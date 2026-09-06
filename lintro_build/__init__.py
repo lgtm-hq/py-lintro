@@ -45,12 +45,12 @@ def generate_all(repo_root: Path, check: bool = False) -> int:
         ``EXIT_OK`` (0).
     """
     argv = ["--check"] if check else []
-    definitions_dir, index_path = builtin_index.resolve_paths(repo_root)
+    tools_dir, index_path = builtin_index.resolve_paths(repo_root)
     codes = (
         _versions_main(argv, paths=GeneratorPaths.from_repo_root(repo_root)),
         builtin_index.main(
             argv,
-            definitions_dir=definitions_dir,
+            tools_dir=tools_dir,
             index_path=index_path,
         ),
     )

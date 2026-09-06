@@ -181,8 +181,9 @@ consistent UX and maintainable implementation.
 
 1. Core code
 
-- Create a tool plugin in `lintro/tools/definitions/` (subclass `BaseToolPlugin`, use
-  `@register_tool`).
+- Create a tool package `lintro/tools/<tool>/` with the plugin in its `definition.py`
+  (subclass `BaseToolPlugin`, use `@register_tool`) and the package's import surface in
+  `__init__.py`.
 - Implement `definition` property returning `ToolDefinition`.
 - Implement `check()` (and `fix()` only if the tool supports auto-fixes).
 - Add a parser module in `lintro/parsers/<tool>/` for the tool's default output.
@@ -211,10 +212,10 @@ consistent UX and maintainable implementation.
 Three files are derived and **not committed** (#2176), each from its own inputs:
 `lintro/_generated_versions.py` (from the per-install-type version sources),
 `lintro/tools/manifest.json` (rendered from `manifest.src.json` with resolved versions
-injected), and `lintro/plugins/_builtin_index.py` (from the tool definition modules
-under `lintro/tools/definitions/`). They are generated at package build time by the
-in-tree PEP 517 backend (`lintro_build/backend.py`), so every wheel, sdist, editable
-install, Docker image, and frozen binary carries current copies. `just setup` (via
+injected), and `lintro/plugins/_builtin_index.py` (from the per-tool packages under
+`lintro/tools/`). They are generated at package build time by the in-tree PEP 517
+backend (`lintro_build/backend.py`), so every wheel, sdist, editable install, Docker
+image, and frozen binary carries current copies. `just setup` (via
 `uv pip install -e .`) generates them into your gitignored working tree; after editing a
 version source locally, run `just generate` to refresh them.
 

@@ -2,8 +2,8 @@
 
 Everything the ``rustfmt`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.rustfmt.definition`. ``lintro.tools.definitions.rustfmt``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.rustfmt.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.rustfmt.definition import (

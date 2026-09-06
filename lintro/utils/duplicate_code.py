@@ -1,8 +1,9 @@
 """Duplicate-code ratchet gate for Lintro's own tool definitions.
 
 Issue #2293. ``pylint``'s ``duplicate-code`` checker (``R0801``) is enabled on
-``lintro/tools/definitions`` so the copy-pasted tool-definition template cannot
-grow while #2311 factors it out. pylint has no per-finding baseline the way
+the per-tool packages under ``lintro/tools`` so the copy-pasted tool-definition
+template cannot grow back after #2311 factored it out. pylint has no
+per-finding baseline the way
 ruff has per-file ignores, so the ratchet is a *count*: the blocks that existed
 when the gate landed are recorded as ``duplicate_code_baseline`` under
 ``[tool.lintro.pylint]`` in ``pyproject.toml``.

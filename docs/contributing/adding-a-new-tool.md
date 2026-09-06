@@ -53,21 +53,32 @@ overview of how Lintro dogfoods its own codebase.
 
 ## Step 1 — Plugin definition
 
-Create `lintro/tools/definitions/<tool>.py`. A tool that needs helper modules of its own
-gets a package instead (see `lintro/tools/ruff/`):
+Every tool is one package under `lintro/tools/<tool>/` (see `lintro/tools/ruff/`). There
+is no central definitions module to edit and no registration list to append to —
+discovery finds the package (#2311):
 
 - `lintro/tools/<tool>/definition.py` — the plugin and its `ToolDefinition`, next to the
-  helper modules it delegates to.
+  helper modules it delegates to. The file name matters: discovery enters a tool package
+  through its `definition` module, so `@register_tool` must be reachable from there.
 - `lintro/tools/<tool>/__init__.py` — the package's import surface: re-export the plugin
   class, its module-level constants and every helper other packages import, and list
-  them in `__all__`, so no caller reaches past the package.
-- `lintro/tools/definitions/<tool>.py` — a re-export shim carrying the same names, so
-  plugin discovery (which scans that package) still registers the tool.
+  them in `__all__`, so no caller reaches past the package. Importing `definition` runs
+  this module, which is how the package's other modules come along; keep a module that
+  must stay lazy (one reaching into `lintro.ai`, say) out of it and import it inside the
+  function that needs it, as `lintro/tools/idiom_review/__init__.py` does.
 - `pyproject.toml` — append `lintro/tools/<tool>` to `[tool.lintro.pylint] include`, and
   add the same path to `GATE_PACKAGES` in `tests/unit/test_duplicate_code_baseline.py`,
   in the same change. The duplicate-code gate's scope follows the files, so a package
   left out of `include` is a definition that silently escapes the ratchet, and the test
   asserts the two lists are equal.
+- `pyproject.toml` — the import-linter `layers` contract lists the `tools -> plugins`
+  edges a tool package needs (`lintro.tools.<tool>.definition -> lintro.plugins.base`,
+  `.protocol` and `.registry`) under `[tool.importlinter]` `ignore_imports`. Add exactly
+  those three; never a new kind of edge.
+
+Helper modules that two tools share and neither owns go in their own package with no
+`definition.py` — `lintro/tools/ts_checker/` behind `tsc` and `vue-tsc` is the only one.
+Discovery lists every public module of such a package instead of a single entry point.
 
 Structure (mirrored from your reference tool):
 
@@ -373,11 +384,11 @@ just generate
 
 This regenerates `lintro/_generated_versions.py`, renders `lintro/tools/manifest.json`
 from `manifest.src.json`, and rewrites `lintro/plugins/_builtin_index.py` so the new
-definition module is discoverable from frozen (Nuitka onefile) binaries. **All three
-outputs are gitignored** — they are generated at package build time (#2176), so there is
-nothing to commit and no drift gate to satisfy. Editable installs regenerate them
-automatically on `uv pip install -e .` / `just setup`; after editing a version source
-locally, run `just generate` to keep your working tree current.
+tool package is discoverable from frozen (Nuitka onefile) binaries. **All three outputs
+are gitignored** — they are generated at package build time (#2176), so there is nothing
+to commit and no drift gate to satisfy. Editable installs regenerate them automatically
+on `uv pip install -e .` / `just setup`; after editing a version source locally, run
+`just generate` to keep your working tree current.
 
 To check your tree is in sync without writing:
 
@@ -585,14 +596,14 @@ python3 scripts/ci/generate-builtin-tool-index.py --check
 
 Implementation checklist:
 
-- [ ] `lintro/tools/definitions/<tool>.py` — `@register_tool`, `BaseToolPlugin`,
-      `ToolDefinition`; for a tool with helper modules, those three live in
-      `lintro/tools/<tool>/definition.py`, `lintro/tools/<tool>/__init__.py` re-exports
-      them, and this module is the re-export shim
-- [ ] `pyproject.toml` — `[tool.lintro.pylint] include` gains `lintro/tools/<tool>` when
-      the tool is a package, and `GATE_PACKAGES` in
-      `tests/unit/test_duplicate_code_baseline.py` gains the same path (duplicate-code
-      gate scope follows the files, and the test asserts the two lists are equal)
+- [ ] `lintro/tools/<tool>/definition.py` — `@register_tool`, `BaseToolPlugin`,
+      `ToolDefinition`; `lintro/tools/<tool>/__init__.py` re-exports them
+- [ ] `pyproject.toml` — `[tool.lintro.pylint] include` gains `lintro/tools/<tool>`, and
+      `GATE_PACKAGES` in `tests/unit/test_duplicate_code_baseline.py` gains the same
+      path (duplicate-code gate scope follows the files, and the test asserts the two
+      lists are equal)
+- [ ] `pyproject.toml` — import-linter `ignore_imports` gains the three
+      `lintro.tools.<tool>.definition -> lintro.plugins.{base,protocol,registry}` edges
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`, `<tool>_parser.py`
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)

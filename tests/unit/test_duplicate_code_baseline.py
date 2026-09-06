@@ -1,11 +1,9 @@
 """Ratchet gate for the duplicate-code baseline (issue #2293).
 
-``pyproject.toml`` scopes pylint's ``duplicate-code`` checker to the
-tool-definition modules — ``lintro/tools/definitions`` plus the per-tool
-packages #2311 has moved definitions into — and records today's ``R0801``
-count as
-``[tool.lintro.pylint] duplicate_code_baseline``. That number is a burn-down
-target owned by #2311, which is done when it reaches 0.
+``pyproject.toml`` scopes pylint's ``duplicate-code`` checker to the per-tool
+packages under ``lintro/tools`` and records today's ``R0801`` count as
+``[tool.lintro.pylint] duplicate_code_baseline``. That number was a burn-down
+target owned by #2311; it reached 0, so the gate is now zero-tolerance.
 
 Two guards live here. The configured baseline may never exceed the ceiling
 recorded when the gate landed — an exact, tool-free comparison between
@@ -59,7 +57,6 @@ GATE_PACKAGES: tuple[str, ...] = (
     "lintro/tools/cargo_deny",
     "lintro/tools/clippy",
     "lintro/tools/commitlint",
-    "lintro/tools/definitions",
     "lintro/tools/dotenv_linter",
     "lintro/tools/gitleaks",
     "lintro/tools/golangci_lint",
@@ -252,7 +249,7 @@ def _assert_within_baseline(*, count: int, baseline: int) -> None:
 def test_a_live_count_at_the_baseline_is_accepted() -> None:
     """The live comparison passes for a count that has not grown.
 
-    The baseline reached 0 in #2311, so a clone-free definitions package is the
+    The baseline reached 0 in #2311, so clone-free per-tool packages are the
     only count the gate now accepts; anything else is growth.
     """
     _assert_within_baseline(

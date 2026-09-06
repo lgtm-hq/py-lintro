@@ -2,8 +2,8 @@
 
 Everything the ``taplo`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.taplo.definition`. ``lintro.tools.definitions.taplo``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.taplo.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.taplo.definition import (

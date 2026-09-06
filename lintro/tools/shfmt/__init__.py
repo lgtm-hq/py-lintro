@@ -2,8 +2,8 @@
 
 Everything the ``shfmt`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.shfmt.definition`. ``lintro.tools.definitions.shfmt``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.shfmt.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.shfmt.definition import (

@@ -2,8 +2,8 @@
 
 Everything the ``pylint`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.pylint.definition`. ``lintro.tools.definitions.pylint``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.pylint.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.pylint.definition import (

@@ -2472,7 +2472,7 @@ def test_create_universal_binary_smoke_tests_the_post_lipo_artifact() -> None:
     # #2202: the builtin index is generated, not committed (#2180), and this
     # job never builds the package — the checkout must carry the generator's
     # inputs and the generate step must run between checkout and smoke test.
-    assert_that(sparse).contains("lintro/tools/definitions")
+    assert_that(sparse).contains("lintro/tools")
     assert_that(sparse).contains("lintro_build")
     generate = by_name["Generate builtin tool index"]
     assert_that(generate["run"]).is_equal_to(

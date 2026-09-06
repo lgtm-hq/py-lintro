@@ -2,8 +2,8 @@
 
 Everything the ``osv_scanner`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.osv_scanner.definition`. ``lintro.tools.definitions.osv_scanner``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.osv_scanner.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.osv_scanner.definition import (

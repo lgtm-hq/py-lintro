@@ -408,10 +408,10 @@ exclude = [
 ]
 
 # Duplicate-code ratchet gate (issue #2293). pylint's `duplicate-code` checker
-# runs on the tool-definition modules only, so the copy-pasted definition
-# template cannot grow while #2311 factors it out. `include` follows the
-# definitions as #2311 moves them into per-tool packages, so a tool that leaves
-# `lintro/tools/definitions` does not leave the gate. pylint has no per-finding
+# runs on the per-tool packages only, so the copy-pasted definition template
+# cannot grow back after #2311 factored it out. `include` lists every
+# `lintro/tools/<tool>` package, so a new tool joins the gate by being added
+# here alongside its package. pylint has no per-finding
 # baseline, so the ratchet is a count: `duplicate_code_baseline` is the number
 # of R0801 blocks present when the gate landed, and the run fails when the
 # count is higher. Lower this number in the PR that removes duplication; never
@@ -419,8 +419,8 @@ exclude = [
 # tests/unit/test_duplicate_code_baseline.py in the same commit — that test
 # asserts this value is `<=` the ceiling recorded there, so leaving the ceiling
 # behind would silently allow the baseline to climb back. #2311 drove the count
-# to 0, so the gate is now zero-tolerance: any new clone set in the definitions
-# package fails the run. The live guard stays `<=` so a pylint/astroid build
+# to 0, so the gate is now zero-tolerance: any new clone set in the per-tool
+# packages fails the run. The live guard stays `<=` so a pylint/astroid build
 # that reports a phantom finding is the only way this can move, and the fix is
 # to delete the duplication. See lintro/utils/duplicate_code.py.
 [tool.lintro.pylint]
@@ -434,7 +434,6 @@ include = [
   "lintro/tools/cargo_deny",
   "lintro/tools/clippy",
   "lintro/tools/commitlint",
-  "lintro/tools/definitions",
   "lintro/tools/dotenv_linter",
   "lintro/tools/gitleaks",
   "lintro/tools/golangci_lint",
@@ -604,9 +603,10 @@ constraint-dependencies = [
 # module-level import into a function body is **not** a fix — `import-linter`
 # counts function-body imports, and so does `scripts/ci/import_matrix.py`,
 # whose two-way cycle count `tests/unit/test_import_boundaries.py` pins.
-# Exception: a new tool definition added under the current definitions pattern
-# records its three `-> lintro.plugins.{base,protocol,registry}` edges under
-# #2311, which deletes them all when it factors the pattern.
+# Exception: a new tool package records its three
+# `-> lintro.plugins.{base,protocol,registry}` edges under #2311, which owns
+# the `tools -> plugins` direction until the plugin contract moves below the
+# `tools` layer.
 
 [tool.importlinter]
 root_package = "lintro"

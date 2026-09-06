@@ -1,7 +1,7 @@
 """Tool discovery for builtin and external plugins.
 
 This module handles discovering and loading Lintro tools from:
-1. Built-in tool definitions (lintro/tools/definitions/)
+1. Built-in per-tool packages (lintro/tools/<tool>/)
 2. External (third-party) plugins via Python entry points (``lintro.tools``)
 
 Third-party packages register a tool plugin by advertising an entry point in
@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import os
 import pkgutil
 from pathlib import Path
@@ -54,8 +55,16 @@ from lintro.utils.plugin_tool_names import (
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
 
-# Import path of the package holding the builtin tool definitions.
-BUILTIN_DEFINITIONS_PACKAGE = "lintro.tools.definitions"
+# Import path of the package holding the builtin per-tool packages (#2311).
+BUILTIN_TOOLS_PACKAGE = "lintro.tools"
+
+# Packages under ``lintro.tools`` that hold shared scaffolding rather than a
+# tool. Mirrors ``lintro_build.builtin_index.NON_TOOL_PACKAGES``; the generated
+# index is the source of truth, and this only bounds the source-tree scan.
+NON_TOOL_PACKAGES = frozenset({"core"})
+
+# Module a per-tool package declares its plugin in (#2311).
+DEFINITION_MODULE_NAME = "definition"
 
 # Entry-point group names live in `lintro.utils.plugin_tool_names` so that
 # config parsing can read plugin names without importing `lintro.plugins`
@@ -81,35 +90,68 @@ _discovered: bool = False
 
 
 def _module_names_from_package_scan() -> set[str]:
-    """Scan the definitions package for tool modules, when that is possible.
+    """Scan the per-tool packages for the modules discovery must import.
 
-    Complements the generated index so a definition module added to a source
-    checkout is discovered even before the index is regenerated. Returns an
-    empty set whenever the package exposes no importable search path — the
-    normal situation inside a frozen Nuitka onefile binary, where the index is
-    the only source of module names.
+    Complements the generated index so a package added to a source checkout is
+    discovered even before the index is regenerated. Returns an empty set
+    whenever ``lintro.tools`` exposes no importable search path — the normal
+    situation inside a frozen Nuitka onefile binary, where the index is the
+    only source of module names.
 
     Returns:
-        Public (non-underscore) module names found next to the definitions
-        package, or an empty set when the package cannot be scanned.
+        ``<package>.<module>`` names found under ``lintro.tools``, or an empty
+        set when the package cannot be scanned.
     """
     try:
-        package = importlib.import_module(BUILTIN_DEFINITIONS_PACKAGE)
+        package = importlib.import_module(BUILTIN_TOOLS_PACKAGE)
         search_path = [str(entry) for entry in getattr(package, "__path__", ()) or ()]
         if not search_path:
             return set()
         return {
-            module.name
-            for module in pkgutil.iter_modules(search_path)
-            if not module.name.startswith("_")
+            f"{tool_package.name}.{module_name}"
+            for tool_package in pkgutil.iter_modules(search_path)
+            if tool_package.ispkg
+            and not tool_package.name.startswith("_")
+            and tool_package.name not in NON_TOOL_PACKAGES
+            for module_name in _entry_module_names(package_name=tool_package.name)
         }
     except Exception as e:
-        logger.debug(f"Could not scan {BUILTIN_DEFINITIONS_PACKAGE!r}: {e}")
+        logger.debug(f"Could not scan {BUILTIN_TOOLS_PACKAGE!r}: {e}")
         return set()
 
 
+def _entry_module_names(*, package_name: str) -> tuple[str, ...]:
+    """List the modules discovery must import for one per-tool package.
+
+    Mirrors ``lintro_build.builtin_index._entry_modules``: a per-tool package
+    is entered through its ``definition`` module, whose import runs the package
+    ``__init__`` and so pulls in the package's own re-export surface. A shared
+    package with no ``definition`` module (the ``ts_checker`` family) has no
+    such entry point, so all of its public modules are named instead.
+
+    Args:
+        package_name: Package base name under ``lintro.tools``, e.g. ``"ruff"``.
+
+    Returns:
+        Module base names within that package, or an empty tuple when the
+        package has no importable search path.
+    """
+    spec = importlib.util.find_spec(f"{BUILTIN_TOOLS_PACKAGE}.{package_name}")
+    locations = getattr(spec, "submodule_search_locations", None)
+    if spec is None or locations is None:
+        return ()
+    names = tuple(
+        module.name
+        for module in pkgutil.iter_modules([str(entry) for entry in locations])
+        if not module.name.startswith("_")
+    )
+    if DEFINITION_MODULE_NAME in names:
+        return (DEFINITION_MODULE_NAME,)
+    return names
+
+
 def get_builtin_module_names() -> tuple[str, ...]:
-    """Return the builtin tool definition modules to import.
+    """Return the builtin per-tool package modules to import.
 
     Combines the generated index (which travels with the compiled package and
     therefore works in wheels and frozen binaries alike) with a best-effort
@@ -117,7 +159,7 @@ def get_builtin_module_names() -> tuple[str, ...]:
     index was regenerated).
 
     Returns:
-        Sorted, de-duplicated module base names.
+        Sorted, de-duplicated ``<package>.<module>`` names.
     """
     names = set(BUILTIN_TOOL_MODULES)
     names.update(_module_names_from_package_scan())
@@ -125,7 +167,7 @@ def get_builtin_module_names() -> tuple[str, ...]:
 
 
 def discover_builtin_tools() -> int:
-    """Load all builtin tool definitions.
+    """Load all builtin per-tool packages.
 
     Imports every module named by :func:`get_builtin_module_names`, which
     triggers the ``@register_tool`` decorators.
@@ -134,18 +176,20 @@ def discover_builtin_tools() -> int:
         Number of tool modules loaded.
 
     Note:
-        Each tool definition file should use the @register_tool decorator
-        to register itself with the ToolRegistry.
+        Each per-tool package's ``definition`` module uses the @register_tool
+        decorator to register itself with the ToolRegistry. The package's other
+        modules are imported too, so a tool that registers from elsewhere in
+        its package is still discovered.
     """
     loaded_count = 0
 
     module_names = get_builtin_module_names()
     if not module_names:
-        logger.warning("No builtin tool definition modules are known")
+        logger.warning("No builtin tool modules are known")
         return loaded_count
 
     for name in module_names:
-        module_name = f"{BUILTIN_DEFINITIONS_PACKAGE}.{name}"
+        module_name = f"{BUILTIN_TOOLS_PACKAGE}.{name}"
         try:
             # Safe: module_name comes from the generated builtin index or a
             # scan of lintro's own package, never from user input.

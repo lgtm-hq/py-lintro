@@ -71,8 +71,8 @@ See the full guide:
 
 ### Core implementation
 
-- [ ] `lintro/tools/definitions/<tool>.py` — `@register_tool`, `BaseToolPlugin`,
-      `ToolDefinition`
+- [ ] `lintro/tools/<tool>/` — `definition.py` with `@register_tool`, `BaseToolPlugin`,
+      `ToolDefinition`; `__init__.py` re-export surface
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, issue class, parser function
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` added
 - [ ] Version registered in correct source (`_tool_versions.py` / `_tool_packages.py` +
