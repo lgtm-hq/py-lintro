@@ -146,9 +146,7 @@ def test_extract_failure_section_truncates_long_output() -> None:
     """A mass failure cannot bury the summary it is appended to."""
     body = "\n".join(f"E   line {i}" for i in range(20_000))
     section = extract_failure_section(f"=== FAILURES ===\n{body}\n")
-    assert_that(len(section)).is_less_than_or_equal_to(
-        FAILURE_SECTION_MAX_CHARS + 100,
-    )
+    assert_that(len(section)).is_less_than_or_equal_to(FAILURE_SECTION_MAX_CHARS)
     assert_that(section).contains("truncated by lintro")
 
 

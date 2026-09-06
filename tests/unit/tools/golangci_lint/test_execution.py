@@ -438,18 +438,25 @@ def test_fix_initial_check_timeout_reports_no_phantom_issue(
     assert_that(result.remaining_issues_count).is_equal_to(0)
 
 
-def _argv(call: Any) -> list[str]:
-    """Return the argv a ``_run_subprocess`` call was made with.
+def _record_golangci_argv(recorded: list[list[str]]) -> Any:
+    """Return a ``_run_subprocess`` stand-in that records every argv it sees.
+
+    Recording into a plain list keeps the assertions about the command lintro
+    actually builds rather than about mock bookkeeping, which
+    ``scripts/ci/testing/scan_mock_only_tests.py`` rejects (#2315).
 
     Args:
-        call: A recorded ``unittest.mock`` call.
+        recorded: List the stand-in appends each argv to.
 
     Returns:
-        The command list, whether it was passed positionally or by keyword.
+        A callable with ``_run_subprocess``'s signature.
     """
-    if call.args:
-        return cast(list[str], call.args[0])
-    return cast(list[str], call.kwargs["cmd"])
+
+    def _run(cmd: list[str], **_kwargs: Any) -> tuple[bool, str]:
+        recorded.append(list(cmd))
+        return True, GOLANGCI_JSON_NO_ISSUES
+
+    return _run
 
 
 def test_check_invokes_golangci_lint_with_parallel_runners_allowed(
@@ -468,15 +475,21 @@ def test_check_invokes_golangci_lint_with_parallel_runners_allowed(
         tmp_path: Temporary directory for the Go module.
     """
     _make_go_module(tmp_path)
+    recorded: list[list[str]] = []
 
     with patch.object(
         golangci_lint_plugin,
         "_run_subprocess",
-        return_value=(True, GOLANGCI_JSON_NO_ISSUES),
-    ) as run:
+        side_effect=_record_golangci_argv(recorded),
+    ):
         golangci_lint_plugin.check([str(tmp_path)], {})
 
-    assert_that(_argv(run.call_args)).contains("--allow-parallel-runners")
+    assert_that(recorded).is_length(1)
+    assert_that(recorded[0]).contains(
+        "golangci-lint",
+        "run",
+        "--allow-parallel-runners",
+    )
 
 
 def test_fix_invokes_golangci_lint_with_parallel_runners_allowed(
@@ -490,14 +503,16 @@ def test_fix_invokes_golangci_lint_with_parallel_runners_allowed(
         tmp_path: Temporary directory for the Go module.
     """
     _make_go_module(tmp_path)
+    recorded: list[list[str]] = []
 
     with patch.object(
         golangci_lint_plugin,
         "_run_subprocess",
-        return_value=(True, GOLANGCI_JSON_NO_ISSUES),
-    ) as run:
+        side_effect=_record_golangci_argv(recorded),
+    ):
         golangci_lint_plugin.fix([str(tmp_path)], {})
 
-    assert_that(run.call_count).is_greater_than(0)
-    for call in run.call_args_list:
-        assert_that(_argv(call)).contains("--allow-parallel-runners")
+    assert_that(recorded).is_not_empty()
+    for argv in recorded:
+        assert_that(argv).contains("golangci-lint", "run", "--allow-parallel-runners")
+    assert_that([argv for argv in recorded if "--fix" in argv]).is_not_empty()

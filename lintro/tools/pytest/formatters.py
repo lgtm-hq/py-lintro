@@ -263,6 +263,10 @@ def format_pytest_issues_table(issues: list[PytestIssue]) -> str:
 #: cannot bury the summary it is appended to.
 FAILURE_SECTION_MAX_CHARS: int = 20_000
 
+#: Appended in place of the discarded tail when the cap bites. Its own length
+#: counts against :data:`FAILURE_SECTION_MAX_CHARS`.
+_TRUNCATION_NOTICE: str = "\n... (failure section truncated by lintro)"
+
 #: Banners that open a body pytest prints per failing test. ``ERRORS`` comes
 #: first when both are present, and is the only one an error-during-setup run
 #: emits at all.
@@ -323,9 +327,11 @@ def extract_failure_section(raw_output: str | None) -> str:
     )
     section = "\n".join(lines[start:end]).strip()
     if len(section) > FAILURE_SECTION_MAX_CHARS:
+        # The notice counts against the cap, so the returned string never
+        # exceeds the documented limit.
         section = (
-            section[:FAILURE_SECTION_MAX_CHARS]
-            + "\n... (failure section truncated by lintro)"
+            section[: FAILURE_SECTION_MAX_CHARS - len(_TRUNCATION_NOTICE)]
+            + _TRUNCATION_NOTICE
         )
     return section
 
