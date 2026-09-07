@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.pylint import (
+from lintro.tools.pylint.definition import (
     PYLINT_ANALYSED_METADATA_KEY,
     PYLINT_NO_INCLUDED_FILES,
     PylintPlugin,

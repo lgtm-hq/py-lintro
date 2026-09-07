@@ -15,7 +15,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.stylelint.stylelint_issue import StylelintIssue
-from lintro.tools.definitions.stylelint import StylelintPlugin
+from lintro.tools.stylelint.definition import StylelintPlugin
 from tests.integration._tools import require_command
 
 # Shared fixtures: single source of truth for stylelint sample content.

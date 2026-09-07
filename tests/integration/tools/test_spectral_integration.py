@@ -14,7 +14,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.spectral.spectral_issue import SpectralIssue
-from lintro.tools.definitions.spectral import SpectralPlugin
+from lintro.tools.spectral.definition import SpectralPlugin
 from tests.integration._tools import require_command
 from tests.test_samples_helpers import copy_sample
 

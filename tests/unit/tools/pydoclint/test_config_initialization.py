@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.pydoclint import PydoclintPlugin
+from lintro.tools.pydoclint.definition import PydoclintPlugin
 
 
 def test_plugin_definition_has_empty_conflicts_with() -> None:

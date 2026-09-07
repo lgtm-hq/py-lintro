@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.svelte_check import SvelteCheckPlugin
+from lintro.tools.svelte_check.definition import SvelteCheckPlugin
 
 
 @pytest.fixture

@@ -121,7 +121,7 @@ def _labels_for(*, path: str) -> set[str]:
             {"enhancement", "security"},
         ),
         (
-            "lintro/tools/definitions/semgrep.py",
+            "lintro/tools/semgrep/definition.py",
             {"enhancement", "security"},
         ),
         (".github/workflows/codeql.yml", {"ci", "security"}),

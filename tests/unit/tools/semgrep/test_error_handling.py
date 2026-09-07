@@ -11,7 +11,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.parsers.semgrep.semgrep_parser import parse_semgrep_output
-from lintro.tools.definitions.semgrep import SemgrepPlugin
+from lintro.tools.semgrep.definition import SemgrepPlugin
 from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:

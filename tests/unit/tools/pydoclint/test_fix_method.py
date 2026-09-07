@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lintro.tools.definitions.pydoclint import PydoclintPlugin
+from lintro.tools.pydoclint.definition import PydoclintPlugin
 
 
 def test_fix_raises_not_implemented(

@@ -9,7 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.svelte_check import (
+from lintro.tools.svelte_check.definition import (
     SVELTE_CHECK_DEFAULT_PRIORITY,
     SVELTE_CHECK_DEFAULT_TIMEOUT,
     SVELTE_CHECK_FILE_PATTERNS,

@@ -74,8 +74,18 @@ GATE_PACKAGES: tuple[str, ...] = (
     "lintro/tools/oxlint",
     "lintro/tools/pip_audit",
     "lintro/tools/prettier",
+    "lintro/tools/pydoclint",
+    "lintro/tools/pylint",
     "lintro/tools/pytest",
     "lintro/tools/ruff",
+    "lintro/tools/rustfmt",
+    "lintro/tools/semgrep",
+    "lintro/tools/shellcheck",
+    "lintro/tools/shfmt",
+    "lintro/tools/spectral",
+    "lintro/tools/sqlfluff",
+    "lintro/tools/stylelint",
+    "lintro/tools/svelte_check",
 )
 
 #: Ceiling on the baseline, recorded when the gate landed and deliberately not

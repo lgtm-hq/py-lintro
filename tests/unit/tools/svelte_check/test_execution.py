@@ -10,7 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.svelte_check.svelte_check_issue import SvelteCheckIssue
-from lintro.tools.definitions.svelte_check import SvelteCheckPlugin
+from lintro.tools.svelte_check.definition import SvelteCheckPlugin
 
 
 def _mock_subprocess_success(**kwargs: Any) -> tuple[bool, str]:

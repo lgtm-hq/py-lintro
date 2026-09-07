@@ -15,7 +15,7 @@ from lintro.tools.core.version_parsing import (
     TOOLS_WITH_SIMPLE_VERSION_PATTERN,
     extract_version_from_output,
 )
-from lintro.tools.definitions.spectral import SpectralPlugin
+from lintro.tools.spectral.definition import SpectralPlugin
 
 
 def test_definition_name(spectral_plugin: SpectralPlugin) -> None:

@@ -10,7 +10,7 @@ from assertpy import assert_that
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.pylint import (
+from lintro.tools.pylint.definition import (
     PYLINT_DEFAULT_PRIORITY,
     PYLINT_DEFAULT_TIMEOUT,
     PylintPlugin,
