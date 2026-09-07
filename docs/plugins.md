@@ -104,7 +104,9 @@ Create a plugin class that inherits from `BaseToolPlugin`:
 ```python
 from dataclasses import dataclass
 
+from lintro.enums.capability import Cap
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import LINTRO_PLUGIN_API_VERSION
 from lintro.plugins.base import BaseToolPlugin
@@ -127,6 +129,11 @@ class MyToolPlugin(BaseToolPlugin):
             can_fix=False,  # Set to True if tool can auto-fix issues
             tool_type=ToolType.LINTER,  # LINTER, FORMATTER, or SECURITY
             file_patterns=["*.py"],  # Glob patterns for files to check
+            claims=[  # What the tool touches and what it does to it
+                Claim(patterns=["*.py"], capabilities={Cap.CHECK}),
+            ],
+            reads_tree=True,  # Must run after mutating tools settle
+            partitionable=False,  # True if the file set can be sharded
             priority=50,  # Execution priority (higher = runs earlier)
             conflicts_with=[],  # Names of conflicting tools
             native_configs=["pyproject.toml", ".mytool.yaml"],  # Config files
@@ -192,20 +199,50 @@ class MyToolPlugin(BaseToolPlugin):
 
 The `ToolDefinition` dataclass defines your tool's metadata:
 
-| Field             | Type        | Description                        |
-| ----------------- | ----------- | ---------------------------------- |
-| `name`            | `str`       | Unique tool identifier             |
-| `description`     | `str`       | Brief description                  |
-| `can_fix`         | `bool`      | Whether tool supports auto-fixing  |
-| `tool_type`       | `ToolType`  | LINTER, FORMATTER, or SECURITY     |
-| `file_patterns`   | `list[str]` | Glob patterns for target files     |
-| `priority`        | `int`       | Execution order (higher = earlier) |
-| `conflicts_with`  | `list[str]` | Names of conflicting tools         |
-| `native_configs`  | `list[str]` | Config file names                  |
-| `version_command` | `list[str]` | Command to check version           |
-| `min_version`     | `str`       | Minimum supported version          |
-| `default_options` | `dict`      | Default tool options               |
-| `default_timeout` | `int`       | Default timeout in seconds         |
+| Field             | Type          | Description                                          |
+| ----------------- | ------------- | ---------------------------------------------------- |
+| `name`            | `str`         | Unique tool identifier                               |
+| `description`     | `str`         | Brief description                                    |
+| `can_fix`         | `bool`        | Whether tool supports auto-fixing                    |
+| `tool_type`       | `ToolType`    | LINTER, FORMATTER, or SECURITY                       |
+| `file_patterns`   | `list[str]`   | Glob patterns for target files                       |
+| `claims`          | `list[Claim]` | Patterns plus the capabilities applied to them       |
+| `reads_tree`      | `bool`        | Reads the working tree, so runs after mutation       |
+| `partitionable`   | `bool`        | File set may be sharded without changing the verdict |
+| `priority`        | `int`         | Execution order (higher = earlier)                   |
+| `conflicts_with`  | `list[str]`   | Names of conflicting tools                           |
+| `native_configs`  | `list[str]`   | Config file names                                    |
+| `version_command` | `list[str]`   | Command to check version                             |
+| `min_version`     | `str`         | Minimum supported version                            |
+| `default_options` | `dict`        | Default tool options                                 |
+| `default_timeout` | `int`         | Default timeout in seconds                           |
+
+### Claims and capabilities
+
+`claims` declares _what a tool touches_ and _what it does to it_, replacing the scalar
+`priority` integer as the input to execution ordering (epic #1735). A `Claim` pairs glob
+patterns with a set of `Cap` values:
+
+| Capability   | Meaning                                                    |
+| ------------ | ---------------------------------------------------------- |
+| `Cap.FIX`    | Rewrites a file to remove diagnostics (`ruff check --fix`) |
+| `Cap.FORMAT` | Rewrites a file to a canonical layout (`black`)            |
+| `Cap.CHECK`  | Reports diagnostics only; never mutates                    |
+
+There is deliberately no `LINT` or `ANALYZE`: both would be synonyms for `CHECK`
+distinguished only by analysis depth, which is not a scheduling input. Depth is carried
+by the two orthogonal scope booleans instead:
+
+- `reads_tree` — must the tool run after mutation settles? False only for a tool that
+  reads something other than the working tree (commitlint reads git commit messages),
+  which is therefore unordered and may run first.
+- `partitionable` — can its file set be sharded or narrowed without changing its
+  verdict? False for project-scoped analysis such as mypy, pylint's cross-module checks,
+  import-linter contracts and dependency audits.
+
+Ordering per pattern will be `FIX` → `FORMAT` → `CHECK`, and at most one tool may hold
+`FORMAT` for a given pattern. Nothing derives order from these declarations yet —
+ordering still reads `DEFAULT_TOOL_PRIORITIES`.
 
 ### ToolResult
 

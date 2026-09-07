@@ -12,8 +12,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.rustfmt.rustfmt_parser import parse_rustfmt_output
 from lintro.plugins.base import BaseToolPlugin
@@ -80,6 +82,14 @@ class RustfmtPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.FORMATTER,
             file_patterns=RUSTFMT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=RUSTFMT_FILE_PATTERNS,
+                    capabilities={Cap.FORMAT},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=RUSTFMT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=["rustfmt.toml", ".rustfmt.toml"],

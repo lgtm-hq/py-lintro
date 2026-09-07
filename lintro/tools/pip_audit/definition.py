@@ -15,9 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pip_audit.pip_audit_issue import PipAuditIssue
 from lintro.parsers.pip_audit.pip_audit_parser import (
@@ -164,6 +166,14 @@ class PipAuditPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.SECURITY,
             file_patterns=PIP_AUDIT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=PIP_AUDIT_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=PIP_AUDIT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[],  # pip-audit has no native config file

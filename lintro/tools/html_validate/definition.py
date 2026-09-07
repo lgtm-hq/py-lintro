@@ -28,9 +28,11 @@ from dataclasses import dataclass
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_parser import (
     parse_html_validate_output,
@@ -101,6 +103,14 @@ class HtmlValidatePlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=HTML_VALIDATE_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=HTML_VALIDATE_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=HTML_VALIDATE_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=list(HTML_VALIDATE_CONFIG_FILENAMES),

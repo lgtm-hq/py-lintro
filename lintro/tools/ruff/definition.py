@@ -14,8 +14,10 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -66,6 +68,14 @@ class RuffPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.LINTER | ToolType.FORMATTER,
             file_patterns=RUFF_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=RUFF_FILE_PATTERNS,
+                    capabilities={Cap.FIX, Cap.FORMAT, Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=RUFF_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=["pyproject.toml", "ruff.toml", ".ruff.toml"],

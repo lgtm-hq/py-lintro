@@ -16,8 +16,10 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.mypy.mypy_parser import parse_mypy_output
 from lintro.plugins.base import BaseToolPlugin
@@ -139,6 +141,14 @@ class MypyPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER | ToolType.TYPE_CHECKER,
             file_patterns=MYPY_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=MYPY_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=MYPY_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=["mypy.ini", ".mypy.ini", "pyproject.toml", "setup.cfg"],

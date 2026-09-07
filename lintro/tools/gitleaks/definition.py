@@ -17,8 +17,10 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.gitleaks.gitleaks_issue import GitleaksIssue
 from lintro.parsers.gitleaks.gitleaks_parser import parse_gitleaks_output
@@ -64,6 +66,14 @@ class GitleaksPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.SECURITY,
             file_patterns=GITLEAKS_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=GITLEAKS_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=GITLEAKS_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[".gitleaks.toml"],

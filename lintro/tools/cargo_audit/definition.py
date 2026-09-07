@@ -13,9 +13,11 @@ from pathlib import Path
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cargo_audit.cargo_audit_parser import (
     extract_cargo_audit_payload,
@@ -76,6 +78,14 @@ class CargoAuditPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.SECURITY,
             file_patterns=CARGO_AUDIT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=CARGO_AUDIT_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=CARGO_AUDIT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[".cargo/audit.toml"],

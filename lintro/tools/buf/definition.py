@@ -22,9 +22,11 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.parsers.buf.buf_parser import (
@@ -74,6 +76,14 @@ class BufPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.LINTER | ToolType.FORMATTER,
             file_patterns=BUF_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=BUF_FILE_PATTERNS,
+                    capabilities={Cap.FORMAT, Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=BUF_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=["buf.yaml", "buf.work.yaml"],

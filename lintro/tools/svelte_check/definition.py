@@ -23,8 +23,10 @@ from typing import Any, NoReturn
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.parsers.svelte_check.svelte_check_parser import parse_svelte_check_output
@@ -62,6 +64,14 @@ class SvelteCheckPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER | ToolType.TYPE_CHECKER,
             file_patterns=SVELTE_CHECK_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=SVELTE_CHECK_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=SVELTE_CHECK_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[

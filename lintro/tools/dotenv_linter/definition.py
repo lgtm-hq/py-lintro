@@ -12,9 +12,11 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.dotenv_linter.dotenv_linter_issue import DotenvLinterIssue
 from lintro.parsers.dotenv_linter.dotenv_linter_parser import (
@@ -88,6 +90,14 @@ class DotenvLinterPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.LINTER,
             file_patterns=DOTENV_LINTER_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=DOTENV_LINTER_FILE_PATTERNS,
+                    capabilities={Cap.FIX, Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=DOTENV_LINTER_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[],

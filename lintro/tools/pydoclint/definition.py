@@ -12,8 +12,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pydoclint.pydoclint_parser import parse_pydoclint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -49,6 +51,14 @@ class PydoclintPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER | ToolType.DOCUMENTATION,
             file_patterns=PYDOCLINT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=PYDOCLINT_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=PYDOCLINT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=["pyproject.toml", ".pydoclint.toml"],

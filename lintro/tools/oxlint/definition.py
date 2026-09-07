@@ -12,9 +12,11 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.oxlint.oxlint_issue import OxlintIssue
 from lintro.parsers.oxlint.oxlint_parser import parse_oxlint_output
@@ -78,6 +80,14 @@ class OxlintPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.LINTER,
             file_patterns=OXLINT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=OXLINT_FILE_PATTERNS,
+                    capabilities={Cap.FIX, Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=OXLINT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[".oxlintrc.json"],

@@ -22,12 +22,14 @@ try:
 except ImportError:
     yaml = None  # type: ignore[assignment]
 
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.enums.yamllint_format import (
     YamllintFormat,
     normalize_yamllint_format,
 )
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.yamllint.yamllint_parser import parse_yamllint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -75,6 +77,14 @@ class YamllintPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=YAMLLINT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=YAMLLINT_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=YAMLLINT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[".yamllint", ".yamllint.yml", ".yamllint.yaml"],

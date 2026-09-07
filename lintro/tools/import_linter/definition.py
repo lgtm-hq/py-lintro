@@ -20,8 +20,10 @@ from pathlib import Path
 
 from loguru import logger
 
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.import_linter.import_linter_parser import (
     parse_import_linter_output,
@@ -167,6 +169,14 @@ class ImportLinterPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=IMPORT_LINTER_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=IMPORT_LINTER_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=IMPORT_LINTER_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=["pyproject.toml", ".importlinter", "setup.cfg"],

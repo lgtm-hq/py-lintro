@@ -107,6 +107,11 @@ class <Tool>Plugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,         # see ToolType options below
             file_patterns=["*.ext"],
+            claims=[                            # see "Claims" below
+                Claim(patterns=["*.ext"], capabilities={Cap.CHECK}),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=50,                        # see DEFAULT_TOOL_PRIORITIES
             conflicts_with=[],
             native_configs=[".toolrc"],
@@ -319,6 +324,22 @@ branch in that same module.
 
 Add the tool to `get_install_hints()` in `lintro/tools/core/version_checking.py` so
 `lintro doctor` can display context-aware install instructions.
+
+**Claims** declare what the tool touches and what it does to it (epic #1735). Pair the
+tool's `file_patterns` with the capabilities it applies:
+
+| Capability   | When to use                                             |
+| ------------ | ------------------------------------------------------- |
+| `Cap.FIX`    | The tool rewrites files to remove diagnostics           |
+| `Cap.FORMAT` | The tool rewrites files to a canonical layout           |
+| `Cap.CHECK`  | The tool reports diagnostics without rewriting anything |
+
+`Cap.FIX`/`Cap.FORMAT` must be declared if and only if `can_fix=True`, and at most one
+tool may hold `Cap.FORMAT` for a given pattern — a second one is dual formatting
+authority. Set `reads_tree=False` only for a tool that does not read the working tree at
+all, and `partitionable=False` when the tool's verdict depends on seeing the whole
+project (type checkers, contract checkers, dependency audits).
+`tests/unit/plugins/test_tool_claims.py` enforces all of this.
 
 ---
 
@@ -615,6 +636,7 @@ Implementation checklist:
       applicable)
 - [ ] `lintro/tools/core/version_checking.py` — install hints
 - [ ] `lintro/utils/config_priority.py` — `DEFAULT_TOOL_PRIORITIES` (if non-default)
+- [ ] `claims`, `reads_tree` and `partitionable` declared on the `ToolDefinition`
 - [ ] `pyproject.toml` — parser package added to `packages` list
 - [ ] `scripts/utils/install-tools.sh` — 4 sync points (help, SUPPORTED_TOOLS, install
       block, tools_to_verify)

@@ -10,9 +10,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.sqlfluff.sqlfluff_parser import parse_sqlfluff_output
 from lintro.plugins.base import BaseToolPlugin
@@ -59,6 +61,14 @@ class SqlfluffPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.LINTER | ToolType.FORMATTER,
             file_patterns=SQLFLUFF_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=SQLFLUFF_FILE_PATTERNS,
+                    capabilities={Cap.FIX, Cap.FORMAT, Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=SQLFLUFF_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[".sqlfluff", "pyproject.toml"],

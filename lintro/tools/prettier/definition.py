@@ -16,8 +16,10 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.prettier.prettier_issue import PrettierIssue
 from lintro.parsers.prettier.prettier_parser import parse_prettier_output
@@ -100,6 +102,14 @@ class PrettierPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.FORMATTER,
             file_patterns=PRETTIER_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=PRETTIER_FILE_PATTERNS,
+                    capabilities={Cap.FORMAT},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=PRETTIER_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=list(PRETTIER_CONFIG_FILENAMES),

@@ -22,8 +22,10 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pylint.pylint_parser import parse_pylint_output
 from lintro.plugins.base import BaseToolPlugin
@@ -278,6 +280,14 @@ class PylintPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=PYLINT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=PYLINT_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=PYLINT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=list(PYLINT_CONFIG_FILES),

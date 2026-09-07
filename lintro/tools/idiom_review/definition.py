@@ -29,10 +29,12 @@ from typing import TYPE_CHECKING, cast
 
 from loguru import logger
 
+from lintro.enums.capability import Cap
 from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.execution_class import ExecutionClass
 from lintro.enums.idiom_review_mode import IdiomReviewMode
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
@@ -94,6 +96,14 @@ class IdiomReviewPlugin(BaseToolPlugin):
             # and never feed its issue counts (#1308).
             execution_class=ExecutionClass.ADVISORY,
             file_patterns=IDIOM_REVIEW_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=IDIOM_REVIEW_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=IDIOM_REVIEW_PRIORITY,
             conflicts_with=[],
             native_configs=[],

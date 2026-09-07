@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
 from lintro.parsers.golangci_lint.golangci_lint_parser import (
@@ -191,6 +193,14 @@ class GolangciLintPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.LINTER,
             file_patterns=GOLANGCI_LINT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=GOLANGCI_LINT_FILE_PATTERNS,
+                    capabilities={Cap.FIX, Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=False,
             priority=GOLANGCI_LINT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[

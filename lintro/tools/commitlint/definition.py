@@ -68,6 +68,9 @@ class CommitlintPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=COMMITLINT_FILE_PATTERNS,
+            claims=[],
+            reads_tree=False,
+            partitionable=False,
             priority=COMMITLINT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=[

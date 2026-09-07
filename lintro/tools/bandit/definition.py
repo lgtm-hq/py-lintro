@@ -20,8 +20,10 @@ from lintro.enums.bandit_levels import (
     normalize_bandit_confidence_level,
     normalize_bandit_severity_level,
 )
+from lintro.enums.capability import Cap
 from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.bandit.bandit_parser import parse_bandit_output
 from lintro.plugins.base import BaseToolPlugin
@@ -98,6 +100,14 @@ class BanditPlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.SECURITY,
             file_patterns=BANDIT_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=BANDIT_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=BANDIT_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=["pyproject.toml", ".bandit", "bandit.yaml"],

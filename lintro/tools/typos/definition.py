@@ -15,8 +15,10 @@ from typing import Any
 from loguru import logger
 
 from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.typos.typos_issue import TyposIssue
 from lintro.parsers.typos.typos_parser import parse_typos_report
@@ -158,6 +160,14 @@ class TyposPlugin(BaseToolPlugin):
             can_fix=True,
             tool_type=ToolType.LINTER,
             file_patterns=TYPOS_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=TYPOS_FILE_PATTERNS,
+                    capabilities={Cap.FIX, Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            partitionable=True,
             priority=TYPOS_DEFAULT_PRIORITY,
             conflicts_with=[],
             native_configs=list(TYPOS_CONFIG_FILENAMES),
