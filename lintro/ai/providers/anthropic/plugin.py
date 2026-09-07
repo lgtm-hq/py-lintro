@@ -40,10 +40,14 @@ class AnthropicPlugin:
     def transports(self) -> frozenset[AITransport]:
         """Return the transports Anthropic serves.
 
+        Declared once, on the metadata record, so the transports a plugin
+        advertises and the ones doctor and config validation read cannot
+        disagree (#2308).
+
         Returns:
-            Both ``api`` (the ``anthropic`` SDK) and ``cli`` (``claude -p``).
+            :attr:`ANTHROPIC_METADATA.supported_transports`.
         """
-        return frozenset({AITransport.API, AITransport.CLI})
+        return ANTHROPIC_METADATA.supported_transports
 
     @property
     def metadata(self) -> ProviderMetadata:

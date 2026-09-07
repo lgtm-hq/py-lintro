@@ -40,10 +40,14 @@ class CursorPlugin:
     def transports(self) -> frozenset[AITransport]:
         """Return the transports Cursor serves.
 
+        Declared once, on the metadata record, so the transports a plugin
+        advertises and the ones doctor and config validation read cannot
+        disagree (#2308).
+
         Returns:
-            ``cli`` only — the Cursor CreateAgent HTTP API is not used.
+            :attr:`CURSOR_METADATA.supported_transports`.
         """
-        return frozenset({AITransport.CLI})
+        return CURSOR_METADATA.supported_transports
 
     @property
     def metadata(self) -> ProviderMetadata:

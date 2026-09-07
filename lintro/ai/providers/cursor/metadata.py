@@ -1,21 +1,24 @@
 """Static description of the Cursor provider.
 
 Cursor has no API transport: the CreateAgent HTTP API is not used (see
-:mod:`lintro.ai.providers.cursor.provider`), so ``sdk_package`` is ``None`` and
-the ``agent`` CLI is the only backend. Everything here is answerable without
-spawning that binary.
+:mod:`lintro.ai.providers.cursor.provider`), so ``sdk_package`` is ``None``,
+``supported_transports`` holds ``cli`` alone, and the ``agent`` CLI is the only
+backend. Everything here is answerable without spawning that binary.
 
-The values are read from the existing tables rather than copied: folding
-:data:`lintro.ai.registry.PROVIDERS` and friends into this record is phase 3
-(#2308), so today this module is a view over them, not a second source of
-truth.
+Since #2308 this module *is* the declaration: pricing, defaults, the API-key
+variable, the CLI binary and its contract, the install hint and the auth probe
+are stated once here and read everywhere else through
+:mod:`lintro.ai.registry`'s facade.
 """
 
 from __future__ import annotations
 
+from lintro.ai.enums import AITransport
+from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.cli_auth_probe import CliAuthProbe
+from lintro.ai.providers.cursor.cli_contract import CURSOR_CLI_CONTRACT
 from lintro.ai.providers.protocol import ProviderMetadata
-from lintro.ai.registry import PROVIDERS
 
 __all__ = ["CURSOR_CLI_BINARY", "CURSOR_METADATA"]
 
@@ -23,12 +26,31 @@ __all__ = ["CURSOR_CLI_BINARY", "CURSOR_METADATA"]
 CURSOR_CLI_BINARY = "agent"
 
 #: Static description of the Cursor provider.
+#:
+#: The ``agent`` CLI bills against a Cursor subscription rather than per token,
+#: so its models carry zero rates. :func:`lintro.ai.cost.estimate_cost_with_floor`
+#: is what keeps ``ai.max_cost_usd`` meaningful for them.
 CURSOR_METADATA = ProviderMetadata(
     provider=AIProvider.CURSOR,
-    default_model=PROVIDERS.cursor.default_model,
-    default_api_key_env=PROVIDERS.cursor.default_api_key_env,
+    display_name="Cursor",
+    default_model="auto",
+    default_api_key_env="CURSOR_API_KEY",
+    supported_transports=frozenset({AITransport.CLI}),
+    default_transport=AITransport.CLI,
     sdk_package=None,
     cli_binary=CURSOR_CLI_BINARY,
     cli_contract_id=AIProvider.CURSOR.value,
-    pricing=PROVIDERS.cursor.models,
+    cli_contract=CURSOR_CLI_CONTRACT,
+    cli_install_hint="Install agent CLI: curl https://cursor.com/install -fsS | bash",
+    cli_auth_probe=CliAuthProbe(
+        # The `agent` CLI reads CURSOR_API_KEY itself.
+        honors_api_key_env=True,
+        configured_message="{key_env} is set",
+        unverified_message="Cursor CLI auth not verified",
+        hint="Run `agent login` or set CURSOR_API_KEY",
+    ),
+    pricing={
+        "auto": ModelPricing(0.0, 0.0),
+        "gpt-5.3-codex-fast": ModelPricing(0.0, 0.0),
+    },
 )

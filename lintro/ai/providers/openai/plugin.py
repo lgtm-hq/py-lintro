@@ -40,10 +40,14 @@ class OpenAIPlugin:
     def transports(self) -> frozenset[AITransport]:
         """Return the transports OpenAI serves.
 
+        Declared once, on the metadata record, so the transports a plugin
+        advertises and the ones doctor and config validation read cannot
+        disagree (#2308).
+
         Returns:
-            Both ``api`` (the ``openai`` SDK) and ``cli`` (``codex exec``).
+            :attr:`OPENAI_METADATA.supported_transports`.
         """
-        return frozenset({AITransport.API, AITransport.CLI})
+        return OPENAI_METADATA.supported_transports
 
     @property
     def metadata(self) -> ProviderMetadata:

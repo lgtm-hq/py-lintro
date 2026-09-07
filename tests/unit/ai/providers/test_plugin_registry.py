@@ -53,8 +53,11 @@ def _metadata_for(provider: AIProvider) -> ProviderMetadata:
     """
     return ProviderMetadata(
         provider=provider,
+        display_name="Fake",
         default_model="fake-model",
         default_api_key_env="FAKE_API_KEY",
+        supported_transports=frozenset({AITransport.API}),
+        default_transport=AITransport.API,
         sdk_package="fake-sdk",
         cli_binary="fake-cli",
         cli_contract_id="fake",
@@ -275,8 +278,11 @@ def test_metadata_pricing_cannot_be_mutated_in_place() -> None:
     source = {"fake-model": ModelPricing(1.0, 2.0)}
     metadata = ProviderMetadata(
         provider=AIProvider.ANTHROPIC,
+        display_name="Fake",
         default_model="fake-model",
         default_api_key_env="FAKE_API_KEY",
+        supported_transports=frozenset({AITransport.API}),
+        default_transport=AITransport.API,
         pricing=source,
     )
 

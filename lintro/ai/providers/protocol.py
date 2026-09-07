@@ -42,6 +42,8 @@ if TYPE_CHECKING:
     from lintro.ai.model_pricing import ModelPricing
     from lintro.ai.provider_enum import AIProvider
     from lintro.ai.providers.base import BaseAIProvider
+    from lintro.ai.providers.cli_auth_probe import CliAuthProbe
+    from lintro.ai.providers.cli_contracts import CliContract
 
 __all__ = [
     "PROVIDER_PLUGIN_API_VERSION",
@@ -64,46 +66,87 @@ class ProviderMetadata:
 
     Everything here is answerable without importing the vendor SDK or spawning
     its CLI, so doctor output, config validation, cost estimation, and the CLI
-    contract check can read a plugin's metadata cheaply. The fields mirror the
-    metadata scattered across :mod:`lintro.ai.registry`,
-    :mod:`lintro.ai.availability`, :mod:`lintro.ai.cost`, and
-    :mod:`lintro.ai.providers.cli_contracts` today; folding those consumers
-    onto this record is a later phase, not this one.
+    contract check can read a plugin's metadata cheaply. Since #2308 this
+    record is the *only* declaration of these facts: the parallel tables that
+    lived in :mod:`lintro.ai.registry`, :mod:`lintro.ai.availability`,
+    :mod:`lintro.ai.cost`, :mod:`lintro.ai.display.status` and
+    :mod:`lintro.ai.providers.cli_contracts` are gone, and every one of those
+    consumers now reads a plugin's metadata through
+    :mod:`lintro.ai.registry`'s facade.
 
     Attributes:
         provider: Enum identity of the provider this metadata describes.
+        display_name: Human-readable vendor name for prose and generated docs.
         default_model: Model identifier used when the user names none.
         default_api_key_env: Environment variable read for the API key.
+        supported_transports: Transports this provider can actually serve. A
+            transport absent from the set is a configuration error, not a
+            runtime failure — doctor reports the pairing as incompatible.
+        default_transport: The transport this provider is documented and
+            steered towards — what doctor tells a user to set, and what the
+            generated provider table in ``docs/ai-features.md`` shows. Always
+            a member of *supported_transports*. It is deliberately *not* the
+            factory's unset-transport fallback: that fallback is ``api`` for
+            every provider, including CLI-only ones, so an unset transport
+            still produces the pre-plugin error text (see
+            :meth:`lintro.ai.providers.cursor.plugin.CursorPlugin.build`).
         sdk_package: Distribution installed for API transport, or ``None``
             when the provider has no API transport (CLI-only vendors).
         cli_binary: Executable looked up on ``PATH`` for CLI transport, or
             ``None`` when the provider has no CLI transport.
         cli_contract_id: Key identifying the provider's entry in the CLI
             contract table, or ``None`` when the provider declares no CLI
-            contract. Kept a plain string so metadata stays importable without
-            pulling in the contract definitions.
+            contract. Kept a plain string so a caller that only needs the key
+            never touches the contract definitions.
+        cli_contract: The flag surface and version floor lintro expects of
+            *cli_binary*, or ``None`` when the provider declares no CLI
+            contract. Declared here so a provider's CLI identity and the
+            contract it is checked against cannot drift apart.
+        cli_install_hint: Actionable guidance doctor shows when *cli_binary* is
+            not on ``PATH``.
+        cli_auth_probe: How doctor decides, without spawning the binary,
+            whether the CLI can authenticate.
         pricing: Known model identifiers mapped to their per-million-token
             pricing. Empty when the provider publishes no per-token price
             (for example a flat-rate subscription CLI).
     """
 
     provider: AIProvider
+    display_name: str
     default_model: str
     default_api_key_env: str
+    supported_transports: frozenset[AITransport]
+    default_transport: AITransport
     sdk_package: str | None = None
     cli_binary: str | None = None
     cli_contract_id: str | None = None
+    cli_contract: CliContract | None = None
+    cli_install_hint: str | None = None
+    cli_auth_probe: CliAuthProbe | None = None
     pricing: Mapping[str, ModelPricing] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Store *pricing* behind a read-only view.
+        """Store *pricing* behind a read-only view and check the transports.
 
         A frozen dataclass stops the attribute being rebound but not the
         mapping being edited in place, and consumers treat metadata as a
         constant. Copying into a ``MappingProxyType`` also detaches the record
         from a caller that keeps mutating the dict it passed in.
+
+        Raises:
+            ValueError: If ``default_transport`` is not one of
+                ``supported_transports``. A default the provider cannot serve
+                would turn every unset-transport run into a runtime failure,
+                so it is rejected where it is declared.
         """
         object.__setattr__(self, "pricing", MappingProxyType(dict(self.pricing)))
+        if self.default_transport not in self.supported_transports:
+            supported = ", ".join(sorted(t.value for t in self.supported_transports))
+            raise ValueError(
+                f"Provider '{self.provider.value}' declares default transport "
+                f"'{self.default_transport.value}', which is not among its "
+                f"supported transports: {supported or 'none'}.",
+            )
 
     @property
     def pricing_keys(self) -> tuple[str, ...]:
@@ -113,6 +156,17 @@ class ProviderMetadata:
             Model identifiers in declaration order.
         """
         return tuple(self.pricing)
+
+    def supports(self, transport: AITransport) -> bool:
+        """Report whether this provider can serve *transport*.
+
+        Args:
+            transport: The transport to test.
+
+        Returns:
+            True when *transport* is one this provider serves.
+        """
+        return transport in self.supported_transports
 
 
 @runtime_checkable
