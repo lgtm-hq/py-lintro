@@ -2640,11 +2640,13 @@ def test_build_binary_save_sha256_falls_back_to_the_reused_checksum() -> None:
     for job_id in ("build-macos", "build-linux"):
         by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
         sha_env = by_name["Save SHA256 to file"]["env"]["SHA256"]
-        assert_that(sha_env).described_as(job_id).contains(
-            "steps.sha256.outputs.sha256",
-        )
-        assert_that(sha_env).described_as(job_id).contains(
-            "steps.reuse.outputs.sha256",
+        # The exact expression, not just both names: the order matters (the
+        # freshly built checksum wins) and `||` is what makes the reuse value a
+        # fallback rather than an override.
+        assert_that(_normalize_github_expr(sha_env)).described_as(
+            job_id,
+        ).is_equal_to(
+            "${{ steps.sha256.outputs.sha256 || steps.reuse.outputs.sha256 }}",
         )
 
 
@@ -2715,11 +2717,13 @@ def test_binary_release_scripts_are_executable() -> None:
 def test_memory_sampler_tees_its_output_into_the_step_log() -> None:
     """Sampler evidence reaches stdout, not only the failure-only artifact.
 
-    A runner kill skips every remaining step, so ``Upload memory diagnostics``
-    (``if: failure()``) never runs and the artifact channel is empty exactly
-    when the log matters. ``start`` tees a baseline snapshot and ``stop``
-    replays the log and tees the final snapshot, while the workflow keeps the
-    artifact upload for ordinary failures.
+    ``start`` tees a baseline snapshot into its own step log, so a runner kill
+    still leaves the memory state the compile began from. The interval samples
+    reach a human only through ``Stop memory sampler`` (``if: always()``, which
+    replays the log) or the ``if: failure()`` artifact, neither of which runs
+    when the runner itself is killed. Both steps must therefore stay wired, and
+    the artifact upload must stay failure-only rather than becoming the sole
+    channel.
     """
     # What actually reaches stdout is asserted against the running script in
     # tests/scripts/test_memory_sampler.py; this only pins the workflow side,

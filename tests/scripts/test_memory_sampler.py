@@ -334,7 +334,9 @@ def test_start_tees_a_baseline_snapshot_to_stdout(
     """Start streams a baseline snapshot to the step log and the artifact.
 
     ``Upload memory diagnostics`` is ``if: failure()``, which never runs when
-    the runner itself is killed, so stdout is the only channel that survives.
+    the runner itself is killed. This baseline is the part that survives such a
+    kill: the interval samples taken later still need the stop step's replay or
+    the artifact to reach a human.
     """
     _write_stub(stub_bin, "uname", 'echo "Linux"')
     _write_stub(stub_bin, "vmstat", 'echo "VMSTAT_STUB_OUTPUT"')

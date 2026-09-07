@@ -248,6 +248,9 @@ jobs:
 
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
+        # #2435: this step also tees a baseline snapshot into its own log, the
+        # part that survives a runner kill. The interval samples still reach a
+        # human only via Stop memory sampler's replay or the failure artifact.
         run: scripts/ci/memory-sampler.sh start memory-sampler.log memory-sampler.pid
 
       - name: Build binary
@@ -460,6 +463,9 @@ jobs:
 
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
+        # #2435: this step also tees a baseline snapshot into its own log, the
+        # part that survives a runner kill. The interval samples still reach a
+        # human only via Stop memory sampler's replay or the failure artifact.
         run: scripts/ci/memory-sampler.sh start memory-sampler.log memory-sampler.pid
 
       - name: Build binary

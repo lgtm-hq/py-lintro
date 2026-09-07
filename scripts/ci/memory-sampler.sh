@@ -32,11 +32,13 @@ Commands:
                                  PID is written to <pid-file>. Idempotent: a
                                  live sampler recorded in <pid-file> is reused.
   stop <log-file> <pid-file>     Stop the sampler recorded in <pid-file>, replay
-                                 <log-file> to stdout, and tee a final snapshot
-                                 plus stop marker into both <log-file> and the
-                                 step log, then remove <pid-file>. Idempotent: a
-                                 missing or stale <pid-file> stops nothing but
-                                 still replays and closes out an existing log.
+                                 <log-file> to stdout (the only way the interval
+                                 samples reach a step log), and tee a final
+                                 snapshot plus stop marker into both <log-file>
+                                 and the step log, then remove <pid-file>.
+                                 Idempotent: a missing or stale <pid-file> stops
+                                 nothing but still replays and closes out an
+                                 existing log.
 
 Examples:
   memory-sampler.sh start memory-sampler.log memory-sampler.pid
@@ -137,12 +139,14 @@ cmd_start() {
 	echo "$sampler_pid" >"$pid_file"
 	log_info "Memory sampler started (PID $sampler_pid, interval ${interval}s, log: $log_file)"
 
-	# #2435: a runner kill skips every remaining step, so the artifact upload
-	# (failure-only, and never reached on a kill) is not a channel we can rely
-	# on. The step log is, up to the moment of the kill. The sampler loop keeps
-	# its stdio detached — a background writer holding the step's stdout would
-	# stall the runner waiting for EOF — so the baseline snapshot is teed here
-	# and cmd_stop replays the rest.
+	# #2435: a runner kill skips every remaining step, so the failure-only
+	# artifact upload never runs and the interval samples are lost with it.
+	# What this tee buys is narrower than that: the baseline snapshot below is
+	# written to the start step's log, so a kill leaves evidence of the memory
+	# state the compile began from. The samples taken *during* the compile still
+	# reach a human only through the stop step (which replays the log) or the
+	# artifact — the sampler loop keeps its stdio detached, because a background
+	# writer holding the step's stdout would stall the runner waiting for EOF.
 	snapshot | tee -a "$log_file" || log_warning "Baseline snapshot failed (ignored)"
 }
 
@@ -155,8 +159,8 @@ cmd_stop() {
 		sampler_pid="$(cat "$pid_file")"
 	else
 		# Not an early return: whatever the sampler managed to write before the
-		# PID file went missing is still evidence, and the replay below is the
-		# only channel that reaches the step log (#2435).
+		# PID file went missing is still evidence, and the replay below is what
+		# puts the interval samples in a step log at all (#2435).
 		log_warning "No sampler PID file at $pid_file; nothing to stop"
 	fi
 
@@ -179,9 +183,11 @@ cmd_stop() {
 	rm -f "$pid_file"
 
 	# #2435: replay everything sampled during the build into the step log before
-	# appending the end state, so the sampler evidence survives even when the
-	# failure-only artifact upload never runs. Display-only: a failure here must
-	# not fail an `if: always()` step, hence the fallbacks.
+	# appending the end state. This is the only path that puts the interval
+	# samples in a step log, and it runs whenever the step itself runs — a
+	# failing compile reaches it (`if: always()`), a runner kill does not.
+	# Display-only: a failure here must not fail an `if: always()` step, hence
+	# the fallbacks.
 	if [[ -s "$log_file" ]]; then
 		echo "=== sampler log: $log_file ==="
 		cat "$log_file" || log_warning "Could not replay $log_file (ignored)"

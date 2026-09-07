@@ -124,6 +124,17 @@ fi
 
 # 1. The same-run checksum artifact. Missing means either a first attempt or an
 #    asset this job never produced; both rebuild.
+#
+#    A rerun leaves one artifact per attempt under the same name, so this list
+#    can hold duplicates. Verified against run 33996465351 (two live
+#    `sha256-linux-x64` artifacts, ids 9985590534 at 08:15 and 9984484383 at
+#    06:58): `gh run download <run-id> -n sha256-linux-x64 -D dir` exits 0 and
+#    writes exactly one file at `dir/sha256-linux-x64.txt` — no nesting, no
+#    error — holding the newest attempt's digest (bcf1692c...), which is the
+#    attempt whose binary is on the release. Should gh ever pick the older
+#    duplicate the only consequence is a checksum mismatch below, i.e. a
+#    rebuild: a stale digest can never authorise reusing bytes this run did not
+#    produce.
 if ! gh run download "${GITHUB_RUN_ID:-}" \
 	--name "$CHECKSUM_ARTIFACT" \
 	--dir "$CHECKSUM_DIR" >/dev/null 2>&1; then
