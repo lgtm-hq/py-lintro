@@ -19,7 +19,11 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.providers import get_provider
-from lintro.ai.providers.cursor import CURSOR_MIN_TIMEOUT, CursorProvider, _find_agent
+from lintro.ai.providers.cursor.provider import (
+    CURSOR_MIN_TIMEOUT,
+    CursorProvider,
+    _find_agent,
+)
 from lintro.ai.registry import AIProvider
 from tests.unit.ai.conftest import HANG, patch_cli_exec
 
@@ -28,7 +32,7 @@ from tests.unit.ai.conftest import HANG, patch_cli_exec
 def _mock_agent_on_path():
     """Patch shutil.which to report ``agent`` as available."""
     with patch(
-        "lintro.ai.providers.cursor._find_agent",
+        "lintro.ai.providers.cursor.provider._find_agent",
         return_value="/usr/local/bin/agent",
     ):
         yield
@@ -159,7 +163,7 @@ def test_cursor_provider_raises_when_agent_missing():
     """Raise AINotAvailableError when agent CLI is missing."""
     with (
         patch(
-            "lintro.ai.providers.cursor._find_agent",
+            "lintro.ai.providers.cursor.provider._find_agent",
             return_value=None,
         ),
         pytest.raises(AINotAvailableError, match="agent"),
@@ -306,7 +310,7 @@ async def test_complete_raises_on_subprocess_timeout(provider):
     with (
         # The agent CLI enforces a 600s floor (covered separately), so the
         # floor is lowered here to keep the timeout path fast.
-        patch("lintro.ai.providers.cursor.CURSOR_MIN_TIMEOUT", 0.01),
+        patch("lintro.ai.providers.cursor.provider.CURSOR_MIN_TIMEOUT", 0.01),
         patch_cli_exec(side_effect=_hang_completion),
         pytest.raises(AIProviderError, match="timed out"),
     ):

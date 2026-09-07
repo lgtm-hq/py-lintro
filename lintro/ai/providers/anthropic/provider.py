@@ -2,6 +2,10 @@
 
 Uses the Anthropic Python SDK for ``transport: api`` and the ``claude`` CLI
 for ``transport: cli``.
+
+Imported on demand by
+:meth:`lintro.ai.providers.anthropic.plugin.AnthropicPlugin.build`; importing
+:mod:`lintro.ai.providers.anthropic` alone does not pull the vendor SDK.
 """
 
 from __future__ import annotations
@@ -24,10 +28,14 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.providers._api_common import (
+    ApiStreamingProvider,
+    finish_api_completion,
+)
+from lintro.ai.providers.anthropic.metadata import ANTHROPIC_CLI_BINARY
 from lintro.ai.providers.base import (
     AIResponse,
     AsyncAIStreamResult,
-    BaseAIProvider,
     ProviderCapabilities,
 )
 from lintro.ai.providers.claude_auth import should_send_bare
@@ -56,7 +64,7 @@ except ImportError:
 
 DEFAULT_MODEL = PROVIDERS.anthropic.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.anthropic.default_api_key_env
-_CLAUDE_BIN = "claude"
+_CLAUDE_BIN = ANTHROPIC_CLI_BINARY
 
 
 def _find_claude() -> str | None:
@@ -185,7 +193,7 @@ class _AnthropicCliTransport(CliTransport):
         )
 
 
-class AnthropicProvider(BaseAIProvider):
+class AnthropicProvider(ApiStreamingProvider):
     """Anthropic Claude provider."""
 
     @staticmethod
@@ -521,36 +529,23 @@ class AnthropicProvider(BaseAIProvider):
             output_tokens = response.usage.output_tokens
             cost = estimate_cost(effective_model, input_tokens, output_tokens)
 
-            log_transcript_event(
-                provider=AIProvider.ANTHROPIC.value,
-                transport=AITransport.API.value,
-                direction=TranscriptDirection.RESPONSE,
-                payload={
-                    "model": effective_model,
-                    "content": content,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "cost_estimate": cost,
-                },
-            )
-
-            return AIResponse(
-                content=content,
+            return finish_api_completion(
+                provider=AIProvider.ANTHROPIC,
                 model=effective_model,
+                content=content,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
-                cost_estimate=cost,
-                provider=AIProvider.ANTHROPIC,
+                cost=cost,
             )
 
-    async def stream_complete(
+    async def _stream_api(
         self,
         prompt: str,
         *,
-        system: str | None = None,
-        max_tokens: int = DEFAULT_PER_CALL_MAX_TOKENS,
-        timeout: float = DEFAULT_TIMEOUT,
-        model: str | None = None,
+        system: str | None,
+        max_tokens: int,
+        timeout: float,
+        model: str | None,
     ) -> AsyncAIStreamResult:
         """Stream a completion from the Anthropic API token-by-token.
 
@@ -564,14 +559,6 @@ class AnthropicProvider(BaseAIProvider):
         Returns:
             An AsyncAIStreamResult wrapping the token stream.
         """
-        if self._transport == AITransport.CLI:
-            return await super().stream_complete(
-                prompt,
-                system=system,
-                max_tokens=max_tokens,
-                timeout=timeout,
-            )
-
         client = self._get_client()
         effective_max = min(max_tokens, self._max_tokens)
         effective_model = model or self._model

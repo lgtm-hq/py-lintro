@@ -9,12 +9,12 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.enums import AITransport
-from lintro.ai.providers import anthropic as anthropic_module
-from lintro.ai.providers import openai as openai_module
-from lintro.ai.providers.anthropic import AnthropicProvider
+from lintro.ai.providers.anthropic import provider as anthropic_module
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.base import BaseAIProvider, ProviderCapabilities
-from lintro.ai.providers.cursor import CursorProvider
-from lintro.ai.providers.openai import OpenAIProvider
+from lintro.ai.providers.cursor.provider import CursorProvider
+from lintro.ai.providers.openai import provider as openai_module
+from lintro.ai.providers.openai.provider import OpenAIProvider
 
 
 @pytest.fixture()
@@ -26,15 +26,15 @@ def _cli_binaries_on_path() -> Iterator[None]:
     """
     with (
         patch(
-            "lintro.ai.providers.anthropic._find_claude",
+            "lintro.ai.providers.anthropic.provider._find_claude",
             return_value="/usr/local/bin/claude",
         ),
         patch(
-            "lintro.ai.providers.cursor._find_agent",
+            "lintro.ai.providers.cursor.provider._find_agent",
             return_value="/usr/local/bin/agent",
         ),
         patch(
-            "lintro.ai.providers.openai._find_codex",
+            "lintro.ai.providers.openai.provider._find_codex",
             return_value="/usr/local/bin/codex",
         ),
         patch.object(anthropic_module, "_has_anthropic", True),
