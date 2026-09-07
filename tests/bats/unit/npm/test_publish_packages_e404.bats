@@ -94,4 +94,6 @@ npm error 404 not found"
 		echo "# Output: ${output}" >&2
 		return 1
 	}
+	# The loop must fall through to a publish attempt, not abort on the view.
+	assert_equal "1" "$(_attempt_count)"
 }

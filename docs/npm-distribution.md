@@ -63,7 +63,7 @@ The OIDC token npm receives identifies the **entry workflow of the run**, not th
 reusable workflow doing the publishing. Only one identity matches the trusted publisher
 configured for the `@lgtm-hq/lintro*` packages:
 
-| Entry path                                             | OIDC identity                            | Live publish  |
+| Entry path                                             | OIDC identity (`github.workflow_ref`)    | Live publish  |
 | ------------------------------------------------------ | ---------------------------------------- | ------------- |
 | Tag push → `publish-pypi-on-tag.yml` → `workflow_call` | `publish-pypi-on-tag.yml @ refs/tags/v*` | authenticates |
 | **Run workflow** on `Publish - npm`                    | `publish-npm.yml @ refs/heads/main`      | rejected      |
@@ -78,8 +78,12 @@ Two guards encode this:
 
 - The `guard` job in `publish-npm.yml` (`scripts/ci/npm/assert_dispatch_allowed.sh`)
   fails a live dispatch immediately. It carries no `environment:` and runs before the
-  publish job, so a doomed run never consumes an `npm` approval. Dispatching with
-  `dry_run: true` — the dispatch default — stays supported for testing.
+  publish job, so a doomed run never consumes an `npm` approval. It decides on
+  `github.workflow_ref` — the entry workflow, which is exactly what npm matches — not on
+  `github.event_name`, which a `workflow_call` run inherits from its caller. A
+  dispatched `Publish - PyPI Production` run is therefore still allowed to publish.
+  Dispatching `Publish - npm` with `dry_run: true` — the dispatch default — stays
+  supported for testing.
 - `scripts/ci/npm/publish_packages.sh` classifies `E404` as a fatal auth failure, so a
   rejected publish is not retried three times per package.
 

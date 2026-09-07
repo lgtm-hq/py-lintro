@@ -1469,23 +1469,47 @@ def test_publish_npm_refuses_live_dispatch_before_the_npm_environment() -> None:
     assert_that(guard_step["run"].strip()).is_equal_to(
         "scripts/ci/npm/assert_dispatch_allowed.sh",
     )
-    # Both halves of the condition (event + dry_run) must reach the script.
+    # Every input the guard decides on must reach the script: the entry
+    # workflow (the OIDC subject), the event, and dry_run.
+    assert_that(guard_step["env"]["WORKFLOW_REF"]).contains("github.workflow_ref")
     assert_that(guard_step["env"]["EVENT_NAME"]).contains("github.event_name")
     assert_that(guard_step["env"]["DRY_RUN"]).contains("inputs.dry_run")
 
 
-def test_publish_npm_guard_script_gates_on_event_and_dry_run() -> None:
-    """The guard script fails only for a live ``workflow_dispatch`` run."""
+def test_publish_npm_guard_script_gates_on_entry_workflow_and_dry_run() -> None:
+    """The guard fails only for a live run entering through publish-npm.yml.
+
+    ``github.event_name`` is not sufficient on its own: a ``workflow_call``
+    run reports the *caller's* event, so a dispatched tag-pipeline run also
+    arrives as ``workflow_dispatch`` with ``dry_run: false`` and must still be
+    allowed. The entry workflow is the value npm actually matches.
+    """
     script = _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
+    repo = "lgtm-hq/py-lintro/.github/workflows"
+    tag_pipeline_ref = f"{repo}/publish-pypi-on-tag.yml@refs/tags/v1.2.3"
+    dispatch_ref = f"{repo}/publish-npm.yml@refs/heads/main"
     cases: list[tuple[dict[str, str], int]] = [
-        ({"EVENT_NAME": "push", "DRY_RUN": "false"}, 0),
-        ({"EVENT_NAME": "workflow_dispatch", "DRY_RUN": "true"}, 0),
-        ({"EVENT_NAME": "workflow_dispatch", "DRY_RUN": "false"}, 1),
+        # Tag pipeline entry, however it was triggered: allowed.
+        ({"WORKFLOW_REF": tag_pipeline_ref, "EVENT_NAME": "push"}, 0),
+        ({"WORKFLOW_REF": tag_pipeline_ref, "EVENT_NAME": "workflow_dispatch"}, 0),
+        # Direct dispatch of this workflow: refused unless it is a dry run.
+        ({"WORKFLOW_REF": dispatch_ref, "EVENT_NAME": "workflow_dispatch"}, 1),
+        (
+            {
+                "WORKFLOW_REF": dispatch_ref,
+                "EVENT_NAME": "workflow_dispatch",
+                "DRY_RUN": "true",
+            },
+            0,
+        ),
+        # No workflow ref: fall back to the event, fail-closed on a dispatch.
+        ({"EVENT_NAME": "workflow_dispatch"}, 1),
+        ({"EVENT_NAME": "push"}, 0),
     ]
     for env, expected_code in cases:
         result = subprocess.run(  # nosec B603 - fixed in-repo script
             [str(script)],
-            env={"PATH": "/usr/bin:/bin", **env},
+            env={"PATH": "/usr/bin:/bin", "DRY_RUN": "false", **env},
             capture_output=True,
             text=True,
             check=False,
@@ -1495,12 +1519,15 @@ def test_publish_npm_guard_script_gates_on_event_and_dry_run() -> None:
         )
 
 
-def test_publish_npm_never_retries_an_e404_publish() -> None:
+def test_publish_npm_classifies_e404_as_non_retryable() -> None:
     """publish_packages.sh classifies npm's masked-auth E404 as fatal.
 
     npm reports an unauthorized publish as ``E404 Not Found`` (issue #2247).
     Retrying it burns three attempts per package on a permanent condition, so
-    E404 belongs in the non-retryable class, not the transient one.
+    E404 belongs in the non-retryable class, not the transient one. This is a
+    wiring assertion on the two classification patterns; the behaviour (one
+    attempt, no retry) is covered by
+    ``tests/bats/unit/npm/test_publish_packages_e404.bats``.
     """
     script = (_REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh").read_text(
         encoding="utf-8",

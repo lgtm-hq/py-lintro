@@ -92,7 +92,12 @@ jobs:
           persist-credentials: false
 
       - name: Refuse live dispatch runs
+        # workflow_ref is the run's *entry* workflow — the OIDC subject npm
+        # matches on. event_name alone cannot tell a direct dispatch of this
+        # workflow from a dispatch of the tag pipeline that calls it, because
+        # a workflow_call run reports the caller's event.
         env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
           EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: scripts/ci/npm/assert_dispatch_allowed.sh
