@@ -975,7 +975,7 @@ runs.
 ```bash
 lintro check --explain-order              # derived vs current, then exit
 lintro check --tools ruff,black --explain-order
-lintro fmt --explain-order
+lintro format --explain-order
 lintro doctor                             # compact summary section
 ```
 
