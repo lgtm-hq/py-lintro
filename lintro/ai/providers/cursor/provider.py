@@ -295,7 +295,10 @@ class CursorProvider(BaseAIProvider):
         Args:
             prompt: User prompt text.
             system: Optional system prompt prepended to the user prompt.
-            max_tokens: Unused; kept for provider API parity.
+            max_tokens: Per-call token cap. The effective value is the
+                lower of this and the provider-level cap; the ``agent`` CLI
+                enforces no hard limit, so it is stated to the model in the
+                prompt instead.
             timeout: Subprocess timeout in seconds (minimum 600 for agent).
             repo_root: Git repository root for ``--workspace``.
             use_one_shot: When True, do not resume an existing CLI session.

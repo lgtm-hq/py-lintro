@@ -137,6 +137,11 @@ class ApiStreamingProvider(BaseAIProvider):
             An AsyncAIStreamResult wrapping the token stream.
         """
         if self._transport == AITransport.CLI:
+            # ``model`` is deliberately not forwarded: neither provider passed
+            # it on this branch before the migration, and #2307 is
+            # behaviour-preserving. Threading the per-call override through the
+            # CLI fallback is a real fix, but it belongs to whichever issue
+            # owns CLI streaming, not to this move.
             return await super().stream_complete(
                 prompt,
                 system=system,
