@@ -77,11 +77,12 @@ def render_ai_status(
 
     from lintro.ai.availability import is_provider_available
     from lintro.ai.provider_enum import (
+        AIProvider,
         accepted_provider_values,
         provider_required_error,
     )
     from lintro.ai.providers import get_default_model
-    from lintro.ai.registry import PROVIDERS, AIProvider
+    from lintro.ai.registry import metadata_for
 
     if ai_config.provider is None:
         provider_name = ""
@@ -104,9 +105,8 @@ def render_ai_status(
         sdk_ok = is_provider_available(provider_name)
 
         # Check API key
-        key_env = ai_config.api_key_env or PROVIDERS.default_api_key_envs.get(
-            AIProvider(provider_name),
-            "",
+        key_env = (
+            ai_config.api_key_env or metadata_for(provider_name).default_api_key_env
         )
         key_set = bool(os.environ.get(key_env)) if key_env else False
 

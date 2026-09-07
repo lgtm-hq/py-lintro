@@ -15,7 +15,7 @@ from lintro.ai.cost import (
     format_cost,
     format_token_count,
 )
-from lintro.ai.registry import DEFAULT_PRICING, PROVIDERS, ModelPricing
+from lintro.ai.registry import DEFAULT_PRICING, ModelPricing, model_pricing
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def debug_messages() -> Iterator[list[str]]:
 
 def test_cost_known_model():
     """Verify cost estimation uses correct pricing for a known model."""
-    pricing = PROVIDERS.model_pricing["gpt-4o"]
+    pricing = model_pricing()["gpt-4o"]
     cost = estimate_cost("gpt-4o", 1000, 500)
     expected = (1000 / 1_000_000) * pricing.input_per_million + (
         500 / 1_000_000
@@ -47,9 +47,17 @@ def test_cost_known_model():
 
 
 def test_estimate_cost_with_floor_partial_zero_uses_default():
-    """Verify partial zero pricing falls back to default rates."""
+    """Verify partial zero pricing falls back to default rates.
+
+    The priced-at-zero half is what matters, so the lookup is patched at the
+    seam ``cost`` reads rather than in the metadata: patching a facade call's
+    return value used to patch a throwaway dict and prove nothing.
+    """
     partial_zero = ModelPricing(input_per_million=3.0, output_per_million=0.0)
-    with patch.dict(PROVIDERS.model_pricing, {"partial-zero": partial_zero}):
+    with patch(
+        "lintro.ai.cost.model_pricing",
+        return_value={"partial-zero": partial_zero},
+    ):
         cost = estimate_cost_with_floor("partial-zero", 1_000_000, 1_000_000)
     expected = DEFAULT_PRICING.input_per_million + DEFAULT_PRICING.output_per_million
     assert_that(cost).is_close_to(expected, 1e-10)
@@ -87,7 +95,7 @@ def test_cost_known_model_does_not_log(debug_messages: list[str]) -> None:
     Args:
         debug_messages: Loguru DEBUG records captured during the test.
     """
-    pricing = PROVIDERS.model_pricing["gpt-4o"]
+    pricing = model_pricing()["gpt-4o"]
     cost = estimate_cost("gpt-4o", 100, 50)
 
     expected = (100 / 1_000_000) * pricing.input_per_million + (
@@ -109,10 +117,14 @@ def test_cost_large_token_count():
     assert_that(cost).is_greater_than(0)
 
 
-@pytest.mark.parametrize("model", list(PROVIDERS.model_pricing.keys()))
+@pytest.mark.parametrize("model", sorted(model_pricing()))
 def test_cost_all_known_models_have_pricing(model: str) -> None:
-    """Verify every registered model produces a known cost estimate."""
-    pricing = PROVIDERS.model_pricing[model]
+    """Verify every declared model produces a known cost estimate.
+
+    Args:
+        model: A model identifier some provider's metadata prices.
+    """
+    pricing = model_pricing()[model]
     cost = estimate_cost(model, 1000, 1000)
     if pricing.input_per_million == 0 and pricing.output_per_million == 0:
         assert_that(cost).is_equal_to(0.0)

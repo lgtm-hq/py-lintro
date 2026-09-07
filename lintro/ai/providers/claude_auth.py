@@ -24,12 +24,15 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from pathlib import Path
 
 from loguru import logger
 
 from lintro.ai.enums import CliBareMode
+from lintro.ai.providers.anthropic.metadata import (
+    ANTHROPIC_MANAGED_SETTINGS_ENV,
+    managed_settings_path,
+)
 
 __all__ = [
     "BARE_MODE_ENV",
@@ -69,22 +72,6 @@ _BOOLEAN_ALIASES: dict[str, CliBareMode] = {
 _MAX_SETTINGS_BYTES = 256 * 1024
 
 
-def _managed_settings_path() -> Path | None:
-    """Return the platform's enterprise-managed Claude settings file.
-
-    Returns:
-        The managed settings path for this platform, or ``None`` when the
-        platform has no documented location.
-    """
-    if sys.platform == "darwin":
-        return Path("/Library/Application Support/ClaudeCode/managed-settings.json")
-    if sys.platform == "win32":
-        return Path("C:/ProgramData/ClaudeCode/managed-settings.json")
-    if sys.platform.startswith("linux"):
-        return Path("/etc/claude-code/managed-settings.json")
-    return None
-
-
 def _settings_candidates(*, cwd: str | None) -> tuple[Path, ...]:
     """Return the Claude Code settings files that may declare ``apiKeyHelper``.
 
@@ -104,7 +91,9 @@ def _settings_candidates(*, cwd: str | None) -> tuple[Path, ...]:
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
     user_dir = Path(config_dir) if config_dir else Path.home() / ".claude"
     project_dir = Path(cwd) if cwd else Path.cwd()
-    managed = _managed_settings_path()
+    managed = managed_settings_path(
+        override=os.environ.get(ANTHROPIC_MANAGED_SETTINGS_ENV),
+    )
     return (
         *((managed,) if managed is not None else ()),
         user_dir / "settings.json",

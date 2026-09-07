@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from loguru import logger
 
-from lintro.ai.registry import DEFAULT_PRICING, PROVIDERS
+from lintro.ai.registry import DEFAULT_PRICING, model_pricing
 
 
 def estimate_cost(
@@ -26,7 +26,7 @@ def estimate_cost(
     Returns:
         float: Estimated cost in USD.
     """
-    pricing = PROVIDERS.model_pricing.get(model)
+    pricing = model_pricing().get(model)
     if pricing is None:
         logger.debug(f"Unknown model {model!r}, using default pricing")
         pricing = DEFAULT_PRICING
@@ -45,7 +45,7 @@ def estimate_cost_with_floor(
     """Estimate cost, using default pricing when a model is unpriced.
 
     Some providers (notably Cursor via its subscription ``agent`` CLI) do
-    not expose per-token pricing, so their registry entries carry zero
+    not expose per-token pricing, so their metadata carries zero
     rates. Pricing such calls at zero would let them accrue nothing against
     :class:`~lintro.ai.budget.CostBudget`, turning ``ai.max_cost_usd`` into
     a no-op and allowing deep reviews to run unbounded API calls. To keep
@@ -60,7 +60,7 @@ def estimate_cost_with_floor(
     Returns:
         float: Estimated cost in USD, always using a non-zero rate.
     """
-    pricing = PROVIDERS.model_pricing.get(model)
+    pricing = model_pricing().get(model)
     if pricing is None or (
         pricing.input_per_million == 0.0 or pricing.output_per_million == 0.0
     ):

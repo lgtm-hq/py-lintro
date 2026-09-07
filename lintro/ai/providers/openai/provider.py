@@ -28,6 +28,7 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers._api_common import (
     ApiStreamingProvider,
     finish_api_completion,
@@ -44,13 +45,12 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.providers.openai.metadata import OPENAI_CLI_BINARY
+from lintro.ai.providers.openai.metadata import OPENAI_CLI_BINARY, OPENAI_METADATA
 from lintro.ai.raw_response import (
     CLI_ENVELOPE_STAGE,
     describe_raw_response,
     recover_prose_envelope,
 )
-from lintro.ai.registry import PROVIDERS, AIProvider
 from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
 _has_openai = False
@@ -61,8 +61,8 @@ try:
 except ImportError:
     pass
 
-DEFAULT_MODEL = PROVIDERS.openai.default_model
-DEFAULT_API_KEY_ENV = PROVIDERS.openai.default_api_key_env
+DEFAULT_MODEL = OPENAI_METADATA.default_model
+DEFAULT_API_KEY_ENV = OPENAI_METADATA.default_api_key_env
 _CODEX_BIN = OPENAI_CLI_BINARY
 _CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 

@@ -14,9 +14,9 @@ from lintro.ai.exceptions import AINotAvailableError, AIProviderError
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_capabilities import CliCapabilityGuard
 from lintro.ai.providers.cli_contracts import (
-    CLI_CONTRACTS,
     CliContract,
     cli_contract_for,
+    cli_contracts,
     format_version,
 )
 from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
@@ -625,7 +625,7 @@ async def test_run_decodes_stdout_and_stderr(transport: _FakeTransport) -> None:
 
 def test_every_provider_declares_a_cli_contract() -> None:
     """Every provider identity has a declared CLI contract."""
-    assert_that(sorted(CLI_CONTRACTS)).is_equal_to(sorted(AIProvider))
+    assert_that(sorted(cli_contracts())).is_equal_to(sorted(AIProvider))
 
 
 @pytest.mark.parametrize("provider", list(AIProvider))

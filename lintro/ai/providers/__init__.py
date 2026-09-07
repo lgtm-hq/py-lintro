@@ -20,25 +20,18 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.paths import resolve_workspace_root
 from lintro.ai.provider_enum import (
+    AIProvider,
     accepted_provider_values,
     provider_required_error,
 )
 from lintro.ai.providers.builtins import load_builtin_providers
 from lintro.ai.providers.registry import all_providers, get_registered
-from lintro.ai.registry import PROVIDERS, AIProvider
+from lintro.ai.registry import metadata_for
 from lintro.ai.transcript import maybe_start_transcript
 
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import BaseAIProvider
-
-# String-keyed lookup for convenience.
-DEFAULT_MODELS: dict[str, str] = {
-    p.value: m for p, m in PROVIDERS.default_models.items()
-}
-DEFAULT_API_KEY_ENVS: dict[str, str] = {
-    p.value: e for p, e in PROVIDERS.default_api_key_envs.items()
-}
 
 
 def get_provider(
@@ -113,7 +106,10 @@ def get_default_model(provider_name: str) -> str | None:
     Returns:
         Default model identifier, or None if provider is unknown.
     """
-    return DEFAULT_MODELS.get(provider_name.lower())
+    try:
+        return metadata_for(provider_name).default_model
+    except AIProviderNotRegisteredError:
+        return None
 
 
 __all__ = ["AINotAvailableError", "get_default_model", "get_provider"]

@@ -1,126 +1,117 @@
-"""AI provider registry — single source of truth for provider metadata.
+"""Facade over per-provider plugin metadata.
 
-Consolidates model pricing, default models, and API key environment
-variables into a frozen dataclass hierarchy keyed by an ``AIProvider``
-StrEnum.  Every piece of provider metadata lives here; downstream
-modules import what they need rather than maintaining parallel dicts.
+Every fact about a provider — its display name, default model, pricing,
+API-key variable, CLI binary, contract and transports — is declared once, in
+that provider's own package (``lintro/ai/providers/<name>/metadata.py``). This
+module is the read side: it loads the in-tree plugins and hands their
+:class:`~lintro.ai.providers.protocol.ProviderMetadata` records to the
+consumers that used to keep parallel tables of the same facts (#2308).
 
-The ``AIProvider`` enum, ``ModelPricing``, and ``ProviderInfo`` dataclasses
-are defined in :mod:`lintro.ai.provider_enum` and
-:mod:`lintro.ai.provider_info` respectively, and re-exported here for
-convenience.
+Before that migration this module *held* those tables, as a frozen
+``PROVIDERS`` registry that ``availability``, ``cost``, ``display.status`` and
+the CLI contracts each partly duplicated. Nothing declares provider data here
+any more; adding a vendor means adding an
+:class:`~lintro.ai.provider_enum.AIProvider` member and a package, never
+editing this file.
+
+The lookups are deliberately functions rather than a module-level mapping: a
+cached snapshot is the parallel table this replaced, and it would go stale the
+moment a test swapped the registered plugins.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
+from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
-from lintro.ai.provider_info import ModelPricing, ProviderInfo
+
+if TYPE_CHECKING:
+    from lintro.ai.providers.protocol import ProviderMetadata
 
 __all__ = [
     "AIProvider",
-    "AIProviderRegistry",
     "DEFAULT_PRICING",
     "ModelPricing",
-    "PROVIDERS",
-    "ProviderInfo",
+    "all_metadata",
+    "default_api_key_envs",
+    "default_models",
+    "metadata_for",
+    "model_pricing",
 ]
 
-# -- Registry class --------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class AIProviderRegistry:
-    """Frozen registry of all supported AI providers.
-
-    Access individual providers via attribute (``registry.anthropic``)
-    or iterate with :meth:`items`.
-    """
-
-    anthropic: ProviderInfo
-    openai: ProviderInfo
-    cursor: ProviderInfo
-    _cached_model_pricing: dict[str, ModelPricing] = field(
-        default_factory=dict,
-        init=False,
-        repr=False,
-    )
-
-    def __post_init__(self) -> None:
-        """Pre-compute cached derived mappings."""
-        pricing: dict[str, ModelPricing] = {}
-        for _provider, info in self.items():
-            pricing.update(info.models)
-        object.__setattr__(self, "_cached_model_pricing", pricing)
-
-    def items(self) -> Iterator[tuple[AIProvider, ProviderInfo]]:
-        """Yield ``(AIProvider, ProviderInfo)`` pairs."""
-        for provider in AIProvider:
-            yield provider, getattr(self, provider.value)
-
-    def get(self, provider: AIProvider) -> ProviderInfo:
-        """Look up a provider by enum member.
-
-        Args:
-            provider: The provider to look up.
-
-        Returns:
-            ProviderInfo for the requested provider.
-        """
-        info: ProviderInfo = getattr(self, provider.value)
-        return info
-
-    @property
-    def model_pricing(self) -> dict[str, ModelPricing]:
-        """Flat mapping of every known model to its pricing."""
-        return dict(self._cached_model_pricing)
-
-    @property
-    def default_models(self) -> dict[AIProvider, str]:
-        """Map each provider to its default model identifier."""
-        return {p: info.default_model for p, info in self.items()}
-
-    @property
-    def default_api_key_envs(self) -> dict[AIProvider, str]:
-        """Map each provider to its default API-key env var."""
-        return {p: info.default_api_key_env for p, info in self.items()}
-
-
-# -- Singleton instance ----------------------------------------------------
-
-PROVIDERS = AIProviderRegistry(
-    anthropic=ProviderInfo(
-        default_model="claude-sonnet-4-6",
-        default_api_key_env="ANTHROPIC_API_KEY",
-        models={
-            "claude-sonnet-4-6": ModelPricing(3.00, 15.00),
-            "claude-sonnet-4-20250514": ModelPricing(3.00, 15.00),
-            "claude-haiku-4-5-20251001": ModelPricing(0.80, 4.00),
-            "claude-opus-4-20250514": ModelPricing(15.00, 75.00),
-        },
-    ),
-    openai=ProviderInfo(
-        default_model="gpt-4o",
-        default_api_key_env="OPENAI_API_KEY",
-        models={
-            "gpt-4o": ModelPricing(2.50, 10.00),
-            "gpt-4o-mini": ModelPricing(0.15, 0.60),
-            "gpt-4-turbo": ModelPricing(10.00, 30.00),
-            "o1": ModelPricing(15.00, 60.00),
-            "o1-mini": ModelPricing(1.10, 4.40),
-        },
-    ),
-    cursor=ProviderInfo(
-        default_model="auto",
-        default_api_key_env="CURSOR_API_KEY",
-        models={
-            "auto": ModelPricing(0.0, 0.0),
-            "gpt-5.3-codex-fast": ModelPricing(0.0, 0.0),
-        },
-    ),
-)
-
-# Fallback pricing when a model is not in the registry.
+#: Fallback pricing for a model no provider publishes a price for.
 DEFAULT_PRICING = ModelPricing(input_per_million=3.00, output_per_million=15.00)
+
+
+def all_metadata() -> dict[AIProvider, ProviderMetadata]:
+    """Return the metadata of every registered provider plugin.
+
+    Returns:
+        Metadata keyed by provider, in :class:`AIProvider` declaration order so
+        callers never depend on plugin import order.
+    """
+    from lintro.ai.providers.builtins import load_builtin_providers
+    from lintro.ai.providers.registry import all_providers
+
+    load_builtin_providers()
+    return {provider: plugin.metadata for provider, plugin in all_providers().items()}
+
+
+def metadata_for(provider: AIProvider | str) -> ProviderMetadata:
+    """Return one provider's metadata.
+
+    Args:
+        provider: Provider enum member, or the string a user typed.
+
+    Returns:
+        The provider's metadata record.
+        :class:`~lintro.ai.exceptions.AIProviderNotRegisteredError` propagates
+        from the registry lookup when *provider* is unknown, or is known but
+        has no registered plugin.
+    """
+    from lintro.ai.providers.builtins import load_builtin_providers
+    from lintro.ai.providers.registry import get_registered
+
+    load_builtin_providers()
+    return get_registered(provider).metadata
+
+
+def model_pricing() -> dict[str, ModelPricing]:
+    """Return every known model mapped to its pricing.
+
+    Providers are merged in :class:`AIProvider` declaration order. Model
+    identifiers are vendor-unique in practice, so the merge is a union rather
+    than a precedence decision.
+
+    Returns:
+        A flat mapping of model identifier to :class:`ModelPricing`.
+    """
+    pricing: dict[str, ModelPricing] = {}
+    for metadata in all_metadata().values():
+        pricing.update(metadata.pricing)
+    return pricing
+
+
+def default_models() -> dict[AIProvider, str]:
+    """Return each provider's default model identifier.
+
+    Returns:
+        Default model keyed by provider, in enum declaration order.
+    """
+    return {
+        provider: metadata.default_model
+        for provider, metadata in all_metadata().items()
+    }
+
+
+def default_api_key_envs() -> dict[AIProvider, str]:
+    """Return each provider's default API-key environment variable.
+
+    Returns:
+        Variable name keyed by provider, in enum declaration order.
+    """
+    return {
+        provider: metadata.default_api_key_env
+        for provider, metadata in all_metadata().items()
+    }

@@ -30,9 +30,9 @@ from dataclasses import dataclass
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_capabilities import PROBE_TIMEOUT
 from lintro.ai.providers.cli_contracts import (
-    CLI_CONTRACTS,
     CliContract,
     cli_contract_for,
+    cli_contracts,
     format_version,
     unadvertised_flags,
 )
@@ -287,4 +287,4 @@ def declared_cli_providers() -> tuple[AIProvider, ...]:
         Providers in declaration order, so a newly declared contract is picked up
         by the contract tests without editing them.
     """
-    return tuple(CLI_CONTRACTS)
+    return tuple(cli_contracts())

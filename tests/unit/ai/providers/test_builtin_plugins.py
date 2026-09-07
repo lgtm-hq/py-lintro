@@ -32,7 +32,7 @@ from lintro.ai.providers.registry import (
     is_registered,
     restore_registered,
 )
-from lintro.ai.registry import PROVIDERS
+from lintro.ai.registry import metadata_for
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -96,18 +96,17 @@ def test_registry_enumerates_providers_in_enum_order() -> None:
 
 @pytest.mark.usefixtures("_registered")
 @pytest.mark.parametrize("provider", list(AIProvider))
-def test_plugin_metadata_agrees_with_the_existing_tables(
+def test_every_consumer_reads_the_same_metadata_record(
     provider: AIProvider,
 ) -> None:
-    """Metadata is a view over today's tables, not a second source of truth.
+    """The facade, availability and the contract lookup all answer alike.
 
     Args:
         provider: The provider under test.
     """
     metadata = get_registered(provider).metadata
-    info = PROVIDERS.get(provider)
 
-    assert_that(metadata.default_model).is_equal_to(info.default_model)
+    assert_that(metadata).is_same_as(metadata_for(provider))
     assert_that(metadata.default_api_key_env).is_equal_to(
         provider_api_key_env(provider),
     )
@@ -115,8 +114,7 @@ def test_plugin_metadata_agrees_with_the_existing_tables(
     assert_that(metadata.cli_binary).is_equal_to(
         cli_contract_for(provider).binary,
     )
-    assert_that(metadata.cli_contract_id).is_equal_to(provider.value)
-    assert_that(list(metadata.pricing_keys)).is_equal_to(list(info.models))
+    assert_that(metadata.cli_contract).is_same_as(cli_contract_for(provider))
 
 
 @pytest.mark.usefixtures("_registered")
@@ -157,7 +155,7 @@ def test_get_provider_builds_the_same_class_over_api_transport(
     assert_that(type(built).__name__).is_equal_to(_EXPECTED_CLASSES[provider])
     assert_that(built.name).is_equal_to(provider.value)
     assert_that(built.model_name).is_equal_to(
-        PROVIDERS.get(provider).default_model,
+        metadata_for(provider).default_model,
     )
 
 

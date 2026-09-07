@@ -7,7 +7,6 @@ import shutil
 from dataclasses import dataclass
 
 from lintro.ai.availability import (
-    codex_auth_configured,
     is_provider_available,
     provider_api_key_env,
     provider_cli_binary,
@@ -16,8 +15,12 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.liveness import LivenessState, check_liveness_sync
 from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.provider_enum import accepted_provider_values, provider_required_error
-from lintro.ai.registry import AIProvider
+from lintro.ai.provider_enum import (
+    AIProvider,
+    accepted_provider_values,
+    provider_required_error,
+)
+from lintro.ai.registry import metadata_for
 from lintro.ai.transcript import TRANSCRIPT_DIR, is_transcript_enabled
 from lintro.enums.tool_status import ToolStatus
 
@@ -71,7 +74,7 @@ def check_ai_liveness(config: AIConfig) -> list[AICheckResult]:
         or config.provider is None
     ):
         return []
-    if config.provider == AIProvider.CURSOR and config.transport == AITransport.API:
+    if not metadata_for(config.provider).supports(config.transport):
         # Structurally impossible pairing. check_ai_configuration already reports
         # it; probing anyway would fail on provider construction and surface a
         # misleading "no credential" verdict for what is a configuration error.
@@ -152,13 +155,21 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
     if config.provider is None or config.transport is None:
         return results
 
-    if config.provider == AIProvider.CURSOR and config.transport == AITransport.API:
+    metadata = metadata_for(config.provider)
+    if not metadata.supports(config.transport):
+        only = metadata.default_transport.value
         results.append(
             AICheckResult(
                 name="ai.provider+transport",
                 status=ToolStatus.INCOMPATIBLE,
-                message="cursor provider only supports transport: cli",
-                hint="Set `transport: cli` and install the Cursor agent CLI",
+                message=(
+                    f"{config.provider.value} provider only supports "
+                    f"transport: {only}"
+                ),
+                hint=(
+                    f"Set `transport: {only}` and install the "
+                    f"{metadata.display_name} agent CLI"
+                ),
             ),
         )
         return results
@@ -243,13 +254,19 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
 
 
 def _cli_install_hint(*, provider: AIProvider) -> str:
-    if provider == AIProvider.CURSOR:
-        return "Install agent CLI: curl https://cursor.com/install -fsS | bash"
-    if provider == AIProvider.ANTHROPIC:
-        return "Install Claude Code: https://code.claude.com/docs/en/setup"
-    if provider == AIProvider.OPENAI:
-        return "Install Codex CLI: https://developers.openai.com/codex/cli"
-    return "Install the provider CLI and ensure it is on PATH"
+    """Return the install guidance for a provider's missing CLI binary.
+
+    Args:
+        provider: The provider whose binary was not found on ``PATH``.
+
+    Returns:
+        The hint the provider's plugin metadata declares, or a generic one when
+        it declares none.
+    """
+    return (
+        metadata_for(provider).cli_install_hint
+        or "Install the provider CLI and ensure it is on PATH"
+    )
 
 
 def _check_cli_auth(
@@ -257,48 +274,34 @@ def _check_cli_auth(
     provider: AIProvider,
     config: AIConfig,
 ) -> AICheckResult | None:
-    if provider == AIProvider.CURSOR:
-        key_env = config.api_key_env or provider_api_key_env(provider)
-        if os.environ.get(key_env):
-            return AICheckResult(
-                name="ai.cli.auth",
-                status=ToolStatus.OK,
-                message=f"{key_env} is set",
-            )
+    """Report whether the provider's CLI is likely to authenticate.
+
+    Presence only, and never spawns the binary: the probe each provider's
+    metadata declares says which environment variables and login files count as
+    proof. An unproven credential is ``UNKNOWN`` rather than a failure, because
+    an interactive vendor login lintro cannot see is the common case.
+
+    Args:
+        provider: The provider whose CLI transport is configured.
+        config: Parsed AI configuration, consulted for an ``api_key_env``
+            override.
+
+    Returns:
+        The check result, or None when the provider declares no auth probe.
+    """
+    probe = metadata_for(provider).cli_auth_probe
+    if probe is None:
+        return None
+    key_env = config.api_key_env or provider_api_key_env(provider)
+    if probe.is_configured(key_env=key_env):
         return AICheckResult(
             name="ai.cli.auth",
-            status=ToolStatus.UNKNOWN,
-            message="Cursor CLI auth not verified",
-            hint="Run `agent login` or set CURSOR_API_KEY",
+            status=ToolStatus.OK,
+            message=probe.describe(key_env=key_env),
         )
-
-    if provider == AIProvider.ANTHROPIC:
-        key_env = config.api_key_env or provider_api_key_env(provider)
-        if os.environ.get(key_env):
-            return AICheckResult(
-                name="ai.cli.auth",
-                status=ToolStatus.OK,
-                message=f"{key_env} set (API billing overrides subscription)",
-            )
-        return AICheckResult(
-            name="ai.cli.auth",
-            status=ToolStatus.UNKNOWN,
-            message="Claude CLI auth not verified",
-            hint="Run `claude login` or set ANTHROPIC_API_KEY",
-        )
-
-    if provider == AIProvider.OPENAI:
-        if codex_auth_configured():
-            return AICheckResult(
-                name="ai.cli.auth",
-                status=ToolStatus.OK,
-                message="Codex auth configured (CODEX_API_KEY or ~/.codex/auth.json)",
-            )
-        return AICheckResult(
-            name="ai.cli.auth",
-            status=ToolStatus.UNKNOWN,
-            message="Codex CLI auth not verified",
-            hint="Run `codex login` or set CODEX_API_KEY",
-        )
-
-    return None
+    return AICheckResult(
+        name="ai.cli.auth",
+        status=ToolStatus.UNKNOWN,
+        message=probe.unverified_message,
+        hint=probe.hint,
+    )

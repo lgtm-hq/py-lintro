@@ -27,6 +27,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.base import (
     AIResponse,
     BaseAIProvider,
@@ -39,20 +40,19 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
-from lintro.ai.providers.cursor.metadata import CURSOR_CLI_BINARY
+from lintro.ai.providers.cursor.metadata import CURSOR_CLI_BINARY, CURSOR_METADATA
 from lintro.ai.raw_response import (
     CLI_ENVELOPE_STAGE,
     describe_raw_response,
     recover_prose_envelope,
 )
-from lintro.ai.registry import PROVIDERS, AIProvider
 from lintro.ai.token_budget import estimate_tokens
 
 CURSOR_MIN_TIMEOUT = 600.0
 
 _AGENT_BIN = CURSOR_CLI_BINARY
-DEFAULT_MODEL = PROVIDERS.cursor.default_model
-DEFAULT_API_KEY_ENV = PROVIDERS.cursor.default_api_key_env
+DEFAULT_MODEL = CURSOR_METADATA.default_model
+DEFAULT_API_KEY_ENV = CURSOR_METADATA.default_api_key_env
 
 
 def _find_agent() -> str | None:

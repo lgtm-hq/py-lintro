@@ -14,9 +14,6 @@ from one import.
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
-
 import click
 
 from lintro.ai.enums import AITransport
@@ -25,13 +22,13 @@ from lintro.ai.liveness import (
     LivenessState,
     check_liveness_sync,
 )
-from lintro.ai.registry import AIProvider
+from lintro.ai.provider_enum import AIProvider
+from lintro.ai.registry import metadata_for
 
 __all__ = [
     "LivenessResult",
     "LivenessState",
     "check_liveness_sync",
-    "codex_auth_configured",
     "is_ai_available",
     "is_provider_available",
     "provider_api_key_env",
@@ -41,12 +38,6 @@ __all__ = [
 ]
 
 _AI_AVAILABLE: bool | None = None
-
-_CLI_BINARIES: dict[tuple[AIProvider, AITransport], str] = {
-    (AIProvider.ANTHROPIC, AITransport.CLI): "claude",
-    (AIProvider.OPENAI, AITransport.CLI): "codex",
-    (AIProvider.CURSOR, AITransport.CLI): "agent",
-}
 
 
 def _resolve_provider(provider: AIProvider | str) -> AIProvider | None:
@@ -70,26 +61,40 @@ def _resolve_transport(transport: AITransport | str | None) -> AITransport | Non
 
 
 def _api_provider_available(provider: AIProvider) -> bool:
-    if provider == AIProvider.CURSOR:
+    """Report whether the provider's API transport can be served here.
+
+    Args:
+        provider: The provider to check.
+
+    Returns:
+        True when the provider serves an API transport and its SDK imports.
+    """
+    import importlib
+
+    metadata = metadata_for(provider)
+    if not metadata.supports(AITransport.API) or metadata.sdk_package is None:
         return False
     try:
-        if provider == AIProvider.ANTHROPIC:
-            import anthropic  # noqa: F401
-
-            return True
-        if provider == AIProvider.OPENAI:
-            import openai  # noqa: F401
-
-            return True
+        # Safe: the name comes from lintro's own provider metadata, never from
+        # user input.
+        importlib.import_module(metadata.sdk_package)  # nosemgrep: non-literal-import
     except ImportError:
         return False
-    return False
+    return True
 
 
 def _cli_binary_available(provider: AIProvider) -> bool:
+    """Report whether the provider's CLI binary is on ``PATH``.
+
+    Args:
+        provider: The provider to check.
+
+    Returns:
+        True when the provider declares a CLI binary and it resolves.
+    """
     import shutil
 
-    binary = _CLI_BINARIES.get((provider, AITransport.CLI))
+    binary = provider_cli_binary(provider)
     if binary is None:
         return False
     return shutil.which(binary) is not None
@@ -176,19 +181,28 @@ def reset_availability_cache() -> None:
 
 
 def provider_api_key_env(provider: AIProvider) -> str:
-    """Return the default API key environment variable for a provider."""
-    from lintro.ai.registry import PROVIDERS
+    """Return the default API key environment variable for a provider.
 
-    return PROVIDERS.get(provider).default_api_key_env
+    Args:
+        provider: The provider to look up.
+
+    Returns:
+        The variable name declared by the provider's plugin metadata.
+    """
+    return metadata_for(provider).default_api_key_env
 
 
 def provider_cli_binary(provider: AIProvider) -> str | None:
-    """Return the CLI binary name for a provider, if any."""
-    return _CLI_BINARIES.get((provider, AITransport.CLI))
+    """Return the CLI binary name for a provider, if any.
 
+    Args:
+        provider: The provider to look up.
 
-def codex_auth_configured() -> bool:
-    """Return True when Codex CLI auth is likely configured."""
-    if os.environ.get("CODEX_API_KEY"):
-        return True
-    return (Path.home() / ".codex" / "auth.json").is_file()
+    Returns:
+        The binary name declared by the provider's plugin metadata, or None
+        when the provider serves no CLI transport.
+    """
+    metadata = metadata_for(provider)
+    if not metadata.supports(AITransport.CLI):
+        return None
+    return metadata.cli_binary

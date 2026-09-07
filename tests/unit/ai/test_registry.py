@@ -1,8 +1,8 @@
-"""Tests for the AI provider registry."""
+"""Tests for the provider-metadata facade."""
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, asdict
+from dataclasses import FrozenInstanceError
 
 import pytest
 from assertpy import assert_that
@@ -13,10 +13,13 @@ from lintro.ai.provider_enum import (
 )
 from lintro.ai.registry import (
     DEFAULT_PRICING,
-    PROVIDERS,
     AIProvider,
     ModelPricing,
-    ProviderInfo,
+    all_metadata,
+    default_api_key_envs,
+    default_models,
+    metadata_for,
+    model_pricing,
 )
 
 # -- AIProvider StrEnum ----------------------------------------------------
@@ -84,103 +87,55 @@ def test_model_pricing_frozen():
         p.input_per_million = 999.0  # type: ignore[misc]
 
 
-# -- ProviderInfo ----------------------------------------------------------
+# -- Facade ---------------------------------------------------------------
 
 
-def test_provider_info_fields():
-    """ProviderInfo stores all expected attributes."""
-    info = ProviderInfo(
-        default_model="test-model",
-        default_api_key_env="TEST_KEY",
-        models={"test-model": ModelPricing(1.0, 2.0)},
+def test_all_metadata_covers_every_provider() -> None:
+    """Every enum member resolves to a registered plugin's metadata."""
+    metadata = all_metadata()
+    assert_that(list(metadata)).is_equal_to(list(AIProvider))
+    for provider, record in metadata.items():
+        assert_that(record.provider).is_equal_to(provider)
+
+
+def test_metadata_for_accepts_enum_and_string() -> None:
+    """A user-typed provider name resolves to the same record as the enum."""
+    assert_that(metadata_for("anthropic")).is_same_as(
+        metadata_for(AIProvider.ANTHROPIC),
     )
-    assert_that(info.default_model).is_equal_to("test-model")
-    assert_that(info.default_api_key_env).is_equal_to("TEST_KEY")
-    assert_that(info.models).contains_key("test-model")
 
 
-def test_provider_info_default_models_empty():
-    """ProviderInfo.models defaults to an empty dict."""
-    info = ProviderInfo(default_model="m", default_api_key_env="K")
-    assert_that(info.models).is_empty()
-
-
-# -- AIProviderRegistry ----------------------------------------------------
-
-
-def test_registry_items():
-    """items() yields all providers."""
-    items = list(PROVIDERS.items())
-    assert_that(items).is_length(len(list(AIProvider)))
-    providers = [p for p, _ in items]
-    assert_that(providers).contains(AIProvider.ANTHROPIC, AIProvider.OPENAI)
-
-
-def test_registry_get():
-    """get() returns the correct ProviderInfo."""
-    info = PROVIDERS.get(AIProvider.ANTHROPIC)
-    assert_that(info).is_same_as(PROVIDERS.anthropic)
-    info = PROVIDERS.get(AIProvider.OPENAI)
-    assert_that(info).is_same_as(PROVIDERS.openai)
-
-
-def test_registry_model_pricing_contains_all_models():
-    """model_pricing merges every model from all providers."""
-    pricing = PROVIDERS.model_pricing
-    for _provider, info in PROVIDERS.items():
-        for model_name in info.models:
+def test_model_pricing_merges_every_provider() -> None:
+    """model_pricing() is the union of every provider's pricing table."""
+    pricing = model_pricing()
+    for record in all_metadata().values():
+        for model_name in record.pricing:
             assert_that(pricing).contains_key(model_name)
+    for entry in pricing.values():
+        assert_that(entry).is_instance_of(ModelPricing)
 
 
-def test_registry_model_pricing_values_are_model_pricing():
-    """Every value in model_pricing is a ModelPricing instance."""
-    for p in PROVIDERS.model_pricing.values():
-        assert_that(p).is_instance_of(ModelPricing)
-
-
-def test_registry_default_models():
-    """default_models maps each AIProvider to a string."""
-    defaults = PROVIDERS.default_models
-    assert_that(defaults).contains_key(AIProvider.ANTHROPIC)
-    assert_that(defaults).contains_key(AIProvider.OPENAI)
-    for model in defaults.values():
+def test_default_models_are_priced_by_their_own_provider() -> None:
+    """Every default model is one the same provider publishes pricing for."""
+    for provider, model in default_models().items():
         assert_that(model).is_instance_of(str)
+        assert_that(all_metadata()[provider].pricing).contains_key(model)
 
 
-def test_registry_default_api_key_envs():
-    """default_api_key_envs maps each AIProvider to a string."""
-    envs = PROVIDERS.default_api_key_envs
-    assert_that(envs).contains_key(AIProvider.ANTHROPIC)
-    assert_that(envs).contains_key(AIProvider.OPENAI)
+def test_default_api_key_envs() -> None:
+    """Each provider declares the API-key variable it has always used."""
+    envs = default_api_key_envs()
     assert_that(envs[AIProvider.ANTHROPIC]).is_equal_to("ANTHROPIC_API_KEY")
     assert_that(envs[AIProvider.OPENAI]).is_equal_to("OPENAI_API_KEY")
+    assert_that(envs[AIProvider.CURSOR]).is_equal_to("CURSOR_API_KEY")
 
 
-def test_registry_default_model_in_provider_models():
-    """Every default model exists in its provider's models dict."""
-    for _provider, info in PROVIDERS.items():
-        assert_that(info.models).contains_key(info.default_model)
-
-
-# -- asdict ----------------------------------------------------------------
-
-
-def test_asdict_produces_nested_dict():
-    """asdict(PROVIDERS) produces a correct nested dictionary."""
-    d = asdict(PROVIDERS)
-    assert_that(d).contains_key("anthropic", "openai")
-    anthropic_info = d["anthropic"]
-    assert_that(anthropic_info).contains_key(
-        "default_model",
-        "default_api_key_env",
-        "models",
-    )
-    # Models are nested dicts with pricing fields.
-    for pricing in anthropic_info["models"].values():
-        assert_that(pricing).contains_key(
-            "input_per_million",
-            "output_per_million",
-        )
+def test_facade_lookups_are_not_cached_snapshots() -> None:
+    """Each call rebuilds from the registry rather than a module-level table."""
+    first = all_metadata()
+    second = all_metadata()
+    assert_that(first).is_equal_to(second)
+    assert_that(first).is_not_same_as(second)
 
 
 # -- DEFAULT_PRICING -------------------------------------------------------

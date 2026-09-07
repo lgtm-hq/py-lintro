@@ -1065,7 +1065,46 @@ CLI flags always override config: passing `--fix` on the CLI turns it on even if
 
 ### Providers
 
-#### [Anthropic](https://docs.anthropic.com/) (default)
+Every provider fact below — defaults, transports, the API-key variable, the CLI binary
+and the per-model prices — is declared once, in that provider's plugin metadata
+(`lintro/ai/providers/<name>/metadata.py`), and read everywhere else through
+`lintro.ai.registry`. These two tables are asserted equal to that metadata by
+`tests/unit/ai/providers/test_docs_provider_table.py`, so they cannot drift from the
+code. Do not hand-edit them; change the metadata.
+
+<!-- BEGIN GENERATED: provider-table -->
+
+| Provider  | Default model       | API key env         | Transports             | CLI binary |
+| --------- | ------------------- | ------------------- | ---------------------- | ---------- |
+| Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | `api` (default), `cli` | `claude`   |
+| OpenAI    | `gpt-4o`            | `OPENAI_API_KEY`    | `api` (default), `cli` | `codex`    |
+| Cursor    | `auto`              | `CURSOR_API_KEY`    | `cli` (default)        | `agent`    |
+
+<!-- END GENERATED: provider-table -->
+
+Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
+reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
+subscription); `estimate_cost_with_floor` is what keeps a cost cap meaningful for those.
+
+<!-- BEGIN GENERATED: model-pricing-table -->
+
+| Provider  | Model                       | Input  | Output |
+| --------- | --------------------------- | ------ | ------ |
+| Anthropic | `claude-sonnet-4-6`         | $3.00  | $15.00 |
+| Anthropic | `claude-sonnet-4-20250514`  | $3.00  | $15.00 |
+| Anthropic | `claude-haiku-4-5-20251001` | $0.80  | $4.00  |
+| Anthropic | `claude-opus-4-20250514`    | $15.00 | $75.00 |
+| OpenAI    | `gpt-4o`                    | $2.50  | $10.00 |
+| OpenAI    | `gpt-4o-mini`               | $0.15  | $0.60  |
+| OpenAI    | `gpt-4-turbo`               | $10.00 | $30.00 |
+| OpenAI    | `o1`                        | $15.00 | $60.00 |
+| OpenAI    | `o1-mini`                   | $1.10  | $4.40  |
+| Cursor    | `auto`                      | $0.00  | $0.00  |
+| Cursor    | `gpt-5.3-codex-fast`        | $0.00  | $0.00  |
+
+<!-- END GENERATED: model-pricing-table -->
+
+#### [Anthropic](https://docs.anthropic.com/)
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -1094,6 +1133,23 @@ ai:
 
 See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
 options and pricing.
+
+#### [Cursor](https://docs.cursor.com/en/cli/overview)
+
+```bash
+export CURSOR_API_KEY=...
+```
+
+```yaml
+ai:
+  provider: cursor
+  transport: cli # cursor is CLI-only
+  # model: auto  # default
+```
+
+The `agent` CLI bills against a Cursor subscription rather than per token, so its models
+are priced at zero above. `ai.max_cost_usd` still applies: unpriced calls are charged at
+the fallback rate so a cost cap stays a real ceiling.
 
 #### Measuring a provider choice
 

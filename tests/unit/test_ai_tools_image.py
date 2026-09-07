@@ -18,7 +18,7 @@ import pytest
 import yaml
 from assertpy import assert_that
 
-from lintro.ai.providers.cli_contracts import CLI_CONTRACTS
+from lintro.ai.providers.cli_contracts import cli_contracts
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _AI_TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "ai-tools.Dockerfile"
@@ -102,7 +102,7 @@ def _lintro_tools_digest(*, dockerfile: Path) -> str:
 
 
 def _contract_binaries() -> list[str]:
-    return sorted({contract.binary for contract in CLI_CONTRACTS.values()})
+    return sorted({contract.binary for contract in cli_contracts().values()})
 
 
 @pytest.mark.parametrize("binary", _contract_binaries())
