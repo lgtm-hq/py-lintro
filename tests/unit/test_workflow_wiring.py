@@ -1434,6 +1434,94 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
+def test_publish_npm_refuses_live_dispatch_before_the_npm_environment() -> None:
+    """A live workflow_dispatch is refused before the npm approval is spent.
+
+    npm trusted publishing only authenticates the tag-pipeline entry path
+    (issue #2247), so a live direct dispatch can never publish. The guard must
+    run in its own job that carries no ``environment:`` and that the
+    environment-gated publish job ``needs``, otherwise the doomed run burns an
+    ``npm`` deployment approval before failing.
+    """
+    workflow = _load_workflow(name="publish-npm.yml")
+    jobs = workflow["jobs"]
+
+    guard = jobs["guard"]
+    assert_that(guard).does_not_contain_key("environment")
+
+    publish_needs = jobs["publish"]["needs"]
+    if isinstance(publish_needs, str):
+        publish_needs = [publish_needs]
+    assert_that(publish_needs).contains("guard")
+    assert_that(jobs["publish"]["environment"]).is_equal_to("npm")
+
+    guard_step = next(
+        (
+            step
+            for step in guard["steps"]
+            if step.get("run", "").strip().endswith("assert_dispatch_allowed.sh")
+        ),
+        None,
+    )
+    assert_that(guard_step).described_as("guard step not found").is_not_none()
+    assert guard_step is not None  # narrow type for mypy
+    # The decision logic lives in the script, not inline in the workflow.
+    assert_that(guard_step["run"].strip()).is_equal_to(
+        "scripts/ci/npm/assert_dispatch_allowed.sh",
+    )
+    # Both halves of the condition (event + dry_run) must reach the script.
+    assert_that(guard_step["env"]["EVENT_NAME"]).contains("github.event_name")
+    assert_that(guard_step["env"]["DRY_RUN"]).contains("inputs.dry_run")
+
+
+def test_publish_npm_guard_script_gates_on_event_and_dry_run() -> None:
+    """The guard script fails only for a live ``workflow_dispatch`` run."""
+    script = _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
+    cases: list[tuple[dict[str, str], int]] = [
+        ({"EVENT_NAME": "push", "DRY_RUN": "false"}, 0),
+        ({"EVENT_NAME": "workflow_dispatch", "DRY_RUN": "true"}, 0),
+        ({"EVENT_NAME": "workflow_dispatch", "DRY_RUN": "false"}, 1),
+    ]
+    for env, expected_code in cases:
+        result = subprocess.run(  # nosec B603 - fixed in-repo script
+            [str(script)],
+            env={"PATH": "/usr/bin:/bin", **env},
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert_that(result.returncode).described_as(str(env)).is_equal_to(
+            expected_code,
+        )
+
+
+def test_publish_npm_never_retries_an_e404_publish() -> None:
+    """publish_packages.sh classifies npm's masked-auth E404 as fatal.
+
+    npm reports an unauthorized publish as ``E404 Not Found`` (issue #2247).
+    Retrying it burns three attempts per package on a permanent condition, so
+    E404 belongs in the non-retryable class, not the transient one.
+    """
+    script = (_REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh").read_text(
+        encoding="utf-8",
+    )
+    non_retryable = re.search(
+        r"^NON_RETRYABLE_ERROR_RE='([^']*)'",
+        script,
+        flags=re.MULTILINE,
+    )
+    transient = re.search(
+        r"^TRANSIENT_ERROR_RE='([^']*)'",
+        script,
+        flags=re.MULTILINE,
+    )
+    assert_that(non_retryable).is_not_none()
+    assert_that(transient).is_not_none()
+    assert non_retryable is not None and transient is not None  # narrow for mypy
+    assert_that(non_retryable.group(1).split("|")).contains("E404")
+    assert_that(transient.group(1)).does_not_contain("E404")
+
+
 def test_publish_npm_delegates_publish_to_hardened_script() -> None:
     """The publish step runs publish_packages.sh (retry/idempotency live there).
 

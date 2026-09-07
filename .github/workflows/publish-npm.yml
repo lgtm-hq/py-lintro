@@ -10,6 +10,12 @@ name: Publish - npm
 # environment approval). The platform binaries are downloaded from the
 # GitHub release created earlier in the tag pipeline, so this workflow must
 # run after build-binary.yml has uploaded them.
+#
+# A LIVE direct `workflow_dispatch` of this workflow is refused by the `guard`
+# job: trusted publishing only matches the tag-pipeline entry path
+# (publish-pypi-on-tag.yml @ refs/tags/v*). Publish or backfill a tag by
+# approving / re-running that run instead. See #2247 and
+# docs/npm-distribution.md.
 
 'on':
   workflow_call:
@@ -56,8 +62,44 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Runs BEFORE the environment-gated publish job and carries no
+  # `environment:`, so a doomed live dispatch fails without consuming an `npm`
+  # approval. npm trusted publishing only matches the tag-pipeline entry path
+  # (publish-pypi-on-tag.yml @ refs/tags/v*); a direct dispatch presents a
+  # different OIDC identity and the registry masks the rejection as E404
+  # (see #2247).
+  guard:
+    name: Check entry path
+    runs-on: ubuntu-24.04
+    permissions:
+      # read: checkout, to run the guard script from the repository
+      contents: read
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Refuse live dispatch runs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: scripts/ci/npm/assert_dispatch_allowed.sh
+
   publish:
     name: Package and publish
+    needs: guard
     runs-on: ubuntu-24.04
     environment: npm
     permissions:
