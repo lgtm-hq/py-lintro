@@ -1017,7 +1017,7 @@ def test_sweep_ci_ghcr_tags_fails_on_query_error(
     _write_stub(
         bin_dir,
         "gh",
-        ('echo "boom" >&2\n' "exit 1\n"),
+        ('echo "boom" >&2\nexit 1\n'),
     )
 
     result = _run_with_stubs(
@@ -1164,7 +1164,7 @@ def test_sweep_ci_ghcr_tags_dry_run_skips_delete(
     _write_stub(
         bin_dir,
         "gh",
-        ('echo "$*" >> "$GH_LOG"\n' 'printf "%s\\n" "$GH_VERSIONS_TSV"'),
+        ('echo "$*" >> "$GH_LOG"\nprintf "%s\\n" "$GH_VERSIONS_TSV"'),
     )
 
     result = _run_with_stubs(

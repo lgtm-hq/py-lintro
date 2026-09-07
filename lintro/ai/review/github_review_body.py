@@ -378,7 +378,7 @@ def _commits_section(
         )
     else:
         sentence = (
-            f"This round reviewed the PR's full diff against `{base}` " f"at `{head}`."
+            f"This round reviewed the PR's full diff against `{base}` at `{head}`."
         )
     return "\n".join(
         [

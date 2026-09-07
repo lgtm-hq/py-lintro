@@ -98,8 +98,7 @@ async def _generate_all_suggestions(
             budget.check()
 
         loguru_logger.debug(
-            f"AI fix: {tool_name} has {len(issues)} issues, "
-            f"budget={remaining_budget}",
+            f"AI fix: {tool_name} has {len(issues)} issues, budget={remaining_budget}",
         )
 
         fix_params = FixGenParams(

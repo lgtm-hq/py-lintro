@@ -136,8 +136,7 @@ def registry_fallback_install_hint(command: Sequence[str]) -> str:
     spec = registry_fallback_spec(command) or ""
     package, _version = split_npm_spec(spec)
     lines = [
-        f"Lintro prefers a project-local install of {package}. Add it to this "
-        "project:",
+        f"Lintro prefers a project-local install of {package}. Add it to this project:",
         f"    bun add -D {spec}",
         f"    npm install -D {spec}",
     ]

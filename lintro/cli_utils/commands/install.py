@@ -203,7 +203,7 @@ def install_command(
                 sorted(t.name for t in registry.all_tools(include_dev=True)),
             )
             raise click.UsageError(
-                f"Unknown tools: {', '.join(unknown)}. " f"Available: {available}",
+                f"Unknown tools: {', '.join(unknown)}. Available: {available}",
             )
 
     # Validate profile name

@@ -215,7 +215,7 @@ def check_oxlint_type_aware(*, option_enabled: bool = False) -> list[OxlintCheck
                         name="oxlint.type-aware.typescript",
                         status=ToolStatus.OK,
                         message=(
-                            f"TypeScript {ts_version} " f"(>= {TYPESCRIPT_MIN_VERSION})"
+                            f"TypeScript {ts_version} (>= {TYPESCRIPT_MIN_VERSION})"
                         ),
                     ),
                 )

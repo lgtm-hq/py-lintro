@@ -171,20 +171,22 @@ class ToolManager:
         while remaining:
             ready = [name for name in remaining if predecessors[name] <= level.keys()]
             if not ready:
-                # A derived cycle stalls the assignment. Serialise the
-                # remainder alphabetically, matching how ``_linearize`` breaks
-                # a cycle: tools that still constrain each other must not end
-                # up running concurrently just because the graph is unsound.
-                depth = max(level.values(), default=-1)
-                for name in sorted(remaining):
-                    depth += 1
-                    level[name] = depth
-                break
-            for name in ready:
-                level[name] = max(
-                    (level[dep] + 1 for dep in predecessors[name]),
-                    default=0,
-                )
+                # A derived cycle stalls the assignment. Break exactly one
+                # node the way ``_linearize`` does — the alphabetically first
+                # remaining tool — then resume, so the tools still waiting on
+                # it keep waiting. Dumping the whole remainder at once would
+                # let a successor share a batch with, or precede, a cycle
+                # member it must observe.
+                stalled = min(remaining)
+                # Strictly after everything already levelled, so nothing that
+                # was waiting on it can share its batch or precede it.
+                level[stalled] = max(level.values(), default=-1) + 1
+            else:
+                for name in ready:
+                    level[name] = max(
+                        (level[dep] + 1 for dep in predecessors[name]),
+                        default=0,
+                    )
             remaining = [name for name in remaining if name not in level]
 
         return [

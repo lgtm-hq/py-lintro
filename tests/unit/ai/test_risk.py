@@ -263,11 +263,11 @@ def test_calculate_patch_stats_multiple_files() -> None:
     suggestions = [
         AIFixSuggestion(
             file="a.py",
-            diff=("--- a/a.py\n" "+++ b/a.py\n" "@@ -1 +1 @@\n" "-old\n" "+new\n"),
+            diff=("--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-old\n+new\n"),
         ),
         AIFixSuggestion(
             file="b.py",
-            diff=("--- a/b.py\n" "+++ b/b.py\n" "@@ -1 +1,2 @@\n" "+added\n"),
+            diff=("--- a/b.py\n+++ b/b.py\n@@ -1 +1,2 @@\n+added\n"),
         ),
     ]
 

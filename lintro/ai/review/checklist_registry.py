@@ -106,8 +106,7 @@ def validate_checklist_items(*, items: list[ChecklistItem]) -> None:
 
         if item.tier == 1 and (item.domains or item.languages):
             msg = (
-                f"Tier 1 checklist item {item.id} must have empty domains "
-                "and languages"
+                f"Tier 1 checklist item {item.id} must have empty domains and languages"
             )
             raise ValueError(msg)
 

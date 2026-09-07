@@ -139,8 +139,7 @@ class CliSurfaceReport:
         state = "; ".join(self.violations) if self.violations else "contract satisfied"
         help_note = "" if self.help_readable else " (help unreadable)"
         return (
-            f"{self.contract.binary} {format_version(self.version)}"
-            f"{help_note}: {state}"
+            f"{self.contract.binary} {format_version(self.version)}{help_note}: {state}"
         )
 
 

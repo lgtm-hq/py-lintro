@@ -52,6 +52,5 @@ class PipAuditIssue(BaseIssue):
         else:
             fix_hint = "no known fix"
         return (
-            f"[{self.vuln_id}] {self.package_name}@{self.package_version}: "
-            f"{fix_hint}"
+            f"[{self.vuln_id}] {self.package_name}@{self.package_version}: {fix_hint}"
         )

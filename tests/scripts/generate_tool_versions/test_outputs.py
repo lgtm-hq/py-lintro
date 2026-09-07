@@ -115,13 +115,7 @@ def test_render_manifest_rejects_version_in_src(gen: ModuleType) -> None:
     Args:
         gen: Imported generator module.
     """
-    src = (
-        "{\n"
-        '  "tools": [\n'
-        '    {"name": "oxfmt", "version": "0.0.0"}\n'
-        "  ]\n"
-        "}\n"
-    )
+    src = '{\n  "tools": [\n    {"name": "oxfmt", "version": "0.0.0"}\n  ]\n}\n'
     with pytest.raises(gen.GenerationError, match="oxfmt"):
         gen.render_manifest(src_text=src, target_versions={})
 

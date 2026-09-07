@@ -412,8 +412,7 @@ def write_output_file(
         for result in all_results:
             safe_name = html.escape(result.name)
             html_lines.append(
-                f"<tr><td>{safe_name}</td>"
-                f"<td>{_merged_issue_count(result)}</td></tr>",
+                f"<tr><td>{safe_name}</td><td>{_merged_issue_count(result)}</td></tr>",
             )
         html_lines.append("</table>")
         for result in all_results:

@@ -165,9 +165,7 @@ def _failure_banner(
     )
     shown = max(run.round for run in state.runs)
     headline = FAILURE_BANNER_HEADLINE.format(round_number=state.next_round)
-    return (
-        f"> {headline} — {detail} · showing round {shown} results below. " f"{guidance}"
-    )
+    return f"> {headline} — {detail} · showing round {shown} results below. {guidance}"
 
 
 def _render_error_copy(

@@ -162,8 +162,7 @@ def require_ai() -> None:
     """
     if not is_ai_available():
         raise click.UsageError(
-            "AI features require lintro[ai]. "
-            "Install with: uv pip install 'lintro[ai]'",
+            "AI features require lintro[ai]. Install with: uv pip install 'lintro[ai]'",
         )
 
 

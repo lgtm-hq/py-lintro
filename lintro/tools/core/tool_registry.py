@@ -270,8 +270,7 @@ class ManifestRegistry:
         """
         if name not in self._tools:
             raise KeyError(
-                f"Tool {name!r} not in registry. "
-                f"Known tools: {sorted(self._tools)}",
+                f"Tool {name!r} not in registry. Known tools: {sorted(self._tools)}",
             )
         return self._tools[name]
 

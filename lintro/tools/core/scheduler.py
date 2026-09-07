@@ -366,9 +366,12 @@ def collect_tool_claims(tool_names: Sequence[str]) -> dict[str, list[Claim]]:
 
     A tool that cannot be resolved, or whose definition predates ``claims``,
     contributes no claims and is therefore unordered. Ordering must not be the
-    thing that fails a run: an unresolvable tool is reported by the executor
-    as a failed result, and an unknown name is rejected up front by
-    :meth:`ToolManager.get_tool_execution_order`.
+    thing that fails a run: an unresolvable tool reaches the executor and is
+    reported there as a failed result. Rejecting an unknown name outright is
+    the job of :meth:`ToolManager.get_tool_execution_order`, the entry point
+    the CLI uses, which resolves every name before ordering starts;
+    ``get_parallel_batches`` deliberately does not, so batching stays as
+    tolerant as this function.
 
     Args:
         tool_names: Tool names to look up (case-insensitive).
@@ -409,6 +412,14 @@ def derive_execution_order(tool_names: Sequence[str]) -> list[str]:
     what runs when — the executor, ``--explain-order``, ``lintro doctor`` and
     ``lintro config`` — resolves it through this function, so a report can
     never print an order other than the one that runs.
+
+    Ordering itself is total and fail-open: a name that resolves to no
+    registered tool contributes no claims and stays in the result,
+    unconstrained, because a bad name must not be something *ordering* fails
+    on. Rejecting it is a separate concern and belongs to the entry point the
+    CLI goes through, :meth:`ToolManager.get_tool_execution_order`, which
+    resolves every name before calling this. Both halves are pinned by
+    ``test_manager_rejects_an_unknown_name_the_scheduler_tolerates``.
 
     Args:
         tool_names: Tool names to order (case-insensitive).

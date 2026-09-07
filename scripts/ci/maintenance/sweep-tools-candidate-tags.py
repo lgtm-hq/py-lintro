@@ -197,7 +197,7 @@ def _refresh_candidate(
 ) -> CandidateVersion | None:
     """Re-read a package version immediately before a destructive delete."""
     endpoint = (
-        f"orgs/{owner}/packages/container/{PACKAGE}/versions/" f"{candidate.version_id}"
+        f"orgs/{owner}/packages/container/{PACKAGE}/versions/{candidate.version_id}"
     )
     found, payload = _gh_json_allow_not_found(endpoint)
     if not found:

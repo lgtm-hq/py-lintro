@@ -30,16 +30,16 @@ def print_first_run_guidance(console: Console) -> None:
     console.print()
     console.print("  [bold]Get started:[/bold]")
     console.print(
-        "    lintro doctor" "                      [dim]See available tools[/dim]",
+        "    lintro doctor                      [dim]See available tools[/dim]",
     )
     console.print(
-        "    lintro init" "                        [dim]Configure this project[/dim]",
+        "    lintro init                        [dim]Configure this project[/dim]",
     )
     console.print(
-        "    lintro install --profile recommended" "   [dim]Install common tools[/dim]",
+        "    lintro install --profile recommended   [dim]Install common tools[/dim]",
     )
     console.print(
-        "    lintro install ruff mypy" "           [dim]Install specific tools[/dim]",
+        "    lintro install ruff mypy           [dim]Install specific tools[/dim]",
     )
     console.print()
     console.print(

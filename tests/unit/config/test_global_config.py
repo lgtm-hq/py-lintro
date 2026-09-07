@@ -350,12 +350,7 @@ def test_load_config_both_project_wins_and_deep_merges(
     )
     project = _make_project(tmp_path, monkeypatch)
     (project / ".lintro-config.yaml").write_text(
-        "enforce:\n"
-        "  line_length: 120\n"
-        "ai:\n"
-        "  enabled: false\n"
-        "tools:\n"
-        "  black: false\n",
+        "enforce:\n  line_length: 120\nai:\n  enabled: false\ntools:\n  black: false\n",
     )
 
     config = load_config(allow_pyproject_fallback=False)
@@ -560,11 +555,7 @@ def test_load_config_global_merges_with_pyproject_project_tier(
         monkeypatch: Pytest monkeypatch fixture.
     """
     (isolated_home / ".lintro-config.yaml").write_text(
-        "enforce:\n"
-        "  line_length: 100\n"
-        "  target_python: py311\n"
-        "ai:\n"
-        "  enabled: true\n",
+        "enforce:\n  line_length: 100\n  target_python: py311\nai:\n  enabled: true\n",
     )
     project = _make_project(tmp_path, monkeypatch)
     pyproject = project / "pyproject.toml"

@@ -172,8 +172,7 @@ class BaseAIProvider(ABC):
         api_key = os.environ.get(self._api_key_env) or ""
         if not api_key and not self._base_url:
             raise AIAuthenticationError(
-                f"No API key found. Set the {self._api_key_env} "
-                f"environment variable.",
+                f"No API key found. Set the {self._api_key_env} environment variable.",
             )
 
         if not api_key and self._base_url:

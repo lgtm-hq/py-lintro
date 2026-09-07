@@ -111,8 +111,7 @@ def golden_review_result() -> ReviewResult:
                 file="src/auth/session.py",
                 line=31,
                 title="Unknown session status grants access",
-                description="The else branch treats any unrecognised status "
-                "as active.",
+                description="The else branch treats any unrecognised status as active.",
                 cause="No explicit default for unknown statuses.",
                 fix="Default to expired and log the unrecognised value.",
                 confidence="high",

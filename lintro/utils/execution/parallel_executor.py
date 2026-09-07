@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, TypeVar
 
@@ -148,6 +149,7 @@ def run_tools_parallel(
                     # tool in the main list, so this branch ran sequentially
                     # and an unresolvable tool never reached here; now every
                     # selected tool stays in one list and this path is live.
+                    attempt_started = time.monotonic()
                     try:
                         tool = tool_manager.get_tool(tool_name)
 
@@ -169,13 +171,23 @@ def run_tools_parallel(
                             diff_base=diff_base,
                         )
                     except (OSError, ValueError, RuntimeError) as exc:
+                        # Same telemetry the sequential path records: a
+                        # console line so the failure is visible on a TTY
+                        # (suppressed with the progress bar so machine-readable
+                        # stdout stays clean), and a duration so a crashed tool
+                        # still appears in ``--profile``.
                         logger.exception(f"Error running {tool_name}")
+                        if not disable_progress:
+                            progress.console.print(
+                                f"Error running {tool_name}: {exc}",
+                            )
                         all_results.append(
                             ToolResult(
                                 name=tool_name,
                                 success=False,
                                 output=f"Failed to initialize tool: {exc}",
                                 issues_count=0,
+                                duration_seconds=time.monotonic() - attempt_started,
                             ),
                         )
                         completed_count += 1

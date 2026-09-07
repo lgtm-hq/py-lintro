@@ -113,9 +113,10 @@ def console_capture() -> tuple[Callable[[str], None], list[str]]:
 
 
 @pytest.fixture
-def console_capture_with_kwargs() -> (
-    tuple[Callable[..., None], list[tuple[str, dict[str, Any]]]]
-):
+def console_capture_with_kwargs() -> tuple[
+    Callable[..., None],
+    list[tuple[str, dict[str, Any]]],
+]:
     """Capture console output with kwargs for testing.
 
     Returns:

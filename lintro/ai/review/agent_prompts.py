@@ -158,8 +158,7 @@ def _finding_block(*, finding: ReviewFinding) -> list[str]:
     title = sanitize_comment_text(finding.title, limit=_TITLE_LIMIT)
     category = sanitize_comment_text(finding.category, limit=60)
     bullet = (
-        f"- Line {finding.line} — **{title}** "
-        f"({finding.severity.value} · {category}):"
+        f"- Line {finding.line} — **{title}** ({finding.severity.value} · {category}):"
     )
     lines = [
         wrap(text=bullet, subsequent_indent=CONTINUATION_INDENT),

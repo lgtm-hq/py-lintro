@@ -188,6 +188,11 @@ def test_live_order_is_exactly_the_derived_order() -> None:
 
     selection = ["black", "ruff", "mypy"]
 
+    # Both the observable order and the equality: shared sort bug would
+    # otherwise satisfy the equality alone.
+    assert_that(derive_execution_order(selection)).is_equal_to(
+        ["ruff", "black", "mypy"],
+    )
     assert_that(
         tool_manager.get_tool_execution_order(selection),
     ).is_equal_to(derive_execution_order(selection))
@@ -204,3 +209,23 @@ def test_narrow_globs_do_not_subsume_each_other() -> None:
 
     assert_that(derived.edges).is_empty()
     assert_that(list(derived.tools)).is_equal_to(["broad_fixer", "narrow_checker"])
+
+
+def test_manager_rejects_an_unknown_name_the_scheduler_tolerates() -> None:
+    """The two contracts are deliberately different, and both are live.
+
+    ``derive_execution_order`` is total: an unresolvable name stays in the
+    order, unconstrained, so a caller that is not the manager still gets a
+    usable schedule. ``ToolManager.get_tool_execution_order`` resolves every
+    name first, so the CLI still fails loudly on a typo.
+    """
+    from lintro.tools import tool_manager
+
+    assert_that(derive_execution_order(["not-a-registered-tool"])).is_equal_to(
+        ["not-a-registered-tool"],
+    )
+    assert_that(
+        tool_manager.get_tool_execution_order,
+    ).raises(
+        ValueError,
+    ).when_called_with(["not-a-registered-tool"])

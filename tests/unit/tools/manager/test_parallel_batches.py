@@ -102,9 +102,15 @@ def test_get_parallel_batches_covers_every_selected_tool_once() -> None:
     """Batching partitions the selection; nothing is dropped or duplicated."""
     tools = ["ruff", "black", "mypy", "yamllint", "hadolint"]
 
-    flattened = [name for batch in get_parallel_batches(tools) for name in batch]
+    batches = get_parallel_batches(tools)
+    flattened = [name for batch in batches for name in batch]
+    depth = {name: index for index, batch in enumerate(batches) for name in batch}
 
     assert_that(sorted(flattened)).is_equal_to(sorted(tools))
+    # Unconstrained tools keep running alongside the DAG root rather than
+    # being pushed into their own batches once any edge exists.
+    assert_that(depth["yamllint"]).is_equal_to(depth["ruff"])
+    assert_that(depth["hadolint"]).is_equal_to(depth["ruff"])
 
 
 def test_get_parallel_batches_normalizes_mixed_case_names() -> None:
@@ -153,3 +159,37 @@ def test_get_parallel_batches_serialises_a_stalled_graph(
     batches = ToolManager().get_parallel_batches(["b_tool", "a_tool"])
 
     assert_that(batches).is_equal_to([["a_tool"], ["b_tool"]])
+
+
+def test_get_parallel_batches_keeps_a_cycle_successor_last(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Breaking a cycle must not let a successor run between its members.
+
+    The stall is broken one node at a time, so ``c_tool`` — which follows both
+    cycle members — still waits for both instead of being levelled alongside
+    them.
+
+    Args:
+        monkeypatch: Pytest fixture used to substitute a cyclic report.
+    """
+    cyclic = DerivedOrder(
+        tools=("a_tool", "b_tool", "c_tool"),
+        edges=(
+            _edge(before="a_tool", after="b_tool"),
+            _edge(before="b_tool", after="a_tool"),
+            _edge(before="a_tool", after="c_tool"),
+            _edge(before="b_tool", after="c_tool"),
+        ),
+        cycles=(),
+    )
+    monkeypatch.setattr(
+        tool_manager_module,
+        "build_order_report",
+        lambda _names: cyclic,
+        raising=True,
+    )
+
+    batches = ToolManager().get_parallel_batches(["c_tool", "b_tool", "a_tool"])
+
+    assert_that(batches).is_equal_to([["a_tool"], ["b_tool"], ["c_tool"]])

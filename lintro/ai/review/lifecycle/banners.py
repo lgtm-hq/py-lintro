@@ -165,8 +165,7 @@ def regression_provenance(*, record: FindingRecord, thread_url: str = "") -> str
         fixed += f" (`{fixed_in}`)"
     origin = f" — [original thread]({thread_url})" if thread_url else ""
     return (
-        f"> ↩ **regression** · first raised round {record.since_round}, "
-        f"{fixed}{origin}"
+        f"> ↩ **regression** · first raised round {record.since_round}, {fixed}{origin}"
     )
 
 

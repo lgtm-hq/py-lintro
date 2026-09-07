@@ -421,7 +421,7 @@ def test_commits_section_names_the_new_commit_count(
 
     assert_that(body).contains("<details><summary>📥 Commits</summary>")
     assert_that(body).contains(
-        "This round reviewed the 2 new commits since round 2, " "`484f51c` → `fb740b2`",
+        "This round reviewed the 2 new commits since round 2, `484f51c` → `fb740b2`",
     )
     assert_that(body).contains("full diff against `main`")
 

@@ -58,9 +58,7 @@ def fake_repo(tmp_path: Path) -> Generator[Path, None, None]:
     )
 
     (tmp_path / "lintro" / "_tool_versions.py").write_text(
-        "from lintro.enums.tool_name import ToolName\n"
-        "TOOL_VERSIONS: dict = {\n"
-        "}\n",
+        "from lintro.enums.tool_name import ToolName\nTOOL_VERSIONS: dict = {\n}\n",
     )
 
     (tmp_path / "package.json").write_text(
