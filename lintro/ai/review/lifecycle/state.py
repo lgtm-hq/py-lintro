@@ -9,15 +9,23 @@ question, answered in two places.
 
 Both halves live here now. Reading prefers the authoritative store for the
 environment: workflow artifacts under CI, the local ledger otherwise. Neither
-crosses into the other, which is the #2154 trust boundary. A pre-v2 sticky
-comment is no longer migrated (#2305): it is treated as absent, and the round
-starts a fresh history.
+crosses into the other, which is the #2154 trust boundary.
+
+When neither store has anything and the run is going to post, the sticky
+comment's own leftover blob is the last resort — the same fallback
+:func:`~lintro.ai.review.github.post_review_to_github` applies before it
+renders. It is read *here*, once, so the board and the state written beside it
+describe the same history: a round that rendered three recovered runs and then
+persisted a fresh round 1 would lose them for good, because the next round
+prefers the store it just wrote. A pre-v2 blob is not migrated (#2305) — it is
+treated as absent and the round starts a fresh history.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import replace
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
@@ -55,6 +63,7 @@ def load_prior_review_state(
     pr_number: int | None,
     head_ref: str,
     repo: str,
+    post: bool = False,
 ) -> ReviewState:
     """Load the state this round continues from.
 
@@ -62,9 +71,44 @@ def load_prior_review_state(
         pr_number: Pull request number, or ``None`` for a local branch run.
         head_ref: Head ref reviewed in this round, part of the ledger key.
         repo: ``owner/name`` slug the state must belong to.
+        post: Whether this run will comment on the pull request. Only then is
+            the sticky comment consulted, so a run that writes nothing also
+            reads nothing over the network.
 
     Returns:
         ReviewState: The prior state, or an empty state for a first round.
+    """
+    stored = _load_stored_state(
+        pr_number=pr_number,
+        head_ref=head_ref,
+        repo=repo,
+    )
+    if not post:
+        return stored
+    return resolve_prior_state(
+        prior_state=stored,
+        sticky_state=_sticky_state(pr_number=pr_number, repo=repo),
+    )
+
+
+def _load_stored_state(
+    *,
+    pr_number: int | None,
+    head_ref: str,
+    repo: str,
+) -> ReviewState:
+    """Read the authoritative store for this environment.
+
+    Args:
+        pr_number: Pull request number, or ``None`` for a local branch run.
+        head_ref: Head ref reviewed in this round, part of the ledger key.
+        repo: ``owner/name`` slug the state must belong to.
+
+    Returns:
+        ReviewState: Workflow-artifact state under CI, the local ledger
+        otherwise, or an empty state when neither holds this pull request.
+        CI never reads the ledger and a local run never reads the artifacts:
+        the #2154 trust boundary.
     """
     if _in_actions():
         return load_ci_state(
@@ -79,6 +123,33 @@ def load_prior_review_state(
     )
     if local.coverage or local.runs or local.findings:
         return local
+    return ReviewState()
+
+
+def _sticky_state(*, pr_number: int | None, repo: str) -> ReviewState:
+    """Recover whatever state the sticky comment still carries.
+
+    Nothing has *written* this blob since #2154 moved authoritative state to
+    workflow artifacts, so it only ever answers for a comment an older lintro
+    left behind. Any failure here — no GitHub context, no token, an
+    unreachable API — is an empty state: a review must never fail because a
+    comment could not be read.
+
+    Args:
+        pr_number: Pull request number, or ``None`` when it is unknown.
+        repo: ``owner/name`` slug the comment belongs to.
+
+    Returns:
+        ReviewState: The decoded state, or an empty state.
+    """
+    with suppress(Exception):
+        from lintro.ai.integrations.github_pr import GitHubPRReporter
+        from lintro.ai.review.lifecycle.comments import load_sticky_comment
+
+        _existing, state = load_sticky_comment(
+            reporter=GitHubPRReporter(pr_number=pr_number, repo=repo or None),
+        )
+        return state
     return ReviewState()
 
 

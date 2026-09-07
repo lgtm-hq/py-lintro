@@ -237,6 +237,10 @@ def post_review_to_github(
         body=render(inline_failure=failure),
     )
     success = outcome.ok
+    # The archive is where history goes when the board can no longer hold it,
+    # not a surface a round's verdict depends on: a failure is logged by the
+    # lifecycle and the round still reports what the board says. Losing the
+    # archive loses old runs, not this round's findings.
     upsert_archive(reporter=gh_reporter, body=getattr(render, "archive", None))
 
     if inline_findings:

@@ -10,8 +10,11 @@ is fed back through ``decide`` rather than branched on separately.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import Any
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, NoReturn
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,6 +23,7 @@ from assertpy import assert_that
 from lintro.ai.review.enums.comment_action import CommentAction
 from lintro.ai.review.enums.comment_kind import CommentKind
 from lintro.ai.review.github_constants import ARCHIVE_MARKER, STICKY_MARKER
+from lintro.ai.review.lifecycle import state as lifecycle_state
 from lintro.ai.review.lifecycle.comments import (
     load_sticky_comment,
     locate_comment,
@@ -27,6 +31,25 @@ from lintro.ai.review.lifecycle.comments import (
     upsert_comment,
 )
 from lintro.ai.review.lifecycle.decision import ExistingComment, decide
+from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.state_store import load_local_state, write_local_state
+from lintro.ai.review.sticky import parse_sticky_state
+
+
+def _raise_offline(**_kwargs: Any) -> NoReturn:
+    """Stand in for a reporter that cannot be built at all.
+
+    Args:
+        **_kwargs: The pull request context the caller passed.
+
+    Raises:
+        RuntimeError: Always — no GitHub context is reachable.
+    """
+    msg = "no GitHub context"
+    raise RuntimeError(msg)
+
 
 #: Every comment kind the lifecycle owns, so a new kind cannot quietly opt out
 #: of the shared decision.
@@ -45,10 +68,13 @@ class _RecordingClient:
         comments: Bodies of the comments now on the pull request, in the
             order they were written.
         markers_searched: Markers the production code looked a comment up by.
+        accept_posts: Whether GitHub accepts a new comment. False stands in
+            for a rejected write.
     """
 
     comments: list[str] = field(default_factory=list)
     markers_searched: list[str] = field(default_factory=list)
+    accept_posts: bool = True
 
     def find_issue_comment(self, *, marker: str) -> tuple[int, str] | None:
         """Look up the comment carrying a marker.
@@ -70,8 +96,10 @@ class _RecordingClient:
             body: Markdown the production code posted.
 
         Returns:
-            bool: Always ``True``, the success GitHub would report.
+            bool: Whether GitHub accepted the comment.
         """
+        if not self.accept_posts:
+            return False
         self.comments.append(body)
         return True
 
@@ -469,3 +497,208 @@ def test_the_replacement_is_posted_before_the_original_is_deleted() -> None:
     assert_that(names.index("post_issue_comment")).is_less_than(
         names.index("delete_issue_comment"),
     )
+
+
+def _v2_sticky_body(*, runs: int) -> str:
+    """Render a sticky body carrying a v2 state blob with ``runs`` rounds.
+
+    Args:
+        runs: How many completed rounds the blob records.
+
+    Returns:
+        str: The comment body, marker and blob included.
+    """
+    payload = json.dumps(
+        {
+            "version": 2,
+            "runs": [
+                {"round": index, "model": "m", "total": 10}
+                for index in range(1, runs + 1)
+            ],
+        },
+    )
+    return f"{STICKY_MARKER}\n\n<!-- lintro-ai-review-state: {payload} -->"
+
+
+def test_a_posting_run_recovers_the_stickys_history_before_persisting(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    sample_review_result: ReviewResult,
+) -> None:
+    """The board and the state written beside it describe the same history.
+
+    Both stores are empty and the sticky comment still carries a v2 blob. The
+    posting path falls back to that blob to render, so the loader has to fall
+    back to it too — otherwise the round renders three recovered rounds and
+    persists a fresh round 1, and the next run prefers the store it just
+    wrote and loses them for good. The assertion follows the state all the way
+    to the ledger the next round will read.
+
+    Args:
+        monkeypatch: Fixture used to point the ledger at a scratch directory.
+        tmp_path: Scratch directory standing in for the ledger.
+        sample_review_result: The round being persisted.
+    """
+    ledger = tmp_path / "ledger"
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path / "parts"))
+    monkeypatch.setattr("lintro.ai.review.state_store.LOCAL_STATE_DIR", ledger)
+    monkeypatch.setattr(
+        lifecycle_state,
+        "_sticky_state",
+        lambda **_kwargs: parse_sticky_state(body=_v2_sticky_body(runs=3)),
+    )
+
+    loaded = lifecycle_state.load_prior_review_state(
+        pr_number=7,
+        head_ref="feature",
+        repo="lgtm-hq/py-lintro",
+        post=True,
+    )
+    lifecycle_state.persist_review_state(
+        result=sample_review_result,
+        context=SimpleNamespace(base_ref="main", head_ref="feature"),
+        prior=loaded,
+        pr_number=7,
+        repo="lgtm-hq/py-lintro",
+    )
+    persisted = load_local_state(
+        key="pr-7",
+        repo="lgtm-hq/py-lintro",
+        pr_number=7,
+        directory=ledger,
+    )
+
+    assert_that([run.round for run in loaded.runs]).is_equal_to([1, 2, 3])
+    assert_that([run.round for run in persisted.runs]).is_equal_to([1, 2, 3, 4])
+
+
+def test_a_run_that_posts_nothing_never_reads_the_sticky(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Without ``--post`` the loader stays offline, as it always has.
+
+    Args:
+        monkeypatch: Fixture used to point the ledger at a scratch directory.
+        tmp_path: Scratch directory standing in for the ledger.
+    """
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(
+        "lintro.ai.review.state_store.LOCAL_STATE_DIR",
+        tmp_path / "ledger",
+    )
+    consulted: list[str] = []
+
+    def _sticky(**_kwargs: Any) -> ReviewState:
+        """Record that the sticky was consulted and answer with history.
+
+        Args:
+            **_kwargs: The pull request the loader asked about.
+
+        Returns:
+            ReviewState: A state that would be obvious in the result.
+        """
+        consulted.append("sticky")
+        return parse_sticky_state(body=_v2_sticky_body(runs=3))
+
+    monkeypatch.setattr(lifecycle_state, "_sticky_state", _sticky)
+
+    loaded = lifecycle_state.load_prior_review_state(
+        pr_number=7,
+        head_ref="feature",
+        repo="lgtm-hq/py-lintro",
+    )
+
+    assert_that(consulted).is_empty()
+    assert_that(loaded.runs).is_empty()
+
+
+def test_a_stored_state_wins_over_the_stickys_leftover_blob(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The authoritative store is authoritative; the comment is a last resort.
+
+    Args:
+        monkeypatch: Fixture used to point the ledger at a scratch directory.
+        tmp_path: Scratch directory standing in for the ledger.
+    """
+    ledger = tmp_path / "ledger"
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr("lintro.ai.review.state_store.LOCAL_STATE_DIR", ledger)
+    write_local_state(
+        state=ReviewState(
+            runs=(RunRecord(round=1, sha="abc1234"),),
+            repo="lgtm-hq/py-lintro",
+            pr_number=7,
+        ),
+        key="pr-7",
+        directory=ledger,
+    )
+    monkeypatch.setattr(
+        lifecycle_state,
+        "_sticky_state",
+        lambda **_kwargs: parse_sticky_state(body=_v2_sticky_body(runs=3)),
+    )
+
+    loaded = lifecycle_state.load_prior_review_state(
+        pr_number=7,
+        head_ref="feature",
+        repo="lgtm-hq/py-lintro",
+        post=True,
+    )
+
+    assert_that([run.round for run in loaded.runs]).is_equal_to([1])
+    assert_that(loaded.runs[0].sha).is_equal_to("abc1234")
+
+
+def test_an_unreadable_sticky_leaves_the_round_starting_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """No token, no context, no network: a review still runs.
+
+    Args:
+        monkeypatch: Fixture used to point the ledger at a scratch directory.
+        tmp_path: Scratch directory standing in for the ledger.
+    """
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(
+        "lintro.ai.review.state_store.LOCAL_STATE_DIR",
+        tmp_path / "ledger",
+    )
+    monkeypatch.setattr(
+        "lintro.ai.integrations.github_pr.GitHubPRReporter",
+        _raise_offline,
+    )
+
+    loaded = lifecycle_state.load_prior_review_state(
+        pr_number=7,
+        head_ref="feature",
+        repo="lgtm-hq/py-lintro",
+        post=True,
+    )
+
+    assert_that(loaded.runs).is_empty()
+    assert_that(loaded.next_round).is_equal_to(1)
+
+
+def test_a_failed_archive_write_is_reported_rather_than_swallowed() -> None:
+    """A dropped archive says so; it does not fail the round (#2412 review)."""
+    client = _RecordingClient(accept_posts=False)
+
+    outcome = upsert_archive(reporter=client, body="## history")
+
+    assert_that(outcome.ok).is_false()
+    assert_that(client.comments).is_empty()
+
+
+def test_nothing_to_archive_is_not_a_failed_archive() -> None:
+    """History that still fits reports success, not a swallowed error."""
+    client = _RecordingClient()
+
+    outcome = upsert_archive(reporter=client, body=None)
+
+    assert_that(outcome.ok).is_true()
+    assert_that(outcome.comment_id).is_none()

@@ -208,21 +208,34 @@ def upsert_comment(
     return _apply_supersede(reporter=reporter, plan=plan)
 
 
-def upsert_archive(*, reporter: CommentClient, body: str | None) -> None:
+def upsert_archive(*, reporter: CommentClient, body: str | None) -> UpsertOutcome:
     """Write the history-archive comment when one was rendered.
 
     Args:
         reporter: GitHub client used to find and write the archive.
         body: Archive Markdown, or ``None`` when history still fits the board.
+
+    Returns:
+        UpsertOutcome: What happened. A body of ``None`` is not a failure —
+        there was nothing to write — so it reports success with no id. A write
+        that *was* attempted and failed is logged here, because the caller
+        treats the archive as best-effort and would otherwise drop the only
+        evidence that a round's older history went nowhere.
     """
     if not body:
-        return
-    upsert_comment(
+        return UpsertOutcome(ok=True, comment_id=None)
+    outcome = upsert_comment(
         reporter=reporter,
         kind=CommentKind.ARCHIVE,
         existing=locate_comment(reporter=reporter, kind=CommentKind.ARCHIVE),
         body=body,
     )
+    if not outcome.ok:
+        logger.warning(
+            "Could not write the run-history archive comment; this round's "
+            "older history is not on the pull request",
+        )
+    return outcome
 
 
 def _apply_update(

@@ -880,6 +880,7 @@ def _finish_review(
         pr_number=targets.state_pr,
         head_ref=prepared.context.head_ref,
         repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
+        post=options.post,
     )
     if not options.force_full:
         _check_convergence(
