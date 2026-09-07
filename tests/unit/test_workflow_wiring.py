@@ -431,6 +431,16 @@ def test_docker_ci_gates_semgrep_lockfile_drift_before_the_builds() -> None:
     # minute, and upstream of publish, so a drifted lockfile never ships.
     assert_that(docker_ci["jobs"]["docker-build"]["needs"]).contains("semgrep-lock")
     assert_that(docker_ci["jobs"]["publish"]["needs"]).contains("semgrep-lock")
+    # docker-build now depends on a job that is skipped on docs-only and
+    # lint-scope=changed PRs, so its `!cancelled()` is load-bearing: without it
+    # the required 🐳 Build Docker Images check would be skipped on those PRs
+    # and merges would deadlock. publish must NOT carry it, so a red gate
+    # skips the GHCR promotion.
+    build_condition = _normalize_github_expr(docker_ci["jobs"]["docker-build"]["if"])
+    assert_that(build_condition).contains("!cancelled()")
+    publish_condition = _normalize_github_expr(docker_ci["jobs"]["publish"]["if"])
+    assert_that(publish_condition).does_not_contain("!cancelled()")
+    assert_that(publish_condition).does_not_contain("always()")
 
     # The path filter the gate leans on still lists both lockfile paths.
     detect = next(
