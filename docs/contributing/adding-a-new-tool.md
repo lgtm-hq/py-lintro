@@ -298,6 +298,11 @@ Choose the path that matches the tool's distribution mechanism.
    ./scripts/ci/compile-semgrep-lock.sh
    ```
 
+   Commit the recompiled lockfile with the `.in` change: nothing regenerates it
+   automatically. When the two drift apart, docker-ci's 🔐 Semgrep Lockfile Drift check
+   (`scripts/ci/check-semgrep-lock.sh`) goes red with the diff and the recompile
+   command, and the image `publish` job refuses to run.
+
    Keep the package listed in `REQUIREMENTS_PYPI_SOURCES` in
    `lintro_build/versions/generate.py` so the generator still reads the pin from
    `requirements-semgrep.txt`.

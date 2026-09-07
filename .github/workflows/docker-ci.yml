@@ -236,6 +236,92 @@ jobs:
           RELEASE_BUMP: ${{ steps.bump.outputs.release-bump }}
         run: scripts/ci/resolve-pipeline-relevance.sh
 
+  # Lockfile drift gate (#2436). requirements-semgrep.txt is compiled from
+  # requirements-semgrep.in by scripts/ci/compile-semgrep-lock.sh and nothing
+  # regenerates it automatically — the Mend-hosted Renovate app never executed
+  # the postUpgradeTasks that used to claim otherwise — so a semgrep bump could
+  # ship a stale lockfile and turn a dozen unrelated jobs red. This check fails
+  # first, alone, and names the command that fixes it.
+  #
+  # Scope: both requirements-semgrep files sit in the `full-lint` path filter
+  # of the changes job above, so lint-scope 'full' is exactly "the diff may
+  # have touched them" (plus harmless extra runs — the check costs under a
+  # minute). Fail-open like every other gate here: an empty lint-scope from a
+  # failed changes job is != 'changed' and still runs the check.
+  #
+  # Not (yet) an org-ruleset required check: this job going red does not by
+  # itself block a merge — docker-build deliberately keeps reporting — but it
+  # is the one named red check that says what happened, and `publish` needs it
+  # to succeed, so a drifted lockfile can never reach GHCR.
+  semgrep-lock:
+    name: 🔐 Semgrep Lockfile Drift
+    needs: [changes]
+    if: >-
+      !cancelled() &&
+      needs.changes.outputs.pipeline != 'false' &&
+      needs.changes.outputs.lint-scope != 'changed'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout the scripts and the requirements files
+    # Resolution is a single uv metadata pass over ~66 packages; anything
+    # slower than this is a hung network, not a slow resolve.
+    timeout-minutes: 10
+    env:
+      # Exact uv pin (#1487): `version: latest` makes setup-uv resolve through
+      # the astral-sh/versions manifest, the dominant harden-runner timeout
+      # path. Renovate keeps this in step with docker/tools.Dockerfile's
+      # ARG UV_VERSION via the customManager on this line; a contract test
+      # asserts the two stay equal.
+      UV_VERSION: '0.12.7'
+    steps:
+      - name: Harden Runner
+        # astral.sh / releases.astral.sh and the GitHub releases CDN serve the
+        # setup-uv download; pypi.org and files.pythonhosted.org are the
+        # resolution itself (metadata plus the hashes uv pins).
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            astral.sh:443
+            releases.astral.sh:443
+            pypi.org:443
+            files.pythonhosted.org:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            scripts/ci/check-semgrep-lock.sh
+            scripts/ci/semgrep-lock-lib.sh
+            scripts/ci/compile-semgrep-lock.sh
+            requirements-semgrep.in
+            requirements-semgrep.txt
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Install uv
+        # continue-on-error + retry (#1487, #1513): the artifact URL lookup can
+        # still consult the version manifest, and `publish` needs this job, so
+        # an install flake must not silently skip the GHCR promotion.
+        id: setup-uv
+        continue-on-error: true
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Install uv (retry)
+        if: steps.setup-uv.outcome == 'failure'
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: ${{ env.UV_VERSION }}
+      - name: Check semgrep lockfile drift
+        run: scripts/ci/check-semgrep-lock.sh
+
   docker-build:
     name: 🐳 Build Docker Images
     # Required check (org ruleset checks-py-lintro): the job itself always
@@ -243,7 +329,13 @@ jobs:
     # output and the job early-exits green on docs-only PRs. !cancelled()
     # keeps it running (fail-open, full build) if the changes job failed —
     # the pipeline output is then empty, which is != 'false' at every step.
-    needs: [changes]
+    #
+    # semgrep-lock runs first (#2436) so a stale isolated lockfile is reported
+    # by its own named check in under a minute rather than as a wall of
+    # confusing build failures. The build itself still runs — `!cancelled()`
+    # is deliberate, this is a required check that must always report — but
+    # the drift check is red before the first layer is pulled.
+    needs: [changes, semgrep-lock]
     if: '!cancelled()'
     runs-on: ubuntu-24.04
     permissions:
@@ -1349,7 +1441,7 @@ jobs:
   # promoted digests are then signed with Cosign (keyless OIDC).
   publish:
     name: 📦 Publish to GHCR
-    needs: [changes, code-quality-gate, security-audit, integration-test]
+    needs: [changes, semgrep-lock, code-quality-gate, security-audit, integration-test]
     # Publishing used to hang off `dogfooding-lint`, which is skipped on
     # docs-only pushes, so publish was skipped with it. The gate deliberately
     # reports success there instead (it is a required check), so the docs-only

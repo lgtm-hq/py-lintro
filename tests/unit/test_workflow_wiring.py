@@ -377,6 +377,72 @@ def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
         )
 
 
+def test_docker_ci_gates_semgrep_lockfile_drift_before_the_builds() -> None:
+    """The semgrep lockfile gate runs on the full-lint filter, before builds.
+
+    #2436: nothing regenerates requirements-semgrep.txt automatically, so a
+    stale lockfile has to fail one named check early instead of a dozen
+    downstream jobs. Both requirements-semgrep files live in the changes
+    job's ``full-lint`` path filter, which is what lint-scope reports.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["semgrep-lock"]
+    condition = _normalize_github_expr(gate["if"])
+
+    assert_that(gate["needs"]).is_equal_to(["changes"])
+    assert_that(condition).contains("!cancelled()")
+    assert_that(condition).contains("needs.changes.outputs.pipeline != 'false'")
+    assert_that(condition).contains("needs.changes.outputs.lint-scope != 'changed'")
+
+    steps = gate["steps"]
+    assert_that(steps[0]["name"]).is_equal_to("Harden Runner")
+    endpoints = steps[0]["with"]["allowed-endpoints"].split()
+    assert_that(endpoints).contains("pypi.org:443", "files.pythonhosted.org:443")
+    assert_that([step.get("run") for step in steps]).contains(
+        "scripts/ci/check-semgrep-lock.sh",
+    )
+
+    # Only the scripts and the two requirements files are checked out.
+    checkout = next(step for step in steps if step.get("name") == "Checkout")
+    sparse = checkout["with"]["sparse-checkout"].split()
+    assert_that(sparse).contains(
+        "scripts/ci/check-semgrep-lock.sh",
+        "scripts/ci/semgrep-lock-lib.sh",
+        "requirements-semgrep.in",
+        "requirements-semgrep.txt",
+    )
+
+    # Exact uv pin plus the retry pair (#1487): `latest` resolves through the
+    # astral-sh/versions manifest, and an install flake here would skip
+    # publish, which needs this job.
+    assert_that(gate["env"]["UV_VERSION"]).is_equal_to(_tools_dockerfile_uv_version())
+    setup_uv = [
+        step for step in steps if "astral-sh/setup-uv@" in (step.get("uses") or "")
+    ]
+    assert_that(setup_uv).is_length(2)
+    for step in setup_uv:
+        assert_that(step["with"]["version"]).contains("env.UV_VERSION")
+        assert_that(step["with"]["version"]).does_not_contain("latest")
+    assert_that(setup_uv[0]["continue-on-error"]).is_true()
+    assert_that(setup_uv[1]["if"]).contains("steps.setup-uv.outcome == 'failure'")
+    assert_that(endpoints).contains("github-releases.githubusercontent.com:443")
+
+    # The gate is upstream of the image builds, so drift is red in under a
+    # minute, and upstream of publish, so a drifted lockfile never ships.
+    assert_that(docker_ci["jobs"]["docker-build"]["needs"]).contains("semgrep-lock")
+    assert_that(docker_ci["jobs"]["publish"]["needs"]).contains("semgrep-lock")
+
+    # The path filter the gate leans on still lists both lockfile paths.
+    detect = next(
+        step
+        for step in docker_ci["jobs"]["changes"]["steps"]
+        if step.get("id") == "detect"
+    )
+    filters = detect["with"]["filters"]
+    assert_that(filters).contains("'requirements-semgrep.in'")
+    assert_that(filters).contains("'requirements-semgrep.txt'")
+
+
 def test_docker_ci_dogfooding_lint_waits_on_docker_build() -> None:
     """Dogfooding lint depends on the docker build (#2180: no manifest-sync)."""
     docker_ci = _load_workflow(name="docker-ci.yml")
@@ -1466,6 +1532,22 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
     assert_that(matching).described_as(
         "no Renovate customManager targets build-binary.yml",
     ).is_not_empty()
+
+    # The docker-ci semgrep-lock job carries the same pin (#2436); the same
+    # manager must cover it or the second site would rot.
+    uv_managers = [
+        manager
+        for manager in matching
+        if any("UV_VERSION" in pattern for pattern in manager.get("matchStrings", []))
+    ]
+    assert_that(uv_managers).is_not_empty()
+    assert_that(
+        [
+            pattern
+            for manager in uv_managers
+            for pattern in manager["managerFilePatterns"]
+        ],
+    ).contains(".github/workflows/docker-ci.yml")
 
     for manager in matching:
         assert_that(manager["packageNameTemplate"]).is_equal_to("astral-sh/uv")
