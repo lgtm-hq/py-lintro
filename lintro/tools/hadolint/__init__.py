@@ -2,8 +2,8 @@
 
 Everything the ``hadolint`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.hadolint.definition`. ``lintro.tools.definitions.hadolint``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.hadolint.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.hadolint.definition import (

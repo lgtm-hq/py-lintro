@@ -10,15 +10,15 @@ import pytest
 from assertpy import assert_that
 from loguru import logger
 
-import lintro.tools.definitions as definitions_package
+import lintro.tools as tools_package
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins._builtin_index import (
     BUILTIN_TOOL_MODULES,
-    REGISTERING_TOOL_MODULES,
+    REGISTERING_TOOL_PACKAGES,
 )
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.discovery import (
-    BUILTIN_DEFINITIONS_PACKAGE,
+    BUILTIN_TOOLS_PACKAGE,
     ENTRY_POINT_GROUP,
     ENV_ENABLE_EXTERNAL_PLUGINS,
     _load_external_entry_point,
@@ -142,9 +142,11 @@ def test_discover_builtin_tools_loads_tools() -> None:
 
 
 def test_discover_builtin_tools_skips_private_modules() -> None:
-    """Skip modules starting with underscore."""
+    """Skip packages and modules starting with underscore."""
     module_names = get_builtin_module_names()
-    assert_that([n for n in module_names if n.startswith("_")]).is_empty()
+    assert_that(
+        [n for n in module_names if any(p.startswith("_") for p in n.split("."))],
+    ).is_empty()
 
     result = discover_builtin_tools()
 
@@ -167,8 +169,8 @@ def test_discover_builtin_tools_without_known_modules() -> None:
 def test_discover_builtin_tools_uses_index_without_source_dir() -> None:
     """Import builtin modules from the index when the package has no path.
 
-    Mirrors a frozen Nuitka onefile binary, where the definitions source
-    directory is never materialized and the package scan yields nothing.
+    Mirrors a frozen Nuitka onefile binary, where the per-tool package source
+    directories are never materialized and the package scan yields nothing.
     """
     with patch(
         "lintro.plugins.discovery._module_names_from_package_scan",
@@ -181,7 +183,7 @@ def test_discover_builtin_tools_uses_index_without_source_dir() -> None:
 
 
 def test_module_names_from_package_scan_handles_unscannable_package() -> None:
-    """Return an empty set when the definitions package exposes no path."""
+    """Return an empty set when the tools package exposes no path."""
     package = MagicMock()
     package.__path__ = []
     with patch("importlib.import_module", return_value=package):
@@ -189,7 +191,7 @@ def test_module_names_from_package_scan_handles_unscannable_package() -> None:
 
 
 def test_module_names_from_package_scan_handles_import_error() -> None:
-    """Degrade to an empty set when the definitions package cannot import."""
+    """Degrade to an empty set when the tools package cannot import."""
     with patch("importlib.import_module", side_effect=ImportError("boom")):
         assert_that(_module_names_from_package_scan()).is_empty()
 
@@ -198,11 +200,11 @@ def test_get_builtin_module_names_unions_index_and_scan() -> None:
     """Combine the generated index with modules found by the package scan."""
     with patch(
         "lintro.plugins.discovery._module_names_from_package_scan",
-        return_value={"ruff", "not_yet_indexed"},
+        return_value={"ruff.definition", "not_yet_indexed.definition"},
     ):
         names = get_builtin_module_names()
 
-    assert_that(names).contains("not_yet_indexed")
+    assert_that(names).contains("not_yet_indexed.definition")
     assert_that(names).contains(*BUILTIN_TOOL_MODULES)
     assert_that(list(names)).is_equal_to(sorted(names))
 
@@ -545,9 +547,9 @@ def test_reset_discovery_resets_discovery_state() -> None:
 # =============================================================================
 
 
-def test_builtin_definitions_package_matches_import_path() -> None:
-    """The configured definitions package matches the real package."""
-    assert_that(definitions_package.__name__).is_equal_to(BUILTIN_DEFINITIONS_PACKAGE)
+def test_builtin_tools_package_matches_import_path() -> None:
+    """The configured tools package matches the real package."""
+    assert_that(tools_package.__name__).is_equal_to(BUILTIN_TOOLS_PACKAGE)
 
 
 def test_builtin_index_is_non_empty() -> None:
@@ -740,10 +742,10 @@ def test_shadowed_plugin_gets_no_divergence_advice(
 
 
 def test_registering_index_matches_the_real_registry() -> None:
-    """The index's registering set is exactly the builtin registry.
+    """The index's registering packages are exactly the builtin registry.
 
-    The generator detects registering modules via AST (``@register_tool`` as a
-    Name or Attribute decorator). The binary smoke test treats that subset as
+    The generator detects registering packages via AST (``@register_tool`` as
+    a Name or Attribute decorator). The binary smoke test treats that set as
     the expected builtin tool set, so both over-counting and under-counting
     would make released binaries fail their own registry assertion — or worse,
     silently shrink the assertion. Equality catches both directions.
@@ -755,6 +757,6 @@ def test_registering_index_matches_the_real_registry() -> None:
         for name in ToolRegistry.get_names()
         if ToolRegistry.get_origin(name) == ToolRegistry.BUILTIN_ORIGIN
     }
-    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
+    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_PACKAGES}
 
     assert_that(sorted(registered)).is_equal_to(sorted(expected))

@@ -207,7 +207,7 @@ def test_result_inspected_files_rejects_every_real_no_work_message(
 ) -> None:
     """Every "nothing to do" message a wrapper actually emits is recognised.
 
-    These are literals taken from `lintro/tools/definitions/**`; the earlier
+    These are literals taken from `lintro/tools/*/definition.py`; the earlier
     regex matched only the "No … files … to check" family and let the rest
     through as if the tool had inspected something.
 

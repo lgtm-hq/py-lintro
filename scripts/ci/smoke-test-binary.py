@@ -39,10 +39,10 @@ EXIT_FAILED = 1
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# Generated index of builtin definition modules; its registering subset is the
+# Generated index of builtin tool modules; its registering package set is the
 # expected builtin tool set (module names match tool names modulo separator).
 BUILTIN_INDEX_PATH = REPO_ROOT / "lintro" / "plugins" / "_builtin_index.py"
-REGISTERING_MODULES_NAME = "REGISTERING_TOOL_MODULES"
+REGISTERING_PACKAGES_NAME = "REGISTERING_TOOL_PACKAGES"
 
 # Generous but bounded: a cold onefile binary pays an extraction cost on the
 # first run, and ``check`` fans out across every registered tool.
@@ -108,7 +108,7 @@ def expected_builtin_tools(index_path: Path) -> list[str]:
 
     Raises:
         RuntimeError: If the index cannot be read, parsed, or declares no
-            registering modules. Fail closed: an unreadable index must not
+            registering packages. Fail closed: an unreadable index must not
             degrade to "any builtin is enough".
     """
     try:
@@ -123,22 +123,22 @@ def expected_builtin_tools(index_path: Path) -> list[str]:
             target, value = node.targets[0].id, node.value
         else:
             continue
-        if target != REGISTERING_MODULES_NAME or value is None:
+        if target != REGISTERING_PACKAGES_NAME or value is None:
             continue
         try:
             names = sorted(str(name) for name in ast.literal_eval(value))
         except ValueError as exc:
             raise RuntimeError(
-                f"{index_path} {REGISTERING_MODULES_NAME} is not a literal",
+                f"{index_path} {REGISTERING_PACKAGES_NAME} is not a literal",
             ) from exc
         if not names:
             raise RuntimeError(
-                f"{index_path} declares an empty {REGISTERING_MODULES_NAME}",
+                f"{index_path} declares an empty {REGISTERING_PACKAGES_NAME}",
             )
         return names
 
     raise RuntimeError(
-        f"{index_path} declares no {REGISTERING_MODULES_NAME}",
+        f"{index_path} declares no {REGISTERING_PACKAGES_NAME}",
     )
 
 

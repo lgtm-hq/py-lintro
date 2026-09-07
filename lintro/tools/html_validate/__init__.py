@@ -2,8 +2,8 @@
 
 Everything the ``html_validate`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.html_validate.definition`. ``lintro.tools.definitions.html_validate``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.html_validate.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.html_validate.definition import (

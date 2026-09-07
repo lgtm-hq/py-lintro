@@ -2,12 +2,12 @@
 
 Importable implementation behind ``scripts/ci/generate-builtin-tool-index.py``.
 
-The builtin tool registry is populated by importing every module under
-``lintro/tools/definitions/``. Globbing that directory at runtime only works
-when lintro runs from a source tree or a wheel: Nuitka ``--onefile`` binaries
-(npm and Homebrew channels) ship compiled modules without materializing the
-Python source directory, so the glob found nothing and the registry stayed
-empty (#2006).
+The builtin tool registry is populated by importing the ``definition`` module
+of every per-tool package under ``lintro/tools/`` (#2311). Globbing that tree
+at runtime only works when lintro runs from a source tree or a wheel: Nuitka
+``--onefile`` binaries (npm and Homebrew channels) ship compiled modules without
+materializing the Python source directory, so the glob found nothing and the
+registry stayed empty (#2006).
 
 This generator writes the module list into an importable Python module that
 travels with the compiled package, making discovery independent of the
@@ -33,16 +33,17 @@ from pathlib import Path
 
 from .exit_codes import EXIT_DRIFT, EXIT_INPUT_ERROR, EXIT_OK
 
-_HEADER = '''"""Auto-generated index of builtin tool definition modules.
+_HEADER = '''"""Auto-generated index of builtin tool modules.
 
 Do not edit by hand. Run
 ``python3 scripts/ci/generate-builtin-tool-index.py`` to regenerate.
 
-Names are module base names under ``lintro/tools/definitions/``. Discovery
-imports them to populate the tool registry. Shipping the list as code (rather
-than globbing ``lintro/tools/definitions/*.py``) keeps builtin discovery
-working inside frozen Nuitka onefile binaries, which never materialize the
-Python source directory (#2006).
+Names are ``<package>.<module>`` paths relative to ``lintro.tools``: the
+``definition`` module of every per-tool package, and every public module of a
+shared package that has none (#2311). Discovery imports them to populate the
+tool registry. Shipping the list as code (rather than globbing
+``lintro/tools/*/*.py``) keeps builtin discovery working inside frozen Nuitka
+onefile binaries, which never materialize the Python source directory (#2006).
 """
 
 from __future__ import annotations
@@ -52,31 +53,32 @@ BUILTIN_TOOL_MODULES: tuple[str, ...] = (
 
 _REGISTERING_HEADER = """)
 
-# Subset of the modules above that register a tool with the registry (they use
-# the ``@register_tool`` decorator). Helper modules that only support a tool are
-# imported but contribute no registry entry. The binary smoke test uses this to
-# assert a built binary exposes every builtin tool, not merely a non-empty set.
-REGISTERING_TOOL_MODULES: tuple[str, ...] = (
+# The per-tool packages that register a tool with the registry (one of their
+# modules applies the ``@register_tool`` decorator). Shared helper packages such
+# as ``ts_checker`` are imported but contribute no registry entry. The binary
+# smoke test uses this to assert a built binary exposes every builtin tool, not
+# merely a non-empty set.
+REGISTERING_TOOL_PACKAGES: tuple[str, ...] = (
 """
 
 _FOOTER = ")\n"
 
-# Decorator name that marks a definition module as contributing a registry entry.
+# Decorator name that marks a tool module as contributing a registry entry.
 REGISTER_TOOL_NAME = "register_tool"
 
-# Import prefix and module suffix of a per-tool package's plugin module, e.g.
-# ``lintro.tools.ruff.definition`` (#2311). A definition module that is only a
-# re-export shim for one of those still contributes a registry entry, because
-# importing it imports the package module that applies ``@register_tool``.
-PER_TOOL_PACKAGE_PREFIX = "lintro.tools."
-DEFINITION_MODULE_SUFFIX = ".definition"
+# Packages under ``lintro/tools`` that are not per-tool packages: shared
+# scaffolding the tool packages import, never a registry entry of its own.
+NON_TOOL_PACKAGES: frozenset[str] = frozenset({"core"})
+
+# Module a per-tool package declares its plugin in (#2311).
+DEFINITION_MODULE_NAME = "definition"
 
 
 def resolve_paths(repo_root: Path) -> tuple[Path, Path]:
     """Derive the generator's input and output paths from a repository root.
 
-    The index lives under ``lintro/plugins`` rather than next to the
-    definitions it lists: ``lintro.tools.__init__`` imports the tool manager,
+    The index lives under ``lintro/plugins`` rather than next to the tool
+    packages it lists: ``lintro.tools.__init__`` imports the tool manager,
     which imports discovery, so importing anything from ``lintro.tools`` at
     discovery import time would close an import cycle.
 
@@ -84,34 +86,94 @@ def resolve_paths(repo_root: Path) -> tuple[Path, Path]:
         repo_root: Repository root directory.
 
     Returns:
-        Tuple of (definitions directory, index module path).
+        Tuple of (tools directory, index module path).
     """
     return (
-        repo_root / "lintro" / "tools" / "definitions",
+        repo_root / "lintro" / "tools",
         repo_root / "lintro" / "plugins" / "_builtin_index.py",
     )
 
 
-def collect_module_names(definitions_dir: Path) -> list[str]:
-    """Collect the builtin definition module names from the source tree.
+def _tool_packages(tools_dir: Path) -> list[Path]:
+    """Return the per-tool package directories under ``tools_dir``.
 
     Args:
-        definitions_dir: Directory holding the builtin tool definition modules.
+        tools_dir: The ``lintro/tools`` directory.
 
     Returns:
-        Sorted module base names, excluding private/dunder modules.
+        Sorted package directories, excluding private names and the shared
+        scaffolding packages named by :data:`NON_TOOL_PACKAGES`.
 
     Raises:
-        FileNotFoundError: When ``definitions_dir`` does not exist.
+        FileNotFoundError: When ``tools_dir`` does not exist.
     """
-    if not definitions_dir.is_dir():
-        msg = f"Builtin definitions directory not found: {definitions_dir}"
+    if not tools_dir.is_dir():
+        msg = f"Builtin tools directory not found: {tools_dir}"
         raise FileNotFoundError(msg)
 
     return sorted(
-        path.stem
-        for path in definitions_dir.glob("*.py")
-        if not path.name.startswith("_")
+        path
+        for path in tools_dir.iterdir()
+        if path.is_dir()
+        and not path.name.startswith((".", "_"))
+        and path.name not in NON_TOOL_PACKAGES
+        and (path / "__init__.py").is_file()
+    )
+
+
+def _public_modules(package: Path) -> list[Path]:
+    """Return the public module files of one per-tool package.
+
+    Args:
+        package: A per-tool package directory.
+
+    Returns:
+        Sorted ``*.py`` files, excluding ``__init__.py`` and private modules.
+    """
+    return sorted(
+        path for path in package.glob("*.py") if not path.name.startswith("_")
+    )
+
+
+def _entry_modules(package: Path) -> list[Path]:
+    """Return the modules discovery must import for one package.
+
+    A per-tool package is entered through its ``definition`` module: importing
+    it runs the package ``__init__``, which is the package's re-export surface,
+    so every other module the tool needs comes along. Listing the rest here
+    would defeat the deliberate laziness of packages that keep a heavy module
+    (``idiom_review.engine``, which reaches into :mod:`lintro.ai`) out of the
+    import surface. A shared package with no ``definition`` module — the
+    ``ts_checker`` family behind ``tsc`` and ``vue-tsc`` — has no such entry
+    point, so all of its public modules are listed instead.
+
+    Args:
+        package: A per-tool package directory.
+
+    Returns:
+        Sorted module files discovery should import for this package.
+    """
+    definition = package / f"{DEFINITION_MODULE_NAME}.py"
+    if definition.is_file():
+        return [definition]
+    return _public_modules(package)
+
+
+def collect_module_names(tools_dir: Path) -> list[str]:
+    """Collect the builtin tool module names from the source tree.
+
+    Args:
+        tools_dir: The ``lintro/tools`` directory holding the per-tool packages.
+
+    Returns:
+        Sorted ``<package>.<module>`` names relative to ``lintro.tools``: each
+        package's ``definition`` module, or every public module of a shared
+        package that has none.
+    """
+    return sorted(
+        f"{package.name}.{module.stem}"
+        for package in _tool_packages(tools_dir)
+        for module in _entry_modules(package)
     )
 
 
@@ -136,35 +198,12 @@ def _is_register_tool_decorator(node: ast.AST) -> bool:
     return False
 
 
-def _is_definition_reexport(node: ast.AST) -> bool:
-    """Return whether ``node`` imports from a per-tool package's plugin module.
-
-    ``from lintro.tools.ruff.definition import RuffPlugin`` is the re-export
-    shim #2311 leaves in ``lintro/tools/definitions`` when a tool moves into
-    its own package. Importing the shim imports that module, so the shim still
-    contributes a registry entry.
-
-    Args:
-        node: An AST node from the module being inspected.
-
-    Returns:
-        True when the node is such an import.
-    """
-    if not isinstance(node, ast.ImportFrom) or node.module is None:
-        return False
-    return node.module.startswith(PER_TOOL_PACKAGE_PREFIX) and node.module.endswith(
-        DEFINITION_MODULE_SUFFIX,
-    )
-
-
 def _source_registers_tool(*, source: str, path: Path) -> bool:
     """Return whether Python source contributes a registry entry.
 
-    True when the module applies ``@register_tool`` itself, and also when it is
-    a re-export shim for a per-tool package's ``definition`` module, which
-    applies the decorator on its behalf. Parsed with :mod:`ast` so comments and
-    string literals cannot count as a registration. The generator stays
-    stdlib-only: importing the registry at generation time would pull the
+    True when the module applies ``@register_tool``. Parsed with :mod:`ast` so
+    comments and string literals cannot count as a registration. The generator
+    stays stdlib-only: importing the registry at generation time would pull the
     ``lintro`` package (and its import cycle with ``lintro.tools``) into
     minimal CI containers.
 
@@ -173,7 +212,7 @@ def _source_registers_tool(*, source: str, path: Path) -> bool:
         path: Path of the file, used in parse-error messages.
 
     Returns:
-        True when the module registers a tool directly or re-exports one.
+        True when the module registers a tool.
 
     Raises:
         ValueError: When ``source`` is not valid Python.
@@ -185,8 +224,6 @@ def _source_registers_tool(*, source: str, path: Path) -> bool:
         raise ValueError(msg) from exc
 
     for node in ast.walk(tree):
-        if _is_definition_reexport(node):
-            return True
         decorator_list = getattr(node, "decorator_list", None)
         if not decorator_list:
             continue
@@ -195,43 +232,34 @@ def _source_registers_tool(*, source: str, path: Path) -> bool:
     return False
 
 
-def collect_registering_module_names(definitions_dir: Path) -> list[str]:
-    """Collect the definition modules that contribute a registry entry.
+def collect_registering_package_names(tools_dir: Path) -> list[str]:
+    """Collect the per-tool packages that contribute a registry entry.
 
-    Registration is detected by walking each module's AST for a
-    ``register_tool`` decorator (a ``Name`` or ``Attribute``), or for an import
-    from a per-tool package's ``definition`` module, which is what a re-export
-    shim carries instead (#2311). Comments and docstrings that mention the
-    decorator do not count.
+    Registration is detected by walking the AST of each module
+    :func:`_entry_modules` names — the ones discovery actually imports — for a
+    ``register_tool`` decorator (a ``Name`` or ``Attribute``). Scanning the
+    same modules keeps the two lists consistent by construction: a decorator in
+    a module discovery never imports would otherwise make a frozen binary
+    expect a tool it cannot register. Comments and docstrings that mention the
+    decorator do not count. A shared package such as ``ts_checker`` registers
+    nothing and is therefore absent.
 
     Args:
-        definitions_dir: Directory holding the builtin tool definition modules.
+        tools_dir: The ``lintro/tools`` directory holding the per-tool packages.
 
     Returns:
-        Sorted module base names whose source applies ``@register_tool`` or
-        re-exports a per-tool package's plugin.
-
-    Raises:
-        FileNotFoundError: When ``definitions_dir`` does not exist.
-        ValueError: When a definition file cannot be parsed as Python.
+        Sorted package names holding a module that applies ``@register_tool``.
     """
-    if not definitions_dir.is_dir():
-        msg = f"Builtin definitions directory not found: {definitions_dir}"
-        raise FileNotFoundError(msg)
-
     registering: list[str] = []
-    for path in definitions_dir.glob("*.py"):
-        if path.name.startswith("_"):
-            continue
-        try:
-            registers = _source_registers_tool(
-                source=path.read_text(encoding="utf-8"),
-                path=path,
+    for package in _tool_packages(tools_dir):
+        if any(
+            _source_registers_tool(
+                source=module.read_text(encoding="utf-8"),
+                path=module,
             )
-        except ValueError:
-            raise
-        if registers:
-            registering.append(path.stem)
+            for module in _entry_modules(package)
+        ):
+            registering.append(package.name)
     return sorted(registering)
 
 
@@ -239,8 +267,9 @@ def render_index(module_names: list[str], registering: list[str]) -> str:
     """Render the text of the generated index module.
 
     Args:
-        module_names: Sorted builtin definition module names.
-        registering: Sorted subset that registers a tool.
+        module_names: Sorted ``<package>.<module>`` names under
+            ``lintro.tools``.
+        registering: Sorted per-tool package names that register a tool.
 
     Returns:
         Full module source text, formatted the way black would emit it.
@@ -270,14 +299,14 @@ def _report_drift(*, current: str, desired: str, path: Path) -> None:
 def main(
     argv: list[str] | None = None,
     *,
-    definitions_dir: Path,
+    tools_dir: Path,
     index_path: Path,
 ) -> int:
     """Run the generator.
 
     Args:
         argv: Optional argv override (for tests and callers).
-        definitions_dir: Directory holding the builtin tool definition modules.
+        tools_dir: The ``lintro/tools`` directory holding the per-tool packages.
         index_path: Path of the generated index module.
 
     Returns:
@@ -285,7 +314,7 @@ def main(
         mode, ``2`` when inputs could not be read.
     """
     parser = argparse.ArgumentParser(
-        description="Generate the builtin tool definition module index.",
+        description="Generate the builtin tool module index.",
     )
     parser.add_argument(
         "--check",
@@ -295,15 +324,15 @@ def main(
     args = parser.parse_args(argv)
 
     try:
-        module_names = collect_module_names(definitions_dir)
-        registering = collect_registering_module_names(definitions_dir)
+        module_names = collect_module_names(tools_dir)
+        registering = collect_registering_package_names(tools_dir)
     except (FileNotFoundError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return EXIT_INPUT_ERROR
 
     if not module_names:
         print(
-            f"error: no builtin tool definitions found in {definitions_dir}",
+            f"error: no builtin tool modules found in {tools_dir}",
             file=sys.stderr,
         )
         return EXIT_INPUT_ERROR

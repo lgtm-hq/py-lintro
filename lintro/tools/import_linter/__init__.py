@@ -2,8 +2,8 @@
 
 Everything the ``import-linter`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.import_linter.definition`. ``lintro.tools.definitions.import_linter``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.import_linter.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.import_linter.definition import (

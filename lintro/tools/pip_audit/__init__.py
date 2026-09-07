@@ -2,8 +2,8 @@
 
 Everything the ``pip_audit`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.pip_audit.definition`. ``lintro.tools.definitions.pip_audit``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.pip_audit.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.pip_audit.definition import (

@@ -46,7 +46,7 @@ def _duplicate_result(count: int) -> ToolResult:
     """
     issues = [
         PylintIssue(
-            file=f"lintro/tools/definitions/tool_{index}.py",
+            file=f"lintro/tools/tool_{index}/definition.py",
             line=1,
             code="R0801",
             symbol="duplicate-code",

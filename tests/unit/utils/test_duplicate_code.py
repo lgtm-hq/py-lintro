@@ -25,7 +25,7 @@ def _duplicate_issue(index: int) -> PylintIssue:
         PylintIssue: A duplicate-code finding.
     """
     return PylintIssue(
-        file=f"lintro/tools/definitions/tool_{index}.py",
+        file=f"lintro/tools/tool_{index}/definition.py",
         line=1,
         code="R0801",
         symbol="duplicate-code",
@@ -41,7 +41,7 @@ def _other_issue() -> PylintIssue:
         PylintIssue: A finding the gate must leave alone.
     """
     return PylintIssue(
-        file="lintro/tools/definitions/tool_0.py",
+        file="lintro/tools/tool_0/definition.py",
         line=7,
         code="C0116",
         symbol="missing-function-docstring",

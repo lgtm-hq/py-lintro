@@ -7,23 +7,23 @@ more tools to Lintro without any change to the Lintro core repository.
 ## Overview
 
 Lintro uses a plugin architecture that lets you add support for new linting and
-formatting tools. Built-in tools live in `lintro/tools/definitions/`; external tools
-ship in their own distributions and are discovered automatically at startup via Python
-entry points in the **`lintro.tools`** group.
+formatting tools. Every built-in tool is one package under `lintro/tools/<tool>/`;
+external tools ship in their own distributions and are discovered automatically at
+startup via Python entry points in the **`lintro.tools`** group.
 
-A tool with helper modules of its own gets a package instead of a single module (#2311):
+A built-in tool package looks like this (#2311):
 
 ```text
 lintro/tools/<tool>/
 ├── __init__.py      # re-exports the plugin and the helpers other packages use
 ├── definition.py    # @register_tool plugin class + its ToolDefinition
 └── ...              # command builders, executors, per-tool processing
-lintro/tools/definitions/<tool>.py   # re-export shim, so discovery still finds it
 ```
 
-`ruff` and `pytest` are the worked examples. Plugin discovery scans
-`lintro/tools/definitions/`, so the shim is what registers the tool until discovery
-moves to the per-tool packages.
+`ruff` and `pytest` are the worked examples. Plugin discovery enters each package
+through its `definition` module — importing it runs the package `__init__`, so the
+package's own re-export surface comes along — which is what registers the tool. There is
+no central list to append to.
 
 An external plugin gets the exact same lifecycle as a built-in tool: config injection,
 file discovery, subprocess execution, output normalization, and per-invocation execution
@@ -503,9 +503,9 @@ A minimal third-party plugin distribution contains:
 
 ## Example Plugins
 
-See the built-in plugins in `lintro/tools/definitions/` for complete examples:
+See the built-in plugins under `lintro/tools/` for complete examples:
 
 - `lintro/tools/ruff/definition.py` - Python linter with fix support
-- `bandit.py` - Security scanner (no fix)
-- `prettier.py` - JavaScript/TypeScript formatter
-- `hadolint.py` - Dockerfile linter
+- `lintro/tools/bandit/definition.py` - Security scanner (no fix)
+- `lintro/tools/prettier/definition.py` - JavaScript/TypeScript formatter
+- `lintro/tools/hadolint/definition.py` - Dockerfile linter

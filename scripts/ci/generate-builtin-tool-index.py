@@ -33,10 +33,10 @@ sys.path.insert(0, str(REPO_ROOT))
 from lintro_build.builtin_index import main, resolve_paths  # noqa: E402
 
 if __name__ == "__main__":
-    definitions_dir, index_path = resolve_paths(REPO_ROOT)
+    tools_dir, index_path = resolve_paths(REPO_ROOT)
     sys.exit(
         main(
-            definitions_dir=definitions_dir,
+            tools_dir=tools_dir,
             index_path=index_path,
         ),
     )

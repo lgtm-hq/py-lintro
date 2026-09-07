@@ -2,8 +2,8 @@
 
 Everything the ``tsc`` tool owns lives here: the plugin and its
 :class:`~lintro.plugins.protocol.ToolDefinition` in
-:mod:`lintro.tools.tsc.definition`. ``lintro.tools.definitions.tsc``
-re-exports the plugin so plugin discovery keeps finding it (#2311).
+:mod:`lintro.tools.tsc.definition`. Plugin discovery enters the package
+through that module (#2311).
 """
 
 from lintro.tools.tsc.definition import (

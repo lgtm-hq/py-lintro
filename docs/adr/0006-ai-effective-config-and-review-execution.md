@@ -176,7 +176,7 @@ Adapters still _construct_ the provider (`cli_utils/commands/review.py`,
 reuse it after `execute_review` returns. The MCP use-after-close hazard this ADR
 originally recorded does not arise: `get_provider` caches nothing, so every MCP call
 builds its own provider. The three non-review construction sites
-(`tools/definitions/idiom_review.py`, `ai/orchestrator.py`, `ai/liveness.py`) are not
+(`tools/idiom_review/definition.py`, `ai/orchestrator.py`, `ai/liveness.py`) are not
 review runs and keep their own lifetimes; #2302 did not widen its scope to them.
 
 ### Exit semantics (unchanged)

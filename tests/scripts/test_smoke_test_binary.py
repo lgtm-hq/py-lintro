@@ -204,7 +204,7 @@ def _write_fake_index(*, path: Path, names: list[str]) -> Path:
 
     Args:
         path: Destination path for the index module.
-        names: Module names to declare as registering a tool.
+        names: Package names to declare as registering a tool.
 
     Returns:
         The path the index was written to.
@@ -213,7 +213,7 @@ def _write_fake_index(*, path: Path, names: list[str]) -> Path:
     path.write_text(
         "BUILTIN_TOOL_MODULES: tuple[str, ...] = (\n"
         f"{rendered})\n\n"
-        "REGISTERING_TOOL_MODULES: tuple[str, ...] = (\n"
+        "REGISTERING_TOOL_PACKAGES: tuple[str, ...] = (\n"
         f"{rendered})\n",
     )
     return path
@@ -223,7 +223,7 @@ def test_expected_builtin_tools_reads_the_registering_subset(
     smoke: ModuleType,
     tmp_path: Path,
 ) -> None:
-    """The expected tool set comes from the index's registering subset.
+    """The expected tool set comes from the index's registering package set.
 
     Args:
         smoke: Imported smoke-test module.
