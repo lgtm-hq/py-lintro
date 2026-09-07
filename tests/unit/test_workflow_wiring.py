@@ -2724,8 +2724,10 @@ def test_memory_sampler_tees_its_output_into_the_step_log() -> None:
     sampler = (_REPO_ROOT / "scripts" / "ci" / "memory-sampler.sh").read_text(
         encoding="utf-8",
     )
-    assert_that(sampler).contains('snapshot | tee -a "$log_file"')
-    assert_that(sampler).contains('} | tee -a "$log_file"')
+    # Behaviour (what reaches stdout) is asserted in
+    # tests/scripts/test_memory_sampler.py; this only pins that the sampler
+    # keeps writing both channels rather than redirecting into the log alone.
+    assert_that(sampler.count('| tee -a "$log_file"')).is_greater_than_or_equal_to(2)
 
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     for job_id in ("build-macos", "build-linux"):

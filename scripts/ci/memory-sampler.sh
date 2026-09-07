@@ -31,10 +31,12 @@ Commands:
                                  (default: 15, or SAMPLER_INTERVAL). The sampler
                                  PID is written to <pid-file>. Idempotent: a
                                  live sampler recorded in <pid-file> is reused.
-  stop <log-file> <pid-file>     Stop the sampler recorded in <pid-file>,
-                                 append a final snapshot plus stop marker to
-                                 <log-file>, and remove <pid-file>. Idempotent:
-                                 a missing or stale <pid-file> is a no-op.
+  stop <log-file> <pid-file>     Stop the sampler recorded in <pid-file>, replay
+                                 <log-file> to stdout, and tee a final snapshot
+                                 plus stop marker into both <log-file> and the
+                                 step log, then remove <pid-file>. Idempotent: a
+                                 missing or stale <pid-file> stops nothing but
+                                 still replays and closes out an existing log.
 
 Examples:
   memory-sampler.sh start memory-sampler.log memory-sampler.pid

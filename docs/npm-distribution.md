@@ -76,11 +76,13 @@ npm publish in the existing PyPI → binaries/Homebrew → npm order. The rerun 
 since #2435 the Linux and macOS binary jobs detect the verified binary already attached
 to the release (SHA256-matched against the `sha256-*` artifact the same run produced)
 and skip the ~20-minute Nuitka rebuild, the verify/smoke steps it feeds, and the release
-upload. Nothing is deleted from the release on the way — uploads stage `<asset>.new`,
-verify it, and only then swap — so an interrupted rerun cannot leave a published release
-without its binary. Approve the npm environment only when that same production run
-reaches its waiting npm job. Do not dispatch or retry the standalone `publish-npm.yml`
-workflow as a substitute for the production chain.
+upload. Uploads also stage `<asset>.new` and verify it before anything is removed, so
+the only moment the release lacks its binary is the single delete-plus-rename API pair
+at the end; a kill there leaves `<asset>.new` in place for the next attempt to promote,
+instead of the multi-second upload window the old overwrite path had. Approve the npm
+environment only when that same production run reaches its waiting npm job. Do not
+dispatch or retry the standalone `publish-npm.yml` workflow as a substitute for the
+production chain.
 
 Trusted publishing requires **npm ≥ 11.5.1**. The workflow uses **Node 24**, which ships
 a compatible bundled npm — do **not** run `npm install -g npm` (or any in-place

@@ -316,6 +316,11 @@ jobs:
           "dist/nuitka/lintro-macos-$BUILD_ARCH"
           "$BUILD_ARCH"
 
+      # Ungated on reuse (#2435) so a later attempt still finds the binary and
+      # its checksum among the run artifacts. No `overwrite:` needed: artifacts
+      # are per-attempt, so re-uploading a name an earlier attempt already used
+      # is not a conflict — run 33996465351 carries two `sha256-linux-x64`
+      # artifacts, one per attempt, and the reuse check reads them by run id.
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -517,6 +522,8 @@ jobs:
           "dist/nuitka/lintro-linux-$BUILD_ARCH"
           "linux-$BUILD_ARCH"
 
+      # Ungated on reuse and `overwrite:`-free for the same reason as the macOS
+      # job above (#2435).
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
