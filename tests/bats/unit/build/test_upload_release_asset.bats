@@ -204,6 +204,19 @@ teardown() {
 	[[ ! -e "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
 }
 
+@test "upload_release_asset.sh: replaces a stale staging asset when no live asset remains" {
+	# The rebuild path after reuse_release_asset.sh declined a stale
+	# <asset>.new: the leftover is from some other build, so it is dropped and
+	# the freshly built binary is published under the final name.
+	printf 'some-other-build\n' >"${GH_STATE}/assets/${ASSET_NAME}.new"
+
+	run "$SCRIPT" v1.2.3 "$LOCAL_FILE"
+	assert_success
+	assert_output --partial "Removing stale ${ASSET_NAME}.new"
+	assert_equal "fresh-build" "$(cat "${GH_STATE}/assets/${ASSET_NAME}")"
+	[[ ! -e "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+}
+
 @test "upload_release_asset.sh: a corrupted upload fails without touching the live asset" {
 	printf 'old-build\n' >"${GH_STATE}/assets/${ASSET_NAME}"
 	export GH_STUB_CORRUPT_UPLOAD=1

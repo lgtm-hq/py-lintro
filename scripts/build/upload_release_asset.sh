@@ -38,8 +38,11 @@ is what happened to lintro-linux-x64 on v0.147.3 (#2435). This script instead:
 Only step 3 has a gap, and it is a delete plus a rename rather than a
 multi-second upload. A kill anywhere else leaves the release with the old asset
 (steps 1-2) or with both names present. A kill inside step 3 leaves only
-<asset-name>.new, and the next attempt promotes it (checksum-matched) instead
-of deleting it; a staging asset from some other build is deleted first.
+<asset-name>.new. Both halves of the next attempt recover from that: this
+script promotes the leftover when it matches the file being uploaded, and
+reuse_release_asset.sh promotes it (skipping the rebuild entirely) when it
+matches the run's own checksum artifact. A staging asset from some other build
+is deleted before a fresh upload.
 EOF
 	[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && exit 0
 	exit 2
@@ -48,7 +51,7 @@ fi
 RELEASE_TAG="$1"
 FILE="$2"
 ASSET_NAME="${3:-$(basename "$FILE")}"
-STAGING_NAME="${ASSET_NAME}.new"
+STAGING_NAME="$(release_staging_name "$ASSET_NAME")"
 
 if [[ -z "$RELEASE_TAG" ]]; then
 	log_error "Release tag is required"
@@ -79,44 +82,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Echo the numeric id of a named asset on the release, or nothing when absent.
-asset_id() {
-	local name="$1"
-	gh api "repos/{owner}/{repo}/releases/tags/${RELEASE_TAG}" \
-		--jq ".assets[] | select(.name == \"${name}\") | .id" 2>/dev/null || true
-}
-
-delete_asset_by_id() {
-	local id="$1"
-	gh api -X DELETE "repos/{owner}/{repo}/releases/assets/${id}" >/dev/null
-}
-
-# Delete whatever currently holds ASSET_NAME and rename the staging asset onto
-# it. This is the only step that can leave the release without the final name,
-# and it is a single API pair rather than a multi-second upload.
-promote_staging_asset() {
-	local staging_id="$1"
-	local old_id
-	old_id="$(asset_id "$ASSET_NAME")"
-	if [[ -n "$old_id" ]]; then
-		log_info "Replacing existing ${ASSET_NAME}"
-		delete_asset_by_id "$old_id"
-	fi
-	gh api -X PATCH "repos/{owner}/{repo}/releases/assets/${staging_id}" \
-		-f "name=${ASSET_NAME}" >/dev/null
-}
-
 # Echo the SHA256 of a published asset, or nothing when it cannot be read.
 published_sha256() {
 	local name="$1"
-	local dir="$WORK_DIR/inspect"
-	rm -rf "$dir"
-	mkdir -p "$dir"
-	gh release download "$RELEASE_TAG" \
-		--pattern "$name" \
-		--dir "$dir" \
-		--clobber >/dev/null 2>&1 || return 0
-	sha256_file "${dir}/${name}" 2>/dev/null || return 0
+	local path
+	path="$(release_download_asset "$RELEASE_TAG" "$name" "$WORK_DIR/inspect")" || return 0
+	sha256_file "$path" 2>/dev/null || return 0
 }
 
 if ! LOCAL_SHA="$(sha256_file "$FILE")"; then
@@ -134,16 +105,16 @@ cp "$FILE" "$STAGING_FILE"
 # holding only <asset>.new, and re-uploading from scratch would delete the one
 # good copy first. Stale bytes from some other build are removed, since gh
 # refuses to upload a duplicate name and they must never be renamed into place.
-STALE_ID="$(asset_id "$STAGING_NAME")"
+STALE_ID="$(release_asset_id "$RELEASE_TAG" "$STAGING_NAME")"
 if [[ -n "$STALE_ID" ]]; then
 	if [[ "$(published_sha256 "$STAGING_NAME")" == "$LOCAL_SHA" ]]; then
 		log_info "Promoting the ${STAGING_NAME} left by an earlier attempt"
-		promote_staging_asset "$STALE_ID"
+		release_promote_asset "$RELEASE_TAG" "$STALE_ID" "$ASSET_NAME"
 		log_success "Published ${ASSET_NAME} to ${RELEASE_TAG} (sha256=${LOCAL_SHA})"
 		exit 0
 	fi
 	log_warning "Removing stale ${STAGING_NAME} from ${RELEASE_TAG}"
-	delete_asset_by_id "$STALE_ID"
+	release_delete_asset "$STALE_ID"
 fi
 
 log_info "Uploading ${STAGING_NAME} to ${RELEASE_TAG}"
@@ -165,19 +136,19 @@ fi
 
 if [[ "$REMOTE_SHA" != "$LOCAL_SHA" ]]; then
 	log_error "Uploaded ${STAGING_NAME} sha256=${REMOTE_SHA} does not match local ${LOCAL_SHA}"
-	NEW_ID="$(asset_id "$STAGING_NAME")"
+	NEW_ID="$(release_asset_id "$RELEASE_TAG" "$STAGING_NAME")"
 	if [[ -n "$NEW_ID" ]]; then
-		delete_asset_by_id "$NEW_ID"
+		release_delete_asset "$NEW_ID"
 	fi
 	exit 1
 fi
 
-NEW_ID="$(asset_id "$STAGING_NAME")"
+NEW_ID="$(release_asset_id "$RELEASE_TAG" "$STAGING_NAME")"
 if [[ -z "$NEW_ID" ]]; then
 	log_error "Uploaded ${STAGING_NAME} is not listed on ${RELEASE_TAG}"
 	exit 1
 fi
 
-promote_staging_asset "$NEW_ID"
+release_promote_asset "$RELEASE_TAG" "$NEW_ID" "$ASSET_NAME"
 
 log_success "Published ${ASSET_NAME} to ${RELEASE_TAG} (sha256=${LOCAL_SHA})"

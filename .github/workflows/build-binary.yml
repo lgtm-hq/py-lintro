@@ -230,7 +230,9 @@ jobs:
       # docs/npm-distribution.md) used to rebuild from scratch even when the
       # release already carried this job's own verified binary. The step below
       # reuses that asset when its SHA256 matches the sha256 artifact this run
-      # produced, and every step it makes redundant is gated on its output.
+      # produced, and every step it makes redundant is gated on its output. It
+      # also promotes an `<asset>.new` left behind by a swap that was killed
+      # between its delete and its rename, so that window costs no rebuild.
       - name: Check for reusable release asset
         id: reuse
         env:

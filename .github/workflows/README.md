@@ -146,11 +146,13 @@ summary and opens/updates a deduplicated GitHub issue on `main` failures — hen
 `build-binary.yml`'s `Build macOS Binary` / `Build Linux Binary` jobs are idempotent
 (#2435). Before compiling, each checks whether the release already carries its platform
 asset and whether that asset's SHA256 matches the `sha256-*` artifact this same run
-produced on an earlier attempt. On a match the job reuses the asset and skips
-`Build binary`, `Verify binary`, `Smoke-test tool registry`, `Finalize binary` and
-`Upload to release`; only the artifact uploads run again. The same-run artifact is
-written after verify and smoke-test passed on that earlier attempt, which is what makes
-skipping them safe — an asset uploaded by hand has no such artifact and is rebuilt.
+produced on an earlier attempt. The check also looks at `<asset>.new` when the published
+name is missing or stale, so an interrupted swap does not cost a rebuild. On a match the
+job reuses the asset and skips `Build binary`, `Verify binary`,
+`Smoke-test tool registry`, `Finalize binary` and `Upload to release`; only the artifact
+uploads run again. The same-run artifact is written after verify and smoke-test passed
+on that earlier attempt, which is what makes skipping them safe — an asset uploaded by
+hand has no such artifact and is rebuilt.
 
 Consequences for operators:
 
@@ -158,9 +160,12 @@ Consequences for operators:
   binary jobs pass in ~2 minutes instead of a ~20-minute rebuild, and `npm-publish` runs
   under the trusted workflow identity it needs. There is no separate dispatch path.
 - The two compile jobs upload with `scripts/build/upload_release_asset.sh`, which
-  uploads `<asset>.new`, verifies its checksum, and only then deletes and renames; a
-  retry promotes a checksum-matching `<asset>.new` left by a killed swap. A killed
-  runner can no longer strip a good binary off a published release, which is what the
+  uploads `<asset>.new`, verifies its checksum, and only then deletes and renames. A
+  kill between that delete and that rename leaves only `<asset>.new`, and both halves of
+  the next attempt recover from it: the reuse check promotes it when it matches the
+  run's checksum artifact (so the rerun still skips the rebuild), and the uploader
+  promotes it when it matches the binary it was about to upload. A killed runner can no
+  longer strip a good binary off a published release, which is what the
   `softprops/action-gh-release` overwrite path did on `v0.147.3`. The
   `Generate Man Page` and `Create Universal Binary` jobs still upload with
   `softprops/action-gh-release`; their assets are regenerated cheaply, so the swap was

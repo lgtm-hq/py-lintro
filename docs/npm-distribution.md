@@ -78,11 +78,11 @@ to the release (SHA256-matched against the `sha256-*` artifact the same run prod
 and skip the ~20-minute Nuitka rebuild, the verify/smoke steps it feeds, and the release
 upload. Uploads also stage `<asset>.new` and verify it before anything is removed, so
 the only moment the release lacks its binary is the single delete-plus-rename API pair
-at the end; a kill there leaves `<asset>.new` in place for the next attempt to promote,
-instead of the multi-second upload window the old overwrite path had. Approve the npm
-environment only when that same production run reaches its waiting npm job. Do not
-dispatch or retry the standalone `publish-npm.yml` workflow as a substitute for the
-production chain.
+at the end; a kill there leaves `<asset>.new` in place, and the next attempt promotes it
+from the reuse check, so the rerun still skips the rebuild, instead of the multi-second
+upload window the old overwrite path had. Approve the npm environment only when that
+same production run reaches its waiting npm job. Do not dispatch or retry the standalone
+`publish-npm.yml` workflow as a substitute for the production chain.
 
 Trusted publishing requires **npm ≥ 11.5.1**. The workflow uses **Node 24**, which ships
 a compatible bundled npm — do **not** run `npm install -g npm` (or any in-place

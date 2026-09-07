@@ -29,8 +29,9 @@ Outputs (GITHUB_OUTPUT, when set):
                      a value when "Finalize binary" was skipped.
 
 Environment:
-  GH_TOKEN            Token with contents: read (release) and actions: read
-                      (run artifacts).
+  GH_TOKEN            Token with contents: read (release), actions: read (run
+                      artifacts), and contents: write when an interrupted swap
+                      has to be promoted.
   GITHUB_REPOSITORY   owner/repo; exported to gh as GH_REPO when set.
   GITHUB_RUN_ID       Run whose artifacts are consulted.
   GITHUB_OUTPUT       Appended to when set.
@@ -45,6 +46,16 @@ So a match proves the bytes on the release are bytes this job already verified
 and smoke-tested, which is what makes skipping those steps safe. An asset
 uploaded by hand (or by any other run) has no matching same-run artifact and is
 therefore treated as unverified: the job rebuilds.
+
+Interrupted swaps
+-----------------
+upload_release_asset.sh publishes through <asset-name>.new and then deletes the
+old asset and renames the staging one. A kill between those two calls leaves
+the release holding only <asset-name>.new. When <asset-name> is missing or its
+checksum is stale, this script therefore also inspects <asset-name>.new; if
+*that* matches the same-run checksum it is promoted (any stale <asset-name> is
+deleted, <asset-name>.new is renamed onto it) and reused. The same invariant
+applies: the bytes were verified and smoke-tested by an earlier attempt.
 
 Never fails the step: every lookup failure degrades to reuse=false.
 EOF
@@ -128,34 +139,56 @@ if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{64}$ ]]; then
 fi
 EXPECTED_SHA="$(printf '%s' "$EXPECTED_SHA" | tr '[:upper:]' '[:lower:]')"
 
-# 2. The asset currently attached to the release.
-if ! gh release download "$RELEASE_TAG" \
-	--pattern "$ASSET_NAME" \
-	--dir "$ASSET_DIR" \
-	--clobber >/dev/null 2>&1; then
-	log_warning "Release ${RELEASE_TAG} has no ${ASSET_NAME} asset; rebuilding"
+# Echo the lowercase SHA256 of a published asset into ASSET_SHA and its local
+# path into ASSET_FILE, or return 1 when the release has no such asset (or it
+# cannot be hashed). Two names are tried in turn by the caller.
+ASSET_FILE=""
+ASSET_SHA=""
+inspect_published_asset() {
+	local name="$1"
+	local path sha
+	path="$(release_download_asset "$RELEASE_TAG" "$name" "$ASSET_DIR")" || return 1
+	sha="$(sha256_file "$path")" || return 1
+	ASSET_FILE="$path"
+	ASSET_SHA="$(printf '%s' "$sha" | tr '[:upper:]' '[:lower:]')"
+}
+
+# 2. The asset currently attached to the release, then - when that is missing or
+#    stale - the staging asset an interrupted swap can leave behind. A kill
+#    between upload_release_asset.sh's delete and its rename leaves the release
+#    holding only <asset>.new; promoting it here finishes that swap and saves
+#    the rebuild the missing final name would otherwise force.
+STAGING_NAME="$(release_staging_name "$ASSET_NAME")"
+REUSE_NAME=""
+if inspect_published_asset "$ASSET_NAME" && [[ "$ASSET_SHA" == "$EXPECTED_SHA" ]]; then
+	REUSE_NAME="$ASSET_NAME"
+elif inspect_published_asset "$STAGING_NAME" && [[ "$ASSET_SHA" == "$EXPECTED_SHA" ]]; then
+	REUSE_NAME="$STAGING_NAME"
+fi
+
+# 3. Only an exact match against the run's own checksum short-circuits the build.
+if [[ -z "$REUSE_NAME" ]]; then
+	log_warning "Release ${RELEASE_TAG} has no ${ASSET_NAME} matching the run checksum ${EXPECTED_SHA}; rebuilding"
 	emit false
 fi
 
-DOWNLOADED="$ASSET_DIR/$ASSET_NAME"
-if [[ ! -f "$DOWNLOADED" ]]; then
-	log_warning "Download of ${ASSET_NAME} produced no file; rebuilding"
-	emit false
-fi
-
-if ! ACTUAL_SHA="$(sha256_file "$DOWNLOADED")"; then
-	log_warning "No SHA256 tool found (expected sha256sum or shasum); rebuilding"
-	emit false
-fi
-ACTUAL_SHA="$(printf '%s' "$ACTUAL_SHA" | tr '[:upper:]' '[:lower:]')"
-
-# 3. Only an exact match short-circuits the build.
-if [[ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]]; then
-	log_warning "Release asset ${ASSET_NAME} sha256=${ACTUAL_SHA} does not match the run checksum ${EXPECTED_SHA}; rebuilding"
-	emit false
+if [[ "$REUSE_NAME" == "$STAGING_NAME" ]]; then
+	# Finish the interrupted swap before reusing the bytes, so the release ends
+	# this job with the asset under its published name. A failure here is not
+	# fatal: the binary is still rebuilt and re-uploaded by the normal path.
+	STAGING_ID="$(release_asset_id "$RELEASE_TAG" "$STAGING_NAME")"
+	if [[ -z "$STAGING_ID" ]]; then
+		log_warning "Could not resolve ${STAGING_NAME} on ${RELEASE_TAG}; rebuilding"
+		emit false
+	fi
+	log_info "Promoting ${STAGING_NAME} left by an interrupted swap"
+	if ! release_promote_asset "$RELEASE_TAG" "$STAGING_ID" "$ASSET_NAME"; then
+		log_warning "Could not promote ${STAGING_NAME}; rebuilding"
+		emit false
+	fi
 fi
 
 mkdir -p "$(dirname "$DEST_PATH")"
-cp "$DOWNLOADED" "$DEST_PATH"
+cp "$ASSET_FILE" "$DEST_PATH"
 chmod +x "$DEST_PATH"
-emit true "$ACTUAL_SHA"
+emit true "$ASSET_SHA"

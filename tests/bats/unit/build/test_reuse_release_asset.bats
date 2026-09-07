@@ -6,10 +6,12 @@ load "../../helpers/common"
 
 SCRIPT="${BUILD_SCRIPTS_DIR}/reuse_release_asset.sh"
 
-# Minimal `gh` stub. Release assets live in $GH_STATE/assets/<name>, run
-# artifacts in $GH_STATE/artifacts/<artifact>/<file>; anything absent makes the
+# `gh` stub. Release assets live in $GH_STATE/assets/<name> (their id is their
+# name, which is enough to model delete-by-id and rename-by-id), run artifacts
+# in $GH_STATE/artifacts/<artifact>/<file>; anything absent makes the
 # corresponding gh subcommand exit non-zero, which is what the script treats as
-# "nothing to reuse".
+# "nothing to reuse". API calls are appended to $GH_STUB_LOG so the promotion
+# ordering can be asserted.
 write_gh_stub() {
 	local dir="$1"
 	mkdir -p "$dir"
@@ -17,6 +19,7 @@ write_gh_stub() {
 #!/usr/bin/env bash
 set -euo pipefail
 
+ARGV=("$@")
 sub="${1:-} ${2:-}"
 shift 2 || true
 
@@ -43,6 +46,8 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
+assets="${GH_STATE}/assets"
+
 case "$sub" in
 "run download")
 	src="${GH_STATE}/artifacts/${name}"
@@ -50,9 +55,44 @@ case "$sub" in
 	cp "$src"/* "$outdir/"
 	;;
 "release download")
-	src="${GH_STATE}/assets/${pattern}"
+	src="${assets}/${pattern}"
 	[[ -f "$src" ]] || exit 1
 	cp "$src" "${outdir}/${pattern}"
+	;;
+"api -X")
+	# `gh api -X <METHOD> <path> [-f name=<new>]`; args were shifted above, so
+	# re-read them from the saved copy.
+	method="${ARGV[2]}"
+	id="${ARGV[3]##*/}"
+	case "$method" in
+	DELETE)
+		rm -f "${assets:?}/${id}"
+		echo "delete ${id}" >>"$GH_STUB_LOG"
+		;;
+	PATCH)
+		new_name=""
+		for arg in "${ARGV[@]}"; do
+			case "$arg" in
+			name=*) new_name="${arg#name=}" ;;
+			esac
+		done
+		[[ -n "$new_name" ]] || exit 1
+		[[ -f "${assets}/${id}" ]] || exit 1
+		mv "${assets}/${id}" "${assets}/${new_name}"
+		echo "rename ${id} -> ${new_name}" >>"$GH_STUB_LOG"
+		;;
+	*)
+		echo "unsupported method: $method" >&2
+		exit 64
+		;;
+	esac
+	;;
+"api repos/{owner}/{repo}/releases/tags/"*)
+	# `gh api <path> --jq '.assets[] | select(.name == "X") | .id'`
+	asset="$(printf '%s' "${ARGV[3]}" | sed -n 's/.*select(\.name == "\([^"]*\)").*/\1/p')"
+	[[ -n "$asset" ]] || exit 64
+	[[ -f "${assets}/${asset}" ]] || exit 0
+	printf '%s\n' "$asset"
 	;;
 *)
 	echo "unsupported gh invocation: $sub" >&2
@@ -70,6 +110,8 @@ setup() {
 	mkdir -p "$WORKDIR"
 	export GH_STATE="${BATS_TEST_TMPDIR}/gh-state"
 	mkdir -p "${GH_STATE}/assets" "${GH_STATE}/artifacts"
+	export GH_STUB_LOG="${BATS_TEST_TMPDIR}/gh-calls.log"
+	: >"$GH_STUB_LOG"
 	STUB_BIN="${BATS_TEST_TMPDIR}/stub-bin"
 	write_gh_stub "$STUB_BIN"
 	PATH="${STUB_BIN}:${PATH}"
@@ -95,6 +137,10 @@ publish_asset() {
 publish_checksum_artifact() {
 	mkdir -p "${GH_STATE}/artifacts/${ARTIFACT}"
 	printf '%s\n' "$1" >"${GH_STATE}/artifacts/${ARTIFACT}/${ARTIFACT}.txt"
+}
+
+publish_staging_asset() {
+	printf '%s\n' "$1" >"${GH_STATE}/assets/${ASSET_NAME}.new"
 }
 
 run_script() {
@@ -136,7 +182,7 @@ run_script() {
 	run_script
 	assert_success
 	assert_equal "false" "$(get_github_output reuse)"
-	assert_output --partial "has no ${ASSET_NAME} asset"
+	assert_output --partial "has no ${ASSET_NAME} matching the run checksum"
 }
 
 @test "reuse_release_asset.sh: a checksum mismatch rebuilds and leaves no binary" {
@@ -147,7 +193,7 @@ run_script() {
 	run_script
 	assert_success
 	assert_equal "false" "$(get_github_output reuse)"
-	assert_output --partial "does not match the run checksum"
+	assert_output --partial "has no ${ASSET_NAME} matching the run checksum"
 	[[ ! -f "$DEST" ]]
 }
 
@@ -206,6 +252,77 @@ run_script() {
 	assert_success
 	assert_output --partial "Reusing verified release asset"
 	assert_equal "" "$(cat "$output_file")"
+}
+
+@test "reuse_release_asset.sh: promotes and reuses a staging asset left by a killed swap" {
+	# upload_release_asset.sh deletes the live asset and then renames
+	# <asset>.new onto it. A kill between those two calls leaves only the
+	# staging asset; this run finishes the swap instead of rebuilding.
+	publish_staging_asset "already-released-bytes"
+	local sha
+	sha="$(compute_expected_sha256 "${GH_STATE}/assets/${ASSET_NAME}.new")"
+	publish_checksum_artifact "$sha"
+
+	run_script
+	assert_success
+	assert_equal "true" "$(get_github_output reuse)"
+	assert_equal "$sha" "$(get_github_output sha256)"
+	assert_output --partial "Promoting ${ASSET_NAME}.new"
+	# The release ends the job with the asset under its published name.
+	[[ -f "${GH_STATE}/assets/${ASSET_NAME}" ]]
+	[[ ! -e "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+	assert_equal "rename ${ASSET_NAME}.new -> ${ASSET_NAME}" "$(sed -n 1p "$GH_STUB_LOG")"
+	# ...and the binary is staged for the rest of the job.
+	[[ -x "$DEST" ]]
+	assert_equal "$sha" "$(compute_expected_sha256 "$DEST")"
+}
+
+@test "reuse_release_asset.sh: a stale staging asset rebuilds and is left for the upload" {
+	# Bytes from some other build: not verified by this run, so no promotion
+	# and no reuse. upload_release_asset.sh removes it before its own upload.
+	publish_staging_asset "some-other-build"
+	publish_checksum_artifact "$(printf '%064d' 1)"
+
+	run_script
+	assert_success
+	assert_equal "false" "$(get_github_output reuse)"
+	assert_output --partial "has no ${ASSET_NAME} matching the run checksum"
+	[[ ! -f "$DEST" ]]
+	# Nothing was promoted or deleted: the rebuild path owns the cleanup.
+	assert_equal "" "$(cat "$GH_STUB_LOG")"
+	[[ -f "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+}
+
+@test "reuse_release_asset.sh: a stale live asset is replaced by the matching staging asset" {
+	# Both names present: the live one is from an older build, the staging one
+	# is what this run verified. Promotion deletes the stale live asset first.
+	publish_asset "some-other-build"
+	publish_staging_asset "already-released-bytes"
+	local sha
+	sha="$(compute_expected_sha256 "${GH_STATE}/assets/${ASSET_NAME}.new")"
+	publish_checksum_artifact "$sha"
+
+	run_script
+	assert_success
+	assert_equal "true" "$(get_github_output reuse)"
+	assert_equal "delete ${ASSET_NAME}" "$(sed -n 1p "$GH_STUB_LOG")"
+	assert_equal "rename ${ASSET_NAME}.new -> ${ASSET_NAME}" "$(sed -n 2p "$GH_STUB_LOG")"
+	assert_equal "$sha" "$(compute_expected_sha256 "${GH_STATE}/assets/${ASSET_NAME}")"
+}
+
+@test "reuse_release_asset.sh: a matching live asset is reused without touching the release" {
+	# Both names present and the live one already matches: the normal reuse
+	# path must not promote anything.
+	publish_asset "already-released-bytes"
+	publish_staging_asset "already-released-bytes"
+	publish_checksum_artifact "$(compute_expected_sha256 "${GH_STATE}/assets/${ASSET_NAME}")"
+
+	run_script
+	assert_success
+	assert_equal "true" "$(get_github_output reuse)"
+	assert_output --partial "Reusing verified release asset"
+	assert_equal "" "$(cat "$GH_STUB_LOG")"
+	[[ -f "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
 }
 
 @test "reuse_release_asset.sh: matches the Linux workflow argv contract" {
