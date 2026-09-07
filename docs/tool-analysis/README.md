@@ -56,8 +56,6 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: No auto-fix, limited CLI pass-through, single-process execution
 - 🚀 **Enhanced**: Central line-length injection, normalized issues, safe version checks
 
-### [Hadolint Analysis](./hadolint-analysis.md)
-
 ### [Cppcheck Analysis](./cppcheck-analysis.md)
 
 **C/C++ Static Analyzer**
@@ -65,6 +63,8 @@ implementations with the core tools themselves.
 - ✅ **Preserved**: Six-level severity, CWE ids, inconclusive flag via native XML
 - ⚠️ **Defaults**: Check-only; `warning,style,performance,portability` enabled
 - 🚀 **Notes**: Native XML parser (SARIF is lossy for cppcheck); fails closed
+
+### [Hadolint Analysis](./hadolint-analysis.md)
 
 ### [Bandit Analysis](./bandit-analysis.md)
 

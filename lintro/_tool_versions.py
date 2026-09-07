@@ -71,6 +71,9 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CARGO_DENY: "0.20.0",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.CLIPPY: "1.98.0",
+    # Recommended/pinned version (Homebrew, CI). The supported floor is the
+    # lower ``min_version`` in manifest.src.json, so the Debian package the
+    # tools image installs is still accepted.
     ToolName.CPPCHECK: "2.21.0",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",

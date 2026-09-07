@@ -41,6 +41,7 @@ def test_check_detects_seeded_defects(
     codes = {str(getattr(i, "code", "")) for i in (result.issues or [])}
     assert_that(codes).contains("arrayIndexOutOfBounds")
     assert_that(codes).contains("uninitvar")
+    assert_that(codes).contains("memleak")
 
 
 def test_check_clean_file_passes(

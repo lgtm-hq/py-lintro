@@ -1283,8 +1283,14 @@ standalone on files without any build/project context.
 - macOS: `brew install cppcheck`
 - Debian/Ubuntu: `apt-get install cppcheck`
 
-Cppcheck is driven entirely by command-line options (no native config file), so all
-configuration is via `--tool-options`.
+Lintro runs Cppcheck over the files it discovers and drives it entirely through
+command-line options, so configuration goes through `--tool-options`. Cppcheck's own
+project modes (`--project=compile_commands.json`, GUI project files) and suppression
+files are not wired into the Lintro integration.
+
+Lintro requires Cppcheck **2.13.0 or newer** (the version pinned for the Docker image
+and CI is 2.21.0). Distribution packages older than 2.13.0 are rejected by the version
+check; install from Homebrew or upstream in that case.
 
 **Available Options via `--tool-options`:**
 
