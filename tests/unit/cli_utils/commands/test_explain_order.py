@@ -75,3 +75,16 @@ def test_check_without_explain_order_still_runs() -> None:
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_run.called).is_true()
     assert_that(result.output).does_not_contain("Execution order (shadow mode)")
+
+
+def test_check_explain_order_still_validates_the_diff_base() -> None:
+    """``--diff`` validation runs before the explain-order early exit."""
+    runner = CliRunner()
+    args = ["--diff", ".", "--tools", "ruff", "--explain-order"]
+
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
+        result = runner.invoke(check_command, args)
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(mock_run.called).is_false()
+    assert_that(result.output).does_not_contain("Execution order (shadow mode)")

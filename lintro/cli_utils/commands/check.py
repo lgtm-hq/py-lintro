@@ -232,6 +232,8 @@ def check_command(
         SystemExit: Process exit with the aggregated exit code from tools,
             or 1 when the config cannot be parsed.
     """
+    validate_diff_base_ref(diff_base=diff_base)
+
     # Add default paths if none provided
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
@@ -248,8 +250,6 @@ def check_command(
         from lintro.utils.file_cache import clear_all_caches
 
         clear_all_caches()
-
-    validate_diff_base_ref(diff_base=diff_base)
 
     # Build tool-specific options string
     tool_option_parts: list[str] = []
