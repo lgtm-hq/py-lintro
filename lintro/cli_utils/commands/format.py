@@ -5,6 +5,7 @@ import click
 from lintro.api import core as api
 from lintro.api.pipeline import run_lint_with_ai
 from lintro.cli_utils.diff_option import validate_diff_base_ref
+from lintro.cli_utils.order_explain import emit_order_explanation
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 
@@ -133,6 +134,16 @@ DEFAULT_ACTION: str = "fmt"
     is_flag=True,
     help="Show a per-tool performance profile (timing table + suggestions)",
 )
+@click.option(
+    "--explain-order",
+    "explain_order",
+    is_flag=True,
+    help=(
+        "Print the claims-derived execution order next to the current one, "
+        "with the pattern behind each disagreement, then exit without "
+        "running any tool. Reporting only (#1741)."
+    ),
+)
 def format_command(
     ctx: click.Context,
     paths: tuple[str, ...],
@@ -154,6 +165,7 @@ def format_command(
     dry_run: bool,
     no_art: bool,
     profile: bool,
+    explain_order: bool,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -186,6 +198,8 @@ def format_command(
         dry_run: bool: Preview would-be fixes without modifying any files.
         no_art: bool: Suppress the decorative ASCII art printed after the run.
         profile: bool: Whether to emit a per-tool performance profile.
+        explain_order: bool: Print the shadow-mode execution-order diff
+            and exit without running tools.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools,
@@ -195,6 +209,13 @@ def format_command(
 
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
+
+    if explain_order:
+        emit_order_explanation(
+            tools=tools,
+            action=DEFAULT_ACTION,
+            paths=normalized_paths,
+        )
 
     # Run the AI-aware pipeline: execute, AI-enhance, render.
     try:

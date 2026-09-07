@@ -32,6 +32,7 @@ from lintro.cli_utils.install_output import (
     render_outcome_summary,
     unresolved_tool_names,
 )
+from lintro.cli_utils.order_explain import render_doctor_order_section
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_quickfix import build_quick_fix
@@ -610,6 +611,7 @@ def doctor_command(
     _render_ai_checks(display_console, ai_checks)
     _render_oxlint_checks(display_console, oxlint_checks)
     _render_mcp_extra(display_console)
+    render_doctor_order_section(display_console)
 
     # Summary
     display_console.print()

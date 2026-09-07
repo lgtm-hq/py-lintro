@@ -240,9 +240,13 @@ by the two orthogonal scope booleans instead:
   verdict? False for project-scoped analysis such as mypy, pylint's cross-module checks,
   import-linter contracts and dependency audits.
 
-Ordering per pattern will be `FIX` → `FORMAT` → `CHECK`, and at most one tool may hold
-`FORMAT` for a given pattern. Nothing derives order from these declarations yet —
-ordering still reads `DEFAULT_TOOL_PRIORITIES`.
+Ordering per pattern is `FIX` → `FORMAT` → `CHECK`, and at most one tool may hold
+`FORMAT` for a given pattern. Execution still reads `DEFAULT_TOOL_PRIORITIES`: the
+derived order is computed in **shadow mode** only (issue #1741) and reported, never
+executed. Run `lintro check --explain-order` to see the derived order beside the current
+one, or `lintro doctor` for the summary. See
+[Shadow-mode order diff](configuration.md#shadow-mode-order-diff) in the configuration
+guide.
 
 ### ToolResult
 

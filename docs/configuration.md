@@ -964,6 +964,64 @@ tool_priorities = { ruff = 5, black = 10, prettier = 1 }
 Lower priority values run first. This ensures formatters run before linters, avoiding
 false positives from linters detecting issues that formatters would fix.
 
+### Shadow-mode order diff
+
+The scalar priorities above are being replaced by an order **derived** from each tool's
+declared claims and capabilities (epic #1735). Step 3 of that epic computes the derived
+order alongside the live one and reports the difference; nothing about execution
+changes, and `tool_order`, `tool_order_custom` and `tool_priorities` still decide what
+runs.
+
+```bash
+lintro check --explain-order              # derived vs current, then exit
+lintro check --tools ruff,black --explain-order
+lintro fmt --explain-order
+lintro doctor                             # compact summary section
+```
+
+`--explain-order` prints the diff and exits without running a single tool. Tool
+selection is resolved exactly as the real run would resolve it, so the "current" order
+shown is the order that invocation would have executed.
+
+Derivation rules:
+
+| Rule              | Behaviour                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| Phase per pattern | A tool occupies the earliest phase it holds there: `FIX` → `FORMAT` → `CHECK`               |
+| One invocation    | A tool that both fixes and checks a pattern sits in `FIX`; its diagnostics come out with it |
+| Edges             | Every earlier-phase tool precedes every later-phase tool for that pattern                   |
+| Ties              | Equal phases derive no edge, so the tie breaks alphabetically                               |
+| Broad claims      | A tool claiming `*` (typos, gitleaks, trufflehog) joins every pattern group                 |
+| Project-scoped    | A claim with no patterns (osv-scanner) derives no edges                                     |
+| Cycles            | Reported before ordering, naming the tools and the patterns whose edges closed them         |
+
+Sample output:
+
+```text
+Execution order (shadow mode)
+  Reporting only: the scalar-priority order is still the one that runs.
+
+  Current (scalar priority):
+    1. black
+    2. ruff
+
+  Derived (claims):
+    1. ruff
+    2. black
+
+  Differences (1):
+    ruff should run before black (current order runs black first)
+      *.py: ruff(fix) -> black(format)
+      *.pyi: ruff(fix) -> black(format)
+
+  Cycles (0): the derived graph is a DAG.
+```
+
+The derived order recovers the intended pairings that the priority table gets wrong
+today — `ruff → black` on Python (which `[tool.lintro.post_checks]` currently patches up
+separately), `oxlint → oxfmt` on JS/TS, `prettier → html-validate` on HTML and
+`shfmt → shellcheck` on shell.
+
 ### Post-checks Configuration
 
 Black is integrated as a post-check tool by default. Post-checks run after the main

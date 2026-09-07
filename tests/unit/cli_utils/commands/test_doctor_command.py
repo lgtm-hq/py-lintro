@@ -1062,3 +1062,47 @@ def test_output_json_includes_optional_extras() -> None:
     data = json.loads(output.getvalue())
     extras = {entry["name"]: entry for entry in data["optional_extras"]}
     assert_that(extras).contains_key("mcp")
+
+
+def test_doctor_renders_execution_order_shadow_section() -> None:
+    """The shadow-mode execution-order section (#1741) is part of doctor output."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch("subprocess.run") as mock_run,
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.output).contains("Execution order (shadow)")
+    assert_that(result.output).contains("Reporting only")
+    assert_that(result.output).contains("lintro check --explain-order")
+
+
+def test_doctor_order_section_is_informational_only() -> None:
+    """Order differences never change the doctor exit code."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.order_explain.doctor_order_lines",
+            return_value=[
+                "  Execution order (shadow)",
+                "    tools: 2  differences: 1  cycles: 0",
+            ],
+        ),
+        patch("subprocess.run") as mock_run,
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("differences: 1")
