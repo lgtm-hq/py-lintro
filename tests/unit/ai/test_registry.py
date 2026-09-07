@@ -165,11 +165,43 @@ def test_all_metadata_covers_every_provider() -> None:
         assert_that(record.provider).is_equal_to(provider)
 
 
-def test_metadata_for_accepts_enum_and_string() -> None:
-    """A user-typed provider name resolves to the same record as the enum."""
-    assert_that(metadata_for("anthropic")).is_same_as(
-        metadata_for(AIProvider.ANTHROPIC),
-    )
+@pytest.mark.parametrize("name", ["anthropic", "Anthropic", "ANTHROPIC"])
+def test_metadata_for_accepts_enum_and_any_casing(name: str) -> None:
+    """A user-typed provider name resolves to the same record as the enum.
+
+    Args:
+        name: Spelling a user might type for ``--provider``.
+    """
+    assert_that(metadata_for(name)).is_same_as(metadata_for(AIProvider.ANTHROPIC))
+
+
+def test_facade_loads_the_builtin_plugins_itself() -> None:
+    """Lookups work on a cold registry; no caller has to load plugins first.
+
+    The tables this facade replaced needed no registration, so a lookup that
+    silently answered ``None`` until :func:`get_provider` had run once would be
+    a regression that only shows up out of order.
+    """
+    from lintro.ai.providers import get_default_model
+    from lintro.ai.providers.cli_contract_check import declared_cli_providers
+
+    saved = all_providers()
+    try:
+        clear_registered()
+        assert_that(list(all_metadata())).is_equal_to(list(AIProvider))
+        clear_registered()
+        assert_that(get_default_model("Anthropic")).is_equal_to("claude-sonnet-4-6")
+        clear_registered()
+        assert_that(list(declared_cli_providers())).is_equal_to(list(AIProvider))
+    finally:
+        restore_registered(saved)
+
+
+def test_get_default_model_returns_none_for_an_unknown_provider() -> None:
+    """An unrecognised name is None, not an exception, for the status renderer."""
+    from lintro.ai.providers import get_default_model
+
+    assert_that(get_default_model("gemini")).is_none()
 
 
 def test_model_pricing_merges_every_provider() -> None:

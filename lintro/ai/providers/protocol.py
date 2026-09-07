@@ -82,8 +82,9 @@ class ProviderMetadata:
         default_model: Model identifier used when the user names none.
         default_api_key_env: Environment variable read for the API key.
         supported_transports: Transports this provider can actually serve. A
-            transport absent from the set is a configuration error, not a
-            runtime failure — doctor reports the pairing as incompatible.
+            transport absent from the set is a configuration error: doctor
+            reports the pairing as incompatible, and the provider constructor
+            rejects it rather than failing later inside the vendor call.
         default_transport: The transport this provider is documented and
             steered towards — what doctor tells a user to set, and what the
             generated provider table in ``docs/ai-features.md`` shows. Always
@@ -96,10 +97,10 @@ class ProviderMetadata:
             when the provider has no API transport (CLI-only vendors).
         cli_binary: Executable looked up on ``PATH`` for CLI transport, or
             ``None`` when the provider has no CLI transport.
-        cli_contract_id: Key identifying the provider's entry in the CLI
-            contract table, or ``None`` when the provider declares no CLI
-            contract. Kept a plain string so a caller that only needs the key
-            never touches the contract definitions.
+        cli_contract_id: Stable string key for the provider's CLI contract, or
+            ``None`` when it declares none. Kept a plain string so a caller
+            that only needs the key never imports the contract definitions
+            alongside *cli_contract*.
         cli_contract: The flag surface and version floor lintro expects of
             *cli_binary*, or ``None`` when the provider declares no CLI
             contract. Declared here so a provider's CLI identity and the
@@ -137,9 +138,12 @@ class ProviderMetadata:
 
         Raises:
             ValueError: If ``default_transport`` is not one of
-                ``supported_transports``. A default the provider cannot serve
-                would turn every unset-transport run into a runtime failure,
-                so it is rejected where it is declared.
+                ``supported_transports``. Doctor and the generated provider
+                table steer users towards this transport, so a default the
+                provider cannot serve would advertise an unusable pairing. It
+                is rejected where it is declared rather than surfacing as a
+                confusing doctor hint. (It is not the factory's
+                unset-transport fallback; see the field's own docs.)
         """
         object.__setattr__(self, "pricing", MappingProxyType(dict(self.pricing)))
         if self.default_transport not in self.supported_transports:

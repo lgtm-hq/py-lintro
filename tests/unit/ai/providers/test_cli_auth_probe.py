@@ -36,17 +36,50 @@ def _probe(provider: AIProvider) -> CliAuthProbe:
     return probe
 
 
+#: An API-key variable no provider declares, used for override cases.
+_RENAMED_KEY = "RENAMED_API_KEY"
+
+
+def _api_key_honouring_providers() -> list[AIProvider]:
+    """Return the providers whose CLI reads the resolved API-key variable.
+
+    Returns:
+        Providers whose probe sets ``honors_api_key_env``.
+    """
+    return [
+        provider
+        for provider in AIProvider
+        if metadata_for(provider).cli_auth_probe is not None
+        and _probe(provider).honors_api_key_env
+    ]
+
+
 @pytest.fixture(autouse=True)
 def _no_ambient_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Strip every credential the probes read so results are deterministic.
+
+    The variables are read off the plugin metadata rather than copied, so a
+    provider that starts reading a new one is stripped here without this
+    fixture being edited.
 
     Args:
         monkeypatch: Pytest environment patcher.
         tmp_path: Empty directory used as the home directory.
     """
-    for name in ("ANTHROPIC_API_KEY", "CURSOR_API_KEY", "CODEX_API_KEY", "OTHER_KEY"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv(_RENAMED_KEY, raising=False)
+    for provider in AIProvider:
+        metadata = metadata_for(provider)
+        monkeypatch.delenv(metadata.default_api_key_env, raising=False)
+        probe = metadata.cli_auth_probe
+        if probe is None:
+            continue
+        for name in probe.extra_env_vars:
+            monkeypatch.delenv(name, raising=False)
+    # `home` is a classmethod; patching it with a plain lambda would break the
+    # `Path.home()` call the probe makes. HOME is set too so an `expanduser`
+    # anywhere downstream cannot reach the real home directory either.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
 
 
 @pytest.mark.parametrize("provider", list(AIProvider))
@@ -64,10 +97,7 @@ def test_probe_reports_unconfigured_without_any_credential(
     ).is_false()
 
 
-@pytest.mark.parametrize(
-    "provider",
-    [AIProvider.ANTHROPIC, AIProvider.CURSOR],
-)
+@pytest.mark.parametrize("provider", _api_key_honouring_providers())
 def test_api_key_honouring_probes_accept_the_resolved_variable(
     provider: AIProvider,
     monkeypatch: pytest.MonkeyPatch,
@@ -84,6 +114,45 @@ def test_api_key_honouring_probes_accept_the_resolved_variable(
 
     assert_that(probe.is_configured(key_env=key_env)).is_true()
     assert_that(probe.describe(key_env=key_env)).contains(key_env)
+
+
+@pytest.mark.parametrize("provider", _api_key_honouring_providers())
+def test_api_key_honouring_probes_accept_a_renamed_variable(
+    provider: AIProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``honors_api_key_env`` means the *resolved* name, not the default one.
+
+    ``ai.api_key_env`` renames the variable doctor reads, so the probe must
+    accept whatever name it is handed rather than the provider default.
+
+    Args:
+        provider: The provider under test.
+        monkeypatch: Pytest environment patcher.
+    """
+    probe = _probe(provider)
+    monkeypatch.setenv(_RENAMED_KEY, "secret")
+
+    assert_that(probe.is_configured(key_env=_RENAMED_KEY)).is_true()
+    assert_that(probe.describe(key_env=_RENAMED_KEY)).contains(_RENAMED_KEY)
+    assert_that(
+        probe.is_configured(key_env=metadata_for(provider).default_api_key_env),
+    ).is_false()
+
+
+def test_probes_that_ignore_the_api_key_env_reject_a_renamed_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A renamed SDK variable proves nothing for a CLI that never reads it.
+
+    Args:
+        monkeypatch: Pytest environment patcher.
+    """
+    monkeypatch.setenv(_RENAMED_KEY, "secret")
+
+    assert_that(
+        _probe(AIProvider.OPENAI).is_configured(key_env=_RENAMED_KEY),
+    ).is_false()
 
 
 def test_openai_probe_ignores_the_sdk_api_key_variable(
@@ -120,6 +189,56 @@ def test_openai_probe_accepts_the_login_file(tmp_path: Path) -> None:
     assert_that(
         _probe(AIProvider.OPENAI).is_configured(key_env="OPENAI_API_KEY"),
     ).is_true()
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        (
+            AIProvider.ANTHROPIC,
+            (
+                "{key_env} set (API billing overrides subscription)",
+                "Claude CLI auth not verified",
+                "Run `claude login` or set ANTHROPIC_API_KEY",
+            ),
+        ),
+        (
+            AIProvider.OPENAI,
+            (
+                "Codex auth configured (CODEX_API_KEY or ~/.codex/auth.json)",
+                "Codex CLI auth not verified",
+                "Run `codex login` or set CODEX_API_KEY",
+            ),
+        ),
+        (
+            AIProvider.CURSOR,
+            (
+                "{key_env} is set",
+                "Cursor CLI auth not verified",
+                "Run `agent login` or set CURSOR_API_KEY",
+            ),
+        ),
+    ],
+)
+def test_probe_messages_are_pinned_verbatim(
+    provider: AIProvider,
+    expected: tuple[str, str, str],
+) -> None:
+    """The user-visible probe strings are pinned, not read from the record.
+
+    Doctor's tests compare its output against the metadata, which proves the
+    wiring but not the wording. These literals are the pre-#2308 doctor
+    messages, so a typo in a message shows up here rather than shipping.
+
+    Args:
+        provider: The provider under test.
+        expected: The ``(configured, unverified, hint)`` triple it must carry.
+    """
+    probe = _probe(provider)
+
+    assert_that(
+        (probe.configured_message, probe.unverified_message, probe.hint),
+    ).is_equal_to(expected)
 
 
 def test_describe_leaves_a_message_without_a_placeholder_alone() -> None:

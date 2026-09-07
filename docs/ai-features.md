@@ -1082,6 +1082,12 @@ code. Do not hand-edit them; change the metadata.
 
 <!-- END SNAPSHOT: provider-table -->
 
+`(default)` marks the transport lintro documents and `lintro doctor` steers you to; it
+is **not** a fallback for an omitted `ai.transport`. That fallback is `api` for every
+provider, Cursor included — which is why leaving `ai.transport` unset with
+`provider: cursor` fails with `cursor provider only supports transport: cli`. Set
+`ai.transport` explicitly.
+
 Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
 reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
 subscription); `estimate_cost_with_floor` is what keeps a cost cap meaningful for those.

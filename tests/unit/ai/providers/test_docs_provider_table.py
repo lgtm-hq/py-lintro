@@ -8,7 +8,7 @@ path, printing the table to paste back.
 
 Both tables are compared cell by cell after normalising whitespace, so
 prettier's column padding is free to differ from what the renderer emits. A
-failure prints the rows to paste back between the ``BEGIN``/``END GENERATED``
+failure prints the rows to paste back between the ``BEGIN``/``END SNAPSHOT``
 markers.
 """
 

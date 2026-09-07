@@ -27,21 +27,46 @@ from lintro.ai.providers.cli_auth_probe import CliAuthProbe
 from lintro.ai.registry import metadata_for
 from lintro.enums.tool_status import ToolStatus
 
-#: Providers whose CLI reads the resolved ``ai.api_key_env`` variable.
-_API_KEY_HONOURING = (AIProvider.ANTHROPIC, AIProvider.CURSOR)
+#: An API-key variable no provider declares, used for the override cases.
+_RENAMED_KEY = "RENAMED_KEY"
+
+
+def _honours_api_key_env(provider: AIProvider) -> bool:
+    """Report whether the provider's CLI reads the resolved API-key variable.
+
+    Args:
+        provider: The provider to check.
+
+    Returns:
+        True when its probe sets ``honors_api_key_env``.
+    """
+    return _probe(provider).honors_api_key_env
 
 
 @pytest.fixture(autouse=True)
 def _no_ambient_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Strip every credential and binary doctor could otherwise find.
 
+    The variables come from the plugin metadata rather than a hand-kept list,
+    so a provider that starts reading a new one is stripped here too.
+
     Args:
         monkeypatch: Pytest environment patcher.
         tmp_path: Empty directory used as the home directory.
     """
-    for name in ("ANTHROPIC_API_KEY", "CURSOR_API_KEY", "CODEX_API_KEY", "RENAMED_KEY"):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.delenv(_RENAMED_KEY, raising=False)
+    for provider in AIProvider:
+        metadata = metadata_for(provider)
+        monkeypatch.delenv(metadata.default_api_key_env, raising=False)
+        probe = metadata.cli_auth_probe
+        if probe is None:
+            continue
+        for name in probe.extra_env_vars:
+            monkeypatch.delenv(name, raising=False)
+    # `home` is a classmethod, and HOME is set as well so an `expanduser`
+    # anywhere downstream cannot reach the real home directory either.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("shutil.which", lambda _binary: None)
 
 
@@ -138,12 +163,12 @@ def test_unproven_cli_auth_is_unknown_not_a_failure(provider: AIProvider) -> Non
     assert_that(result.hint).is_equal_to(probe.hint)
 
 
-@pytest.mark.parametrize("provider", _API_KEY_HONOURING)
+@pytest.mark.parametrize("provider", list(AIProvider))
 def test_api_key_variable_marks_cli_auth_ok(
     provider: AIProvider,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """For the CLIs that read it, a set API-key variable is proof enough.
+    """A set API-key variable is proof only for the CLIs that read it.
 
     Args:
         provider: The provider under test.
@@ -154,11 +179,16 @@ def test_api_key_variable_marks_cli_auth_ok(
 
     result = _result(check_ai_configuration(_cli_config(provider)), "ai.cli.auth")
 
+    if not _honours_api_key_env(provider):
+        # OpenAI's codex binary never reads OPENAI_API_KEY, so setting it must
+        # leave the verdict unproven rather than reporting a false OK.
+        assert_that(result.status).is_equal_to(ToolStatus.UNKNOWN)
+        return
     assert_that(result.status).is_equal_to(ToolStatus.OK)
     assert_that(result.message).contains(key_env)
 
 
-@pytest.mark.parametrize("provider", _API_KEY_HONOURING)
+@pytest.mark.parametrize("provider", list(AIProvider))
 def test_a_renamed_api_key_variable_is_honoured(
     provider: AIProvider,
     monkeypatch: pytest.MonkeyPatch,
@@ -173,15 +203,18 @@ def test_a_renamed_api_key_variable_is_honoured(
         provider: The provider under test.
         monkeypatch: Pytest environment patcher.
     """
-    monkeypatch.setenv("RENAMED_KEY", "secret")
+    monkeypatch.setenv(_RENAMED_KEY, "secret")
 
     results = check_ai_configuration(
-        _cli_config(provider, api_key_env="RENAMED_KEY"),
+        _cli_config(provider, api_key_env=_RENAMED_KEY),
     )
     result = _result(results, "ai.cli.auth")
 
+    if not _honours_api_key_env(provider):
+        assert_that(result.status).is_equal_to(ToolStatus.UNKNOWN)
+        return
     assert_that(result.status).is_equal_to(ToolStatus.OK)
-    assert_that(result.message).contains("RENAMED_KEY")
+    assert_that(result.message).contains(_RENAMED_KEY)
 
 
 def test_openai_cli_auth_accepts_codex_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -222,6 +255,9 @@ def test_openai_cli_auth_accepts_the_login_file(tmp_path: Path) -> None:
     )
 
     assert_that(result.status).is_equal_to(ToolStatus.OK)
+    assert_that(result.message).is_equal_to(
+        "Codex auth configured (CODEX_API_KEY or ~/.codex/auth.json)",
+    )
 
 
 def test_unsupported_provider_transport_pairing_is_incompatible() -> None:
@@ -246,8 +282,28 @@ def test_unsupported_provider_transport_pairing_is_incompatible() -> None:
     )
 
 
-def test_liveness_skips_an_unsupported_pairing_without_probing() -> None:
-    """No credential probe runs for a pairing that cannot be constructed."""
+def test_liveness_skips_an_unsupported_pairing_without_probing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No credential probe runs for a pairing that cannot be constructed.
+
+    Asserting the empty result alone would also pass if the probe ran and
+    returned nothing, so the probe itself is replaced by one that fails the
+    test when called.
+
+    Args:
+        monkeypatch: Pytest attribute patcher.
+    """
+    calls: list[object] = []
+
+    def _record(**kwargs: object) -> object:
+        calls.append(kwargs)
+        raise AssertionError("check_liveness_sync must not run for this pairing")
+
+    monkeypatch.setattr(
+        "lintro.ai.doctor_checks.check_liveness_sync",
+        _record,
+    )
     config = AIConfig(
         enabled=True,
         review=True,
@@ -256,3 +312,4 @@ def test_liveness_skips_an_unsupported_pairing_without_probing() -> None:
     )
 
     assert_that(check_ai_liveness(config)).is_empty()
+    assert_that(calls).is_empty()

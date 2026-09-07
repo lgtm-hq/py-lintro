@@ -126,6 +126,40 @@ def test_api_transport_implies_an_sdk_package(provider: AIProvider) -> None:
         assert_that(metadata.sdk_package).is_none()
 
 
+@pytest.mark.parametrize(
+    ("provider", "expected"),
+    [
+        (
+            AIProvider.ANTHROPIC,
+            "Install Claude Code: https://code.claude.com/docs/en/setup",
+        ),
+        (
+            AIProvider.OPENAI,
+            "Install Codex CLI: https://developers.openai.com/codex/cli",
+        ),
+        (
+            AIProvider.CURSOR,
+            "Install agent CLI: curl https://cursor.com/install -fsS | bash",
+        ),
+    ],
+)
+def test_install_hints_are_pinned_verbatim(
+    provider: AIProvider,
+    expected: str,
+) -> None:
+    """Doctor's install hints are pinned, not read back from the record.
+
+    The doctor tests compare rendered output against the metadata, which proves
+    the wiring but not the wording. These literals are the pre-#2308 strings, so
+    a typo shows up here rather than shipping.
+
+    Args:
+        provider: The provider under test.
+        expected: The hint doctor must show for it.
+    """
+    assert_that(metadata_for(provider).cli_install_hint).is_equal_to(expected)
+
+
 def test_model_identifiers_are_unique_across_providers() -> None:
     """No two providers claim the same model, so the merged pricing is lossless."""
     declared = [model for record in all_metadata().values() for model in record.pricing]
