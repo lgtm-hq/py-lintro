@@ -238,13 +238,13 @@ by the two orthogonal scope booleans instead:
   import-linter contracts and dependency audits.
 
 Ordering per pattern is `FIX` → `FORMAT` → `CHECK`, and at most one tool may hold
-`FORMAT` for a given pattern. Execution is unchanged — it still follows the configured
-`tool_order` strategy (`priority` reading `DEFAULT_TOOL_PRIORITIES`, or `alphabetical` /
-`custom`), then post-check splitting: the derived order is computed in **shadow mode**
-only (issue #1741) and reported, never executed. Run `lintro check --explain-order` to
-see the derived order beside the current one, or `lintro doctor` for the summary. See
-[Shadow-mode order diff](configuration.md#shadow-mode-order-diff) in the configuration
-guide.
+`FORMAT` for a given pattern. This derivation **is** execution order (issue #1742):
+there is no `tool_order` strategy and no `DEFAULT_TOOL_PRIORITIES` table to fall back
+on, and parallel batching reads the same graph. Run `lintro check --explain-order` to
+see the order a run would use with the claim behind each constraint, or `lintro doctor`
+for the summary. See
+[Tool Ordering Configuration](configuration.md#tool-ordering-configuration) in the
+configuration guide.
 
 ### ToolResult
 

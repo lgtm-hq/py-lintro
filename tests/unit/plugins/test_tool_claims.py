@@ -165,9 +165,9 @@ def test_format_authority_is_uncontested_in_the_derived_graph() -> None:
     """No pattern group has two tools in the derived ``FORMAT`` phase.
 
     Dual formatting authority is the defect the epic exists to remove. The
-    check runs over the derivation's own pattern universe and its fnmatch
-    subsumption rather than exact pattern strings, so a tool claiming ``*.py``
-    and one claiming ``*`` are compared rather than filed apart.
+    check runs over the derivation's own pattern universe and its universal
+    ``*`` subsumption rather than exact pattern strings, so a tool claiming
+    ``*.py`` and one claiming ``*`` are compared rather than filed apart.
     """
     claims_by_tool = {name: _DEFINITIONS[name].claims for name in TOOL_NAMES}
 

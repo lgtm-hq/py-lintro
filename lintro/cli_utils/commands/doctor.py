@@ -8,7 +8,7 @@ Only presentation lives here. The probes themselves — and the
 tool serves — live in :mod:`lintro.utils.doctor_report`, so the same data backs
 the terminal output, ``--json``, and an agent (issue #1240).
 
-One exception: the shadow-mode execution-order section (issue #1741) is
+One exception: the derived execution-order section (issues #1741, #1742) is
 terminal-only. It is rendered on the Rich path after the ``--json`` and
 markdown early returns, so neither ``--json`` nor the MCP health report
 carries it.
