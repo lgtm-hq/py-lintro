@@ -11,10 +11,10 @@ happens to run into it.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Protocol
 
 from loguru import logger
 
-from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.review.enums.comment_action import CommentAction
 from lintro.ai.review.enums.comment_kind import CommentKind
 from lintro.ai.review.github_constants import ARCHIVE_MARKER, STICKY_MARKER
@@ -27,6 +27,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.sticky import parse_sticky_state
 
 __all__ = [
+    "CommentClient",
     "UpsertOutcome",
     "load_sticky_comment",
     "locate_comment",
@@ -41,6 +42,66 @@ _MARKERS: dict[CommentKind, str] = {
     CommentKind.ARCHIVE: ARCHIVE_MARKER,
     CommentKind.ERROR: STICKY_MARKER,
 }
+
+
+class CommentClient(Protocol):
+    """The GitHub operations this module needs, and nothing more.
+
+    Structural typing keeps the lifecycle independent of the reporter class,
+    the way :class:`~lintro.ai.review.lifecycle.threads.LifecycleClient`
+    already does for the inline threads: writing a comment is four calls, and
+    anything that makes them can be written through.
+
+    Two further methods are read off the object when it has them —
+    ``create_issue_comment``, which answers with the new comment's id, and
+    ``update_issue_comment_status``, which answers with the PATCH's HTTP
+    status. Neither is required, so neither is declared here.
+    """
+
+    def find_issue_comment(self, *, marker: str) -> tuple[int, str] | None:
+        """Locate the comment carrying a marker.
+
+        Args:
+            marker: Marker identifying the comment kind.
+
+        Returns:
+            tuple[int, str] | None: The comment's id and body, or ``None``.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def post_issue_comment(self, body: str) -> bool:
+        """Post a new comment.
+
+        Args:
+            body: Markdown body to write.
+
+        Returns:
+            bool: True when the comment was created.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def update_issue_comment(self, *, comment_id: int, body: str) -> bool:
+        """Edit an existing comment in place.
+
+        Args:
+            comment_id: Comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            bool: True when the edit took effect.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def delete_issue_comment(self, *, comment_id: int) -> bool:
+        """Delete a comment.
+
+        Args:
+            comment_id: Comment to delete.
+
+        Returns:
+            bool: True when the comment is gone.
+        """
+        ...  # pragma: no cover - structural type only
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -61,13 +122,13 @@ class UpsertOutcome:
 
 def locate_comment(
     *,
-    reporter: GitHubPRReporter,
+    reporter: CommentClient,
     kind: CommentKind,
 ) -> ExistingComment:
     """Find the review's comment of one kind on the pull request.
 
     Args:
-        reporter: GitHub reporter used to list the pull request's comments.
+        reporter: GitHub client used to list the pull request's comments.
         kind: Which comment to look for.
 
     Returns:
@@ -80,7 +141,7 @@ def locate_comment(
 
 def load_sticky_comment(
     *,
-    reporter: GitHubPRReporter,
+    reporter: CommentClient,
 ) -> tuple[ExistingComment, ReviewState]:
     """Locate the sticky comment and decode any state left behind in it.
 
@@ -89,7 +150,7 @@ def load_sticky_comment(
     lintro. A pre-v2 blob decodes as no state at all (#2305).
 
     Args:
-        reporter: GitHub reporter used to list the pull request's comments.
+        reporter: GitHub client used to list the pull request's comments.
 
     Returns:
         tuple[ExistingComment, ReviewState]: The live sticky comment and the
@@ -104,7 +165,7 @@ def load_sticky_comment(
 
 def upsert_comment(
     *,
-    reporter: GitHubPRReporter,
+    reporter: CommentClient,
     kind: CommentKind,
     existing: ExistingComment,
     body: str,
@@ -118,7 +179,7 @@ def upsert_comment(
     here, so the fallback is the same decision the caller started from.
 
     Args:
-        reporter: GitHub reporter used to create, edit, or replace the
+        reporter: GitHub client used to create, edit, or replace the
             comment.
         kind: Which of the review's comments is being written.
         existing: What is already on the pull request for that kind.
@@ -147,11 +208,11 @@ def upsert_comment(
     return _apply_supersede(reporter=reporter, plan=plan)
 
 
-def upsert_archive(*, reporter: GitHubPRReporter, body: str | None) -> None:
+def upsert_archive(*, reporter: CommentClient, body: str | None) -> None:
     """Write the history-archive comment when one was rendered.
 
     Args:
-        reporter: GitHub reporter used to find and write the archive.
+        reporter: GitHub client used to find and write the archive.
         body: Archive Markdown, or ``None`` when history still fits the board.
     """
     if not body:
@@ -166,14 +227,14 @@ def upsert_archive(*, reporter: GitHubPRReporter, body: str | None) -> None:
 
 def _apply_update(
     *,
-    reporter: GitHubPRReporter,
+    reporter: CommentClient,
     plan: CommentPlan,
     comment_id: int,
 ) -> UpsertOutcome | None:
     """Edit the comment in place.
 
     Args:
-        reporter: GitHub reporter used to edit the comment.
+        reporter: GitHub client used to edit the comment.
         plan: The update plan.
         comment_id: The comment to edit, narrowed by the caller.
 
@@ -197,13 +258,13 @@ def _apply_update(
 
 def _apply_supersede(
     *,
-    reporter: GitHubPRReporter,
+    reporter: CommentClient,
     plan: CommentPlan,
 ) -> UpsertOutcome:
     """Post a replacement comment and delete the one it supersedes.
 
     Args:
-        reporter: GitHub reporter used to post and delete.
+        reporter: GitHub client used to post and delete.
         plan: The supersede plan.
 
     Returns:
@@ -238,14 +299,14 @@ def _apply_supersede(
 
 def _patch_status(
     *,
-    reporter: GitHubPRReporter,
+    reporter: CommentClient,
     comment_id: int,
     body: str,
 ) -> int | None:
     """Return the PATCH status, with a bool-reporter fallback.
 
     Args:
-        reporter: GitHub reporter used to edit the comment.
+        reporter: GitHub client used to edit the comment.
         comment_id: Existing comment id.
         body: Markdown body to write.
 
@@ -264,11 +325,11 @@ def _patch_status(
     return 403
 
 
-def _create(*, reporter: GitHubPRReporter, body: str, marker: str) -> int | None:
+def _create(*, reporter: CommentClient, body: str, marker: str) -> int | None:
     """Create a comment and return its id.
 
     Args:
-        reporter: GitHub reporter used to post the comment.
+        reporter: GitHub client used to post the comment.
         body: Markdown body to write.
         marker: Marker the comment carries, used to find it again when the
             reporter's create call does not answer with an id.
@@ -289,14 +350,14 @@ def _create(*, reporter: GitHubPRReporter, body: str, marker: str) -> int | None
 
 def _post_with_retry(
     *,
-    reporter: GitHubPRReporter,
+    reporter: CommentClient,
     body: str,
     marker: str,
 ) -> int | None:
     """Create a comment, retrying once after a failed POST.
 
     Args:
-        reporter: GitHub reporter used to post the comment.
+        reporter: GitHub client used to post the comment.
         body: Markdown body to write.
         marker: Marker the comment carries.
 

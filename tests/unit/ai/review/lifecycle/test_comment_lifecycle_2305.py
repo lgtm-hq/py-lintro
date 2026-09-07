@@ -10,6 +10,7 @@ is fed back through ``decide`` rather than branched on separately.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -30,6 +31,74 @@ from lintro.ai.review.lifecycle.decision import ExistingComment, decide
 #: Every comment kind the lifecycle owns, so a new kind cannot quietly opt out
 #: of the shared decision.
 KINDS = (CommentKind.STICKY, CommentKind.ARCHIVE, CommentKind.ERROR)
+
+
+@dataclass
+class _RecordingClient:
+    """A pull request that remembers the comments written onto it.
+
+    A stub that only counts calls says a write was attempted; this says what
+    the pull request ends up carrying, which is the thing a reviewer would
+    actually see.
+
+    Attributes:
+        comments: Bodies of the comments now on the pull request, in the
+            order they were written.
+        markers_searched: Markers the production code looked a comment up by.
+    """
+
+    comments: list[str] = field(default_factory=list)
+    markers_searched: list[str] = field(default_factory=list)
+
+    def find_issue_comment(self, *, marker: str) -> tuple[int, str] | None:
+        """Look up the comment carrying a marker.
+
+        Args:
+            marker: Marker identifying the comment kind.
+
+        Returns:
+            tuple[int, str] | None: Always ``None`` — this pull request starts
+            with no comments on it.
+        """
+        self.markers_searched.append(marker)
+        return None
+
+    def post_issue_comment(self, body: str) -> bool:
+        """Record a newly posted comment.
+
+        Args:
+            body: Markdown the production code posted.
+
+        Returns:
+            bool: Always ``True``, the success GitHub would report.
+        """
+        self.comments.append(body)
+        return True
+
+    def update_issue_comment(self, *, comment_id: int, body: str) -> bool:
+        """Record an edit to a comment already on the pull request.
+
+        Args:
+            comment_id: Comment the production code edited.
+            body: New Markdown body.
+
+        Returns:
+            bool: Always ``True``.
+        """
+        self.comments[comment_id] = body
+        return True
+
+    def delete_issue_comment(self, *, comment_id: int) -> bool:
+        """Remove a comment from the pull request.
+
+        Args:
+            comment_id: Comment the production code deleted.
+
+        Returns:
+            bool: Always ``True``.
+        """
+        del self.comments[comment_id]
+        return True
 
 
 def _reporter() -> MagicMock:
@@ -239,14 +308,34 @@ def test_each_kind_is_located_by_its_own_marker() -> None:
     assert_that(seen).is_equal_to([ARCHIVE_MARKER, STICKY_MARKER])
 
 
-def test_an_empty_archive_body_writes_nothing() -> None:
-    """History that still fits the board means no archive comment at all."""
-    reporter = _reporter()
+@pytest.mark.parametrize(
+    ("body", "expected"),
+    [
+        (None, []),
+        ("", []),
+        ("## history", ["## history"]),
+    ],
+    ids=["attr=none", "attr=empty", "attr=rendered"],
+)
+def test_the_archive_is_written_only_when_history_overflowed(
+    body: str | None,
+    expected: list[str],
+) -> None:
+    """History that still fits the board leaves the archive comment alone.
 
-    upsert_archive(reporter=reporter, body=None)
+    Args:
+        body: Archive Markdown the renderer produced, or ``None`` when the
+            board still holds its whole history.
+        expected: Comment bodies the pull request should end up carrying.
+    """
+    client = _RecordingClient()
 
-    reporter.find_issue_comment.assert_not_called()
-    reporter.post_issue_comment.assert_not_called()
+    upsert_archive(reporter=client, body=body)
+
+    assert_that(client.comments).is_equal_to(expected)
+    assert_that(client.markers_searched).is_equal_to(
+        [ARCHIVE_MARKER] if expected else [],
+    )
 
 
 def test_a_v1_only_sticky_body_is_read_as_no_prior_state() -> None:
