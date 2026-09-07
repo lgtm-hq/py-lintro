@@ -58,8 +58,11 @@ def _open_prompt_findings(
     """Return every still-open finding the fix-all prompt must cover.
 
     Built from the same ``_sorted_open_records`` call the Findings table is
-    built from, so the prompt and the table cover the identical set in the
+    built from, so the prompt and the table select the identical set in the
     identical order — by construction rather than by two selections agreeing.
+    The rendered panel may still show fewer rows than the table: the renderer
+    (``agent_prompts.prompt_findings``) drops question-kind findings, which
+    are not actionable, after this selection.
 
     This round's ``result.findings`` is not that set. Under incomplete
     coverage the matcher carries a prior open record on a file this round

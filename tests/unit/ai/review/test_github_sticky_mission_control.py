@@ -1076,11 +1076,12 @@ def test_fix_all_prompt_covers_a_round_that_reported_nothing(
 def test_the_prompt_and_the_table_select_the_same_findings(
     limit: int | None,
 ) -> None:
-    """Under truncation the prompt covers exactly the rows the table shows.
+    """Under truncation the prompt selects exactly the rows the table shows.
 
     Both sections shrink under the same ``RenderLimits.open`` pressure, so a
     prompt that selected its own subset would tell an agent to fix a finding
-    the reader cannot see, or omit one they can.
+    the reader cannot see, or omit one they can. This pins the selection;
+    the panel renderer may still drop question-kind rows afterwards.
 
     Args:
         limit: Open-finding limit applied to both selections.

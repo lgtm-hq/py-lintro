@@ -198,11 +198,20 @@ def test_every_tool_package_is_inside_the_gate() -> None:
     ``lintro/tools/<tool>/definition.py`` simply would not be scanned, and the
     R0801 count would stay at 0 while its copy-pasted definition template grew
     back. This scans the source tree instead of trusting the roster, so adding
-    a tool without adding its package fails here with the package named.
+    a tool without adding its package fails here with the package named. Every
+    importable package is a tool package for this purpose (not only those
+    with a ``definition.py``): shared helpers such as ``ts_checker`` are in
+    the gate too, and a package without ``__init__.py`` is not importable and
+    is excluded, matching discovery's package rule.
     """
+    tools_root = REPO_ROOT / "lintro" / "tools"
     on_disk = {
-        f"lintro/tools/{path.parent.name}"
-        for path in (REPO_ROOT / "lintro" / "tools").glob("*/definition.py")
+        f"lintro/tools/{path.name}"
+        for path in tools_root.iterdir()
+        if path.is_dir()
+        and (path / "__init__.py").is_file()
+        and not path.name.startswith("_")
+        and path.name != "core"
     }
 
     assert_that(on_disk).described_as("no per-tool packages found").is_not_empty()
