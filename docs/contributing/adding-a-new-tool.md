@@ -577,11 +577,11 @@ If the tool is available as a Homebrew formula and its version matches what
 
 A new-tool PR is **not mergeable** until all three gates pass:
 
-| Gate                                                                                   | What it checks                                                                                                                                                                                |
-| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness    | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, declared `claims` mirror `file_patterns`, and docs references exist |
-| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                                         |
-| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails           |
+| Gate                                                                                   | What it checks                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness    | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, and docs references exist                                 |
+| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                               |
+| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails |
 
 Until those gates are live, satisfy their intent manually by working through the
 [pre-submit checklist](#pre-submit-checklist) below.

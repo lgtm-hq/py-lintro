@@ -177,7 +177,9 @@ def test_derive_execution_order_tolerates_an_unresolvable_tool() -> None:
     """An unresolvable name stays in the order, unconstrained."""
     order = derive_execution_order(["ruff", "not-a-registered-tool"])
 
-    assert_that(sorted(order)).is_equal_to(["not-a-registered-tool", "ruff"])
+    # Compared unsorted: an unconstrained pair breaks alphabetically, so the
+    # unresolvable name genuinely precedes ruff rather than merely appearing.
+    assert_that(order).is_equal_to(["not-a-registered-tool", "ruff"])
 
 
 def test_live_order_is_exactly_the_derived_order() -> None:

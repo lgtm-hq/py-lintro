@@ -924,6 +924,12 @@ everywhere lintro reports it. The scalar `tool_order`, `tool_order_custom`,
 `[tool.lintro.post_checks]` table, whose only real job — running black after ruff — now
 falls out of the model.
 
+**Upgrading.** Leftover `tool_order`, `tool_order_custom`, `tool_priorities` or
+`[tool.lintro.post_checks]` keys warn as unknown and are ignored; a run that carried
+them keeps working and needs no edit to succeed. The one hard break is
+`lintro list-tools --show-conflicts`, which is removed and now fails as an unknown
+option — use `lintro check --explain-order` to see what orders a run instead.
+
 Derivation rules:
 
 | Rule              | Behaviour                                                                                   |

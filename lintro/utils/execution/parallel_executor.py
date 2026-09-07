@@ -142,29 +142,54 @@ def run_tools_parallel(
                 tools_with_instances: list[tuple[str, BaseToolPlugin]] = []
 
                 for tool_name in batch:
-                    tool = tool_manager.get_tool(tool_name)
+                    # A tool that cannot be resolved or configured becomes a
+                    # failed result, exactly as it does in the sequential
+                    # path. Before #1742 post-check filtering usually left one
+                    # tool in the main list, so this branch ran sequentially
+                    # and an unresolvable tool never reached here; now every
+                    # selected tool stays in one list and this path is live.
+                    try:
+                        tool = tool_manager.get_tool(tool_name)
 
-                    # Configure tool using shared helper. This returns a
-                    # private per-invocation copy so concurrent batch
-                    # execution never races on the shared singleton's options.
-                    tool = configure_tool_for_execution(
-                        tool=tool,
-                        tool_name=tool_name,
-                        config_manager=config_manager,
-                        tool_option_dict=tool_option_dict,
-                        exclude=exclude,
-                        include_venv=include_venv,
-                        incremental=incremental,
-                        action=action,
-                        selected_tools=selected_tools,
-                        auto_install=auto_install,
-                        diff_base=diff_base,
-                    )
+                        # Configure tool using shared helper. This returns a
+                        # private per-invocation copy so concurrent batch
+                        # execution never races on the shared singleton's
+                        # options.
+                        tool = configure_tool_for_execution(
+                            tool=tool,
+                            tool_name=tool_name,
+                            config_manager=config_manager,
+                            tool_option_dict=tool_option_dict,
+                            exclude=exclude,
+                            include_venv=include_venv,
+                            incremental=incremental,
+                            action=action,
+                            selected_tools=selected_tools,
+                            auto_install=auto_install,
+                            diff_base=diff_base,
+                        )
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        logger.exception(f"Error running {tool_name}")
+                        all_results.append(
+                            ToolResult(
+                                name=tool_name,
+                                success=False,
+                                output=f"Failed to initialize tool: {exc}",
+                                issues_count=0,
+                            ),
+                        )
+                        completed_count += 1
+                        progress.update(task, completed=completed_count)
+                        continue
 
                     tools_with_instances.append((tool_name, tool))
 
+                if not tools_with_instances:
+                    # Every tool in the batch failed to initialize.
+                    continue
+
                 # Update progress description for this batch
-                batch_names = ", ".join(batch)
+                batch_names = ", ".join(name for name, _ in tools_with_instances)
                 progress.update(
                     task,
                     description=f"Running: {batch_names}",

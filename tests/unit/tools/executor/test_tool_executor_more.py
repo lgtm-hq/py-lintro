@@ -172,15 +172,6 @@ def test_main_loop_get_tool_raises_appends_failure(
 
     monkeypatch.setattr(te, "get_tools_to_run", fake_get_tools, raising=True)
     monkeypatch.setattr(tool_manager, "get_tool", fake_get_tool, raising=True)
-    # The sequential loop is what turns an unresolvable tool into a failure
-    # result; force it so the assertion does not depend on the parallel
-    # threshold (two selected tools would otherwise run in parallel).
-    monkeypatch.setattr(
-        te,
-        "_execute_tools_parallel",
-        te._execute_tools_sequential,
-        raising=True,
-    )
     monkeypatch.setattr(
         OutputManager,
         "write_reports_from_results",
@@ -202,8 +193,13 @@ def test_main_loop_get_tool_raises_appends_failure(
     )
     out = capsys.readouterr().out
     data = json.loads(out)
-    tool_names = [r.get("tool") for r in data.get("results", [])]
-    assert_that("ruff" in tool_names).is_true()
+    results = {r.get("tool"): r for r in data.get("results", [])}
+    # Two selected tools take the real parallel dispatcher, which must turn an
+    # unresolvable tool into a failed result rather than aborting the run, and
+    # must still run the tool that resolved.
+    assert_that(results).contains_key("ruff", "black")
+    assert_that(results["ruff"].get("success")).is_false()
+    assert_that(results["black"].get("success")).is_true()
     # Exit should be failure due to appended failure result
     assert_that(code).is_equal_to(1)
 

@@ -134,7 +134,7 @@ def list_tools(
                 "description": plugin.definition.description,
                 "capabilities": capabilities,
                 "execution_class": plugin.definition.execution_class.value,
-                "order": order_positions[tool_name],
+                "position": order_positions[tool_name],
                 "syncable": is_tool_injectable(tool_name),
                 "origin": ToolRegistry.get_origin(tool_name),
             }

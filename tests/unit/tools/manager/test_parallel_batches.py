@@ -7,9 +7,32 @@ than a mocked ``conflicts_with`` table.
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
+import lintro.tools.core.tool_manager as tool_manager_module
+from lintro.enums.capability import Cap
+from lintro.tools.core.scheduler import DerivedOrder, OrderEdge
 from lintro.tools.core.tool_manager import ToolManager
+
+
+def _edge(*, before: str, after: str) -> OrderEdge:
+    """Build a FIX -> CHECK edge between two tools on ``*.py``.
+
+    Args:
+        before: Tool that must run first.
+        after: Tool that must run second.
+
+    Returns:
+        The corresponding derived edge.
+    """
+    return OrderEdge(
+        before=before,
+        after=after,
+        pattern="*.py",
+        before_capability=Cap.FIX,
+        after_capability=Cap.CHECK,
+    )
 
 
 def get_parallel_batches(tools: list[str]) -> list[list[str]]:
@@ -60,8 +83,12 @@ def test_get_parallel_batches_places_a_checker_after_both_mutators() -> None:
 
     flattened = [name for batch in batches for name in batch]
     assert_that(flattened).is_length(3)
-    assert_that(flattened.index("ruff")).is_less_than(flattened.index("black"))
-    assert_that(flattened.index("black")).is_less_than(flattened.index("mypy"))
+    # Batch membership, not flattened position: a single [ruff, black, mypy]
+    # batch would satisfy an index comparison while running all three
+    # concurrently, which is exactly what the derived edges forbid.
+    depth = {name: index for index, batch in enumerate(batches) for name in batch}
+    assert_that(depth["ruff"]).is_less_than(depth["black"])
+    assert_that(depth["black"]).is_less_than(depth["mypy"])
 
 
 def test_get_parallel_batches_preserves_input_order_within_a_batch() -> None:
@@ -78,3 +105,51 @@ def test_get_parallel_batches_covers_every_selected_tool_once() -> None:
     flattened = [name for batch in get_parallel_batches(tools) for name in batch]
 
     assert_that(sorted(flattened)).is_equal_to(sorted(tools))
+
+
+def test_get_parallel_batches_normalizes_mixed_case_names() -> None:
+    """Derived edges are lowercase, so batching lowercases its input too."""
+    batches = get_parallel_batches(["RUFF", "Black"])
+
+    depth = {name: index for index, batch in enumerate(batches) for name in batch}
+    assert_that(sorted(depth)).is_equal_to(["black", "ruff"])
+    assert_that(depth["ruff"]).is_less_than(depth["black"])
+
+
+def test_get_parallel_batches_rejects_duplicate_names() -> None:
+    """A selection naming the same tool twice is a caller error."""
+    assert_that(get_parallel_batches).raises(ValueError).when_called_with(
+        ["ruff", "RUFF"],
+    )
+
+
+def test_get_parallel_batches_serialises_a_stalled_graph(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cycle must not collapse into one concurrent batch.
+
+    ``_linearize`` breaks a cycle by emitting the alphabetically first
+    remaining tool; batching mirrors that rather than running tools that
+    still constrain each other at the same time.
+
+    Args:
+        monkeypatch: Pytest fixture used to substitute a cyclic report.
+    """
+    cyclic = DerivedOrder(
+        tools=("a_tool", "b_tool"),
+        edges=(
+            _edge(before="a_tool", after="b_tool"),
+            _edge(before="b_tool", after="a_tool"),
+        ),
+        cycles=(),
+    )
+    monkeypatch.setattr(
+        tool_manager_module,
+        "build_order_report",
+        lambda _names: cyclic,
+        raising=True,
+    )
+
+    batches = ToolManager().get_parallel_batches(["b_tool", "a_tool"])
+
+    assert_that(batches).is_equal_to([["a_tool"], ["b_tool"]])

@@ -218,8 +218,10 @@ def _execute_tools_parallel(
         try:
             tool = tool_manager.get_tool(result.name)
             _enrich_issues_with_doc_urls(tool, result)
-        except (KeyError, ValueError):
-            pass  # Tool not found — skip enrichment
+        except (KeyError, OSError, ValueError, RuntimeError):
+            # Unresolvable tool: the parallel dispatcher already recorded a
+            # failure result for it, so there is nothing to enrich.
+            continue
 
     # Dry-run: restrict each result to would-fix issues before totals and
     # display so non-auto-fixable diagnostics don't inflate the count.

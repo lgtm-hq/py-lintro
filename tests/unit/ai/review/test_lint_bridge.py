@@ -65,7 +65,7 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
     with patch(
         "lintro.ai.review.lint_bridge.get_tools_to_run",
     ) as mock_get_tools:
-        mock_get_tools.return_value.to_run = ["ruff"]
+        mock_get_tools.return_value.to_run = ["ruff", "black"]
         with (
             patch(
                 "lintro.ai.review.lint_bridge.tool_manager.get_tool",
@@ -74,12 +74,16 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
             patch(
                 "lintro.ai.review.lint_bridge.configure_tool_for_execution",
                 side_effect=lambda *, tool, **kwargs: tool,
-            ),
+            ) as mock_configure,
         ):
             results = run_lint_on_changed_files(
                 changed_files=["src/main.py"],
                 lintro_config=LintroConfig(),
             )
 
-    assert_that(results).is_length(1)
-    mock_tool.check.assert_called_once()
+    assert_that(results).is_length(2)
+    # Format authority is resolved from the run's selection (#1742), so the
+    # bridge must hand over the tools it is actually running — an empty set
+    # would leave ruff formatting alongside black.
+    for call in mock_configure.call_args_list:
+        assert_that(call.kwargs["selected_tools"]).is_equal_to({"ruff", "black"})

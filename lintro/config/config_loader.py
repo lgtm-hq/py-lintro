@@ -54,9 +54,10 @@ LINTRO_CONFIG_FILENAMES = [
 ]
 
 # Config sections that are valid in both ``.lintro-config.yaml`` and
-# ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` and
-# ``licenses`` by ``lintro.config.licenses_config``, and ``plugins`` by
-# ``lintro.plugins.discovery``. They are part of the schema even though
+# ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` by
+# ``lintro.utils.config``, ``licenses`` by ``lintro.config.licenses_config``,
+# and ``plugins`` by ``lintro.plugins.discovery``. They are part of the
+# schema even though
 # ``LintroConfig`` does not model them, so consumers that build an allowlist
 # of known top-level keys must include them.
 EXTERNALLY_HANDLED_SECTIONS: frozenset[str] = frozenset(
