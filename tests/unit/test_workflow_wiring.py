@@ -1534,9 +1534,14 @@ def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> Non
     trusted = _guard_allowlisted_workflow()
     tag_pipeline_ref = f"{workflows}/{trusted}@refs/tags/v1.2.3"
     dispatch_ref = f"{workflows}/publish-npm.yml@refs/heads/main"
+    unset = "<unset>"
     cases: list[tuple[dict[str, str], int]] = [
         # The trusted entry workflow, on any ref: allowed.
         ({"WORKFLOW_REF": tag_pipeline_ref}, 0),
+        # An absent or empty DRY_RUN is a live publish, not a dry run: a
+        # dispatch must still be refused, or a dropped input would open the gate.
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": unset}, 1),
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": ""}, 1),
         ({"WORKFLOW_REF": f"{workflows}/{trusted}@refs/heads/main"}, 0),
         # Direct dispatch of this workflow: refused unless it is a dry run.
         ({"WORKFLOW_REF": dispatch_ref}, 1),
@@ -1551,9 +1556,11 @@ def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> Non
         ({}, 1),
     ]
     for env, expected_code in cases:
+        merged = {"PATH": "/usr/bin:/bin", "DRY_RUN": "false", **env}
+        merged = {key: value for key, value in merged.items() if value != unset}
         result = subprocess.run(  # nosec B603 - fixed in-repo script
             [str(script)],
-            env={"PATH": "/usr/bin:/bin", "DRY_RUN": "false", **env},
+            env=merged,
             capture_output=True,
             text=True,
             check=False,
