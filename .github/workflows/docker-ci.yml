@@ -272,7 +272,7 @@ jobs:
       # path. Renovate keeps this in step with docker/tools.Dockerfile's
       # ARG UV_VERSION via the customManager on this line; a contract test
       # asserts the two stay equal.
-      UV_VERSION: '0.12.7'
+      UV_VERSION: '0.12.10'
     steps:
       - name: Harden Runner
         # astral.sh / releases.astral.sh and the GitHub releases CDN serve the
