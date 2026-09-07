@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.151.4] - 2026-09-07
+
+### Changed
+
+- **ai/providers**: migrate providers behind the registry (#2425) (ebd532f)
+
+### Fixed
+
+- **deps**: update linting tools (#2232) (2c40d98)
+
 ## [0.151.3] - 2026-09-07
 
 ### Fixed
