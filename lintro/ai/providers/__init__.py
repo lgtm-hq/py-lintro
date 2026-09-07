@@ -39,6 +39,7 @@ def get_provider(
     config: AIConfig,
     *,
     workspace_root: Path | None = None,
+    transcript_command: str | None = None,
 ) -> BaseAIProvider:
     """Instantiate an AI provider from configuration.
 
@@ -46,6 +47,10 @@ def get_provider(
         config: AI configuration specifying provider, model, and API key.
         workspace_root: Optional workspace root for transcript cache paths.
             Defaults to the current working directory.
+        transcript_command: Optional command label for the transcript
+            filename. Callers that know the verb they run under state it here;
+            everything else falls back to ``DEFAULT_COMMAND_LABEL``. lintro
+            never infers the verb from ``sys.argv`` (#1998).
 
     Returns:
         BaseAIProvider: Configured provider instance.
@@ -92,6 +97,7 @@ def get_provider(
         workspace_root=workspace_root or resolve_workspace_root(None),
         config_enabled=config.transcript_logging,
         retention=config.transcript_retention,
+        command=transcript_command,
     )
 
     provider_cls: type[BaseAIProvider]

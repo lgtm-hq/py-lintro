@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from lintro.ai.providers import get_provider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.ai.transcript import (
+    DEFAULT_COMMAND_LABEL,
     ENV_TRANSCRIPT,
     TRANSCRIPT_DIR,
     TranscriptDirection,
@@ -311,3 +313,82 @@ def test_get_provider_starts_transcript_when_enabled(tmp_path: Path) -> None:
 
     files = list((tmp_path / TRANSCRIPT_DIR).glob("*.ndjson"))
     assert_that(files).is_not_empty()
+
+
+def test_default_command_label_is_used_when_the_caller_names_none(
+    tmp_path: Path,
+) -> None:
+    """A caller that omits ``command`` gets the fixed ``ai`` label (#1998).
+
+    The label is never inferred from ``sys.argv``: the argv here names a verb
+    the old allowlist would have picked up, and the filename must ignore it.
+    """
+    writer = maybe_start_transcript(
+        workspace_root=tmp_path,
+        config_enabled=True,
+    )
+
+    assert_that(writer).is_not_none()
+    assert writer is not None
+    assert_that(writer.path).is_not_none()
+    assert writer.path is not None
+    assert_that(writer.path.name).ends_with(f"-{DEFAULT_COMMAND_LABEL}.ndjson")
+
+
+def test_argv_never_labels_the_transcript(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A CLI verb on ``sys.argv`` does not reach the transcript filename."""
+    monkeypatch.setattr(sys, "argv", ["lintro", "check", "--output-format", "json"])
+
+    writer = maybe_start_transcript(
+        workspace_root=tmp_path,
+        config_enabled=True,
+    )
+
+    assert writer is not None and writer.path is not None
+    assert_that(writer.path.name).does_not_contain("check")
+    assert_that(writer.path.name).ends_with(f"-{DEFAULT_COMMAND_LABEL}.ndjson")
+
+
+def test_explicit_command_label_is_honored(tmp_path: Path) -> None:
+    """An explicit ``command=`` still names the transcript file."""
+    writer = maybe_start_transcript(
+        workspace_root=tmp_path,
+        config_enabled=True,
+        command="review",
+    )
+
+    assert writer is not None and writer.path is not None
+    assert_that(writer.path.name).ends_with("-review.ndjson")
+
+
+def test_explicit_command_label_is_sanitized(tmp_path: Path) -> None:
+    """Path separators in an explicit label cannot escape the transcript dir."""
+    writer = TranscriptWriter(
+        workspace_root=tmp_path,
+        command="../../etc/passwd",
+    )
+
+    assert writer.path is not None
+    assert_that(writer.path.parent).is_equal_to(tmp_path / TRANSCRIPT_DIR)
+    assert_that(writer.path.name).ends_with("-..-..-etc-passwd.ndjson")
+
+
+def test_get_provider_labels_the_transcript_from_the_caller(tmp_path: Path) -> None:
+    """``transcript_command`` from a caller that knows its verb reaches the file."""
+    config = AIConfig(
+        lint=True,
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.API,
+        transcript_logging=True,
+        api_base_url="http://localhost:9",
+    )
+
+    with contextlib.suppress(AIError, ValueError, ImportError, OSError):
+        get_provider(config, workspace_root=tmp_path, transcript_command="review")
+
+    files = list((tmp_path / TRANSCRIPT_DIR).glob("*.ndjson"))
+    assert_that([path.name for path in files]).is_length(1)
+    assert_that(files[0].name).ends_with("-review.ndjson")

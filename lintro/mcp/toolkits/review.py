@@ -754,7 +754,11 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     prepared = prepared.with_max_cost_usd(max_cost_usd=budget.effective_usd)
 
     try:
-        provider = get_provider(prepared.ai_config, workspace_root=workspace)
+        provider = get_provider(
+            prepared.ai_config,
+            workspace_root=workspace,
+            transcript_command="review",
+        )
     except (AIProviderRequiredError, ValueError) as exc:
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,
