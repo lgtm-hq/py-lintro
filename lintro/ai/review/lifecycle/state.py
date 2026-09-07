@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
-from contextlib import suppress
 from dataclasses import replace
+
+from loguru import logger
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.models.review_result import ReviewResult
@@ -131,9 +132,15 @@ def _sticky_state(*, pr_number: int | None, repo: str) -> ReviewState:
 
     Nothing has *written* this blob since #2154 moved authoritative state to
     workflow artifacts, so it only ever answers for a comment an older lintro
-    left behind. Any failure here — no GitHub context, no token, an
-    unreachable API — is an empty state: a review must never fail because a
-    comment could not be read.
+    left behind. Reaching GitHub can fail for reasons that are not this
+    review's problem — no context, no token, an unreachable API — and those
+    are an empty state: a review must never fail because a comment could not
+    be read.
+
+    Only the transport-and-parse families are caught. ``urllib`` raises
+    ``URLError`` (an ``OSError``) and the JSON decoder raises a ``ValueError``;
+    anything else escaping here is a defect in this package, and swallowing it
+    would turn a bug into a pull request whose history quietly restarts.
 
     Args:
         pr_number: Pull request number, or ``None`` when it is unknown.
@@ -142,15 +149,21 @@ def _sticky_state(*, pr_number: int | None, repo: str) -> ReviewState:
     Returns:
         ReviewState: The decoded state, or an empty state.
     """
-    with suppress(Exception):
-        from lintro.ai.integrations.github_pr import GitHubPRReporter
-        from lintro.ai.review.lifecycle.comments import load_sticky_comment
+    from lintro.ai.integrations.github_pr import GitHubPRReporter
+    from lintro.ai.review.lifecycle.comments import load_sticky_comment
 
+    try:
         _existing, state = load_sticky_comment(
             reporter=GitHubPRReporter(pr_number=pr_number, repo=repo or None),
         )
-        return state
-    return ReviewState()
+    except (OSError, ValueError) as exc:
+        logger.debug(
+            "Could not read the sticky comment for prior state ({}); this "
+            "round starts a fresh history",
+            exc,
+        )
+        return ReviewState()
+    return state
 
 
 def resolve_prior_state(

@@ -141,7 +141,9 @@ def post_review_to_github(
         repo: Optional repository override (owner/name).
         reporter: Optional preconfigured GitHub reporter.
         options: What this round renders and what the lifecycle may do.
-            Defaults are a first round with no carried state.
+            Omitting it carries no state *into* the call; the state left on
+            the sticky comment is still recovered below, so an omitted
+            ``prior_state`` is not the same as a first round.
 
     Returns:
         True when posting succeeded; False on failure or when GitHub context

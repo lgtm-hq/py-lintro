@@ -19,29 +19,34 @@ class LifecycleSyncRequest:
     the pass inside the eight-parameter ratchet (#2301) and makes it
     impossible to stamp one round's records with another round's sha.
 
+    The three fields the old keyword wall required stay required here. An
+    absent ``comment_bodies`` skips every stamp and an absent
+    ``round_number`` would label this round's banners "round 1", and neither
+    should be reachable by forgetting an argument.
+
     Attributes:
-        resolved: Records the matcher resolved this round.
-        partial: Open records of collapsed patterns with some occurrences
-            gone.
-        regressed: Records that came back this round; their *old* thread is
-            stamped and deliberately left resolved.
         comment_bodies: Current bodies of the pull request's inline comments,
             keyed by comment id. A record whose body is absent is skipped:
             overwriting a comment whose content is unknown would destroy the
             finding it carries.
         head_sha: Head commit sha reviewed in this round.
         round_number: 1-based round number for this run.
+        resolved: Records the matcher resolved this round.
+        partial: Open records of collapsed patterns with some occurrences
+            gone.
+        regressed: Records that came back this round; their *old* thread is
+            stamped and deliberately left resolved.
         auto_resolve: ``review.auto_resolve``. False keeps the banner and
             skips the GraphQL mutation entirely.
         new_thread_urls: Finding key to the URL of the fresh thread carrying
             its regression.
     """
 
+    comment_bodies: Mapping[int, str]
+    head_sha: str
+    round_number: int
     resolved: Sequence[FindingRecord] = ()
     partial: Sequence[FindingRecord] = ()
     regressed: Sequence[FindingRecord] = ()
-    comment_bodies: Mapping[int, str] = field(default_factory=dict)
-    head_sha: str = ""
-    round_number: int = 1
     auto_resolve: bool = True
     new_thread_urls: Mapping[str, str] = field(default_factory=dict)

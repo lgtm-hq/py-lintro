@@ -37,6 +37,16 @@ __all__ = [
 
 #: Marker identifying each comment kind on the pull request. A kind is exactly
 #: "the comment carrying this marker", which is why one lookup serves them all.
+#:
+#: ``ERROR`` deliberately shares ``STICKY_MARKER``: a failed round is a *state
+#: of the board*, not a comment of its own, and ``format_error_comment``
+#: embeds the sticky marker in the body it renders. Giving it a marker of its
+#: own would make a superseded failure comment relocate by the wrong one.
+#:
+#: Every :class:`~lintro.ai.review.enums.comment_kind.CommentKind` must appear
+#: here — the lookups below index this map directly, so a missing kind is a
+#: ``KeyError`` at write time rather than a decision. The 2305 lifecycle tests
+#: assert the two sets are equal so a fourth kind cannot be added without one.
 _MARKERS: dict[CommentKind, str] = {
     CommentKind.STICKY: STICKY_MARKER,
     CommentKind.ARCHIVE: ARCHIVE_MARKER,
@@ -52,10 +62,16 @@ class CommentClient(Protocol):
     already does for the inline threads: writing a comment is four calls, and
     anything that makes them can be written through.
 
-    Two further methods are read off the object when it has them —
-    ``create_issue_comment``, which answers with the new comment's id, and
-    ``update_issue_comment_status``, which answers with the PATCH's HTTP
-    status. Neither is required, so neither is declared here.
+    ``update_issue_comment_status`` is part of the contract because it is
+    what separates "GitHub refused this edit" from "GitHub refused this edit
+    *because you are not the author*", and only the second may supersede. A
+    client that could not answer with a status would have every failed edit —
+    a 500, a throttle — read as an actor mismatch and answered with a
+    duplicate comment.
+
+    ``create_issue_comment``, which answers with the new comment's id, is read
+    off the object when it has one: without it the comment is re-located by
+    its marker instead, which is a slower path rather than a wrong one.
     """
 
     def find_issue_comment(self, *, marker: str) -> tuple[int, str] | None:
@@ -100,6 +116,19 @@ class CommentClient(Protocol):
 
         Returns:
             bool: True when the comment is gone.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def update_issue_comment_status(self, *, comment_id: int, body: str) -> int | None:
+        """Edit a comment and answer with the HTTP status GitHub returned.
+
+        Args:
+            comment_id: Comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            int | None: The status, or ``None`` when the request never
+            reached GitHub.
         """
         ...  # pragma: no cover - structural type only
 
@@ -324,9 +353,11 @@ def _patch_status(
         body: Markdown body to write.
 
     Returns:
-        int | None: HTTP status when the reporter exposes one. Bool-only test
-        doubles map success to ``200`` and failure to ``403`` so the
-        actor-mismatch path stays covered without a status method.
+        int | None: HTTP status when the reporter exposes one. A double that
+        predates the status method — it is on the protocol, but a ``Mock`` is
+        not checked against one — maps success to ``200`` and failure to
+        ``403``, which is how the actor-mismatch path was covered before
+        ``update_issue_comment_status`` existed.
     """
     status_fn = getattr(reporter, "update_issue_comment_status", None)
     if callable(status_fn):
