@@ -57,6 +57,11 @@ checksum is stale, this script therefore also inspects <asset-name>.new; if
 deleted, <asset-name>.new is renamed onto it) and reused. The same invariant
 applies: the bytes were verified and smoke-tested by an earlier attempt.
 
+An asset that is listed on the release but cannot be downloaded or hashed is
+never judged stale and never replaced: only a digest that was actually computed
+can authorise a delete. Such a release ends the step as reuse=false with
+nothing touched.
+
 Never fails the step: every lookup failure degrades to reuse=false.
 EOF
 	[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && exit 0
@@ -139,18 +144,51 @@ if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{64}$ ]]; then
 fi
 EXPECTED_SHA="$(printf '%s' "$EXPECTED_SHA" | tr '[:upper:]' '[:lower:]')"
 
-# Echo the lowercase SHA256 of a published asset into ASSET_SHA and its local
-# path into ASSET_FILE, or return 1 when the release has no such asset (or it
-# cannot be hashed). Two names are tried in turn by the caller.
+# Put the lowercase SHA256 of a published asset into ASSET_SHA and its local
+# path into ASSET_FILE. Three outcomes, kept distinct on purpose: 0 the digest
+# was actually computed, 2 the release has no asset by that name, 1 the asset
+# is listed but could not be downloaded or hashed. Only outcome 0 may lead to a
+# delete anywhere downstream -- an unread asset is never judged stale.
 ASSET_FILE=""
 ASSET_SHA=""
 inspect_published_asset() {
 	local name="$1"
 	local path sha
-	path="$(release_download_asset "$RELEASE_TAG" "$name" "$ASSET_DIR")" || return 1
-	sha="$(sha256_file "$path")" || return 1
-	ASSET_FILE="$path"
-	ASSET_SHA="$(printf '%s' "$sha" | tr '[:upper:]' '[:lower:]')"
+	if path="$(release_download_asset "$RELEASE_TAG" "$name" "$ASSET_DIR")"; then
+		sha="$(sha256_file "$path")" || return 1
+		ASSET_FILE="$path"
+		ASSET_SHA="$(printf '%s' "$sha" | tr '[:upper:]' '[:lower:]')"
+		return 0
+	fi
+	[[ -z "$(release_asset_id "$RELEASE_TAG" "$name")" ]] && return 2
+	return 1
+}
+
+# Set REUSE_NAME to the published name whose bytes match the run checksum, or
+# leave it empty. Not a command substitution: it publishes ASSET_FILE/ASSET_SHA
+# for the caller and can end the step through `emit`, neither of which survives
+# a subshell. An asset that exists but cannot be read ends the step as a
+# rebuild, with nothing deleted -- the release is in a state this job must not
+# act on.
+REUSE_NAME=""
+resolve_reusable_asset() {
+	local name status
+	for name in "$ASSET_NAME" "$STAGING_NAME"; do
+		inspect_published_asset "$name" && status=0 || status=$?
+		case "$status" in
+		0)
+			if [[ "$ASSET_SHA" == "$EXPECTED_SHA" ]]; then
+				REUSE_NAME="$name"
+				return 0
+			fi
+			;;
+		2) ;;
+		*)
+			log_warning "Could not read ${name} from ${RELEASE_TAG}; rebuilding without touching it"
+			emit false
+			;;
+		esac
+	done
 }
 
 # 2. The asset currently attached to the release, then - when that is missing or
@@ -159,12 +197,7 @@ inspect_published_asset() {
 #    holding only <asset>.new; promoting it here finishes that swap and saves
 #    the rebuild the missing final name would otherwise force.
 STAGING_NAME="$(release_staging_name "$ASSET_NAME")"
-REUSE_NAME=""
-if inspect_published_asset "$ASSET_NAME" && [[ "$ASSET_SHA" == "$EXPECTED_SHA" ]]; then
-	REUSE_NAME="$ASSET_NAME"
-elif inspect_published_asset "$STAGING_NAME" && [[ "$ASSET_SHA" == "$EXPECTED_SHA" ]]; then
-	REUSE_NAME="$STAGING_NAME"
-fi
+resolve_reusable_asset
 
 # 3. Only an exact match against the run's own checksum short-circuits the build.
 if [[ -z "$REUSE_NAME" ]]; then

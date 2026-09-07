@@ -55,6 +55,9 @@ case "$sub" in
 	cp "$src"/* "$outdir/"
 	;;
 "release download")
+	# GH_STUB_FAIL_DOWNLOAD models a transient download failure on an asset
+	# that is still listed on the release.
+	[[ "${GH_STUB_FAIL_DOWNLOAD:-}" == "$pattern" ]] && exit 1
 	src="${assets}/${pattern}"
 	[[ -f "$src" ]] || exit 1
 	cp "$src" "${outdir}/${pattern}"
@@ -322,6 +325,41 @@ run_script() {
 	assert_equal "true" "$(get_github_output reuse)"
 	assert_output --partial "Reusing verified release asset"
 	assert_equal "" "$(cat "$GH_STUB_LOG")"
+	[[ -f "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+}
+
+@test "reuse_release_asset.sh: an unreadable staging asset rebuilds without deleting it" {
+	# The staging asset is listed but cannot be downloaded. It may be the only
+	# copy of a verified binary, so the job rebuilds and leaves it alone rather
+	# than treating an unread digest as a mismatch.
+	publish_staging_asset "already-released-bytes"
+	publish_checksum_artifact "$(compute_expected_sha256 "${GH_STATE}/assets/${ASSET_NAME}.new")"
+	export GH_STUB_FAIL_DOWNLOAD="${ASSET_NAME}.new"
+
+	run_script
+	assert_success
+	assert_equal "false" "$(get_github_output reuse)"
+	assert_output --partial "Could not read ${ASSET_NAME}.new"
+	assert_output --partial "without touching it"
+	[[ -f "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+	assert_equal "" "$(cat "$GH_STUB_LOG")"
+	[[ ! -f "$DEST" ]]
+}
+
+@test "reuse_release_asset.sh: an unreadable published asset rebuilds without promoting over it" {
+	# Same rule for the published name: an asset whose digest could not be read
+	# is never replaced on this path.
+	publish_asset "some-other-build"
+	publish_staging_asset "already-released-bytes"
+	publish_checksum_artifact "$(compute_expected_sha256 "${GH_STATE}/assets/${ASSET_NAME}.new")"
+	export GH_STUB_FAIL_DOWNLOAD="${ASSET_NAME}"
+
+	run_script
+	assert_success
+	assert_equal "false" "$(get_github_output reuse)"
+	assert_output --partial "Could not read ${ASSET_NAME} from"
+	assert_equal "" "$(cat "$GH_STUB_LOG")"
+	[[ -f "${GH_STATE}/assets/${ASSET_NAME}" ]]
 	[[ -f "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
 }
 

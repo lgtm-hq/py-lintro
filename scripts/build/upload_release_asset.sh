@@ -42,7 +42,9 @@ multi-second upload. A kill anywhere else leaves the release with the old asset
 script promotes the leftover when it matches the file being uploaded, and
 reuse_release_asset.sh promotes it (skipping the rebuild entirely) when it
 matches the run's own checksum artifact. A staging asset from some other build
-is deleted before a fresh upload.
+is deleted before a fresh upload -- but only once its digest has actually been
+read and found to differ. When the leftover cannot be downloaded or hashed this
+script fails instead, because it can be the release's only copy of the binary.
 EOF
 	[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && exit 0
 	exit 2
@@ -82,12 +84,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Echo the SHA256 of a published asset, or nothing when it cannot be read.
+# Echo the SHA256 of a published asset, or return 1 when it could not be read.
+# The distinction matters: an empty string must never be compared against a real
+# digest, because "the hashes differ" is what authorises deleting an asset. A
+# transient download failure has to fail the step instead.
 published_sha256() {
 	local name="$1"
 	local path
-	path="$(release_download_asset "$RELEASE_TAG" "$name" "$WORK_DIR/inspect")" || return 0
-	sha256_file "$path" 2>/dev/null || return 0
+	path="$(release_download_asset "$RELEASE_TAG" "$name" "$WORK_DIR/inspect")" || return 1
+	sha256_file "$path"
 }
 
 if ! LOCAL_SHA="$(sha256_file "$FILE")"; then
@@ -107,13 +112,21 @@ cp "$FILE" "$STAGING_FILE"
 # refuses to upload a duplicate name and they must never be renamed into place.
 STALE_ID="$(release_asset_id "$RELEASE_TAG" "$STAGING_NAME")"
 if [[ -n "$STALE_ID" ]]; then
-	if [[ "$(published_sha256 "$STAGING_NAME")" == "$LOCAL_SHA" ]]; then
+	# Fail closed when the leftover cannot be read. After a killed swap it can
+	# be the release's only copy of the binary, so it may only be deleted on a
+	# digest that was actually computed and actually differs -- never on a
+	# transient download error.
+	if ! STALE_SHA="$(published_sha256 "$STAGING_NAME")"; then
+		log_error "Could not read ${STAGING_NAME} from ${RELEASE_TAG}; refusing to delete it"
+		exit 1
+	fi
+	if [[ "$STALE_SHA" == "$LOCAL_SHA" ]]; then
 		log_info "Promoting the ${STAGING_NAME} left by an earlier attempt"
 		release_promote_asset "$RELEASE_TAG" "$STALE_ID" "$ASSET_NAME"
 		log_success "Published ${ASSET_NAME} to ${RELEASE_TAG} (sha256=${LOCAL_SHA})"
 		exit 0
 	fi
-	log_warning "Removing stale ${STAGING_NAME} from ${RELEASE_TAG}"
+	log_warning "Removing stale ${STAGING_NAME} (sha256=${STALE_SHA}) from ${RELEASE_TAG}"
 	release_delete_asset "$STALE_ID"
 fi
 

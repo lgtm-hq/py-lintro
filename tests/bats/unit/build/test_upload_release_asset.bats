@@ -50,6 +50,9 @@ case "${1:-} ${2:-}" in
 		*) shift ;;
 		esac
 	done
+	# GH_STUB_FAIL_DOWNLOAD models a transient download failure on an asset
+	# that is still listed on the release.
+	[[ "${GH_STUB_FAIL_DOWNLOAD:-}" == "$pattern" ]] && exit 1
 	[[ -f "${assets}/${pattern}" ]] || exit 1
 	cp "${assets}/${pattern}" "${outdir}/${pattern}"
 	;;
@@ -199,7 +202,8 @@ teardown() {
 
 	run "$SCRIPT" v1.2.3 "$LOCAL_FILE"
 	assert_success
-	assert_output --partial "Removing stale ${ASSET_NAME}.new"
+	# The digest is read and reported before anything is deleted.
+	assert_output --partial "Removing stale ${ASSET_NAME}.new (sha256="
 	assert_equal "fresh-build" "$(cat "${GH_STATE}/assets/${ASSET_NAME}")"
 	[[ ! -e "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
 }
@@ -215,6 +219,21 @@ teardown() {
 	assert_output --partial "Removing stale ${ASSET_NAME}.new"
 	assert_equal "fresh-build" "$(cat "${GH_STATE}/assets/${ASSET_NAME}")"
 	[[ ! -e "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+}
+
+@test "upload_release_asset.sh: an unreadable staging asset fails instead of deleting it" {
+	# After a killed swap <asset>.new can be the release's only copy. A
+	# transient download failure must not be read as "the hashes differ".
+	printf 'fresh-build\n' >"${GH_STATE}/assets/${ASSET_NAME}.new"
+	export GH_STUB_FAIL_DOWNLOAD="${ASSET_NAME}.new"
+
+	run "$SCRIPT" v1.2.3 "$LOCAL_FILE"
+	assert_failure
+	assert_equal "1" "$status"
+	assert_output --partial "refusing to delete it"
+	# The only copy is still on the release and nothing was deleted.
+	[[ -f "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+	assert_equal "" "$(cat "$GH_STUB_LOG")"
 }
 
 @test "upload_release_asset.sh: a corrupted upload fails without touching the live asset" {
