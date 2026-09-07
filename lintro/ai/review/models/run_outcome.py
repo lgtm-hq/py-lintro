@@ -8,10 +8,11 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 
 __all__ = ["CONVERGENCE_SCORE_PRECISION", "NARRATIVE_LIMIT", "RunOutcome"]
 
-#: Decimal places a persisted convergence score is rounded to. It lives here
-#: rather than in :mod:`lintro.ai.review.convergence` only because that module
-#: imports this one; the scoring module re-exports it as ``SCORE_PRECISION``
-#: so every surface rounds a score exactly once, the same way.
+#: Decimal places a persisted convergence score is rounded to. It lives with
+#: the field it rounds rather than in :mod:`lintro.ai.review.convergence`,
+#: which imports this module; the scoring module re-exports it as
+#: ``SCORE_PRECISION`` so every surface rounds a score exactly once, the same
+#: way.
 CONVERGENCE_SCORE_PRECISION = 2
 
 #: Maximum characters of a stored per-round narrative, on the way in (it is

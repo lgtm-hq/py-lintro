@@ -72,10 +72,8 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import Severity
-from lintro.ai.review.models.run_record import (
-    CONVERGENCE_SCORE_PRECISION,
-    RunRecord,
-)
+from lintro.ai.review.models.run_outcome import CONVERGENCE_SCORE_PRECISION
+from lintro.ai.review.models.run_record import RunRecord
 from lintro.enums.review_category import ReviewCategory
 
 __all__ = [

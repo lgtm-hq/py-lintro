@@ -29,7 +29,7 @@ from lintro.ai.review.models.run_outcome import (
 from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.transport import resolve_cost_basis
 
-__all__ = ["CONVERGENCE_SCORE_PRECISION", "RunRecord"]
+__all__ = ["RunRecord"]
 
 
 def _strict_bool(value: object) -> bool:
