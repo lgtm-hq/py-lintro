@@ -236,16 +236,24 @@ def test_check_passes_configured_options_into_the_subprocess_argv(
 
     # Options reach a plugin through set_options (which is how ToolManager
     # drives it); check()'s dict only carries execution knobs such as timeout.
-    # prepare() is left real so discovery and the version gate run for real: a
-    # check() that stopped calling prepare, or built a command it never passed
-    # on, would otherwise still pass.
+    # prepare() is left real so option merging and file discovery run for real:
+    # a check() that stopped calling prepare, or built a command it never passed
+    # on, would otherwise still pass. Only the version probe is stubbed, so the
+    # test is hermetic — without that, a runner with no cppcheck on PATH takes
+    # the skip path and never reaches _run_subprocess at all.
     cppcheck_plugin.set_options(
         enable=["warning", "style"],
         std="c11",
         inconclusive=True,
         suppress="missingInclude",
     )
-    with patch.object(cppcheck_plugin, "_run_subprocess", side_effect=_spy):
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(cppcheck_plugin, "_run_subprocess", side_effect=_spy),
+    ):
         result = cppcheck_plugin.check([str(source)], {})
 
     assert_that(result.success).is_true()
