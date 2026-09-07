@@ -17,8 +17,8 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-from lintro.ai.providers import anthropic as mod
-from lintro.ai.providers.anthropic import AnthropicProvider
+from lintro.ai.providers.anthropic import provider as mod
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
 
 
 @dataclass

@@ -47,7 +47,7 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/ai/orchestrator.py": ("PLR0912",),
     "lintro/ai/pipeline.py": ("C901", "PLR0912", "PLR0913"),
     "lintro/ai/providers/base.py": ("PLR0913",),
-    "lintro/ai/providers/openai.py": ("PLR0912",),
+    "lintro/ai/providers/openai/provider.py": ("PLR0912",),
     "lintro/ai/refinement.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/ai/review/chunker/grouping.py": ("C901",),
     "lintro/ai/review/chunker/shell_run_parse.py": ("C901", "PLR0912"),

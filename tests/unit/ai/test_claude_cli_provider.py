@@ -12,7 +12,7 @@ from assertpy import assert_that
 
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
-from lintro.ai.providers.anthropic import AnthropicProvider, _find_claude
+from lintro.ai.providers.anthropic.provider import AnthropicProvider, _find_claude
 from lintro.ai.registry import AIProvider
 from tests.unit.ai.conftest import patch_cli_exec
 
@@ -21,7 +21,7 @@ from tests.unit.ai.conftest import patch_cli_exec
 def _mock_claude_on_path() -> Iterator[None]:
     """Patch claude binary discovery for CLI transport tests."""
     with patch(
-        "lintro.ai.providers.anthropic._find_claude",
+        "lintro.ai.providers.anthropic.provider._find_claude",
         return_value="/usr/local/bin/claude",
     ):
         yield
@@ -49,7 +49,7 @@ def _cli_json(
 def test_claude_cli_init_raises_when_claude_missing() -> None:
     """Raise when the claude binary is not on PATH."""
     with (
-        patch("lintro.ai.providers.anthropic._find_claude", return_value=None),
+        patch("lintro.ai.providers.anthropic.provider._find_claude", return_value=None),
         pytest.raises(AINotAvailableError, match="claude"),
     ):
         AnthropicProvider(transport=AITransport.CLI)

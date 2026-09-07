@@ -1434,6 +1434,172 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
+def test_publish_npm_refuses_untrusted_entry_before_the_npm_environment() -> None:
+    """A run that cannot authenticate fails before the npm approval is spent.
+
+    npm trusted publishing only authenticates the tag-pipeline entry path
+    (issue #2247), so a live direct dispatch can never publish. The guard must
+    run in its own job that carries no ``environment:`` and that the
+    environment-gated publish job ``needs``, otherwise the doomed run burns an
+    ``npm`` deployment approval before failing.
+    """
+    workflow = _load_workflow(name="publish-npm.yml")
+    jobs = workflow["jobs"]
+
+    guard = jobs["guard"]
+    assert_that(guard).does_not_contain_key("environment")
+
+    publish_needs = jobs["publish"]["needs"]
+    if isinstance(publish_needs, str):
+        publish_needs = [publish_needs]
+    assert_that(publish_needs).contains("guard")
+    assert_that(jobs["publish"]["environment"]).is_equal_to("npm")
+
+    guard_step = next(
+        (
+            step
+            for step in guard["steps"]
+            if step.get("run", "").strip().endswith("assert_dispatch_allowed.sh")
+        ),
+        None,
+    )
+    assert_that(guard_step).described_as("guard step not found").is_not_none()
+    assert guard_step is not None  # narrow type for mypy
+    # The decision logic lives in the script, not inline in the workflow.
+    assert_that(guard_step["run"].strip()).is_equal_to(
+        "scripts/ci/npm/assert_dispatch_allowed.sh",
+    )
+    # Both inputs the guard decides on must reach the script: the entry
+    # workflow (the OIDC subject) and dry_run.
+    assert_that(guard_step["env"]["WORKFLOW_REF"]).contains("github.workflow_ref")
+    assert_that(guard_step["env"]["DRY_RUN"]).contains("inputs.dry_run")
+
+
+def _guard_allowlisted_workflow() -> str:
+    """Return the workflow filename the npm guard allowlists.
+
+    Returns:
+        The basename of the entry workflow named in
+        ``TRUSTED_ENTRY_WORKFLOW`` inside ``assert_dispatch_allowed.sh``.
+    """
+    script = (
+        _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
+    ).read_text(encoding="utf-8")
+    match = re.search(
+        r"^readonly TRUSTED_ENTRY_WORKFLOW='/\.github/workflows/([^']+)@'",
+        script,
+        flags=re.MULTILINE,
+    )
+    assert_that(match).described_as("TRUSTED_ENTRY_WORKFLOW not found").is_not_none()
+    assert match is not None  # narrow type for mypy
+    return match.group(1)
+
+
+def test_publish_npm_guard_allowlists_a_workflow_that_calls_it() -> None:
+    """The allowlisted entry workflow exists and really calls publish-npm.yml.
+
+    The guard is an allowlist keyed on a workflow *filename*, so a rename on
+    either side would silently lock out every publish (or, with a denylist,
+    let an unauthenticable one through). Pin both halves: the named workflow
+    is on disk, and it is the one that invokes publish-npm.yml.
+    """
+    allowlisted = _guard_allowlisted_workflow()
+    entry_path = _REPO_ROOT / ".github" / "workflows" / allowlisted
+    assert_that(entry_path.is_file()).described_as(str(entry_path)).is_true()
+
+    entry_workflow = _load_workflow(name=allowlisted)
+    callers = [
+        job
+        for job in entry_workflow["jobs"].values()
+        if isinstance(job, dict)
+        and str(job.get("uses", "")).endswith("publish-npm.yml")
+    ]
+    assert_that(callers).described_as(
+        f"{allowlisted} must call publish-npm.yml",
+    ).is_not_empty()
+
+
+def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> None:
+    """Only the tag pipeline may run a live publish; everything else fails.
+
+    ``github.event_name`` cannot substitute for the entry workflow: a
+    ``workflow_call`` run reports the *caller's* event, so a dispatched
+    tag-pipeline run and a dispatched publish-npm.yml run look identical. And
+    the check is an allowlist, so an unknown or renamed caller is refused
+    rather than waved through. The runner's own ``GITHUB_WORKFLOW_REF`` is the
+    fallback, so a dropped ``env:`` mapping still gates the publish.
+    """
+    script = _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
+    workflows = "lgtm-hq/py-lintro/.github/workflows"
+    trusted = _guard_allowlisted_workflow()
+    tag_pipeline_ref = f"{workflows}/{trusted}@refs/tags/v1.2.3"
+    dispatch_ref = f"{workflows}/publish-npm.yml@refs/heads/main"
+    unset = "<unset>"
+    cases: list[tuple[dict[str, str], int]] = [
+        # The trusted entry workflow, on any ref: allowed.
+        ({"WORKFLOW_REF": tag_pipeline_ref}, 0),
+        # An absent or empty DRY_RUN is a live publish, not a dry run: a
+        # dispatch must still be refused, or a dropped input would open the gate.
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": unset}, 1),
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": ""}, 1),
+        ({"WORKFLOW_REF": f"{workflows}/{trusted}@refs/heads/main"}, 0),
+        # Direct dispatch of this workflow: refused unless it is a dry run.
+        ({"WORKFLOW_REF": dispatch_ref}, 1),
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": "true"}, 0),
+        # An unknown caller is not on the allowlist.
+        ({"WORKFLOW_REF": f"{workflows}/some-other-pipeline.yml@refs/tags/v1"}, 1),
+        # With no WORKFLOW_REF mapping, the runner's own GITHUB_WORKFLOW_REF
+        # still gates: a dropped `env:` in the workflow must not open the gate.
+        ({"GITHUB_WORKFLOW_REF": tag_pipeline_ref}, 0),
+        ({"GITHUB_WORKFLOW_REF": dispatch_ref}, 1),
+        # No entry path at all proves nothing: fail closed.
+        ({}, 1),
+    ]
+    for env, expected_code in cases:
+        merged = {"PATH": "/usr/bin:/bin", "DRY_RUN": "false", **env}
+        merged = {key: value for key, value in merged.items() if value != unset}
+        result = subprocess.run(  # nosec B603 - fixed in-repo script
+            [str(script)],
+            env=merged,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert_that(result.returncode).described_as(str(env)).is_equal_to(
+            expected_code,
+        )
+
+
+def test_publish_npm_classifies_e404_as_non_retryable() -> None:
+    """publish_packages.sh classifies npm's masked-auth E404 as fatal.
+
+    npm reports an unauthorized publish as ``E404 Not Found`` (issue #2247).
+    Retrying it burns three attempts per package on a permanent condition, so
+    E404 belongs in the non-retryable class, not the transient one. This is a
+    wiring assertion on the two classification patterns; the behaviour (one
+    attempt, no retry) is covered by
+    ``tests/bats/unit/npm/test_publish_packages_e404.bats``.
+    """
+    script = (_REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh").read_text(
+        encoding="utf-8",
+    )
+    non_retryable = re.search(
+        r"^NON_RETRYABLE_ERROR_RE='([^']*)'",
+        script,
+        flags=re.MULTILINE,
+    )
+    transient = re.search(
+        r"^TRANSIENT_ERROR_RE='([^']*)'",
+        script,
+        flags=re.MULTILINE,
+    )
+    assert_that(non_retryable).is_not_none()
+    assert_that(transient).is_not_none()
+    assert non_retryable is not None and transient is not None  # narrow for mypy
+    assert_that(non_retryable.group(1).split("|")).contains("E404")
+    assert_that(transient.group(1)).does_not_contain("E404")
+
+
 def test_publish_npm_delegates_publish_to_hardened_script() -> None:
     """The publish step runs publish_packages.sh (retry/idempotency live there).
 
