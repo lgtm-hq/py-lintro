@@ -2721,20 +2721,19 @@ def test_memory_sampler_tees_its_output_into_the_step_log() -> None:
     replays the log and tees the final snapshot, while the workflow keeps the
     artifact upload for ordinary failures.
     """
-    sampler = (_REPO_ROOT / "scripts" / "ci" / "memory-sampler.sh").read_text(
-        encoding="utf-8",
-    )
-    # Behaviour (what reaches stdout) is asserted in
-    # tests/scripts/test_memory_sampler.py; this only pins that the sampler
-    # keeps writing both channels rather than redirecting into the log alone.
-    assert_that(sampler.count('| tee -a "$log_file"')).is_greater_than_or_equal_to(2)
-
+    # What actually reaches stdout is asserted against the running script in
+    # tests/scripts/test_memory_sampler.py; this only pins the workflow side,
+    # where the sampler steps must stay wired and the artifact upload must stay
+    # failure-only rather than becoming the sole channel.
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     for job_id in ("build-macos", "build-linux"):
         by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
         assert_that(by_name["Upload memory diagnostics"]["if"]).described_as(
             job_id,
         ).is_equal_to("failure()")
+        assert_that(by_name["Stop memory sampler"]["if"]).described_as(
+            job_id,
+        ).is_equal_to("always()")
 
 
 _PUSH_SHA_TERNARY = "github.event_name == 'push' && github.sha || github.ref"

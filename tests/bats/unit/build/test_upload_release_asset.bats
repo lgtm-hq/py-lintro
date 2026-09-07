@@ -176,6 +176,23 @@ teardown() {
 	assert_equal "rename ${ASSET_NAME}.new -> ${ASSET_NAME}" "$(sed -n 2p "$GH_STUB_LOG")"
 }
 
+@test "upload_release_asset.sh: promotes a matching staging asset from a killed swap" {
+	# A kill between the delete and the rename leaves only <asset>.new. The
+	# retry must finish that swap, not delete the release's only copy and
+	# re-upload it.
+	printf 'fresh-build\n' >"${GH_STATE}/assets/${ASSET_NAME}.new"
+
+	run "$SCRIPT" v1.2.3 "$LOCAL_FILE"
+	assert_success
+	assert_output --partial "Promoting the ${ASSET_NAME}.new"
+	assert_equal "fresh-build" "$(cat "${GH_STATE}/assets/${ASSET_NAME}")"
+	[[ ! -e "${GH_STATE}/assets/${ASSET_NAME}.new" ]]
+	# Renamed in place: nothing was deleted and nothing was re-uploaded.
+	assert_equal "rename ${ASSET_NAME}.new -> ${ASSET_NAME}" "$(sed -n 1p "$GH_STUB_LOG")"
+	run grep -c "^delete" "$GH_STUB_LOG"
+	assert_output "0"
+}
+
 @test "upload_release_asset.sh: clears a stale staging asset from a killed attempt" {
 	printf 'old-build\n' >"${GH_STATE}/assets/${ASSET_NAME}"
 	printf 'half-uploaded\n' >"${GH_STATE}/assets/${ASSET_NAME}.new"

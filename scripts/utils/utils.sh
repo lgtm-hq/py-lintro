@@ -274,3 +274,23 @@ version_ge() {
 		exit 0  # versions are equal
 	}'
 }
+
+# =============================================================================
+# Checksums
+# =============================================================================
+
+# Print the SHA256 of a file, using whichever of sha256sum/shasum exists.
+# Returns 1 when neither is available so callers can fail closed with their own
+# message. Single implementation so the Linux (sha256sum) and macOS (shasum)
+# release paths cannot drift apart.
+# Usage: sha="$(sha256_file "$path")" || log_error "..."
+sha256_file() {
+	local file="$1"
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$file" | cut -d' ' -f1
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$file" | cut -d' ' -f1
+	else
+		return 1
+	fi
+}

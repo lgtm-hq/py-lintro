@@ -157,10 +157,14 @@ Consequences for operators:
 - **Re-run failed jobs** on a tag run is the supported npm backfill path (#2247): the
   binary jobs pass in ~2 minutes instead of a ~20-minute rebuild, and `npm-publish` runs
   under the trusted workflow identity it needs. There is no separate dispatch path.
-- Release uploads use `scripts/build/upload_release_asset.sh`, which uploads
-  `<asset>.new`, verifies its checksum, and only then deletes and renames. A killed
+- The two compile jobs upload with `scripts/build/upload_release_asset.sh`, which
+  uploads `<asset>.new`, verifies its checksum, and only then deletes and renames; a
+  retry promotes a checksum-matching `<asset>.new` left by a killed swap. A killed
   runner can no longer strip a good binary off a published release, which is what the
-  `softprops/action-gh-release` overwrite path did on `v0.147.3`.
+  `softprops/action-gh-release` overwrite path did on `v0.147.3`. The
+  `Generate Man Page` and `Create Universal Binary` jobs still upload with
+  `softprops/action-gh-release`; their assets are regenerated cheaply, so the swap was
+  not extended to them.
 
 ## Token patterns
 

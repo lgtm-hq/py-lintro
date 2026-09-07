@@ -35,10 +35,11 @@ is what happened to lintro-linux-x64 on v0.147.3 (#2435). This script instead:
      file, so a truncated upload is caught before anything is deleted,
   3. deletes the old asset and renames <asset-name>.new to <asset-name>.
 
-Only step 3 has a gap, and it is a single API call rather than a multi-second
-upload. A kill anywhere else leaves the release with the old asset (steps 1-2)
-or with both names present, and the next attempt starts by clearing any stale
-<asset-name>.new.
+Only step 3 has a gap, and it is a delete plus a rename rather than a
+multi-second upload. A kill anywhere else leaves the release with the old asset
+(steps 1-2) or with both names present. A kill inside step 3 leaves only
+<asset-name>.new, and the next attempt promotes it (checksum-matched) instead
+of deleting it; a staging asset from some other build is deleted first.
 EOF
 	[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && exit 0
 	exit 2
@@ -78,17 +79,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-sha256_of() {
-	local file="$1"
-	if command -v sha256sum >/dev/null 2>&1; then
-		sha256sum "$file" | cut -d' ' -f1
-	elif command -v shasum >/dev/null 2>&1; then
-		shasum -a 256 "$file" | cut -d' ' -f1
-	else
-		return 1
-	fi
-}
-
 # Echo the numeric id of a named asset on the release, or nothing when absent.
 asset_id() {
 	local name="$1"
@@ -101,7 +91,35 @@ delete_asset_by_id() {
 	gh api -X DELETE "repos/{owner}/{repo}/releases/assets/${id}" >/dev/null
 }
 
-if ! LOCAL_SHA="$(sha256_of "$FILE")"; then
+# Delete whatever currently holds ASSET_NAME and rename the staging asset onto
+# it. This is the only step that can leave the release without the final name,
+# and it is a single API pair rather than a multi-second upload.
+promote_staging_asset() {
+	local staging_id="$1"
+	local old_id
+	old_id="$(asset_id "$ASSET_NAME")"
+	if [[ -n "$old_id" ]]; then
+		log_info "Replacing existing ${ASSET_NAME}"
+		delete_asset_by_id "$old_id"
+	fi
+	gh api -X PATCH "repos/{owner}/{repo}/releases/assets/${staging_id}" \
+		-f "name=${ASSET_NAME}" >/dev/null
+}
+
+# Echo the SHA256 of a published asset, or nothing when it cannot be read.
+published_sha256() {
+	local name="$1"
+	local dir="$WORK_DIR/inspect"
+	rm -rf "$dir"
+	mkdir -p "$dir"
+	gh release download "$RELEASE_TAG" \
+		--pattern "$name" \
+		--dir "$dir" \
+		--clobber >/dev/null 2>&1 || return 0
+	sha256_file "${dir}/${name}" 2>/dev/null || return 0
+}
+
+if ! LOCAL_SHA="$(sha256_file "$FILE")"; then
 	log_error "No SHA256 tool found (expected sha256sum or shasum)"
 	exit 1
 fi
@@ -110,10 +128,20 @@ WORK_DIR="$(mktemp -d)"
 STAGING_FILE="$WORK_DIR/$STAGING_NAME"
 cp "$FILE" "$STAGING_FILE"
 
-# A previous killed attempt may have left the staging asset behind; gh refuses
-# to upload a duplicate name, and stale bytes must never be renamed into place.
+# A previous killed attempt may have left the staging asset behind. If it is
+# already the bytes we are about to upload, finish that swap instead of
+# deleting it: a kill in the delete-and-rename pair below leaves the release
+# holding only <asset>.new, and re-uploading from scratch would delete the one
+# good copy first. Stale bytes from some other build are removed, since gh
+# refuses to upload a duplicate name and they must never be renamed into place.
 STALE_ID="$(asset_id "$STAGING_NAME")"
 if [[ -n "$STALE_ID" ]]; then
+	if [[ "$(published_sha256 "$STAGING_NAME")" == "$LOCAL_SHA" ]]; then
+		log_info "Promoting the ${STAGING_NAME} left by an earlier attempt"
+		promote_staging_asset "$STALE_ID"
+		log_success "Published ${ASSET_NAME} to ${RELEASE_TAG} (sha256=${LOCAL_SHA})"
+		exit 0
+	fi
 	log_warning "Removing stale ${STAGING_NAME} from ${RELEASE_TAG}"
 	delete_asset_by_id "$STALE_ID"
 fi
@@ -130,7 +158,7 @@ gh release download "$RELEASE_TAG" \
 	--dir "$VERIFY_DIR" \
 	--clobber
 
-if ! REMOTE_SHA="$(sha256_of "$VERIFY_DIR/$STAGING_NAME")"; then
+if ! REMOTE_SHA="$(sha256_file "$VERIFY_DIR/$STAGING_NAME")"; then
 	log_error "Could not hash the uploaded asset"
 	exit 1
 fi
@@ -150,13 +178,6 @@ if [[ -z "$NEW_ID" ]]; then
 	exit 1
 fi
 
-OLD_ID="$(asset_id "$ASSET_NAME")"
-if [[ -n "$OLD_ID" ]]; then
-	log_info "Replacing existing ${ASSET_NAME}"
-	delete_asset_by_id "$OLD_ID"
-fi
-
-gh api -X PATCH "repos/{owner}/{repo}/releases/assets/${NEW_ID}" \
-	-f "name=${ASSET_NAME}" >/dev/null
+promote_staging_asset "$NEW_ID"
 
 log_success "Published ${ASSET_NAME} to ${RELEASE_TAG} (sha256=${LOCAL_SHA})"

@@ -44,11 +44,7 @@ mkdir -p "$TARGET_DIR"
 mv "$SOURCE" "$TARGET"
 chmod +x "$TARGET"
 
-if command -v sha256sum >/dev/null 2>&1; then
-	SHA="$(sha256sum "$TARGET" | cut -d' ' -f1)"
-elif command -v shasum >/dev/null 2>&1; then
-	SHA="$(shasum -a 256 "$TARGET" | cut -d' ' -f1)"
-else
+if ! SHA="$(sha256_file "$TARGET")"; then
 	log_error "No SHA256 tool found (expected sha256sum or shasum)"
 	exit 1
 fi

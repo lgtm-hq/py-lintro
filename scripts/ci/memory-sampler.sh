@@ -193,7 +193,7 @@ cmd_stop() {
 	{
 		snapshot || echo "final snapshot failed (ignored)"
 		echo "=== sampler stopped $(date -u '+%Y-%m-%dT%H:%M:%SZ') ==="
-	} | tee -a "$log_file"
+	} | tee -a "$log_file" || log_warning "Could not write the final snapshot (ignored)"
 }
 
 case "${1:-}" in

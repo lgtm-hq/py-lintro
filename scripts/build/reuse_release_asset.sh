@@ -84,17 +84,6 @@ emit() {
 	exit 0
 }
 
-sha256_of() {
-	local file="$1"
-	if command -v sha256sum >/dev/null 2>&1; then
-		sha256sum "$file" | cut -d' ' -f1
-	elif command -v shasum >/dev/null 2>&1; then
-		shasum -a 256 "$file" | cut -d' ' -f1
-	else
-		return 1
-	fi
-}
-
 if [[ -z "$RELEASE_TAG" ]]; then
 	log_warning "No release tag resolved; nothing to reuse"
 	emit false
@@ -154,7 +143,7 @@ if [[ ! -f "$DOWNLOADED" ]]; then
 	emit false
 fi
 
-if ! ACTUAL_SHA="$(sha256_of "$DOWNLOADED")"; then
+if ! ACTUAL_SHA="$(sha256_file "$DOWNLOADED")"; then
 	log_warning "No SHA256 tool found (expected sha256sum or shasum); rebuilding"
 	emit false
 fi
