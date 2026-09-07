@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.151.2] - 2026-09-07
+
+### Changed
+
+- **deps**: pin lintro-tools image digest to c46c3aea (#2445) (762fc2c)
+
+### Fixed
+
+- **ci**: make the binary release jobs idempotent and the asset swap atomic (#2440)
+  (452302c)
+- **ci**: give the dogfood gate's version probe 120s (#2444) (a41e739)
+
 ## [0.151.1] - 2026-09-07
 
 ### Fixed
