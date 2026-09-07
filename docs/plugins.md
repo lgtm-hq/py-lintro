@@ -25,6 +25,11 @@ through its `definition` module — importing it runs the package `__init__`, so
 package's own re-export surface comes along — which is what registers the tool. There is
 no central list to append to.
 
+One exception: a shared helper package with no `definition.py` registers nothing and is
+indexed by its public modules instead. `lintro/tools/ts_checker/` is the only such
+package today; it holds the base, command and execution helpers that `tsc` and `vue_tsc`
+share, and it still appears in the duplicate-code gate scope.
+
 An external plugin gets the exact same lifecycle as a built-in tool: config injection,
 file discovery, subprocess execution, output normalization, and per-invocation execution
 isolation.
