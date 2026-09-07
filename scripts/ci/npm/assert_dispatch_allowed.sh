@@ -39,9 +39,11 @@ Usage: assert_dispatch_allowed.sh
 Environment:
   WORKFLOW_REF  The run's entry workflow (github.workflow_ref), e.g.
                 owner/repo/.github/workflows/publish-npm.yml@refs/heads/main.
-                This is the OIDC subject npm matches on.
-  EVENT_NAME    The triggering event (github.event_name). Only consulted when
-                WORKFLOW_REF is empty.
+                This is the OIDC subject npm matches on. Defaults to the
+                runner's GITHUB_WORKFLOW_REF.
+  EVENT_NAME    The triggering event (github.event_name); defaults to the
+                runner's GITHUB_EVENT_NAME. Only consulted when WORKFLOW_REF
+                is empty.
   DRY_RUN       "true" when the run only performs `npm publish --dry-run`.
                 Anything else is treated as a live publish.
 
@@ -51,8 +53,10 @@ EOF
 	exit 0
 fi
 
-workflow_ref="${WORKFLOW_REF:-}"
-event_name="${EVENT_NAME:-}"
+# Fall back to the runner-provided values so a dropped `env:` mapping in the
+# workflow still gates the publish instead of silently allowing it.
+workflow_ref="${WORKFLOW_REF:-${GITHUB_WORKFLOW_REF:-}}"
+event_name="${EVENT_NAME:-${GITHUB_EVENT_NAME:-}}"
 dry_run="${DRY_RUN:-}"
 
 if [[ "$dry_run" == "true" ]]; then
@@ -65,10 +69,12 @@ if [[ -n "$workflow_ref" ]]; then
 		echo "Entry workflow '$workflow_ref' is the trusted publisher identity; proceeding."
 		exit 0
 	fi
-elif [[ "$event_name" != "workflow_dispatch" ]]; then
+elif [[ -n "$event_name" && "$event_name" != "workflow_dispatch" ]]; then
 	# No workflow ref to inspect: fall back to the event. A `workflow_call`
 	# run reports the caller's event, so anything but a dispatch entered
-	# through a pipeline whose identity npm may trust.
+	# through a pipeline whose identity npm may trust. An *empty* event names
+	# no entry path at all, so it falls through to the refusal below rather
+	# than opening the gate on missing context.
 	echo "Entry path '$event_name': npm trusted publishing applies; proceeding."
 	exit 0
 fi

@@ -11,6 +11,10 @@ DISPATCH_REF="lgtm-hq/py-lintro/.github/workflows/publish-npm.yml@refs/heads/mai
 
 setup() {
 	setup_temp_dir
+	# The script falls back to the runner-provided values; a real Actions
+	# environment would leak them into the no-context cases below.
+	export GITHUB_WORKFLOW_REF=""
+	export GITHUB_EVENT_NAME=""
 }
 
 teardown() {
@@ -87,5 +91,21 @@ teardown() {
 
 @test "assert_dispatch_allowed.sh: a dry run is allowed with no context at all" {
 	DRY_RUN=true run "$SCRIPT"
+	assert_success
+}
+
+@test "assert_dispatch_allowed.sh: a live run with no context at all is refused" {
+	# Neither a workflow ref nor an event names an entry path, so there is
+	# nothing to prove the run can authenticate: fail closed.
+	run "$SCRIPT"
+	assert_failure
+}
+
+@test "assert_dispatch_allowed.sh: falls back to the runner environment" {
+	# A dropped `env:` mapping in the workflow must still gate the publish.
+	GITHUB_WORKFLOW_REF="$DISPATCH_REF" DRY_RUN=false run "$SCRIPT"
+	assert_failure
+
+	GITHUB_WORKFLOW_REF="$TAG_PIPELINE_REF" DRY_RUN=false run "$SCRIPT"
 	assert_success
 }

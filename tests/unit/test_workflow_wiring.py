@@ -1505,6 +1505,8 @@ def test_publish_npm_guard_script_gates_on_entry_workflow_and_dry_run() -> None:
         # No workflow ref: fall back to the event, fail-closed on a dispatch.
         ({"EVENT_NAME": "workflow_dispatch"}, 1),
         ({"EVENT_NAME": "push"}, 0),
+        # No entry path at all proves nothing: fail closed.
+        ({}, 1),
     ]
     for env, expected_code in cases:
         result = subprocess.run(  # nosec B603 - fixed in-repo script
