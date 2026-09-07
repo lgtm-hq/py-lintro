@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -14,8 +15,10 @@ from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError, AIProviderError
+from lintro.ai.json_response import strip_json_fences
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.review.chunk_pass import review_chunk
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_category import ReviewCategory
@@ -24,6 +27,7 @@ from lintro.ai.review.errors_taxonomy import ReviewErrorKind, classify_provider_
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.interrupt import SIGTERM_TIMEOUT_MESSAGE, sigterm_timeout_error
+from lintro.ai.review.merge import parse_review_response
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.coverage_record import CoverageRecord
@@ -33,16 +37,17 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.orchestrator import (
-    _review_chunk,
-    build_git_native_review_prompt,
-    parse_review_response,
-    resolve_review_chunks,
     run_review,
     run_review_async,
-    strip_json_fences,
 )
-from lintro.ai.review.progress import ReviewProgressCallback
+from lintro.ai.review.progress import NullReviewProgress, ReviewProgressCallback
+from lintro.ai.review.prompts import (
+    PromptInputs,
+    build_git_native_review_prompt,
+)
+from lintro.ai.review.run_planning import resolve_review_chunks
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
+from lintro.ai.review.session import ChunkRunPlan, ReviewSessionOptions
 from lintro.ai.review.state_store import load_ci_state, write_state_part
 
 
@@ -80,6 +85,9 @@ def _sample_response_json(
 
 def _mock_provider(*, content: str) -> MagicMock:
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-20250514"
     provider.name = "anthropic"
     # Declare capabilities explicitly: a bare MagicMock attribute is truthy, so
@@ -150,7 +158,7 @@ def test_run_review_marks_cli_transport_tokens_estimated() -> None:
     provider = _mock_provider(content=_sample_response_json())
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -161,12 +169,14 @@ def test_run_review_marks_cli_transport_tokens_estimated() -> None:
     ):
         result = run_review(
             _one_file_context(),
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            ),
         )
 
     assert_that(result.metadata.token_usage_estimated).is_true()
@@ -200,7 +210,7 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         response = provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -212,29 +222,31 @@ def test_run_review_returns_partial_on_cost_cap() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_recording_call_ai,
         ),
     ):
         result = run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_cost_usd=0.01,
-                # Keep this mid-run stop deterministic under the patched
-                # recorder; parallel > 1 accepts n−1 overshoot (#1969).
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_cost_usd=0.01,
+                    # Keep this mid-run stop deterministic under the patched
+                    # recorder; parallel > 1 accepts n−1 overshoot (#1969).
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -269,7 +281,7 @@ def test_run_review_returns_partial_on_chunk_timeout() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:
@@ -282,26 +294,28 @@ def test_run_review_returns_partial_on_chunk_timeout() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_timeout_second_call,
         ),
     ):
         result = run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.CLI,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.CLI,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -338,7 +352,7 @@ async def test_run_review_returns_partial_on_sigterm() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:
@@ -352,27 +366,29 @@ async def test_run_review_returns_partial_on_sigterm() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_hang_second_call,
         ),
     ):
         result = await run_review_async(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.CLI,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.CLI,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                stop=stop,
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            stop=stop,
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -408,7 +424,7 @@ async def test_run_review_persists_when_agent_dies_after_sigterm() -> None:
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:
@@ -422,27 +438,29 @@ async def test_run_review_persists_when_agent_dies_after_sigterm() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_die_after_stop,
         ),
     ):
         result = await run_review_async(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.CLI,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.CLI,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                stop=stop,
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            stop=stop,
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -490,7 +508,7 @@ def test_run_review_writes_incremental_coverage_parts(
         user_prompt,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         response = provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -502,27 +520,29 @@ def test_run_review_writes_incremental_coverage_parts(
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_recording_call_ai,
         ),
     ):
         run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_cost_usd=0.01,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_cost_usd=0.01,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     parts = sorted(tmp_path.glob("part-*.json"))
@@ -568,11 +588,11 @@ def test_incremental_state_json_wins_over_downloaded_prior(
     ]
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -582,12 +602,14 @@ def test_incremental_state_json_wins_over_downloaded_prior(
     ):
         run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            ),
         )
     loaded = load_ci_state(
         directory=tmp_path,
@@ -629,11 +651,11 @@ def test_incremental_checkpoint_keeps_prior_findings(
     ]
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -643,13 +665,15 @@ def test_incremental_checkpoint_keeps_prior_findings(
     ):
         run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            prior_state=prior,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                prior_state=prior,
+            ),
         )
     loaded = load_ci_state(
         directory=tmp_path,
@@ -694,7 +718,7 @@ def test_incremental_checkpoint_keeps_this_run_findings(
         provider,
         user_prompt,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         # Key on the chunk's own diff line: every chunk prompt now lists all
         # changed files, so a file name alone no longer identifies the chunk.
         if "diff --git a/b.py" in user_prompt or "+y" in user_prompt:
@@ -707,26 +731,28 @@ def test_incremental_checkpoint_keeps_this_run_findings(
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_timeout_b,
         ),
     ):
         run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.CLI,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.CLI,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
     loaded = load_ci_state(
         directory=tmp_path,
@@ -794,11 +820,11 @@ def test_incremental_checkpoint_applies_sensitivity_filter(
     ]
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -808,13 +834,17 @@ def test_incremental_checkpoint_applies_sensitivity_filter(
     ):
         run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            sensitivity=resolve_sensitivity_policy(strictness=ReviewStrictness.FOCUSED),
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                sensitivity=resolve_sensitivity_policy(
+                    strictness=ReviewStrictness.FOCUSED,
+                ),
+            ),
         )
     loaded = load_ci_state(
         directory=tmp_path,
@@ -869,11 +899,11 @@ def test_incremental_checkpoint_keeps_inherited_sibling_findings(
     ]
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
                 user_prompt,
                 system=kwargs.get("system_prompt"),
@@ -883,13 +913,15 @@ def test_incremental_checkpoint_keeps_inherited_sibling_findings(
     ):
         run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            prior_state=prior,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                prior_state=prior,
+            ),
         )
     loaded = load_ci_state(
         directory=tmp_path,
@@ -924,7 +956,7 @@ def test_parallel_timeout_keeps_completed_sibling() -> None:
         provider,
         user_prompt,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         # Key on the chunk's own diff line: every chunk prompt now lists all
         # changed files, so a file name alone no longer identifies the chunk.
         if "diff --git a/b.py" in user_prompt or "+y" in user_prompt:
@@ -937,26 +969,28 @@ def test_parallel_timeout_keeps_completed_sibling() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_timeout_b,
         ),
     ):
         result = run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.CLI,
-                max_parallel_calls=2,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.CLI,
+                    max_parallel_calls=2,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -978,7 +1012,7 @@ def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
         provider,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         response = provider.complete(
             kwargs.get("user_prompt", ""),
             system=kwargs.get("system_prompt"),
@@ -989,21 +1023,23 @@ def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
         return response
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=_recording_call_ai,
     ):
         result = run_review(
             _one_file_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_cost_usd=0.005,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_cost_usd=0.005,
+                ),
+                depth=2,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=2,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -1036,7 +1072,7 @@ def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
         provider,
         budget=None,
         **kwargs,
-    ):  # noqa: ANN001, ANN003, ANN202
+    ):
         del budget
         seen.append("call")
         if len(seen) >= 2:
@@ -1049,23 +1085,25 @@ def test_run_review_raises_on_genuine_provider_error_mid_review() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_flaky_call_ai,
         ),
         pytest.raises(AIError),
     ):
         run_review(
             _two_file_context(),
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            ),
         )
 
 
@@ -1098,7 +1136,7 @@ def test_run_review_depth1_returns_review_result() -> None:
     provider = _mock_provider(content=_sample_response_json())
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -1109,12 +1147,14 @@ def test_run_review_depth1_returns_review_result() -> None:
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=checklist_items,
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=checklist_items,
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            ),
         )
 
     assert_that(result.summary).contains("Merge")
@@ -1135,12 +1175,14 @@ def test_run_review_empty_diff_returns_empty_result() -> None:
 
     result = run_review(
         context,
-        provider=provider,
-        ai_config=AIConfig(enabled=True, transport=AITransport.API),
-        depth=1,
-        checklist_items=[],
-        checklist_text="",
-        classifications=[],
+        options=ReviewSessionOptions(
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+        ),
     )
 
     assert_that(result.summary).contains("No changes")
@@ -1186,7 +1228,7 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     ]
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -1197,12 +1239,14 @@ def test_run_review_depth2_calls_provider_twice() -> None:
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=2,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=2,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            ),
         )
 
     assert_that(provider.complete.call_count).is_equal_to(2)
@@ -1212,7 +1256,7 @@ def test_run_review_depth2_calls_provider_twice() -> None:
 
 
 def _single_chunk() -> ReviewChunk:
-    """Build a one-file review chunk for direct ``_review_chunk`` tests."""
+    """Build a one-file review chunk for direct ``review_chunk`` tests."""
     return ReviewChunk(
         id=1,
         files=["src/main.py"],
@@ -1222,7 +1266,7 @@ def _single_chunk() -> ReviewChunk:
 
 
 def _single_file_context() -> ReviewContext:
-    """Build a minimal review context for direct ``_review_chunk`` tests."""
+    """Build a minimal review context for direct ``review_chunk`` tests."""
     return ReviewContext(
         base_ref="main",
         head_ref="feature",
@@ -1236,6 +1280,35 @@ def _single_file_context() -> ReviewContext:
         ],
         unified_diff="diff --git a/src/main.py b/src/main.py\n+change",
         pr_metadata=None,
+    )
+
+
+def _chunk_run_plan(*, budget: CostBudget) -> ChunkRunPlan:
+    """Build a depth-3 chunk plan for the single-file fixture context.
+
+    Args:
+        budget: Cost budget the chunk's provider calls record against.
+
+    Returns:
+        A plan over the single-file fixture context. Every other field is
+        fixed here, so the budget is the only value a caller varies.
+    """
+    return ChunkRunPlan(
+        context=_single_file_context(),
+        provider=MagicMock(),
+        ai_config=AIConfig(enabled=True, transport=AITransport.API),
+        depth=3,
+        checklist_items=[],
+        checklist_text="1. [logic-bug] Example?",
+        classifications=[],
+        lint_results=None,
+        budget=budget,
+        progress=NullReviewProgress(),
+        repo_root="",
+        use_one_shot=False,
+        strictness_section="",
+        next_generated_checklist_id=100,
+        diff_budget=0,
     )
 
 
@@ -1263,23 +1336,11 @@ async def test_review_chunk_checks_budget_before_each_provider_call() -> None:
 
     with (
         patch.object(budget, "check", side_effect=_record_check),
-        patch(
-            "lintro.ai.review.orchestrator.call_ai",
-            side_effect=_fake_call_ai,
-        ),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_fake_call_ai),
     ):
-        await _review_chunk(
+        await review_chunk(
             chunk=_single_chunk(),
-            context=_single_file_context(),
-            provider=MagicMock(),
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=3,
-            checklist_text="1. [logic-bug] Example?",
-            checklist_count=1,
-            next_generated_checklist_id=100,
-            classifications=[],
-            lint_results=None,
-            budget=budget,
+            plan=_chunk_run_plan(budget=budget),
         )
 
     # Three provider calls (extra checklist, main review, adversarial), each
@@ -1309,23 +1370,11 @@ async def test_review_chunk_budget_stops_runaway_calls() -> None:
         budget.record(response.cost_estimate)
         return response
 
-    with patch(
-        "lintro.ai.review.orchestrator.call_ai",
-        side_effect=_fake_call_ai,
-    ):
+    with patch("lintro.ai.review.provider_call.call_ai", side_effect=_fake_call_ai):
         with pytest.raises(AIError):
-            await _review_chunk(
+            await review_chunk(
                 chunk=_single_chunk(),
-                context=_single_file_context(),
-                provider=MagicMock(),
-                ai_config=AIConfig(enabled=True, transport=AITransport.API),
-                depth=3,
-                checklist_text="1. [logic-bug] Example?",
-                checklist_count=1,
-                next_generated_checklist_id=100,
-                classifications=[],
-                lint_results=None,
-                budget=budget,
+                plan=_chunk_run_plan(budget=budget),
             )
 
     # The first depth-2 call overspends the $0.01 cap; the budget check gates
@@ -1434,26 +1483,25 @@ def test_run_review_parallelizes_multiple_chunks(tmp_path: Path) -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
-        patch(
-            "lintro.ai.review.orchestrator.call_ai",
-            side_effect=_track_concurrency,
-        ),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_track_concurrency),
     ):
         run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=4,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=4,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(max_active).is_greater_than(1)
@@ -1546,27 +1594,29 @@ def test_run_review_serializes_when_cost_cap_is_set(tmp_path: Path) -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_track_concurrency,
         ),
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=4,
-                max_cost_usd=1.0,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=4,
+                    max_cost_usd=1.0,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(max_active).is_equal_to(1)
@@ -1607,26 +1657,25 @@ def test_run_review_parallelizes_depth_two_chunks(tmp_path: Path) -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
-        patch(
-            "lintro.ai.review.orchestrator.call_ai",
-            side_effect=_track_concurrency,
-        ),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_track_concurrency),
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=4,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=4,
+                ),
+                depth=2,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=2,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(max_active).is_greater_than(1)
@@ -1693,27 +1742,29 @@ def test_run_review_merges_chunks_in_index_order(tmp_path: Path) -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_slow_first_chunk,
         ),
     ):
         result = run_review(
             context,
-            provider=_mock_provider(content=_sample_response_json()),
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=3,
-                max_cost_usd=1.0,
+            options=ReviewSessionOptions(
+                provider=_mock_provider(content=_sample_response_json()),
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=3,
+                    max_cost_usd=1.0,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     finding_files = [finding.file for finding in result.findings]
@@ -1748,23 +1799,25 @@ def test_run_review_records_phase_timings(tmp_path: Path) -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_fast_call,
         ),
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            context_collection_seconds=0.123,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                context_collection_seconds=0.123,
+            ),
         )
 
     timings = result.metadata.phase_timings
@@ -1818,27 +1871,29 @@ def test_run_review_budget_cutoff_keeps_completed_under_parallelism(
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=_expensive_call,
         ),
     ):
         result = run_review(
             context,
-            provider=_mock_provider(content=_sample_response_json()),
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=2,
-                max_cost_usd=0.5,
+            options=ReviewSessionOptions(
+                provider=_mock_provider(content=_sample_response_json()),
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=2,
+                    max_cost_usd=0.5,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(result.metadata.partial).is_true()
@@ -1865,30 +1920,33 @@ def test_run_review_aborts_progress_when_chunk_review_fails() -> None:
         pr_metadata=None,
     )
     provider = _mock_provider(content=_sample_response_json())
-    progress = MagicMock(spec=ReviewProgressCallback)
+    progress = _RecordingProgress()
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=RuntimeError("provider failed"),
         ),
         pytest.raises(ReviewExecutionError),
     ):
         run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            progress=progress,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                progress=progress,
+            ),
         )
 
-    progress.on_start.assert_called_once()
-    progress.on_error.assert_called_once()
-    progress.on_abort.assert_called_once()
-    progress.on_complete.assert_not_called()
+    # The run starts, reports the failure, aborts, and never completes.
+    assert_that(progress.events.count("on_start")).is_equal_to(1)
+    assert_that(progress.events.count("on_error")).is_equal_to(1)
+    assert_that(progress.events.count("on_abort")).is_equal_to(1)
+    assert_that(progress.events).does_not_contain("on_complete")
 
 
 def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
@@ -1913,20 +1971,22 @@ def test_run_review_propagates_chunk_error_when_progress_abort_raises() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             side_effect=RuntimeError("provider failed"),
         ),
         pytest.raises(ReviewExecutionError) as exc_info,
     ):
         run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            progress=progress,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                progress=progress,
+            ),
         )
 
     assert_that(exc_info.value.cause_message).contains("provider failed")
@@ -1966,7 +2026,7 @@ def test_run_review_returns_result_when_progress_complete_raises() -> None:
     progress.on_complete.side_effect = BrokenPipeError()
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=lambda *, provider, user_prompt, **kwargs: provider.complete(
             user_prompt,
             system=kwargs.get("system_prompt"),
@@ -1976,13 +2036,15 @@ def test_run_review_returns_result_when_progress_complete_raises() -> None:
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=checklist_items,
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            progress=progress,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=checklist_items,
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                progress=progress,
+            ),
         )
 
     assert_that(result.summary).contains("Merge")
@@ -2008,25 +2070,43 @@ def test_run_review_uses_git_native_prompt_for_cli_transport() -> None:
     provider = _mock_provider(content=_sample_response_json())
     provider.name = "anthropic"
 
+    built: list[dict[str, Any]] = []
+
+    def _build(**kwargs: Any) -> tuple[str, str]:
+        """Record one git-native prompt build.
+
+        Args:
+            **kwargs: Prompt-builder keyword arguments.
+
+        Returns:
+            tuple[str, str]: A stand-in system and user prompt pair.
+        """
+        built.append(kwargs)
+        return ("system", "user")
+
     with patch(
-        "lintro.ai.review.orchestrator.build_git_native_review_prompt",
-    ) as mock_git_native:
-        mock_git_native.return_value = ("system", "user")
+        "lintro.ai.review.response_pipeline.build_git_native_review_prompt",
+        _build,
+    ):
         with patch(
-            "lintro.ai.review.orchestrator.call_ai",
+            "lintro.ai.review.provider_call.call_ai",
             return_value=provider.complete("prompt"),
         ):
-            run_review(
+            result = run_review(
                 context,
-                provider=provider,
-                ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
-                depth=1,
-                checklist_items=[],
-                checklist_text="1. [logic-bug] Example?",
-                classifications=[],
+                options=ReviewSessionOptions(
+                    provider=provider,
+                    ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+                    depth=1,
+                    checklist_items=[],
+                    checklist_text="1. [logic-bug] Example?",
+                    classifications=[],
+                ),
             )
 
-    mock_git_native.assert_called_once()
+    # One chunk, so exactly one git-native prompt, and the review still lands.
+    assert_that(built).is_length(1)
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
 
 
 def test_build_git_native_review_prompt_embeds_diff_when_requested(
@@ -2042,11 +2122,13 @@ def test_build_git_native_review_prompt_embeds_diff_when_requested(
     )
 
     _, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=sample_review_context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=sample_review_context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
         embed_diff=True,
     )
 
@@ -2073,11 +2155,13 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
     )
 
     _, user_prompt = build_git_native_review_prompt(
-        chunk=chunk,
-        context=sample_review_context,
-        checklist_text="1. [logic-bug] Example?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=chunk,
+            context=sample_review_context,
+            checklist_text="1. [logic-bug] Example?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
         embed_diff=False,
         allow_unredacted_git_native=True,
     )
@@ -2086,11 +2170,56 @@ def test_build_git_native_review_prompt_uses_git_command_when_not_embedded(
     assert_that(user_prompt).does_not_contain("<pull_request_diff>")
 
 
-def _capability_provider(*, supports_sessions: bool) -> MagicMock:
+class _RecordingProgress:
+    """Progress callback that records the lifecycle events it receives.
+
+    Used instead of a mock so tests assert on the observable event sequence
+    rather than on how the collaborator was called (#2315).
+
+    Attributes:
+        events: Callback names in the order the orchestrator invoked them.
+    """
+
+    events: list[str]
+
+    def __init__(self) -> None:
+        """Start with an empty event log."""
+        self.events = []
+
+    def __getattr__(self, name: str) -> Any:
+        """Record any ``on_*`` callback the orchestrator invokes.
+
+        Args:
+            name: Callback name being looked up.
+
+        Returns:
+            Any: A recorder for ``on_*`` names.
+
+        Raises:
+            AttributeError: For any non-callback attribute.
+        """
+        if not name.startswith("on_"):
+            raise AttributeError(name)
+
+        def _record(*_args: Any, **_kwargs: Any) -> None:
+            self.events.append(name)
+
+        return _record
+
+
+def _capability_provider(
+    *,
+    supports_sessions: bool,
+    session_events: list[str] | None = None,
+) -> MagicMock:
     """Build a mock provider declaring a session capability.
 
     Args:
         supports_sessions: Value of ``capabilities.supports_sessions``.
+        session_events: Optional list that records ``begin``/``end`` in the
+            order the orchestrator drives the durable session, so tests assert
+            on the session lifecycle rather than on mock call bookkeeping
+            (#2315).
 
     Returns:
         A configured provider mock.
@@ -2099,6 +2228,13 @@ def _capability_provider(*, supports_sessions: bool) -> MagicMock:
     provider.capabilities = ProviderCapabilities(
         supports_sessions=supports_sessions,
     )
+    if session_events is not None:
+        provider.begin_durable_session.side_effect = lambda *_args, **_kwargs: (
+            session_events.append("begin")
+        )
+        provider.end_durable_session.side_effect = lambda *_args, **_kwargs: (
+            session_events.append("end")
+        )
     return provider
 
 
@@ -2109,7 +2245,7 @@ def _run_single_chunk_review(provider: MagicMock) -> None:
         provider: The provider mock under test.
     """
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -2119,33 +2255,41 @@ def _run_single_chunk_review(provider: MagicMock) -> None:
     ):
         run_review(
             _one_file_context(),
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            ),
         )
 
 
 def test_run_review_opens_durable_session_when_capability_declared() -> None:
-    """Open a durable session for any provider declaring session support."""
-    provider = _capability_provider(supports_sessions=True)
+    """A provider declaring session support gets its session opened and closed."""
+    session_events: list[str] = []
+    provider = _capability_provider(
+        supports_sessions=True,
+        session_events=session_events,
+    )
 
     _run_single_chunk_review(provider)
 
-    provider.begin_durable_session.assert_called_once()
-    provider.end_durable_session.assert_called_once()
+    assert_that(session_events).is_equal_to(["begin", "end"])
 
 
 def test_run_review_skips_durable_session_without_capability() -> None:
-    """Leave sessions alone for providers that declare no session support."""
-    provider = _capability_provider(supports_sessions=False)
+    """A provider declaring no session support is never asked to open one."""
+    session_events: list[str] = []
+    provider = _capability_provider(
+        supports_sessions=False,
+        session_events=session_events,
+    )
 
     _run_single_chunk_review(provider)
 
-    provider.begin_durable_session.assert_not_called()
-    provider.end_durable_session.assert_not_called()
+    assert_that(session_events).is_empty()
 
 
 def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:
@@ -2157,7 +2301,7 @@ def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:
     ]
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -2168,12 +2312,14 @@ def test_run_review_metadata_records_reviewed_and_skipped_files() -> None:
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+            ),
         )
 
     assert_that(result.metadata.reviewed_paths).is_equal_to(("src/main.py",))
@@ -2190,7 +2336,7 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
     context = _one_file_context()
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         side_effect=lambda *, provider, user_prompt, system_prompt=None, **kwargs: (
             provider.complete(
                 user_prompt,
@@ -2201,13 +2347,15 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
     ):
         result = run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            run_builtin_checklist=False,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                run_builtin_checklist=False,
+            ),
         )
 
     assert_that(result.metadata.reviewed_paths).is_empty()
@@ -2219,19 +2367,19 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
 async def test_generated_checklist_ids_capped_at_stride() -> None:
     """Model-controlled question counts cannot cross the per-chunk id stride.
 
-    Parallel chunks get disjoint id ranges of ``_GENERATED_CHECKLIST_ID_STRIDE``;
+    Parallel chunks get disjoint id ranges of ``GENERATED_CHECKLIST_ID_STRIDE``;
     accepting more generated questions than the stride would collide with the
     next chunk's range and corrupt the checklist merge (#1969).
     """
     from lintro.ai.budget import CostBudget
-    from lintro.ai.review.orchestrator import (
-        _GENERATED_CHECKLIST_ID_STRIDE,
-        _generate_extra_checklist,
+    from lintro.ai.review.checklist_pass import (
+        GENERATED_CHECKLIST_ID_STRIDE,
+        generate_extra_checklist,
     )
 
     oversized = [
         {"id": f"G{i}", "question": f"Question {i}?"}
-        for i in range(_GENERATED_CHECKLIST_ID_STRIDE + 10)
+        for i in range(GENERATED_CHECKLIST_ID_STRIDE + 10)
     ]
     payload = json.dumps({"generated_questions": oversized})
     context = ReviewContext(
@@ -2259,10 +2407,10 @@ async def test_generated_checklist_ids_capped_at_stride() -> None:
     )
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         return_value=response,
     ):
-        text, next_id, _usage = await _generate_extra_checklist(
+        text, next_id, _usage = await generate_extra_checklist(
             chunk=chunk,
             context=context,
             provider=_mock_provider(content=payload),
@@ -2271,5 +2419,5 @@ async def test_generated_checklist_ids_capped_at_stride() -> None:
             next_generated_checklist_id=100,
         )
 
-    assert_that(next_id).is_equal_to(100 + _GENERATED_CHECKLIST_ID_STRIDE)
-    assert_that(text.splitlines()).is_length(_GENERATED_CHECKLIST_ID_STRIDE)
+    assert_that(next_id).is_equal_to(100 + GENERATED_CHECKLIST_ID_STRIDE)
+    assert_that(text.splitlines()).is_length(GENERATED_CHECKLIST_ID_STRIDE)

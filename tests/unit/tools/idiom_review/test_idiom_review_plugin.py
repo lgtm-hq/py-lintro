@@ -20,7 +20,7 @@ from lintro.ai.provider_enum import AIProvider
 from lintro.config.lintro_config import LintroConfig
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 from lintro.plugins.registry import ToolRegistry
-from lintro.tools.definitions.idiom_review import IdiomReviewPlugin
+from lintro.tools.idiom_review.definition import IdiomReviewPlugin
 
 
 def _write_py(tmp_path: Path) -> str:
@@ -41,7 +41,6 @@ def test_definition_metadata() -> None:
     definition = IdiomReviewPlugin().definition
 
     assert_that(definition.name).is_equal_to("idiom-review")
-    assert_that(definition.priority).is_equal_to(95)
     assert_that(definition.can_fix).is_false()
     assert_that(definition.version_command).is_none()
     assert_that(definition.file_patterns).contains("*.py")
@@ -82,8 +81,8 @@ class _FakeEngine:
         self,
         *,
         file_path: str,
-        source: str,  # noqa: ARG002
-        language: str = "python",  # noqa: ARG002
+        source: str,
+        language: str = "python",
     ) -> list[IdiomReviewIssue]:
         """Return canned per-file findings.
 

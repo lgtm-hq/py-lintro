@@ -175,10 +175,12 @@ def test_format_detection_notice_groups_by_language() -> None:
         ),
         ({"index.html": "<html></html>\n"}, "html", "html_validate"),
         ({"app.css": "body { color: black; }\n"}, "css", "stylelint"),
+        ({"src/main.c": "int main(void) { return 0; }\n"}, "c", "cppcheck"),
+        ({"src/main.cpp": "int main() { return 0; }\n"}, "cpp", "cppcheck"),
         ({".env": "FOO=bar\n"}, "dotenv", "dotenv_linter"),
         ({"deploy/values.yaml": "replicaCount: 1\n"}, "yaml", "yamllint"),
     ],
-    ids=["svelte", "astro", "vue", "html", "css", "dotenv", "nested-yaml"],
+    ids=["svelte", "astro", "vue", "html", "css", "c", "cpp", "dotenv", "nested-yaml"],
 )
 def test_no_config_scopes_hyphenated_and_markup_tools(
     monkeypatch: pytest.MonkeyPatch,

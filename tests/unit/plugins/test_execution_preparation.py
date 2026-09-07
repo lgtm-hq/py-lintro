@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.plugins.execution_preparation import (  # noqa: SLF001
+from lintro.plugins.execution_preparation import (
     _parse_allow_version_lag,
     _version_lag_allowed,
 )

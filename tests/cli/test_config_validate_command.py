@@ -320,7 +320,7 @@ def test_config_show_subcommand(cli_runner: CliRunner) -> None:
     """
     with cli_runner.isolated_filesystem():
         Path(".lintro-config.yaml").write_text(
-            "enforce:\n  line_length: 100\nexecution:\n  tool_order: alphabetical\n",
+            "enforce:\n  line_length: 100\nexecution:\n  fail_fast: true\n",
             encoding="utf-8",
         )
 
@@ -342,12 +342,11 @@ def test_config_show_subcommand(cli_runner: CliRunner) -> None:
             "line_length",
             "target_python",
             "tool_order",
-            "custom_order",
         )
         assert_that(settings["line_length"]).is_equal_to(100)
-        assert_that(settings["tool_order"]).is_equal_to("alphabetical")
+        assert_that(settings["tool_order"]).is_equal_to("derived")
         assert_that(data["tool_execution_order"]).is_not_empty()
-        assert_that(data["tool_execution_order"][0]).contains("tool", "priority")
+        assert_that(data["tool_execution_order"][0]).contains("tool", "position")
 
 
 def test_config_show_null_tool_entry_exits_one(cli_runner: CliRunner) -> None:

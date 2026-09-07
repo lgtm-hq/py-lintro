@@ -85,6 +85,13 @@ generator reads (#2176):
   `--tool-options`)
 - `yamllint` - YAML linter
 - `pydoclint` - Python docstring linter
+- `import-linter` - Python import-contract checker (binary `lint-imports`); it reports a
+  clean result when the project has no import-linter configuration, so it is safe to
+  leave enabled
+- `pylint` - Python static analyser. Lintro runs it project-scoped (one invocation over
+  every discovered file) so cross-module checkers such as `duplicate-code` (R0801) can
+  see the whole set. Configure it in `[tool.pylint.<section>]`; with no configuration
+  pylint's own defaults apply and overlap heavily with ruff
 
 ### Optional External Tools
 
@@ -113,6 +120,8 @@ order and for what changed.
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
   by default (`brew install trufflehog` or GitHub releases)
+- `cppcheck` - C/C++ static analyzer (`brew install cppcheck` or
+  `apt-get install cppcheck`)
 - `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
   <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
@@ -504,8 +513,8 @@ lintro check --output-format grid --group-by code
 Add `--profile` to `check` or `format` to see how long each main-phase tool took.
 Executors always record those timings (including under parallel execution); the flag
 only controls whether they are rendered. Post-checks are omitted. The table is human and
-JSON only — `--score` and csv/sarif/markdown stdout stay unchanged. The `CUMULATIVE` row
-is the sum of per-tool seconds, not parallel wall-clock.
+JSON only — csv/sarif/markdown stdout stay unchanged. The `CUMULATIVE` row is the sum of
+per-tool seconds, not parallel wall-clock.
 
 ```bash
 # Show a per-tool timing table with optimization suggestions
@@ -701,7 +710,7 @@ sudo lintro check
 ### Getting Help
 
 - **Command help:** `lintro --help` or `lintro check --help`
-- **List tools:** `lintro list-tools --show-conflicts`
+- **List tools:** `lintro list-tools`
 - **GitHub Issues:** Report bugs or request features
 - **Documentation:** Check other guides in the `docs/` directory
 

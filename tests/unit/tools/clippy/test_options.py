@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.clippy import CLIPPY_DEFAULT_TIMEOUT, ClippyPlugin
+from lintro.tools.clippy.definition import CLIPPY_DEFAULT_TIMEOUT, ClippyPlugin
 
 
 def test_default_options(clippy_plugin: ClippyPlugin) -> None:

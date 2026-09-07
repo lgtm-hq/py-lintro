@@ -18,6 +18,7 @@ from pathspec import GitIgnoreSpec
 
 from lintro._tool_versions import TOOL_VERSIONS
 from lintro.enums.tool_name import ToolName
+from tests.integration._tools import ALLOW_VERSION_LAG_ENV, TOOLS_IMAGE_ENV
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
@@ -361,14 +362,95 @@ def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
             step
             for step in job["steps"]
             if step.get("if") == "needs.changes.outputs.pipeline == 'false'"
-            and "ci-log.sh" in step.get("run", "")
+            and "skipped:" in step.get("run", "")
         ]
         assert_that(skip_steps).described_as(job_name).is_length(1)
         skip_step = skip_steps[0]
-        assert_that(skip_step["run"]).contains('"skipped:"')
+        # Inlined (#2297): ci-log.sh only ever ran `echo "$*"`.
+        assert_that(skip_step["run"]).starts_with("echo ")
+        # Double-quoted, not bare: skip reasons contain spaces ("version-bump
+        # PR", "docs-only change"), so an unquoted expansion would word-split
+        # the reason across echo arguments.
+        assert_that(skip_step["run"]).contains('"skipped: $SKIP_REASON')
         assert_that(skip_step["env"]["SKIP_REASON"]).contains(
             "needs.changes.outputs.skip-reason",
         )
+
+
+def test_docker_ci_gates_semgrep_lockfile_drift_before_the_builds() -> None:
+    """The semgrep lockfile gate runs on the full-lint filter, before builds.
+
+    #2436: nothing regenerates requirements-semgrep.txt automatically, so a
+    stale lockfile has to fail one named check early instead of a dozen
+    downstream jobs. Both requirements-semgrep files live in the changes
+    job's ``full-lint`` path filter, which is what lint-scope reports.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["semgrep-lock"]
+    condition = _normalize_github_expr(gate["if"])
+
+    assert_that(gate["needs"]).is_equal_to(["changes"])
+    assert_that(condition).contains("!cancelled()")
+    assert_that(condition).contains("needs.changes.outputs.pipeline != 'false'")
+    assert_that(condition).contains("needs.changes.outputs.lint-scope != 'changed'")
+
+    steps = gate["steps"]
+    assert_that(steps[0]["name"]).is_equal_to("Harden Runner")
+    endpoints = steps[0]["with"]["allowed-endpoints"].split()
+    assert_that(endpoints).contains("pypi.org:443", "files.pythonhosted.org:443")
+    assert_that([step.get("run") for step in steps]).contains(
+        "scripts/ci/check-semgrep-lock.sh",
+    )
+
+    # Only the scripts and the two requirements files are checked out.
+    checkout = next(step for step in steps if step.get("name") == "Checkout")
+    sparse = checkout["with"]["sparse-checkout"].split()
+    assert_that(sparse).contains(
+        "scripts/ci/check-semgrep-lock.sh",
+        "scripts/ci/semgrep-lock-lib.sh",
+        "requirements-semgrep.in",
+        "requirements-semgrep.txt",
+    )
+
+    # Exact uv pin plus the retry pair (#1487): `latest` resolves through the
+    # astral-sh/versions manifest, and an install flake here would skip
+    # publish, which needs this job.
+    assert_that(gate["env"]["UV_VERSION"]).is_equal_to(_tools_dockerfile_uv_version())
+    setup_uv = [
+        step for step in steps if "astral-sh/setup-uv@" in (step.get("uses") or "")
+    ]
+    assert_that(setup_uv).is_length(2)
+    for step in setup_uv:
+        assert_that(step["with"]["version"]).contains("env.UV_VERSION")
+        assert_that(step["with"]["version"]).does_not_contain("latest")
+    assert_that(setup_uv[0]["continue-on-error"]).is_true()
+    assert_that(setup_uv[1]["if"]).contains("steps.setup-uv.outcome == 'failure'")
+    assert_that(endpoints).contains("github-releases.githubusercontent.com:443")
+
+    # The gate is upstream of the image builds, so drift is red in under a
+    # minute, and upstream of publish, so a drifted lockfile never ships.
+    assert_that(docker_ci["jobs"]["docker-build"]["needs"]).contains("semgrep-lock")
+    assert_that(docker_ci["jobs"]["publish"]["needs"]).contains("semgrep-lock")
+    # docker-build now depends on a job that is skipped on docs-only and
+    # lint-scope=changed PRs, so its `!cancelled()` is load-bearing: without it
+    # the required 🐳 Build Docker Images check would be skipped on those PRs
+    # and merges would deadlock. publish must NOT carry it, so a red gate
+    # skips the GHCR promotion.
+    build_condition = _normalize_github_expr(docker_ci["jobs"]["docker-build"]["if"])
+    assert_that(build_condition).contains("!cancelled()")
+    publish_condition = _normalize_github_expr(docker_ci["jobs"]["publish"]["if"])
+    assert_that(publish_condition).does_not_contain("!cancelled()")
+    assert_that(publish_condition).does_not_contain("always()")
+
+    # The path filter the gate leans on still lists both lockfile paths.
+    detect = next(
+        step
+        for step in docker_ci["jobs"]["changes"]["steps"]
+        if step.get("id") == "detect"
+    )
+    filters = detect["with"]["filters"]
+    assert_that(filters).contains("'requirements-semgrep.in'")
+    assert_that(filters).contains("'requirements-semgrep.txt'")
 
 
 def test_docker_ci_dogfooding_lint_waits_on_docker_build() -> None:
@@ -761,6 +843,88 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
     assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
+@pytest.mark.parametrize("job_id", ["dogfooding-lint", "dogfooding_lint_retry"])
+def test_dogfood_lint_callers_allow_the_hosted_runner_watchdog(job_id: str) -> None:
+    """Dogfood lint callers must allow GitHub's hosted-runner watchdog (#2352).
+
+    harden-runner block mode denied `hosted-compute-watchdog-*.githubapp.com`
+    and `hosted-compute-request-orchestrator-*.githubapp.com`, and long jobs
+    were reclaimed mid-run with exit 143. The reusable workflow's enforcing
+    harden-runner step reads `allowed-endpoints` verbatim, so the caller must
+    carry the whole baseline plus the watchdog entry — asserting a couple of
+    baseline hosts keeps a future edit from shrinking the list to one entry.
+
+    Args:
+        job_id: Dogfooding lint caller whose egress allowlist is under test.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    job_with = docker_ci["jobs"][job_id]["with"]
+    allowed = set(str(job_with["allowed-endpoints"]).split())
+
+    assert_that(job_with["egress-policy"]).is_equal_to("block")
+    assert_that(job_with["allowed-endpoints-mode"]).is_equal_to("append")
+    assert_that(allowed).contains("*.githubapp.com:443")
+    assert_that(allowed).contains(
+        "github.com:443",
+        "api.github.com:443",
+        "ghcr.io:443",
+        "pypi.org:443",
+    )
+
+
+def test_dogfood_lint_callers_share_one_egress_allowlist() -> None:
+    """Both dogfood lint callers must carry the identical allowlist (#2352).
+
+    The reusable workflow's enforcing harden-runner step reads the caller's
+    `allowed-endpoints` verbatim, so each caller repeats the whole baseline.
+    Two hand-maintained copies drift silently — a host added for the primary
+    and forgotten on the retry fails only on the retry, during an incident.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    primary = str(docker_ci["jobs"]["dogfooding-lint"]["with"]["allowed-endpoints"])
+    retry = str(
+        docker_ci["jobs"]["dogfooding_lint_retry"]["with"]["allowed-endpoints"],
+    )
+
+    assert_that(primary.split()).is_equal_to(retry.split())
+    assert_that(primary.split()).does_not_contain_duplicates()
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        "docker-build",
+        "dogfooding-lint-changed",
+        "dogfood-skip-gate",
+        "security-audit",
+        "integration-test",
+        "publish",
+    ],
+)
+def test_long_docker_ci_jobs_allow_the_hosted_runner_watchdog(job_id: str) -> None:
+    """Every long in-repo Docker CI job allows the watchdog endpoints (#2352).
+
+    Jobs whose budget exceeds ~10 minutes are the ones observed dying with
+    "The runner has received a shutdown signal" while harden-runner blocked
+    GitHub's hosted-compute watchdog and request-orchestrator hosts.
+
+    Args:
+        job_id: Docker CI job whose harden-runner allowlist is under test.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    job = docker_ci["jobs"][job_id]
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    allowed = set(str(harden["with"]["allowed-endpoints"]).split())
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(job["timeout-minutes"]).is_greater_than(10)
+    assert_that(allowed).contains("*.githubapp.com:443")
+
+
 def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
     """Full-repo skip checks wait for retry and consume its final report."""
     docker_ci = _load_workflow(name="docker-ci.yml")
@@ -821,38 +985,58 @@ def test_dogfood_skip_gate_has_bounded_timeout() -> None:
         assert_that(timeout).is_equal_to(30)
 
 
-def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
-    """test-ci classifies PR diffs before calling the reusable matrix (#1359)."""
+def test_test_ci_has_no_path_classification_surface() -> None:
+    """test-ci must not reintroduce a pipeline classifier (#2108, #2297).
+
+    The Python matrix can never path-skip: ``pipeline-skip`` is hard-false
+    because a skipped reusable ``test`` job publishes the uninterpolated
+    check name and deadlocks required-check merges. The former ``changes``
+    job therefore computed a ``pipeline`` output whose only consumer
+    (``stage-coverage-html``) is push-only, while
+    ``resolve-pipeline-relevance.sh`` resolves ``pipeline=false`` on
+    ``pull_request`` alone — the condition could never be false. Guard the
+    whole surface, not just the job name, so it cannot creep back.
+    """
     test_ci = _load_workflow(name="test-ci.yml")
-    changes_job = test_ci["jobs"]["changes"]
-    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
-
-    assert_that(changes_job["outputs"]["pipeline"]).contains(
-        "steps.result.outputs.pipeline",
-    )
-    assert_that(changes_job["outputs"]["skip-reason"]).contains(
-        "steps.result.outputs.skip-reason",
+    raw = (_REPO_ROOT / ".github" / "workflows" / "test-ci.yml").read_text(
+        encoding="utf-8",
     )
 
-    bump_step = steps["bump"]
-    assert_that(bump_step["if"]).contains(_github_event_name_is_pull_request_token())
-    assert_that(bump_step["run"]).is_equal_to("scripts/ci/release-bump-only.sh")
+    assert_that(test_ci["jobs"]).does_not_contain_key("changes")
+    assert_that(raw).does_not_contain("resolve-pipeline-relevance.sh")
+    assert_that(raw).does_not_contain("needs.changes.")
 
-    resolve_step = steps["result"]
-    assert_that(resolve_step["run"]).is_equal_to(
-        "scripts/ci/resolve-pipeline-relevance.sh",
-    )
-    assert_that(resolve_step["env"]["RELEASE_BUMP"]).contains(
-        "steps.bump.outputs.release-bump",
-    )
+    # Exact dependency lists, not a "does not contain 'changes'" subset check:
+    # a classifier reintroduced under any other job id would slip past a
+    # name-shaped assertion. These are the only edges test-ci may have.
+    expected_needs: dict[str, list[str]] = {
+        "test-compat": [],
+        "test-coverage": [],
+        "test-gate": ["test-compat", "test-coverage"],
+        "test-suite-coverage": ["test-gate"],
+        "stage-coverage-html": ["test-coverage"],
+    }
+    assert_that(set(test_ci["jobs"])).is_equal_to(set(expected_needs))
+    for job_id, expected in expected_needs.items():
+        assert_that(test_ci["jobs"][job_id].get("needs") or []).described_as(
+            job_id,
+        ).is_equal_to(expected)
+    # on.<event>.paths collapses nested required contexts (#1359).
+    triggers = test_ci["on"]
+    assert_that(triggers).is_not_empty()
+    for trigger in triggers.values():
+        if isinstance(trigger, dict):
+            assert_that(trigger).does_not_contain_key("paths")
+            assert_that(trigger).does_not_contain_key("paths-ignore")
 
 
 def test_test_ci_reusables_never_path_skip() -> None:
-    """Reusable callers fail-open on changes failure and never path-skip.
+    """Reusable callers always run the matrix and never path-skip.
 
-    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed
-    changes job must still run the matrix (empty pipeline != 'false')
-    instead of collapsing to skipped → false green.
+    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: the matrix
+    runs unless the whole workflow is cancelled, instead of collapsing to
+    skipped → false green. With the classifier gone (#2297) the callers
+    have no upstream dependency at all, so nothing can skip them.
 
     ``pipeline-skip`` stays hard-false (#2108): lgtm-ci's skipped ``test``
     job publishes as ``test-compat / inputs.job-name`` rather than the
@@ -867,10 +1051,87 @@ def test_test_ci_reusables_never_path_skip() -> None:
     test_ci = _load_workflow(name="test-ci.yml")
     for job_name, published_name in expected_job_names.items():
         job = test_ci["jobs"][job_name]
-        assert_that(job["needs"]).contains("changes")
+        assert_that(job.get("needs") or []).is_empty()
         assert_that(job["if"]).is_equal_to("!cancelled()")
         assert_that(job["with"]["pipeline-skip"]).is_false()
         assert_that(job["with"]["job-name"]).is_equal_to(published_name)
+
+
+def test_tools_image_switch_is_declared_where_the_suite_runs() -> None:
+    """The Docker side declares the exact variable the gate reads (#465).
+
+    ``LINTRO_TOOLS_IMAGE`` is what turns a missing wrapped tool from a skip
+    into a failure. Its name lives in Python as
+    ``tests.integration._tools.TOOLS_IMAGE_ENV`` but has to be repeated as a
+    plain string in the Dockerfile and in docker-compose.yml, which neither
+    can import. A rename on one side would silently degrade the required
+    Docker integration check back to a rubber stamp, so pin all three.
+    """
+    switch = f"{TOOLS_IMAGE_ENV}=1"
+
+    dockerfile = (_REPO_ROOT / "docker" / "tools.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    # Match the ENV instruction itself: a bare substring would also be
+    # satisfied by the surrounding comment or by a RUN line, neither of which
+    # puts the variable in the test process's environment.
+    env_instruction = re.search(
+        rf"(?m)^\s*ENV\s+{re.escape(switch)}(?:\s|$)",
+        dockerfile,
+    )
+    assert_that(env_instruction).described_as(
+        "docker/tools.Dockerfile ENV instruction",
+    ).is_not_none()
+
+    compose = yaml.safe_load(
+        (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"),
+    )
+    environment = compose["services"]["test-integration"]["environment"]
+    assert_that(environment).described_as("test-integration service").contains(switch)
+
+    # The hosted matrix is the other half of the lockstep: it runs the same
+    # modules on a toolless runner, so copying the switch onto the reusable
+    # would turn every absent wrapped tool into a collection failure there.
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job_text = yaml.safe_dump(test_ci["jobs"][job_name])
+        assert_that(job_text).described_as(job_name).does_not_contain(
+            TOOLS_IMAGE_ENV,
+        )
+
+
+def test_version_lag_env_matches_the_plugin_contract() -> None:
+    """The gate reads the same env var the plugins do (#1582).
+
+    ``tests/integration/_tools.py`` mirrors lintro's version-lag allowance so
+    an allow-listed lagging binary keeps collecting its module. The name is
+    spelled once per side; a rename in either would silently re-introduce the
+    skip the allowance exists to prevent.
+    """
+    from lintro.plugins.execution_preparation import _ALLOW_VERSION_LAG_ENV
+
+    assert_that(ALLOW_VERSION_LAG_ENV).is_equal_to(_ALLOW_VERSION_LAG_ENV)
+
+
+def test_test_ci_matrix_collects_the_integration_suite() -> None:
+    """The Python matrix runs tests/integration instead of ignoring it (#465).
+
+    Every integration module gates on ``tests/integration/_tools.py``, which
+    skips on a toolless runner and only fails inside the tools image, so the
+    hosted matrix can collect the suite without installing any wrapped tool.
+    """
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job = test_ci["jobs"][job_name]
+        assert_that(job["with"]["test-path"]).described_as(job_name).is_equal_to(
+            "tests",
+        )
+        # Assert the absence of *any* ignore, not just this path spelling:
+        # "--ignore=tests" or "--ignore tests/integration" would exclude the
+        # suite again while still passing a substring check for the path.
+        assert_that(job["with"]["extra-args"]).described_as(
+            job_name,
+        ).does_not_contain("--ignore", "tests/integration")
 
 
 def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
@@ -882,10 +1143,8 @@ def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
     test_ci = _load_workflow(name="test-ci.yml")
     gate = test_ci["jobs"]["test-suite-coverage"]
 
-    assert_that(gate["needs"]).contains(
-        "changes",
-        "test-gate",
-    )
+    assert_that(gate["needs"]).is_equal_to(["test-gate"])
+    assert_that(gate["with"]).does_not_contain_key("pipeline-skip")
     assert_that(gate["with"]["upstream-result"]).is_equal_to(
         "${{ needs.test-gate.outputs.result }}",
     )
@@ -959,6 +1218,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "docker",
         "docker-compose.yml",
         "Dockerfile",
+        "evals",  # offline review-efficacy harness (#2147): linted Python
         "justfile",
         "LICENSE",
         "lintro",
@@ -967,7 +1227,6 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "npm",
         "package.json",
         "pyproject.toml",
-        "pytest.ini",
         "renovate.json",
         "requirements-semgrep.in",
         "requirements-semgrep.txt",
@@ -976,7 +1235,6 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "test_samples",
         "tests",
         "tools",
-        "tox.ini",
         "uv.lock",
     },
 )
@@ -1284,6 +1542,22 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
     assert_that(matching).described_as(
         "no Renovate customManager targets build-binary.yml",
     ).is_not_empty()
+
+    # The docker-ci semgrep-lock job carries the same pin (#2436); the same
+    # manager must cover it or the second site would rot.
+    uv_managers = [
+        manager
+        for manager in matching
+        if any("UV_VERSION" in pattern for pattern in manager.get("matchStrings", []))
+    ]
+    assert_that(uv_managers).is_not_empty()
+    assert_that(
+        [
+            pattern
+            for manager in uv_managers
+            for pattern in manager["managerFilePatterns"]
+        ],
+    ).contains(".github/workflows/docker-ci.yml")
 
     for manager in matching:
         assert_that(manager["packageNameTemplate"]).is_equal_to("astral-sh/uv")
@@ -1615,8 +1889,7 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
                     continue
                 if with_block.get("ref") != canonical:
                     offenders.append(
-                        f"{path.name}:{job_id}: checkout ref "
-                        f"{with_block.get('ref')!r}",
+                        f"{path.name}:{job_id}: checkout ref {with_block.get('ref')!r}",
                     )
 
     assert_that(offenders).is_empty()
@@ -2284,13 +2557,16 @@ def test_create_universal_binary_smoke_tests_the_post_lipo_artifact() -> None:
     )
 
     checkout = by_name["Checkout scripts"]
-    sparse = checkout["with"]["sparse-checkout"]
+    # Split into paths: ``contains`` on the raw block is a substring match, so
+    # it would keep passing for a now-deleted sibling path such as the old
+    # ``lintro/tools/definitions`` (#2428).
+    sparse = checkout["with"]["sparse-checkout"].split()
     assert_that(sparse).contains("scripts")
     assert_that(sparse).contains("lintro/plugins")
     # #2202: the builtin index is generated, not committed (#2180), and this
     # job never builds the package — the checkout must carry the generator's
     # inputs and the generate step must run between checkout and smoke test.
-    assert_that(sparse).contains("lintro/tools/definitions")
+    assert_that(sparse).contains("lintro/tools")
     assert_that(sparse).contains("lintro_build")
     generate = by_name["Generate builtin tool index"]
     assert_that(generate["run"]).is_equal_to(
@@ -2954,13 +3230,59 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
     assert_that(versions).contains("bump only alongside rustc (#2205)")
 
 
+def test_renovate_does_not_track_cppcheck() -> None:
+    """The cppcheck pin follows Debian's package, not upstream's tags.
+
+    Cppcheck ships no portable single binary, so both the tools image and the
+    app-image ``install-tools.sh`` bridge install Debian's package. The
+    manifest-vs-image gate requires the installed version to *equal* the
+    manifest version, so a Renovate-driven bump to an upstream tag apt cannot
+    supply would fail CI permanently rather than merely lag. The pin moves
+    only when the ``python:3.14-slim`` base image changes Debian release.
+    """
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    managers = config.get("customManagers") or []
+
+    tracked = {
+        manager.get("packageNameTemplate")
+        for manager in managers
+        if manager.get("packageNameTemplate")
+    }
+    assert_that(tracked).does_not_contain("danmar/cppcheck")
+
+    match_strings = " ".join(
+        " ".join(manager.get("matchStrings") or []) for manager in managers
+    )
+    assert_that(match_strings).does_not_contain("ToolName.CPPCHECK")
+
+    grouped = [
+        package
+        for package in ("cppcheck", "danmar/cppcheck")
+        if any(
+            package in (rule.get("matchPackageNames") or [])
+            for rule in config.get("packageRules") or []
+        )
+    ]
+    assert_that(grouped).is_empty()
+
+    versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(versions).contains("NOT Renovate-managed")
+
+
 # Every workflow file carrying a pinned release reference, and how many sites
 # it must carry. Hard-coding the counts is deliberate: asserting only that the
 # surviving references agree would stay green if a refactor deleted all but one
 # pin, which is exactly the drift this guard exists to catch (#1751).
 _PINNED_IMAGE_SITES = {
     "dogfood-nightly.yml": 5,
-    "docker-ci.yml": 4,
+    # One: docker-ci carries the pin in a single workflow-level
+    # `env: LINTRO_FORK_FALLBACK_IMAGE` that every fork-fallback consumer
+    # reads (#2297).
+    "docker-ci.yml": 1,
 }
 
 
@@ -2992,6 +3314,122 @@ def test_pinned_release_image_sites_share_one_reference() -> None:
         references.update(matches)
 
     assert_that(references).is_length(1)
+
+
+def test_docker_ci_fork_fallback_resolves_through_one_env() -> None:
+    """Every docker-ci fork-fallback consumer reads the one workflow-level pin.
+
+    The pin used to be copy-pasted at four consumers, which is how it drifted
+    four releases behind the published image (#2297). It now lives once in
+    ``env.LINTRO_FORK_FALLBACK_IMAGE``. Two consumers read that context
+    directly; the two reusable-workflow callers cannot, because ``env`` is not
+    an available context in ``jobs.<id>.with`` — they go through
+    ``needs.docker-build.outputs.fork-fallback-image``, which republishes the
+    same env. This asserts no consumer reverted to its own literal and that
+    every caller still declares the ``docker-build`` dependency that
+    indirection needs.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    pin = docker_ci["env"]["LINTRO_FORK_FALLBACK_IMAGE"].strip()
+
+    assert_that(pin).matches(
+        r"^ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$",
+    )
+    # Published from a step, not interpolated straight from `env`, so the
+    # output can never be empty — an empty middle operand is falsy in the
+    # consumers' ternary and would silently select a never-pushed ci- tag.
+    build = docker_ci["jobs"]["docker-build"]
+    assert_that(build["outputs"]).contains_entry(
+        {"fork-fallback-image": "${{ steps.fork-fallback.outputs.image }}"},
+    )
+    publish_steps = [
+        step for step in build["steps"] if step.get("id") == "fork-fallback"
+    ]
+    assert_that(publish_steps).is_length(1)
+    publish = publish_steps[0]
+    # The exact write, not just a mention of the variable: a step that merely
+    # logged the pin, or wrote it under a different key, would leave the
+    # output empty — and empty is falsy in the consumers' ternary, silently
+    # selecting a ci- tag that fork runs never push.
+    assert_that(publish["run"].strip()).is_equal_to(
+        'echo "image=$LINTRO_FORK_FALLBACK_IMAGE" >> "$GITHUB_OUTPUT"',
+    )
+    # The key written above must be the key the job output reads back.
+    assert_that(build["outputs"]["fork-fallback-image"]).contains(
+        f"steps.{publish['id']}.outputs.image",
+    )
+    # Unconditional: the output must exist for every event, not just the ones
+    # that reach the heavy build steps.
+    assert_that(publish).does_not_contain_key("if")
+
+    # job id -> the expression carrying the fork-fallback selection.
+    reusable_callers = ("dogfooding-lint", "dogfooding_lint_retry")
+    step_consumers = {
+        "dogfooding-lint-changed": "LINTRO_IMAGE",
+        "dogfood-skip-gate": "LINTRO_IMAGE",
+    }
+    expressions: list[str] = []
+    # Reusable callers must go through the job output and must NOT use `env`:
+    # `env` is not an available context in `jobs.<id>.with`, so accepting it
+    # here would let an invalid workflow pass this test.
+    for job_id in reusable_callers:
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        expression = job["with"]["lintro-image"]
+        assert_that(expression).described_as(job_id).contains(
+            "needs.docker-build.outputs.fork-fallback-image",
+        )
+        assert_that(expression).described_as(job_id).does_not_contain(
+            "env.LINTRO_FORK_FALLBACK_IMAGE",
+        )
+        expressions.append(expression)
+    # Step-level consumers read the workflow env directly.
+    for job_id, env_key in step_consumers.items():
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        values = [
+            step["env"][env_key]
+            for step in job["steps"]
+            if env_key in (step.get("env") or {})
+        ]
+        assert_that(values).described_as(job_id).is_length(1)
+        assert_that(values[0]).described_as(job_id).contains(
+            "env.LINTRO_FORK_FALLBACK_IMAGE",
+        )
+        expressions.append(values[0])
+
+    assert_that(expressions).is_length(4)
+    for expression in expressions:
+        # No consumer may carry its own literal digest again.
+        assert_that(expression).described_as(expression).does_not_contain("sha256:")
+        # The fork-vs-same-repo selection the pin exists for must survive,
+        # including its polarity: the pin is the `&&` branch (fork) and the
+        # run-scoped CI tag the `||` branch (same repo). Asserting only that
+        # both fragments appear would accept an inverted ternary, which would
+        # hand fork PRs a ci- tag that fork runs never push.
+        collapsed = " ".join(expression.split())
+        condition = "needs.docker-build.outputs.is-fork == 'true'"
+        ci_tag = "format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id)"
+        assert_that(collapsed).described_as(expression).contains(condition)
+        assert_that(collapsed).described_as(expression).contains(ci_tag)
+        pin_token = next(
+            token
+            for token in (
+                "needs.docker-build.outputs.fork-fallback-image",
+                "env.LINTRO_FORK_FALLBACK_IMAGE",
+            )
+            if token in collapsed
+        )
+        # condition ... && <pin> ... || <ci tag>
+        assert_that(collapsed.index(condition)).described_as(
+            expression,
+        ).is_less_than(collapsed.index(pin_token))
+        assert_that(collapsed.index(pin_token)).described_as(
+            expression,
+        ).is_less_than(collapsed.index("||"))
+        assert_that(collapsed.index("||")).described_as(
+            expression,
+        ).is_less_than(collapsed.index(ci_tag))
 
 
 def test_pinned_release_image_manager_covers_both_workflows() -> None:
@@ -3347,8 +3785,44 @@ def test_code_quality_gate_sparse_checkout_covers_gate_scripts() -> None:
         "scripts/ci/evaluate-code-quality-gate.sh",
         "scripts/ci/assert-required-check.sh",
         "scripts/ci/is-infra-flake-failure.sh",
+        "scripts/ci/summarize-code-quality-gate.sh",
     ):
         assert_that(sparse).contains(script)
+
+
+def test_code_quality_gate_explains_an_infra_flake_in_the_summary() -> None:
+    """A fail-closed gate must say whether the red was runner loss (#2296).
+
+    The summary step has to survive the gate step's own failure, so it is
+    guarded by ``always()`` — that failure is exactly what it explains.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+
+    summary_step = next(
+        step
+        for step in gate_job["steps"]
+        if "summarize-code-quality-gate.sh" in str(step.get("run", ""))
+    )
+    assert_that(str(summary_step["run"]).strip()).is_equal_to(
+        "scripts/ci/summarize-code-quality-gate.sh",
+    )
+
+    condition = _normalize_github_expr(str(summary_step["if"]))
+    assert_that(condition).contains("always()")
+    assert_that(condition).contains("steps.gate.outputs.infra-flake == 'true'")
+
+    # The script branches on GATE_STATUS and quotes MAX_RERUNS, and refuses to
+    # write anything unless GATE_INFRA_FLAKE is the literal 'true'. A missing
+    # key would silently fall back to a default and print the wrong story.
+    env = summary_step["env"]
+    assert_that(_normalize_github_expr(str(env["GATE_INFRA_FLAKE"]))).is_equal_to(
+        "${{ steps.gate.outputs.infra-flake }}",
+    )
+    assert_that(_normalize_github_expr(str(env["GATE_STATUS"]))).is_equal_to(
+        "${{ steps.gate.outputs.status }}",
+    )
+    assert_that(str(env["MAX_RERUNS"])).is_equal_to("3")
 
 
 # --- Release version-skew audit wiring (#1712) ------------------------------
@@ -3527,8 +4001,8 @@ _DOGFOOD_TOOL_OPTIONS_RE = re.compile(
     r"pydoclint:timeout=\d+,[^\s]+osv_scanner:check_suppressions=[^\s,]+",
 )
 _EXPECTED_DOGFOOD_TOOL_OPTIONS = (
-    "pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,"
-    "mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,"
+    "pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,"
+    "mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,"
     "osv_scanner:check_suppressions=false"
 )
 

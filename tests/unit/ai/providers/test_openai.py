@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Generator
+from dataclasses import dataclass, field
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -17,6 +19,71 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.providers import openai as mod
 from lintro.ai.providers.openai import OpenAIProvider
+
+
+@dataclass
+class _RecordingCompletions:
+    """Records the keyword arguments each ``completions.create`` call receives.
+
+    Used instead of an ``AsyncMock`` so tests assert on a list the fake really
+    appended to rather than on mock call bookkeeping (#2315).
+
+    Attributes:
+        response: Object every call returns.
+        calls: Keyword arguments of each call, in order.
+    """
+
+    response: Any
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    async def create(self, **kwargs: Any) -> Any:
+        """Record one request and return the canned response.
+
+        Args:
+            **kwargs: Request keyword arguments the provider built.
+
+        Returns:
+            Any: The canned response.
+        """
+        self.calls.append(kwargs)
+        return self.response
+
+
+def _openai_client(completions: _RecordingCompletions) -> SimpleNamespace:
+    """Wrap a recording completions object in the SDK's client shape.
+
+    Args:
+        completions: The recorder to expose at ``chat.completions``.
+
+    Returns:
+        SimpleNamespace: A client stand-in the provider can call.
+    """
+    return SimpleNamespace(chat=SimpleNamespace(completions=completions))
+
+
+def _openai_response(
+    *,
+    content: str = "response",
+    prompt_tokens: int = 10,
+    completion_tokens: int = 5,
+) -> SimpleNamespace:
+    """Build a stand-in for an OpenAI chat-completions response.
+
+    Args:
+        content: Assistant message content.
+        prompt_tokens: Prompt tokens the response reports.
+        completion_tokens: Completion tokens the response reports.
+
+    Returns:
+        SimpleNamespace: The response stand-in.
+    """
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        ),
+    )
 
 
 class _FakeOpenAIError(Exception):
@@ -182,34 +249,20 @@ async def test_openai_complete_parses_response():
         )
 
 
-async def test_openai_complete_without_system_prompt():
+async def test_openai_complete_without_system_prompt() -> None:
     """complete() omits system message when system is None."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider()
 
-        mock_message = MagicMock()
-        mock_message.content = "response"
-
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-
-        mock_usage = MagicMock()
-        mock_usage.prompt_tokens = 10
-        mock_usage.completion_tokens = 5
-
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_response.usage = mock_usage
-
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        provider._client = mock_client
+        completions = _RecordingCompletions(response=_openai_response())
+        provider._client = _openai_client(completions)
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            await provider.complete("prompt")
+            result = await provider.complete("prompt")
 
-        call_kwargs = mock_client.chat.completions.create.call_args[1]
-        assert_that(call_kwargs["messages"]).is_equal_to(
+        assert_that(result.content).is_equal_to("response")
+        assert_that(completions.calls).is_length(1)
+        assert_that(completions.calls[0]["messages"]).is_equal_to(
             [{"role": "user", "content": "prompt"}],
         )
 
@@ -240,29 +293,18 @@ async def test_openai_complete_handles_none_usage():
         assert_that(result.output_tokens).is_equal_to(0)
 
 
-async def test_openai_complete_respects_max_tokens_cap():
+async def test_openai_complete_respects_max_tokens_cap() -> None:
     """complete() uses the lower of per-call and provider-level max_tokens."""
     with patch.object(mod, "_has_openai", True):
         provider = OpenAIProvider(max_tokens=2048)
 
-        mock_message = MagicMock()
-        mock_message.content = "ok"
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-        mock_usage = MagicMock()
-        mock_usage.prompt_tokens = 10
-        mock_usage.completion_tokens = 5
-
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_response.usage = mock_usage
-
-        mock_client = MagicMock()
-        mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
-        provider._client = mock_client
+        completions = _RecordingCompletions(response=_openai_response(content="ok"))
+        provider._client = _openai_client(completions)
 
         with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-            await provider.complete("prompt", max_tokens=4096)
+            result = await provider.complete("prompt", max_tokens=4096)
 
-        call_kwargs = mock_client.chat.completions.create.call_args[1]
-        assert_that(call_kwargs["max_tokens"]).is_equal_to(2048)
+        assert_that(result.content).is_equal_to("ok")
+        assert_that(completions.calls).is_length(1)
+        # The per-call 4096 is capped by the provider-level 2048.
+        assert_that(completions.calls[0]["max_tokens"]).is_equal_to(2048)

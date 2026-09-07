@@ -25,7 +25,6 @@ move that call without touching anything in here.
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import Coroutine, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
@@ -34,13 +33,10 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from lintro.ai.invoke import call_ai
-from lintro.ai.json_response import strip_json_fences
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 from lintro.ai.review.enums.finding_origin import FindingOrigin
-from lintro.ai.review.finding_matcher import fingerprint_for
-from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.models.coverage_degradation import (
     SYNTHESIS_CHUNK_INDEX,
     CoverageDegradation,
@@ -53,6 +49,10 @@ from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     guarded_changed_paths,
     plan_synthesis_prompt,
+)
+from lintro.ai.review.synthesis_response import (
+    deduplicate_synthesis_findings,
+    parse_synthesis_findings,
 )
 
 if TYPE_CHECKING:
@@ -68,6 +68,7 @@ if TYPE_CHECKING:
 __all__ = [
     "SYNTHESIS_CHUNK_INDEX",
     "SynthesisPass",
+    "SynthesisPassRequest",
     "run_synthesis_pass",
     "should_run_synthesis",
 ]
@@ -139,87 +140,6 @@ def should_run_synthesis(
     if config is None or not config.enabled:
         return False
     return chunks_reviewed > 1
-
-
-def _parse_synthesis_findings(*, content: str) -> tuple[ReviewFinding, ...] | None:
-    """Parse the pass's response with the shared finding parser.
-
-    Args:
-        content: Raw model response text.
-
-    Returns:
-        Parsed findings, or ``None`` when the response was not a JSON object
-        carrying a ``findings`` list — a missing key counts the same as a
-        malformed value. The caller records that as a failed pass rather than
-        an empty one, so "found nothing" and "could not be read" never look
-        alike. Only a present, empty list is an empty success.
-    """
-    try:
-        payload = json.loads(strip_json_fences(content=content))
-    except (json.JSONDecodeError, ValueError):
-        logger.warning("Could not parse the cross-chunk synthesis response as JSON.")
-        return None
-    if not isinstance(payload, dict):
-        logger.warning("The cross-chunk synthesis payload was not an object.")
-        return None
-    if "findings" not in payload:
-        # An answer that never mentions ``findings`` did not answer. Defaulting
-        # it to an empty list would report "found no cross-file
-        # inconsistencies" for a call that produced nothing usable.
-        logger.warning("The cross-chunk synthesis payload had no findings key.")
-        return None
-    raw = payload["findings"]
-    if not isinstance(raw, list):
-        # ``parse_findings`` would quietly render a string, a mapping, or a
-        # null here as no findings at all, which is exactly the "empty
-        # success" this pass promises never to confuse with a failure.
-        logger.warning("The cross-chunk synthesis findings value was not a list.")
-        return None
-    return parse_findings(raw_findings=raw)
-
-
-def _deduplicate(
-    *,
-    candidates: Sequence[ReviewFinding],
-    existing: Sequence[ReviewFinding],
-) -> tuple[ReviewFinding, ...]:
-    """Drop synthesized findings the chunk passes already reported.
-
-    Identity is the cross-round fingerprint the state ledger already uses, so
-    a synthesized restatement collapses onto the chunk finding it duplicates
-    instead of appearing beside it under a slightly different line number.
-
-    Args:
-        candidates: Synthesized findings, in reported order.
-        existing: Findings already merged from the chunk passes.
-
-    Returns:
-        The candidates whose fingerprint is new, in reported order.
-    """
-    seen = {
-        fingerprint_for(
-            file=finding.file,
-            category=finding.category,
-            title=finding.title,
-        )
-        for finding in existing
-    }
-    kept: list[ReviewFinding] = []
-    for finding in candidates:
-        fingerprint = fingerprint_for(
-            file=finding.file,
-            category=finding.category,
-            title=finding.title,
-        )
-        if fingerprint in seen:
-            logger.debug(
-                "Dropping synthesized finding {title!r}: already reported.",
-                title=finding.title,
-            )
-            continue
-        seen.add(fingerprint)
-        kept.append(finding)
-    return tuple(kept)
 
 
 def _failed_pass(
@@ -312,21 +232,49 @@ async def _await_call_until_stop(
                     await task
 
 
-async def run_synthesis_pass(
-    *,
-    context: ReviewContext,
-    summaries: Sequence[ChunkSummary],
-    existing_findings: Sequence[ReviewFinding],
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    config: ReviewSynthesisConfig,
-    policy: ReviewSensitivityPolicy,
-    budget: CostBudget,
-    repo_root: str = "",
-    use_one_shot: bool = True,
-    diff_budget: int = 1,
-    stop: asyncio.Event | None = None,
-) -> SynthesisPass:
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SynthesisPassRequest:
+    """Everything the cross-chunk synthesis pass reads.
+
+    Grouping the pass's inputs keeps :func:`run_synthesis_pass` to one
+    argument and makes a new input a field here rather than another keyword
+    threaded through the caller (issue #2301).
+
+    Attributes:
+        context: Collected review diff context.
+        summaries: Per-chunk digests in chunk order.
+        existing_findings: Findings already merged from the chunk passes,
+            deduplicated against.
+        provider: Configured AI provider instance.
+        ai_config: AI configuration for retries, budget, and timeouts.
+        config: Resolved synthesis configuration.
+        policy: Run sensitivity policy applied to the synthesized findings.
+        budget: Session cost budget tracker.
+        repo_root: Absolute path to the repository under review.
+        use_one_shot: When True, avoid durable provider sessions.
+        diff_budget: Token budget the whole prompt must fit — the digest,
+            the changed-file list, and the diff together.
+        stop: Event set by the run's interrupt handler. When it fires while
+            the extra call is in flight the call is abandoned and the pass
+            reports a failure, so a SIGTERM cannot hold the process in an
+            optional call while there is a completed review to persist.
+    """
+
+    context: ReviewContext
+    summaries: Sequence[ChunkSummary]
+    existing_findings: Sequence[ReviewFinding]
+    provider: BaseAIProvider
+    ai_config: AIConfig
+    config: ReviewSynthesisConfig
+    policy: ReviewSensitivityPolicy
+    budget: CostBudget
+    repo_root: str = ""
+    use_one_shot: bool = True
+    diff_budget: int = 1
+    stop: asyncio.Event | None = None
+
+
+async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
     """Run the whole-PR cross-chunk pass and return what it contributed.
 
     Exactly one provider call, on the same ``call_ai`` transport and behind
@@ -356,23 +304,7 @@ async def run_synthesis_pass(
     tally this function returns.
 
     Args:
-        context: Collected review diff context.
-        summaries: Per-chunk digests in chunk order.
-        existing_findings: Findings already merged from the chunk passes,
-            deduplicated against.
-        provider: Configured AI provider instance.
-        ai_config: AI configuration for retries, budget, and timeouts.
-        config: Resolved synthesis configuration.
-        policy: Run sensitivity policy applied to the synthesized findings.
-        budget: Session cost budget tracker.
-        repo_root: Absolute path to the repository under review.
-        use_one_shot: When True, avoid durable provider sessions.
-        diff_budget: Token budget the whole prompt must fit — the digest,
-            the changed-file list, and the diff together.
-        stop: Event set by the run's interrupt handler. When it fires while
-            the extra call is in flight the call is abandoned and the pass
-            reports a failure, so a SIGTERM cannot hold the process in an
-            optional call while there is a completed review to persist.
+        request: The pass's inputs.
 
     Returns:
         The pass result. Any failure — a budget stop, a provider error, an
@@ -380,6 +312,19 @@ async def run_synthesis_pass(
         degradation, never as an exception: the chunk findings stand and the
         run stays complete for them.
     """
+    context = request.context
+    summaries = request.summaries
+    existing_findings = request.existing_findings
+    provider = request.provider
+    ai_config = request.ai_config
+    config = request.config
+    policy = request.policy
+    budget = request.budget
+    repo_root = request.repo_root
+    use_one_shot = request.use_one_shot
+    diff_budget = request.diff_budget
+    stop = request.stop
+
     plan = plan_synthesis_prompt(
         context=context,
         summaries=summaries,
@@ -431,7 +376,7 @@ async def run_synthesis_pass(
         )
         return _failed_pass(truncated=truncated)
 
-    parsed = _parse_synthesis_findings(content=response.content)
+    parsed = parse_synthesis_findings(content=response.content)
     if parsed is None:
         return _failed_pass(
             truncated=truncated,
@@ -458,7 +403,10 @@ async def run_synthesis_pass(
     # nothing, so letting one consume a slot in the cap window would discard a
     # novel cross-file finding that came after it — the exact thing this pass
     # exists to surface.
-    deduplicated = _deduplicate(candidates=guarded, existing=existing_findings)
+    deduplicated = deduplicate_synthesis_findings(
+        candidates=guarded,
+        existing=existing_findings,
+    )
     kept = deduplicated[: max(config.max_findings, 1)]
 
     degradations = (

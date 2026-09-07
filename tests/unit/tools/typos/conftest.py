@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.typos import TyposPlugin
+from lintro.tools.typos.definition import TyposPlugin
 
 
 @pytest.fixture

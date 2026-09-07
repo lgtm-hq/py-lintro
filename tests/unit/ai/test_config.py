@@ -7,6 +7,7 @@ from assertpy import assert_that
 from pydantic import ValidationError
 
 from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.registry import AIProvider
 
@@ -52,7 +53,7 @@ def test_cli_bare_defaults_to_auto() -> None:
 
 def test_cli_bare_accepts_explicit_override() -> None:
     """The bare-mode policy is settable from a plain config string."""
-    config = AIConfig.from_mapping({"cli_bare": "never"})
+    config = resolve_effective_ai_config({"cli_bare": "never"}).config
     assert_that(config.cli_bare).is_equal_to(CliBareMode.NEVER)
 
 

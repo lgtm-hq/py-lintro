@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from lintro.ai.config_overrides import apply_cli_overrides
 from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.providers.claude_auth import should_send_bare
@@ -19,9 +18,7 @@ __all__ = [
     "DEFAULT_API_TIMEOUT",
     "DEFAULT_CLI_TIMEOUT",
     "ResolvedTransportSettings",
-    "apply_cli_overrides",
     "apply_resolved_transport",
-    "apply_transport_override",
     "format_resolved_profile_log",
     "resolve_cost_basis",
     "resolve_max_cost_with_source",
@@ -76,30 +73,6 @@ def resolve_cost_basis(*, auth_mode: str, estimated: bool) -> CostBasis | None:
     if estimated:
         return CostBasis.ESTIMATED
     return None
-
-
-def apply_transport_override(
-    ai_config: AIConfig,
-    transport: str | AITransport | None,
-) -> AIConfig:
-    """Apply a CLI transport override on top of config.
-
-    Args:
-        ai_config: Loaded AI configuration.
-        transport: Optional ``api`` or ``cli`` override from the CLI flag.
-
-    Returns:
-        Config unchanged when *transport* is ``None``, otherwise a copy
-        with ``transport`` replaced.
-    """
-    if transport is None:
-        return ai_config
-    transport_enum = (
-        transport
-        if isinstance(transport, AITransport)
-        else AITransport(str(transport).lower())
-    )
-    return ai_config.model_copy(update={"transport": transport_enum})
 
 
 def _profile_max_cost(ai_config: AIConfig) -> float | None:

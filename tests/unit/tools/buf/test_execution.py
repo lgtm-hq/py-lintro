@@ -10,7 +10,7 @@ from assertpy import assert_that
 
 from lintro.parsers.buf.buf_issue import BufIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.buf import BufPlugin
+from lintro.tools.buf.definition import BufPlugin
 
 _LINT_ISSUE = (
     '{"path":"a.proto","start_line":2,"start_column":1,"end_line":2,'

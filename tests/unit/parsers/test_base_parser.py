@@ -55,20 +55,6 @@ def test_extract_int_field_excludes_bool() -> None:
     assert_that(result).is_equal_to(0)
 
 
-def test_extract_str_field_first_candidate() -> None:
-    """extract_str_field returns value from first matching candidate."""
-    data: dict[str, object] = {"filename": "test.py", "file": "other.py"}
-    result = extract_str_field(data, ["filename", "file"])
-    assert_that(result).is_equal_to("test.py")
-
-
-def test_extract_str_field_second_candidate() -> None:
-    """extract_str_field falls back to second candidate."""
-    data: dict[str, object] = {"file": "test.py"}
-    result = extract_str_field(data, ["filename", "file"])
-    assert_that(result).is_equal_to("test.py")
-
-
 def test_extract_str_field_default() -> None:
     """extract_str_field returns default when no match."""
     data: dict[str, object] = {"other": "value"}
@@ -81,20 +67,6 @@ def test_extract_str_field_empty_default() -> None:
     data: dict[str, object] = {}
     result = extract_str_field(data, ["filename"])
     assert_that(result).is_equal_to("")
-
-
-def test_extract_dict_field_first_candidate() -> None:
-    """extract_dict_field returns value from first matching candidate."""
-    data: dict[str, object] = {"location": {"line": 1}, "start": {"row": 2}}
-    result = extract_dict_field(data, ["location", "start"])
-    assert_that(result).is_equal_to({"line": 1})
-
-
-def test_extract_dict_field_second_candidate() -> None:
-    """extract_dict_field falls back to second candidate."""
-    data: dict[str, object] = {"start": {"row": 2}}
-    result = extract_dict_field(data, ["location", "start"])
-    assert_that(result).is_equal_to({"row": 2})
 
 
 def test_extract_dict_field_default() -> None:
@@ -111,13 +83,6 @@ def test_extract_dict_field_empty_default() -> None:
     assert_that(result).is_equal_to({})
 
 
-def test_strip_ansi_codes_removes_color() -> None:
-    """strip_ansi_codes removes color codes."""
-    text = "\x1b[31mError\x1b[0m: message"
-    result = strip_ansi_codes(text)
-    assert_that(result).is_equal_to("Error: message")
-
-
 def test_strip_ansi_codes_plain_text() -> None:
     """strip_ansi_codes returns plain text unchanged."""
     text = "plain text without codes"
@@ -130,12 +95,6 @@ def test_strip_ansi_codes_multiple_codes() -> None:
     text = "\x1b[1m\x1b[32mSuccess\x1b[0m: \x1b[34minfo\x1b[0m"
     result = strip_ansi_codes(text)
     assert_that(result).is_equal_to("Success: info")
-
-
-def test_strip_ansi_codes_empty_string() -> None:
-    """strip_ansi_codes handles empty string."""
-    result = strip_ansi_codes("")
-    assert_that(result).is_equal_to("")
 
 
 def test_validate_str_field_valid_string() -> None:

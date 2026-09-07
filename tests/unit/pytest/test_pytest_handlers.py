@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.implementations.pytest.pytest_handlers import (
+from lintro.tools.pytest.pytest_handlers import (
     handle_check_plugins,
     handle_collect_only,
     handle_fixture_info,
@@ -82,8 +82,8 @@ def fake_pytest_plugin() -> FakePytestPlugin:
 # Tests for handle_list_plugins
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.list_installed_plugins")
-@patch("lintro.tools.implementations.pytest.pytest_handlers.get_pytest_version_info")
+@patch("lintro.tools.pytest.pytest_handlers.list_installed_plugins")
+@patch("lintro.tools.pytest.pytest_handlers.get_pytest_version_info")
 def test_list_plugins_with_results(
     mock_version: MagicMock,
     mock_plugins: MagicMock,
@@ -113,8 +113,8 @@ def test_list_plugins_with_results(
     assert_that(result.output).contains("pytest-mock (3.10.0)")
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.list_installed_plugins")
-@patch("lintro.tools.implementations.pytest.pytest_handlers.get_pytest_version_info")
+@patch("lintro.tools.pytest.pytest_handlers.list_installed_plugins")
+@patch("lintro.tools.pytest.pytest_handlers.get_pytest_version_info")
 def test_list_plugins_no_plugins(
     mock_version: MagicMock,
     mock_plugins: MagicMock,
@@ -140,7 +140,7 @@ def test_list_plugins_no_plugins(
 # Tests for handle_check_plugins
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.check_plugin_installed")
+@patch("lintro.tools.pytest.pytest_handlers.check_plugin_installed")
 def test_check_all_plugins_installed(
     mock_check: MagicMock,
     fake_pytest_plugin: FakePytestPlugin,
@@ -163,7 +163,7 @@ def test_check_all_plugins_installed(
     assert_that(result.output).contains("pytest-mock")
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.check_plugin_installed")
+@patch("lintro.tools.pytest.pytest_handlers.check_plugin_installed")
 def test_check_missing_plugins(
     mock_check: MagicMock,
     fake_pytest_plugin: FakePytestPlugin,
@@ -187,7 +187,7 @@ def test_check_missing_plugins(
     assert_that(result.output).contains("pip install")
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.check_plugin_installed")
+@patch("lintro.tools.pytest.pytest_handlers.check_plugin_installed")
 def test_check_all_plugins_missing(
     mock_check: MagicMock,
     fake_pytest_plugin: FakePytestPlugin,
@@ -233,7 +233,7 @@ def test_check_plugins_invalid_input(
     assert_that(result.success).is_false()
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.check_plugin_installed")
+@patch("lintro.tools.pytest.pytest_handlers.check_plugin_installed")
 def test_check_plugins_with_whitespace(
     mock_check: MagicMock,
     fake_pytest_plugin: FakePytestPlugin,

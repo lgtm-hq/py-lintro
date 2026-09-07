@@ -93,7 +93,7 @@ lintro check src/ --tools vue-tsc --auto-install
 
 ## Priority and Conflicts
 
-- **Priority:** 83 (runs after tsc, same priority as astro-check)
+- **Order:** derived from claims; runs in the `CHECK` phase
 - **Tool Type:** LINTER | TYPE_CHECKER
 - **Conflicts:** None
 - **Complements:** oxlint, oxfmt, prettier (formatting/linting)

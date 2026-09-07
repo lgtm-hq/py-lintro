@@ -1,0 +1,319 @@
+"""Cppcheck tool definition.
+
+Cppcheck is a static analysis tool for C and C++ code. It detects undefined
+behavior, memory safety defects, and other bug patterns that compilers commonly
+miss, with a design philosophy of minimizing false positives. It runs standalone
+on individual translation units and needs no build/project context.
+
+Cppcheck reports its structured findings as XML (schema version 2) on stderr.
+Lintro parses that XML natively rather than cppcheck's newer
+``--output-format=sarif`` because SARIF is lossy for cppcheck (it collapses the
+``style``/``performance``/``portability``/``information`` severities into a single
+``warning`` level and drops the ``inconclusive`` flag). See
+``docs/tool-analysis/cppcheck-analysis.md``.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from loguru import logger
+
+from lintro._tool_versions import get_min_version
+from lintro.enums.capability import Cap
+from lintro.enums.doc_url_template import DocUrlTemplate
+from lintro.enums.tool_name import ToolName
+from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.cppcheck.cppcheck_parser import parse_cppcheck_output
+from lintro.plugins.base import BaseToolPlugin
+from lintro.plugins.protocol import ToolDefinition
+from lintro.plugins.registry import register_tool
+from lintro.tools.core.batch_runner import (
+    BatchCheckPolicy,
+    BatchOutput,
+    BatchSuccess,
+    run_batch_check,
+)
+from lintro.tools.core.option_validators import (
+    filter_none_options,
+    normalize_str_or_list,
+    validate_bool,
+    validate_option_types,
+)
+
+# Constants for Cppcheck configuration
+CPPCHECK_DEFAULT_TIMEOUT: int = 60
+# Source files only. Cppcheck treats a header passed on the command line as a
+# standalone translation unit, which misfires (unused members, unparsed macros)
+# because the defining/including source is absent; upstream's manual therefore
+# says to pass sources and let cppcheck pull in the headers they ``#include``.
+# Headers are still analyzed — through the sources that include them.
+CPPCHECK_FILE_PATTERNS: list[str] = [
+    "*.c",
+    "*.cpp",
+    "*.cc",
+    "*.cxx",
+    "*.c++",
+]
+# ``error`` severity checks always run; these advisory categories are enabled by
+# default to surface actionable, low-false-positive findings. ``unusedFunction``
+# and ``information`` are intentionally excluded: the former needs whole-program
+# analysis and misfires on per-file runs, the latter is mostly configuration
+# noise (missing includes, etc.).
+CPPCHECK_DEFAULT_ENABLE: str = "warning,style,performance,portability"
+# Enable categories lintro refuses. ``unusedFunction`` needs whole-program
+# visibility; lintro invokes cppcheck on the file list discovered for the run
+# (a user-supplied path, a ``--diff`` scope, or the whole tree), so a function
+# whose only caller sat outside that list would be reported unused. ``all``
+# implies ``unusedFunction``, so it is refused for the same reason. Rejecting
+# is deliberate: silently dropping a category the user explicitly asked for
+# would be worse than saying it is unsupported.
+CPPCHECK_UNSUPPORTED_ENABLE: frozenset[str] = frozenset({"unusedFunction", "all"})
+# Cppcheck exits 0 when clean and with this code when any enabled finding is
+# reported (see ``--error-exitcode``). Issue counting is driven by the parsed
+# XML; the exit code is only used to detect execution failures.
+CPPCHECK_ERROR_EXITCODE: int = 1
+
+
+def _reject_unsupported_enable(enable: str) -> None:
+    """Reject enable categories that need whole-program analysis.
+
+    Both spellings a user can reach ``unusedFunction`` through are refused: the
+    category itself and ``all``, which implies it. Tokens are compared
+    case-insensitively after splitting on commas, so neither a list nor a
+    comma-joined string can smuggle one past.
+
+    Args:
+        enable: The comma-joined enable value.
+
+    Raises:
+        ValueError: If any token names an unsupported category.
+    """
+    lowered = {token.strip().lower() for token in enable.split(",")}
+    rejected = sorted(
+        name for name in CPPCHECK_UNSUPPORTED_ENABLE if name.lower() in lowered
+    )
+    if not rejected:
+        return
+    raise ValueError(
+        f"cppcheck enable category not supported: {', '.join(rejected)}. "
+        "These require whole-program analysis, but lintro runs cppcheck over "
+        "the files discovered for the run, which may be a subset of the tree "
+        "(a path argument or a --diff scope), so functions would be reported "
+        "unused merely because their callers were outside it.",
+    )
+
+
+@register_tool
+@dataclass
+class CppcheckPlugin(BaseToolPlugin):
+    """Cppcheck C/C++ static analysis plugin.
+
+    This plugin integrates Cppcheck with Lintro for detecting bugs and undefined
+    behavior in C and C++ source files. Cppcheck is check-only; it does not
+    modify code, so ``fix()`` is unsupported.
+    """
+
+    @property
+    def definition(self) -> ToolDefinition:
+        """Return the tool definition.
+
+        Returns:
+            ToolDefinition containing tool metadata.
+        """
+        return ToolDefinition(
+            name="cppcheck",
+            description=(
+                "Static analysis for C/C++ that detects undefined behavior, "
+                "memory safety defects, and other bugs"
+            ),
+            can_fix=False,
+            tool_type=ToolType.LINTER | ToolType.SECURITY,
+            file_patterns=CPPCHECK_FILE_PATTERNS,
+            claims=[
+                Claim(
+                    patterns=CPPCHECK_FILE_PATTERNS,
+                    capabilities={Cap.CHECK},
+                ),
+            ],
+            reads_tree=True,
+            # Each file is its own translation unit, so a shard's verdict does
+            # not depend on which other files ran. The one category that would
+            # break this, ``unusedFunction``, needs whole-program visibility and
+            # is excluded from the default enable set for that reason; enabling
+            # it explicitly is unsupported (see ``set_options``).
+            partitionable=True,
+            native_configs=[],
+            version_command=["cppcheck", "--version"],
+            min_version=get_min_version(ToolName.CPPCHECK),
+            default_options={
+                "timeout": CPPCHECK_DEFAULT_TIMEOUT,
+                "enable": CPPCHECK_DEFAULT_ENABLE,
+                "inconclusive": False,
+                "std": None,
+                "inline_suppr": False,
+                "suppress": None,
+            },
+            default_timeout=CPPCHECK_DEFAULT_TIMEOUT,
+        )
+
+    def set_options(
+        self,
+        enable: str | list[str] | None = None,
+        inconclusive: bool | None = None,
+        std: str | None = None,
+        inline_suppr: bool | None = None,
+        suppress: str | list[str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Set Cppcheck-specific options.
+
+        Args:
+            enable: Check categories to enable, either comma-separated (e.g.
+                ``"warning,style"``) or as a list. ``error`` checks always run
+                regardless of this value. The CLI splits ``--tool-options`` on
+                commas, so a list (``enable=warning|style``) is the way to
+                request several categories from the command line.
+                ``unusedFunction`` and ``all`` are rejected: they need
+                whole-program visibility, while lintro invokes cppcheck on the
+                file list discovered for the run, which may be a subset of the
+                tree.
+            inconclusive: Whether to report findings cppcheck cannot fully
+                confirm. Increases coverage at the cost of some false positives.
+            std: Language standard to assume (e.g. ``c11``, ``c++17``).
+            inline_suppr: Whether to honor inline ``// cppcheck-suppress`` comments.
+            suppress: Suppression specification, or a list of them (e.g.
+                ``["missingInclude", "unusedFunction:*"]``).
+            **kwargs: Other tool options.
+        """
+        enable_list = normalize_str_or_list(enable, "enable")
+        if enable_list is not None:
+            enable = ",".join(part for part in enable_list if part)
+            _reject_unsupported_enable(enable)
+        suppress = normalize_str_or_list(suppress, "suppress")
+        validate_option_types({"std": std}, {"std": str})
+        validate_bool(inconclusive, "inconclusive")
+        validate_bool(inline_suppr, "inline_suppr")
+
+        options = filter_none_options(
+            enable=enable,
+            inconclusive=inconclusive,
+            std=std,
+            inline_suppr=inline_suppr,
+            suppress=suppress,
+        )
+        super().set_options(**options, **kwargs)
+
+    def _build_command(self, files: list[str]) -> list[str]:
+        """Build the cppcheck check command.
+
+        Args:
+            files: List of files to check.
+
+        Returns:
+            List of command arguments.
+        """
+        cmd: list[str] = self._get_executable_command("cppcheck")
+        # XML (schema v2) report on stderr; quiet suppresses stdout progress.
+        cmd.extend(["--xml", "--quiet"])
+        cmd.append(f"--error-exitcode={CPPCHECK_ERROR_EXITCODE}")
+
+        enable_opt = self.options.get("enable", CPPCHECK_DEFAULT_ENABLE)
+        if enable_opt:
+            cmd.append(f"--enable={enable_opt}")
+
+        if self.options.get("inconclusive"):
+            cmd.append("--inconclusive")
+
+        std_opt = self.options.get("std")
+        if std_opt:
+            cmd.append(f"--std={std_opt}")
+
+        if self.options.get("inline_suppr"):
+            cmd.append("--inline-suppr")
+
+        suppress_opt = self.options.get("suppress")
+        if isinstance(suppress_opt, list):
+            for suppression in suppress_opt:
+                cmd.append(f"--suppress={suppression}")
+
+        cmd.extend(files)
+        return cmd
+
+    def doc_url(self, code: str) -> str | None:
+        """Return documentation URL for the given cppcheck check id.
+
+        Cppcheck check ids do not map to per-rule pages, so all codes resolve to
+        the manual.
+
+        Args:
+            code: Cppcheck check id (e.g., "uninitvar").
+
+        Returns:
+            URL to the cppcheck manual, or None if code is empty.
+        """
+        if code:
+            return DocUrlTemplate.CPPCHECK
+        return None
+
+    def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+        """Check files with Cppcheck for bugs and undefined behavior.
+
+        Args:
+            paths: List of file or directory paths to check.
+            options: Runtime options that override defaults.
+
+        Returns:
+            ToolResult with check results.
+        """
+        ctx = self.prepare(paths, options, no_files_message="No files to check.")
+        if isinstance(ctx, ToolResult):
+            return ctx
+
+        cmd = self._build_command(files=ctx.files)
+        logger.debug(f"[CppcheckPlugin] Running: {' '.join(cmd[:8])}...")
+
+        # Cppcheck writes its XML report to stderr and, under ``--quiet``,
+        # nothing to stdout, so the combined output the batch runner hands the
+        # parser is the report. It exits with CPPCHECK_ERROR_EXITCODE when it
+        # reports findings, so exit status and findings must both be clean.
+        # A non-zero exit with nothing parseable means the invocation itself
+        # failed (bad argument, internal error); surfacing the raw output there
+        # fails closed instead of reporting a silent pass.
+        return run_batch_check(
+            ctx,
+            plugin=self,
+            cmd=cmd,
+            parse=lambda output: parse_cppcheck_output(output),
+            policy=BatchCheckPolicy(
+                success=BatchSuccess.EXIT_AND_ISSUES,
+                output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
+            ),
+            on_error=lambda exc: ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=f"Cppcheck failed: {exc}",
+                issues_count=0,
+            ),
+        )
+
+    def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+        """Cppcheck cannot fix issues, only report them.
+
+        Args:
+            paths: List of file or directory paths to fix.
+            options: Tool-specific options.
+
+        Returns:
+            ToolResult: Never returns, always raises NotImplementedError.
+
+        Raises:
+            NotImplementedError: Cppcheck does not support fixing issues.
+        """
+        raise NotImplementedError(
+            "Cppcheck cannot automatically fix issues. Run 'lintro check' to see "
+            "issues.",
+        )

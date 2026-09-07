@@ -9,14 +9,14 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.mypy import (
+from lintro.tools.mypy.definition import (
     MYPY_DEFAULT_EXCLUDE_PATTERNS,
     _regex_to_glob,
     _split_config_values,
 )
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.mypy import MypyPlugin
+    from lintro.tools.mypy.definition import MypyPlugin
 
 
 # Tests for _split_config_values helper

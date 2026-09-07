@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess is used for TimeoutExpired in mocked tool execution tests
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock, patch
@@ -10,10 +11,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.html_validate.html_validate_issue import HtmlValidateIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.core.command_builders import pinned_npm_spec
-from lintro.tools.definitions.html_validate import (
+from lintro.tools.html_validate.definition import (
     HtmlValidatePlugin,
     contains_glob_syntax,
 )
@@ -55,6 +57,35 @@ def _mock_ctx(tmp_path: Path, files: list[str]) -> MagicMock:
     ctx.files = files
     ctx.rel_files = files
     return ctx
+
+
+def _recording_html_validate_run(
+    commands: list[list[str]],
+    result: SubprocessResult,
+) -> Callable[..., SubprocessResult]:
+    """Build an html-validate subprocess double that records each argv.
+
+    Args:
+        commands: List that accumulates one argv per invocation.
+        result: Subprocess result every recorded invocation reports back.
+
+    Returns:
+        A callable suitable as ``_run_subprocess_result``'s side effect.
+    """
+
+    def _run(**kwargs: object) -> SubprocessResult:
+        """Record the html-validate argv and report ``result``.
+
+        Args:
+            **kwargs: Arguments the plugin passed to the subprocess helper.
+
+        Returns:
+            The canned subprocess result.
+        """
+        commands.append(list(cast(list[str], kwargs["cmd"])))
+        return result
+
+    return _run
 
 
 def test_check_with_issues(
@@ -141,15 +172,17 @@ def test_check_returns_early_when_skipped(
     Args:
         html_validate_plugin: The plugin under test.
     """
-    early = MagicMock()
-    ctx = MagicMock()
-    ctx.should_skip = True
-    ctx.early_result = early
+    early = ToolResult(
+        name="html-validate",
+        success=True,
+        output="",
+        issues_count=0,
+    )
 
     with patch.object(
         html_validate_plugin,
-        "_prepare_execution",
-        return_value=ctx,
+        "prepare",
+        return_value=early,
     ):
         result = html_validate_plugin.check(["x.html"], {})
 
@@ -227,6 +260,7 @@ def test_check_falls_back_to_absolute_files(
     html_file.write_text("<p>ok</p>\n")
 
     mock_result = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+    commands: list[list[str]] = []
 
     with (
         patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
@@ -242,16 +276,17 @@ def test_check_falls_back_to_absolute_files(
         patch.object(
             html_validate_plugin,
             "_run_subprocess_result",
-            return_value=mock_result,
-        ) as mock_run,
+            side_effect=_recording_html_validate_run(commands, mock_result),
+        ),
     ):
         ctx = _mock_ctx(tmp_path, [str(html_file)])
         ctx.rel_files = []
         mock_prepare.return_value = ctx
-        html_validate_plugin.check([str(html_file)], {})
+        result = html_validate_plugin.check([str(html_file)], {})
 
-    cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
-    assert_that(cmd[-1]).is_equal_to(str(html_file))
+    assert_that(commands).is_length(1)
+    assert_that(commands[0][-1]).is_equal_to(str(html_file))
+    assert_that(result.success).is_true()
 
 
 def test_fix_raises_not_implemented(
@@ -294,21 +329,23 @@ def test_check_prefers_the_target_projects_local_binary(
     html_file.write_text("<p>ok</p>\n")
 
     mock_result = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+    commands: list[list[str]] = []
 
     with (
         patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             html_validate_plugin,
             "_run_subprocess_result",
-            return_value=mock_result,
-        ) as mock_run,
+            side_effect=_recording_html_validate_run(commands, mock_result),
+        ),
     ):
         mock_prepare.return_value = _mock_ctx(project, [str(html_file)])
-        html_validate_plugin.check([str(html_file)], {})
+        result = html_validate_plugin.check([str(html_file)], {})
 
-    cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
+    assert_that(commands).is_length(1)
     # The project's own binary, not "html-validate" from PATH or a bunx spec.
-    assert_that(cmd[0]).is_equal_to(binary.as_posix())
+    assert_that(commands[0][0]).is_equal_to(binary.as_posix())
+    assert_that(result.success).is_true()
 
 
 def test_check_does_not_fall_back_to_lintros_own_node_modules(
@@ -342,20 +379,22 @@ def test_check_does_not_fall_back_to_lintros_own_node_modules(
     html_file.write_text("<p>ok</p>\n")
 
     mock_result = SubprocessResult(returncode=0, stdout="[]", stderr="", output="[]")
+    commands: list[list[str]] = []
 
     with (
         patch.object(html_validate_plugin, "_prepare_execution") as mock_prepare,
         patch.object(
             html_validate_plugin,
             "_run_subprocess_result",
-            return_value=mock_result,
-        ) as mock_run,
+            side_effect=_recording_html_validate_run(commands, mock_result),
+        ),
     ):
         mock_prepare.return_value = _mock_ctx(project, [str(html_file)])
-        html_validate_plugin.check([str(html_file)], {})
+        result = html_validate_plugin.check([str(html_file)], {})
 
-    cmd = cast(list[str], mock_run.call_args.kwargs["cmd"])
-    assert_that(cmd[0]).is_not_equal_to(stray.as_posix())
+    assert_that(commands).is_length(1)
+    assert_that(commands[0][0]).is_not_equal_to(stray.as_posix())
+    assert_that(result.success).is_true()
 
 
 def _run_with_fallback(

@@ -58,7 +58,7 @@ def _ai_status_lines(ctx: RunContext) -> list[str] | None:
     Raises:
         click.UsageError: When an ``LINTRO_AI_*`` overlay fails validation.
     """
-    if ctx.clean_stdout_output or ctx.score_only:
+    if ctx.clean_stdout_output:
         return None
 
     from lintro.ai.exceptions import AIConfigOverrideError
@@ -142,7 +142,7 @@ def _capture_fmt_checkpoint(*, ctx: RunContext, paths: list[str]) -> None:
         workspace_root=Path.cwd(),
         keep=ai_config.checkpoint_retention,
     )
-    if checkpoint is None or ctx.clean_stdout_output or ctx.score_only:
+    if checkpoint is None or ctx.clean_stdout_output:
         return
     ctx.logger.console_output(
         text=f"Captured fmt checkpoint {checkpoint.ref}",
@@ -173,8 +173,6 @@ def run_lint_artifact(
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
-    score: bool = False,
-    fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
     profile: bool = False,
@@ -205,16 +203,12 @@ def run_lint_artifact(
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Optional CLI override for ``ai.transport`` when AI runs.
         dry_run: Preview what ``fmt`` would fix without modifying files.
-        score: When True with human-readable output, print only the 0-100
-            health score line and suppress the normal execution summary.
-        fail_under: When set, exit with code 1 if the computed health score is
-            strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
         profile: When True, render the per-tool timing table (human output) or
             attach a ``profile`` key (JSON). Executors always record main-tool
-            timings; post-checks are omitted. ``--score`` and csv/sarif/markdown
-            stdout stay unchanged.
+            timings; post-checks are omitted. csv/sarif/markdown stdout stay
+            unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
             ``lintro test`` sets this to False because AI never applies to the
             test action. It gates :func:`~lintro.ai.interface.enhance_artifact`
@@ -223,7 +217,7 @@ def run_lint_artifact(
             executor's AI seams were removed.
 
     Returns:
-        RunArtifact: The rendered run's results, totals, health score, and
+        RunArtifact: The rendered run's results, totals, severity tallies, and
         exit code.
 
     Raises:
@@ -234,7 +228,6 @@ def run_lint_artifact(
     ctx = build_run_context(
         action=action,
         output_format=output_format,
-        score=score,
         debug=debug,
         no_art=no_art,
         dry_run=dry_run,
@@ -257,7 +250,6 @@ def run_lint_artifact(
         auto_install=auto_install,
         yes=yes,
         ignore_conflicts=ignore_conflicts,
-        fail_under=fail_under,
         diff_base=diff_base,
         ai_status_lines=_ai_status_lines(ctx),
         on_tool_result=make_result_display(
@@ -280,7 +272,6 @@ def run_lint_artifact(
                 output_format=output_format,
                 ai_fix=ai_fix,
                 transport=transport,
-                fail_under=fail_under,
             )
         except AIConfigOverrideError as exc:
             raise click.UsageError(str(exc)) from exc
@@ -326,8 +317,6 @@ def run_lint_with_ai(
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
-    score: bool = False,
-    fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
     profile: bool = False,
@@ -361,16 +350,12 @@ def run_lint_with_ai(
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Optional CLI override for ``ai.transport`` when AI runs.
         dry_run: Preview what ``fmt`` would fix without modifying files.
-        score: When True with human-readable output, print only the 0-100
-            health score line and suppress the normal execution summary.
-        fail_under: When set, exit with code 1 if the computed health score is
-            strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning, or ``None``.
         no_art: When True, suppress decorative ASCII art.
         profile: When True, render the per-tool timing table (human output) or
             attach a ``profile`` key (JSON). Executors always record main-tool
-            timings; post-checks are omitted. ``--score`` and csv/sarif/markdown
-            stdout stay unchanged.
+            timings; post-checks are omitted. csv/sarif/markdown stdout stay
+            unchanged.
         ai_enabled: Whether the post-execution AI enhancement may run.
 
     Returns:
@@ -398,8 +383,6 @@ def run_lint_with_ai(
         ignore_conflicts=ignore_conflicts,
         transport=transport,
         dry_run=dry_run,
-        score=score,
-        fail_under=fail_under,
         diff_base=diff_base,
         no_art=no_art,
         profile=profile,

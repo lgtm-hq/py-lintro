@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from typing import Any
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
@@ -14,7 +17,11 @@ from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.validation import ValidationResult
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
-from tests.unit.ai.conftest import MockAIProvider, MockIssue
+from tests.unit.ai.conftest import (
+    MockAIProvider,
+    MockIssue,
+    RecordingConsoleLogger,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -71,28 +78,122 @@ def _make_fix_issues(
     return [(result, issue) for issue in issues]
 
 
+@dataclass
+class _PipelineRecorder:
+    """Records what the fix pipeline hands to each downstream stage.
+
+    Used instead of ``unittest.mock`` doubles so every assertion reads a list
+    the stand-in really appended to rather than mock call bookkeeping (#2315).
+
+    Attributes:
+        fix_params: Params object of each ``generate_fixes_from_params`` call.
+        apply_batches: Suggestion batch passed positionally to ``apply_fixes``.
+        apply_kwargs: Keyword arguments of each ``apply_fixes`` call.
+        review_batches: Suggestion batch passed to ``review_fixes_interactive``.
+        verify_kwargs: Keyword arguments of each ``verify_fixes`` call.
+        post_summary_kwargs: Keyword arguments of each
+            ``generate_post_fix_summary`` call.
+        stages: Names of the stages that ran, in order.
+    """
+
+    fix_params: list[Any] = field(default_factory=list)
+    apply_batches: list[list[AIFixSuggestion]] = field(default_factory=list)
+    apply_kwargs: list[dict[str, Any]] = field(default_factory=list)
+    review_batches: list[list[AIFixSuggestion]] = field(default_factory=list)
+    verify_kwargs: list[dict[str, Any]] = field(default_factory=list)
+    post_summary_kwargs: list[dict[str, Any]] = field(default_factory=list)
+    stages: list[str] = field(default_factory=list)
+
+
+def _install_pipeline_recorder(
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    generated: Sequence[Sequence[AIFixSuggestion]] = (),
+    applied: Sequence[AIFixSuggestion] | None = None,
+    reviewed: tuple[int, int, list[AIFixSuggestion]] | None = None,
+    validation: ValidationResult | None = None,
+) -> _PipelineRecorder:
+    """Replace every pipeline stage with a recording stand-in.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        generated: One suggestion list per ``generate_fixes_from_params``
+            call; the last entry repeats if the pipeline asks for more.
+        applied: Suggestions ``apply_fixes`` reports as applied. ``None``
+            means "whatever batch it was given".
+        reviewed: Tuple ``review_fixes_interactive`` returns.
+        validation: Result ``verify_fixes`` returns.
+
+    Returns:
+        The recorder the installed stand-ins append to.
+    """
+    recorder = _PipelineRecorder()
+    batches = [list(batch) for batch in generated]
+    review_result = (0, 0, []) if reviewed is None else reviewed
+
+    async def _generate_fixes(
+        _issues: object,
+        _provider: object,
+        params: object,
+    ) -> list[AIFixSuggestion]:
+        recorder.stages.append("generate")
+        recorder.fix_params.append(params)
+        if not batches:
+            return []
+        index = min(len(recorder.fix_params) - 1, len(batches) - 1)
+        return list(batches[index])
+
+    def _apply_fixes(
+        candidates: Sequence[AIFixSuggestion],
+        **kwargs: Any,
+    ) -> list[AIFixSuggestion]:
+        recorder.stages.append("apply")
+        recorder.apply_batches.append(list(candidates))
+        recorder.apply_kwargs.append(kwargs)
+        return list(candidates) if applied is None else list(applied)
+
+    def _review_interactive(
+        candidates: Sequence[AIFixSuggestion],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> tuple[int, int, list[AIFixSuggestion]]:
+        recorder.stages.append("review")
+        recorder.review_batches.append(list(candidates))
+        return review_result
+
+    def _verify_fixes(**kwargs: Any) -> ValidationResult | None:
+        recorder.stages.append("verify")
+        recorder.verify_kwargs.append(kwargs)
+        return validation
+
+    async def _post_fix_summary(**kwargs: Any) -> None:
+        recorder.stages.append("post_summary")
+        recorder.post_summary_kwargs.append(kwargs)
+        return None
+
+    monkeypatch.setattr(f"{_PIPELINE}.generate_fixes_from_params", _generate_fixes)
+    monkeypatch.setattr(f"{_PIPELINE}.apply_fixes", _apply_fixes)
+    monkeypatch.setattr(f"{_PIPELINE}.review_fixes_interactive", _review_interactive)
+    monkeypatch.setattr(f"{_PIPELINE}.verify_fixes", _verify_fixes)
+    monkeypatch.setattr(f"{_PIPELINE}.generate_post_fix_summary", _post_fix_summary)
+    monkeypatch.setattr(f"{_PIPELINE}.render_summary", lambda *_a, **_k: "")
+    monkeypatch.setattr(f"{_PIPELINE}.render_validation", lambda *_a, **_k: "")
+    return recorder
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
 
 
-@patch(f"{_PIPELINE}.render_validation")
-@patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.verify_fixes")
-@patch(f"{_PIPELINE}.generate_post_fix_summary")
-@patch(f"{_PIPELINE}.review_fixes_interactive")
-@patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes_from_params")
 async def test_budget_tracking_across_multiple_tools(
-    mock_generate_fixes_from_params,
-    mock_apply_fixes,
-    mock_review_fixes_interactive,
-    mock_generate_post_fix_summary,
-    mock_verify_fixes,
-    mock_render_summary,
-    mock_render_validation,
-):
-    """When two tools have issues, budget (max_fix_attempts) is consumed correctly."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fix budget shrinks by the issues each tool already consumed.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     issue_a = MockIssue(file="a.py", line=1, code="E501", message="err")
     issue_b = MockIssue(file="b.py", line=1, code="E501", message="err")
     issue_c = MockIssue(file="c.py", line=1, code="W001", message="err")
@@ -109,55 +210,36 @@ async def test_budget_tracking_across_multiple_tools(
     suggestion_b = _make_suggestion(file="b.py", tool_name="ruff")
     suggestion_c = _make_suggestion(file="c.py", tool_name="mypy", code="W001")
 
-    mock_generate_fixes_from_params.side_effect = [
-        [suggestion_a, suggestion_b],
-        [suggestion_c],
-    ]
-    mock_apply_fixes.return_value = []
-    mock_review_fixes_interactive.return_value = (0, 0, [])
-    mock_verify_fixes.return_value = ValidationResult()
-
-    ai_config = _default_ai_config(max_fix_attempts=3)
+    recorder = _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion_a, suggestion_b], [suggestion_c]],
+        applied=[],
+        validation=ValidationResult(),
+    )
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
-        ai_config=ai_config,
-        logger=MagicMock(),
+        ai_config=_default_ai_config(max_fix_attempts=3),
+        logger=RecordingConsoleLogger(),
         output_format="terminal",
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_generate_fixes_from_params.call_count).is_equal_to(2)
-
-    # First call gets full budget of 3
-    first_call_params = mock_generate_fixes_from_params.call_args_list[0].args[2]
-    assert_that(first_call_params.max_issues).is_equal_to(3)
-
-    # Second call gets reduced budget: 3 - 2 (issues consumed from ruff) = 1
-    second_call_params = mock_generate_fixes_from_params.call_args_list[1].args[2]
-    assert_that(second_call_params.max_issues).is_equal_to(1)
+    # The first tool sees the full budget of 3; the second sees what the two
+    # ruff issues left behind.
+    budgets = [params.max_issues for params in recorder.fix_params]
+    assert_that(budgets).is_equal_to([3, 1])
 
 
-@patch(f"{_PIPELINE}.is_safe_style_fix")
-@patch(f"{_PIPELINE}.render_validation")
-@patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.verify_fixes")
-@patch(f"{_PIPELINE}.generate_post_fix_summary")
-@patch(f"{_PIPELINE}.review_fixes_interactive")
-@patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes_from_params")
 async def test_safe_vs_risky_suggestion_splitting(
-    mock_generate_fixes_from_params,
-    mock_apply_fixes,
-    mock_review_fixes_interactive,
-    mock_generate_post_fix_summary,
-    mock_verify_fixes,
-    mock_render_summary,
-    mock_render_validation,
-    mock_is_safe,
-):
-    """Suggestions split into safe and risky via is_safe_style_fix."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only the safe-style suggestion reaches the auto-apply fast path.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     issue = MockIssue(file="a.py", line=1, code="E501", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
@@ -165,259 +247,257 @@ async def test_safe_vs_risky_suggestion_splitting(
     safe = _make_suggestion(code="E501", risk_level="safe-style")
     risky = _make_suggestion(code="B101", risk_level="behavioral-risk")
 
-    mock_generate_fixes_from_params.return_value = [safe, risky]
-    mock_is_safe.side_effect = lambda s: s.risk_level == "safe-style"
-    mock_apply_fixes.return_value = [safe]
-    mock_review_fixes_interactive.return_value = (0, 0, [])
-    mock_verify_fixes.return_value = ValidationResult()
-
-    ai_config = _default_ai_config(auto_apply_safe_fixes=True)
+    recorder = _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[safe, risky]],
+        applied=[safe],
+        validation=ValidationResult(),
+    )
+    monkeypatch.setattr(
+        f"{_PIPELINE}.is_safe_style_fix",
+        lambda suggestion: suggestion.risk_level == "safe-style",
+    )
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
-        ai_config=ai_config,
-        logger=MagicMock(),
+        ai_config=_default_ai_config(auto_apply_safe_fixes=True),
+        logger=RecordingConsoleLogger(),
         output_format="json",
         workspace_root=Path("/tmp"),
     )
 
-    # apply_fixes is called with only safe suggestions for fast path
-    applied_batch = mock_apply_fixes.call_args.args[0]
-    assert_that(applied_batch).is_length(1)
-    assert_that(applied_batch[0].risk_level).is_equal_to("safe-style")
+    assert_that(recorder.apply_batches).is_not_empty()
+    fast_path_batch = recorder.apply_batches[0]
+    assert_that(fast_path_batch).is_length(1)
+    assert_that(fast_path_batch[0].risk_level).is_equal_to("safe-style")
 
 
-@patch(f"{_PIPELINE}.render_validation")
-@patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.verify_fixes")
-@patch(f"{_PIPELINE}.generate_post_fix_summary")
-@patch(f"{_PIPELINE}.review_fixes_interactive")
-@patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes_from_params")
 async def test_auto_apply_fast_path_json_mode(
-    mock_generate_fixes_from_params,
-    mock_apply_fixes,
-    mock_review_fixes_interactive,
-    mock_generate_post_fix_summary,
-    mock_verify_fixes,
-    mock_render_summary,
-    mock_render_validation,
-):
-    """Safe fixes auto-apply when auto_apply_safe_fixes + json."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """JSON mode auto-applies safe fixes and never prompts for review.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     issue = MockIssue(file="a.py", line=1, code="E501", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
 
     safe = _make_suggestion(code="E501", risk_level="safe-style", confidence="high")
 
-    mock_generate_fixes_from_params.return_value = [safe]
-    mock_apply_fixes.return_value = [safe]
-    mock_verify_fixes.return_value = ValidationResult()
+    recorder = _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[safe]],
+        applied=[safe],
+        validation=ValidationResult(),
+    )
 
-    ai_config = _default_ai_config(auto_apply_safe_fixes=True, auto_apply=False)
-
-    await run_fix_pipeline(
+    applied_count, failed_count, suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
-        ai_config=ai_config,
-        logger=MagicMock(),
+        ai_config=_default_ai_config(auto_apply_safe_fixes=True, auto_apply=False),
+        logger=RecordingConsoleLogger(),
         output_format="json",
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_apply_fixes.call_count).is_greater_than_or_equal_to(1)
-    apply_kwargs = mock_apply_fixes.call_args.kwargs
-    assert_that(apply_kwargs["auto_apply"]).is_true()
+    assert_that(applied_count).is_equal_to(1)
+    assert_that(failed_count).is_equal_to(0)
+    assert_that(suggestions).is_equal_to([safe])
+    assert_that(recorder.apply_kwargs).is_not_empty()
+    assert_that(recorder.apply_kwargs[0]["auto_apply"]).is_true()
+    # JSON mode is non-interactive: the review stage must never run.
+    assert_that(recorder.stages).does_not_contain("review")
 
-    # review_fixes_interactive should NOT be called in json mode
-    mock_review_fixes_interactive.assert_not_called()
 
-
-@patch(f"{_PIPELINE}.render_validation")
-@patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.verify_fixes")
-@patch(f"{_PIPELINE}.generate_post_fix_summary")
-@patch(f"{_PIPELINE}.review_fixes_interactive")
-@patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes_from_params")
-@patch(f"{_PIPELINE}.sys.stdin.isatty", return_value=True)
 async def test_interactive_review_path(
-    _mock_isatty,
-    mock_generate_fixes_from_params,
-    mock_apply_fixes,
-    mock_review_fixes_interactive,
-    mock_generate_post_fix_summary,
-    mock_verify_fixes,
-    mock_render_summary,
-    mock_render_validation,
-):
-    """When not json and not auto_apply, review_fixes_interactive is called."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminal run without auto-apply routes suggestions through review.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     issue = MockIssue(file="a.py", line=1, code="B101", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
 
     suggestion = _make_suggestion(code="B101", risk_level="behavioral-risk")
 
-    mock_generate_fixes_from_params.return_value = [suggestion]
-    mock_review_fixes_interactive.return_value = (1, 0, [suggestion])
-    mock_verify_fixes.return_value = ValidationResult()
+    recorder = _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        reviewed=(1, 0, [suggestion]),
+        validation=ValidationResult(),
+    )
+    monkeypatch.setattr(f"{_PIPELINE}.sys.stdin.isatty", lambda: True)
 
-    ai_config = _default_ai_config(auto_apply=False, auto_apply_safe_fixes=False)
-
-    await run_fix_pipeline(
+    applied_count, _failed, _suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
-        ai_config=ai_config,
-        logger=MagicMock(),
+        ai_config=_default_ai_config(auto_apply=False, auto_apply_safe_fixes=False),
+        logger=RecordingConsoleLogger(),
         output_format="terminal",
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_review_fixes_interactive.call_count).is_equal_to(1)
-    review_batch = mock_review_fixes_interactive.call_args.args[0]
-    assert_that(review_batch).is_length(1)
-    assert_that(review_batch[0].code).is_equal_to("B101")
+    assert_that(applied_count).is_equal_to(1)
+    assert_that(recorder.review_batches).is_length(1)
+    reviewed_codes = [s.code for s in recorder.review_batches[0]]
+    assert_that(reviewed_codes).is_equal_to(["B101"])
 
 
-@patch(f"{_PIPELINE}.render_validation")
-@patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.verify_fixes")
-@patch(f"{_PIPELINE}.generate_post_fix_summary")
-@patch(f"{_PIPELINE}.review_fixes_interactive")
-@patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes_from_params")
 async def test_no_suggestions_returns_early(
-    mock_generate_fixes_from_params,
-    mock_apply_fixes,
-    mock_review_fixes_interactive,
-    mock_generate_post_fix_summary,
-    mock_verify_fixes,
-    mock_render_summary,
-    mock_render_validation,
-):
-    """Empty generate_fixes_from_params exits without calling apply/review."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No generated suggestion means no apply, review, verify or summary stage.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture, used to install recording
+            stand-ins for the downstream pipeline stages.
+    """
     issue = MockIssue(file="a.py", line=1, code="E501", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
 
-    mock_generate_fixes_from_params.return_value = []
+    stages_run: list[str] = []
 
-    ai_config = _default_ai_config()
+    def _record(name: str) -> Callable[..., Any]:
+        """Build a stand-in that records that its stage ran.
 
-    await run_fix_pipeline(
+        Args:
+            name: Pipeline stage name.
+
+        Returns:
+            Callable[..., Any]: A stand-in returning ``None``.
+        """
+
+        def _stage(*_args: Any, **_kwargs: Any) -> None:
+            stages_run.append(name)
+
+        return _stage
+
+    async def _no_suggestions(*_args: Any, **_kwargs: Any) -> list[AIFixSuggestion]:
+        """Produce no fix suggestions at all.
+
+        Args:
+            *_args: Ignored positional extras.
+            **_kwargs: Ignored keyword extras.
+
+        Returns:
+            list[AIFixSuggestion]: Always empty.
+        """
+        stages_run.append("generate")
+        return []
+
+    monkeypatch.setattr(f"{_PIPELINE}.generate_fixes_from_params", _no_suggestions)
+    for stage in (
+        "apply_fixes",
+        "review_fixes_interactive",
+        "verify_fixes",
+        "generate_post_fix_summary",
+        "render_summary",
+        "render_validation",
+    ):
+        monkeypatch.setattr(f"{_PIPELINE}.{stage}", _record(stage))
+
+    applied, failed, suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
-        ai_config=ai_config,
-        logger=MagicMock(),
+        ai_config=_default_ai_config(),
+        logger=RecordingConsoleLogger(),
         output_format="json",
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_generate_fixes_from_params.call_count).is_equal_to(1)
-    mock_apply_fixes.assert_not_called()
-    mock_review_fixes_interactive.assert_not_called()
-    mock_verify_fixes.assert_not_called()
-    mock_generate_post_fix_summary.assert_not_called()
+    assert_that(applied).is_equal_to(0)
+    assert_that(failed).is_equal_to(0)
+    assert_that(suggestions).is_empty()
+    assert_that(stages_run).is_equal_to(["generate"])
 
 
-@patch(f"{_PIPELINE}.render_validation")
-@patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.verify_fixes")
-@patch(f"{_PIPELINE}.generate_post_fix_summary")
-@patch(f"{_PIPELINE}.review_fixes_interactive")
-@patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes_from_params")
 async def test_post_fix_summary_generation(
-    mock_generate_fixes_from_params,
-    mock_apply_fixes,
-    mock_review_fixes_interactive,
-    mock_generate_post_fix_summary,
-    mock_verify_fixes,
-    mock_render_summary,
-    mock_render_validation,
-):
-    """Applied fixes + non-json -> post_fix_summary is called."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Applied fixes outside JSON mode trigger the post-fix summary stage.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     issue = MockIssue(file="a.py", line=1, code="B101", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
 
     suggestion = _make_suggestion(code="B101", tool_name="ruff")
 
-    mock_generate_fixes_from_params.return_value = [suggestion]
-    mock_apply_fixes.return_value = [suggestion]
-    mock_verify_fixes.return_value = ValidationResult(
-        verified=1,
-        unverified=0,
-        verified_by_tool={"ruff": 1},
-        unverified_by_tool={"ruff": 0},
+    recorder = _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+        validation=ValidationResult(
+            verified=1,
+            unverified=0,
+            verified_by_tool={"ruff": 1},
+            unverified_by_tool={"ruff": 0},
+        ),
     )
-    mock_generate_post_fix_summary.return_value = None
 
-    ai_config = _default_ai_config(auto_apply=True)
-
-    await run_fix_pipeline(
+    applied_count, _failed, _suggestions = await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
-        ai_config=ai_config,
-        logger=MagicMock(),
+        ai_config=_default_ai_config(auto_apply=True),
+        logger=RecordingConsoleLogger(),
         output_format="terminal",
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_generate_post_fix_summary.call_count).is_equal_to(1)
-    post_kwargs = mock_generate_post_fix_summary.call_args.kwargs
-    assert_that(post_kwargs).contains_key("remaining_results")
-    assert_that(post_kwargs).contains_key("applied")
-    assert_that(post_kwargs).contains_key("rejected")
+    assert_that(applied_count).is_equal_to(1)
+    assert_that(recorder.post_summary_kwargs).is_length(1)
+    summary_kwargs = recorder.post_summary_kwargs[0]
+    assert_that(summary_kwargs["applied"]).is_equal_to(1)
+    assert_that(summary_kwargs["rejected"]).is_equal_to(0)
+    remaining = [r.name for r in summary_kwargs["remaining_results"]]
+    assert_that(remaining).is_equal_to(["ruff"])
 
 
-@patch(f"{_PIPELINE}.render_validation")
-@patch(f"{_PIPELINE}.render_summary")
-@patch(f"{_PIPELINE}.verify_fixes")
-@patch(f"{_PIPELINE}.generate_post_fix_summary")
-@patch(f"{_PIPELINE}.review_fixes_interactive")
-@patch(f"{_PIPELINE}.apply_fixes")
-@patch(f"{_PIPELINE}.generate_fixes_from_params")
 async def test_verify_fixes_flow(
-    mock_generate_fixes_from_params,
-    mock_apply_fixes,
-    mock_review_fixes_interactive,
-    mock_generate_post_fix_summary,
-    mock_verify_fixes,
-    mock_render_summary,
-    mock_render_validation,
-):
-    """When fixes are applied, verify_fixes is called with suggestions and by_tool."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Applied fixes are handed to verification with their owning tool.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     issue = MockIssue(file="a.py", line=1, code="B101", message="err")
     result = _make_result("ruff", [issue])
     fix_issues = _make_fix_issues(result, [issue])
 
     suggestion = _make_suggestion(code="B101", tool_name="ruff")
 
-    mock_generate_fixes_from_params.return_value = [suggestion]
-    mock_apply_fixes.return_value = [suggestion]
-    mock_verify_fixes.return_value = ValidationResult(
-        verified=1,
-        unverified=0,
-        verified_by_tool={"ruff": 1},
-        unverified_by_tool={"ruff": 0},
+    recorder = _install_pipeline_recorder(
+        monkeypatch=monkeypatch,
+        generated=[[suggestion]],
+        applied=[suggestion],
+        validation=ValidationResult(
+            verified=1,
+            unverified=0,
+            verified_by_tool={"ruff": 1},
+            unverified_by_tool={"ruff": 0},
+        ),
     )
-    mock_generate_post_fix_summary.return_value = None
-
-    ai_config = _default_ai_config(auto_apply=True)
 
     await run_fix_pipeline(
         fix_issues=fix_issues,
         provider=MockAIProvider(),
-        ai_config=ai_config,
-        logger=MagicMock(),
+        ai_config=_default_ai_config(auto_apply=True),
+        logger=RecordingConsoleLogger(),
         output_format="terminal",
         workspace_root=Path("/tmp"),
     )
 
-    assert_that(mock_verify_fixes.call_count).is_equal_to(1)
-    verify_kwargs = mock_verify_fixes.call_args.kwargs
-    assert_that(verify_kwargs).contains_key("applied_suggestions")
-    assert_that(verify_kwargs).contains_key("by_tool")
+    assert_that(recorder.verify_kwargs).is_length(1)
+    verify_kwargs = recorder.verify_kwargs[0]
     assert_that(verify_kwargs["applied_suggestions"]).is_equal_to([suggestion])
+    assert_that(list(verify_kwargs["by_tool"])).is_equal_to(["ruff"])

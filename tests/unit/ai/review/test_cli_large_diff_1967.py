@@ -39,14 +39,17 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import (
-    # Deliberate private import: the retry loop is unit-tested at the helper
-    # seam because driving it through run_review_async needs a full provider
-    # + chunking stack for no extra coverage. Update this import when the
-    # helper is renamed (#1967 review).
-    _invoke_chunk_review,
-    resolve_review_chunks,
     run_review_async,
 )
+from lintro.ai.review.response_pipeline import (
+    # Deliberate helper-seam import: the retry loop is unit-tested here
+    # because driving it through run_review_async needs a full provider
+    # + chunking stack for no extra coverage (#1967 review).
+    ChunkReviewRequest,
+    invoke_chunk_review,
+)
+from lintro.ai.review.run_planning import resolve_review_chunks
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.token_budget import estimate_tokens
 from tests.unit.ai.conftest import patch_cli_exec
 from tests.unit.ai.providers.test_cli_capability_guard import _FakeTransport
@@ -368,6 +371,9 @@ async def test_run_review_rejects_cli_diff_above_hard_ceiling(
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False
@@ -381,12 +387,14 @@ async def test_run_review_rejects_cli_diff_above_hard_ceiling(
     with pytest.raises(ReviewContextError) as exc_info:
         await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=ai_config,
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=ai_config,
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+            ),
         )
 
     assert_that(exc_info.value.code).is_equal_to(ReviewContextErrorCode.DIFF_TOO_LARGE)
@@ -411,6 +419,9 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False
@@ -440,17 +451,19 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
     )
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(return_value=ok_response),
     ) as mock_call:
         result = await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=ai_config,
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=ai_config,
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
+            ),
         )
 
     assert_that(result.metadata.chunks_total).is_greater_than(1)
@@ -478,6 +491,9 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     ai_config = AIConfig(enabled=True, review=True, transport=AITransport.CLI)
@@ -519,26 +535,28 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         return ok_response
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        response, _elapsed, _degradations = await _invoke_chunk_review(
-            chunk=chunk,
-            context=context,
-            provider=provider,
-            ai_config=ai_config,
-            checklist_text="",
-            checklist_count=0,
-            interaction_paths="",
-            lint_results=None,
-            extra_checklist="",
-            strictness_section="",
-            budget=budget,
-            repo_root=str(tmp_path),
-            use_one_shot=True,
-            diff_budget=10_000,
-            max_findings=CLI_MAX_FINDINGS_PER_CALL,
-            chunk_index=0,
+        response, _elapsed, _degradations = await invoke_chunk_review(
+            request=ChunkReviewRequest(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=ai_config,
+                checklist_text="",
+                checklist_count=0,
+                interaction_paths="",
+                lint_results=None,
+                extra_checklist="",
+                strictness_section="",
+                budget=budget,
+                repo_root=str(tmp_path),
+                use_one_shot=True,
+                diff_budget=10_000,
+                max_findings=CLI_MAX_FINDINGS_PER_CALL,
+                chunk_index=0,
+            ),
         )
 
     assert_that(calls).is_length(2)

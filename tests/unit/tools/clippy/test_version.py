@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.clippy import ClippyPlugin
+from lintro.tools.clippy.definition import ClippyPlugin
 
 
 def test_check_skips_when_rustc_banner_is_below_pin(tmp_path: Path) -> None:

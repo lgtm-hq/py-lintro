@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.actionlint import (
+from lintro.tools.actionlint.definition import (
     ACTIONLINT_DEFAULT_TIMEOUT,
     ActionlintPlugin,
 )

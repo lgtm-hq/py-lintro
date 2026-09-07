@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,14 +22,17 @@ from lintro.ai.integrations.github_pr import _error_message
 from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
-from lintro.ai.review.github import _post_inline_findings, post_review_to_github
-from lintro.ai.review.github_sticky import build_sticky_comment
+from lintro.ai.review.github import post_review_to_github
+from lintro.ai.review.github_inline import post_inline_findings
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
+from lintro.ai.review.models.inline_post_request import InlinePostRequest
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.output import (
     INLINE_POST_FAILURE_KEY,
     render_inline_post_failure_json,
 )
+from lintro.ai.review.sticky import build_sticky_comment
 
 #: Message GitHub returns when it throttles content creation on a token.
 _RATE_LIMIT_MESSAGE = (
@@ -75,8 +79,36 @@ def _reporter(*, response: GitHubApiResponse) -> MagicMock:
     reporter.fetch_pr_diff_lines.return_value = diff_lines
     reporter.fetch_compare_lines.return_value = diff_lines
     reporter.fetch_pr_commit_shas.return_value = []
-    reporter.post_issue_comment.return_value = True
-    reporter.update_issue_comment.return_value = True
+    sticky_bodies: list[str] = []
+    reporter.sticky_bodies = sticky_bodies
+
+    def _post_issue_comment(body: Any, **_kwargs: Any) -> bool:
+        """Record a newly posted sticky body.
+
+        Args:
+            body: Sticky comment body the production code posted.
+            **_kwargs: Ignored posting extras.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        sticky_bodies.append(str(body))
+        return True
+
+    def _update_issue_comment(**kwargs: Any) -> bool:
+        """Record an edited sticky body.
+
+        Args:
+            **kwargs: Update arguments, of which ``body`` is recorded.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        sticky_bodies.append(str(kwargs["body"]))
+        return True
+
+    reporter.post_issue_comment.side_effect = _post_issue_comment
+    reporter.update_issue_comment.side_effect = _update_issue_comment
     reporter.delete_issue_comment.return_value = True
     reporter.api_response.return_value = response
     reporter.api_base = "https://api.github.com"
@@ -199,8 +231,11 @@ def test_line_mapping_rejection_states_the_cause_once(
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
 
-    post_review_to_github(result=sample_review_result, reporter=reporter)
-    body = str(reporter.update_issue_comment.call_args.kwargs["body"])
+    posted = post_review_to_github(result=sample_review_result, reporter=reporter)
+
+    assert_that(posted).is_false()
+    assert_that(reporter.sticky_bodies).is_not_empty()
+    body = reporter.sticky_bodies[-1]
     row = next(line for line in body.splitlines() if "could not be posted" in line)
 
     assert_that(row.count("map to no line in this PR's diff")).is_equal_to(1)
@@ -257,12 +292,14 @@ def test_sticky_row_reports_the_kind_supplied_by_the_caller(
 ) -> None:
     """The public sticky builder renders whatever cause it is handed."""
     body = build_sticky_comment(
-        result=sample_review_result,
-        inline_failure=InlinePostFailure(
-            reason="GitHub rate limit (HTTP 403)",
-            findings=sample_review_result.findings,
-            kind=InlinePostFailureKind.RATE_LIMITED,
-            status=403,
+        request=StickyRequest(
+            result=sample_review_result,
+            inline_failure=InlinePostFailure(
+                reason="GitHub rate limit (HTTP 403)",
+                findings=sample_review_result.findings,
+                kind=InlinePostFailureKind.RATE_LIMITED,
+                status=403,
+            ),
         ),
     )
 
@@ -277,12 +314,13 @@ def test_inline_post_result_carries_the_status_and_attempted_ids(
         response=GitHubApiResponse(status=403, message=_RATE_LIMIT_MESSAGE),
     )
 
-    outcome = _post_inline_findings(
+    outcome = post_inline_findings(
         reporter=reporter,
-        findings=list(sample_review_result.findings),
-        checklist_display=ChecklistDisplay.OFF,
-        question_map={},
-        finding_keys=("key-a", "key-b"),
+        request=InlinePostRequest(
+            findings=list(sample_review_result.findings),
+            checklist_display=ChecklistDisplay.OFF,
+            finding_keys=("key-a", "key-b"),
+        ),
     )
 
     assert_that(outcome.ok).is_false()

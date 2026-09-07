@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
@@ -18,33 +20,25 @@ from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
-from tests.unit.ai.conftest import MockAIProvider, MockIssue
+from tests.unit.ai.conftest import (
+    MockAIProvider,
+    MockIssue,
+    RecordingConsoleLogger,
+)
 
 # ---------------------------------------------------------------------------
 # Multi-tool fix scenarios
 # ---------------------------------------------------------------------------
 
 
-@patch("lintro.ai.orchestrator.require_ai")
-@patch("lintro.ai.orchestrator.get_provider")
-@patch("lintro.ai.pipeline.generate_fixes_from_params")
-@patch("lintro.ai.pipeline.apply_fixes")
-@patch("lintro.ai.pipeline.review_fixes_interactive")
-@patch("lintro.ai.pipeline.sys.stdin.isatty", return_value=False)
-@patch(
-    "lintro.ai.orchestrator._resolve_issue_path",
-    side_effect=lambda *, file, workspace_root, cwd: Path(file),
-)
 def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_risky(
-    _mock_normalize,
-    _mock_isatty,
-    mock_review_fixes_interactive,
-    mock_apply_fixes,
-    mock_generate_fixes,
-    mock_get_provider,
-    _mock_require_ai,
-):
-    """Non-interactive mode auto-applies safe fixes, reviews risky."""
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safe-style fixes auto-apply while risky ones go to review.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
     result = ToolResult(
         name="ruff",
         success=False,
@@ -72,7 +66,6 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
             auto_apply_safe_fixes=True,
         ).model_dump(),
     )
-    logger = MagicMock()
 
     safe_suggestion = AIFixSuggestion(
         file="src/main.py",
@@ -91,28 +84,88 @@ def test_run_ai_enhancement_fix_action_noninteractive_applies_safe_then_reviews_
         confidence="medium",
     )
 
-    mock_get_provider.return_value = MockAIProvider()
-    mock_generate_fixes.return_value = [safe_suggestion, risky_suggestion]
-    mock_apply_fixes.return_value = [safe_suggestion]
-    mock_review_fixes_interactive.return_value = (0, 0, [])
+    applied_batches: list[list[AIFixSuggestion]] = []
+    reviewed_batches: list[list[AIFixSuggestion]] = []
+
+    async def _generate_fixes(
+        _issues: object,
+        _provider: object,
+        _params: object,
+    ) -> list[AIFixSuggestion]:
+        return [safe_suggestion, risky_suggestion]
+
+    def _apply_fixes(
+        candidates: Sequence[AIFixSuggestion],
+        **_kwargs: Any,
+    ) -> list[AIFixSuggestion]:
+        applied_batches.append(list(candidates))
+        return [safe_suggestion]
+
+    def _review_interactive(
+        candidates: Sequence[AIFixSuggestion],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> tuple[int, int, list[AIFixSuggestion]]:
+        reviewed_batches.append(list(candidates))
+        return 0, 0, []
+
+    monkeypatch.setattr("lintro.ai.orchestrator.require_ai", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "lintro.ai.orchestrator.get_provider",
+        lambda *_a, **_k: MockAIProvider(),
+    )
+    monkeypatch.setattr(
+        "lintro.ai.orchestrator._resolve_issue_path",
+        lambda *, file, workspace_root, cwd: Path(file),
+    )
+    monkeypatch.setattr(
+        "lintro.ai.pipeline.generate_fixes_from_params",
+        _generate_fixes,
+    )
+    monkeypatch.setattr("lintro.ai.pipeline.apply_fixes", _apply_fixes)
+    monkeypatch.setattr(
+        "lintro.ai.pipeline.review_fixes_interactive",
+        _review_interactive,
+    )
+    monkeypatch.setattr("lintro.ai.pipeline.sys.stdin.isatty", lambda: False)
+    # Stub the post-apply stages too: with a fix reported as applied the
+    # pipeline would otherwise run the real verification stack against the
+    # workspace, which needs the wrapped tools on PATH (#2315).
+    monkeypatch.setattr(
+        "lintro.ai.pipeline.verify_fixes",
+        lambda *_a, **_k: ValidationResult(),
+    )
+
+    async def _no_post_summary(*_args: Any, **_kwargs: Any) -> None:
+        """Skip the post-fix summary, which would call the provider.
+
+        Args:
+            *_args: Ignored positional arguments.
+            **_kwargs: Ignored keyword arguments.
+
+        Returns:
+            None: No summary is generated.
+        """
+        return None
+
+    monkeypatch.setattr(
+        "lintro.ai.pipeline.generate_post_fix_summary",
+        _no_post_summary,
+    )
 
     run_ai_enhancement(
         action=Action.FIX,
         all_results=[result],
         lintro_config=config,
-        logger=logger,
+        logger=RecordingConsoleLogger(),
         output_format="terminal",
     )
 
-    assert_that(mock_apply_fixes.call_count).is_equal_to(1)
-    safe_batch = mock_apply_fixes.call_args.args[0]
-    assert_that(safe_batch).is_length(1)
-    assert_that(safe_batch[0].code).is_equal_to("E501")
+    assert_that(applied_batches).is_length(1)
+    assert_that([s.code for s in applied_batches[0]]).is_equal_to(["E501"])
 
-    assert_that(mock_review_fixes_interactive.call_count).is_equal_to(1)
-    risky_batch = mock_review_fixes_interactive.call_args.args[0]
-    assert_that(risky_batch).is_length(1)
-    assert_that(risky_batch[0].code).is_equal_to("B101")
+    assert_that(reviewed_batches).is_length(1)
+    assert_that([s.code for s in reviewed_batches[0]]).is_equal_to(["B101"])
 
 
 @patch("lintro.ai.orchestrator.require_ai")
@@ -261,7 +314,7 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
         unverified_by_tool={"ruff": 0},
     )
 
-    run_ai_enhancement(
+    ai_result = run_ai_enhancement(
         action=Action.FIX,
         all_results=[result],
         lintro_config=config,
@@ -269,7 +322,16 @@ def test_run_ai_enhancement_fix_action_json_uses_fresh_rerun_results(
         output_format="json",
     )
 
-    assert_that(mock_verify_fixes.call_count).is_equal_to(1)
+    # `fixed_count` is stamped from the applied suggestions, not from the
+    # verification pass: pipeline.py builds `applied_by_tool` off
+    # `applied_suggestions` and hands that to `attach_fixed_count_metadata`,
+    # while the ValidationResult only feeds the separate verified/unverified
+    # counts. The stubbed verification above is what keeps this rerun path
+    # deterministic, not what produces the number asserted below.
+    assert_that(ai_result.fixes_applied).is_equal_to(1)
+    assert_that(result.metadata).is_not_none()
+    assert_that(result.metadata).contains_key("fixed_count")
+    assert_that(result.metadata["fixed_count"]).is_equal_to(1)  # type: ignore[index]  # assertpy is_not_none narrows this
 
 
 # ---------------------------------------------------------------------------

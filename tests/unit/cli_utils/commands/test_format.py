@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -253,20 +254,6 @@ def test_format_command_returns_tool_exit_code(mock_run: MagicMock) -> None:
 
 
 @patch("lintro.api.core.run_lint_with_ai")
-def test_format_code_invokes_command(mock_run: MagicMock) -> None:
-    """format_code routes through the library API.
-
-    Args:
-        mock_run: Mock for run_lint_with_ai used by the API.
-    """
-    mock_run.return_value = 0
-
-    format_code(paths=["src/"])
-
-    mock_run.assert_called_once()
-
-
-@patch("lintro.api.core.run_lint_with_ai")
 def test_format_code_raises_on_failure(mock_run: MagicMock) -> None:
     """format_code raises RuntimeError on non-zero exit.
 
@@ -279,14 +266,19 @@ def test_format_code_raises_on_failure(mock_run: MagicMock) -> None:
         format_code(paths=["src/"])
 
 
-@patch("lintro.api.core.run_lint_with_ai")
-def test_format_code_passes_options(mock_run: MagicMock) -> None:
+def test_format_code_passes_options(monkeypatch: pytest.MonkeyPatch) -> None:
     """format_code passes all options through to the API.
 
     Args:
-        mock_run: Mock for run_lint_with_ai used by the API.
+        monkeypatch: Pytest monkeypatch fixture used to install the recorder.
     """
-    mock_run.return_value = 0
+    calls: list[dict[str, Any]] = []
+
+    def _record(**kwargs: Any) -> int:
+        calls.append(dict(kwargs))
+        return 0
+
+    monkeypatch.setattr("lintro.api.core.run_lint_with_ai", _record)
 
     format_code(
         paths=["src/"],
@@ -296,9 +288,9 @@ def test_format_code_passes_options(mock_run: MagicMock) -> None:
         verbose=True,
     )
 
-    call_kwargs = mock_run.call_args.kwargs
-    assert_that(call_kwargs["paths"]).is_equal_to(["src/"])
-    assert_that(call_kwargs["tools"]).is_equal_to("ruff")
-    assert_that(call_kwargs["exclude"]).is_equal_to("*.bak")
-    assert_that(call_kwargs["include_venv"]).is_true()
-    assert_that(call_kwargs["verbose"]).is_true()
+    assert_that(calls).is_length(1)
+    assert_that(calls[0]["paths"]).is_equal_to(["src/"])
+    assert_that(calls[0]["tools"]).is_equal_to("ruff")
+    assert_that(calls[0]["exclude"]).is_equal_to("*.bak")
+    assert_that(calls[0]["include_venv"]).is_true()
+    assert_that(calls[0]["verbose"]).is_true()

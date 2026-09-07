@@ -22,7 +22,6 @@ SUBCOMMANDS: tuple[str, ...] = (
     "licenses",
     "list-tools",
     "review",
-    "setup",
     "test",
     "versions",
     "watch",
@@ -30,7 +29,7 @@ SUBCOMMANDS: tuple[str, ...] = (
 
 # Human-facing summary phrases that must survive Click's \\f truncation.
 SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
-    "badge": "Generate a shields.io markdown badge for the project health score.",
+    "badge": "Generate a shields.io markdown badge for the project's issue counts.",
     "check": "Check files for issues using the specified tools.",
     "completions": "Print a shell completion script for bash, zsh, or fish.",
     "doctor": "Check tool installation status and version compatibility.",
@@ -40,7 +39,6 @@ SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
     "licenses": "Check dependency licenses for policy compliance.",
     "list-tools": "List all available tools and their configurations.",
     "review": "Run AI-powered diff-based code review, plus advisory AI finders.",
-    "setup": "Set up lintro for your project.",
     "test": "Run tests using pytest.",
     "versions": "Display version information for all supported tools.",
     "watch": "Watch paths and continuously lint files as they change.",

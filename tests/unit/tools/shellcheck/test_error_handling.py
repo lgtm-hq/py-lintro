@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.shellcheck import ShellcheckPlugin
+from lintro.tools.shellcheck.definition import ShellcheckPlugin
 from tests.test_samples_helpers import copy_sample
 
 # Tests for timeout handling

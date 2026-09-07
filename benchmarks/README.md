@@ -232,8 +232,8 @@ print(render_markdown_table(report))
 
 - `small-python/` — a small, clean Python-only project (passes ruff/mypy), so timing
   reflects startup and traversal cost rather than variable diagnostic volume. Includes a
-  fixture-local `pyproject.toml` that disables lintro `post_checks` and the
-  `module_size` gate for overhead runs.
+  fixture-local `pyproject.toml` that disables the lintro `module_size` gate for
+  overhead runs.
 
 Add medium-polyglot and large-monorepo fixtures (or a pinned public OSS repo) by
 dropping new directories under `fixtures/`; the comparative harness auto-discovers them.

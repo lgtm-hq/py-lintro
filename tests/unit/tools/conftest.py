@@ -20,9 +20,9 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.clippy import ClippyPlugin
-    from lintro.tools.definitions.mypy import MypyPlugin
-    from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.clippy.definition import ClippyPlugin
+    from lintro.tools.mypy.definition import MypyPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def mypy_plugin() -> MypyPlugin:
     Returns:
         A MypyPlugin instance.
     """
-    from lintro.tools.definitions.mypy import MypyPlugin
+    from lintro.tools.mypy.definition import MypyPlugin
 
     return MypyPlugin()
 
@@ -94,7 +94,7 @@ def clippy_plugin() -> ClippyPlugin:
     Returns:
         A ClippyPlugin instance.
     """
-    from lintro.tools.definitions.clippy import ClippyPlugin
+    from lintro.tools.clippy.definition import ClippyPlugin
 
     return ClippyPlugin()
 
@@ -106,7 +106,7 @@ def tsc_plugin() -> TscPlugin:
     Returns:
         A TscPlugin instance.
     """
-    from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
     return TscPlugin()
 
@@ -281,3 +281,41 @@ def mock_execution_context_for_tool(
         The same factory function as mock_execution_context_factory.
     """
     return mock_execution_context_factory
+
+
+def record_subprocess_argv(
+    commands: list[list[str]],
+    *,
+    outputs: list[tuple[bool, str]] | None = None,
+    default: tuple[bool, str] = (True, ""),
+) -> Callable[..., tuple[bool, str]]:
+    """Build a plain stand-in for a plugin's ``_run_subprocess``.
+
+    Reading the argv back off a ``MagicMock`` only asserts how the mock was
+    called; recording it into a caller-owned list makes the executed command an
+    observable value the test can assert on (#2315).
+
+    Args:
+        commands: List each invocation's argv is appended to, in order.
+        outputs: Canned ``(success, output)`` results, consumed one per call.
+            When exhausted (or omitted) ``default`` is returned instead.
+        default: Result returned once ``outputs`` runs out.
+
+    Returns:
+        A callable recording each invocation and returning the canned results.
+    """
+    remaining = list(outputs or [])
+
+    def fake_run(**kwargs: Any) -> tuple[bool, str]:
+        """Record one subprocess invocation and return the next canned result.
+
+        Args:
+            **kwargs: Arguments the plugin passed to ``_run_subprocess``.
+
+        Returns:
+            The next canned ``(success, output)`` pair, else ``default``.
+        """
+        commands.append(list(kwargs["cmd"]))
+        return remaining.pop(0) if remaining else default
+
+    return fake_run

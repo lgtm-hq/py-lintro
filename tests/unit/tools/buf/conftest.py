@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.buf import BufPlugin
+from lintro.tools.buf.definition import BufPlugin
 
 
 @pytest.fixture

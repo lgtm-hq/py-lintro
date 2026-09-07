@@ -8,7 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.buf import BUF_DEFAULT_TIMEOUT, BufPlugin
+from lintro.tools.buf.definition import BUF_DEFAULT_TIMEOUT, BufPlugin
 from lintro.utils.execution.tool_configuration import _detection_scoped_tool_names
 
 

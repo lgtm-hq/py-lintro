@@ -562,26 +562,3 @@ class ThreadSafeConsoleLogger:
         if output:
             self.console_output(text="")
             self.console_output(text=output)
-
-    def print_post_checks_header(
-        self,
-    ) -> None:
-        """Print a distinct header separating the post-checks phase."""
-        border_char: str = "━"
-        border: str = border_char * BORDER_LENGTH
-        title_styled: str = click.style(
-            text="🚦  POST-CHECKS",
-            fg="magenta",
-            bold=True,
-        )
-        subtitle_styled: str = click.style(
-            text=("Running optional follow-up checks after primary tools"),
-            fg="magenta",
-        )
-        border_styled: str = click.style(text=border, fg="magenta")
-
-        self.console_output(text=border_styled)
-        self.console_output(text=title_styled)
-        self.console_output(text=subtitle_styled)
-        self.console_output(text=border_styled)
-        self.console_output(text="")

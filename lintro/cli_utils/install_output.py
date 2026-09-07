@@ -1,9 +1,8 @@
 """Shared rendering for install/upgrade execution results.
 
-``lintro install``, ``lintro setup`` and ``lintro doctor --fix`` all execute
-the same plan and must report it the same way: one line per planned action,
-numbered, so it is unambiguous that later actions still ran after an earlier
-failure or timeout.
+``lintro install`` and ``lintro doctor --fix`` both execute the same plan and
+must report it the same way: one line per planned action, numbered, so it is
+unambiguous that later actions still ran after an earlier failure or timeout.
 """
 
 from __future__ import annotations

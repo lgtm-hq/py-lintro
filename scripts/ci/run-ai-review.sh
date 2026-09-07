@@ -12,13 +12,16 @@ set -euo pipefail
 # while producing nothing, because the Anthropic balance was depleted. It now
 # exits non-zero whenever no review was produced:
 #
-#   exit 0  a review was produced (findings or clean)
+#   exit 0  a review was produced (findings or clean), or the convergence stop
+#           rule (#2099) deliberately skipped the round with nothing open that
+#           blocks — so exit 0 is "not blocked", not "a review ran"
 #   exit 1  no review was produced — no credential, dead credential, depleted
-#           balance, unreachable provider, or a lintro-side failure
+#           balance, unreachable provider, or a lintro-side failure — or a
+#           converged skip whose last real round left open P1 findings
 #
 # The check is deliberately NOT required, so a billing condition is loud without
-# blocking a merge. P1 findings still exit 0: the review ran, and findings are
-# advisory here.
+# blocking a merge. P1 findings from a completed round still exit 0: the review
+# ran, and findings are advisory here.
 #
 # Classification lives in scripts/ci/classify_review_outcome.py, which reads
 # lintro's own machine-readable error envelope — the failure taxonomy is not

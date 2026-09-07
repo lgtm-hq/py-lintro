@@ -21,6 +21,200 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.151.1] - 2026-09-07
+
+### Fixed
+
+- **ci**: gate semgrep lockfile drift in ci and drop the dead renovate tasks (#2439)
+  (f7ee955)
+
+## [0.151.0] - 2026-09-07
+
+### Added
+
+- **core**: make derived DAG ordering authoritative, delete priority scalars (#2427)
+  (d9d49e2)
+
+### Changed
+
+- **ai/review**: decompose RunRecord into nested value objects (#2419) (e2c2541)
+
+## [0.150.0] - 2026-09-07
+
+### Added
+
+- **tools**: add cppcheck for C/C++ static analysis (#1157) (65ca506)
+
+### Changed
+
+- **ai/review**: single comment-lifecycle owner, v1 state paths retired (#2412)
+  (ad046a1)
+
+## [0.149.0] - 2026-09-07
+
+### Added
+
+- **core**: shadow-mode diff of derived vs current tool order (#2422) (6aacad4)
+
+## [0.148.1] - 2026-09-07
+
+### Changed
+
+- bump harden-runner to v2.21.1 and lgtm-ci to v0.69.6 (#2431) (ccdca32)
+
+### Fixed
+
+- **review**: address retro AI review findings from the Cursor outage (#2429) (d50415b)
+
+## [0.148.0] - 2026-09-07
+
+### Added
+
+- **plugins**: declare claims, capabilities and scope on all tools (#2420) (d80f0c3)
+
+### Changed
+
+- **ai/providers**: provider plugin contract and adr (#2421) (e14e9d7)
+- **tools**: delete the definition shims, discover per-tool packages (PR K) (#2409)
+  (e0f3786)
+- **ai/review**: one body-assembly pipeline for github comments (#2411) (33c5501)
+
+## [0.147.7] - 2026-09-07
+
+### Changed
+
+- **tools**: move the last 7 definitions and the ts-checker family (PR J) (#2408)
+  (92d5476)
+- **ai**: split the CLI capability guard out of `cli_transport` (#2414) (2a6e5a0)
+- **ai/review**: one contract module for github comment invariants (#2407) (6ce23df)
+- **ai**: drop argv command inference from transcript filenames (#2415) (65918df)
+- **ai**: reconcile manifest-name vocabularies in chunker and classifier (#2413)
+  (e2e9391)
+- **tools**: move 10 more definitions into per-tool packages (PR I) (#2406) (6ce6325)
+- **ai**: the review session owns provider lifetime and closes it once (#2405) (a11b64a)
+- **tools**: move 12 more definitions into per-tool packages (PR H) (#2402) (28295b4)
+- **ai**: split the last oversized review modules and ratchet the size (#2401) (6e2ed12)
+- **tools**: move 12 definitions into per-tool packages (PR G) (#2397) (de1c09a)
+- **ai**: extract the chunk runner and drop the orchestrator baselines (#2398) (cf533ba)
+
+### Fixed
+
+- **ci**: extend typos and black timeouts in the dogfood runs (#2404) (89b7c25)
+
+## [0.147.6] - 2026-09-06
+
+### Changed
+
+- **ai**: move per-chunk review passes out of the orchestrator (#2394) (480ba92)
+- **tools**: fold ruff and pytest implementations into tool packages (#2392) (a4c6ed6)
+- **ai**: move cross-chunk review merge out of the orchestrator (#2388) (f4b822e)
+- **unit**: registry isolation, split leftovers, and randomised order (#2375) (49e4efb)
+- **tools**: share cargo-root and `node_modules` helpers (PR F) (#2389) (97487c1)
+
+### Fixed
+
+- **golangci-lint**: allow parallel runners so findings never vanish (#2396) (2cb6fcd)
+
+## [0.147.5] - 2026-09-06
+
+### Changed
+
+- **tools**: add `run_batch_check` and migrate 14 definitions (PR E) (#2385) (dfb53d6)
+- **ai**: move review prompt construction out of the orchestrator (#2384) (4d0fe5d)
+- **ai**: carry review run settings in a session options object (#2383) (8f3eccc)
+- **tools**: add `run_per_file_check` and migrate 6 definitions (PR D) (#2382) (50ce56d)
+- **ai**: step 3 — shared review preparation consumed by the CLI and MCP adapters
+  (#2377) (45a37ba)
+- **tools**: add `run_per_file_fix` and migrate 3 definitions (PR B) (#2380) (06bb54c)
+- **tools**: factor the shared check/fix scaffolding out of the 45 tool definitions — PR
+  A (#2376) (9f70219)
+- **ai**: step 2 — one effective-config resolver for every AI surface (#2373) (060f616)
+- **cli**: cut cold-start via lazy imports (#2372) (088a7ac)
+- **quality**: close the phase 0 checkpoint follow-ups (#2370) (52a4dcf)
+- **ai**: add characterization gap list and golden tests before the review decomposition
+  (#2363) (7ffbba4)
+- **packaging**: find packages, ship py.typed, trim the sdist (#2364) (638f8ce)
+- **core**: delete the setup command and the health score (#2362) (61df25b)
+- **deps**: one dev dependency list, delete tox, widen the matrix (#2361) (90d4214)
+
+### Fixed
+
+- **deps**: keep pydoclint importable against docstring-parser (#2381) (c26ca50)
+
+## [0.147.4] - 2026-09-06
+
+### Fixed
+
+- **ci**: let the duplicate-code guard tolerate environment-dependent pylint counts
+  (#2366) (c38e3f6)
+
+## [0.147.3] - 2026-09-05
+
+### Changed
+
+- **ci**: pin the fork-fallback image once and delete orphaned scripts (#2322) (16da987)
+- **ci**: delete the dead changes job from test-ci (#2320) (b539ee0)
+- **ci**: integration suite in the required gate; missing tool is a failure inside
+  Docker (#2326) (7d75401)
+- **ci**: drop fail-fast from CI test runs so a red run reports every failure (#2319)
+  (4f68973)
+
+### Fixed
+
+- **ci**: fail-closed required lint check when the lint job produces no verdict (#2324)
+  (9f4a1d6)
+
+## [0.147.2] - 2026-09-05
+
+### Changed
+
+- **ci**: make coverage blocking repo-side (#2321) (e6a6dd7)
+
+### Fixed
+
+- **post-checks**: honour --tool-options for post-check tools (#2357) (30f341a)
+
+## [0.147.1] - 2026-09-05
+
+### Changed
+
+- **quality**: ratcheting duplicate-code gate on tool definitions (#2354) (9f45637)
+
+### Fixed
+
+- **ci**: allow hosted-runner watchdog egress on long-running jobs (#2353) (8162c56)
+
+## [0.147.0] - 2026-09-05
+
+### Added
+
+- **tools**: add pylint tool plugin (#2334) (7736c09)
+
+### Changed
+
+- **quality**: enable ruff structural families with a per-file baseline (#2323)
+  (b301132)
+- **quality**: import-layering contract with a ratcheting baseline (#2333) (6e253d2)
+
+## [0.146.0] - 2026-09-05
+
+### Added
+
+- **tools**: add import-linter tool plugin (#2325) (da4f15f)
+
+## [0.145.0] - 2026-09-05
+
+### Added
+
+- **evals**: add a cross-provider review agreement matrix harness (#2276) (a4cb90c)
+
+## [0.144.0] - 2026-09-05
+
+### Added
+
+- **ai**: add a numeric convergence score as a deterministic re-review stop signal
+  (#2263) (1fd2356)
+
 ## [0.143.0] - 2026-09-04
 
 ### Added

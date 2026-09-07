@@ -81,7 +81,6 @@ def _labels_for(*, path: str) -> set[str]:
     [
         ("tests/unit/test_labeler_rules.py", {"testing"}),
         ("pytest.ini", {"testing"}),
-        ("tox.ini", {"testing"}),
         ("test_samples/README.md", {"testing", "documentation"}),
         ("pyproject.toml", {"dependencies", "release"}),
         ("tools/ascii_resizer/pyproject.toml", {"release"}),
@@ -91,7 +90,7 @@ def _labels_for(*, path: str) -> set[str]:
         ("lintro/__init__.py", {"enhancement", "release"}),
         ("lintro/cli.py", {"enhancement"}),
         (".github/labeler.yml", {"maintenance"}),
-        ("scripts/ci/detect-changes.sh", {"ci"}),
+        ("scripts/ci/resolve-pipeline-relevance.sh", {"ci"}),
         ("scripts/ci/test-verify-imports.sh", {"ci"}),
         ("scripts/ci/npm/publish_packages.sh", {"ci", "release"}),
         ("npm/lintro/package.json", {"release"}),
@@ -114,15 +113,15 @@ def _labels_for(*, path: str) -> set[str]:
         (".github/workflows/docker-ci.yml", {"ci"}),
         (".allstar/allstar.yaml", {"infrastructure"}),
         (
-            "lintro/tools/definitions/bandit.py",
+            "lintro/tools/bandit/definition.py",
             {"enhancement", "security"},
         ),
         (
-            "lintro/tools/definitions/gitleaks.py",
+            "lintro/tools/gitleaks/definition.py",
             {"enhancement", "security"},
         ),
         (
-            "lintro/tools/definitions/semgrep.py",
+            "lintro/tools/semgrep/definition.py",
             {"enhancement", "security"},
         ),
         (".github/workflows/codeql.yml", {"ci", "security"}),

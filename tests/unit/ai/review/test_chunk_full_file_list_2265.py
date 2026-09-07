@@ -17,7 +17,8 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
-from lintro.ai.review.orchestrator import (
+from lintro.ai.review.prompts import (
+    PromptInputs,
     build_git_native_review_prompt,
     build_review_prompt,
 )
@@ -86,11 +87,13 @@ def _build(*, builder_name: str) -> str:
         "git_native": build_git_native_review_prompt,
     }[builder_name]
     _system, user_prompt = builder(
-        chunk=_make_chunk(),
-        context=_make_context(),
-        checklist_text="1. [logic-bug] Example question?",
-        checklist_count=1,
-        interaction_paths="(none)",
+        inputs=PromptInputs(
+            chunk=_make_chunk(),
+            context=_make_context(),
+            checklist_text="1. [logic-bug] Example question?",
+            checklist_count=1,
+            interaction_paths="(none)",
+        ),
     )
     return user_prompt
 
@@ -195,12 +198,12 @@ def test_full_pr_file_list_goes_through_redaction(
         builder_name: Prompt builder under test.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    import lintro.ai.review.orchestrator as orchestrator_module
+    import lintro.ai.review.prompts as prompts_module
 
     def _tagged(*, text: str, source: str) -> str:
         return f"[redacted:{source}]{text}"
 
-    monkeypatch.setattr(orchestrator_module, "redact_prompt_text", _tagged)
+    monkeypatch.setattr(prompts_module, "redact_prompt_text", _tagged)
 
     prompt = _build(builder_name=builder_name)
     marked = [line for line in prompt.splitlines() if CHUNK_FILE_MARKER in line]

@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.actionlint import ActionlintPlugin
+from lintro.tools.actionlint.definition import ActionlintPlugin
 
 # Tests for ActionlintPlugin.check method
 

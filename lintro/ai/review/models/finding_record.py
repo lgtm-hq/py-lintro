@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
+from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -70,6 +71,13 @@ class FindingRecord:
             ``None`` for an ordinary chunk finding (#2269). Persisted only
             when set, so a blob written without the synthesis pass is
             byte-identical to one written before it existed.
+        evidence_style: Self-reported evidence basis from the most recent
+            sighting (#2099). Persisted so the convergence score of a carried
+            finding is identical to the score it had when first reported — a
+            round-to-round jump in the score would be indistinguishable from
+            real movement in the review. Serialized only when it differs from
+            the ``diff_local`` default, so a record written before the field
+            existed round-trips byte-identically.
     """
 
     fingerprint: str
@@ -96,6 +104,7 @@ class FindingRecord:
     fix: str = ""
     confidence: str = ""
     origin: FindingOrigin | None = None
+    evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
 
     @property
     def key(self) -> str:
@@ -188,6 +197,8 @@ class FindingRecord:
             payload["confidence"] = self.confidence
         if self.origin is not None:
             payload["origin"] = str(self.origin)
+        if self.evidence_style is not EvidenceStyle.DIFF_LOCAL:
+            payload["evidence_style"] = str(self.evidence_style)
         return payload
 
     @classmethod
@@ -236,6 +247,7 @@ class FindingRecord:
             fix=str(payload.get("fix", "")),
             confidence=str(payload.get("confidence", "")),
             origin=_parse_origin(payload.get("origin")),
+            evidence_style=_parse_evidence_style(payload.get("evidence_style")),
         )
 
 
@@ -306,6 +318,24 @@ def _parse_kind(value: Any) -> FindingKind:
         return FindingKind(str(value).lower())
     except ValueError:
         return FindingKind.FINDING
+
+
+def _parse_evidence_style(value: Any) -> EvidenceStyle:
+    """Parse an evidence-style label from an untrusted state blob.
+
+    Args:
+        value: Raw evidence_style value decoded from the state blob.
+
+    Returns:
+        The parsed style, defaulting to :data:`EvidenceStyle.DIFF_LOCAL` when
+        absent or unrecognized. A v2 record carries no such key, and the
+        default is the *highest* likelihood in the convergence score, so a
+        missing label can never deflate a PR toward an early stop. Parsing
+        goes through :meth:`EvidenceStyle.coerce`, the same helper the
+        model-response normalizer uses, so the blob decoder and the parser
+        cannot drift apart on whitespace, case, or the unknown-label default.
+    """
+    return EvidenceStyle.coerce(value)
 
 
 def _parse_status(value: Any) -> FindingStatus:

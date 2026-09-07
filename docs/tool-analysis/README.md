@@ -56,6 +56,14 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: No auto-fix, limited CLI pass-through, single-process execution
 - 🚀 **Enhanced**: Central line-length injection, normalized issues, safe version checks
 
+### [Cppcheck Analysis](./cppcheck-analysis.md)
+
+**C/C++ Static Analyzer**
+
+- ✅ **Preserved**: Six-level severity, CWE ids, inconclusive flag via native XML
+- ⚠️ **Defaults**: Check-only; `warning,style,performance,portability` enabled
+- 🚀 **Notes**: Native XML parser (SARIF is lossy for cppcheck); fails closed
+
 ### [Hadolint Analysis](./hadolint-analysis.md)
 
 ### [Bandit Analysis](./bandit-analysis.md)
@@ -107,6 +115,29 @@ implementations with the core tools themselves.
 - ✅ **Preserved**: Test discovery/execution, JSON/JUnit/plain outputs, config respect
 - ⚠️ **Limited**: No impact analysis or mutation testing; plugin install not managed
 - 🚀 **Enhanced**: Coverage helpers, parallel presets, plugin/marker/fixture listings
+
+### [import-linter Analysis](./import-linter-analysis.md)
+
+### Python Import-Contract Checker
+
+- ✅ **Preserved**: All contract types, the native config filename order, and the native
+  exit-code meaning whenever a config is present (broken → issues, kept → clean)
+- ⚠️ **Limited**: Check-only (contract violations are design problems, not auto-fixable)
+- 🚀 **Enhanced**: Project-scoped single invocation, config discovery that walks up from
+  the input paths and parses the file to confirm a real section, and a clean result
+  where the native tool errors because no config file exists
+
+### [pylint Analysis](./pylint-analysis.md)
+
+### Python Static Analyser (duplicate-code focus)
+
+- ✅ **Preserved**: The whole checker catalogue driven by native config, pylint's own
+  message ids/symbols/categories, and the `R0801` message body verbatim
+- ⚠️ **Limited**: Check-only, slow (full AST per module), and `R0801` is reported once
+  per clone set rather than once per file
+- 🚀 **Enhanced**: Project-scoped single invocation so cross-module checkers work at
+  all, upward config discovery that parses the file to confirm a real section, and
+  bit-field exit codes interpreted instead of trusted
 
 ### [Idiom Review Analysis](./idiom-review-analysis.md)
 

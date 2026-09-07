@@ -61,6 +61,8 @@ reclaimed by `sweep-ci-ghcr-tags.sh` (age-based, default 91 days; #1138).
   lint passed on a failed job).
 - `assert-required-check.sh` — enforce the required check contract for
   lintro-code-quality.
+- `summarize-code-quality-gate.sh` — write the job-summary line that explains an
+  infra-flaked gate.
 
 Safety contract (#1313): a failure is only absorbed when there is positive evidence that
 lint itself did not report a violation — a cancelled/timed-out job that reported no
@@ -71,21 +73,41 @@ sits above the cancellation branch, so even a run cancelled after lint failed st
 above the guard: `143` is `128 + SIGTERM`, assigned by the kernel when the runner kills
 the process, and lintro itself only ever exits `0` or `1` for a lint verdict. A
 SIGTERM'd run often writes a stale `status=failed` on its way out, so `143` overrides it
-and absorbs. Missing outputs are _not_ evidence of a flake and stay red; the bounded
-`dogfooding_lint_retry` job is the remedy for a runner that died before reporting. When
-the gate does absorb noise it sets `infra-flake=true`, and `publish` refuses to promote
-an image on that basis.
+and is classified as infra rather than as a verdict (since #2296 that classification no
+longer greens the check — see below). Missing outputs are _not_ evidence of a flake and
+stay red; the bounded `dogfooding_lint_retry` job is the remedy for a runner that died
+before reporting.
 
-Tool-execution timeouts (#1653, #2242): a per-tool timeout inside lintro also reports
-`status=failed` / `exit-code=1`, so it needs its own positive evidence. The reusable
-lint workflow classifies the authoritative run's own JSON report and publishes
+Fail-closed contract (#2296): classification is not absorption. A classified infra
+failure that produced **no lint verdict** — a cancelled or timed-out job, a SIGTERM
+`exit 143`, a tool-execution timeout — no longer greens the required check. The gate
+writes `passed=false`, `status=no-verdict`, `infra-flake=true` and exits 1, so
+`lintro-code-quality` goes red and `auto-rerun-on-infra-failure.yml` reruns the failed
+jobs (up to three reruns; the original run is attempt 1, so attempt 4 is the last
+eligible one). The check turns green only when a rerun produces a real lint verdict.
+`infra-flake` is kept so the rerun bot, the job summary
+(`summarize-code-quality-gate.sh`) and dashboards can tell "lint failed" apart from
+"lint did not run"; a red check with `status=no-verdict` is runner loss, not a
+violation.
+
+The one absorbed class left is the mirror image: lint reported `status=passed` /
+`exit-code=0` and only a post-lint step of the surrounding job failed (e.g. the report
+artifact upload). That is a real verdict, so the check stays green with
+`infra-flake=true` — and `publish` still refuses to promote the image on that basis, an
+unchanged condition.
+
+Tool-execution timeouts (#1653, #2242, #2296): a per-tool timeout inside lintro also
+reports `status=failed` / `exit-code=1`, so it needs its own positive evidence. The
+reusable lint workflow classifies the authoritative run's own JSON report and publishes
 `timeout-flake` / `timed-out-tools`; `evaluate-code-quality-gate.sh` carries those
 through the same attempt selection as the verdict, `run-code-quality-gate.sh` scopes
 them to `verdict-source=lint`, and `is-infra-flake-failure.sh` absorbs only an exact
 `true`. The classifier fails closed — it needs at least one timed-out tool, zero
 findings from every tool, and no non-timeout failure. Changed-scope runs publish no JSON
 report, so they pass an empty flag and stay red: that asymmetry is a decision, not an
-omission.
+omission. Since #2296 a proven timeout is diagnosed but no longer absorbed either: it
+produced no lint verdict, so the gate goes red with `status=no-verdict` and the rerun
+decides.
 
 ## Local Development
 

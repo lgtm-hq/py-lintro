@@ -6,7 +6,6 @@ They verify the OxfmtPlugin definition, check command, fix command, and set_opti
 
 from __future__ import annotations
 
-import shutil
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Callable
 from pathlib import Path
@@ -15,51 +14,13 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 
-def oxfmt_is_available() -> bool:
-    """Check if oxfmt is installed and actually works.
-
-    This is more robust than just checking shutil.which() because wrapper
-    scripts may exist even when the underlying npm package isn't installed.
-    We verify the tool works by actually formatting a simple JavaScript snippet.
-
-    Returns:
-        True if oxfmt is available and functional, False otherwise.
-    """
-    if shutil.which("oxfmt") is None:
-        return False
-    try:
-        # First check --version works
-        version_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["oxfmt", "--version"],
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-        if version_result.returncode != 0:
-            return False
-
-        # Then verify it can actually format code (catches missing npm packages)
-        format_result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["oxfmt", "--stdin-filepath", "test.js"],
-            input=b"const x=1;\n",
-            capture_output=True,
-            timeout=10,
-            check=False,
-        )
-        return format_result.returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
-        return False
-
-
-# Skip all tests if oxfmt is not installed or not working
-pytestmark = pytest.mark.skipif(
-    not oxfmt_is_available(),
-    reason="oxfmt not installed or not working",
-)
+pytestmark = require_tool("oxfmt")
 
 
 @pytest.fixture

@@ -1,0 +1,10 @@
+<!-- lintro-ai-review -->
+## 🔎 Lintro Review
+
+> ❌ **Review could not complete** — `anthropic` the review could not be completed: provider refused the request
+
+See the cause above and the workflow logs; retry if it looks transient.
+
+<sub>**Model:** `claude-sonnet-4-20250514` · **Provider:** `anthropic` · **Transport:** `api` · **Depth:** 2 · **Tokens:** 14,400 tok (in 12,000 / out 2,400, provider-reported) · **Est. cost:** $0.1234 · **Duration:** 42.5s</sub>
+
+<sub>🤖 Automated review by lintro · not a substitute for human review · `~` = approximate (estimated locally; provider did not report token usage)</sub>

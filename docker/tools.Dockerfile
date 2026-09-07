@@ -31,7 +31,13 @@ LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
 LABEL org.opencontainers.image.description="Pre-built tools layer for lintro"
 LABEL org.opencontainers.image.licenses="MIT"
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# LINTRO_TOOLS_IMAGE marks the image whose whole point is carrying every
+# wrapped tool: the integration suite fails instead of skipping when one of
+# them is missing here (#465). The name is defined in Python as
+# tests/integration/_tools.py::TOOLS_IMAGE_ENV and repeated in
+# docker-compose.yml; tests/unit/test_workflow_wiring.py pins all three.
+ENV LINTRO_TOOLS_IMAGE=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_SYSTEM_PYTHON=1 \
     BUN_INSTALL="/opt/bun" \
@@ -51,6 +57,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     ca-certificates \
     build-essential \
+    cppcheck \
     git \
     libssl-dev \
     pkg-config \
@@ -156,13 +163,15 @@ RUN echo "=== Verifying all tools ===" && \
     cargo --version && rustc --version && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
-    black --version && buf --version && commitlint --version && gitleaks version && \
+    black --version && buf --version && commitlint --version && \
+    cppcheck --version && gitleaks version && \
     golangci-lint version && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
-    pydoclint --version && ruff --version && semgrep --version && \
-    pip-audit --version && \
+    pydoclint --version && pylint --version && ruff --version && \
+    semgrep --version && \
+    pip-audit --version && lint-imports --version && \
     shellcheck --version && shfmt --version && spectral --version && \
     sqlfluff --version && \
     dotenv-linter --version && \

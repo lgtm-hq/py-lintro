@@ -21,6 +21,80 @@ from lintro.ai.providers.base import AIResponse, BaseAIProvider
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.console.logger import ThreadSafeConsoleLogger
+
+
+class RecordingConsoleLogger(ThreadSafeConsoleLogger):
+    """Console logger that records its output instead of printing it.
+
+    Subclasses the real :class:`ThreadSafeConsoleLogger` so it satisfies the
+    type production code annotates, then overrides the sinks that reach a
+    terminal. Every other logger method keeps its real implementation. Tests
+    use this instead of a mock so they assert on visible output rather than on
+    how a collaborator was called (#2315).
+
+    The transcripts are split, so ``lines`` is **not** everything a user would
+    have seen: :meth:`warning` records to ``warnings`` only and never routes
+    through ``console_output``, unlike production, which formats a
+    ``WARNING:`` line and prints it. Assert on ``warnings`` for warning text
+    and on ``lines``/``text`` for the rest.
+
+    Attributes:
+        lines: Every message passed to :meth:`console_output` or :meth:`error`,
+            in order. Excludes warnings.
+        warnings: Every message passed to :meth:`warning`, in order.
+    """
+
+    lines: list[str]
+    warnings: list[str]
+
+    def __init__(self) -> None:
+        """Start with empty console and warning transcripts."""
+        super().__init__()
+        self.lines = []
+        self.warnings = []
+
+    def console_output(self, text: str, color: str | None = None) -> None:
+        """Record one console line instead of printing it.
+
+        Args:
+            text: Text the production code wants on the console.
+            color: Colour the production code asked for, ignored here.
+        """
+        self.lines.append(text)
+
+    def error(self, message: str, *_args: Any, **_kwargs: Any) -> None:
+        """Record one error instead of printing it.
+
+        The real implementation writes to the terminal directly rather than
+        routing through :meth:`console_output`, so it needs its own override
+        or the text would escape the transcript (#2315).
+
+        Args:
+            message: Error text the production code emitted.
+            *_args: Ignored positional extras.
+            **_kwargs: Ignored keyword extras.
+        """
+        self.lines.append(f"ERROR: {message}")
+
+    def warning(self, message: str, **_kwargs: Any) -> None:
+        """Record one warning instead of printing and logging it.
+
+        Args:
+            message: Warning text the production code emitted.
+            **_kwargs: Ignored loguru formatting extras.
+        """
+        self.warnings.append(message)
+
+    @property
+    def text(self) -> str:
+        """Return every recorded console line joined by newlines.
+
+        Returns:
+            str: The console transcript this logger captured, excluding
+            warnings (those live in ``warnings``).
+        """
+        return "\n".join(self.lines)
 
 
 def completed_process(

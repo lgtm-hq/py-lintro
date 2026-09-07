@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -932,7 +933,7 @@ def test_doctor_tools_filter_known_tool() -> None:
 
 def test_doctor_oxlint_type_aware_failure_exit_1() -> None:
     """A failing oxlint type-aware check causes exit 1 and shows the hint."""
-    from lintro.tools.definitions.oxlint_doctor import OxlintCheckResult
+    from lintro.tools.oxlint.doctor import OxlintCheckResult
 
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
@@ -1062,3 +1063,76 @@ def test_output_json_includes_optional_extras() -> None:
     data = json.loads(output.getvalue())
     extras = {entry["name"]: entry for entry in data["optional_extras"]}
     assert_that(extras).contains_key("mcp")
+
+
+def test_doctor_renders_execution_order_section() -> None:
+    """The derived execution-order section (#1742) is part of doctor output."""
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch("subprocess.run") as mock_run,
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.output).contains("Execution order (derived)")
+    assert_that(result.output).contains("This is the order that runs")
+    assert_that(result.output).contains("lintro check --explain-order")
+
+
+def test_doctor_order_section_is_informational_only() -> None:
+    """A constrained derived order never changes the doctor exit code."""
+    from lintro.enums.capability import Cap
+    from lintro.tools.core.scheduler import DerivedOrder, OrderEdge
+
+    report = DerivedOrder(
+        tools=("ruff", "black"),
+        edges=(
+            OrderEdge(
+                before="ruff",
+                after="black",
+                pattern="*.py",
+                before_capability=Cap.FIX,
+                after_capability=Cap.FORMAT,
+            ),
+        ),
+        cycles=(),
+    )
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch("subprocess.run") as mock_run,
+        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "lintro.cli_utils.order_explain.build_order_report",
+            return_value=report,
+        ),
+    ):
+        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
+        result = runner.invoke(doctor_command, [])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("Execution order (derived)")
+    # A non-empty, constrained section still leaves the exit code at 0.
+    assert_that(re.search(r"constraints: [1-9]", result.output)).is_not_none()
+    assert_that(re.search(r"black after ruff \(\*\.py\)", result.output)).is_not_none()
+
+
+def test_doctor_order_lines_are_empty_when_selection_fails() -> None:
+    """An unusable toolset omits the section instead of breaking doctor."""
+    from lintro.cli_utils.order_explain import doctor_order_lines
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_tools_to_run",
+        side_effect=ValueError("unknown tool"),
+    ):
+        lines = doctor_order_lines()
+
+    assert_that(lines).is_empty()

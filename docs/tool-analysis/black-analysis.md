@@ -95,7 +95,7 @@ lintro check src/ --tool-options "black:line_length=100,black:target_version=py3
 
 - Primary configuration via Black's own `pyproject.toml`
 - Optional overrides via `[tool.lintro.black]` and `--tool-options`
-- Black can be used as a post-check via `[tool.lintro.post_checks]`
+- Black owns formatting on `*.py`; the derived order runs it after ruff
 
 ## ⚠️ Limited/Missing Features
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.taplo import (
+from lintro.tools.taplo.definition import (
     TAPLO_DEFAULT_TIMEOUT,
     TaploPlugin,
 )

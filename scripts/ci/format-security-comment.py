@@ -160,8 +160,7 @@ def format_comment(json_path: str) -> str | None:
                 sections.append(f"| {msg} | `{file}` |")
         else:
             sections.append(
-                f"| {issues_count} vulnerabilities found"
-                " (details unavailable) | — |",
+                f"| {issues_count} vulnerabilities found (details unavailable) | — |",
             )
         sections.append("")
         sections.append("### 🔧 Recommended Actions:")

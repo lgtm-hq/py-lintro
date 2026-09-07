@@ -21,7 +21,7 @@ def fake_repo(tmp_path: Path) -> Path:
     Returns:
         Path to the fake repo root.
     """
-    (tmp_path / "lintro" / "tools" / "definitions").mkdir(parents=True)
+    (tmp_path / "lintro" / "tools" / "oxfmt").mkdir(parents=True)
     (tmp_path / "lintro" / "plugins").mkdir()
 
     (tmp_path / "lintro" / "_tool_packages.py").write_text(
@@ -33,9 +33,7 @@ def fake_repo(tmp_path: Path) -> Path:
         "}\n",
     )
     (tmp_path / "lintro" / "_tool_versions.py").write_text(
-        "from lintro.enums.tool_name import ToolName\n"
-        "TOOL_VERSIONS: dict = {\n"
-        "}\n",
+        "from lintro.enums.tool_name import ToolName\nTOOL_VERSIONS: dict = {\n}\n",
     )
     (tmp_path / "package.json").write_text(
         json.dumps({"devDependencies": {"oxfmt": "^0.43.0"}}, indent=2),
@@ -55,7 +53,8 @@ def fake_repo(tmp_path: Path) -> Path:
         )
         + "\n",
     )
-    (tmp_path / "lintro" / "tools" / "definitions" / "oxfmt.py").write_text(
+    (tmp_path / "lintro" / "tools" / "oxfmt" / "__init__.py").write_text("")
+    (tmp_path / "lintro" / "tools" / "oxfmt" / "definition.py").write_text(
         "@register_tool\nclass Plugin:\n    pass\n",
     )
     return tmp_path
@@ -100,16 +99,17 @@ def test_generate_all_reports_version_drift(fake_repo: Path) -> None:
 
 
 def test_generate_all_reports_index_drift(fake_repo: Path) -> None:
-    """A stale builtin index surfaces as drift even when versions are clean.
+    """A new tool package surfaces as builtin-index drift, versions clean.
 
     Args:
         fake_repo: Fake repo fixture root.
     """
     lintro_build.generate_all(fake_repo)
 
-    (fake_repo / "lintro" / "tools" / "definitions" / "extra.py").write_text(
-        "HELPER = True\n",
-    )
+    extra = fake_repo / "lintro" / "tools" / "extra"
+    extra.mkdir()
+    (extra / "__init__.py").write_text("")
+    (extra / "definition.py").write_text("HELPER = True\n")
 
     assert_that(lintro_build.generate_all(fake_repo, check=True)).is_equal_to(
         lintro_build.EXIT_DRIFT,
@@ -129,9 +129,10 @@ def test_generate_all_input_error_beats_drift(
     lintro_build.generate_all(fake_repo)
 
     (fake_repo / "package.json").unlink()
-    (fake_repo / "lintro" / "tools" / "definitions" / "extra.py").write_text(
-        "HELPER = True\n",
-    )
+    extra = fake_repo / "lintro" / "tools" / "extra"
+    extra.mkdir()
+    (extra / "__init__.py").write_text("")
+    (extra / "definition.py").write_text("HELPER = True\n")
 
     assert_that(lintro_build.generate_all(fake_repo, check=True)).is_equal_to(
         lintro_build.EXIT_INPUT_ERROR,

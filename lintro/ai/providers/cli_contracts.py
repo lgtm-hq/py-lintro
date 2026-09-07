@@ -14,7 +14,8 @@ binary and what it requires of it:
   the contract test asserts each one is still advertised by the installed
   binary, so drift breaks CI rather than a user's review.
 * ``optional_flags`` -- flags lintro degrades gracefully without. These are
-  gated by :meth:`~lintro.ai.providers.cli_transport.CliTransport.supports_flag`
+  gated by the capability guard's
+  :meth:`~lintro.ai.providers.cli_capabilities.CliCapabilityGuard.supports_flag`
   before being sent and dropped-and-retried if the binary rejects them.
 * ``version_floor`` -- a *known-incompatible-below* floor, not a known-good
   pin. It is deliberately conservative: binaries below it predate the flag
@@ -25,6 +26,7 @@ binary and what it requires of it:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
@@ -36,9 +38,35 @@ __all__ = [
     "CliContract",
     "OptionalCliFlag",
     "cli_contract_for",
+    "flag_named_in",
     "format_version",
     "unadvertised_flags",
 ]
+
+# Flag characters that continue a flag token. Used to bound flag matches in CLI
+# output so ``--foo`` does not match inside ``--foobar``.
+_FLAG_CHAR = r"[0-9a-z-]"
+
+
+def flag_named_in(lowered_text: str, flag: str) -> bool:
+    """Return whether *flag* is named in *lowered_text* as a whole token.
+
+    A plain substring test would let a rejection of ``--foobar`` also match a
+    candidate ``--foo``, dropping the wrong optional flag. Matching on flag-token
+    boundaries keeps the backstop precise even if a future contract adds flags
+    that share a prefix.
+
+    Args:
+        lowered_text: Already-lowercased CLI output. Either a rejection on stderr
+            or ``--help`` text: the runtime guard and the contract gate share
+            this matcher precisely so both read a flag the same way.
+        flag: The candidate flag, e.g. ``--resume``.
+
+    Returns:
+        True when the flag appears as a complete token.
+    """
+    pattern = rf"(?<!{_FLAG_CHAR}){re.escape(flag.lower())}(?!{_FLAG_CHAR})"
+    return re.search(pattern, lowered_text) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,10 +142,6 @@ def unadvertised_flags(
     Returns:
         The subset of *flags* not present as whole tokens.
     """
-    # Imported inside the function on purpose: cli_transport imports this module
-    # at load time, so a module-level import here would close the cycle.
-    from lintro.ai.providers.cli_transport import flag_named_in
-
     return tuple(flag for flag in flags if not flag_named_in(lowered_help, flag))
 
 

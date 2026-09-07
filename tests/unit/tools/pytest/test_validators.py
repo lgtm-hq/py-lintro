@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.implementations.pytest.pytest_option_validators import (
+from lintro.tools.pytest.pytest_option_validators import (
     validate_pytest_options,
 )
 

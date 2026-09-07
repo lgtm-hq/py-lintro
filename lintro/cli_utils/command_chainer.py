@@ -206,7 +206,7 @@ class CommandChainer:
         except KeyboardInterrupt:
             # Re-raise KeyboardInterrupt to allow normal interruption
             raise
-        except Exception as e:  # noqa: BLE001 - intentional: allow chain to continue
+        except Exception as e:
             # Catch all other exceptions to allow command chain to continue
             exit_code = getattr(e, "exit_code", 1)
             logger.exception(

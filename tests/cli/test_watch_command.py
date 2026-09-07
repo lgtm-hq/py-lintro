@@ -304,6 +304,8 @@ def test_importing_cli_does_not_load_watchdog() -> None:
     script = """
 import sys
 
+import click
+
 import lintro.cli
 import lintro.cli_utils.commands.watch as command_mod
 
@@ -314,7 +316,8 @@ leftover = [
 ]
 if leftover:
     raise SystemExit(f"watchdog imported: {leftover}")
-if lintro.cli.watch_command.name != "watch":
+resolved = lintro.cli.cli.get_command(click.Context(lintro.cli.cli), "watch")
+if resolved is None or resolved.name != "watch":
     raise SystemExit("cli watch command not registered")
 if command_mod.watch_command.name != "watch":
     raise SystemExit("watch command module not loaded")

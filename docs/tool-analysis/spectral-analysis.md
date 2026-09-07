@@ -133,7 +133,7 @@ lintro check --tools spectral openapi.yaml
 ```
 
 ```python
-from lintro.tools.definitions.spectral import SpectralPlugin
+from lintro.tools.spectral.definition import SpectralPlugin
 
 tool = SpectralPlugin()
 result = tool.check(["openapi.yaml"], {})

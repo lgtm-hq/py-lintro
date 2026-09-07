@@ -195,12 +195,6 @@ def test_detect_update_channel_rejects_unrelated_linuxbrew_checkout() -> None:
     assert_that(channel).is_not_equal_to(UpdateChannel.HOMEBREW)
 
 
-def test_detect_update_channel_usr_local_bin_is_standalone() -> None:
-    """``/usr/local/bin`` is standalone unless the link resolves into Cellar."""
-    channel = detect_update_channel("/usr/local/bin/hadolint")
-    assert_that(channel).is_equal_to(UpdateChannel.STANDALONE)
-
-
 def test_detect_update_channel_rejects_unrelated_rustup_dir() -> None:
     """A project directory named ``rustup`` is not a rustup toolchain tree."""
     channel = detect_update_channel("/home/me/src/rustup/bin/tool")

@@ -2,21 +2,18 @@
 
 import contextlib
 import os
-import shutil
 import tempfile
 
-import pytest
 from assertpy import assert_that
 from loguru import logger
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import ToolRegistry
+from tests.integration._tools import require_tool
+
+pytestmark = require_tool("bandit")
 
 
-@pytest.mark.skipif(
-    shutil.which("bandit") is None,
-    reason="Bandit not installed on PATH; skip integration test.",
-)
 def test_bandit_detects_issues_on_sample_file() -> None:
     """Run BanditTool against a known vulnerable sample and expect findings."""
     tool = ToolRegistry.get("bandit")
@@ -32,10 +29,6 @@ def test_bandit_detects_issues_on_sample_file() -> None:
     logger.info(f"[TEST] bandit found {result.issues_count} issues on sample file")
 
 
-@pytest.mark.skipif(
-    shutil.which("bandit") is None,
-    reason="Bandit not installed on PATH; skip integration test.",
-)
 def test_bandit_no_crash_on_clean_temp_file() -> None:
     """Bandit should handle a trivial (clean) temp file gracefully."""
     tool = ToolRegistry.get("bandit")

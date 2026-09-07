@@ -304,12 +304,10 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     assert "action" in resolve["outputs"]
     trigger = _trigger(workflow)
     assert promote["if"] == (
-        "needs.resolve.outputs.action == 'promote' && "
-        "github.ref == 'refs/heads/main'"
+        "needs.resolve.outputs.action == 'promote' && github.ref == 'refs/heads/main'"
     )
     assert fallback["if"] == (
-        "needs.resolve.outputs.action == 'publish' && "
-        "github.ref == 'refs/heads/main'"
+        "needs.resolve.outputs.action == 'publish' && github.ref == 'refs/heads/main'"
     )
     assert "reusable-docker.yml@" in fallback["uses"]
     assert resolve["permissions"]["packages"] == "read"
@@ -860,7 +858,7 @@ def test_promotion_resolves_equal_timestamp_by_merged_head(
     )
 
     assert_that(
-        promotion_module._candidate_tag_for_pr(  # noqa: SLF001
+        promotion_module._candidate_tag_for_pr(
             repository="lgtm-hq/py-lintro",
             pr_number=42,
             head_sha="fedcba9" + "0" * 33,
@@ -895,7 +893,7 @@ def test_promotion_fails_closed_for_unresolved_equal_timestamp(
     )
 
     with pytest.raises(RuntimeError, match="share an updated_at timestamp"):
-        promotion_module._candidate_tag_for_pr(  # noqa: SLF001
+        promotion_module._candidate_tag_for_pr(
             repository="lgtm-hq/py-lintro",
             pr_number=42,
         )
@@ -949,7 +947,7 @@ def test_promotion_requires_renovate_author_and_branch(
 ) -> None:
     """One-sided Renovate identity signals must not be trusted."""
     assert_that(
-        promotion_module._is_renovate_pr(  # noqa: SLF001
+        promotion_module._is_renovate_pr(
             {"user": {"login": author}, "head": {"ref": branch}},
         ),
     ).is_false()
@@ -1220,7 +1218,7 @@ def test_missing_pull_request_does_not_raise(
     monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
 
     assert_that(
-        cleanup_module._pull_request(  # noqa: SLF001
+        cleanup_module._pull_request(
             repository="lgtm-hq/py-lintro",
             number=7,
         ),
@@ -1250,7 +1248,7 @@ def test_merged_pr_prefers_the_merged_renovate_pull_request(
     ]
     monkeypatch.setattr(promotion_module, "_gh_json", lambda *args: payload)
 
-    resolved = promotion_module._merged_pr(  # noqa: SLF001
+    resolved = promotion_module._merged_pr(
         repository="lgtm-hq/py-lintro",
         merge_sha="abc123",
     )

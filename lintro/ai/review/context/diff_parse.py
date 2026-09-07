@@ -158,7 +158,7 @@ def parse_changed_files(*, name_status: str, numstat: str) -> list[ChangedFile]:
     unparsed = [*unparsed_numstat, *unparsed_name_status]
     if unparsed:
         raise ReviewContextError(
-            "Failed to parse git diff metadata: " f"{'; '.join(unparsed[:3])}",
+            f"Failed to parse git diff metadata: {'; '.join(unparsed[:3])}",
             code=ReviewContextErrorCode.GIT_OUTPUT_PARSE_FAILED,
         )
 

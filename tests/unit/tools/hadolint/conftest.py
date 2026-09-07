@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.definitions.hadolint import HadolintPlugin
+from lintro.tools.hadolint.definition import HadolintPlugin
 
 
 @pytest.fixture

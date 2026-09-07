@@ -18,7 +18,6 @@ from rich.console import Console
 
 from lintro.ai.review.display import render_review_terminal
 from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
-from lintro.ai.review.github_sticky import _suggestion_drops_row
 from lintro.ai.review.inline_fix import finding_suggested_change
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
@@ -27,6 +26,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.suggested_change import SuggestedChange
 from lintro.ai.review.patch_validation import validate_suggested_patches
+from lintro.ai.review.sticky.sections import _suggestion_drops_row
 
 
 def _completed(*, stdout: str = "", returncode: int = 0) -> CompletedProcess[str]:
@@ -169,14 +169,32 @@ def test_pr_mode_reader_memoizes_each_path(
         mock_run_git: Patched git runner reporting a missing object.
         mock_run_gh: Patched gh runner serving the file content.
     """
+    fetches: list[str] = []
+
+    def _serve(*_args: object, **kwargs: object) -> object:
+        """Serve the file once and record the fetch.
+
+        Args:
+            *_args: Ignored positional arguments.
+            **kwargs: Runner keyword arguments, including the gh ``args``.
+
+        Returns:
+            object: A completed process carrying the file content.
+        """
+        fetches.append(str(kwargs.get("args")))
+        return _completed(stdout="x = 1\n")
+
     mock_run_git.return_value = _completed(returncode=1)
-    mock_run_gh.return_value = _completed(stdout="x = 1\n")
+    mock_run_gh.side_effect = _serve
 
     read = _head_reader(context=_pr_context())
-    read("src/app.py")
-    read("src/app.py")
+    first = read("src/app.py")
+    second = read("src/app.py")
 
-    assert_that(mock_run_gh.call_count).is_equal_to(1)
+    # The second read is served from the memo: same content, one fetch.
+    assert_that(first).is_equal_to("x = 1\n")
+    assert_that(second).is_equal_to(first)
+    assert_that(fetches).is_length(1)
 
 
 @patch("lintro.ai.review.context.collection._run_gh")

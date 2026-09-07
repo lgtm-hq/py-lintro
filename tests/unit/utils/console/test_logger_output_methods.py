@@ -13,85 +13,100 @@ import pytest
 from assertpy import assert_that
 
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+from tests.unit.utils.console.conftest import patch_tty_streams
 
 # =============================================================================
 # Console Output Method Tests
 # =============================================================================
 
 
-def test_console_output_no_color(logger: ThreadSafeConsoleLogger) -> None:
-    """Verify console_output calls click.echo with plain text when no color specified.
-
-    Without a color argument, the text should be passed directly to click.echo
-    without any styling applied.
-
-    Args:
-        logger: ThreadSafeConsoleLogger instance fixture.
-    """
-    with patch("click.echo") as mock_echo:
-        logger.console_output("test message")
-        mock_echo.assert_called_once_with("test message", err=False)
-
-
-def test_console_output_with_color(logger: ThreadSafeConsoleLogger) -> None:
-    """Verify console_output applies color styling when color argument provided.
-
-    When a color is specified, click.style should be called to wrap the text
-    with the appropriate color, then click.echo displays the styled result.
+def test_console_output_no_color(
+    logger: ThreadSafeConsoleLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plain text reaches stdout unstyled and is tracked in the buffer.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    with (
-        patch("click.echo") as mock_echo,
-        patch("click.style", return_value="styled text") as mock_style,
-    ):
-        logger.console_output("test message", color="red")
-        mock_style.assert_called_once_with("test message", fg="red")
-        mock_echo.assert_called_once_with("styled text", err=False)
+    stdout, stderr = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.console_output("test message")
+
+    assert_that(stdout.getvalue()).is_equal_to("test message\n")
+    assert_that(stderr.getvalue()).is_empty()
+    assert_that(logger.get_buffer()).is_equal_to("test message")
 
 
-def test_console_output_routes_to_stderr_when_enabled() -> None:
-    """Verify console_output writes to stderr when route_stderr is enabled.
+def test_console_output_with_color(
+    logger: ThreadSafeConsoleLogger,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A colour argument wraps the terminal text but not the tracked buffer.
+
+    Args:
+        logger: ThreadSafeConsoleLogger instance fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.console_output("test message", color="red")
+
+    assert_that(stdout.getvalue()).is_equal_to("\x1b[31mtest message\x1b[0m\n")
+    assert_that(logger.get_buffer()).is_equal_to("test message")
+
+
+def test_console_output_routes_to_stderr_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Routed output leaves stdout empty so it stays a parseable document.
 
     Regression test for #1045: machine-readable formats route decorative
-    output to stderr so stdout stays a single parseable document.
+    output to stderr.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
     """
+    stdout, stderr = patch_tty_streams(monkeypatch=monkeypatch)
     stderr_logger = ThreadSafeConsoleLogger(route_stderr=True)
-    with patch("click.echo") as mock_echo:
-        stderr_logger.console_output("banner text")
-        mock_echo.assert_called_once_with("banner text", err=True)
+
+    stderr_logger.console_output("banner text")
+
+    assert_that(stderr.getvalue()).is_equal_to("banner text\n")
+    assert_that(stdout.getvalue()).is_empty()
 
 
 @pytest.mark.parametrize(
-    ("color", "expected_fg"),
+    ("color", "expected_ansi"),
     [
-        pytest.param("red", "red", id="red"),
-        pytest.param("green", "green", id="green"),
-        pytest.param("yellow", "yellow", id="yellow"),
-        pytest.param("cyan", "cyan", id="cyan"),
-        pytest.param("blue", "blue", id="blue"),
-        pytest.param("magenta", "magenta", id="magenta"),
+        pytest.param("red", "\x1b[31m", id="red"),
+        pytest.param("green", "\x1b[32m", id="green"),
+        pytest.param("yellow", "\x1b[33m", id="yellow"),
+        pytest.param("blue", "\x1b[34m", id="blue"),
+        pytest.param("magenta", "\x1b[35m", id="magenta"),
+        pytest.param("cyan", "\x1b[36m", id="cyan"),
     ],
 )
 def test_console_output_various_colors(
     logger: ThreadSafeConsoleLogger,
     color: str,
-    expected_fg: str,
+    expected_ansi: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify console_output correctly applies various color options.
-
-    Different color values should be passed through to click.style's fg parameter
-    without modification.
+    """Every supported colour name emits its own ANSI sequence.
 
     Args:
         logger: ThreadSafeConsoleLogger instance fixture.
         color: The color to apply to output.
-        expected_fg: The expected foreground color value.
+        expected_ansi: The ANSI sequence the colour must produce.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    with patch("click.echo"), patch("click.style") as mock_style:
-        logger.console_output("test", color=color)
-        mock_style.assert_called_once_with("test", fg=expected_fg)
+    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
+
+    logger.console_output("test", color=color)
+
+    assert_that(stdout.getvalue()).is_equal_to(f"{expected_ansi}test\x1b[0m\n")
 
 
 # =============================================================================
@@ -127,49 +142,51 @@ def test_save_console_log_no_run_dir_is_noop(logger: ThreadSafeConsoleLogger) ->
     logger.save_console_log()
 
 
-def test_save_console_log_handles_os_error(tmp_path: Path) -> None:
-    """Verify save_console_log handles OSError gracefully with error log.
+def test_save_console_log_handles_os_error(
+    tmp_path: Path,
+    loguru_messages: list[str],
+) -> None:
+    """An OS-level write failure is reported and no file is written.
 
-    When file creation fails due to OS-level issues, the error should be
-    caught and logged rather than propagating as an exception.
-
-    Args:
-        tmp_path: Temporary directory path for test files.
-    """
-    logger = ThreadSafeConsoleLogger(run_dir=tmp_path)
-    logger._messages = ["Test message"]
-    with (
-        patch("builtins.open", side_effect=OSError("Permission denied")),
-        patch("lintro.utils.console.logger.logger.error") as mock_error,
-    ):
-        logger.save_console_log()
-        mock_error.assert_called_once()
-        error_message = str(mock_error.call_args)
-        assert_that(error_message).contains(
-            "Failed to save console log",
-        )
-
-
-def test_save_console_log_handles_permission_error(tmp_path: Path) -> None:
-    """Verify save_console_log handles PermissionError gracefully.
-
-    Permission errors during file creation should be caught and logged
-    without crashing the application.
+    The error must be caught and reported rather than propagating out of
+    ``save_console_log``.
 
     Args:
         tmp_path: Temporary directory path for test files.
+        loguru_messages: Messages captured from the loguru sink.
     """
     logger = ThreadSafeConsoleLogger(run_dir=tmp_path)
     logger._messages = ["Test message"]
-    with (
-        patch(
-            "builtins.open",
-            side_effect=PermissionError("Access denied"),
-        ),
-        patch("lintro.utils.console.logger.logger.error") as mock_error,
-    ):
+
+    with patch("builtins.open", side_effect=OSError("Disk failure")):
         logger.save_console_log()
-        mock_error.assert_called_once()
-        assert_that(str(mock_error.call_args)).contains(
-            "Failed to save console log",
-        )
+
+    reported = [
+        message
+        for message in loguru_messages
+        if "Failed to save console log" in message
+    ]
+    assert_that(reported).is_length(1)
+    assert_that((tmp_path / "console.log").exists()).is_false()
+
+
+def test_save_console_log_handles_permission_error(
+    tmp_path: Path,
+    loguru_messages: list[str],
+) -> None:
+    """A permission error is reported and no file is written, without crashing.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+        loguru_messages: Messages captured from the loguru sink.
+    """
+    logger = ThreadSafeConsoleLogger(run_dir=tmp_path)
+    logger._messages = ["Test message"]
+
+    with patch("builtins.open", side_effect=PermissionError("Access denied")):
+        logger.save_console_log()
+
+    assert_that(
+        [message for message in loguru_messages if "Failed to save" in message],
+    ).is_length(1)
+    assert_that((tmp_path / "console.log").exists()).is_false()

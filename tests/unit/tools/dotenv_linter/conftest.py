@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.dotenv_linter import DotenvLinterPlugin
+from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
 
 
 @pytest.fixture

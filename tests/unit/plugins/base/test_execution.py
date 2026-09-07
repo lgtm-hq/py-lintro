@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 from unittest.mock import patch
 
 import pytest
@@ -715,3 +715,119 @@ def test_default_exclude_patterns_contains_expected_patterns(pattern: str) -> No
 def test_default_exclude_patterns_is_not_empty() -> None:
     """Verify DEFAULT_EXCLUDE_PATTERNS is not empty."""
     assert_that(DEFAULT_EXCLUDE_PATTERNS).is_not_empty()
+
+
+# =============================================================================
+# BaseToolPlugin.prepare Tests
+# =============================================================================
+
+
+def test_prepare_returns_tool_result_when_version_check_fails(
+    fake_tool_plugin: FakeToolPlugin,
+) -> None:
+    """Verify prepare hands back the skip result itself, not a context.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+    """
+    skip_result = ToolResult(
+        name="fake-tool",
+        success=True,
+        output="Version check failed",
+        issues_count=0,
+    )
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=skip_result,
+    ):
+        prepared = fake_tool_plugin.prepare(paths=["."], options={})
+
+    assert_that(prepared).is_instance_of(ToolResult)
+    assert_that(prepared).is_same_as(skip_result)
+
+
+def test_prepare_returns_tool_result_when_no_files_found(
+    fake_tool_plugin: FakeToolPlugin,
+    tmp_path: Path,
+) -> None:
+    """Verify the no-files early exit surfaces as a ToolResult.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.plugins.execution_preparation.discover_files",
+            return_value=[],
+        ),
+    ):
+        prepared = fake_tool_plugin.prepare(paths=[str(tmp_path)], options={})
+
+    assert_that(prepared).is_instance_of(ToolResult)
+    assert_that(cast("ToolResult", prepared).output).contains("found to check")
+
+
+def test_prepare_returns_context_when_files_are_discovered(
+    fake_tool_plugin: FakeToolPlugin,
+    tmp_path: Path,
+) -> None:
+    """Verify prepare returns a context whose early_result is unset.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+        tmp_path: Pytest temporary directory fixture.
+    """
+    test_file = tmp_path / "test.py"
+    test_file.write_text("print('hello')")
+
+    with (
+        patch(
+            "lintro.plugins.execution_preparation.verify_tool_version",
+            return_value=None,
+        ),
+        patch(
+            "lintro.plugins.execution_preparation.discover_files",
+            return_value=[str(test_file)],
+        ),
+    ):
+        prepared = fake_tool_plugin.prepare(paths=[str(tmp_path)], options={})
+
+    assert_that(prepared).is_instance_of(ExecutionContext)
+    context = cast("ExecutionContext", prepared)
+    assert_that(context.files).is_equal_to([str(test_file)])
+    assert_that(context.early_result).is_none()
+
+
+def test_prepare_delegates_to_prepare_execution(
+    fake_tool_plugin: FakeToolPlugin,
+) -> None:
+    """Verify prepare forwards its arguments to the preparation pipeline.
+
+    Args:
+        fake_tool_plugin: Fixture providing a FakeToolPlugin instance.
+    """
+    context = ExecutionContext(files=["a.py"], rel_files=["a.py"])
+
+    with patch.object(
+        type(fake_tool_plugin),
+        "_prepare_execution",
+        return_value=context,
+    ) as prepare_execution:
+        prepared = fake_tool_plugin.prepare(
+            paths=["."],
+            options={"verbose": True},
+            no_files_message="No files to format.",
+        )
+
+    assert_that(prepared).is_same_as(context)
+    prepare_execution.assert_called_once_with(
+        ["."],
+        {"verbose": True},
+        no_files_message="No files to format.",
+    )

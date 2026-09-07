@@ -19,7 +19,7 @@ def make_finding(
     detector_name: str = "Github",
     detector_type: int = 8,
     verified: bool = False,
-    raw: str = "ghp_examplefakeexamplefakeexamplefake1234",  # noqa: S107
+    raw: str = "ghp_examplefakeexamplefakeexamplefake1234",
     redacted: str = "",
     extra_data: dict[str, str] | None = None,
 ) -> dict[str, object]:

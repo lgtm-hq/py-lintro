@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.black import BlackPlugin
+from lintro.tools.black.definition import BlackPlugin
 
 
 @pytest.fixture

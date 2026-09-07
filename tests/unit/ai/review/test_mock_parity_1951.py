@@ -31,16 +31,19 @@ from lintro.ai.review.github_render import (
     format_finding_comment,
 )
 from lintro.ai.review.github_review_body import REVIEW_BODY_FOOTER
-from lintro.ai.review.github_sticky import advance_review_state, build_sticky_comment
 from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.suggested_change import SuggestedChange
-from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.review_state_codec import leftover_state_block
+from lintro.ai.review.sticky import advance_review_state, build_sticky_comment
 from lintro.ai.review.verdict import VERDICT_RUBRIC_FINE_PRINT
 
 
@@ -88,17 +91,19 @@ def test_open_finding_title_links_to_its_inline_comment(
 ) -> None:
     """A finding whose thread is known renders its title as a link to it."""
     result = _with(base=sample_review_result, findings=(_finding(),))
-    state = advance_review_state(result=result, head_sha="sha1")
+    state = advance_review_state(request=StickyRequest(result=result, head_sha="sha1"))
     key = state.findings[0].key
 
     body = _body_only(
         body=build_sticky_comment(
-            result=result,
-            prior_state=state,
-            head_sha="sha1",
-            inline_comment_ids={key: 424242},
-            repo="owner/name",
-            pr_number=7,
+            request=StickyRequest(
+                result=result,
+                prior_state=state,
+                head_sha="sha1",
+                inline_comment_ids={key: 424242},
+                repo="owner/name",
+                pr_number=7,
+            ),
         ),
     )
 
@@ -113,10 +118,12 @@ def test_open_finding_without_a_comment_id_renders_unlinked(
     """No thread means no link — never a dead one."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
-            head_sha="sha1",
-            repo="owner/name",
-            pr_number=7,
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+                head_sha="sha1",
+                repo="owner/name",
+                pr_number=7,
+            ),
         ),
     )
 
@@ -129,13 +136,15 @@ def test_open_finding_renders_unlinked_without_repo_context(
 ) -> None:
     """A known comment id is not enough: the URL also needs repo and PR."""
     result = _with(base=sample_review_result, findings=(_finding(),))
-    state = advance_review_state(result=result)
+    state = advance_review_state(request=StickyRequest(result=result))
 
     body = _body_only(
         body=build_sticky_comment(
-            result=result,
-            prior_state=state,
-            inline_comment_ids={state.findings[0].key: 99},
+            request=StickyRequest(
+                result=result,
+                prior_state=state,
+                inline_comment_ids={state.findings[0].key: 99},
+            ),
         ),
     )
 
@@ -156,15 +165,17 @@ def test_a_model_written_bracket_cannot_break_out_of_the_link(
         base=sample_review_result,
         findings=(_finding(title=hostile),),
     )
-    state = advance_review_state(result=result)
+    state = advance_review_state(request=StickyRequest(result=result))
 
     body = _body_only(
         body=build_sticky_comment(
-            result=result,
-            prior_state=state,
-            inline_comment_ids={state.findings[0].key: 424242},
-            repo="owner/name",
-            pr_number=7,
+            request=StickyRequest(
+                result=result,
+                prior_state=state,
+                inline_comment_ids={state.findings[0].key: 424242},
+                repo="owner/name",
+                pr_number=7,
+            ),
         ),
     )
 
@@ -191,12 +202,19 @@ def test_history_row_reports_open_after_the_round_and_what_it_fixed(
         base=sample_review_result,
         findings=(_finding(title="Leak"), _finding(title="Race", line=20)),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -209,14 +227,21 @@ def test_history_row_falls_back_for_state_without_the_new_counts(
 ) -> None:
     """A record persisted before the counts existed renders raised and ``—``."""
     prior_state = ReviewState(
-        runs=(RunRecord(round=1, sha="sha1", model="m", p1=2, p2=1),),
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha="sha1", model="m"),
+                outcome=RunOutcome(p1=2, p2=1),
+            ),
+        ),
     )
 
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=()),
-            prior_state=prior_state,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=()),
+                prior_state=prior_state,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -229,9 +254,9 @@ def test_legacy_run_payload_without_the_new_fields_loads() -> None:
     """A v1/v2 payload parses with the new fields absent, not zeroed."""
     record = RunRecord.from_dict({"round": 1, "sha": "sha1", "p1": 2})
 
-    assert_that(record.resolved).is_none()
-    assert_that(record.open_after).is_none()
-    assert_that(record.narrative).is_equal_to("")
+    assert_that(record.outcome.resolved).is_none()
+    assert_that(record.outcome.open_after).is_none()
+    assert_that(record.outcome.narrative).is_equal_to("")
     assert_that(record.to_dict()).does_not_contain_key(
         "resolved",
         "open_after",
@@ -251,23 +276,25 @@ def test_a_corrupted_count_decodes_as_unknown(value: object) -> None:
     """A malformed blob renders "unknown", and never aborts the decode."""
     record = RunRecord.from_dict({"round": 1, "resolved": value})
 
-    assert_that(record.resolved).is_none()
+    assert_that(record.outcome.resolved).is_none()
 
 
 def test_new_run_fields_round_trip_through_the_state_blob() -> None:
     """The counts and narrative survive serialization."""
     record = RunRecord(
-        round=2,
-        resolved=3,
-        open_after=1,
-        narrative="Fixed the fail-open default.",
+        identity=RunIdentity(round=2),
+        outcome=RunOutcome(
+            resolved=3,
+            open_after=1,
+            narrative="Fixed the fail-open default.",
+        ),
     )
 
     restored = RunRecord.from_dict(record.to_dict())
 
-    assert_that(restored.resolved).is_equal_to(3)
-    assert_that(restored.open_after).is_equal_to(1)
-    assert_that(restored.narrative).is_equal_to("Fixed the fail-open default.")
+    assert_that(restored.outcome.resolved).is_equal_to(3)
+    assert_that(restored.outcome.open_after).is_equal_to(1)
+    assert_that(restored.outcome.narrative).is_equal_to("Fixed the fail-open default.")
 
 
 # --- 3. per-round narrative --------------------------------------------------
@@ -285,12 +312,16 @@ def test_history_recap_renders_the_rounds_narrative(
             walkthrough=(),
         ),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -303,14 +334,21 @@ def test_history_recap_falls_back_to_counts_without_a_narrative(
 ) -> None:
     """A legacy record has no narrative, so the counts line stands in."""
     prior_state = ReviewState(
-        runs=(RunRecord(round=1, sha="sha1", model="m", p1=1, p2=2, p3=3),),
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha="sha1", model="m"),
+                outcome=RunOutcome(p1=1, p2=2, p3=3),
+            ),
+        ),
     )
 
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=()),
-            prior_state=prior_state,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=()),
+                prior_state=prior_state,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -351,9 +389,11 @@ def test_narrative_keeps_only_the_first_sentence(
 ) -> None:
     """A recap is one line; the rest of a paragraph is not persisted."""
     result = _with(base=sample_review_result, findings=(), summary=summary)
-    stored = advance_review_state(result=result, head_sha="sha1").runs[-1]
+    stored = advance_review_state(
+        request=StickyRequest(result=result, head_sha="sha1"),
+    ).runs[-1]
 
-    assert_that(stored.narrative).is_equal_to(expected)
+    assert_that(stored.outcome.narrative).is_equal_to(expected)
 
 
 # --- 4. a regression says it is one ------------------------------------------
@@ -362,7 +402,7 @@ def test_narrative_keeps_only_the_first_sentence(
 def _resolved_state(*, finding: ReviewFinding) -> ReviewState:
     """Build prior state in which ``finding`` was raised and already fixed."""
     return ReviewState(
-        runs=(RunRecord(round=1, sha="sha1", model="m"),),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="sha1", model="m")),),
         findings=(
             FindingRecord(
                 fingerprint=fingerprint_for(
@@ -390,7 +430,7 @@ def test_regressed_thread_titles_say_regressed(
 ) -> None:
     """The fresh thread's title carries the suffix, not just a provenance note."""
     finding = _finding()
-    prior_body = STICKY_MARKER + legacy_state_block(
+    prior_body = STICKY_MARKER + leftover_state_block(
         state=_resolved_state(finding=finding),
     )
     reporter = MagicMock()
@@ -472,7 +512,9 @@ def test_verdict_explainer_renders_on_every_round(
     """The title carries the derived verdict on every round."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=findings),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=findings),
+            ),
         ),
     )
     labels = {
@@ -489,7 +531,9 @@ def test_verdict_explainer_sits_directly_under_the_pill(
     """The mockup puts the derived verdict in the title, not a separate pill."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+            ),
         ),
     )
 
@@ -518,7 +562,9 @@ def test_fix_all_panel_caption_names_the_open_table(
     """The panel covers the table right above it, which is what it now says."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(),)),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(_finding(),)),
+            ),
         ),
     )
 

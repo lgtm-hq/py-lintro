@@ -48,7 +48,7 @@ bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
 
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
-lintro badge                       # shields.io health-score badge
+lintro badge                       # shields.io issue-count badge
 lintro check --output-format grid  # Beautiful output
 ```
 
@@ -107,6 +107,12 @@ system.
 <td><code>bun add -D @commitlint/cli @commitlint/config-conventional</code><br><code>npm install -D @commitlint/cli @commitlint/config-conventional</code></td>
 </tr>
 <tr>
+<td><a href="https://cppcheck.sourceforge.io/"><img src="https://img.shields.io/badge/Cppcheck-00599C?logo=cplusplus&logoColor=white" alt="Cppcheck"></a></td>
+<td>🔧 C/C++</td>
+<td>-</td>
+<td><code>brew install cppcheck</code><br><code>apt-get install cppcheck</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/golangci/golangci-lint"><img src="https://img.shields.io/badge/golangci--lint-00ADD8?logo=go&logoColor=white" alt="golangci-lint"></a></td>
 <td>🐹 Go</td>
 <td>✅</td>
@@ -123,6 +129,12 @@ system.
 <td>🌐 HTML</td>
 <td>-</td>
 <td><code>bun add -D html-validate</code><br><code>npm install -D html-validate</code></td>
+</tr>
+<tr>
+<td><a href="https://github.com/seddonym/import-linter"><img src="https://img.shields.io/badge/import--linter-3776AB?logo=python&logoColor=white" alt="import-linter"></a></td>
+<td>🐍 Python</td>
+<td>-</td>
+<td>📦</td>
 </tr>
 <tr>
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
@@ -144,6 +156,12 @@ system.
 </tr>
 <tr>
 <td><a href="https://github.com/jsh9/pydoclint"><img src="https://img.shields.io/badge/pydoclint-3776AB?logo=python&logoColor=white" alt="pydoclint"></a></td>
+<td>🐍 Python</td>
+<td>-</td>
+<td>📦</td>
+</tr>
+<tr>
+<td><a href="https://github.com/pylint-dev/pylint"><img src="https://img.shields.io/badge/pylint-3776AB?logo=python&logoColor=white" alt="pylint"></a></td>
 <td>🐍 Python</td>
 <td>-</td>
 <td>📦</td>
@@ -375,7 +393,8 @@ See the [AI Features Guide](docs/ai-features.md) for full documentation.
 uv pip install lintro
 brew tap lgtm-hq/tap && brew install lintro
 
-# Full (bundled Python tools: ruff, black, mypy, bandit, pydoclint, yamllint)
+# Full (bundled Python tools: ruff, black, mypy, bandit, import-linter,
+# pydoclint, pylint, yamllint)
 uv pip install 'lintro[full]'
 brew tap lgtm-hq/tap && brew install lintro-full
 

@@ -278,7 +278,7 @@ def main() -> int:
     print(message)
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
-        with open(output, "a", encoding="utf-8") as output_file:  # noqa: PTH123
+        with open(output, "a", encoding="utf-8") as output_file:
             output_file.write(f"action={action}\n")
             output_file.write(f"candidate-tag={tag or ''}\n")
     return 0

@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: MIT
 # Evaluate docker-ci upstream jobs and assert the required code-quality gate.
 #
+# Fail-closed since #2296: when no lint attempt produced a verdict the gate
+# writes result=failure, passed=false, status=no-verdict, infra-flake=true and
+# exits 1, so the required lintro-code-quality check goes red and
+# auto-rerun-on-infra-failure.yml retries the run.
+#
 # Required environment variables:
 #   DOCKER_BUILD_RESULT, PRIMARY_LINT_RESULT
 #
@@ -25,10 +30,12 @@ Usage:
     PRIMARY_LINT_RESULT=success scripts/ci/run-code-quality-gate.sh
 
 Writes result, passed, status, exit-code, and infra-flake to GITHUB_OUTPUT
-when set. infra-flake=true means the gate passed by absorbing runner noise
-rather than by observing a successful lint run — including a tool-execution
-timeout in the authoritative lint attempt (#1653), which is absorbed only on
-that attempt's own zero-findings report.
+when set. infra-flake=true means the failure (or the absorbed job failure)
+was runner noise rather than a lint violation. Since #2296 an attempt that
+produced no lint verdict — runner loss, cancellation, SIGTERM exit 143, or a
+tool-execution timeout (#1653) — fails closed: result=failure, passed=false,
+status=no-verdict, infra-flake=true. Only a post-lint job failure on top of a
+passing lint verdict still greens the gate with infra-flake=true.
 EOF
 	exit 0
 fi
@@ -99,12 +106,20 @@ if UPSTREAM_RESULT="${upstream_result}" \
 	TIMED_OUT_TOOLS="${timed_out_tools}" \
 	GITHUB_OUTPUT="${ASSERT_OUTPUT}" \
 	bash "${SCRIPT_DIR}/assert-required-check.sh"; then
-	# infra-flake=true means the required check is green without a lint
-	# verdict. The check stays green (that is the point of #1313) but
-	# consumers that must not ship unlinted artefacts read this flag.
+	# A green gate always rests on a lint verdict since #2296. infra-flake
+	# is still true when the surrounding job failed after lint passed, and
+	# consumers that must not ship unlinted artefacts read that flag.
 	write_job_outputs success true passed 0 "$(read_assert_output infra-flake false)"
 	exit 0
 fi
 
-write_job_outputs failure false failed 1 false
+# Carry the assert step's verdict through instead of hard-coding 'failed': a
+# no-verdict failure (runner loss) must stay distinguishable from a genuine
+# lint failure so the summary and the auto-rerun bot can tell them apart.
+write_job_outputs \
+	failure \
+	false \
+	"$(read_assert_output status failed)" \
+	1 \
+	"$(read_assert_output infra-flake false)"
 exit 1

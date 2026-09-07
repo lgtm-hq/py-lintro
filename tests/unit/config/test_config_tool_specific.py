@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
@@ -216,15 +216,24 @@ def test_load_mypy_config_returns_empty_when_no_config_file(tmp_path: Path) -> N
     assert_that(path).is_none()
 
 
-def test_load_mypy_config_defaults_to_cwd_when_no_base_dir() -> None:
-    """Verify load_mypy_config defaults to current working directory."""
-    with patch("lintro.utils.config.Path") as mock_path:
-        mock_cwd = MagicMock()
-        mock_path.cwd.return_value = mock_cwd
-        mock_cwd.__truediv__ = MagicMock(
-            return_value=MagicMock(exists=MagicMock(return_value=False)),
-        )
+def test_load_mypy_config_defaults_to_cwd_when_no_base_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify load_mypy_config reads the config in the current directory.
 
-        load_mypy_config(base_dir=None)
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    mypy_ini = tmp_path / "mypy.ini"
+    mypy_ini.write_text("[mypy]\nstrict = True\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
 
-        mock_path.cwd.assert_called_once()
+    config, path = load_mypy_config(base_dir=None)
+
+    assert_that(config).contains_key("strict")
+    assert_that(path).is_not_none()
+    # ``base_dir=None`` resolves through ``Path.cwd()``, which on macOS reports
+    # ``/private/var/...`` where ``tmp_path`` says ``/var/...``.
+    assert_that(Path(str(path)).resolve()).is_equal_to(mypy_ini.resolve())

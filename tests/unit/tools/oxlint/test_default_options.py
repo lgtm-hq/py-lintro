@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.oxlint import OXLINT_DEFAULT_TIMEOUT
+from lintro.tools.oxlint.definition import OXLINT_DEFAULT_TIMEOUT
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.oxlint import OxlintPlugin
+    from lintro.tools.oxlint.definition import OxlintPlugin
 
 
 @pytest.mark.parametrize(

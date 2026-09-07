@@ -9,20 +9,6 @@ import pytest
 
 
 @pytest.fixture
-def mock_empty_tool_order_config() -> Generator[None]:
-    """Mock get_tool_order_config to return empty dict.
-
-    Yields:
-        None: Context manager for mocking tool order config.
-    """
-    with patch(
-        "lintro.utils.config_priority.get_tool_order_config",
-        return_value={},
-    ):
-        yield
-
-
-@pytest.fixture
 def mock_empty_configs() -> Generator[None]:
     """Mock all config loaders to return empty dicts.
 

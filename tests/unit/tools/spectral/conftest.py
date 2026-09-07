@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.definitions.spectral import SpectralPlugin
+from lintro.tools.spectral.definition import SpectralPlugin
 
 
 @pytest.fixture

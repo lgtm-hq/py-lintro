@@ -1,10 +1,11 @@
 """Characterization locks for #1972 Phase 1 architecture seams.
 
-These tests freeze *current* CLI/MCP review preparation behavior,
-effective-config parity, review metadata shape, error mapping, and exit
-semantics (0/1/2) before later phases extract shared preparation or split the
-orchestrator. Issue #1970 landed ``ResolvedAIConfig``; Phase 3 still owns
-``prepare_review``, orchestrator decomposition, and provider close wiring.
+These tests freeze CLI/MCP review preparation behavior, effective-config
+parity, review metadata shape, error mapping, and exit semantics (0/1/2)
+across the epic's phases. Issue #1970 landed ``ResolvedAIConfig`` and #2300
+landed the shared ``prepare_review`` / ``execute_review`` path, so the
+preparation lock below asserts where those helpers live now; orchestrator
+decomposition (Phase 4) and provider close wiring (Phase 5) are still ahead.
 """
 
 from __future__ import annotations
@@ -18,7 +19,10 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 from click.testing import CliRunner
 
-from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import (
+    AICliOverrides,
+    resolve_effective_ai_config,
+)
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError
 from lintro.ai.interface import resolve_ai_config
@@ -31,7 +35,6 @@ from lintro.ai.review.error_contract import (
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
-from lintro.ai.transport import apply_transport_override
 from lintro.cli import cli
 from lintro.config.lintro_config import LintroConfig
 from lintro.mcp.toolkits import review as mcp_review
@@ -40,8 +43,10 @@ from lintro.mcp.toolkits.review import resolve_budget_policy
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 CLI_REVIEW_PATH = PROJECT_ROOT / "lintro/cli_utils/commands/review.py"
 MCP_REVIEW_PATH = PROJECT_ROOT / "lintro/mcp/toolkits/review.py"
+PREPARATION_PATH = PROJECT_ROOT / "lintro/ai/review/preparation.py"
 
-# Domain helpers both adapters must keep calling until Phase 3 extracts them.
+# Domain helpers Phase 3 (#2300) extracted into one shared module. They are
+# called there, once, and by neither adapter.
 _SHARED_PREPARATION_CALLS: frozenset[str] = frozenset(
     {
         "collect_review_context",
@@ -49,9 +54,20 @@ _SHARED_PREPARATION_CALLS: frozenset[str] = frozenset(
         "get_all_checklist_items",
         "select_checklist_items",
         "format_checklist_for_prompt",
-        "get_provider",
         "run_review",
         "resolve_sensitivity_policy",
+    },
+)
+
+# The shared path each adapter reaches the domain through, plus the two things
+# that stay adapter-owned: the one config resolver (#2299) and constructing
+# the provider whose lifetime the adapter owns (ADR-0006 section D).
+_ADAPTER_ENTRY_CALLS: frozenset[str] = frozenset(
+    {
+        "resolve_effective_ai_config",
+        "prepare_review",
+        "execute_review",
+        "get_provider",
     },
 )
 
@@ -210,23 +226,23 @@ def _invoke_review(*, run_review_return: ReviewResult) -> Any:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -234,7 +250,7 @@ def _invoke_review(*, run_review_return: ReviewResult) -> Any:
             return_value=MagicMock(model_name="gpt-4o", name="openai"),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=run_review_return,
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -252,17 +268,29 @@ def _invoke_review(*, run_review_return: ReviewResult) -> Any:
 
 
 def test_cli_and_mcp_review_adapters_call_shared_preparation_helpers() -> None:
-    """CLI and MCP both invoke the domain helpers Phase 3 will extract."""
+    """CLI and MCP reach the domain helpers through one shared module.
+
+    Phase 3 (#2300) extracted the duplicated preparation: the helpers are
+    called in ``lintro/ai/review/preparation.py`` alone, and each adapter now
+    calls ``prepare_review`` / ``execute_review`` instead. A surface that
+    re-grew its own copy of a helper call fails here.
+    """
     cli_calls = _called_names(CLI_REVIEW_PATH)
     mcp_calls = _called_names(MCP_REVIEW_PATH)
+    preparation_calls = _called_names(PREPARATION_PATH)
 
-    assert_that(_SHARED_PREPARATION_CALLS.issubset(cli_calls)).is_true()
-    assert_that(_SHARED_PREPARATION_CALLS.issubset(mcp_calls)).is_true()
-    # CLI keeps provenance via resolve_from_mapping (#1970); MCP still goes
-    # through resolve_ai_config, which applies the same env layer internally.
-    assert_that(cli_calls).contains("resolve_from_mapping")
-    assert_that(cli_calls).contains("apply_cli_overrides")
-    assert_that(mcp_calls).contains("resolve_ai_config")
+    assert_that(_SHARED_PREPARATION_CALLS.issubset(preparation_calls)).is_true()
+    assert_that(_ADAPTER_ENTRY_CALLS.issubset(cli_calls)).is_true()
+    assert_that(_ADAPTER_ENTRY_CALLS.issubset(mcp_calls)).is_true()
+    assert_that(_SHARED_PREPARATION_CALLS & cli_calls).is_empty()
+    assert_that(_SHARED_PREPARATION_CALLS & mcp_calls).is_empty()
+    # Both adapters resolve through the one resolver (#2299). The CLI is the
+    # only one with flags, so it is also the only one building an overrides
+    # value; MCP's single per-call knob stays a downstream budget clamp.
+    assert_that(cli_calls).contains("AICliOverrides")
+    assert_that(mcp_calls).does_not_contain("AICliOverrides")
+    assert_that(cli_calls).does_not_contain("resolve_from_mapping")
+    assert_that(mcp_calls).does_not_contain("resolve_from_mapping")
 
 
 def test_cli_owns_posting_and_exit_helpers_mcp_does_not() -> None:
@@ -297,20 +325,24 @@ def test_resolve_ai_config_is_the_single_typed_ai_seam() -> None:
 
     resolved = resolve_ai_config(config)
 
-    assert_that(resolved).is_equal_to(AIConfig.from_mapping(raw))
+    assert_that(resolved).is_equal_to(resolve_effective_ai_config(raw).config)
     assert_that(resolved.review_enabled).is_true()
     assert_that(resolved.max_cost_usd).is_equal_to(1.25)
 
 
 def test_cli_transport_override_does_not_mutate_base_config() -> None:
-    """CLI transport override copies config; base resolution stays untouched."""
-    base = AIConfig(enabled=True, review=True, transport=AITransport.API)
+    """The transport flag overlays a copy; base resolution stays untouched."""
+    raw = {"enabled": True, "review": True, "transport": "api"}
+    base = resolve_effective_ai_config(raw)
 
-    overridden = apply_transport_override(base, "cli")
+    overridden = resolve_effective_ai_config(
+        raw,
+        cli_overrides=AICliOverrides(transport="cli"),
+    )
 
-    assert_that(base.transport).is_equal_to(AITransport.API)
-    assert_that(overridden.transport).is_equal_to(AITransport.CLI)
-    assert_that(overridden is base).is_false()
+    assert_that(base.config.transport).is_equal_to(AITransport.API)
+    assert_that(overridden.config.transport).is_equal_to(AITransport.CLI)
+    assert_that(overridden.config is base.config).is_false()
 
 
 def test_mcp_budget_policy_is_monotonic_never_raises_cap() -> None:
@@ -403,12 +435,6 @@ def test_mcp_review_failure_reuses_cli_error_contract_fields() -> None:
     )
 
 
-def test_review_error_exit_code_stays_two_distinct_from_p1() -> None:
-    """Exit 2 means no review; exit 1 stays reserved for successful P1 findings."""
-    assert_that(REVIEW_ERROR_EXIT_CODE).is_equal_to(2)
-    assert_that(REVIEW_ERROR_EXIT_CODE).is_not_equal_to(1)
-
-
 # ---------------------------------------------------------------------------
 # Exit behavior 0 / 1 / 2
 # ---------------------------------------------------------------------------
@@ -456,23 +482,23 @@ def test_review_exit_two_when_orchestrator_raises() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -480,7 +506,7 @@ def test_review_exit_two_when_orchestrator_raises() -> None:
             return_value=MagicMock(model_name="gpt-4o", name="openai"),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             side_effect=AIAuthenticationError("401 authentication_error"),
         ),
         patch("lintro.cli_utils.commands.review.render_review_error"),

@@ -73,3 +73,31 @@ class AIRateLimitError(AIProviderError):
     Raised when the provider returns a rate limit error. Users should
     wait and retry, or switch to a different provider/model.
     """
+
+
+class AIProviderRegistrationError(AIError):
+    """A provider plugin could not be registered or resolved.
+
+    Base class for the registry errors raised by
+    :mod:`lintro.ai.providers.registry`. This is a wiring error in lintro or a
+    plugin, distinct from a vendor call failing.
+    """
+
+
+class AIProviderAlreadyRegisteredError(AIProviderRegistrationError):
+    """Two plugins claimed the same provider name.
+
+    Raised by :func:`~lintro.ai.providers.registry.register_provider`. Provider
+    names are unique keys, so a second registration is an import-order or
+    packaging bug rather than a supported override.
+    """
+
+
+class AIProviderNotRegisteredError(AIProviderRegistrationError):
+    """No plugin is registered for the requested provider name.
+
+    Raised by :func:`~lintro.ai.providers.registry.get_registered` both when
+    the name is not an :class:`~lintro.ai.provider_enum.AIProvider` member and
+    when it is one that has not registered a plugin; the message distinguishes
+    the two.
+    """

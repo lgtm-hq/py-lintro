@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.yamllint import YamllintPlugin
+from lintro.tools.yamllint.definition import YamllintPlugin
 
 # Tests for YamllintPlugin.check method
 

@@ -64,8 +64,7 @@ def _apply_fix(
         # Validate line number before doing arithmetic.
         if not isinstance(suggestion.line, int) or suggestion.line < 0:
             logger.debug(
-                f"Invalid line {suggestion.line!r} for {suggestion.file}, "
-                f"skipping fix",
+                f"Invalid line {suggestion.line!r} for {suggestion.file}, skipping fix",
             )
             return False
 

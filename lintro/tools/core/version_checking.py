@@ -156,6 +156,14 @@ def get_install_hints() -> dict[str, str]:
             "Install via: brew install bufbuild/buf/buf "
             "or download from https://github.com/bufbuild/buf/releases (v{version}+)"
         ),
+        "import_linter": (
+            "Install via: pip install 'import-linter>={version}' "
+            "or uv add 'import-linter>={version}'"
+        ),
+        "import-linter": (
+            "Install via: pip install 'import-linter>={version}' "
+            "or uv add 'import-linter>={version}'"
+        ),
         "mypy": ("Install via: pip install mypy>={version} or uv add mypy>={version}"),
         "pip_audit": (
             "Install via: pip install 'pip-audit>={version}' "
@@ -168,6 +176,9 @@ def get_install_hints() -> dict[str, str]:
         "pydoclint": (
             "Install via: pip install pydoclint>={version} "
             "or uv add pydoclint>={version}"
+        ),
+        "pylint": (
+            "Install via: pip install 'pylint>={version}' or uv add 'pylint>={version}'"
         ),
         "ruff": ("Install via: pip install ruff>={version} or uv add ruff>={version}"),
         "yamllint": (
@@ -211,6 +222,10 @@ def get_install_hints() -> dict[str, str]:
             "Install via: https://github.com/rhysd/actionlint/releases (v{version}+)"
         ),
         "clippy": "Install via: rustup component add clippy (requires Rust {version}+)",
+        "cppcheck": (
+            "Install via: brew install cppcheck (macOS) or "
+            "apt-get install cppcheck (Debian/Ubuntu) (v{version}+)"
+        ),
         "dotenv_linter": (
             "Install via: brew install dotenv-linter, "
             "cargo install dotenv-linter, or "

@@ -6,7 +6,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -16,15 +16,17 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
-from lintro.ai.review.github_render import format_run_mechanics
+from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_timings import ReviewTimings
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.timings import (
     ReviewPhase,
     ReviewTimingRecorder,
@@ -75,6 +77,9 @@ def _provider() -> MagicMock:
         Configured mock provider.
     """
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = _MODEL
     provider.name = "anthropic"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)
@@ -204,21 +209,23 @@ def _run(
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_chunks(count=chunk_count),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_call),
     ):
         return run_review(
             _context(tmp_path=tmp_path, count=chunk_count),
-            provider=provider,
-            ai_config=ai_config,
-            depth=depth,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            context_collection_seconds=0.5,
-            stop=stop,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=ai_config,
+                depth=depth,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                context_collection_seconds=0.5,
+                stop=stop,
+            ),
         )
 
 
@@ -570,8 +577,11 @@ def test_chunks_cancelled_while_queued_still_report_their_wait(
         [True, True, True],
     )
     # The leader is whichever chunk the semaphore admitted first, not
-    # necessarily index 0 once the breakdown is sorted by chunk index.
-    leader = max(timings.chunks, key=lambda chunk: chunk.in_flight_seconds)
+    # necessarily index 0 once the breakdown is sorted by chunk index. Identify
+    # it by the shortest wait: a sibling cancelled just after admission can
+    # briefly out-measure the leader on in-flight time under load, which made
+    # the previous `max(in_flight_seconds)` pick the wrong chunk (#2315).
+    leader = min(timings.chunks, key=lambda chunk: chunk.queued_seconds)
     assert_that(leader.in_flight_seconds).is_greater_than_or_equal_to(0.01)
     for chunk in timings.chunks:
         if chunk is leader:
@@ -719,13 +729,15 @@ def test_empty_review_still_carries_a_timings_block(tmp_path: Path) -> None:
 
     result = run_review(
         empty,
-        provider=_provider(),
-        ai_config=AIConfig(enabled=True, transport=AITransport.API),
-        depth=1,
-        checklist_items=[],
-        checklist_text="",
-        classifications=[],
-        context_collection_seconds=0.25,
+        options=ReviewSessionOptions(
+            provider=_provider(),
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            depth=1,
+            checklist_items=[],
+            checklist_text="",
+            classifications=[],
+            context_collection_seconds=0.25,
+        ),
     )
 
     timings = _timings_of(result=result)
@@ -798,11 +810,11 @@ def test_sticky_comment_carries_the_timing_summary(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary repository root.
     """
-    from lintro.ai.review.github_sticky import build_sticky_comment
+    from lintro.ai.review.sticky import build_sticky_comment
 
     result = _run(tmp_path=tmp_path, chunk_count=1)
 
-    sticky = build_sticky_comment(result=result, transport="api")
+    sticky = build_sticky_comment(request=StickyRequest(result=result, transport="api"))
 
     expected = format_timing_summary(timings=_timings_of(result=result))
     assert_that(sticky).contains(f"<sub>Timings: {expected}</sub>")

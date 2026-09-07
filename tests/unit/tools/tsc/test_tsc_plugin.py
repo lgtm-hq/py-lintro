@@ -9,7 +9,7 @@ from typing import Any, cast
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.tsc import TscPlugin
+from lintro.tools.tsc.definition import TscPlugin
 
 # =============================================================================
 # Tests for TscPlugin._find_tsconfig method

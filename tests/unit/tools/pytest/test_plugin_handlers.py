@@ -1,4 +1,4 @@
-"""Tests for lintro.tools.implementations.pytest.pytest_handlers module."""
+"""Tests for lintro.tools.pytest.pytest_handlers module."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
-from lintro.tools.implementations.pytest.pytest_handlers import (
+from lintro.tools.pytest.pytest_handlers import (
     handle_check_plugins,
     handle_collect_only,
     handle_fixture_info,
@@ -41,8 +41,8 @@ def _make_mock_tool(name: str = "pytest") -> MagicMock:
 # =============================================================================
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.get_pytest_version_info")
-@patch("lintro.tools.implementations.pytest.pytest_handlers.list_installed_plugins")
+@patch("lintro.tools.pytest.pytest_handlers.get_pytest_version_info")
+@patch("lintro.tools.pytest.pytest_handlers.list_installed_plugins")
 def test_handle_list_plugins_with_plugins(
     mock_list: MagicMock,
     mock_version: MagicMock,
@@ -69,8 +69,8 @@ def test_handle_list_plugins_with_plugins(
     assert_that(result.output).contains("pytest-mock (3.11.1)")
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.get_pytest_version_info")
-@patch("lintro.tools.implementations.pytest.pytest_handlers.list_installed_plugins")
+@patch("lintro.tools.pytest.pytest_handlers.get_pytest_version_info")
+@patch("lintro.tools.pytest.pytest_handlers.list_installed_plugins")
 def test_handle_list_plugins_no_plugins(
     mock_list: MagicMock,
     mock_version: MagicMock,
@@ -96,7 +96,7 @@ def test_handle_list_plugins_no_plugins(
 # =============================================================================
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.check_plugin_installed")
+@patch("lintro.tools.pytest.pytest_handlers.check_plugin_installed")
 def test_handle_check_plugins_all_installed(mock_check: MagicMock) -> None:
     """handle_check_plugins reports all installed.
 
@@ -113,7 +113,7 @@ def test_handle_check_plugins_all_installed(mock_check: MagicMock) -> None:
     assert_that(result.issues_count).is_equal_to(0)
 
 
-@patch("lintro.tools.implementations.pytest.pytest_handlers.check_plugin_installed")
+@patch("lintro.tools.pytest.pytest_handlers.check_plugin_installed")
 def test_handle_check_plugins_some_missing(mock_check: MagicMock) -> None:
     """handle_check_plugins reports missing plugins.
 

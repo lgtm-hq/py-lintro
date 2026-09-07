@@ -5,13 +5,14 @@ from __future__ import annotations
 import asyncio
 import os
 import subprocess  # nosec B404 - CompletedProcess objects are constructed to drive the transport under test
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
 
 import pytest
 from assertpy import assert_that
 
 from lintro.ai.exceptions import AINotAvailableError, AIProviderError
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.cli_capabilities import CliCapabilityGuard
 from lintro.ai.providers.cli_contracts import (
     CLI_CONTRACTS,
     CliContract,
@@ -174,7 +175,9 @@ async def test_check_version_floor_is_inert_without_contract() -> None:
     with patch_cli_exec(return_value=_completed()) as mock_run:
         await unguarded.check_version_floor()
 
-    assert_that(mock_run.call_count).is_equal_to(0)
+    # No contract means no probe: nothing was spawned and no child was created.
+    assert_that(mock_run.transport_calls).is_empty()
+    assert_that(mock_run.processes).is_empty()
 
 
 # -- Proactive --help gate --------------------------------------------------
@@ -504,24 +507,56 @@ async def test_run_guarded_matches_flag_on_token_boundary(
 # -- Subprocess execution ---------------------------------------------------
 
 
-async def test_run_starts_child_in_new_session(transport: _FakeTransport) -> None:
-    """Agent children must not share lintro's process group (#2156)."""
-    process = MagicMock()
-    process.communicate = AsyncMock(return_value=(b'{"ok": true}', b""))
-    process.returncode = 0
-    process.pid = 4242
+async def test_run_starts_child_in_new_session(
+    transport: _FakeTransport,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent children must not share lintro's process group (#2156).
 
-    with patch(
+    Args:
+        transport: The CLI transport under test.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    spawn_kwargs: list[dict[str, Any]] = []
+
+    class _Process:
+        """Stand-in for the spawned agent child process."""
+
+        returncode = 0
+        pid = 4242
+
+        async def communicate(self, *_args: Any, **_kwargs: Any) -> tuple[bytes, bytes]:
+            """Return the canned agent payload.
+
+            Args:
+                *_args: Ignored positional extras (an optional stdin payload).
+                **_kwargs: Ignored keyword extras.
+
+            Returns:
+                tuple[bytes, bytes]: Stdout and stderr of the fake child.
+            """
+            return b'{"ok": true}', b""
+
+    async def _create_subprocess_exec(*_args: Any, **kwargs: Any) -> _Process:
+        spawn_kwargs.append(kwargs)
+        return _Process()
+
+    monkeypatch.setattr(
         "asyncio.create_subprocess_exec",
-        AsyncMock(return_value=process),
-    ) as spawn:
-        await transport.run(["/usr/local/bin/fake", "--always"], timeout=5.0)
+        _create_subprocess_exec,
+    )
 
-    kwargs = spawn.call_args.kwargs
+    result = await transport.run(
+        ["/usr/local/bin/fake", "--always"],
+        timeout=5.0,
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(spawn_kwargs).is_length(1)
     if os.name == "posix":
-        assert_that(kwargs.get("start_new_session")).is_true()
+        assert_that(spawn_kwargs[0].get("start_new_session")).is_true()
     else:
-        assert_that(kwargs).does_not_contain_key("start_new_session")
+        assert_that(spawn_kwargs[0]).does_not_contain_key("start_new_session")
 
 
 async def test_run_raises_provider_error_on_timeout(transport: _FakeTransport) -> None:
@@ -607,3 +642,39 @@ def test_contract_flags_are_distinct_and_well_formed(provider: AIProvider) -> No
     assert_that(required.intersection(optional)).is_empty()
     for flag in required | optional:
         assert_that(flag).starts_with("--")
+
+
+def test_transport_exposes_the_guard_as_a_collaborator() -> None:
+    """The guard is a separate object the transport owns and delegates to (#1871)."""
+    transport = _FakeTransport(
+        binary_path="/bin/fake",
+        binary_name="fake",
+        install_hint="Install fake.",
+        contract=_TEST_CONTRACT,
+    )
+
+    assert_that(transport.capabilities).is_instance_of(CliCapabilityGuard)
+    assert_that(transport.capabilities.contract).is_same_as(_TEST_CONTRACT)
+    assert_that(transport.contract).is_same_as(_TEST_CONTRACT)
+
+
+@pytest.mark.asyncio
+async def test_note_unsupported_flag_short_circuits_the_help_gate() -> None:
+    """A flag the backstop rejected is never re-offered by the proactive gate."""
+    transport = _FakeTransport(
+        binary_path="/bin/fake",
+        binary_name="fake",
+        install_hint="Install fake.",
+        contract=_TEST_CONTRACT,
+    )
+    transport.capabilities.note_unsupported_flag("--resume")
+
+    # The help text advertises --resume, so a probe that ran would answer
+    # true: only a short-circuit can make this false, and ``call_count``
+    # proves no probe was spawned at all.
+    help_text = "  --resume <id>  Resume a session\n"
+    with patch_cli_exec(return_value=_completed(stdout=help_text)) as mock_run:
+        supported = await transport.supports_flag("--resume")
+
+    assert_that(supported).is_false()
+    assert_that(mock_run.call_count).is_equal_to(0)

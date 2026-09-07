@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.black import BlackPlugin
+from lintro.tools.black.definition import BlackPlugin
 
 # Tests for BlackPlugin.check method
 

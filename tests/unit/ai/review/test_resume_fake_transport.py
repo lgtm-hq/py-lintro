@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from assertpy import assert_that
 
@@ -25,6 +25,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.resume import plan_resume
+from lintro.ai.review.session import ReviewSessionOptions
 
 
 def _diff(*, path: str, added: str) -> str:
@@ -72,6 +73,9 @@ def _payload(*, file: str) -> str:
 def _provider() -> MagicMock:
     """Return a session-less provider whose complete() is unused."""
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "fake-model"
     provider.name = "fake"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)
@@ -101,18 +105,20 @@ def _run(
             provider="fake",
         )
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.provider_call.call_ai", side_effect=_call_ai):
         return run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            prior_state=prior,
-            force_full=force_full,
-            enforce_cost_cap=False,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                prior_state=prior,
+                force_full=force_full,
+                enforce_cost_cap=False,
+            ),
         )
 
 
@@ -254,27 +260,29 @@ def _run_capped(
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=chunks,
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_call_ai),
     ):
         return run_review(
             context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_cost_usd=0.01,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_cost_usd=0.01,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                prior_state=prior,
+                force_full=False,
+                enforce_cost_cap=True,
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            prior_state=prior,
-            force_full=False,
-            enforce_cost_cap=True,
         )
 
 

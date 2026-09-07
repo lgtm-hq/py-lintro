@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.markdownlint import MarkdownlintPlugin
+from lintro.tools.markdownlint.definition import MarkdownlintPlugin
 
 
 @pytest.fixture

@@ -3,65 +3,9 @@
 from __future__ import annotations
 
 import shutil
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
 
 import pytest
-
-
-def astro_check_is_available() -> bool:
-    """Check if astro is installed and actually works.
-
-    This checks both that the command exists AND that it executes successfully,
-    which handles cases where a wrapper script exists but the underlying
-    tool isn't installed. Also checks bunx/npx fallbacks.
-
-    Returns:
-        True if astro is installed and working, False otherwise.
-    """
-    # Try direct astro command first
-    if shutil.which("astro") is not None:
-        try:
-            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-                ["astro", "--version"],
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-            if result.returncode == 0:
-                return True
-        except (subprocess.TimeoutExpired, OSError):
-            pass
-
-    # Try bunx fallback
-    if shutil.which("bunx") is not None:
-        try:
-            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-                ["bunx", "astro", "--version"],
-                capture_output=True,
-                timeout=30,
-                check=False,
-            )
-            if result.returncode == 0:
-                return True
-        except (subprocess.TimeoutExpired, OSError):
-            pass
-
-    # Try npx fallback
-    if shutil.which("npx") is not None:
-        try:
-            result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-                ["npx", "astro", "--version"],
-                capture_output=True,
-                timeout=30,
-                check=False,
-            )
-            if result.returncode == 0:
-                return True
-        except (subprocess.TimeoutExpired, OSError):
-            pass
-
-    return False
 
 
 def _find_project_root() -> Path:

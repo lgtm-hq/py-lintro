@@ -109,7 +109,6 @@ clean:
     find . -type d -name "*.egg" -exec rm -rf {} + || true
     find . -type d -name ".pytest_cache" -exec rm -rf {} + || true
     find . -type d -name "htmlcov" -exec rm -rf {} + || true
-    find . -type d -name ".tox" -exec rm -rf {} + || true
 
 # Watch unit tests and re-run on change (requires watchexec)
 # `--` keeps pytest flags from being eaten by just.

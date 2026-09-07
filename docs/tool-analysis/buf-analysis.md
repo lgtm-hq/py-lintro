@@ -10,8 +10,9 @@ two of its capabilities:
 - **`buf format`** — a deterministic protobuf formatter, used both to detect unformatted
   files and to rewrite them in place.
 
-buf is registered as a combined **linter + formatter** (`can_fix=True`) with priority
-`50`, matching `*.proto` files. Native configs: `buf.yaml`, `buf.work.yaml`.
+buf is registered as a combined **linter + formatter** (`can_fix=True`) matching
+`*.proto` files; its execution position is derived from its claims. Native configs:
+`buf.yaml`, `buf.work.yaml`.
 
 ## Installation
 

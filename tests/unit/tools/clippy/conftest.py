@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.clippy import ClippyPlugin
+from lintro.tools.clippy.definition import ClippyPlugin
 
 
 @pytest.fixture

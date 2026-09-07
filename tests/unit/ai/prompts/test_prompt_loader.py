@@ -7,8 +7,6 @@ template resources inside a freshly built wheel.
 
 from __future__ import annotations
 
-import subprocess  # nosec B404 - subprocess drives uv build under test; invocations use shell=False
-import tempfile
 import zipfile
 from pathlib import Path
 
@@ -155,28 +153,23 @@ def test_loader_is_cached_returns_same_object() -> None:
 
 
 @pytest.mark.slow
-def test_templates_present_in_built_wheel() -> None:
-    """A freshly built wheel ships every prompt template resource."""
-    project_root = Path(__file__).parents[4]
-    with tempfile.TemporaryDirectory() as tmpdir:
-        dist_dir = Path(tmpdir) / "dist"
-        build_result = subprocess.run(  # nosec B603 B607 - fixed argv run against uv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["uv", "build", "--wheel", "--out-dir", str(dist_dir)],
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert_that(build_result.returncode).described_as(
-            build_result.stderr,
-        ).is_equal_to(0)
+@pytest.mark.timeout(600)
+def test_templates_present_in_built_wheel(built_distributions: Path) -> None:
+    """A freshly built wheel ships every prompt template resource.
 
-        wheels = list(dist_dir.glob("*.whl"))
-        assert_that(wheels).is_not_empty()
+    Uses the session-wide ``built_distributions`` fixture rather than running
+    its own ``uv build``: two concurrent builds share the project's scratch
+    directories and corrupt each other under ``-n auto`` (#2315).
 
-        with zipfile.ZipFile(wheels[0]) as wheel:
-            names = set(wheel.namelist())
+    Args:
+        built_distributions: Directory holding the session's wheel and sdist.
+    """
+    wheels = sorted(built_distributions.glob("*.whl"))
+    assert_that(wheels).is_not_empty()
 
-        for rel in _EXPECTED_TEMPLATE_PATHS:
-            resource = f"lintro/ai/prompts/templates/{rel}"
-            assert_that(names).described_as(resource).contains(resource)
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        names = set(wheel.namelist())
+
+    for rel in _EXPECTED_TEMPLATE_PATHS:
+        resource = f"lintro/ai/prompts/templates/{rel}"
+        assert_that(names).described_as(resource).contains(resource)

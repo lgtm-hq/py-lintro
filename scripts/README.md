@@ -106,9 +106,6 @@ Scripts for GitHub Actions workflows and continuous integration.
 
 | Script                                      | Purpose                                                                                                                          | Usage                                                                                                                      |
 | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `coverage-manager.sh`                       | Unified coverage ops (extract/badge/comment/threshold)                                                                           | `./scripts/utils/coverage-manager.sh --help`                                                                               |
-| `ci-log.sh`                                 | Generic CI logging utility for workflow status messages                                                                          | `./scripts/ci/ci-log.sh <message>`                                                                                         |
-| `ci-post-pr-comment.sh`                     | Post comments to PRs using GitHub API                                                                                            | `./scripts/ci/ci-post-pr-comment.sh [file]`                                                                                |
 | `post-pr-delete-previous.sh`                | Delete previous PR comments by marker                                                                                            | `./scripts/ci/post-pr-delete-previous.sh --help`                                                                           |
 | `lintro-report-generate.sh`                 | Generate comprehensive Lintro reports                                                                                            | `./scripts/ci/lintro-report-generate.sh`                                                                                   |
 | `pull-lintro-image.sh`                      | Pull lintro Docker image from GHCR and log digest                                                                                | `./scripts/ci/testing/pull-lintro-image.sh`                                                                                |
@@ -121,22 +118,22 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `smoke-test-ai-tools.sh`                    | Run every baked agent CLI in the ai-tools staging image                                                                          | `IMAGE=<ref> PLATFORM=linux/arm64 ./scripts/ci/smoke-test-ai-tools.sh`                                                     |
 | `cosign-sign-images.sh`                     | Sign promoted image digests with Cosign keyless OIDC                                                                             | `./scripts/ci/cosign-sign-images.sh --help`                                                                                |
 | `coverage-badge-update.sh`                  | Generate and update coverage badge                                                                                               | `./scripts/ci/coverage-badge-update.sh --help`                                                                             |
-| `sbom-generate.sh`                          | Generate and export SBOMs via bomctl                                                                                             | `./scripts/ci/sbom-generate.sh --help`                                                                                     |
 | `egress-audit-lite.sh`                      | Audit reachability of allowed endpoints                                                                                          | `./scripts/ci/egress-audit-lite.sh --help`                                                                                 |
-| `detect-changes.sh`                         | Detect repo diffs and set has_changes output                                                                                     | `./scripts/ci/detect-changes.sh --help`                                                                                    |
 | `detect-fork-pr.sh`                         | Detect fork PRs and set `is-fork` output for conditional steps                                                                   | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                                                                   |
 | `resolve-pipeline-relevance.sh`             | Resolve heavy-pipeline path relevance and set `pipeline` output                                                                  | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                                                        |
 | `release-bump-only.sh`                      | Classify automated version-bump PRs via diff allowlist (#1362)                                                                   | `./scripts/ci/release-bump-only.sh --help`                                                                                 |
 | `dogfood-changed-files.sh`                  | Lint only PR-changed files via lintro Docker (full-repo fallback)                                                                | `./scripts/ci/dogfood-changed-files.sh --help`                                                                             |
 | `dogfood-skip-gate.sh`                      | Fail dogfood CI on non-allowlisted skipped tools                                                                                 | `LINTRO_IMAGE=<image> ./scripts/ci/dogfood-skip-gate.sh`                                                                   |
 | `check-dogfood-skips.py`                    | Validate dogfood skip JSON against the committed allowlist                                                                       | `python3 scripts/ci/check-dogfood-skips.py --help`                                                                         |
+| `import_matrix.py`                          | Report lintro's package import matrix and two-way cycles (#2290)                                                                 | `uv run python scripts/ci/import_matrix.py`                                                                                |
 | `classify-lint-timeout.py`                  | Classify a lintro JSON report as a tool-execution-timeout flake (#1653)                                                          | `python3 scripts/ci/classify-lint-timeout.py --help`                                                                       |
 | `classify-nightly-dogfood-failure.py`       | Decide whether a nightly dogfood failure pings the tracker (#2246)                                                               | `python3 scripts/ci/classify-nightly-dogfood-failure.py`                                                                   |
 | `evaluate-test-gate.sh`                     | Evaluate upstream compat/coverage results for required-check gate                                                                | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh`                                         |
 | `evaluate-code-quality-gate.sh`             | Select effective dogfooding lint attempt for code-quality gate                                                                   | `./scripts/ci/evaluate-code-quality-gate.sh --help`                                                                        |
 | `run-code-quality-gate.sh`                  | Evaluate + assert docker-ci code-quality gate for required rollup                                                                | `./scripts/ci/run-code-quality-gate.sh --help`                                                                             |
-| `assert-required-check.sh`                  | Fail required check unless upstream passed or infra flake                                                                        | `./scripts/ci/assert-required-check.sh --help`                                                                             |
+| `assert-required-check.sh`                  | Fail required check unless upstream reported a passing lint verdict                                                              | `./scripts/ci/assert-required-check.sh --help`                                                                             |
 | `is-infra-flake-failure.sh`                 | Classify infra flakes (exit 143, cancelled, passed lint, tool timeout)                                                           | `./scripts/ci/is-infra-flake-failure.sh --help`                                                                            |
+| `summarize-code-quality-gate.sh`            | Explain an infra-flaked code-quality gate in the job summary (#2296)                                                             | `./scripts/ci/summarize-code-quality-gate.sh --help`                                                                       |
 | `fail-on-security-audit.sh`                 | Fail CI when security audit finds vulnerabilities                                                                                | `./scripts/ci/fail-on-security-audit.sh`                                                                                   |
 | `free-disk-space.sh`                        | Free disk space on CI runner for Docker builds                                                                                   | `./scripts/ci/free-disk-space.sh`                                                                                          |
 | `memory-sampler.sh`                         | Background vmstat/free memory sampler around binary builds (#1707)                                                               | `./scripts/ci/memory-sampler.sh start <log> <pid-file>`                                                                    |
@@ -178,10 +175,14 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `compute-new-manifest-tools.py`             | Diff tool names between an old and new manifest (added names)                                                                    | `python scripts/ci/compute-new-manifest-tools.py --help`                                                                   |
 | `generate-tool-versions.py`                 | Generate the gitignored `_generated_versions.py` and render `manifest.json` from `manifest.src.json` (shim over `lintro_build/`) | `python3 scripts/ci/generate-tool-versions.py [--check]`                                                                   |
 | `compile-semgrep-lock.sh`                   | Recompile hash-pinned `requirements-semgrep.txt` from the `.in` pin                                                              | `./scripts/ci/compile-semgrep-lock.sh`                                                                                     |
-| `generate-builtin-tool-index.py`            | Generate the gitignored `lintro/plugins/_builtin_index.py` from the definitions dir (shim over `lintro_build/`)                  | `python3 scripts/ci/generate-builtin-tool-index.py [--check]`                                                              |
+| `check-semgrep-lock.sh`                     | Fail when the committed `requirements-semgrep.txt` drifted from the `.in` pin (docker-ci `semgrep-lock` gate)                    | `./scripts/ci/check-semgrep-lock.sh`                                                                                       |
+| `semgrep-lock-lib.sh`                       | Shared compile invocation sourced by the two semgrep lockfile scripts (library; running it prints help)                          | `source scripts/ci/semgrep-lock-lib.sh`                                                                                    |
+| `generate-builtin-tool-index.py`            | Generate the gitignored `lintro/plugins/_builtin_index.py` from the per-tool packages (shim over `lintro_build/`)                | `python3 scripts/ci/generate-builtin-tool-index.py [--check]`                                                              |
 | `smoke-test-binary.py`                      | Assert a built binary's tool registry is populated (`#2006`)                                                                     | `python scripts/ci/smoke-test-binary.py dist/nuitka/lintro`                                                                |
 | `stage-python-coverage-html.sh`             | Stage flat HTML coverage for GitHub Pages bundling                                                                               | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                                                                |
 | `render-coverage-json-html.py`              | Render a simple HTML index from CI `coverage.json` for Pages bundling                                                            | `python scripts/ci/testing/render-coverage-json-html.py --help`                                                            |
+| `scan_duplicate_test_bodies.py`             | Report test functions sharing a normalised body and module context (#2315)                                                       | `python scripts/ci/testing/scan_duplicate_test_bodies.py`                                                                  |
+| `scan_mock_only_tests.py`                   | Report tests whose only assertions read mock call bookkeeping (#2315)                                                            | `python scripts/ci/testing/scan_mock_only_tests.py`                                                                        |
 | `update-tools-image-digest.py`              | Update both Renovate candidate `lintro-tools` Dockerfile digest pins                                                             | `python3 scripts/ci/update-tools-image-digest.py --help`                                                                   |
 | `resolve-renovate-pr.py`                    | Resolve the open in-repository Renovate PR and candidate image tag                                                               | `python3 scripts/ci/resolve-renovate-pr.py`                                                                                |
 | `promote-tools-candidate.py`                | Classify main update and resolve the newest Renovate candidate                                                                   | `python3 scripts/ci/promote-tools-candidate.py`                                                                            |
@@ -204,7 +205,6 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | `preview-pages-local.sh`        | Build Pages-like dist with optional local coverage bundles | `./scripts/ci/site/preview-pages-local.sh --help`        |
 | `prepare-lychee-action-args.sh` | Prepare lychee-action args for post-build link checking    | `./scripts/ci/site/prepare-lychee-action-args.sh --help` |
 | `migrate-docs-content.py`       | Copy `docs/` into `apps/site/src/content/docs/`            | `uv run python scripts/ci/site/migrate-docs-content.py`  |
-| `fix-markdown-docs.py`          | Fix markdownlint issues in migrated Astro docs content     | `uv run python scripts/ci/site/fix-markdown-docs.py`     |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 
@@ -263,15 +263,12 @@ Shared utilities and helper scripts.
 | `merge_pr_comment.py`                | Merge-update PR comment body, collapsing history      | `python scripts/utils/merge_pr_comment.py --help`                       |
 | `extract-coverage.py`                | Extract coverage from XML files                       | `python scripts/utils/extract-coverage.py`                              |
 | `extract_comment_body.py`            | Extract comment body from GitHub API JSON by ID       | `python scripts/utils/extract_comment_body.py <json> <comment_id>`      |
-| `extract-version.py`                 | Print `version=X.Y.Z` from TOML                       | `python scripts/utils/extract-version.py`                               |
 | `find_comment_with_marker.py`        | Find GitHub comment ID containing a specific marker   | `python scripts/utils/find_comment_with_marker.py <json> <marker>`      |
-| `generate_docs.py`                   | Generate documentation from docstrings                | `python scripts/utils/generate_docs.py`                                 |
 | `install-ai-tools.sh`                | Install the AI agent CLIs (claude, codex, agent)      | `./scripts/utils/install-ai-tools.sh --help`                            |
 | `install-semgrep.sh`                 | Install lockfile-pinned semgrep into an isolated venv | `./scripts/utils/install-semgrep.sh --help`                             |
 | `install-tools.sh`                   | Install external tools (hadolint, prettier, etc.)     | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
 | `install.sh`                         | Install Lintro with dependencies                      | `./scripts/utils/install.sh`                                            |
 | `json_encode_body.py`                | JSON encode comment body for GitHub API requests      | `python scripts/utils/json_encode_body.py <file_or_stdin>`              |
-| `update-version.py`                  | Update version in pyproject.toml                      | `python scripts/utils/update-version.py <version>`                      |
 | `utils.sh`                           | Shared utilities for other scripts                    | Sourced by other scripts                                                |
 | `bootstrap-env.sh`                   | Bootstrap CI env with uv and tools                    | `./scripts/utils/bootstrap-env.sh [--dry-run] [--verbose] --help`       |
 | `install-uv.sh`                      | Install uv from GitHub Releases                       | `./scripts/utils/install-uv.sh [--dry-run] [--verbose]`                 |
@@ -353,50 +350,6 @@ export TEST_PASSED=100 TEST_FAILED=0 TEST_TOTAL=100
 
 `test-ci.yml` uses lgtm-ci `reusable-test-python.yml` for coverage PR comments. The JSON
 format uses single-space after colons for compatibility with grep-based parsers.
-
-#### `sbom-generate.sh`
-
-Generate and export SBOMs using `bomctl` with optional merge and multiple output formats
-(CycloneDX/SPDX). Supports dry-run planning. The script requires the `bomctl` binary to
-be installed (no container fallback).
-
-Features:
-
-- Fetch from GitHub dependency graph (public repos) via `bomctl fetch`
-- Import local SBOM files and optionally merge them
-- Export CycloneDX (1.5/1.6) JSON/XML and SPDX 2.3 JSON files
-- Dry-run mode to preview actions; optional `--netrc` for private repos
-
-Usage:
-
-```bash
-# Show help
-./scripts/ci/sbom-generate.sh --help
-
-# Basic: fetch current repo and export CycloneDX 1.5 JSON to dist/sbom/
-./scripts/ci/sbom-generate.sh
-
-# Multiple formats and XML encoding for CycloneDX
-./scripts/ci/sbom-generate.sh \
-  --format cyclonedx-1.6 --format spdx-2.3 \
-  --encoding xml \
-  --output-dir dist/sbom
-
-# Import additional SBOMs and merge
-./scripts/ci/sbom-generate.sh \
-  --skip-fetch \
-  --import sboms/app.cdx.json \
-  --import sboms/image.cdx.json \
-  --alias combined --name lintro-sbom
-
-# Dry run to preview commands
-./scripts/ci/sbom-generate.sh --dry-run
-```
-
-Notes:
-
-- For private GitHub repos, use `--netrc` with a configured `~/.netrc`.
-- Outputs are written under `dist/sbom/` by default.
 
 ### Docker Scripts
 
@@ -524,7 +477,27 @@ Installs the lockfile-pinned semgrep into an isolated venv and symlinks `semgrep
 ```bash
 ./scripts/utils/install-semgrep.sh --local
 ./scripts/utils/install-semgrep.sh --docker
+```
+
+#### `compile-semgrep-lock.sh` / `check-semgrep-lock.sh`
+
+`compile-semgrep-lock.sh` re-resolves `requirements-semgrep.txt` from the
+`requirements-semgrep.in` pin (hash-pinned, Python 3.11 floor). Run it by hand whenever
+the `.in` pin changes and commit the result — nothing regenerates it automatically, and
+the Mend-hosted Renovate app never executed the `postUpgradeTasks` that once claimed
+otherwise (#2436).
+
+`check-semgrep-lock.sh` is the CI enforcement: the `semgrep-lock` job in `docker-ci.yml`
+re-resolves into a temporary file through the same shared helper, diffs it against the
+committed lockfile ignoring uv's generated header comments, and fails with the diff plus
+the recompile command. The named check goes red and `publish` will not promote an image;
+the image build itself still reports, because it is a required check.
+
+**Usage:**
+
+```bash
 ./scripts/ci/compile-semgrep-lock.sh
+./scripts/ci/check-semgrep-lock.sh
 ```
 
 #### `install-tools.sh`

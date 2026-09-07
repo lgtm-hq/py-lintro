@@ -73,7 +73,7 @@ def test_parse_skips_entry_without_id(tmp_path: Path) -> None:
     """Skip entries that have no id field."""
     toml_file = tmp_path / ".osv-scanner.toml"
     toml_file.write_text(
-        "[[IgnoredVulns]]\n" "ignoreUntil = 2026-12-31\n" 'reason = "Missing id"\n',
+        '[[IgnoredVulns]]\nignoreUntil = 2026-12-31\nreason = "Missing id"\n',
     )
 
     entries = parse_suppressions(toml_file)
@@ -84,7 +84,7 @@ def test_parse_skips_entry_without_ignore_until(tmp_path: Path) -> None:
     """Skip entries that have no ignoreUntil field."""
     toml_file = tmp_path / ".osv-scanner.toml"
     toml_file.write_text(
-        "[[IgnoredVulns]]\n" 'id = "GHSA-1111-aaaa-bbbb"\n' 'reason = "Missing date"\n',
+        '[[IgnoredVulns]]\nid = "GHSA-1111-aaaa-bbbb"\nreason = "Missing date"\n',
     )
 
     entries = parse_suppressions(toml_file)
@@ -95,9 +95,7 @@ def test_parse_missing_reason_defaults_empty(tmp_path: Path) -> None:
     """Missing reason field defaults to empty string."""
     toml_file = tmp_path / ".osv-scanner.toml"
     toml_file.write_text(
-        "[[IgnoredVulns]]\n"
-        'id = "GHSA-1111-aaaa-bbbb"\n'
-        "ignoreUntil = 2026-12-31\n",
+        '[[IgnoredVulns]]\nid = "GHSA-1111-aaaa-bbbb"\nignoreUntil = 2026-12-31\n',
     )
 
     entries = parse_suppressions(toml_file)

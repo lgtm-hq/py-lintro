@@ -16,6 +16,10 @@ from lintro.ai.review.glob_utils import path_matches_any_glob
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.path_utils import is_e2e_test_path, is_test_path
+from lintro.ai.review.vocab import (
+    DEPENDENCY_MANIFEST_EXTRA_NAMES,
+    SHARED_MANIFEST_NAMES,
+)
 
 _DOMAIN_GLOBS: dict[FileDomain, tuple[str, ...]] = {
     FileDomain.SHELL: (
@@ -85,19 +89,9 @@ _CONFIG_SUFFIXES: frozenset[str] = frozenset(
 _DOC_SUFFIXES: frozenset[str] = frozenset({".md", ".rst"})
 _SHELL_SCRIPT_SUFFIXES: frozenset[str] = frozenset({".sh", ".bash", ".bats"})
 _DEPENDENCY_TEXT_PREFIXES: tuple[str, ...] = ("requirements", "constraints")
-_DEPENDENCY_MANIFEST_NAMES: frozenset[str] = frozenset(
-    {
-        "bun.lock",
-        "bun.lockb",
-        "cargo.toml",
-        "composer.json",
-        "go.mod",
-        "npm-shrinkwrap.json",
-        "package.json",
-        "package-lock.json",
-        "pnpm-lock.yaml",
-        "pyproject.toml",
-    },
+# The shared core plus the classifier's ecosystem-agnostic extras (issue #1973).
+_DEPENDENCY_MANIFEST_NAMES: frozenset[str] = (
+    SHARED_MANIFEST_NAMES | DEPENDENCY_MANIFEST_EXTRA_NAMES
 )
 
 

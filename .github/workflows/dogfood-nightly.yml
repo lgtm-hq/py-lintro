@@ -38,15 +38,16 @@ jobs:
     # Same reusable workflow and tool options as the docker-ci.yml full run
     # (dogfooding-lint) so nightly coverage matches the pre-merge gate.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f # v0.69.6
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f' # v0.69.6
       job-name: '🌙 Nightly Dogfooding Lint'
+      # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
@@ -57,7 +58,7 @@ jobs:
       # and Renovate has a version to bump. Do not hand-edit one site alone —
       # tests/unit/test_workflow_wiring.py fails on a partial bump.
       lintro-image: >-
-        ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29
+        ghcr.io/lgtm-hq/py-lintro:0.147.0@sha256:b5624b8122dcfbb17b0640f18768feb4d23f05c6dac18eb6f2edd096d70ad9be
 
   # Bounded retry (1 attempt) of the full-repo lint, mirroring
   # `dogfooding_lint_retry` in docker-ci.yml (#1313, #2246). It runs only when
@@ -85,15 +86,16 @@ jobs:
         )
       )
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f # v0.69.6
     permissions:
       contents: read
       packages: read # pull lintro-image from GHCR in reusable-quality-lint
     with:
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f' # v0.69.6
       job-name: '🌙 Nightly Dogfooding Lint (retry)'
+      # black:timeout=120: the 30s default timed out on the full repo (#2352).
       lintro-tool-options: >-
-        pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+        pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
       egress-policy: block
       # No CI build in this workflow: lint main with the pinned release
       # image (same digest the fork-PR fallback in docker-ci.yml uses).
@@ -104,7 +106,7 @@ jobs:
       # and Renovate has a version to bump. Do not hand-edit one site alone —
       # tests/unit/test_workflow_wiring.py fails on a partial bump.
       lintro-image: >-
-        ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29
+        ghcr.io/lgtm-hq/py-lintro:0.147.0@sha256:b5624b8122dcfbb17b0640f18768feb4d23f05c6dac18eb6f2edd096d70ad9be
 
   verify-pinned-image-tools:
     name: 🔎 Verify Pinned Image Tools
@@ -125,7 +127,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -153,7 +155,7 @@ jobs:
           # Same pinned release image dogfood-full lints with; bumped as one
           # set by Renovate (see the dogfood-full job above).
           IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29
+            ghcr.io/lgtm-hq/py-lintro:0.147.0@sha256:b5624b8122dcfbb17b0640f18768feb4d23f05c6dac18eb6f2edd096d70ad9be
         run: scripts/ci/verify-image-manifest-tools.sh
 
   # No-silent-skip gate (#1510, epic #1508): dogfood-full runs an external
@@ -182,7 +184,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -232,12 +234,13 @@ jobs:
         id: skips
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
+          # black:timeout=120: the 30s default timed out on the full repo (#2352).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same pinned release image dogfood-full lints with.
           # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29
+            ghcr.io/lgtm-hq/py-lintro:0.147.0@sha256:b5624b8122dcfbb17b0640f18768feb4d23f05c6dac18eb6f2edd096d70ad9be
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
@@ -281,7 +284,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -331,12 +334,13 @@ jobs:
         id: skips
         env:
           # Same tool coverage as dogfood-full so skip behaviour matches.
+          # black:timeout=120: the 30s default timed out on the full repo (#2352).
           TOOL_OPTIONS: >-
-            pydoclint:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+            pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
           # Same pinned release image dogfood-full lints with.
           # Bumped as one set by Renovate (see the dogfood-full job above).
           LINTRO_IMAGE: >-
-            ghcr.io/lgtm-hq/py-lintro:0.137.0@sha256:9b3cc2d9b347075967e1accc3ec4448c3f6f40ff74340a20608000b7cff53d29
+            ghcr.io/lgtm-hq/py-lintro:0.147.0@sha256:b5624b8122dcfbb17b0640f18768feb4d23f05c6dac18eb6f2edd096d70ad9be
         # Memory trace (#1761): this job is repeatedly killed mid-lint with
         # "runner has received a shutdown signal" + container EOF, and memory
         # pressure is the leading hypothesis. Samples stream into this step's
@@ -373,7 +377,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -442,11 +446,11 @@ jobs:
     # first failure opens `fix(ci): main workflow failed: dogfood-nightly`,
     # repeat failures comment on the open issue instead of piling up.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f # v0.69.6
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
       issues: write # open or ping the deduplicated failure issue
     with:
       workflow-key: dogfood-nightly
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f' # v0.69.6

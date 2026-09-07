@@ -23,9 +23,8 @@ Lintro uses a clear 5-tier configuration model that separates concerns:
 
 The five tiers above form the `LintroConfig` model's core configuration story
 (`lintro/config/lintro_config.py`). Additional optional sections — `review` (diff-review
-checklist), `score` (health-score weights, see **Health Score** below), and `watch`
-(`lintro watch` defaults; see [Watch Mode](watch-mode.md)) — configure specific commands
-rather than tool resolution.
+checklist) and `watch` (`lintro watch` defaults; see [Watch Mode](watch-mode.md)) —
+configure specific commands rather than tool resolution.
 
 ### Key Principles
 
@@ -57,7 +56,6 @@ The configuration system works in a specific order:
      still selected when their native config file is present at a scan root. Nested
      YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
      tools.
-   - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
@@ -204,7 +202,6 @@ Create a `.lintro-config.yaml` in your project root:
 # Tier 1: EXECUTION - What tools run and how
 execution:
   enabled_tools: [] # Empty = all enabled tools (config present); no-config first run is language-scoped
-  tool_order: priority # priority | alphabetical | [custom list]
   fail_fast: false
   parallel: true # Run tools in parallel (default: true)
   max_workers: 10 # Max parallel workers, 1-32 (default: CPU count)
@@ -259,82 +256,85 @@ lintro config --json
 The config command shows:
 
 - **Enforce settings**: Central `line_length`, `target_python`
-- **Tool execution order**: Based on configured strategy (priority, alphabetical, or
-  custom)
+- **Tool execution order**: Derived from each tool's declared claims
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
-### Health Score
+### Severity Counts and the Count Delta
 
-`lintro check` computes a single, deterministic **0-100 health score** that aggregates
-every issue across every tool into one trackable, CI-gateable, shareable number.
-
-```bash
-lintro check                  # normal output + health score line at the end
-lintro check --score          # print ONLY the score (for scripts/badges)
-lintro check --fail-under 75  # exit 1 if the score is below 75
-lintro check --output-format json   # score included under summary.health_score
-lintro badge                  # markdown shields.io badge for the score
-lintro badge --style flat     # shields.io style variant
-lintro badge --url            # bare badge URL
-lintro badge --json           # score, tier, color, url, and markdown as JSON
-```
-
-`--json` and `--url` are mutually exclusive. `lintro badge` runs a score-only check (or
-accepts `--score N` to skip the run) and prints a shields.io snippet such as
-`![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen)`. Badge color
-follows the tiers below: bright green (75+), yellow (50–74), red (<50).
-
-#### Scoring model
-
-Every issue is normalised to one of three severities (`ERROR`, `WARNING`, `INFO`) and
-weighted, then mapped onto 0-100 with a smoothly saturating penalty:
+`lintro check` reports what it found by severity, and how that changed since the
+previous check in the same workspace:
 
 ```text
-weighted  = error_weight   * n_errors
-          + warning_weight * n_warnings
-          + info_weight    * n_info
-
-score     = floor( 100 * scale / (scale + weighted) )
+Issues: 3 errors, 1 warning, 0 info
+Change since last run: -12 errors, +1 warning
 ```
 
-With the default weights (`ERROR=10`, `WARNING=3`, `INFO=1`) and `scale=100`, this has
-the following guaranteed properties:
+The change line is coloured by the **direction of improvement**, not by the arithmetic
+sign: fewer issues is better, so `-12 errors` is green and `+3 errors` is red. Only the
+severities that actually moved are listed; a run with no movement reads `no change`.
+Severities are compared most-severe first, so trading an error for a warning still reads
+as an improvement.
 
-- **Zero issues → exactly 100.** A clean run is unambiguous.
-- **Any issue → strictly below 100** (`floor` keeps it at most 99).
-- **Monotonic.** Adding an issue, or raising its severity, never raises the score.
-- **Bounded** to `[0, 100]` and **deterministic** — the result depends only on the
-  severity counts and the configured weights/scale, never on ordering or timing.
+The comparison baseline is stored as `severity-baseline.json` at the root of the log
+directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
+directory, so run pruning never removes it.
 
-The score hits 50 when the total weighted penalty equals `scale` (e.g. ten `ERROR`
-issues, or ~33 `WARNING` issues, with the defaults).
+Only a run that actually measured the project reads or writes it, and the same rule
+governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
+measure something else), is not a `fmt --dry-run` preview (those report as checks but
+count only the auto-fixable subset), and had at least one tool actually inspect files.
+Runs that do not qualify — an empty directory, an all-skipped toolset, a toolset that
+declined to run for want of configuration, an early exit — leave the previous baseline
+in place rather than overwriting it with zeroes, so the next comparison may be against
+an older run rather than the immediately preceding one. A missing or unreadable baseline
+simply omits the change line, and never fails a run.
 
-#### Score tiers
+A **tool timeout** is treated differently by the baseline and by the badge, on purpose.
+A check where one tool timed out but another inspected files still records a baseline:
+the alternative would let a single flaky `semgrep` or `gitleaks` timeout freeze the
+baseline, so the next successful run would report its delta against an arbitrarily old
+measurement. `lintro badge` refuses that same run, because a badge is a public claim and
+"0 issues" would assert something about findings that were never collected.
 
-| Score  | Tier         |
-| ------ | ------------ |
-| 75-100 | `great`      |
-| 50-74  | `needs-work` |
-| 0-49   | `critical`   |
+> **Removed in favour of this (issue #1739).** `lintro` used to compute a 0-100 "health
+> score" along with `check --score` and `check --fail-under N`. The score had no size
+> normalization, so ten errors scored the same in a 200-line project and a 500k-line
+> one, and enabling more tools mechanically lowered it. `--fail-under` gated CI on that
+> fabricated number; it is gone with no replacement, because `chk` already exits
+> non-zero when issues exist.
 
-#### Configuring the weights
+#### The badge
 
-Weights and the smoothing scale are tunable via the `score` section:
-
-```yaml
-# .lintro-config.yaml
-score:
-  error_weight: 10 # penalty per ERROR issue
-  warning_weight: 3 # penalty per WARNING issue
-  info_weight: 1 # penalty per INFO issue
-  scale: 100 # larger = the score decays more slowly
+```bash
+lintro badge                  # markdown shields.io badge for the issue counts
+lintro badge --style flat     # shields.io style variant
+lintro badge --url            # bare badge URL
+lintro badge --json           # counts, message, color, url, and markdown as JSON
 ```
+
+`--json` and `--url` are mutually exclusive. `lintro badge` runs a check and prints a
+shields.io snippet such as
+`![Lintro Issues](https://img.shields.io/badge/lintro-0%20issues-brightgreen)`. Badge
+colour is bright green for a clean run, red when any error was found, and yellow when
+only warnings or info issues remain.
+
+Passing any of `--errors N` / `--warnings N` / `--info N` skips the live check entirely
+and treats the severities you omit as zero.
+
+A live badge **refuses to publish** rather than assert a quality claim the run did not
+support. It exits non-zero, printing no snippet, when the check exited early, when any
+tool timed out, and when nothing actually inspected a file — which covers an empty
+directory, an all-skipped toolset, and a toolset that declined to run for want of
+configuration.
 
 #### JSON output
 
-In `--output-format json` the score is added **additively** under
-`summary.health_score`, leaving all existing keys untouched:
+In `--output-format json` the tallies appear under `summary`, alongside `total_issues`,
+`total_fixed` and `total_remaining`, which are unchanged. The `summary.health_score`
+object is **gone** — this is a breaking change for anything that read it.
+`severity_delta` appears only when a comparable baseline exists; on a first run the key
+is absent rather than zero. The **stdout** document looks like this:
 
 ```json
 {
@@ -342,12 +342,27 @@ In `--output-format json` the score is added **additively** under
     "total_issues": 3,
     "total_fixed": 0,
     "total_remaining": 3,
-    "health_score": {
-      "score": 88,
-      "tier": "great",
-      "severity_counts": { "error": 1, "warning": 0, "info": 0 },
-      "weighted_penalty": 10.0
-    }
+    "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
+    "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
+  }
+}
+```
+
+`--output` files and configured JSON artifacts carry the same two severity keys, but the
+rest of their `summary` object differs from the stdout document by design — it adds
+`timestamp` and `tools_run`, and omits `total_remaining`:
+
+```json
+{
+  "timestamp": "2026-09-06T00:00:00+00:00",
+  "action": "check",
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "tools_run": 12,
+    "timed_out_tools": [],
+    "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
+    "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
   }
 }
 ```
@@ -902,97 +917,75 @@ defaults:
 
 ### Tool Ordering Configuration
 
-Lintro supports configurable tool execution order. By default, tools run in priority
-order (formatters before linters), but you can change this behavior.
+**Execution order is not configurable.** Since #1742 it is _derived_ from what each tool
+declares it touches and what it does to it, so it is complete, verifiable and the same
+everywhere lintro reports it. The scalar `tool_order`, `tool_order_custom`,
+`tool_priorities` and `definition.priority` settings are deleted; so is the
+`[tool.lintro.post_checks]` table, whose only real job — running black after ruff — now
+falls out of the model.
 
-```toml
-[tool.lintro]
-# Tool order strategy: "priority" (default), "alphabetical", or "custom"
-tool_order = "priority"
+**Upgrading.** Leftover `tool_order`, `tool_order_custom`, `tool_priorities` or
+`[tool.lintro.post_checks]` keys warn as unknown and are ignored; a run that carried
+them keeps working and needs no edit to succeed. The one hard break is
+`lintro list-tools --show-conflicts`, which is removed and now fails as an unknown
+option — use `lintro check --explain-order` to see what orders a run instead.
 
-# For "custom" strategy, specify the order explicitly
-tool_order_custom = ["prettier", "black", "ruff", "markdownlint", "yamllint"]
+Derivation rules:
 
-# Override individual tool priorities (lower = runs first)
-tool_priorities = { ruff = 5, black = 10, prettier = 1 }
-```
+| Rule              | Behaviour                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| Phase per pattern | A tool occupies the earliest phase it holds there: `FIX` → `FORMAT` → `CHECK`               |
+| One invocation    | A tool that both fixes and checks a pattern sits in `FIX`; its diagnostics come out with it |
+| Edges             | Every earlier-phase tool precedes every later-phase tool for that pattern                   |
+| Ties              | Equal phases derive no edge, so the tie breaks alphabetically                               |
+| Broad claims      | Only `*` subsumes: it joins every group, while `*.py` never joins `test_*.py`               |
+| Project-scoped    | A claim with no patterns (osv-scanner) derives no edges                                     |
+| Cycles            | Reported before ordering, naming the tools and the patterns whose edges closed them         |
 
-**Tool Order Strategies:**
+The pairings this recovers include `ruff → black` on Python, `oxlint → oxfmt` on JS/TS,
+`stylelint → prettier` on CSS, `prettier → html-validate` on HTML and
+`shfmt → shellcheck` on shell.
 
-| Strategy       | Description                                                      |
-| -------------- | ---------------------------------------------------------------- |
-| `priority`     | Formatters run before linters based on priority values (default) |
-| `alphabetical` | Tools run in alphabetical order by name                          |
-| `custom`       | Tools run in order specified by `tool_order_custom`              |
+Parallel runs use the same graph: two tools share a batch only when no derived edge
+separates them, so a mutator and a tool that must observe its writes never run
+concurrently.
 
-**Default Tool Priorities:**
-
-| Tool          | Priority | Type             |
-| ------------- | -------- | ---------------- |
-| prettier      | 10       | Formatter        |
-| black         | 15       | Formatter        |
-| ruff          | 20       | Linter/Formatter |
-| markdownlint  | 30       | Linter           |
-| html_validate | 30       | Linter           |
-| yamllint      | 35       | Linter           |
-| pydoclint     | 40       | Linter           |
-| bandit        | 45       | Security         |
-| buf           | 50       | Linter/Formatter |
-| hadolint      | 50       | Infrastructure   |
-| vale          | 50       | Linter (docs)    |
-| actionlint    | 55       | Infrastructure   |
-| pytest        | 100      | Test Runner      |
-
-Lower priority values run first. This ensures formatters run before linters, avoiding
-false positives from linters detecting issues that formatters would fix.
-
-### Post-checks Configuration
-
-Black is integrated as a post-check tool by default. Post-checks run after the main
-tools complete and can be configured to enforce failure if issues are found. This avoids
-double-formatting with Ruff and keeps formatting decisions explicit.
-
-```toml
-[tool.lintro.post_checks]
-enabled = true
-tools = ["black"]        # Black runs after core tools
-enforce_failure = true   # Fail the run if Black finds issues in check mode
-```
-
-Notes:
-
-- With post-checks enabled for Black, Ruff’s `format`/`format_check` stages can be
-  disabled or overridden via CLI when desired.
-- In `lintro check`, Black runs with `--check` and contributes to failure when
-  `enforce_failure` is true. In `lintro format`, Black formats files in the post-check
-  phase.
-
-#### Black Options via `--tool-options`
-
-You can override Black behavior on the CLI. Supported options include `line_length`,
-`target_version`, `fast`, `preview`, and `diff`.
+### Inspecting the order
 
 ```bash
-# Increase line length and target a specific Python version
-lintro check --tool-options "black:line_length=100,black:target_version=py313"
-
-# Enable fast and preview modes
-lintro format --tool-options "black:fast=True,black:preview=True"
-
-# Show diffs during formatting (in addition to applying changes)
-lintro format --tool-options "black:diff=True"
+lintro check --explain-order              # the order this run would use, then exit
+lintro check --tools ruff,black --explain-order
+lintro format --explain-order
+lintro doctor                             # compact summary section
+lintro config                             # the same order, as a table
 ```
 
-These options can also be set in `pyproject.toml` under `[tool.lintro.black]`:
+`--explain-order` prints the order and exits without running a single tool. Tool
+selection is resolved exactly as the real run would resolve it, and the order comes from
+the same scheduler the run uses, so what you see is what would have executed.
 
-```toml
-[tool.lintro.black]
-line_length = 100
-target_version = "py313"
-fast = false
-preview = false
-diff = false
+Sample output:
+
+```text
+Execution order (derived from tool claims)
+  This is the order that runs. It is derived from what each tool claims to touch, not configured.
+
+    1. ruff
+        (unconstrained; alphabetical tiebreak)
+    2. black
+        after ruff — *.py: ruff(fix) -> black(format)
+        after ruff — *.pyi: ruff(fix) -> black(format)
+
+  Cycles (0): the derived graph is a DAG.
 ```
+
+### Format authority on Python
+
+`*.py` is the one pattern in the 42-tool set with two mutating claimants. Black holds
+`{FORMAT}` and ruff holds `{FIX, FORMAT}`, so black owns the format phase (fewest
+mutating capabilities wins) and ruff is demoted to its fix capability: when black is in
+the run, ruff's `format` / `format_check` stages are switched off unless you ask for
+them explicitly through `--tool-options` or `[tool.lintro.ruff]`.
 
 ### Ruff vs Black Policy (Python)
 
@@ -1254,6 +1247,71 @@ lintro check --tools semgrep --tool-options "semgrep:severity=ERROR"
 lintro check --tools semgrep --tool-options "semgrep:exclude=tests/*|vendor/*"
 ```
 
+#### Cppcheck Configuration
+
+Cppcheck is a static analysis tool for C/C++ that detects undefined behavior,
+memory-safety defects, and other bugs. It is check-only (no auto-fix) and runs
+standalone on files without any build/project context.
+
+**Installation:**
+
+- macOS: `brew install cppcheck`
+- Debian/Ubuntu: `apt-get install cppcheck`
+
+Lintro runs Cppcheck over the files it discovers and drives it entirely through
+command-line options, so configuration goes through `--tool-options`. Cppcheck's own
+project modes (`--project=compile_commands.json`, GUI project files) and suppression
+files are not wired into the Lintro integration.
+
+Only source files (`.c`, `.cpp`, `.cc`, `.cxx`, `.c++`) are passed to Cppcheck. Headers
+handed to Cppcheck directly are analyzed as standalone translation units and misfire
+without the source that defines their macros and uses their declarations, so — as
+upstream's manual recommends — Lintro lets Cppcheck reach headers through the sources
+that `#include` them. `unusedFunction` is likewise unsupported and rejected with a
+`ValueError`, as is `all`, which implies it: they need whole-program visibility, while
+Lintro invokes Cppcheck on the file list discovered for the run — a path argument, a
+`--diff` scope, or the whole tree — so functions would be reported unused merely because
+their callers were outside that list.
+
+Lintro requires Cppcheck **2.13.0 or newer**. Cppcheck ships no portable single binary,
+so the Docker image installs Debian's package (currently 2.17.1 on trixie) and
+`install-tools.sh` uses apt or Homebrew. Distribution packages older than 2.13.0 are
+rejected by the version check; install from Homebrew or upstream in that case.
+
+**Available Options via `--tool-options`:**
+
+| Option         | Type           | Description                                                                                                                                                                                                                                                                                 |
+| -------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enable`       | string \| list | Check categories forwarded to `--enable=`. Commas separate `--tool-options` entries, so several values are written pipe-separated (`cppcheck:enable=warning\|style`). Default `warning,style,performance,portability` (`error` checks always run). `unusedFunction` and `all` are rejected. |
+| `inconclusive` | bool           | Report findings cppcheck cannot fully confirm.                                                                                                                                                                                                                                              |
+| `std`          | string         | Language standard (e.g. `c11`, `c++17`).                                                                                                                                                                                                                                                    |
+| `inline_suppr` | bool           | Honor inline `// cppcheck-suppress` comments.                                                                                                                                                                                                                                               |
+| `suppress`     | string \| list | Suppression specifications forwarded to `--suppress=`, one flag per value. Several values are written pipe-separated (`cppcheck:suppress=missingInclude\|unusedStructMember`).                                                                                                              |
+
+**Example Usage:**
+
+```bash
+# Run with the default check set
+lintro check src/ --tools cppcheck
+
+# Enable only warnings, and assume C11. Options are comma-separated; the pipe
+# is the list separator *within* one value.
+lintro check src/ --tools cppcheck \
+  --tool-options "cppcheck:enable=warning,cppcheck:std=c11"
+
+# Enable several categories (pipe-delimited list inside one option)
+lintro check src/ --tools cppcheck --tool-options "cppcheck:enable=warning|style"
+
+# Include inconclusive findings and suppress missing-include noise
+lintro check src/ --tools cppcheck \
+  --tool-options "cppcheck:inconclusive=true,cppcheck:suppress=missingInclude"
+```
+
+Cppcheck's structured output is parsed from its native XML report (schema version 2).
+SARIF output is available in recent versions but is lossy for cppcheck (it collapses
+`style`/`performance`/`portability` into a single `warning` level), so the native XML
+parser is used. See [Cppcheck Analysis](./tool-analysis/cppcheck-analysis.md).
+
 #### Gitleaks Configuration
 
 **File:** `.gitleaks.toml`
@@ -1473,6 +1531,118 @@ skip-checking-short-docstrings = true
 - `check-return-types`: Validate return types match (default: true)
 - `check-arg-order`: Verify argument order matches signature
 - `skip-checking-short-docstrings`: Skip single-line docstrings
+
+#### import-linter Configuration {#import-linter}
+
+**Tool:** [import-linter](https://github.com/seddonym/import-linter) (binary
+`lint-imports`) — checks architectural import contracts for a Python package.
+
+**Install:** `uv pip install 'lintro[full]'` or `uv pip install import-linter`
+
+**File:** `pyproject.toml` (also reads `.importlinter` and `setup.cfg`)
+
+```toml
+[tool.importlinter]
+root_package = "mypkg"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = ["mypkg.api", "mypkg.services", "mypkg.storage"]
+
+[[tool.importlinter.contracts]]
+name = "CLI must not be imported by the core"
+type = "forbidden"
+source_modules = ["mypkg.core"]
+forbidden_modules = ["mypkg.cli"]
+```
+
+**Behaviour in Lintro:**
+
+- Project-scoped: the tool runs **once** per invocation against the whole import graph,
+  regardless of how many files were passed.
+- Configuration is discovered by walking upward from the given paths; the tool then runs
+  from the config file's directory so the root package is importable.
+- A project with no import-linter configuration reports a clean result rather than an
+  error, so the tool is safe to leave enabled.
+- Check-only. `lintro format` never runs import-linter.
+
+**Available `--tool-options`:**
+
+- `timeout`: Seconds to allow the graph build and contract check (default: 60)
+
+**Usage:**
+
+```bash
+lintro check .
+lintro check . --tools import-linter
+```
+
+Contract syntax and every contract type are documented upstream at
+<https://import-linter.readthedocs.io/en/stable/contract_types/>.
+
+#### pylint Configuration {#pylint}
+
+**Tool:** [pylint](https://github.com/pylint-dev/pylint) — Python static analyser.
+Lintro wires it in mainly for `duplicate-code` (`R0801`), the copy-paste detector no
+other bundled tool provides.
+
+**Install:** `uv pip install 'lintro[full]'` or `uv pip install pylint`
+
+**File:** pylint reads the first of these that declares pylint configuration, in this
+precedence order: `pylintrc`, `pylintrc.toml`, `.pylintrc`, `.pylintrc.toml`,
+`pyproject.toml`, `setup.cfg`, `tox.ini`. Lintro discovers the same file and passes it
+as `--rcfile`.
+
+```toml
+[tool.pylint.main]
+disable = ["all"]
+enable = ["duplicate-code"]
+jobs = 0
+
+[tool.pylint.similarities]
+min-similarity-lines = 12
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+```
+
+**Behaviour in Lintro:**
+
+- Project-scoped: every discovered file is passed to a **single** `pylint` invocation.
+  Cross-module checkers only see clones that appear in one run, so per-file execution
+  would silently miss every `R0801`.
+- Configuration is discovered by walking upward from the given paths and is passed as
+  `--rcfile`. With no pylint configuration anywhere above the paths, pylint's built-in
+  defaults apply — which overlap heavily with ruff, so configure it explicitly.
+- The `R0801` message body (the file list plus the duplicated source block) is preserved
+  verbatim; it is the only description of what is duplicated.
+- pylint's message category becomes the Lintro severity: `fatal`/`error` are ERROR,
+  `warning` and `refactor` (which includes `duplicate-code`) are WARNING, and
+  `convention`/`info` are INFO.
+- Check-only. `lintro format` never runs pylint.
+
+**Available `--tool-options`:**
+
+- `disable`: Message or category to disable, forwarded to `--disable=`. Commas separate
+  `--tool-options` entries, so several values are written pipe-separated
+  (`pylint:disable=C0114|R0801`)
+- `enable`: Message or category to enable, forwarded to `--enable=`. Several values are
+  written pipe-separated (`pylint:enable=duplicate-code|C0114`)
+- `timeout`: Seconds to allow the run (default: 900; a whole-repo pylint run is slow)
+
+**Usage:**
+
+```bash
+lintro check .
+lintro check . --tools pylint
+lintro check . --tools pylint --tool-options "pylint:disable=all,pylint:enable=duplicate-code"
+# Several message ids in one option: pipe-separated, because commas split entries
+lintro check . --tools pylint --tool-options "pylint:enable=duplicate-code|C0114"
+```
+
+Every message id and symbol is documented upstream at
+<https://pylint.readthedocs.io/en/stable/user_guide/messages/messages_overview.html>.
 
 ### Frontend Tools
 
@@ -3281,20 +3451,20 @@ lintro review --advisory-only --tool-options idiom-review:enabled=true
 
 ## Advanced Configuration
 
-### Tool Conflicts and Priorities
+### Tool Overlap
 
-Some tools may conflict with each other. Lintro handles this by:
-
-1. **Priority system** - Higher priority tools run first
-2. **Conflict detection** - Warns about conflicting tools
-3. **Auto-resolution** - Chooses the best tool for each task
+Two tools that touch the same files are not a conflict to be resolved by dropping one.
+They are ordered by the derived DAG, and where both would _format_ the same pattern the
+loser is demoted rather than dropped — ruff keeps its fix capability and black owns
+formatting on `*.py`. No tool is ever removed from a run, so `--ignore-conflicts` is
+inert and kept only for call-site compatibility.
 
 ```bash
-# Check for conflicts
-lintro list-tools --show-conflicts
+# See the order and the claim behind every constraint
+lintro check --explain-order
 
-# Force conflicting tools to run
-lintro check --tools ruff,black --ignore-conflicts
+# List every tool with its position in that order
+lintro list-tools
 ```
 
 ### Performance Optimization

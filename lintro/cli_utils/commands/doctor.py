@@ -7,6 +7,11 @@ Only presentation lives here. The probes themselves — and the
 ``{check, status, detail, remediation}`` health report the MCP ``lintro_doctor``
 tool serves — live in :mod:`lintro.utils.doctor_report`, so the same data backs
 the terminal output, ``--json``, and an agent (issue #1240).
+
+One exception: the derived execution-order section (issues #1741, #1742) is
+terminal-only. It is rendered on the Rich path after the ``--json`` and
+markdown early returns, so neither ``--json`` nor the MCP health report
+carries it.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from lintro.cli_utils.install_output import (
     render_outcome_summary,
     unresolved_tool_names,
 )
+from lintro.cli_utils.order_explain import render_doctor_order_section
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_quickfix import build_quick_fix
@@ -40,7 +46,7 @@ from lintro.tools.core.tool_registry import (
     ManifestRegistry,
 )
 from lintro.tools.core.update_channels import format_advisory_line
-from lintro.tools.definitions.oxlint_doctor import (
+from lintro.tools.oxlint.doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
 )
@@ -610,6 +616,7 @@ def doctor_command(
     _render_ai_checks(display_console, ai_checks)
     _render_oxlint_checks(display_console, oxlint_checks)
     _render_mcp_extra(display_console)
+    render_doctor_order_section(display_console)
 
     # Summary
     display_console.print()

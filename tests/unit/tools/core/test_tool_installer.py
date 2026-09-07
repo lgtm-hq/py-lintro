@@ -504,10 +504,13 @@ def test_plan_with_tools_list(
         side_effect=lambda n: {"tool_a": tool_a, "tool_b": tool_b}[n],
     )
 
-    with patch.object(installer, "_plan_tool") as mock_plan_tool:
-        installer.plan(tools=["tool_a", "tool_b"])
+    with patch.object(installer, "_get_installed_version", return_value=None):
+        plan = installer.plan(tools=["tool_a", "tool_b"])
 
-    assert_that(mock_plan_tool.call_count).is_equal_to(2)
+    assert_that([tool.name for tool, _ in plan.to_install]).is_equal_to(
+        ["tool_a", "tool_b"],
+    )
+    assert_that(plan.total_actions).is_equal_to(2)
 
 
 def test_plan_deduplicates_tools(
@@ -526,10 +529,11 @@ def test_plan_deduplicates_tools(
     registry.__contains__ = MagicMock(return_value=True)
     registry.get = MagicMock(return_value=tool_a)
 
-    with patch.object(installer, "_plan_tool") as mock_plan_tool:
-        installer.plan(tools=["tool_a", "tool_a", "tool_a"])
+    with patch.object(installer, "_get_installed_version", return_value=None):
+        plan = installer.plan(tools=["tool_a", "tool_a", "tool_a"])
 
-    assert_that(mock_plan_tool.call_count).is_equal_to(1)
+    assert_that([tool.name for tool, _ in plan.to_install]).is_equal_to(["tool_a"])
+    assert_that(plan.total_actions).is_equal_to(1)
 
 
 def test_plan_with_profile(
@@ -545,13 +549,33 @@ def test_plan_with_profile(
         make_tool: ManifestTool factory.
     """
     tool_a = make_tool(name="profiled_tool")
-    registry.tools_for_profile = MagicMock(return_value=[tool_a])
+    profile_queries: list[tuple[str, list[str] | None]] = []
 
-    with patch.object(installer, "_plan_tool") as mock_plan_tool:
-        installer.plan(profile="recommended")
+    def fake_tools_for_profile(
+        profile: str,
+        detected_langs: list[str] | None,
+    ) -> list[ManifestTool]:
+        """Record the profile query and return the profile's single tool.
 
-    registry.tools_for_profile.assert_called_once_with("recommended", None)
-    assert_that(mock_plan_tool.call_count).is_equal_to(1)
+        Args:
+            profile: Profile name the installer resolved.
+            detected_langs: Languages the installer passed through.
+
+        Returns:
+            The one tool this fake profile contains.
+        """
+        profile_queries.append((profile, detected_langs))
+        return [tool_a]
+
+    registry.tools_for_profile = fake_tools_for_profile
+
+    with patch.object(installer, "_get_installed_version", return_value=None):
+        plan = installer.plan(profile="recommended")
+
+    assert_that(profile_queries).is_equal_to([("recommended", None)])
+    assert_that([tool.name for tool, _ in plan.to_install]).is_equal_to(
+        ["profiled_tool"],
+    )
 
 
 def test_plan_with_upgrade_flag(
@@ -559,22 +583,33 @@ def test_plan_with_upgrade_flag(
     registry: MagicMock,
     make_tool: Callable[..., ManifestTool],
 ) -> None:
-    """Plan passes the upgrade flag through to _plan_tool.
+    """The upgrade flag moves an outdated tool from ``outdated`` to ``to_upgrade``.
+
+    The installed version already satisfies ``min_version``, so without
+    ``upgrade`` the tool is merely reported as outdated. Asking for an upgrade
+    must schedule a real install action instead.
 
     Args:
         installer: ToolInstaller fixture.
         registry: Mock ManifestRegistry.
         make_tool: ManifestTool factory.
     """
-    tool_a = make_tool(name="upgradable")
+    tool_a = make_tool(name="upgradable", version="2.0.0", min_version="1.0.0")
     registry.__contains__ = MagicMock(return_value=True)
     registry.get = MagicMock(return_value=tool_a)
 
-    with patch.object(installer, "_plan_tool") as mock_plan_tool:
-        installer.plan(tools=["upgradable"], upgrade=True)
+    with patch.object(installer, "_get_installed_version", return_value="1.0.0"):
+        without_upgrade = installer.plan(tools=["upgradable"])
+        with_upgrade = installer.plan(tools=["upgradable"], upgrade=True)
 
-    call_kwargs = mock_plan_tool.call_args
-    assert_that(call_kwargs.kwargs["upgrade"]).is_true()
+    assert_that([tool.name for tool, _ in without_upgrade.outdated]).is_equal_to(
+        ["upgradable"],
+    )
+    assert_that(without_upgrade.to_upgrade).is_empty()
+    assert_that(
+        [tool.name for tool, _, _ in with_upgrade.to_upgrade],
+    ).is_equal_to(["upgradable"])
+    assert_that(with_upgrade.outdated).is_empty()
 
 
 # ---------------------------------------------------------------------------

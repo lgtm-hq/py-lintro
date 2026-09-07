@@ -6,7 +6,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.stylelint import (
+from lintro.tools.stylelint.definition import (
     STYLELINT_DEFAULT_TIMEOUT,
     StylelintPlugin,
 )

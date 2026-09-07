@@ -204,7 +204,6 @@ def run_lintro(
     ctx = build_run_context(
         action=action,
         output_format="json",
-        score=False,
         debug=False,
         no_art=True,
         dry_run=False,
@@ -224,7 +223,6 @@ def run_lintro(
         auto_install=False,
         yes=True,
         ignore_conflicts=False,
-        fail_under=None,
         diff_base=None,
         ai_status_lines=None,
         on_tool_result=None,

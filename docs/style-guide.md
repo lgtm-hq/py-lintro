@@ -207,24 +207,23 @@ lintro/
 │   └── yamllint/
 ├── tools/
 │   ├── core/
-│   ├── definitions/
-│   │   ├── actionlint.py
-│   │   ├── bandit.py
-│   │   ├── black.py
-│   │   ├── clippy.py
-│   │   ├── pydoclint.py
-│   │   ├── hadolint.py
-│   │   ├── markdownlint.py
-│   │   ├── mypy.py
-│   │   ├── oxfmt.py
-│   │   ├── oxlint.py
-│   │   ├── prettier.py
-│   │   ├── pytest.py
-│   │   ├── ruff.py
-│   │   └── yamllint.py
-│   └── implementations/
-│       ├── pytest/
-│       └── ruff/
+│   ├── actionlint/            # one package per tool (#2311)
+│   │   ├── __init__.py        # the package's import surface
+│   │   └── definition.py      # plugin + ToolDefinition; discovery's entry point
+│   ├── bandit/
+│   ├── hadolint/
+│   ├── ts_checker/            # shared family: no plugin, no definition.py
+│   │   ├── base.py
+│   │   ├── command.py
+│   │   └── execution.py
+│   ├── pytest/
+│   │   ├── definition.py      # plugin + ToolDefinition
+│   │   └── ...                # command builder, executor, parsers
+│   └── ruff/
+│       ├── definition.py      # plugin + ToolDefinition
+│       ├── check.py
+│       ├── commands.py
+│       └── fix.py
 └── utils/
     ├── console_logger.py
     ├── logger_setup.py
@@ -338,8 +337,6 @@ class ExamplePlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=["*.py"],
-            priority=60,
-            conflicts_with=[],
             native_configs=["pyproject.toml"],
             version_command=["example", "--version"],
             min_version="1.0.0",

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.yamllint import YamllintPlugin
+from lintro.tools.yamllint.definition import YamllintPlugin
 
 
 def test_default_options(yamllint_plugin: YamllintPlugin) -> None:

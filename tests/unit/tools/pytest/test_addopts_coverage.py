@@ -13,14 +13,14 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.implementations.pytest.addopts_coverage import (
+from lintro.tools.pytest.addopts_coverage import (
     config_addopts_enable_coverage,
 )
-from lintro.tools.implementations.pytest.pytest_command_builder import (
+from lintro.tools.pytest.pytest_command_builder import (
     add_coverage_options,
 )
-from lintro.tools.implementations.pytest.pytest_config import PytestConfiguration
-from lintro.tools.implementations.pytest.pytest_executor import PytestExecutor
+from lintro.tools.pytest.pytest_config import PytestConfiguration
+from lintro.tools.pytest.pytest_executor import PytestExecutor
 
 # Minimal pytest.ini whose addopts force coverage on, mirroring the project
 # configuration that triggered issue #726.
@@ -193,8 +193,20 @@ def test_banner_reports_disabled_without_coverage_config(
     assert_that(banner).contains("Coverage: disabled")
 
 
-def test_zero_coverage_threshold_enables_collection() -> None:
-    """An explicit zero threshold enables coverage collection."""
+def test_zero_coverage_threshold_enables_collection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit zero threshold enables coverage collection.
+
+    Args:
+        tmp_path: Temporary directory provided by pytest.
+        monkeypatch: Pytest monkeypatch fixture used to switch the cwd.
+    """
+    # An inherited COVERAGE_RCFILE is read as a specified config file, so clear
+    # it to keep the empty tmp_path the only source of coverage configuration.
+    monkeypatch.delenv("COVERAGE_RCFILE", raising=False)
+    monkeypatch.chdir(tmp_path)
     command: list[str] = []
 
     add_coverage_options(command, {"coverage_threshold": 0})

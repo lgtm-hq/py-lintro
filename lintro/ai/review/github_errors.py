@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import Any
 
 from lintro.ai.review.errors_taxonomy import (
     KIND_COPY,
@@ -11,13 +10,13 @@ from lintro.ai.review.errors_taxonomy import (
     classify_provider_error,
     resolve_cause_text,
 )
-from lintro.ai.review.github_constants import _FOOTER, MAX_COMMENT_CHARS, STICKY_MARKER
-from lintro.ai.review.github_render import format_run_mechanics, sanitize_comment_text
-from lintro.ai.review.github_sticky import render_state_sticky
+from lintro.ai.review.github_constants import _FOOTER, STICKY_MARKER
+from lintro.ai.review.github_contract import sanitize_comment_text
+from lintro.ai.review.github_notes import format_run_mechanics
+from lintro.ai.review.github_render import Section, assemble
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.review_state_codec import renumber_if_legacy_v1
+from lintro.ai.review.sticky import render_state_sticky
 
 #: Cap on the provider error text rendered on the error-only sticky. Provider
 #: failures can carry a whole CLI JSON payload as their message, and none of it
@@ -45,7 +44,6 @@ def format_error_comment(
     error: Exception,
     provider: str | None = None,
     metadata: ReviewMetadata | None = None,
-    prior_runs: list[dict[str, Any]] | None = None,
     prior_state: ReviewState | None = None,
     repo: str = "",
     pr_number: int | None = None,
@@ -71,9 +69,7 @@ def format_error_comment(
         provider: Provider identifier used for provider-aware classification.
             Falls back to ``metadata.provider`` when omitted.
         metadata: Optional review metadata for a mechanics footer.
-        prior_runs: Legacy run mappings recovered from the previous sticky
-            comment. Ignored when ``prior_state`` is given.
-        prior_state: Full state decoded from the previous sticky comment.
+        prior_state: Full state carried into this round.
             Re-emitted verbatim so a transient error does not reset cumulative
             telemetry, advance the round counter, or touch the tracked
             finding history.
@@ -87,7 +83,7 @@ def format_error_comment(
     """
     resolved_provider = provider or (metadata.provider if metadata else "") or ""
     kind = classify_provider_error(provider=resolved_provider, error=error)
-    state = _resolve_prior_state(prior_runs=prior_runs, prior_state=prior_state)
+    state = prior_state
 
     if state is not None and state.runs:
         return render_state_sticky(
@@ -108,44 +104,24 @@ def format_error_comment(
         provider=resolved_provider,
         cause_limit=ERROR_CAUSE_LIMIT,
     )
-    lines = [
-        STICKY_MARKER,
-        "## 🔎 Lintro Review",
-        "",
-        f"> {ERROR_ONLY_HEADLINE} — {detail}",
-        "",
-        guidance,
-    ]
+    mechanics = ""
     if metadata is not None and metadata.model:
-        lines.extend(["", "<sub>" + format_run_mechanics(metadata=metadata) + "</sub>"])
-    lines.extend(["", _FOOTER])
-    body = "\n".join(lines)
-    if len(body) > MAX_COMMENT_CHARS:
-        body = body[:MAX_COMMENT_CHARS].rstrip()
-    return body
-
-
-def _resolve_prior_state(
-    *,
-    prior_runs: list[dict[str, Any]] | None,
-    prior_state: ReviewState | None,
-) -> ReviewState | None:
-    """Return the state to re-emit, upgrading legacy run mappings when needed.
-
-    Args:
-        prior_runs: Legacy run mappings recovered from the previous sticky
-            comment. Ignored when ``prior_state`` is given.
-        prior_state: Full state decoded from the previous sticky comment.
-
-    Returns:
-        The resolved state, or ``None`` when nothing was carried over.
-    """
-    if prior_state is not None:
-        return prior_state
-    if not prior_runs:
-        return None
-    runs = tuple(RunRecord.from_dict(run) for run in prior_runs)
-    return ReviewState(runs=renumber_if_legacy_v1(runs=runs))
+        mechanics = "<sub>" + format_run_mechanics(metadata=metadata) + "</sub>"
+    # Assembled through the shared pipeline, so this surface joins and caps its
+    # sections exactly the way the sticky board and the review body do: a
+    # provider message long enough to overrun the budget is truncated with the
+    # visible notice rather than sliced silently (#2303, #2304).
+    return assemble(
+        sections=[
+            # The marker sits on the line directly above the heading, not a
+            # blank line above it, so the two are one section rather than two.
+            Section(name="header", text=f"{STICKY_MARKER}\n## 🔎 Lintro Review"),
+            Section(name="failure", text=f"> {ERROR_ONLY_HEADLINE} — {detail}"),
+            Section(name="guidance", text=guidance),
+            Section(name="mechanics", text=mechanics),
+            Section(name="footer", text=_FOOTER),
+        ],
+    )
 
 
 def _failure_banner(
@@ -187,11 +163,9 @@ def _failure_banner(
         provider=provider,
         cause_limit=BANNER_CAUSE_LIMIT,
     )
-    shown = max(run.round for run in state.runs)
+    shown = max(run.identity.round for run in state.runs)
     headline = FAILURE_BANNER_HEADLINE.format(round_number=state.next_round)
-    return (
-        f"> {headline} — {detail} · showing round {shown} results below. " f"{guidance}"
-    )
+    return f"> {headline} — {detail} · showing round {shown} results below. {guidance}"
 
 
 def _render_error_copy(

@@ -90,36 +90,26 @@ def test_tool_manager_get_tool_execution_order() -> None:
     assert_that(order).contains(ToolName.HADOLINT)
 
 
-def test_tool_manager_get_tool_execution_order_with_conflicts() -> None:
-    """Verify conflict resolution in execution order."""
+def test_tool_manager_execution_order_is_derived_from_claims() -> None:
+    """The derived DAG, not a scalar priority, decides the order (#1742)."""
     tm = ToolManager()
 
-    # Verify tools exist before testing conflict resolution
-    assert_that(tm.get_tool(ToolName.RUFF)).is_not_none()
-    assert_that(tm.get_tool(ToolName.BLACK)).is_not_none()
+    order = tm.get_tool_execution_order([ToolName.BLACK.value, ToolName.RUFF.value])
 
-    try:
-        # Temporarily modify conflicts (note: ToolDefinition is frozen, so we need
-        # to work around this for testing - in practice, conflicts are set at
-        # registration time)
+    # ruff is FIX on *.py, black is FORMAT: FIX precedes FORMAT, and the
+    # requested order does not influence the result.
+    assert_that(order).is_equal_to([ToolName.RUFF.value, ToolName.BLACK.value])
 
-        # Since ToolDefinition is frozen, we can't modify conflicts_with directly
-        # This test verifies the conflict resolution logic works with the
-        # existing tool configurations
-        order = tm.get_tool_execution_order([ToolName.RUFF, ToolName.BLACK])
 
-        # Both should be returned since they don't have conflicts defined
-        assert_that(len(order)).is_equal_to(2)
+def test_tool_manager_execution_order_ignores_the_conflict_flag() -> None:
+    """``ignore_conflicts`` is inert: derived ordering never drops a tool."""
+    tm = ToolManager()
 
-        # With ignore_conflicts=True, all tools should be returned
-        order_all = tm.get_tool_execution_order(
-            [ToolName.RUFF, ToolName.BLACK],
-            ignore_conflicts=True,
-        )
-        assert_that(len(order_all)).is_equal_to(2)
-    finally:
-        # No cleanup needed since we didn't actually modify anything
-        pass
+    selection = [ToolName.RUFF.value, ToolName.BLACK.value, ToolName.HADOLINT.value]
+
+    assert_that(
+        tm.get_tool_execution_order(selection, ignore_conflicts=True),
+    ).is_equal_to(tm.get_tool_execution_order(selection))
 
 
 def test_tool_manager_get_tool_names() -> None:

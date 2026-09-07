@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -20,38 +21,98 @@ from lintro.ai.review.github import (
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
-    _cap_body,
+    ReviewPostOptions,
     _count_new_commits,
-    _sticky_comment_id,
-    _upsert_sticky,
     build_sticky_comment,
     format_error_comment,
     format_finding_comment,
     format_run_mechanics,
-    parse_review_state,
+    parse_sticky_state,
     post_review_error_to_github,
     post_review_to_github,
     sanitize_comment_text,
 )
+from lintro.ai.review.github_contract import cap_body
 from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
+
+
+@dataclass
+class _ReporterLog:
+    """Plain record of the comments a review posting writes.
+
+    The reporter stays a ``MagicMock`` because of its wide surface, but the
+    assertions read these lists rather than mock call bookkeeping (#2315).
+
+    Attributes:
+        api_calls: ``(method, url, payload)`` of each raw API request.
+        issue_comment_bodies: Body of each sticky comment posted or edited.
+        api_response: Response every raw API request returns; tests set it to
+            a failure status to drive the degraded paths.
+        update_outcomes: Results ``update_issue_comment`` returns, consumed in
+            order; ``default_update_result`` answers once they run out.
+        default_update_result: Result ``update_issue_comment`` falls back to.
+    """
+
+    api_calls: list[tuple[str, str, Any]] = field(default_factory=list)
+    issue_comment_bodies: list[str] = field(default_factory=list)
+    api_response: GitHubApiResponse = field(
+        default_factory=lambda: GitHubApiResponse(status=200),
+    )
+    update_outcomes: list[bool] = field(default_factory=list)
+    default_update_result: bool = True
 
 
 def _fresh_reporter() -> MagicMock:
-    """Build a MagicMock reporter with no existing sticky comment."""
+    """Build a MagicMock reporter with no existing sticky comment.
+
+    Returns:
+        MagicMock: The reporter stub. Its ``log`` attribute is a
+        :class:`_ReporterLog` recording every comment the run writes.
+    """
     reporter = MagicMock()
+    log = _ReporterLog()
+    reporter.log = log
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = None
     reporter.fetch_pr_diff_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_compare_lines.return_value = {"src/main.py": {10}}
     reporter.fetch_pr_commit_shas.return_value = []
-    reporter.post_issue_comment.return_value = True
-    reporter.update_issue_comment.return_value = True
+
+    def _post_issue_comment(body: Any, **_kwargs: Any) -> bool:
+        """Record a newly posted sticky body.
+
+        Args:
+            body: Sticky comment body the production code posted.
+            **_kwargs: Ignored posting extras.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        log.issue_comment_bodies.append(str(body))
+        return True
+
+    reporter.post_issue_comment.side_effect = _post_issue_comment
+
+    def _update_issue_comment(**kwargs: Any) -> bool:
+        log.issue_comment_bodies.append(str(kwargs["body"]))
+        if log.update_outcomes:
+            return log.update_outcomes.pop(0)
+        return log.default_update_result
+
+    reporter.update_issue_comment.side_effect = _update_issue_comment
     reporter.delete_issue_comment.return_value = True
-    reporter.api_response.return_value = GitHubApiResponse(status=200)
+
+    def _api_response(method: str, url: str, payload: Any = None) -> GitHubApiResponse:
+        log.api_calls.append((method, url, payload))
+        return log.api_response
+
+    reporter.api_response.side_effect = _api_response
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -232,7 +293,7 @@ def test_build_sticky_comment_has_markers_and_verdict_header(
     sample_review_result: ReviewResult,
 ) -> None:
     """First-run sticky comment leads with the round and the derived verdict."""
-    body = build_sticky_comment(result=sample_review_result)
+    body = build_sticky_comment(request=StickyRequest(result=sample_review_result))
 
     assert_that(body).contains(STICKY_MARKER)
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
@@ -245,21 +306,27 @@ def test_build_sticky_comment_aggregates_prior_runs(
     sample_review_result: ReviewResult,
 ) -> None:
     """Cumulative header sums prior runs and flags mixed estimates."""
-    prior = [
-        {
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "model": "cursor:auto",
-            "provider": "cursor",
-            "total": 5000,
-            "cost": 0.02,
-            "estimated": True,
-            "depth": 1,
-            "p1": 0,
-            "p2": 1,
-            "p3": 0,
-        },
-    ]
-    body = build_sticky_comment(result=sample_review_result, prior_runs=prior)
+    prior = ReviewState(
+        runs=(
+            RunRecord.from_dict(
+                {
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "model": "cursor:auto",
+                    "provider": "cursor",
+                    "total": 5000,
+                    "cost": 0.02,
+                    "estimated": True,
+                    "depth": 1,
+                    "p1": 0,
+                    "p2": 1,
+                    "p3": 0,
+                },
+            ),
+        ),
+    )
+    body = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result, prior_state=prior),
+    )
 
     assert_that(body).contains("### 🕘 History · 1 previous run")
     # Mixed estimate => cumulative flagged approximate.
@@ -268,20 +335,20 @@ def test_build_sticky_comment_aggregates_prior_runs(
 
 
 def test_round_trip_state_parsing(sample_review_result: ReviewResult) -> None:
-    """New stickies carry no leftover blob; parse yields empty runs."""
-    from lintro.ai.review.github_sticky import advance_review_state
+    """New stickies carry no leftover blob; parse yields empty state."""
+    from lintro.ai.review.sticky import advance_review_state
 
-    body = build_sticky_comment(result=sample_review_result)
-    runs = parse_review_state(body=body)
-    state = advance_review_state(result=sample_review_result)
+    body = build_sticky_comment(request=StickyRequest(result=sample_review_result))
+    parsed = parse_sticky_state(body=body)
+    state = advance_review_state(request=StickyRequest(result=sample_review_result))
 
-    assert_that(runs).is_empty()
-    assert_that(state.runs[0].model).is_equal_to("claude-sonnet-4-20250514")
+    assert_that(parsed.runs).is_empty()
+    assert_that(state.runs[0].identity.model).is_equal_to("claude-sonnet-4-20250514")
 
 
-def test_parse_review_state_handles_missing_block() -> None:
-    """A body with no state block yields an empty run list."""
-    assert_that(parse_review_state(body="no state here")).is_empty()
+def test_parse_sticky_state_handles_missing_block() -> None:
+    """A body with no state block yields an empty state."""
+    assert_that(parse_sticky_state(body="no state here").runs).is_empty()
 
 
 # --- posting: create, update, inline ----------------------------------------
@@ -297,7 +364,7 @@ def test_post_review_creates_sticky_when_absent(
     posted = post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        captured_comment_ids=captured,
+        options=ReviewPostOptions(captured_comment_ids=captured),
     )
 
     assert_that(posted).is_true()
@@ -317,7 +384,7 @@ def test_failed_inline_post_folds_details_into_the_sticky(
     """
     reporter = _fresh_reporter()
     # The inline review batch is the only call routed through api_response.
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )
@@ -379,7 +446,7 @@ def test_failed_inline_post_never_posts_a_second_sticky(
 ) -> None:
     """A sticky that cannot be located is skipped, not duplicated on the PR."""
     reporter = _fresh_reporter()
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )
@@ -397,28 +464,14 @@ def test_failed_inline_post_never_posts_a_second_sticky(
     reporter.update_issue_comment.assert_not_called()
 
 
-def test_sticky_comment_id_short_circuits_on_a_known_id() -> None:
-    """A known id is reused without a second lookup against the API."""
-    reporter = _fresh_reporter()
-
-    assert_that(_sticky_comment_id(reporter=reporter, known=42)).is_equal_to(42)
-    reporter.find_issue_comment.assert_not_called()
-
-
-def test_sticky_comment_id_relocates_a_just_created_comment() -> None:
-    """With no prior id the sticky is re-located by its marker."""
-    reporter = _fresh_reporter()
-    reporter.find_issue_comment.return_value = (99, "body")
-
-    assert_that(_sticky_comment_id(reporter=reporter, known=None)).is_equal_to(99)
-
-
 def test_post_review_updates_existing_sticky(
     sample_review_result: ReviewResult,
 ) -> None:
     """An existing sticky comment is updated in place, not duplicated."""
     reporter = _fresh_reporter()
-    prior_body = build_sticky_comment(result=sample_review_result)
+    prior_body = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result),
+    )
     reporter.find_issue_comment.return_value = (42, prior_body)
 
     posted = post_review_to_github(
@@ -435,171 +488,6 @@ def test_post_review_updates_existing_sticky(
     assert_that(kwargs["body"]).contains("## 🔎 Lintro Review —")
 
 
-def test_upsert_sticky_creates_when_missing() -> None:
-    """A first review posts a new sticky comment."""
-    reporter = _fresh_reporter()
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=None,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_none()
-    reporter.post_issue_comment.assert_called_once_with("hello")
-    reporter.update_issue_comment.assert_not_called()
-    reporter.delete_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_patches_when_update_succeeds() -> None:
-    """Same-actor updates edit the sticky in place."""
-    reporter = _fresh_reporter()
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(42)
-    reporter.update_issue_comment.assert_called_once_with(
-        comment_id=42,
-        body="hello",
-    )
-    reporter.delete_issue_comment.assert_not_called()
-    reporter.post_issue_comment.assert_not_called()
-    reporter.find_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_supersedes_when_patch_fails() -> None:
-    """GitHub forbids editing another actor's comment; recreate then delete."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment.return_value = False
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(99)
-    reporter.update_issue_comment.assert_called_once_with(
-        comment_id=42,
-        body="hello",
-    )
-    reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
-    reporter.post_issue_comment.assert_called_once_with("hello")
-    reporter.find_issue_comment.assert_called_once_with(marker=STICKY_MARKER)
-
-
-@pytest.mark.parametrize(
-    ("status", "should_recreate"),
-    [
-        (403, True),
-        (500, False),
-        (429, False),
-    ],
-    ids=["attr=actor_mismatch", "attr=server_error", "attr=rate_limit"],
-)
-def test_upsert_sticky_supersedes_only_on_actor_mismatch(
-    status: int,
-    should_recreate: bool,
-) -> None:
-    """Only a 403 PATCH (wrong actor) replaces the leftover sticky."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = status
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    if should_recreate:
-        assert_that(posted).is_true()
-        assert_that(live_id).is_equal_to(99)
-        reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
-        reporter.post_issue_comment.assert_called_once_with("hello")
-    else:
-        assert_that(posted).is_false()
-        assert_that(live_id).is_none()
-        reporter.delete_issue_comment.assert_not_called()
-        reporter.post_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_retries_post_after_recreate_failure() -> None:
-    """A failed create is retried once before the leftover sticky is deleted."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = 403
-    reporter.post_issue_comment.side_effect = [False, True]
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(99)
-    assert_that(reporter.post_issue_comment.call_count).is_equal_to(2)
-
-
-def test_upsert_sticky_keeps_replacement_when_delete_fails() -> None:
-    """A failed delete after a successful create still returns the new id."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment.return_value = False
-    reporter.delete_issue_comment.return_value = False
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_true()
-    assert_that(live_id).is_equal_to(99)
-    reporter.post_issue_comment.assert_called_once_with("hello")
-    reporter.delete_issue_comment.assert_called_once_with(comment_id=42)
-
-
-def test_upsert_sticky_does_not_delete_when_patch_status_unknown() -> None:
-    """A transport failure must not be treated as actor-mismatch."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = None
-
-    posted, live_id = _upsert_sticky(
-        reporter=reporter,
-        body="hello",
-        comment_id=42,
-    )
-
-    assert_that(posted).is_false()
-    assert_that(live_id).is_none()
-    reporter.delete_issue_comment.assert_not_called()
-    reporter.post_issue_comment.assert_not_called()
-
-
-def test_upsert_sticky_posts_replacement_before_deleting() -> None:
-    """Create the new sticky first so a failed POST leaves the old one."""
-    reporter = _fresh_reporter()
-    reporter.update_issue_comment_status.return_value = 403
-    reporter.find_issue_comment.return_value = (99, "hello")
-
-    _upsert_sticky(reporter=reporter, body="hello", comment_id=42)
-
-    names = [call[0] for call in reporter.method_calls]
-    assert_that(names.index("post_issue_comment")).is_less_than(
-        names.index("delete_issue_comment"),
-    )
-
-
 def test_refresh_uses_replacement_id_after_cross_actor_recreate(
     sample_review_result: ReviewResult,
 ) -> None:
@@ -610,13 +498,15 @@ def test_refresh_uses_replacement_id_after_cross_actor_recreate(
     failure details has to target the replacement id; the deleted id 404s.
     """
     reporter = _fresh_reporter()
-    prior_body = build_sticky_comment(result=sample_review_result)
+    prior_body = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result),
+    )
     reporter.find_issue_comment.side_effect = [
         (42, prior_body),
         (99, "replacement"),
     ]
-    reporter.update_issue_comment.side_effect = [False, True]
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.update_outcomes = [False, True]
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )
@@ -680,23 +570,27 @@ def test_post_error_comment_updates_sticky(
 
 def test_error_comment_preserves_prior_run_state() -> None:
     """A transient error re-emits prior run state so telemetry survives."""
-    prior = [
-        {
-            "timestamp": "2026-01-01T00:00:00+00:00",
-            "model": "claude-sonnet-4-20250514",
-            "provider": "anthropic",
-            "total": 5000,
-            "cost": 0.02,
-            "estimated": False,
-            "depth": 1,
-            "p1": 0,
-            "p2": 1,
-            "p3": 0,
-        },
-    ]
+    prior = ReviewState(
+        runs=(
+            RunRecord.from_dict(
+                {
+                    "timestamp": "2026-01-01T00:00:00+00:00",
+                    "model": "claude-sonnet-4-20250514",
+                    "provider": "anthropic",
+                    "total": 5000,
+                    "cost": 0.02,
+                    "estimated": False,
+                    "depth": 1,
+                    "p1": 0,
+                    "p2": 1,
+                    "p3": 0,
+                },
+            ),
+        ),
+    )
     body = format_error_comment(
         error=AIAuthenticationError("bad key"),
-        prior_runs=prior,
+        prior_state=prior,
     )
 
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
@@ -708,12 +602,12 @@ def test_post_error_comment_recovers_prior_state(
     sample_review_result: ReviewResult,
 ) -> None:
     """post_review_error_to_github reloads prior runs and keeps their state."""
-    from lintro.ai.review.github_sticky import advance_review_state
-    from lintro.ai.review.review_state_codec import legacy_state_block
+    from lintro.ai.review.review_state_codec import leftover_state_block
+    from lintro.ai.review.sticky import advance_review_state
 
     reporter = _fresh_reporter()
-    prior = advance_review_state(result=sample_review_result)
-    prior_body = f"{STICKY_MARKER}\n\nprior round{legacy_state_block(state=prior)}"
+    prior = advance_review_state(request=StickyRequest(result=sample_review_result))
+    prior_body = f"{STICKY_MARKER}\n\nprior round{leftover_state_block(state=prior)}"
     reporter.find_issue_comment.return_value = (9, prior_body)
 
     post_review_error_to_github(
@@ -721,7 +615,8 @@ def test_post_error_comment_recovers_prior_state(
         reporter=reporter,
     )
 
-    posted_body = reporter.update_issue_comment.call_args.kwargs["body"]
+    assert_that(reporter.log.issue_comment_bodies).is_not_empty()
+    posted_body = reporter.log.issue_comment_bodies[-1]
     assert_that(posted_body).contains("showing round 1 results below")
     assert_that(posted_body).does_not_contain(STATE_MARKER_PREFIX)
 
@@ -797,7 +692,9 @@ def test_sticky_indexes_every_finding_and_stays_under_the_cap(
         findings=(*mapped, fallback),
     )
 
-    body = build_sticky_comment(result=result, diff_lines=diff_lines)
+    body = build_sticky_comment(
+        request=StickyRequest(result=result, diff_lines=diff_lines),
+    )
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains("### Findings ·")
@@ -827,7 +724,9 @@ def test_sticky_state_round_trips_after_truncation(
         findings=findings,
     )
 
-    body = build_sticky_comment(result=result, diff_lines=diff_lines)
+    body = build_sticky_comment(
+        request=StickyRequest(result=result, diff_lines=diff_lines),
+    )
 
     assert_that(body).contains("## 🔎 Lintro Review —")
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
@@ -837,10 +736,10 @@ def test_sticky_state_round_trips_after_truncation(
 
 
 def test_cap_body_leaves_under_cap_body_unchanged() -> None:
-    """Bodies under the cap pass through _cap_body untouched."""
+    """Bodies under the cap pass through ``cap_body`` untouched."""
     body = f"{STICKY_MARKER}\n\n## 🔎 Lintro Review · round 1"
 
-    capped = _cap_body(body=body)
+    capped = cap_body(body=body)
 
     assert_that(capped).is_equal_to(body)
 
@@ -848,14 +747,14 @@ def test_cap_body_leaves_under_cap_body_unchanged() -> None:
 def test_cap_body_truncates_visibly_as_a_last_resort() -> None:
     """Section-aware pruning handles real overflow; this is the backstop.
 
-    ``_fit_body`` sheds history, then resolved findings, then open findings —
-    each with its own marker. ``_cap_body`` only fires when a single
+    ``fit_body`` sheds history, then resolved findings, then open findings —
+    each with its own marker. ``cap_body`` only fires when a single
     unprunable section is itself over the cap, and even then the truncation
     must be announced rather than leaving a body that stops mid-sentence.
     """
     body = f"{STICKY_MARKER}\n\n" + "x" * (MAX_COMMENT_CHARS + 5_000)
 
-    capped = _cap_body(body=body)
+    capped = cap_body(body=body)
 
     assert_that(len(capped)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     assert_that(capped).contains("Comment truncated to fit GitHub's size limit")
@@ -877,7 +776,7 @@ def test_build_sticky_survives_overflowing_finding_sets(
     )
     result = _result_with_findings(base=sample_review_result, findings=findings)
 
-    body = build_sticky_comment(result=result, diff_lines=None)
+    body = build_sticky_comment(request=StickyRequest(result=result, diff_lines=None))
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains("### Findings ·")
@@ -899,12 +798,14 @@ def test_post_review_uses_the_rich_review_body(
     posted = post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        transport="cli",
-        config_source="`.lintro-config.yaml`",
+        options=ReviewPostOptions(
+            transport="cli",
+            config_source="`.lintro-config.yaml`",
+        ),
     )
 
     assert_that(posted).is_true()
-    payload = reporter.api_response.call_args.args[2]
+    payload = reporter.log.api_calls[-1][2]
     assert_that(payload["body"]).contains("🔎 **Lintro review —")
     assert_that(payload["body"]).contains("**📊 Run stats**")
     assert_that(payload["body"]).contains("Config source: `.lintro-config.yaml`")
@@ -918,13 +819,14 @@ def test_post_review_body_carries_the_fix_prompt_inline(
     reporter = _fresh_reporter()
     reporter.find_issue_comment.return_value = (
         42,
-        build_sticky_comment(result=sample_review_result),
+        build_sticky_comment(request=StickyRequest(result=sample_review_result)),
     )
     reporter.fetch_pr_commit_shas.return_value = []
 
-    post_review_to_github(result=sample_review_result, reporter=reporter)
+    posted = post_review_to_github(result=sample_review_result, reporter=reporter)
 
-    payload = reporter.api_response.call_args.args[2]
+    assert_that(posted).is_true()
+    payload = reporter.log.api_calls[-1][2]
     assert_that(payload["body"]).contains("Fix prompt — this round's")
     assert_that(payload["body"]).contains("<details><summary>Show prompt</summary>")
     assert_that(payload["body"]).does_not_contain("identical to the")
@@ -952,7 +854,13 @@ def test_count_new_commits_measures_from_the_prior_head(
     """The count is commits after the prior head, or None when unresolvable."""
     reporter = _fresh_reporter()
     reporter.fetch_pr_commit_shas.return_value = shas
-    prior_state = ReviewState(runs=(RunRecord(round=1, sha=prior_sha),))
+    prior_state = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha=prior_sha),
+            ),
+        ),
+    )
 
     counted = _count_new_commits(reporter=reporter, prior_state=prior_state)
 
@@ -973,7 +881,13 @@ def test_count_new_commits_is_none_when_the_listing_fails() -> None:
     """An unavailable commit listing yields None rather than a wrong count."""
     reporter = _fresh_reporter()
     reporter.fetch_pr_commit_shas.return_value = None
-    prior_state = ReviewState(runs=(RunRecord(round=1, sha="aaa111"),))
+    prior_state = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha="aaa111"),
+            ),
+        ),
+    )
 
     assert_that(
         _count_new_commits(reporter=reporter, prior_state=prior_state),
@@ -991,14 +905,14 @@ def test_review_body_and_degraded_sticky_coexist(
     """
     reporter = _fresh_reporter()
     reporter.fetch_pr_commit_shas.return_value = []
-    reporter.api_response.return_value = GitHubApiResponse(
+    reporter.log.api_response = GitHubApiResponse(
         status=500,
         message="Server Error",
     )
     reporter.find_issue_comment.side_effect = [
         None,
-        (77, build_sticky_comment(result=sample_review_result)),
-        (77, build_sticky_comment(result=sample_review_result)),
+        (77, build_sticky_comment(request=StickyRequest(result=sample_review_result))),
+        (77, build_sticky_comment(request=StickyRequest(result=sample_review_result))),
     ]
 
     posted = post_review_to_github(result=sample_review_result, reporter=reporter)

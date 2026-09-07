@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.gitleaks import (
+from lintro.tools.gitleaks.definition import (
     GITLEAKS_DEFAULT_TIMEOUT,
     GITLEAKS_OUTPUT_FORMAT,
     GitleaksPlugin,

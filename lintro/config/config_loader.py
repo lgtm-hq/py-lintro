@@ -33,11 +33,11 @@ from lintro.config.review_config import (
     ReviewChecklistItemConfig,
     ReviewConfig,
 )
-from lintro.config.score_config import ScoreConfig
 from lintro.config.watch_config import WatchConfig
 from lintro.enums.config_key import ConfigKey
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.path_utils import find_file_upward
+from lintro.utils.plugin_tool_names import known_plugin_tool_names
 
 try:
     import yaml
@@ -54,10 +54,10 @@ LINTRO_CONFIG_FILENAMES = [
 ]
 
 # Config sections that are valid in both ``.lintro-config.yaml`` and
-# ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` and
-# ``post_checks`` by ``lintro.utils.config``, ``licenses`` by
-# ``lintro.config.licenses_config``, and ``plugins`` by
-# ``lintro.plugins.discovery``. They are part of the schema even though
+# ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` by
+# ``lintro.utils.config``, ``licenses`` by ``lintro.config.licenses_config``,
+# and ``plugins`` by ``lintro.plugins.discovery``. They are part of the
+# schema even though
 # ``LintroConfig`` does not model them, so consumers that build an allowlist
 # of known top-level keys must include them.
 EXTERNALLY_HANDLED_SECTIONS: frozenset[str] = frozenset(
@@ -65,15 +65,6 @@ EXTERNALLY_HANDLED_SECTIONS: frozenset[str] = frozenset(
         "licenses",
         "module_size",
         "plugins",
-    },
-)
-
-# Flat pyproject-only ordering keys read by ``get_tool_order_config``. Unlike
-# the sections above these have no ``.lintro-config.yaml`` equivalent.
-PYPROJECT_ORDERING_KEYS: frozenset[str] = frozenset(
-    {
-        "tool_order_custom",
-        "tool_priorities",
     },
 )
 
@@ -313,7 +304,6 @@ _SECTION_FIELD_OWNERS: dict[str, type[BaseModel]] = {
     "execution": ExecutionConfig,
     "output": OutputConfig,
     "review": ReviewConfig,
-    "score": ScoreConfig,
 }
 _SCHEMALESS_SECTIONS = frozenset({"ai", "defaults", "tools"})
 
@@ -602,8 +592,6 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
     if isinstance(enabled_tools, str):
         enabled_tools = [enabled_tools]
 
-    tool_order = data.get("tool_order", "priority")
-
     # Validate max_fix_retries
     raw_retries = data.get("max_fix_retries")
     if raw_retries is None:
@@ -644,7 +632,6 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
 
     return ExecutionConfig(
         enabled_tools=enabled_tools,
-        tool_order=tool_order,
         fail_fast=data.get("fail_fast", False),
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
@@ -877,34 +864,6 @@ def _parse_output_config(data: Any) -> OutputConfig:
     return OutputConfig(**filtered)
 
 
-def _parse_score_config(data: Any) -> ScoreConfig:
-    """Parse the health score configuration section.
-
-    Args:
-        data: Raw ``score`` section from config.
-
-    Returns:
-        ScoreConfig: Parsed score configuration.
-
-    Raises:
-        ValueError: When the score section is not a mapping.
-    """
-    if not data:
-        return ScoreConfig()
-    if not isinstance(data, dict):
-        msg = f"score config must be a mapping, got {type(data).__name__}"
-        raise ValueError(msg)
-    known_fields = set(ScoreConfig.model_fields.keys())
-    unknown = set(data.keys()) - known_fields
-    if unknown:
-        logger.warning(
-            "Unknown score config keys ignored: {}",
-            ", ".join(sorted(unknown)),
-        )
-    filtered = {key: value for key, value in data.items() if key in known_fields}
-    return ScoreConfig(**filtered)
-
-
 def _parse_deps_config(data: Any) -> DepsConfig:
     """Parse the ``deps`` configuration section.
 
@@ -998,9 +957,10 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
     Shared by the pyproject converter and the config validator so YAML
     ``tools:`` entries and TOML tool tables accept the same name set
     (``ToolName``, legacy aliases, and installed plugins). Plugin names come
-    from :func:`~lintro.plugins.discovery.get_known_plugin_tool_names`, which
-    does not trigger a discovery pass. Execution and enforce key sets come
-    from the Pydantic models so the converter and validator cannot drift.
+    from :func:`~lintro.utils.plugin_tool_names.known_plugin_tool_names`, which
+    reads entry-point metadata and does not trigger a discovery pass. Execution
+    and enforce key sets come from the Pydantic models so the converter and
+    validator cannot drift.
 
     Returns:
         _PyprojectLintroCatalog: Known tool names (including aliases),
@@ -1008,10 +968,9 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
             execution/enforce field sets.
     """
     # Inline imports: ToolName is a static StrEnum that does not trigger
-    # the plugin registry. Discovery is imported here to avoid a circular
-    # dependency between config_loader and the tool subsystem.
+    # the plugin registry; `lintro.utils.config` is imported here to avoid a
+    # circular dependency between config_loader and the tool subsystem.
     from lintro.enums.tool_name import ToolName
-    from lintro.plugins.discovery import get_known_plugin_tool_names
     from lintro.utils.config import LEGACY_TOOL_SECTION_ALIASES
 
     known_tools = {t.value for t in ToolName} | {
@@ -1021,9 +980,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
 
     execution_keys = frozenset(ExecutionConfig.model_fields)
     enforce_keys = frozenset(EnforceConfig.model_fields)
-    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
-        PYPROJECT_ORDERING_KEYS,
-    )
+    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS)
     reserved_keys = (
         set(execution_keys)
         | set(enforce_keys)
@@ -1034,11 +991,9 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
             "deps",
             "output",
             "review",
-            "score",
             "tool",
             "tools",
             "watch",
-            ConfigKey.POST_CHECKS.value.lower(),
             ConfigKey.VERSIONS.value.lower(),
         }
     )
@@ -1046,7 +1001,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
 
     # ToolName never sees entry-point-discovered tools, so config for an
     # externally installed plugin used to be dropped on the floor (#1757).
-    for plugin_name in get_known_plugin_tool_names():
+    for plugin_name in known_plugin_tool_names():
         variants = {
             plugin_name,
             plugin_name.replace("_", "-"),
@@ -1104,7 +1059,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         "tools": {},
         "ai": {},
         "review": {},
-        "score": {},
         "output": {},
         "watch": {},
         "deps": {},
@@ -1119,9 +1073,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     # Keys and sections that are valid under [tool.lintro] but are parsed by
     # other loaders, not by this converter. Listing them keeps the unknown-key
     # warning below from crying wolf about legitimate config.
-    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
-        PYPROJECT_ORDERING_KEYS,
-    )
+    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS)
 
     unknown_keys: list[str] = []
 
@@ -1177,9 +1129,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key in enforce_keys or key.replace("-", "_") in enforce_keys:
             # Enforce config
             result["enforce"][key.replace("-", "_")] = value
-        elif key_lower == ConfigKey.POST_CHECKS.value.lower():
-            # Skip post_checks (handled separately)
-            pass
         elif key_lower == ConfigKey.VERSIONS.value.lower():
             # Skip versions (handled separately)
             pass
@@ -1191,8 +1140,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
             result["ai"] = value
         elif key_lower == "review":
             result["review"] = value
-        elif key_lower == "score" and isinstance(value, dict):
-            result["score"] = value
         elif key_lower == "output" and isinstance(value, dict):
             result["output"] = value
         elif key_lower == "watch":
@@ -1426,7 +1373,6 @@ def build_config_from_dict(
     # Stored verbatim: parsing belongs to the AI layer (issue #724).
     ai_config = data.get("ai") or {}
     review_config = _parse_review_config(data.get("review", {}))
-    score_config = _parse_score_config(data.get("score", {}))
     output_config = _parse_output_config(data.get("output", {}))
     watch_config = _parse_watch_config(data.get("watch", {}))
     deps_config = _parse_deps_config(data.get("deps", {}))
@@ -1438,7 +1384,6 @@ def build_config_from_dict(
         tools=tools_config,
         ai=ai_config,
         review=review_config,
-        score=score_config,
         output=output_config,
         watch=watch_config,
         deps=deps_config,
@@ -1457,9 +1402,7 @@ def get_default_config() -> LintroConfig:
             line_length=88,
             target_python=None,
         ),
-        execution=ExecutionConfig(
-            tool_order="priority",
-        ),
+        execution=ExecutionConfig(),
     )
 
 

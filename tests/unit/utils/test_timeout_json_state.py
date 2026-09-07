@@ -30,8 +30,8 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
-from lintro.tools.definitions.mypy import MypyPlugin
-from lintro.tools.definitions.prettier import PrettierPlugin
+from lintro.tools.mypy.definition import MypyPlugin
+from lintro.tools.prettier.definition import PrettierPlugin
 from lintro.utils.execution.exit_codes import (
     aggregate_tool_results,
     determine_exit_code,
@@ -171,7 +171,6 @@ def _json_for(results: list[ToolResult]) -> dict[str, Any]:
             all_results=results,
             total_issues=total_issues,
             total_remaining=total_remaining,
-            main_phase_empty_due_to_filter=False,
         ),
     )
 
@@ -376,7 +375,6 @@ def test_timeout_still_fails_the_run_despite_zero_issues(
         all_results=results,
         total_issues=total_issues,
         total_remaining=total_remaining,
-        main_phase_empty_due_to_filter=False,
     )
 
     assert_that(total_issues).is_equal_to(0)

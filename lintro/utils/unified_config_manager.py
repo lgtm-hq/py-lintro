@@ -13,7 +13,7 @@ from loguru import logger
 
 from lintro.utils.config import load_lintro_global_config, load_lintro_tool_config
 from lintro.utils.config_constants import ToolConfigInfo
-from lintro.utils.config_priority import get_effective_line_length, get_ordered_tools
+from lintro.utils.config_priority import get_effective_line_length
 from lintro.utils.config_validation import (
     get_tool_config_summary,
     is_tool_injectable,  # Used in get_tool_config() fallback
@@ -80,17 +80,6 @@ class UnifiedConfigManager:
                 is_injectable=is_tool_injectable(tool_name),
             )
         return self.tool_configs[tool_name]
-
-    def get_ordered_tools(self, tool_names: list[str]) -> list[str]:
-        """Get tools in execution order.
-
-        Args:
-            tool_names: List of tool names.
-
-        Returns:
-            List of tool names in execution order.
-        """
-        return get_ordered_tools(tool_names)
 
     def apply_config_to_tool(
         self,

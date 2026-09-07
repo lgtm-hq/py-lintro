@@ -32,10 +32,22 @@
     }
   },
   "language_map": {
-    "python": ["ruff", "black", "mypy", "bandit", "pydoclint", "semgrep", "pip_audit"],
+    "python": [
+      "ruff",
+      "black",
+      "mypy",
+      "bandit",
+      "pydoclint",
+      "semgrep",
+      "pip_audit",
+      "import_linter",
+      "pylint"
+    ],
     "javascript": ["oxlint", "oxfmt", "prettier"],
     "typescript": ["oxlint", "oxfmt", "prettier", "tsc"],
     "rust": ["clippy", "rustfmt", "rustc", "cargo_audit", "cargo_deny"],
+    "c": ["cppcheck"],
+    "cpp": ["cppcheck"],
     "go": ["golangci_lint", "semgrep"],
     "ruby": ["semgrep"],
     "sql": ["sqlfluff"],
@@ -170,6 +182,18 @@
       "tags": ["linter"]
     },
     {
+      "name": "cppcheck",
+      "min_version": "2.13.0",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["cppcheck", "--version"],
+      "languages": ["c", "cpp"],
+      "tags": ["linter", "security"]
+    },
+    {
       "name": "dotenv_linter",
       "install": {
         "type": "binary"
@@ -225,6 +249,18 @@
       "category": "npm",
       "version_command": ["html-validate", "--version"],
       "languages": ["html"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "import_linter",
+      "install": {
+        "type": "pip",
+        "package": "import-linter"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["lint-imports", "--version"],
+      "languages": ["python"],
       "tags": ["linter"]
     },
     {
@@ -323,6 +359,18 @@
       "tier": "tools",
       "category": "bundled",
       "version_command": ["pydoclint", "--version"],
+      "languages": ["python"],
+      "tags": ["linter"]
+    },
+    {
+      "name": "pylint",
+      "install": {
+        "type": "pip",
+        "package": "pylint"
+      },
+      "tier": "tools",
+      "category": "bundled",
+      "version_command": ["pylint", "--version"],
       "languages": ["python"],
       "tags": ["linter"]
     },

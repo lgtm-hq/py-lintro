@@ -15,10 +15,8 @@ from assertpy import assert_that
 from lintro.utils.config import (
     _get_lintro_section,
     clear_pyproject_cache,
-    get_tool_order_config,
     load_lintro_global_config,
     load_lintro_tool_config,
-    load_post_checks_config,
     load_pyproject_config,
     load_tool_config_from_pyproject,
 )
@@ -219,15 +217,14 @@ def test_structural_sections_still_filtered(
 ) -> None:
     """Verify non-tool structural sections are excluded from global config.
 
-    Sections like post_checks, module_size, and versions are not backed by
-    a registered tool but must still be treated as non-global config.
+    Sections like module_size and versions are not backed by a registered
+    tool but must still be treated as non-global config.
 
     Args:
         mock_lintro_section: Factory fixture for mocking _get_lintro_section.
     """
     mock_data = {
         "global_setting": "value",
-        "post_checks": {"enabled": True},
         "module_size": {"threshold": 500},
         "versions": {"ruff": "1.0.0"},
     }
@@ -236,7 +233,6 @@ def test_structural_sections_still_filtered(
         result = load_lintro_global_config()
 
     assert_that(result).is_equal_to({"global_setting": "value"})
-    assert_that(result).does_not_contain_key("post_checks")
     assert_that(result).does_not_contain_key("module_size")
     assert_that(result).does_not_contain_key("versions")
 
@@ -309,98 +305,6 @@ def test_load_lintro_tool_config_handles_various_inputs(
     """
     with patch("lintro.utils.config._get_lintro_section", return_value=section_data):
         result = load_lintro_tool_config(tool_name)
-
-    assert_that(result).is_equal_to(expected)
-    assert_that(result).is_instance_of(dict)
-
-
-# =============================================================================
-# Tests for get_tool_order_config
-# =============================================================================
-
-
-def test_get_tool_order_config_returns_defaults_when_not_configured() -> None:
-    """Verify get_tool_order_config returns default values when not configured.
-
-    The default strategy should be 'priority' with empty custom_order and
-    priority_overrides.
-    """
-    with patch("lintro.utils.config.load_lintro_global_config", return_value={}):
-        result = get_tool_order_config()
-
-    assert_that(result["strategy"]).is_equal_to("priority")
-    assert_that(result["custom_order"]).is_empty()
-    assert_that(result["custom_order"]).is_instance_of(list)
-    assert_that(result["priority_overrides"]).is_empty()
-    assert_that(result["priority_overrides"]).is_instance_of(dict)
-
-
-def test_get_tool_order_config_returns_custom_values_when_configured() -> None:
-    """Verify get_tool_order_config returns custom values when configured.
-
-    When tool_order, tool_order_custom, and tool_priorities are set in the
-    config, they should be returned in the result dictionary.
-    """
-    mock_config = {
-        "tool_order": "custom",
-        "tool_order_custom": ["ruff", "black", "mypy"],
-        "tool_priorities": {"ruff": 100, "black": 50},
-    }
-    with patch(
-        "lintro.utils.config.load_lintro_global_config",
-        return_value=mock_config,
-    ):
-        result = get_tool_order_config()
-
-    assert_that(result["strategy"]).is_equal_to("custom")
-    assert_that(result["custom_order"]).is_equal_to(["ruff", "black", "mypy"])
-    assert_that(result["custom_order"]).is_length(3)
-    assert_that(result["priority_overrides"]).is_equal_to({"ruff": 100, "black": 50})
-    assert_that(result["priority_overrides"]).contains_key("ruff")
-
-
-# =============================================================================
-# Tests for load_post_checks_config
-# =============================================================================
-
-
-@pytest.mark.parametrize(
-    ("section_data", "expected"),
-    [
-        pytest.param(
-            {"post_checks": {"enabled": True, "tools": ["black"]}},
-            {"enabled": True, "tools": ["black"]},
-            id="valid-post-checks-section",
-        ),
-        pytest.param(
-            {"post_checks": "invalid"},
-            {},
-            id="non-dict-post-checks",
-        ),
-        pytest.param(
-            {},
-            {},
-            id="missing-post-checks",
-        ),
-        pytest.param(
-            {"post_checks": {}},
-            {},
-            id="empty-post-checks",
-        ),
-    ],
-)
-def test_load_post_checks_config_handles_various_inputs(
-    section_data: dict[str, Any],
-    expected: dict[str, Any],
-) -> None:
-    """Test load_post_checks_config with various section configurations.
-
-    Args:
-        section_data: Mock data for _get_lintro_section.
-        expected: Expected return value.
-    """
-    with patch("lintro.utils.config._get_lintro_section", return_value=section_data):
-        result = load_post_checks_config()
 
     assert_that(result).is_equal_to(expected)
     assert_that(result).is_instance_of(dict)

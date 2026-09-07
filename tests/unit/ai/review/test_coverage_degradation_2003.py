@@ -38,21 +38,24 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
 )
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.orchestrator import (
-    # Deliberate private import: the retry loop is unit-tested at the helper
-    # seam, matching the #1967 tests that already pin this function.
-    _invoke_chunk_review,
-    run_review_async,
-)
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.orchestrator import run_review_async
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.response_pipeline import (
+    ChunkReviewRequest,
+    invoke_chunk_review,
+)
+from lintro.ai.review.session import ReviewSessionOptions
+from lintro.ai.review.sticky import build_sticky_comment
 from lintro.mcp.toolkits.review import _run_metadata
 
 _CAP = CoverageDegradation(
@@ -123,9 +126,11 @@ def _sticky(*, result: ReviewResult) -> str:
         The rendered sticky comment body.
     """
     return build_sticky_comment(
-        result=result,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=result,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
@@ -345,20 +350,23 @@ def test_uncapped_run_renders_identically_on_every_surface(
 
 def test_run_record_round_trips_the_coverage_flag() -> None:
     """A coverage-limited round persists and parses back as limited."""
-    record = RunRecord(round=1, coverage_limited=True)
+    record = RunRecord(
+        identity=RunIdentity(round=1),
+        coverage=RunCoverage(coverage_limited=True),
+    )
 
     payload = record.to_dict()
 
     assert_that(payload).contains_key("coverage_limited")
-    assert_that(RunRecord.from_dict(payload).coverage_limited).is_true()
+    assert_that(RunRecord.from_dict(payload).coverage.coverage_limited).is_true()
 
 
 def test_run_record_omits_the_flag_for_a_complete_round() -> None:
     """A legacy or complete record keeps its byte-identical serialized shape."""
-    payload = RunRecord(round=1).to_dict()
+    payload = RunRecord(identity=RunIdentity(round=1)).to_dict()
 
     assert_that(payload).does_not_contain_key("coverage_limited")
-    assert_that(RunRecord.from_dict(payload).coverage_limited).is_false()
+    assert_that(RunRecord.from_dict(payload).coverage.coverage_limited).is_false()
 
 
 # --- machine-readable payloads ------------------------------------------------
@@ -518,6 +526,9 @@ async def _degradations_for(
     """
     chunk, context = _chunk_and_context(repo_root=str(tmp_path))
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     budget = MagicMock()
@@ -534,30 +545,32 @@ async def _degradations_for(
         return _ok_response()
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        _response, _elapsed, degradations = await _invoke_chunk_review(
-            chunk=chunk,
-            context=context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                review=True,
-                transport=AITransport.CLI,
+        _response, _elapsed, degradations = await invoke_chunk_review(
+            request=ChunkReviewRequest(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.CLI,
+                ),
+                checklist_text="",
+                checklist_count=0,
+                interaction_paths="",
+                lint_results=None,
+                extra_checklist="",
+                strictness_section="",
+                budget=budget,
+                repo_root=str(tmp_path),
+                use_one_shot=True,
+                diff_budget=10_000,
+                max_findings=max_findings,
+                chunk_index=3,
             ),
-            checklist_text="",
-            checklist_count=0,
-            interaction_paths="",
-            lint_results=None,
-            extra_checklist="",
-            strictness_section="",
-            budget=budget,
-            repo_root=str(tmp_path),
-            use_one_shot=True,
-            diff_budget=10_000,
-            max_findings=max_findings,
-            chunk_index=3,
         )
     return degradations
 
@@ -639,26 +652,31 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
     """
     _chunk, context = _chunk_and_context(repo_root=str(tmp_path))
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False
 
     with patch(
-        "lintro.ai.review.orchestrator.call_ai",
+        "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(return_value=_ok_response()),
     ):
         result = await run_review_async(
             context=context,
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                review=True,
-                transport=AITransport.CLI,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.CLI,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="",
-            classifications=[],
         )
 
     assert_that(result.metadata.findings_coverage_complete).is_false()
@@ -711,12 +729,16 @@ def test_run_record_coverage_limited_uses_strict_bool_parsing() -> None:
     base = RunRecord().to_dict()
 
     assert_that(
-        RunRecord.from_dict({**base, "coverage_limited": "false"}).coverage_limited,
+        RunRecord.from_dict(
+            {**base, "coverage_limited": "false"},
+        ).coverage.coverage_limited,
     ).is_false()
     assert_that(
-        RunRecord.from_dict({**base, "coverage_limited": True}).coverage_limited,
+        RunRecord.from_dict(
+            {**base, "coverage_limited": True},
+        ).coverage.coverage_limited,
     ).is_true()
-    assert_that(RunRecord.from_dict(base).coverage_limited).is_false()
+    assert_that(RunRecord.from_dict(base).coverage.coverage_limited).is_false()
 
 
 def test_capped_and_retried_chunk_counts_once_in_the_description() -> None:
@@ -765,8 +787,12 @@ def test_run_record_partial_uses_strict_bool_parsing() -> None:
 
     base = RunRecord().to_dict()
 
-    assert_that(RunRecord.from_dict({**base, "partial": "false"}).partial).is_false()
-    assert_that(RunRecord.from_dict({**base, "partial": True}).partial).is_true()
+    assert_that(
+        RunRecord.from_dict({**base, "partial": "false"}).coverage.partial,
+    ).is_false()
+    assert_that(
+        RunRecord.from_dict({**base, "partial": True}).coverage.partial,
+    ).is_true()
 
 
 def test_sticky_history_marks_a_prior_capped_round(
@@ -777,28 +803,35 @@ def test_sticky_history_marks_a_prior_capped_round(
     Args:
         sample_review_result: Shared review result fixture.
     """
-    from lintro.ai.review.github_sticky import build_sticky_bodies
     from lintro.ai.review.models.run_record import RunRecord
+    from lintro.ai.review.sticky import build_sticky_bodies
 
-    limited = RunRecord(round=1, sha="abc1234", coverage_limited=True).to_dict()
-    unlimited = RunRecord(round=1, sha="abc1234").to_dict()
+    limited = RunRecord(
+        identity=RunIdentity(round=1, sha="abc1234"),
+        coverage=RunCoverage(coverage_limited=True),
+    ).to_dict()
+    unlimited = RunRecord(identity=RunIdentity(round=1, sha="abc1234")).to_dict()
 
     # The primary sticky archives run history into its companion body, so the
     # marker is asserted across both bodies the public builder returns.
     with_marker = "\n".join(
         body or ""
         for body in build_sticky_bodies(
-            result=sample_review_result,
-            prior_runs=[limited],
-            transport="cli",
+            request=StickyRequest(
+                result=sample_review_result,
+                prior_state=ReviewState(runs=(RunRecord.from_dict(limited),)),
+                transport="cli",
+            ),
         )
     )
     without_marker = "\n".join(
         body or ""
         for body in build_sticky_bodies(
-            result=sample_review_result,
-            prior_runs=[unlimited],
-            transport="cli",
+            request=StickyRequest(
+                result=sample_review_result,
+                prior_state=ReviewState(runs=(RunRecord.from_dict(unlimited),)),
+                transport="cli",
+            ),
         )
     )
 
@@ -815,25 +848,34 @@ def test_advanced_state_persists_coverage_limited_from_a_capped_result(
     Args:
         sample_review_result: Shared review result fixture.
     """
-    from lintro.ai.review.github_sticky import advance_review_state
     from lintro.ai.review.models.run_record import RunRecord
+    from lintro.ai.review.sticky import advance_review_state
 
     capped_state = advance_review_state(
-        result=_with_degradations(result=sample_review_result, degradations=(_CAP,)),
-        head_sha="abc1234",
-        transport="cli",
+        request=StickyRequest(
+            result=_with_degradations(
+                result=sample_review_result,
+                degradations=(_CAP,),
+            ),
+            head_sha="abc1234",
+            transport="cli",
+        ),
     )
     clean_state = advance_review_state(
-        result=sample_review_result,
-        head_sha="abc1234",
-        transport="cli",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="abc1234",
+            transport="cli",
+        ),
     )
 
     capped_run = capped_state.runs[-1]
-    assert_that(capped_run.coverage_limited).is_true()
-    assert_that(clean_state.runs[-1].coverage_limited).is_false()
+    assert_that(capped_run.coverage.coverage_limited).is_true()
+    assert_that(clean_state.runs[-1].coverage.coverage_limited).is_false()
     # The flag survives the flat persisted shape.
-    assert_that(RunRecord.from_dict(capped_run.to_dict()).coverage_limited).is_true()
+    assert_that(
+        RunRecord.from_dict(capped_run.to_dict()).coverage.coverage_limited,
+    ).is_true()
 
 
 def test_unknown_degradation_reason_still_renders_a_clause(

@@ -231,7 +231,7 @@ def test_runner_help_exits_zero() -> None:
 @pytest.mark.parametrize(
     "action_ref",
     [
-        "step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c",
+        "step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1",
         "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
     ],
 )

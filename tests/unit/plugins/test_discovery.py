@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
 from loguru import logger
 
-import lintro.tools.definitions as definitions_package
+import lintro.tools as tools_package
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins._builtin_index import (
     BUILTIN_TOOL_MODULES,
-    REGISTERING_TOOL_MODULES,
+    REGISTERING_TOOL_PACKAGES,
 )
+from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.discovery import (
-    BUILTIN_DEFINITIONS_PACKAGE,
+    BUILTIN_TOOLS_PACKAGE,
     ENTRY_POINT_GROUP,
     ENV_ENABLE_EXTERNAL_PLUGINS,
     _load_external_entry_point,
@@ -28,7 +34,83 @@ from lintro.plugins.discovery import (
     is_discovered,
     reset_discovery,
 )
+from lintro.plugins.protocol import LINTRO_PLUGIN_API_VERSION, ToolDefinition
 from lintro.plugins.registry import ToolRegistry
+
+
+def _make_external_plugin(*, tool_name: str) -> type[BaseToolPlugin]:
+    """Build a well-formed third-party plugin class.
+
+    Args:
+        tool_name: Name the plugin's tool definition should report.
+
+    Returns:
+        A ``BaseToolPlugin`` subclass declaring a compatible API version.
+    """
+
+    @dataclass
+    class _ExternalPlugin(BaseToolPlugin):
+        LINTRO_PLUGIN_API_VERSION = LINTRO_PLUGIN_API_VERSION
+
+        @property
+        def definition(self) -> ToolDefinition:
+            """Return the plugin's tool definition.
+
+            Returns:
+                The tool definition advertised by this fake plugin.
+            """
+            return ToolDefinition(
+                name=tool_name,
+                description="An external tool used in discovery tests",
+                file_patterns=["*.fake"],
+            )
+
+        def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+            """Return a trivially successful result.
+
+            Args:
+                paths: Unused input paths.
+                options: Unused runtime options.
+
+            Returns:
+                A successful ``ToolResult``.
+            """
+            return ToolResult(name=tool_name, success=True, issues_count=0)
+
+    return _ExternalPlugin
+
+
+@dataclass
+class _FakeEntryPoint:
+    """Minimal stand-in for ``importlib.metadata.EntryPoint``.
+
+    Attributes:
+        name: Entry-point name, which is also the tool name the backing plugin
+            registers itself under.
+        value: The ``module:attr`` target string discovery reports on failure.
+        dist: Distribution object exposing ``.name``, or ``None``.
+        load_count: How many times :meth:`load` has been invoked, so a test
+            can assert the trust gate refused *before* importing the plugin.
+    """
+
+    name: str
+    value: str = "fake_pkg.plugin:Plugin"
+    dist: object | None = None
+    load_count: int = 0
+
+    def load(self) -> type[BaseToolPlugin]:
+        """Return a well-formed plugin class registering ``self.name``.
+
+        Counts its own invocations: the trust gate has to fail closed *before*
+        importing third-party code, so "was never registered" is a weaker
+        property than "was never loaded" (#2315).
+
+        Returns:
+            A ``BaseToolPlugin`` subclass whose tool is named after this entry
+            point.
+        """
+        self.load_count += 1
+        return _make_external_plugin(tool_name=self.name)
 
 
 @pytest.fixture(autouse=True)
@@ -63,9 +145,11 @@ def test_discover_builtin_tools_loads_tools() -> None:
 
 
 def test_discover_builtin_tools_skips_private_modules() -> None:
-    """Skip modules starting with underscore."""
+    """Skip packages and modules starting with underscore."""
     module_names = get_builtin_module_names()
-    assert_that([n for n in module_names if n.startswith("_")]).is_empty()
+    assert_that(
+        [n for n in module_names if any(p.startswith("_") for p in n.split("."))],
+    ).is_empty()
 
     result = discover_builtin_tools()
 
@@ -88,8 +172,8 @@ def test_discover_builtin_tools_without_known_modules() -> None:
 def test_discover_builtin_tools_uses_index_without_source_dir() -> None:
     """Import builtin modules from the index when the package has no path.
 
-    Mirrors a frozen Nuitka onefile binary, where the definitions source
-    directory is never materialized and the package scan yields nothing.
+    Mirrors a frozen Nuitka onefile binary, where the per-tool package source
+    directories are never materialized and the package scan yields nothing.
     """
     with patch(
         "lintro.plugins.discovery._module_names_from_package_scan",
@@ -102,7 +186,7 @@ def test_discover_builtin_tools_uses_index_without_source_dir() -> None:
 
 
 def test_module_names_from_package_scan_handles_unscannable_package() -> None:
-    """Return an empty set when the definitions package exposes no path."""
+    """Return an empty set when the tools package exposes no path."""
     package = MagicMock()
     package.__path__ = []
     with patch("importlib.import_module", return_value=package):
@@ -110,7 +194,7 @@ def test_module_names_from_package_scan_handles_unscannable_package() -> None:
 
 
 def test_module_names_from_package_scan_handles_import_error() -> None:
-    """Degrade to an empty set when the definitions package cannot import."""
+    """Degrade to an empty set when the tools package cannot import."""
     with patch("importlib.import_module", side_effect=ImportError("boom")):
         assert_that(_module_names_from_package_scan()).is_empty()
 
@@ -119,11 +203,11 @@ def test_get_builtin_module_names_unions_index_and_scan() -> None:
     """Combine the generated index with modules found by the package scan."""
     with patch(
         "lintro.plugins.discovery._module_names_from_package_scan",
-        return_value={"ruff", "not_yet_indexed"},
+        return_value={"ruff.definition", "not_yet_indexed.definition"},
     ):
         names = get_builtin_module_names()
 
-    assert_that(names).contains("not_yet_indexed")
+    assert_that(names).contains("not_yet_indexed.definition")
     assert_that(names).contains(*BUILTIN_TOOL_MODULES)
     assert_that(list(names)).is_equal_to(sorted(names))
 
@@ -254,15 +338,13 @@ def test_external_plugins_opt_in_env(
         lambda: {},
     )
 
-    mock_ep = MagicMock()
-    mock_ep.name = "trusted_plugin"
-    mock_ep.load.return_value = "not-a-class"
+    entry_point = _FakeEntryPoint(name="trusted-plugin")
 
-    with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
-        discover_external_plugins()
+    with patch("importlib.metadata.entry_points", return_value=[entry_point]):
+        registered = discover_external_plugins()
 
-    # Opt-in reached the load path and executed the entry point.
-    assert_that(mock_ep.load.called).is_true()
+    assert_that(registered).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("trusted-plugin")).is_true()
 
 
 def test_allowlist_filters_untrusted(
@@ -276,22 +358,22 @@ def test_allowlist_filters_untrusted(
     monkeypatch.delenv(ENV_ENABLE_EXTERNAL_PLUGINS, raising=False)
     monkeypatch.setattr(
         "lintro.plugins.discovery._load_plugins_config",
-        lambda: {"trusted": ["a"]},
+        lambda: {"trusted": ["allowed-plugin"]},
     )
 
-    ep_a = MagicMock()
-    ep_a.name = "a"
-    ep_a.load.return_value = "not-a-class"
-    ep_b = MagicMock()
-    ep_b.name = "b"
-    ep_b.load.return_value = "not-a-class"
+    allowed = _FakeEntryPoint(name="allowed-plugin")
+    untrusted = _FakeEntryPoint(name="untrusted-plugin")
 
-    with patch("importlib.metadata.entry_points", return_value=[ep_a, ep_b]):
-        discover_external_plugins()
+    with patch("importlib.metadata.entry_points", return_value=[allowed, untrusted]):
+        registered = discover_external_plugins()
 
-    # Only the allowlisted entry point may be loaded/executed.
-    assert_that(ep_a.load.called).is_true()
-    assert_that(ep_b.load.called).is_false()
+    assert_that(registered).is_equal_to(1)
+    assert_that(ToolRegistry.is_registered("allowed-plugin")).is_true()
+    assert_that(ToolRegistry.is_registered("untrusted-plugin")).is_false()
+    # The untrusted entry point must never be imported at all: refusing to
+    # register it after loading would already have run its module-level code.
+    assert_that(allowed.load_count).is_equal_to(1)
+    assert_that(untrusted.load_count).is_equal_to(0)
 
 
 def test_malformed_yaml_config_fails_closed(
@@ -468,9 +550,9 @@ def test_reset_discovery_resets_discovery_state() -> None:
 # =============================================================================
 
 
-def test_builtin_definitions_package_matches_import_path() -> None:
-    """The configured definitions package matches the real package."""
-    assert_that(definitions_package.__name__).is_equal_to(BUILTIN_DEFINITIONS_PACKAGE)
+def test_builtin_tools_package_matches_import_path() -> None:
+    """The configured tools package matches the real package."""
+    assert_that(tools_package.__name__).is_equal_to(BUILTIN_TOOLS_PACKAGE)
 
 
 def test_builtin_index_is_non_empty() -> None:
@@ -663,10 +745,10 @@ def test_shadowed_plugin_gets_no_divergence_advice(
 
 
 def test_registering_index_matches_the_real_registry() -> None:
-    """The index's registering set is exactly the builtin registry.
+    """The index's registering packages are exactly the builtin registry.
 
-    The generator detects registering modules via AST (``@register_tool`` as a
-    Name or Attribute decorator). The binary smoke test treats that subset as
+    The generator detects registering packages via AST (``@register_tool`` as
+    a Name or Attribute decorator). The binary smoke test treats that set as
     the expected builtin tool set, so both over-counting and under-counting
     would make released binaries fail their own registry assertion — or worse,
     silently shrink the assertion. Equality catches both directions.
@@ -678,6 +760,191 @@ def test_registering_index_matches_the_real_registry() -> None:
         for name in ToolRegistry.get_names()
         if ToolRegistry.get_origin(name) == ToolRegistry.BUILTIN_ORIGIN
     }
-    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
+    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_PACKAGES}
 
     assert_that(sorted(registered)).is_equal_to(sorted(expected))
+
+
+# =============================================================================
+# Tests for the entry-module scan rule (issue #2428, findings 15, 17, 19)
+# =============================================================================
+
+
+def test_the_live_scan_equals_the_generated_index() -> None:
+    """The source-tree scan and the generated index name the same modules.
+
+    ``NON_TOOL_PACKAGES`` and the entry-module rule reimplement
+    ``lintro_build.builtin_index``'s package-entry rule against an importable
+    package rather than a source directory. Two implementations of one rule
+    only stay in step if something compares them, and this is that something:
+    a drift in either direction — a scan that starts naming ``core.*``, an
+    index that stops naming a tool — fails here.
+    """
+    assert_that(_module_names_from_package_scan()).is_equal_to(
+        set(BUILTIN_TOOL_MODULES),
+    )
+
+
+def test_the_live_scan_skips_the_shared_scaffolding_package() -> None:
+    """``lintro.tools.core`` holds scaffolding, never a tool to import."""
+    scanned = _module_names_from_package_scan()
+
+    assert_that([name for name in scanned if name.startswith("core.")]).is_empty()
+
+
+def test_the_live_scan_leaves_the_lazy_idiom_review_engine_unimported() -> None:
+    """A package with a ``definition`` module names only that module.
+
+    ``idiom_review.engine`` reaches into :mod:`lintro.ai`, so naming it would
+    make every lintro start-up import the AI stack. The rule that keeps it out
+    is "``definition`` wins", and this pins its most expensive consequence.
+    """
+    scanned = _module_names_from_package_scan()
+
+    assert_that(scanned).contains("idiom_review.definition")
+    assert_that(scanned).does_not_contain("idiom_review.engine")
+
+
+def _write_package(*, root: Path, name: str, modules: tuple[str, ...]) -> None:
+    """Create a fake per-tool package under ``root``.
+
+    Args:
+        root: Directory standing in for ``lintro/tools``.
+        name: Package base name.
+        modules: Module base names to create beside ``__init__.py``.
+    """
+    package = root / name
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for module in modules:
+        (package / f"{module}.py").write_text("", encoding="utf-8")
+
+
+def _scan_fake_tools_tree(*, root: Path, monkeypatch: pytest.MonkeyPatch) -> set[str]:
+    """Run the real package scan against a fake ``lintro/tools`` tree.
+
+    Only the two lookups that reach the installed package are redirected, and
+    only for ``lintro.tools`` itself — everything else is delegated to the real
+    machinery, because a blanket patch of ``import_module`` breaks the lazy
+    imports other libraries perform during the scan, and the scan swallows the
+    resulting error as an empty result. The scan's own rules (package-only, no
+    leading underscore, not a scaffolding package, definition-wins) stay the
+    code under test rather than a reimplementation.
+
+    Args:
+        root: Directory standing in for ``lintro/tools``.
+        monkeypatch: Fixture used to redirect the two lookups.
+
+    Returns:
+        set[str]: ``<package>.<module>`` names the scan yields for that tree.
+    """
+    tools_package = MagicMock()
+    tools_package.__path__ = [str(root)]
+    real_import_module = importlib.import_module
+    real_find_spec = importlib.util.find_spec
+
+    def _import_module(name: str, package: str | None = None) -> Any:
+        """Return the fake tools package, delegating every other import.
+
+        Args:
+            name: Dotted module name being imported.
+            package: Anchor for a relative import.
+
+        Returns:
+            Any: The fake package, or whatever the real machinery returns.
+        """
+        if name == BUILTIN_TOOLS_PACKAGE:
+            return tools_package
+        return real_import_module(name, package)
+
+    def _find_spec(name: str, package: str | None = None) -> Any:
+        """Resolve one fake per-tool package, delegating every other lookup.
+
+        Args:
+            name: Dotted module name discovery asks for.
+            package: Anchor for a relative import.
+
+        Returns:
+            Any: A spec whose search locations point into the fake tree, with
+            locations ``None`` when the directory is not a package, or
+            whatever the real machinery returns for an unrelated name.
+        """
+        prefix = f"{BUILTIN_TOOLS_PACKAGE}."
+        if not name.startswith(prefix):
+            return real_find_spec(name, package)
+        directory = root / name[len(prefix) :]
+        spec = MagicMock()
+        spec.submodule_search_locations = (
+            [str(directory)] if (directory / "__init__.py").is_file() else None
+        )
+        return spec
+
+    monkeypatch.setattr(importlib, "import_module", _import_module)
+    monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
+    return _module_names_from_package_scan()
+
+
+@pytest.mark.parametrize(
+    ("modules", "expected"),
+    [
+        (("definition", "engine", "renderer"), {"faketool.definition"}),
+        (("shared", "helpers"), {"faketool.helpers", "faketool.shared"}),
+        (("_private", "definition"), {"faketool.definition"}),
+        (("_private",), set()),
+    ],
+    ids=[
+        "definition_wins",
+        "all_public_without_definition",
+        "private_never_named",
+        "private_only_names_nothing",
+    ],
+)
+def test_the_scan_enters_a_package_through_definition_else_all_public(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    modules: tuple[str, ...],
+    expected: set[str],
+) -> None:
+    """A package is entered through ``definition``, else through every public module.
+
+    Mirrors ``lintro_build.builtin_index._entry_modules``: naming the rest of a
+    package that has a ``definition`` would defeat the laziness that keeps
+    ``idiom_review.engine`` — and therefore :mod:`lintro.ai` — out of start-up.
+
+    Args:
+        tmp_path: Directory standing in for ``lintro/tools``.
+        monkeypatch: Fixture used to point the scan at the fake tree.
+        modules: Module base names the fake package holds.
+        expected: ``<package>.<module>`` names the scan must yield.
+    """
+    _write_package(root=tmp_path, name="faketool", modules=modules)
+
+    assert_that(
+        _scan_fake_tools_tree(root=tmp_path, monkeypatch=monkeypatch),
+    ).is_equal_to(expected)
+
+
+def test_the_scan_skips_scaffolding_private_and_non_package_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only public, non-scaffolding packages are entered.
+
+    ``core`` is shared scaffolding, ``_internal`` is private, and a directory
+    with no ``__init__.py`` is not a package at all — none of the three is a
+    tool, and each is skipped for its own reason.
+
+    Args:
+        tmp_path: Directory standing in for ``lintro/tools``.
+        monkeypatch: Fixture used to point the scan at the fake tree.
+    """
+    _write_package(root=tmp_path, name="realtool", modules=("definition",))
+    _write_package(root=tmp_path, name="core", modules=("definition",))
+    _write_package(root=tmp_path, name="_internal", modules=("definition",))
+    loose = tmp_path / "notapackage"
+    loose.mkdir()
+    (loose / "definition.py").write_text("", encoding="utf-8")
+
+    assert_that(
+        _scan_fake_tools_tree(root=tmp_path, monkeypatch=monkeypatch),
+    ).is_equal_to({"realtool.definition"})

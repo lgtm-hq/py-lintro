@@ -14,7 +14,7 @@ import json
 from contextlib import ExitStack
 from dataclasses import replace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -42,9 +42,8 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
-from lintro.ai.review.github_render import format_synthesis_note_line
+from lintro.ai.review.github_notes import format_synthesis_note_line
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.chunk_summary import ChunkSummary
@@ -53,11 +52,14 @@ from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.orchestrator import guard_changed_paths, run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
-from lintro.ai.review.synthesis import run_synthesis_pass
+from lintro.ai.review.session import ReviewSessionOptions
+from lintro.ai.review.sticky import build_sticky_comment
+from lintro.ai.review.synthesis import SynthesisPassRequest, run_synthesis_pass
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     cross_chunk_paths,
@@ -189,6 +191,9 @@ def _mock_provider() -> MagicMock:
         A provider mock safe for the multi-chunk fan-out path.
     """
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-20250514"
     provider.name = "anthropic"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)
@@ -289,12 +294,15 @@ def _run(
     with ExitStack() as stack:
         stack.enter_context(
             patch(
-                "lintro.ai.review.orchestrator.resolve_review_chunks",
+                "lintro.ai.review.run_planning.resolve_review_chunks",
                 return_value=chunks if chunks is not None else _two_chunks(),
             ),
         )
         stack.enter_context(
-            patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+            patch(
+                "lintro.ai.review.provider_call.call_ai",
+                side_effect=_chunk_call,
+            ),
         )
         stack.enter_context(
             patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
@@ -308,22 +316,24 @@ def _run(
             )
         return run_review(
             context if context is not None else _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                sensitivity=(
+                    None
+                    if strictness is None
+                    else resolve_sensitivity_policy(strictness=strictness)
+                ),
+                synthesis=synthesis,
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            sensitivity=(
-                None
-                if strictness is None
-                else resolve_sensitivity_policy(strictness=strictness)
-            ),
-            synthesis=synthesis,
         )
 
 
@@ -406,7 +416,9 @@ def _github_surfaces(*, result: Any) -> tuple[str, str]:
         match=match,
         head_sha="deadbeef",
     )
-    sticky = build_sticky_comment(result=result, head_sha="deadbeef")
+    sticky = build_sticky_comment(
+        request=StickyRequest(result=result, head_sha="deadbeef"),
+    )
     return body, sticky
 
 
@@ -822,25 +834,27 @@ def test_synthesized_duplicate_of_a_chunk_finding_is_dropped() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
             _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                synthesis=ReviewSynthesisConfig(enabled=True),
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            synthesis=ReviewSynthesisConfig(enabled=True),
         )
 
     assert_that(_outcome(result=result).findings_added).is_equal_to(0)
@@ -1578,25 +1592,27 @@ def test_restatements_never_consume_the_cap_window() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
             _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                synthesis=ReviewSynthesisConfig(enabled=True, max_findings=2),
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            synthesis=ReviewSynthesisConfig(enabled=True, max_findings=2),
         )
 
     synthesized_titles = [
@@ -1680,16 +1696,18 @@ async def test_an_interrupt_abandons_the_extra_call_and_degrades() -> None:
 
     with patch("lintro.ai.review.synthesis.call_ai", side_effect=_never_returns):
         result = await run_synthesis_pass(
-            context=_pr_context(),
-            summaries=(),
-            existing_findings=(),
-            provider=_mock_provider(),
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            config=ReviewSynthesisConfig(enabled=True),
-            policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
-            budget=CostBudget(max_cost_usd=1.0),
-            diff_budget=100_000,
-            stop=stop,
+            request=SynthesisPassRequest(
+                context=_pr_context(),
+                summaries=(),
+                existing_findings=(),
+                provider=_mock_provider(),
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                config=ReviewSynthesisConfig(enabled=True),
+                policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+                budget=CostBudget(max_cost_usd=1.0),
+                diff_budget=100_000,
+                stop=stop,
+            ),
         )
 
     assert_that(started.is_set()).is_true()
@@ -1707,15 +1725,17 @@ async def test_without_a_stop_event_the_call_is_awaited_normally() -> None:
 
     with patch("lintro.ai.review.synthesis.call_ai", side_effect=_answers):
         result = await run_synthesis_pass(
-            context=_pr_context(),
-            summaries=(),
-            existing_findings=(),
-            provider=_mock_provider(),
-            ai_config=AIConfig(enabled=True, transport=AITransport.API),
-            config=ReviewSynthesisConfig(enabled=True),
-            policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
-            budget=CostBudget(max_cost_usd=1.0),
-            diff_budget=100_000,
+            request=SynthesisPassRequest(
+                context=_pr_context(),
+                summaries=(),
+                existing_findings=(),
+                provider=_mock_provider(),
+                ai_config=AIConfig(enabled=True, transport=AITransport.API),
+                config=ReviewSynthesisConfig(enabled=True),
+                policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+                budget=CostBudget(max_cost_usd=1.0),
+                diff_budget=100_000,
+            ),
         )
 
     assert_that(result.outcome.failed).is_false()
@@ -1739,25 +1759,27 @@ def test_a_partial_run_never_spends_the_extra_call() -> None:
 
     with (
         patch(
-            "lintro.ai.review.orchestrator.resolve_review_chunks",
+            "lintro.ai.review.run_planning.resolve_review_chunks",
             return_value=_two_chunks(),
         ),
-        patch("lintro.ai.review.orchestrator.call_ai", side_effect=_chunk_call),
+        patch("lintro.ai.review.provider_call.call_ai", side_effect=_chunk_call),
         patch("lintro.ai.review.synthesis.call_ai", side_effect=_synthesis_call),
     ):
         result = run_review(
             _pr_context(),
-            provider=provider,
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                max_parallel_calls=1,
+            options=ReviewSessionOptions(
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    max_parallel_calls=1,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
+                synthesis=ReviewSynthesisConfig(enabled=True),
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
-            synthesis=ReviewSynthesisConfig(enabled=True),
         )
 
     assert_that(result.metadata.partial).is_true()

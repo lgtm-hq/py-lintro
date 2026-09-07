@@ -11,7 +11,6 @@ enforce:
 
 execution:
   enabled_tools: []
-  tool_order: 'priority'
   fail_fast: false
   parallel: true
   max_workers: 10 # 1-32, defaults to CPU count if omitted
@@ -104,6 +103,18 @@ tools:
   pydoclint:
     enabled: true
 
+  # Import-linter - Python import contracts (config in pyproject.toml
+  # [tool.importlinter]; the contract set is empty for now, see #2290)
+  import-linter:
+    enabled: true
+
+  # Pylint - Python static analysis (config in pyproject.toml [tool.pylint];
+  # only duplicate-code/R0801 is enabled there). Scoped to the tool-definition
+  # package by `[tool.lintro.pylint] include` in pyproject.toml, which also
+  # carries the R0801 ratchet baseline (#2293).
+  pylint:
+    enabled: true
+
   # Pytest - Test runner (config in pyproject.toml [tool.pytest.ini_options])
   pytest:
     enabled: true
@@ -141,3 +152,10 @@ review:
     test_gaps: null
   force_semantic_chunking: false # same as --semantic-chunks (~6× agent calls)
   custom_agents: true # true | false | only — .lintro/review-agents/*.md
+  convergence:
+    # Deterministic re-review stop rule (#2099). null disables it: every round
+    # reviews. Set a float to skip the next round once `stable_rounds`
+    # consecutive rounds have scored below it. `lintro review --full` always
+    # forces a round.
+    threshold: null
+    stable_rounds: 2

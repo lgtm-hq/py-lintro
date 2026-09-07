@@ -97,8 +97,9 @@ class ToolDefinition:
     can_fix: bool               # Supports auto-fix?
     tool_type: ToolType         # LINTER, FORMATTER, TYPE_CHECKER, etc.
     file_patterns: list[str]    # Glob patterns for target files
-    priority: int               # Execution order (higher = first)
-    conflicts_with: list[str]   # Mutually exclusive tools
+    claims: list[Claim]         # Patterns plus what the tool does to them
+    reads_tree: bool            # Runs after mutation settles
+    partitionable: bool         # File set may be sharded
     native_configs: list[str]   # Config files the tool reads
     version_command: list[str]  # Command to check version
     min_version: str | None     # Minimum required version
@@ -454,7 +455,8 @@ lintro/
 ├── plugins/                 # Plugin system
 └── tools/
     ├── core/               # Tool management
-    └── implementations/    # Concrete tool classes
+    ├── definitions/        # Plugin modules (re-export shims for moved tools)
+    └── <tool>/             # Per-tool package: definition.py + its helpers
 ```
 
 ### Target Structure (Future)
@@ -592,3 +594,6 @@ subprocess.run(
 - [ROADMAP.md](./ROADMAP.md) - Prioritized improvements
 - [../style-guide.md](../style-guide.md) - Coding standards
 - [../contributing.md](../contributing.md) - Contribution guidelines
+- [../adr/README.md](../adr/README.md) - Architecture Decision Records index
+- [ADR-0008](../adr/0008-ai-review-architecture-invariants.md) - Invariants the AI
+  review subsystem holds across the #1972 decomposition

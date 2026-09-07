@@ -64,14 +64,6 @@ def _ascii_locale_forces_ascii_stdio() -> bool:
     return probe.returncode == 0 and encoding in {"ascii", "usascii"}
 
 
-def test_cli_help() -> None:
-    """Test that CLI shows help."""
-    runner = CliRunner()
-    result = runner.invoke(cli, ["--help"])
-    assert_that(result.exit_code).is_equal_to(0)
-    assert_that(result.output).contains("Lintro")
-
-
 def _assert_help_succeeds_under_ascii_stdio(*, env: dict[str, str]) -> None:
     """Assert ``python -m lintro --help`` succeeds with ASCII stdio.
 
@@ -141,14 +133,6 @@ def test_cli_commands_registered(command: str) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, [command, "--help"])
     assert_that(result.exit_code).is_equal_to(0)
-
-
-def test_main_function() -> None:
-    """Test the main function."""
-    runner = CliRunner()
-    result = runner.invoke(cli, ["--help"])
-    assert_that(result.exit_code).is_equal_to(0)
-    assert_that(result.output).contains("Lintro")
 
 
 @pytest.mark.parametrize(

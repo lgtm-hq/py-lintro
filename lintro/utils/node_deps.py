@@ -53,8 +53,7 @@ def should_install_deps(cwd: Path) -> bool:
         # bun install would fail with EACCES.
         if not os.access(cwd, os.W_OK | os.X_OK):
             msg = (
-                f"Cannot install dependencies: {cwd} is not writable "
-                f"(read-only mount?)"
+                f"Cannot install dependencies: {cwd} is not writable (read-only mount?)"
             )
             logger.warning("[node_deps] {}", msg)
             raise PermissionError(msg)

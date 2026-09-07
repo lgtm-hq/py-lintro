@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.astro_check import AstroCheckPlugin
+from lintro.tools.astro_check.definition import AstroCheckPlugin
 
 
 @pytest.fixture

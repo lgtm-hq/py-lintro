@@ -6,16 +6,15 @@ repositories. They are skipped when ``commitlint`` or ``git`` is unavailable.
 
 from __future__ import annotations
 
-import shutil
 import subprocess  # nosec B404 - test helper, fixed args, no shell
 from pathlib import Path
 
-import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.commitlint.commitlint_issue import CommitlintIssue
 from lintro.plugins import ToolRegistry
+from tests.integration._tools import require_tool
 from tests.test_samples_helpers import sample_path
 
 _SELF_CONTAINED_CONFIG = (
@@ -27,10 +26,10 @@ _SELF_CONTAINED_CONFIG = (
     "};\n"
 )
 
-_requires_binaries = pytest.mark.skipif(
-    shutil.which("commitlint") is None or shutil.which("git") is None,
-    reason="commitlint or git not installed on PATH; skip integration test.",
-)
+pytestmark = [
+    require_tool("commitlint"),
+    require_tool("git"),
+]
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -80,7 +79,6 @@ def _sample_message(name: str) -> str:
     )
 
 
-@_requires_binaries
 def test_commitlint_detects_bad_last_commit(tmp_path: Path) -> None:
     """Commitlint flags a non-conventional last commit message."""
     _init_repo(tmp_path, config=_SELF_CONTAINED_CONFIG)
@@ -99,7 +97,6 @@ def test_commitlint_detects_bad_last_commit(tmp_path: Path) -> None:
     assert_that([i.rule for i in issues]).contains("subject-empty")
 
 
-@_requires_binaries
 def test_commitlint_passes_conventional_commit(tmp_path: Path) -> None:
     """Commitlint accepts a conventional last commit message."""
     _init_repo(tmp_path, config=_SELF_CONTAINED_CONFIG)
@@ -115,7 +112,6 @@ def test_commitlint_passes_conventional_commit(tmp_path: Path) -> None:
     assert_that(result.issues_count).is_equal_to(0)
 
 
-@_requires_binaries
 def test_commitlint_skips_without_config(tmp_path: Path) -> None:
     """Commitlint is skipped (non-error) when no config is present."""
     _init_repo(tmp_path, config=None)

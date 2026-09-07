@@ -9,8 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.vue_tsc import (
-    VUE_TSC_DEFAULT_PRIORITY,
+from lintro.tools.vue_tsc.definition import (
     VUE_TSC_DEFAULT_TIMEOUT,
     VUE_TSC_FILE_PATTERNS,
     VueTscPlugin,
@@ -66,17 +65,6 @@ def test_definition_file_patterns(vue_tsc_plugin: VueTscPlugin) -> None:
         VUE_TSC_FILE_PATTERNS,
     )
     assert_that(vue_tsc_plugin.definition.file_patterns).contains("*.vue")
-
-
-def test_definition_priority(vue_tsc_plugin: VueTscPlugin) -> None:
-    """Verify tool priority is set correctly.
-
-    Args:
-        vue_tsc_plugin: The VueTscPlugin instance to test.
-    """
-    assert_that(vue_tsc_plugin.definition.priority).is_equal_to(
-        VUE_TSC_DEFAULT_PRIORITY,
-    )
 
 
 def test_definition_native_configs(vue_tsc_plugin: VueTscPlugin) -> None:

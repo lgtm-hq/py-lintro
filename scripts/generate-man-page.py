@@ -44,6 +44,9 @@ def render_man_page(date: str | None = None) -> str:
         The rendered man page text.
     """
     ctx = click.Context(cli, info_name="lintro")
+    # Subcommands load lazily (#1305) and click-man reads ``Group.commands``
+    # directly, so materialize the whole tree before rendering.
+    cli.load_all_commands(ctx)
     return str(generate_man_page(ctx, version=__version__, date=date))
 
 

@@ -60,8 +60,23 @@ class ReviewResult:
 
     @property
     def has_p1_findings(self) -> bool:
-        """Return True when any P1 finding exists."""
-        return any(finding.severity == Severity.P1 for finding in self.findings)
+        """Return True when any P1 defect finding exists.
+
+        Questions (#1925) are excluded even when the model labelled one P1:
+        an open question is not a blocker. This is the process exit gate, and
+        it must agree with the readiness verdict
+        (:func:`~lintro.ai.review.finding_matcher.derive_verdict`, which has
+        always excluded questions) and with the converged-skip gate in the CLI
+        — otherwise a round of P1 questions would exit 1 while the skip that
+        follows it exits 0 (#2099 review).
+
+        Returns:
+            True when an open P1 defect claim exists.
+        """
+        return any(
+            finding.severity == Severity.P1 and not finding.is_question
+            for finding in self.findings
+        )
 
     @property
     def readiness_verdict(self) -> ReviewVerdict:

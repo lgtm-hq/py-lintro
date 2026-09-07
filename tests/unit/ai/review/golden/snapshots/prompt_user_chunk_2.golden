@@ -1,0 +1,213 @@
+Review this code change for actionable findings.
+
+**PR:** <CODE_BLOCK_0d15ea5e> Harden the session gate </CODE_BLOCK_0d15ea5e>
+
+**Base → Head:** <CODE_BLOCK_0d15ea5e> `main`...`feature/session-gate` </CODE_BLOCK_0d15ea5e>
+
+**Summary:**
+
+<CODE_BLOCK_0d15ea5e>
+Fail closed on unknown session status and widen token decoding.
+</CODE_BLOCK_0d15ea5e>
+
+
+
+<CODE_BLOCK_0d15ea5e>
+
+</CODE_BLOCK_0d15ea5e>
+
+**Changed files (1):**
+
+<CODE_BLOCK_0d15ea5e>
+- `src/auth/tokens.py` (renamed, +1/-1)
+</CODE_BLOCK_0d15ea5e>
+
+**Every file this PR changes (this chunk's own files are marked
+`— **(this chunk)**`):**
+
+<CODE_BLOCK_0d15ea5e>
+- `src/auth/session.py` (modified, +5/-1)
+- `assets/logo.png` (modified, +0/-0)
+- `src/auth/tokens.py` (renamed, +1/-1) — **(this chunk)**
+</CODE_BLOCK_0d15ea5e>
+
+Unmarked files above are part of this PR but are not in this chunk's diff. Any copy of
+them you read from disk is the stale base-commit version, not this PR's state — never
+treat it as evidence that such a file was not updated, not touched, or missing a change.
+
+---
+
+### Interaction paths (trace each explicitly)
+
+- session status -> token decoding
+
+---
+
+### Mandatory checklist (complete all 2 before finalizing)
+
+Answer every item. Any **yes** → add a finding. Any **no** → record in `checklist` with
+brief evidence (file:line).
+
+1. [security] Does the change fail closed on unknown input?
+2. [logic-bug] Is the renamed module's public signature still compatible?
+
+---
+
+<pull_request_diff>
+<CODE_BLOCK_0d15ea5e>
+diff --git a/src/auth/token_utils.py b/src/auth/tokens.py
+similarity index 92%
+rename from src/auth/token_utils.py
+rename to src/auth/tokens.py
+index 5555555..6666666 100644
+--- a/src/auth/token_utils.py
++++ b/src/auth/tokens.py
+@@ -1,4 +1,4 @@
+-def decode(token: str) -> dict[str, str]:
++def decode(token: str, *, verify: bool = False) -> dict[str, str]:
+     return {}
+
+</CODE_BLOCK_0d15ea5e>
+</pull_request_diff>
+
+<CODE_BLOCK_0d15ea5e>
+<lint_results>
+ruff: 1 issue in src/auth/session.py
+</lint_results>
+</CODE_BLOCK_0d15ea5e>
+
+Report only defects you can trace to a concrete failure.
+
+---
+
+### Required JSON output
+
+{
+  "summary": {
+    "headline": "ONE sentence — what this change does",
+    "walkthrough": [
+      {
+        "text": "One sentence about a coherent part of the change (3-6 bullets total)",
+        "finding_ref": "file:line of the related finding, or empty string"
+      }
+    ]
+  },
+  "verdict_reasoning": {
+    "deciding_factor": "One short paragraph — the single issue that decides mergeability, or why nothing blocks the merge",
+    "failure_mechanism": "One short paragraph — how that issue fails in production; empty string when nothing blocks",
+    "files_needing_attention": ["path/to/file"]
+  },
+  "file_assessments": [
+    {
+      "file": "path/to/file",
+      "overview": "One sentence — what changed in this file"
+    }
+  ],
+  "checklist": [
+    {
+      "id": 1,
+      "answer": "yes|no",
+      "evidence": "One sentence — file:line or logic trace"
+    }
+  ],
+  "findings": [
+    {
+      "kind": "finding|question",
+      "severity": "P1|P2|P3",
+      "category": "logic-bug|silent-failure|integration|test-gap|contract-drift|security|breaking-change|code-smell",
+      "file": "path/to/file",
+      "line": 123,
+      "title": "Short single-line title (5-8 words, no line breaks)",
+      "description": "What is wrong, why it matters in production, and which severity-rubric boundary this meets (P2 because the contract is false / P3 because the code path is correct)",
+      "cause": "Root cause — trace the code path",
+      "failure_scenario": "REQUIRED for P1 — the concrete mechanism by which this fails (inputs, path taken, observable result); else empty string",
+      "fix": "Concise fix suggestion",
+      "suggested_code": "Exact replacement for the flagged line(s) when a mechanical fix applies (one-click GitHub suggestion); else empty string",
+      "suggested_change": {
+        "lines": [123, 124],
+        "replacement": "Full replacement text for exactly those lines; omit the whole object when the fix is not a clean hunk",
+        "before": "Verbatim current text of exactly those lines, copied from the file; checked against HEAD before the suggestion is posted"
+      },
+      "evidence_style": "diff_local|cross_file|speculative",
+      "occurrences": [{ "file": "path/to/file", "line": 123 }],
+      "confidence": "high|medium|low",
+      "checklist_ids": [1, 2]
+    }
+  ],
+  "flagged_files": [
+    {
+      "path": "path/to/already-reviewed-file.py",
+      "reason": "Why this covered file should be re-read next round"
+    }
+  ]
+}
+
+**Rules:**
+
+- Include all **2** checklist entries in `checklist` (even if answer is
+  "no").
+- Every checklist **yes** must have a corresponding finding (link via `checklist_ids`).
+- Do not duplicate findings — merge related checklist items when they share a root
+  cause.
+- Prioritize cross-file integration bugs over isolated nits.
+- `summary.headline` is exactly one sentence stating what the change does — not an
+  assessment of whether it should merge.
+- `summary.walkthrough` holds 3–6 bullets, each one sentence, covering the change in
+  the order a reviewer would read it. When a bullet describes code you also reported a
+  finding for, set that bullet's `finding_ref` to the finding's `file:line`; otherwise
+  use an empty string.
+- **Do not score or state a verdict.** The merge-readiness verdict is computed by
+  lintro from the severities of the open findings (any P1 → Blocked; else any
+  P2 → Changes requested; else any P3 → Nits only; else
+  Ready). Write only the reasoning:
+  `verdict_reasoning.deciding_factor` names the single issue that decides it (or says
+  plainly that nothing blocks the merge) and `verdict_reasoning.failure_mechanism`
+  traces how that issue fails in production. Two short paragraphs at most, total.
+- `verdict_reasoning.files_needing_attention` lists the paths a reviewer should open
+  first; leave it empty when nothing needs attention.
+- `file_assessments` holds one entry per reviewed file with a single-sentence
+  `overview`. Do not include severity counts — lintro derives those from `findings`.
+- Every finding `title` must be a single line with no line breaks.
+- **P1 requires a concrete `failure_scenario`** — the inputs, the path taken, and the
+  observable result. "Could be a problem" is not a failure mechanism. A P1 without one
+  is automatically downgraded to P2 and the correction is recorded against the run, so
+  an uncalibrated P1 buys you nothing but a logged downgrade.
+- **Calibrate severity.** P1 means merge-blocking defect: expect 0–2 on a typical PR and
+  none at all on most. When you are torn between P1 and P2, choose P2. When you are torn
+  between P2 and P3, choose P3 — a single borderline P2 flips the derived verdict from
+  Nits only to Changes requested. Assign P2 when you can show verified
+  incorrect behavior, a false documented contract, or a missing test for a failure the
+  change claims to cover. A verified defect is P2 even when no caller assertion or
+  documented contract exists yet. Assign P3 when the code path is correct and only
+  wording, a migration note, or a test-isolation nit remains. Name that rubric boundary
+  in every finding `description`.
+- Set `kind` to `question` when you suspect something but cannot show it — an
+  assumption you want the author to confirm, context you lack. Questions carry no
+  severity, never affect the verdict, and are capped at **3 per review**. Use them
+  instead of inflating severity; if the answer confirms a defect you will report it as
+  a normal finding next round.
+- Set `evidence_style` honestly: `diff_local` when the diff hunk alone shows it,
+  `cross_file` when you traced code outside the hunk, `speculative` when you inferred it
+  without verifying. A speculative finding is not penalized — it is labelled, and its
+  fix prompt tells the agent to reproduce it first.
+- **Style and formatting a linter would catch are out of scope** — lintro runs the
+  native linters in the same check run, so reporting them is pure noise. The one
+  exception is correctness-adjacent style: shadowed names, misleading identifiers, and
+  confusing API misuse stay in scope as P3 `code-smell`.
+- Include `suggested_change` **only** when the fix is a clean hunk: `lines` is the
+  inclusive `[start, end]` range it replaces (the finding's own `line` must fall inside
+  it) and `replacement` is the *complete* new text for exactly those lines, indentation
+  included. A partial replacement silently deletes the lines it omits. Omit the object
+  entirely when the fix needs edits elsewhere, spans non-contiguous lines, or cannot be
+  written out verbatim — a described fix is better than a wrong one-click commit. Keep
+  `replacement` to at most 4,000 characters and the range to at most 200 lines; anything
+  larger is dropped and rendered as a described fix anyway.
+- Also set `suggested_change.before` to the **verbatim current text** of exactly those
+  lines, copied from the file rather than retyped. It is checked against the file at
+  HEAD before anything is posted: an exact match commits the suggestion, a unique match
+  elsewhere re-anchors it, and anything else drops the one-click fix and keeps only your
+  described `fix`. Omitting `before` means only the line range's existence can be
+  verified, so a misnumbered hunk survives; include it whenever you include
+  `suggested_change`.
+- Cap `findings` at **10** for this call (questions still capped at 3). Prefer the highest-severity issues; summarize any overflow in one walkthrough bullet. Never emit truncated or mid-object JSON.
+- **Do not report the same problem twice**. When one problem repeats across locations, report it once and list every location in `occurrences` as `file`/`line` pairs — including the primary one. It renders as a single collapsed thread, and its fix prompt enumerates every location.

@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.shellcheck import (
+from lintro.tools.shellcheck.definition import (
     SHELLCHECK_DEFAULT_FORMAT,
     SHELLCHECK_DEFAULT_SEVERITY,
     SHELLCHECK_DEFAULT_TIMEOUT,

@@ -7,7 +7,6 @@ without modifying any files, and that exit codes follow check semantics.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import pytest
@@ -15,12 +14,9 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli_utils.commands.format import format_command
+from tests.integration._tools import require_tool
 
-# Skip all tests if ruff is not installed.
-pytestmark = pytest.mark.skipif(
-    shutil.which("ruff") is None,
-    reason="ruff not installed",
-)
+pytestmark = require_tool("ruff")
 
 # Source with fixable issues: two unused imports and a missing-whitespace assign.
 _FIXABLE_SOURCE = "import os\nimport sys\nx=1\n"

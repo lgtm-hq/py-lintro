@@ -19,24 +19,16 @@ from tests.unit.plugins.conftest import create_fake_plugin
 # =============================================================================
 
 
-def test_register_tool_adds_to_registry(clean_registry: None) -> None:
-    """Verify that registering a tool class adds it to the registry.
-
-    Args:
-        clean_registry: Fixture to ensure clean registry state.
-    """
+def test_register_tool_adds_to_registry() -> None:
+    """Verify that registering a tool class adds it to the registry."""
     plugin_class = create_fake_plugin(name="test-register-tool")
     ToolRegistry.register(plugin_class)
 
     assert_that(ToolRegistry.is_registered("test-register-tool")).is_true()
 
 
-def test_register_tool_stores_instance(clean_registry: None) -> None:
-    """Verify that registering a tool creates and stores an instance.
-
-    Args:
-        clean_registry: Fixture to ensure clean registry state.
-    """
+def test_register_tool_stores_instance() -> None:
+    """Verify that registering a tool creates and stores an instance."""
     plugin_class = create_fake_plugin(name="test-instance-tool")
     ToolRegistry.register(plugin_class)
 
@@ -45,12 +37,8 @@ def test_register_tool_stores_instance(clean_registry: None) -> None:
     assert_that(tool.definition.name).is_equal_to("test-instance-tool")
 
 
-def test_register_overwrite_replaces_tool(clean_registry: None) -> None:
-    """Verify that registering a tool with the same name replaces the previous one.
-
-    Args:
-        clean_registry: Fixture to ensure clean registry state.
-    """
+def test_register_overwrite_replaces_tool() -> None:
+    """Verify that registering a tool with the same name replaces the previous one."""
     plugin_class1 = create_fake_plugin(name="overwrite-test", description="First")
     plugin_class2 = create_fake_plugin(name="overwrite-test", description="Second")
 
@@ -63,12 +51,8 @@ def test_register_overwrite_replaces_tool(clean_registry: None) -> None:
     assert_that(tool.definition.description).is_equal_to("Second")
 
 
-def test_register_returns_class_unchanged(clean_registry: None) -> None:
-    """Verify that register returns the class unchanged for decorator use.
-
-    Args:
-        clean_registry: Fixture to ensure clean registry state.
-    """
+def test_register_returns_class_unchanged() -> None:
+    """Verify that register returns the class unchanged for decorator use."""
     plugin_class = create_fake_plugin(name="return-test-tool")
     result = ToolRegistry.register(plugin_class)
 
@@ -249,12 +233,8 @@ def test_is_registered_returns_correct_boolean(tool_name: str, expected: bool) -
 # =============================================================================
 
 
-def test_clear_removes_all_tools(clean_registry: None) -> None:
-    """Verify that clear removes all registered tools.
-
-    Args:
-        clean_registry: Fixture to ensure clean registry state.
-    """
+def test_clear_removes_all_tools() -> None:
+    """Verify that clear removes all registered tools."""
     # First register some tools
     plugin_class = create_fake_plugin(name="clear-test-tool")
     ToolRegistry.register(plugin_class)
@@ -338,38 +318,24 @@ def test_get_fix_tools_is_subset_of_all_tools() -> None:
 # =============================================================================
 
 
-def test_register_tool_decorator_registers_tool(clean_registry: None) -> None:
-    """Verify that the register_tool decorator registers a tool class.
-
-    Args:
-        clean_registry: Fixture that provides a clean registry.
-    """
+def test_register_tool_decorator_registers_tool() -> None:
+    """Verify that the register_tool decorator registers a tool class."""
     plugin_class = create_fake_plugin(name="decorator-test-tool")
     register_tool(plugin_class)
 
     assert_that(ToolRegistry.is_registered("decorator-test-tool")).is_true()
 
 
-def test_register_tool_decorator_returns_class(clean_registry: None) -> None:
-    """Verify that the register_tool decorator returns the class unchanged.
-
-    Args:
-        clean_registry: Fixture to ensure clean registry state.
-    """
+def test_register_tool_decorator_returns_class() -> None:
+    """Verify that the register_tool decorator returns the class unchanged."""
     plugin_class = create_fake_plugin(name="decorator-return-test")
     result = register_tool(plugin_class)
 
     assert_that(result).is_equal_to(plugin_class)
 
 
-def test_register_tool_decorator_can_be_used_as_decorator(
-    clean_registry: None,
-) -> None:
-    """Verify that register_tool works when used as a decorator.
-
-    Args:
-        clean_registry: Fixture that provides a clean registry.
-    """
+def test_register_tool_decorator_can_be_used_as_decorator() -> None:
+    """Verify that register_tool works when used as a decorator."""
 
     @dataclass
     @register_tool
@@ -396,12 +362,8 @@ def test_register_tool_decorator_can_be_used_as_decorator(
 # =============================================================================
 
 
-def test_registry_handles_multiple_registrations(clean_registry: None) -> None:
-    """Verify that registering multiple different tools works correctly.
-
-    Args:
-        clean_registry: Fixture that clears the registry before the test.
-    """
+def test_registry_handles_multiple_registrations() -> None:
+    """Verify that registering multiple different tools works correctly."""
     plugin1 = create_fake_plugin(name="multi-test-1")
     plugin2 = create_fake_plugin(name="multi-test-2")
     plugin3 = create_fake_plugin(name="multi-test-3")

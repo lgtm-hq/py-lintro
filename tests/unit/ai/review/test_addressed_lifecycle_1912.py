@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, field, replace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -15,28 +15,28 @@ from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.lifecycle_stage import LifecycleStage
 from lintro.ai.review.finding_matcher import fingerprint_for
-from lintro.ai.review.github import post_review_to_github
+from lintro.ai.review.github import ReviewPostOptions, post_review_to_github
 from lintro.ai.review.github_constants import STICKY_MARKER
-from lintro.ai.review.github_lifecycle import (
+from lintro.ai.review.lifecycle.banners import (
     LIFECYCLE_OPEN,
     apply_lifecycle_block,
-    finding_marker,
-    parse_finding_marker,
     regression_provenance,
     render_lifecycle_block,
-    sync_addressed_lifecycle,
 )
+from lintro.ai.review.lifecycle.markers import finding_marker, parse_finding_marker
+from lintro.ai.review.lifecycle.threads import sync_addressed_lifecycle
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
+from lintro.ai.review.models.lifecycle_sync_request import LifecycleSyncRequest
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_thread import ReviewThread
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.review_state_codec import leftover_state_block
 
-_TEST_TOKEN = (
-    "ghp_test_fixture_token"  # noqa: S105  # nosec B105 — fake test fixture token
-)
+_TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 _HEAD_SHA = "abc1234def5678"
 _COMMENT_ID = 101
 _THREAD_ID = "PRRT_thread_node"
@@ -247,10 +247,12 @@ def test_resolved_finding_is_bannered_and_its_thread_resolved_by_default() -> No
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -266,11 +268,13 @@ def test_auto_resolve_false_keeps_the_banner_and_skips_the_mutation() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
-        auto_resolve=False,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+            auto_resolve=False,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -289,10 +293,12 @@ def test_partial_progress_never_resolves_the_thread() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        partial=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
+        request=LifecycleSyncRequest(
+            partial=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -312,13 +318,15 @@ def test_regressed_thread_is_bannered_and_stays_resolved() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
-        new_thread_urls={
-            record.key: "https://github.com/owner/name/pull/7#discussion_r9",
-        },
+        request=LifecycleSyncRequest(
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+            new_thread_urls={
+                record.key: "https://github.com/owner/name/pull/7#discussion_r9",
+            },
+        ),
     )
 
     body = reporter.edits[0][1]
@@ -336,10 +344,12 @@ def test_a_regression_without_a_new_thread_does_not_link_one() -> None:
 
     sync_addressed_lifecycle(
         reporter=reporter,
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
+        request=LifecycleSyncRequest(
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+        ),
     )
 
     body = reporter.edits[0][1]
@@ -367,11 +377,13 @@ def test_one_thread_gets_one_banner_even_when_two_stages_apply() -> None:
 
     sync_addressed_lifecycle(
         reporter=reporter,
-        partial=(record,),
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
+        request=LifecycleSyncRequest(
+            partial=(record,),
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+        ),
     )
 
     assert_that(reporter.edits).is_length(1)
@@ -398,12 +410,14 @@ def test_a_regression_outranks_an_addressed_stamp_on_the_same_thread() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        regressed=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=4,
-        new_thread_urls={record.key: url},
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            regressed=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=4,
+            new_thread_urls={record.key: url},
+        ),
     )
 
     assert_that(reporter.edits).is_length(1)
@@ -427,10 +441,12 @@ def test_a_record_without_a_comment_id_is_never_stamped() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(reporter.edits).is_empty()
@@ -456,10 +472,12 @@ def test_unchanged_body_is_never_patched() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: stamped},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: stamped},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(reporter.edits).is_empty()
@@ -473,10 +491,12 @@ def test_a_failed_comment_edit_is_reported_rather_than_raised() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(report.failed).contains(record.key)
@@ -493,10 +513,12 @@ def test_a_failed_thread_listing_keeps_the_banner() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={_COMMENT_ID: _INLINE_BODY},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={_COMMENT_ID: _INLINE_BODY},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(report.edited).contains(record.key)
@@ -511,10 +533,12 @@ def test_a_comment_whose_body_is_unknown_is_left_alone() -> None:
 
     report = sync_addressed_lifecycle(
         reporter=reporter,
-        resolved=(record,),
-        comment_bodies={},
-        head_sha=_HEAD_SHA,
-        round_number=3,
+        request=LifecycleSyncRequest(
+            resolved=(record,),
+            comment_bodies={},
+            head_sha=_HEAD_SHA,
+            round_number=3,
+        ),
     )
 
     assert_that(reporter.edits).is_empty()
@@ -534,7 +558,7 @@ def _sticky_body(*, state: ReviewState) -> str:
     Returns:
         The comment body.
     """
-    return STICKY_MARKER + "\n\nprior round" + legacy_state_block(state=state)
+    return STICKY_MARKER + "\n\nprior round" + leftover_state_block(state=state)
 
 
 def _prior_state(*, findings: tuple[FindingRecord, ...]) -> ReviewState:
@@ -546,7 +570,39 @@ def _prior_state(*, findings: tuple[FindingRecord, ...]) -> ReviewState:
     Returns:
         The state.
     """
-    return ReviewState(runs=(RunRecord(round=1, sha="0f0f0f0"),), findings=findings)
+    return ReviewState(
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="0f0f0f0")),),
+        findings=findings,
+    )
+
+
+@dataclass
+class _ReporterLog:
+    """Plain record of the mutations a review posting performs.
+
+    The reporter itself stays a ``MagicMock`` because it has a wide surface,
+    but every assertion reads one of these lists rather than mock call
+    bookkeeping (#2315).
+
+    Attributes:
+        api_calls: ``(method, url, payload)`` of each raw API request.
+        issue_comment_bodies: Body of each sticky comment posted or edited.
+        review_comment_edits: Keyword arguments of each inline-comment edit.
+        resolved_threads: Thread ids the run resolved.
+        update_outcomes: Results ``update_review_comment`` returns, consumed in
+            order; ``default_update_result`` answers once they run out. A
+            ``side_effect`` wins over ``return_value``, so a test that needs a
+            refused edit must queue it here rather than setting the mock's
+            ``return_value``.
+        default_update_result: Result ``update_review_comment`` falls back to.
+    """
+
+    api_calls: list[tuple[str, str, Any]] = field(default_factory=list)
+    issue_comment_bodies: list[str] = field(default_factory=list)
+    review_comment_edits: list[dict[str, Any]] = field(default_factory=list)
+    resolved_threads: list[str] = field(default_factory=list)
+    update_outcomes: list[bool] = field(default_factory=list)
+    default_update_result: bool = True
 
 
 def _posting_reporter(
@@ -583,11 +639,70 @@ def _posting_reporter(
     reporter.fetch_pr_commit_shas.return_value = []
     reporter.fetch_review_comments.return_value = review_comments or []
     reporter.fetch_review_threads.return_value = _threads()
-    reporter.resolve_review_thread.return_value = True
-    reporter.update_review_comment.return_value = True
-    reporter.post_issue_comment.return_value = True
-    reporter.update_issue_comment.return_value = True
-    reporter.api_response.return_value = GitHubApiResponse(status=200)
+    log = _ReporterLog()
+    reporter.log = log
+
+    def _resolve_review_thread(**kwargs: Any) -> bool:
+        """Record a resolved review thread.
+
+        Args:
+            **kwargs: Resolve arguments, of which ``thread_id`` is recorded.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        log.resolved_threads.append(str(kwargs["thread_id"]))
+        return True
+
+    def _update_review_comment(**kwargs: Any) -> bool:
+        """Record an edited inline review comment.
+
+        Args:
+            **kwargs: Every argument of the edit, recorded as a dict.
+
+        Returns:
+            bool: The next queued outcome, else ``default_update_result``.
+        """
+        log.review_comment_edits.append(dict(kwargs))
+        if log.update_outcomes:
+            return log.update_outcomes.pop(0)
+        return log.default_update_result
+
+    def _post_issue_comment(body: Any, **_kwargs: Any) -> bool:
+        """Record a newly posted sticky body.
+
+        Args:
+            body: Sticky comment body the production code posted.
+            **_kwargs: Ignored posting extras.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        log.issue_comment_bodies.append(str(body))
+        return True
+
+    def _update_issue_comment(**kwargs: Any) -> bool:
+        """Record an edited sticky body.
+
+        Args:
+            **kwargs: Update arguments, of which ``body`` is recorded.
+
+        Returns:
+            bool: Always ``True``, the success result GitHub would return.
+        """
+        log.issue_comment_bodies.append(str(kwargs["body"]))
+        return True
+
+    reporter.resolve_review_thread.side_effect = _resolve_review_thread
+    reporter.update_review_comment.side_effect = _update_review_comment
+    reporter.post_issue_comment.side_effect = _post_issue_comment
+    reporter.update_issue_comment.side_effect = _update_issue_comment
+
+    def _api_response(method: str, url: str, payload: Any = None) -> GitHubApiResponse:
+        log.api_calls.append((method, url, payload))
+        return GitHubApiResponse(status=200)
+
+    reporter.api_response.side_effect = _api_response
     reporter.api_base = "https://api.github.com"
     reporter.repo = "owner/name"
     reporter.pr_number = 7
@@ -603,7 +718,7 @@ def _posted_comments(*, reporter: MagicMock) -> list[dict[str, Any]]:
     Returns:
         The ``comments`` array.
     """
-    payload = reporter.api_response.call_args.args[2]
+    payload = reporter.log.api_calls[-1][2]
     comments: list[dict[str, Any]] = payload["comments"]
     return comments
 
@@ -658,11 +773,7 @@ def test_captured_comment_ids_are_persisted_for_the_next_round(
 
     post_review_to_github(result=sample_review_result, reporter=reporter)
 
-    bodies = [
-        call.kwargs["body"] for call in reporter.update_issue_comment.call_args_list
-    ]
-    bodies += [call.args[0] for call in reporter.post_issue_comment.call_args_list]
-    combined = "\n".join(bodies)
+    combined = "\n".join(reporter.log.issue_comment_bodies)
     assert_that(combined).contains("discussion_r555")
     del key
 
@@ -679,11 +790,12 @@ def test_a_finding_gone_from_this_round_is_bannered_and_resolved(
 
     post_review_to_github(result=sample_review_result, reporter=reporter)
 
-    edit = reporter.update_review_comment.call_args
-    assert_that(edit.kwargs["comment_id"]).is_equal_to(_COMMENT_ID)
-    assert_that(edit.kwargs["body"]).contains("✔ **Addressed in")
-    assert_that(edit.kwargs["body"]).contains("(historical)")
-    reporter.resolve_review_thread.assert_called_once_with(thread_id=_THREAD_ID)
+    assert_that(reporter.log.review_comment_edits).is_length(1)
+    edit = reporter.log.review_comment_edits[0]
+    assert_that(edit["comment_id"]).is_equal_to(_COMMENT_ID)
+    assert_that(edit["body"]).contains("✔ **Addressed in")
+    assert_that(edit["body"]).contains("(historical)")
+    assert_that(reporter.log.resolved_threads).is_equal_to([_THREAD_ID])
 
 
 def test_auto_resolve_false_stops_the_mutation_end_to_end(
@@ -699,11 +811,14 @@ def test_auto_resolve_false_stops_the_mutation_end_to_end(
     post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        auto_resolve=False,
+        options=ReviewPostOptions(auto_resolve=False),
     )
 
-    assert_that(reporter.update_review_comment.called).is_true()
-    reporter.resolve_review_thread.assert_not_called()
+    # The comment is still stamped as addressed, but the thread stays open.
+    edits = [str(edit["body"]) for edit in reporter.log.review_comment_edits]
+    assert_that(edits).is_not_empty()
+    assert_that(edits[0]).contains("✔ **Addressed in")
+    assert_that(reporter.log.resolved_threads).is_empty()
 
 
 def test_a_regression_posts_a_fresh_comment_carrying_its_provenance(
@@ -757,22 +872,32 @@ def test_posting_survives_a_refused_comment_edit(
         prior=_prior_state(findings=(record,)),
         review_comments=[{"id": _COMMENT_ID, "body": _INLINE_BODY}],
     )
-    reporter.update_review_comment.return_value = False
+    # Queue the refusal on the log, not the mock: the recorder is installed as
+    # a side_effect, which unittest.mock runs ahead of return_value (#2315).
+    reporter.log.update_outcomes = [False]
 
     posted = post_review_to_github(
         result=sample_review_result,
         reporter=reporter,
-        auto_resolve=auto_resolve,
+        options=ReviewPostOptions(auto_resolve=auto_resolve),
     )
 
     assert_that(posted).is_true()
+    # The edit really was attempted and really was refused, so the production
+    # failed-edit branch ran: it `continue`s before queueing the thread for
+    # resolution, leaving nothing resolved even when auto_resolve is on.
+    assert_that(reporter.log.review_comment_edits).is_length(1)
+    assert_that(reporter.log.update_outcomes).is_empty()
+    assert_that(reporter.log.resolved_threads).is_empty()
     # The refused edit is not a crash; the prior comment id remains available
     # on the artifact state the next round will load.
-    from lintro.ai.review.github_sticky import advance_review_state
+    from lintro.ai.review.sticky import advance_review_state
 
     advanced = advance_review_state(
-        result=sample_review_result,
-        prior_state=_prior_state(findings=(record,)),
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_state=_prior_state(findings=(record,)),
+        ),
     )
     stored = [
         item for item in advanced.findings if item.fingerprint == record.fingerprint
@@ -862,15 +987,22 @@ def test_resolve_review_thread_reports_the_threads_new_state() -> None:
 def test_update_review_comment_patches_the_pulls_comments_endpoint() -> None:
     """An inline comment lives under /pulls/comments, not /issues/comments."""
     reporter = _api_reporter()
+    requests: list[tuple[str, str, Any]] = []
 
-    with patch.object(
-        reporter,
-        "api_response",
-        return_value=GitHubApiResponse(status=200),
-    ) as request:
-        reporter.update_review_comment(comment_id=_COMMENT_ID, body="new")
+    def _api_response(
+        method: str,
+        url: str,
+        payload: Any = None,
+    ) -> GitHubApiResponse:
+        requests.append((method, url, payload))
+        return GitHubApiResponse(status=200)
 
-    method, url, payload = request.call_args.args
+    with patch.object(reporter, "api_response", _api_response):
+        updated = reporter.update_review_comment(comment_id=_COMMENT_ID, body="new")
+
+    assert_that(updated).is_true()
+    assert_that(requests).is_length(1)
+    method, url, payload = requests[0]
     assert_that(method).is_equal_to("PATCH")
     assert_that(url).is_equal_to(
         f"https://api.github.com/repos/owner/name/pulls/comments/{_COMMENT_ID}",

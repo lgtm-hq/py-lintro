@@ -11,7 +11,7 @@ from lintro.enums.pytest_enums import PytestSpecialMode
 from lintro.parsers.pytest.pytest_issue import PytestIssue
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.pytest import PytestPlugin
+    from lintro.tools.pytest.definition import PytestPlugin
 
 
 # =============================================================================

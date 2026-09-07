@@ -1,0 +1,75 @@
+---
+# Review eval corpus (issue #2147), seeded from the #1962 pilot selections.
+#
+# Each item is a merged historical pull request that `lintro review --pr`
+# can re-review. `expected_findings` is optional: only labeled items take
+# part in the precision/recall table, and a label is a human adjudication,
+# not a competitor bot's comment.
+#
+# A label carries exactly the three fields that form a finding fingerprint
+# (file, category, title), because that is what
+# lintro/ai/review/finding_matcher.py hashes. The matcher normalizes a title's
+# case, punctuation and whitespace before hashing it -- it does not match
+# rewritten wording -- so a label survives line drift and cosmetic title
+# differences, not a freely reworded title.
+#
+# Severity is carried alongside, not hashed: it is what the expected verdict is
+# derived from, and it never affects whether a label matches a finding. It is
+# required on every label for exactly that reason -- a forgotten P1 must fail
+# the loader, not be stored as a quieter default.
+#
+# Every item is a merged pull request of this repository; each title is the
+# merged PR's own title.
+version: 1
+repo: lgtm-hq/py-lintro
+
+items:
+  - id: pr-916
+    pr: 916
+    title: 'chore(deps): update actions/cache to v6.1.0 (major)'
+
+  - id: pr-958
+    pr: 958
+    title: 'fix(astro-check): run non-interactively to prevent prompt hang and timeout'
+
+  - id: pr-1186
+    pr: 1186
+    title: 'docs(ai): complete config reference and correct privacy claims'
+
+  - id: pr-1481
+    pr: 1481
+    title: 'refactor: split oversized modules under the size gate'
+
+  - id: pr-1878
+    pr: 1878
+    title: 'feat(review): add user-defined review agents as markdown files'
+
+  - id: pr-1886
+    pr: 1886
+    title: 'feat(cli): move advisory AI finders out of chk into lintro review'
+
+  - id: pr-1891
+    pr: 1891
+    title: 'feat(mcp): add review toolkit exposing AI diff review'
+
+  - id: pr-1916
+    pr: 1916
+    title: >-
+      feat(review): state schema v2 with per-run stats history and
+      cross-run finding matching
+
+  - id: pr-1928
+    pr: 1928
+    title: 'fix(deps): bump fast-uri to 4.1.2 for CVE-2026-18446'
+
+  - id: pr-1936
+    pr: 1936
+    title: 'fix(deps): bump cryptography to 50.0.0 for GHSA-g6cj-pr64-35w5'
+
+  - id: pr-1939
+    pr: 1939
+    title: 'feat(review): add corpus-informed finding model to the review pipeline'
+
+  - id: pr-1958
+    pr: 1958
+    title: 'fix(review): render the sticky This-run stats as badge tables'

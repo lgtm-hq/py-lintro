@@ -60,7 +60,7 @@ def _make_run_tools(
         verbose: bool,
         yes: bool,
         no_art: bool,
-        run_post_checks: bool,
+        run_gates: bool,
         on_tool_result: Callable[[ToolResult], None],
         render_summary: bool,
     ) -> int:
@@ -77,7 +77,7 @@ def _make_run_tools(
             "verbose": verbose,
             "yes": yes,
             "no_art": no_art,
-            "run_post_checks": run_post_checks,
+            "run_gates": run_gates,
             "on_tool_result": on_tool_result,
             "render_summary": render_summary,
         }
@@ -108,7 +108,7 @@ def test_watch_runner_options_match_real_executor_signature() -> None:
         "verbose",
         "yes",
         "no_art",
-        "run_post_checks",
+        "run_gates",
         "on_tool_result",
         "render_summary",
     }
@@ -136,7 +136,7 @@ def test_run_batch_checks_by_default(
     assert_that(recorder["kwargs"]["paths"]).contains(str(target))
     assert_that(recorder["kwargs"]["yes"]).is_true()
     assert_that(recorder["kwargs"]["no_art"]).is_true()
-    assert_that(recorder["kwargs"]["run_post_checks"]).is_false()
+    assert_that(recorder["kwargs"]["run_gates"]).is_false()
     assert_that(recorder["kwargs"]["render_summary"]).is_false()
 
 

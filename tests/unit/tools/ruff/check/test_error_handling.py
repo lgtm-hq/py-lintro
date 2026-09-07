@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
-from collections.abc import Callable
 from unittest.mock import MagicMock, patch
 
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
-from lintro.tools.implementations.ruff.check import execute_ruff_check
+from lintro.tools.ruff.check import execute_ruff_check
 
 
 def test_execute_ruff_check_handles_timeout(
@@ -22,7 +21,7 @@ def test_execute_ruff_check_handles_timeout(
         mock_ruff_tool: Mock RuffTool instance for testing.
     """
     with patch(
-        "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+        "lintro.tools.ruff.check.run_subprocess_with_timeout",
         side_effect=subprocess.TimeoutExpired(cmd=["ruff"], timeout=30),
     ):
         result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
@@ -50,10 +49,10 @@ def test_execute_ruff_check_handles_format_timeout(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=lint_issues,
         ),
     ):
@@ -89,12 +88,12 @@ def test_execute_ruff_check_subprocess_failure_respected(
     """
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             # Subprocess fails (exit code != 0) but produces empty/no output
             return_value=(False, "[]"),
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             # No issues parsed from output
             return_value=[],
         ),
@@ -108,16 +107,14 @@ def test_execute_ruff_check_subprocess_failure_respected(
 
 def test_execute_ruff_check_version_check_failure(
     mock_ruff_tool: MagicMock,
-    ruff_execution_context: Callable[..., MagicMock],
 ) -> None:
     """Return early when the prepared context reports a version failure.
 
-    Version checking now happens inside the shared ``_prepare_execution``
+    Version checking now happens inside the shared ``prepare``
     pipeline, which surfaces the failure via ``early_result``.
 
     Args:
         mock_ruff_tool: Mock RuffTool instance for testing.
-        ruff_execution_context: Factory for mock execution contexts.
     """
     version_error_result = ToolResult(
         name="ruff",
@@ -125,11 +122,8 @@ def test_execute_ruff_check_version_check_failure(
         output="Skipping ruff: version too old",
         issues_count=0,
     )
-    mock_ruff_tool._prepare_execution.return_value = ruff_execution_context(
-        early_result=version_error_result,
-    )
+    mock_ruff_tool.prepare.return_value = version_error_result
 
     result = execute_ruff_check(mock_ruff_tool, ["/test/project"])
 
-    assert_that(result.output).is_equal_to("Skipping ruff: version too old")
-    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result).is_same_as(version_error_result)

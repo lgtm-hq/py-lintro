@@ -1,0 +1,10 @@
+[importlinter]
+root_package = cleanlayered
+
+[importlinter:contract:layers]
+name = Layered architecture
+type = layers
+layers =
+    cleanlayered.api
+    cleanlayered.services
+    cleanlayered.storage

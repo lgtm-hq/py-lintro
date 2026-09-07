@@ -10,7 +10,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.parsers.golangci_lint.golangci_lint_issue import GolangciLintIssue
-from lintro.tools.definitions.golangci_lint import GolangciLintPlugin
+from lintro.tools.golangci_lint.definition import GolangciLintPlugin
 from tests.unit.tools.golangci_lint.conftest import (
     GOLANGCI_JSON_NO_ISSUES,
     GOLANGCI_JSON_ONE_ISSUE,
@@ -286,7 +286,7 @@ def test_fix_skips_without_go_mod(
 
 def test_find_module_roots_returns_each_module(tmp_path: Path) -> None:
     """Two sibling modules without a parent go.mod both become roots."""
-    from lintro.tools.definitions.golangci_lint import _find_go_module_roots
+    from lintro.tools.golangci_lint.definition import _find_go_module_roots
 
     mod_a = tmp_path / "svc-a"
     mod_b = tmp_path / "svc-b"
@@ -322,7 +322,7 @@ def test_check_covers_all_selected_modules(
         return (False, GOLANGCI_JSON_TWO_ISSUES)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=lambda **kwargs: _fake_run(**kwargs),
     ):
         result = golangci_lint_plugin.check(
@@ -356,7 +356,7 @@ def test_check_disambiguates_paths_across_modules(
     _make_go_module(mod_b)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=lambda **kwargs: (False, GOLANGCI_JSON_ONE_ISSUE),
     ):
         result = golangci_lint_plugin.check(
@@ -401,7 +401,7 @@ def test_check_timeout_in_one_module_preserves_others(
         raise subprocess.TimeoutExpired(cmd="golangci-lint", timeout=1)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=lambda **kwargs: _fake_run(**kwargs),
     ):
         result = golangci_lint_plugin.check(
@@ -428,7 +428,7 @@ def test_fix_initial_check_timeout_reports_no_phantom_issue(
     _make_go_module(tmp_path)
 
     with patch(
-        "lintro.tools.definitions.golangci_lint.run_subprocess_with_timeout",
+        "lintro.tools.golangci_lint.definition.run_subprocess_with_timeout",
         side_effect=subprocess.TimeoutExpired(cmd="golangci-lint", timeout=1),
     ):
         result = golangci_lint_plugin.fix([str(tmp_path)], {})
@@ -436,3 +436,83 @@ def test_fix_initial_check_timeout_reports_no_phantom_issue(
     assert_that(result.success).is_false()
     assert_that(result.initial_issues_count).is_equal_to(0)
     assert_that(result.remaining_issues_count).is_equal_to(0)
+
+
+def _record_golangci_argv(recorded: list[list[str]]) -> Any:
+    """Return a ``_run_subprocess`` stand-in that records every argv it sees.
+
+    Recording into a plain list keeps the assertions about the command lintro
+    actually builds rather than about mock bookkeeping, which
+    ``scripts/ci/testing/scan_mock_only_tests.py`` rejects (#2315).
+
+    Args:
+        recorded: List the stand-in appends each argv to.
+
+    Returns:
+        A callable with ``_run_subprocess``'s signature.
+    """
+
+    def _run(cmd: list[str], **_kwargs: Any) -> tuple[bool, str]:
+        recorded.append(list(cmd))
+        return True, GOLANGCI_JSON_NO_ISSUES
+
+    return _run
+
+
+def test_check_invokes_golangci_lint_with_parallel_runners_allowed(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """check() puts ``--allow-parallel-runners`` on the real argv.
+
+    Pinned through the public entry point rather than the private command
+    builder: what matters is that the flag reaches the subprocess, because
+    without it a second concurrent instance exits 3 with an empty ``Issues``
+    array and the findings silently disappear (#2391).
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory for the Go module.
+    """
+    _make_go_module(tmp_path)
+    recorded: list[list[str]] = []
+
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        side_effect=_record_golangci_argv(recorded),
+    ):
+        golangci_lint_plugin.check([str(tmp_path)], {})
+
+    assert_that(recorded).is_length(1)
+    assert_that(recorded[0]).contains(
+        "golangci-lint",
+        "run",
+        "--allow-parallel-runners",
+    )
+
+
+def test_fix_invokes_golangci_lint_with_parallel_runners_allowed(
+    golangci_lint_plugin: GolangciLintPlugin,
+    tmp_path: Path,
+) -> None:
+    """fix() carries the same flag on every golangci-lint invocation.
+
+    Args:
+        golangci_lint_plugin: Plugin under test.
+        tmp_path: Temporary directory for the Go module.
+    """
+    _make_go_module(tmp_path)
+    recorded: list[list[str]] = []
+
+    with patch.object(
+        golangci_lint_plugin,
+        "_run_subprocess",
+        side_effect=_record_golangci_argv(recorded),
+    ):
+        golangci_lint_plugin.fix([str(tmp_path)], {})
+
+    assert_that(recorded).is_not_empty()
+    for argv in recorded:
+        assert_that(argv).contains("golangci-lint", "run", "--allow-parallel-runners")
+    assert_that([argv for argv in recorded if "--fix" in argv]).is_not_empty()

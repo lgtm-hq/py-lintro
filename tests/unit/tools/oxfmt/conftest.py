@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.oxfmt import OxfmtPlugin
+from lintro.tools.oxfmt.definition import OxfmtPlugin
 
 
 @pytest.fixture

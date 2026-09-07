@@ -130,16 +130,15 @@ def fetch_text(*, url: str, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> str:
         raise ValueError(f"Refusing to fetch non-HTTPS URL: {url}")
     # The https:// scheme is asserted above, so no file:/custom scheme can be
     # opened; the URLs are built from CLI defaults, not from untrusted input.
-    request = (
-        urllib.request.Request(  # noqa: S310 — HTTPS-only validated above  # nosec B310
-            url,
-            headers={"User-Agent": "py-lintro-version-skew-audit"},
-        )
+    request = urllib.request.Request(
+        url,
+        headers={"User-Agent": "py-lintro-version-skew-audit"},
     )
     token = os.environ.get("GITHUB_TOKEN", "")
     if token and urllib.parse.urlsplit(url).hostname == "api.github.com":
         request.add_header("Authorization", f"Bearer {token}")
-    with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+    # nosemgrep: dynamic-urllib-use-detected
+    with urllib.request.urlopen(  # nosec B310
         request,
         timeout=timeout,
     ) as response:

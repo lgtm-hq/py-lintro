@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,16 +24,18 @@ from lintro.ai.review.github_errors import (
     condense_provider_error,
     format_error_comment,
 )
-from lintro.ai.review.github_sticky import (
-    advance_review_state,
-    build_sticky_comment,
-    render_state_sticky,
-)
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.sticky import (
+    advance_review_state,
+    build_sticky_comment,
+    render_state_sticky,
+)
 
 #: Banner headline for the round that fails in these tests, taken from the
 #: production template so a copy change cannot silently defang the assertions.
@@ -43,10 +46,12 @@ _ROUND_2_FAILED = FAILURE_BANNER_HEADLINE.format(round_number=2)
 def prior_body(sample_review_result: ReviewResult) -> str:
     """Render a successful round-1 sticky to fail the next round against."""
     return build_sticky_comment(
-        result=sample_review_result,
-        head_sha="a" * 40,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="a" * 40,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
@@ -54,10 +59,12 @@ def prior_body(sample_review_result: ReviewResult) -> str:
 def prior_state(sample_review_result: ReviewResult) -> ReviewState:
     """Artifact state persisted by a successful round."""
     return advance_review_state(
-        result=sample_review_result,
-        head_sha="a" * 40,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="a" * 40,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
@@ -91,19 +98,6 @@ def test_banner_carries_the_kind_specific_guidance(prior_state: ReviewState) -> 
     assert_that(body).contains(f"> {_ROUND_2_FAILED}")
     assert_that(body).contains(KIND_COPY[ReviewErrorKind.AUTH_FAILED][1])
     assert_that(body).does_not_contain(KIND_COPY[ReviewErrorKind.SERVER_ERROR][1])
-
-
-def test_legacy_prior_runs_also_render_the_board(prior_state: ReviewState) -> None:
-    """A v1 sticky's run mappings route to the board, not the error surface."""
-    body = format_error_comment(
-        error=AIProviderError("Overloaded"),
-        prior_runs=[run.to_dict() for run in prior_state.runs],
-    )
-
-    assert_that(body).contains(f"> {_ROUND_2_FAILED}")
-    assert_that(body).contains("showing round 1 results below")
-    assert_that(body).does_not_contain(ERROR_ONLY_HEADLINE)
-    assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
 
 
 def test_banner_sits_directly_under_the_header(prior_state: ReviewState) -> None:
@@ -259,7 +253,13 @@ def test_failure_body_respects_the_hard_comment_limit() -> None:
     )
     state = ReviewState(
         runs=tuple(
-            RunRecord(round=round_number, sha=f"{round_number:040d}", model="m")
+            RunRecord(
+                identity=RunIdentity(
+                    round=round_number,
+                    sha=f"{round_number:040d}",
+                    model="m",
+                ),
+            )
             for round_number in range(1, 21)
         ),
         findings=findings,
@@ -275,19 +275,36 @@ def test_failure_body_respects_the_hard_comment_limit() -> None:
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
 
 
-def _reporter(*, prior_body: str) -> MagicMock:
+def _reporter(*, prior_body: str, bodies: list[str] | None = None) -> MagicMock:
     """Build a mock reporter serving ``prior_body`` as the existing sticky.
 
     Args:
         prior_body: Sticky body the reporter reports as already posted.
+        bodies: Optional list that collects every sticky body written back, so
+            tests can assert on the rendered text rather than on mock call
+            bookkeeping (#2315).
 
     Returns:
         The configured mock.
     """
+    collected = bodies if bodies is not None else []
+
+    def _update(**kwargs: Any) -> bool:
+        """Record the body written back to the sticky comment.
+
+        Args:
+            **kwargs: Update keyword arguments, including ``body``.
+
+        Returns:
+            bool: Always ``True``, standing in for a successful edit.
+        """
+        collected.append(str(kwargs["body"]))
+        return True
+
     reporter = MagicMock()
     reporter.is_available.return_value = True
     reporter.find_issue_comment.return_value = (9, prior_body)
-    reporter.update_issue_comment.return_value = True
+    reporter.update_issue_comment.side_effect = _update
     reporter.repo = "owner/name"
     reporter.pr_number = 7
     return reporter
@@ -298,7 +315,8 @@ def test_posting_a_failure_updates_the_sticky_in_place(
     prior_state: ReviewState,
 ) -> None:
     """The end-to-end error path edits the sticky and keeps the board."""
-    reporter = _reporter(prior_body=prior_body)
+    bodies: list[str] = []
+    reporter = _reporter(prior_body=prior_body, bodies=bodies)
 
     posted = post_review_error_to_github(
         error=AIProviderError("Overloaded"),
@@ -308,7 +326,7 @@ def test_posting_a_failure_updates_the_sticky_in_place(
         reporter=reporter,
         prior_state=prior_state,
     )
-    body = reporter.update_issue_comment.call_args.kwargs["body"]
+    body = bodies[-1]
 
     assert_that(posted).is_true()
     assert_that(body).contains(f"> {_ROUND_2_FAILED}")
@@ -321,8 +339,10 @@ def test_posting_falls_back_to_the_reporter_pr_context(
     prior_state: ReviewState,
 ) -> None:
     """Omitting the overrides renders exactly what supplying them renders."""
-    explicit = _reporter(prior_body=prior_body)
-    implicit = _reporter(prior_body=prior_body)
+    explicit_bodies: list[str] = []
+    implicit_bodies: list[str] = []
+    explicit = _reporter(prior_body=prior_body, bodies=explicit_bodies)
+    implicit = _reporter(prior_body=prior_body, bodies=implicit_bodies)
 
     post_review_error_to_github(
         error=AIProviderError("Overloaded"),
@@ -339,9 +359,9 @@ def test_posting_falls_back_to_the_reporter_pr_context(
         prior_state=prior_state,
     )
 
-    assert_that(implicit.update_issue_comment.call_args.kwargs["body"]).is_equal_to(
-        explicit.update_issue_comment.call_args.kwargs["body"],
-    )
+    assert_that(explicit_bodies).is_length(1)
+    assert_that(implicit_bodies).is_equal_to(explicit_bodies)
+    assert_that(implicit_bodies[0]).contains("### Findings ·")
 
 
 def test_render_state_sticky_without_a_banner(prior_state: ReviewState) -> None:

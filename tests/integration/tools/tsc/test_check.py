@@ -13,16 +13,12 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from tests.integration.tools.tsc.conftest import tsc_is_available
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if tsc is not installed or not working
-pytestmark = pytest.mark.skipif(
-    not tsc_is_available(),
-    reason="tsc not installed or not working",
-)
+pytestmark = require_tool("tsc")
 
 
 # --- Tests for TscPlugin definition ---

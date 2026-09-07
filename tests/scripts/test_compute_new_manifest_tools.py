@@ -62,7 +62,7 @@ def _manifest(names: list[str]) -> str:
 def test_tool_names_missing_file_is_empty() -> None:
     """A non-existent manifest path yields an empty name set (new-manifest case)."""
     module = _load_module()
-    names = module._tool_names(Path("/definitely/not/here.json"))  # noqa: SLF001
+    names = module._tool_names(Path("/definitely/not/here.json"))
     assert_that(names).is_equal_to(set())
 
 
@@ -78,7 +78,7 @@ def test_tool_names_reads_declared_names(tmp_path: Path) -> None:
             },
         ),
     )
-    names = module._tool_names(manifest)  # noqa: SLF001
+    names = module._tool_names(manifest)
     assert_that(names).is_equal_to({"ruff", "black"})
 
 
@@ -521,12 +521,12 @@ def test_py_version_changed_no_change_is_empty(tmp_path: Path) -> None:
 def test_version_tuple_stops_at_prerelease_tag() -> None:
     """A pre-release tag stops parsing so "7.1.0-rc.1" is (7, 1, 0)."""
     module = _load_module()
-    version_tuple = module._version_tuple  # noqa: SLF001
+    version_tuple = module._version_tuple
     assert_that(version_tuple("7.1.0-rc.1")).is_equal_to((7, 1, 0))
     assert_that(version_tuple("7.1.3")).is_equal_to((7, 1, 3))
     # Pre-release tags collapse to their release base, so ordering is decided
     # by the numeric segments only.
-    is_upward = module._is_upward_bump  # noqa: SLF001
+    is_upward = module._is_upward_bump
     assert_that(is_upward("7.1.0-rc.1", "7.2.0")).is_true()
     assert_that(is_upward("7.2.0", "7.1.0-rc.1")).is_false()
 

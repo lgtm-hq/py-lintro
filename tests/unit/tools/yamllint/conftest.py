@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.yamllint import YamllintPlugin
+from lintro.tools.yamllint.definition import YamllintPlugin
 
 
 @pytest.fixture

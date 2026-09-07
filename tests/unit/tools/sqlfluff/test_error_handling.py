@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.sqlfluff import (
+from lintro.tools.sqlfluff.definition import (
     SQLFLUFF_DEFAULT_TIMEOUT,
     SqlfluffPlugin,
 )

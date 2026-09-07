@@ -68,11 +68,13 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 
 # New binaries land in docker/tools.Dockerfile, but this app image still
 # FROMs a digest-pinned tools image that will not contain them until the
-# next published digest. Bridge typos, spectral, and buf here so dogfood and
-# the manifest-vs-image gate actually run them instead of failing with
-# binary_missing. No-op once the digest already has them on PATH.
+# next published digest. Bridge typos, spectral, buf, import-linter, pylint,
+# and cppcheck here so dogfood and the manifest-vs-image gate actually run
+# them instead of failing with binary_missing. No-op once the digest already
+# has them on PATH.
 RUN chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck && \
+    rm -rf /var/lib/apt/lists/*
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -220,5 +222,15 @@ RUN echo "Smoke-testing AI agent CLIs..." && \
     gosu lintro codex --version && \
     gosu lintro agent --version && \
     echo "AI CLI smoke check passed."
+
+# This stage is the only place `full` and `ai` are installed together, so it is
+# the only place the `docstring_parser` module collision can reappear (#2378).
+# pydoclint fails to import when upstream `docstring-parser` shadows
+# `docstring-parser-fork`, and `lintro chk` would report that as a skip rather
+# than an error - so assert the import here, where it fails the build loudly.
+RUN echo "Smoke-testing the combined full+ai Python environment..." && \
+    /app/.venv/bin/pydoclint --version && \
+    /app/.venv/bin/python -c "import anthropic.lib.tools, docstring_parser" && \
+    echo "Combined full+ai smoke check passed."
 
 # ENTRYPOINT, CMD and HEALTHCHECK are inherited from `full`.

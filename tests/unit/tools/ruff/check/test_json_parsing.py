@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from assertpy import assert_that
 
 from lintro.parsers.ruff.ruff_issue import RuffIssue
-from lintro.tools.implementations.ruff.check import execute_ruff_check
+from lintro.tools.ruff.check import execute_ruff_check
 
 
 def test_execute_ruff_check_parses_json_output_correctly(
@@ -25,11 +25,11 @@ def test_execute_ruff_check_parses_json_output_correctly(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             return_value=(False, sample_ruff_json_output),
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             side_effect=parse_ruff_output,
         ),
     ):
@@ -65,11 +65,11 @@ def test_execute_ruff_check_empty_json_output(
     """
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
             return_value=(True, sample_ruff_json_empty_output),
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
     ):
@@ -95,15 +95,15 @@ def test_execute_ruff_check_parses_format_check_output(
 
     with (
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_output",
+            "lintro.tools.ruff.check.parse_ruff_output",
             return_value=[],
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.parse_ruff_format_check_output",
+            "lintro.tools.ruff.check.parse_ruff_format_check_output",
             side_effect=parse_ruff_format_check_output,
         ),
         patch(
-            "lintro.tools.implementations.ruff.check.run_subprocess_with_timeout",
+            "lintro.tools.ruff.check.run_subprocess_with_timeout",
         ) as mock_subprocess,
     ):
         # First call: lint check, Second call: format check

@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.shfmt import (
+from lintro.tools.shfmt.definition import (
     SHFMT_DEFAULT_TIMEOUT,
     ShfmtPlugin,
 )

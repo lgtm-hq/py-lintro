@@ -79,7 +79,7 @@ def get_cached_suggestion(
                 k: v
                 for k, v in suggestion.items()
                 if k in {f.name for f in dataclasses.fields(AIFixSuggestion)}
-            }
+            },
         )
     return None
 

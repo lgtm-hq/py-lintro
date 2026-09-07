@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.pydoclint import PydoclintPlugin
+from lintro.tools.pydoclint.definition import PydoclintPlugin
 
 
 def test_check_with_mocked_subprocess_success(
