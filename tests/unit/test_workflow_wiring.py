@@ -1526,7 +1526,8 @@ def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> Non
     ``workflow_call`` run reports the *caller's* event, so a dispatched
     tag-pipeline run and a dispatched publish-npm.yml run look identical. And
     the check is an allowlist, so an unknown or renamed caller is refused
-    rather than waved through.
+    rather than waved through. The runner's own ``GITHUB_WORKFLOW_REF`` is the
+    fallback, so a dropped ``env:`` mapping still gates the publish.
     """
     script = _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
     workflows = "lgtm-hq/py-lintro/.github/workflows"
@@ -1542,6 +1543,10 @@ def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> Non
         ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": "true"}, 0),
         # An unknown caller is not on the allowlist.
         ({"WORKFLOW_REF": f"{workflows}/some-other-pipeline.yml@refs/tags/v1"}, 1),
+        # With no WORKFLOW_REF mapping, the runner's own GITHUB_WORKFLOW_REF
+        # still gates: a dropped `env:` in the workflow must not open the gate.
+        ({"GITHUB_WORKFLOW_REF": tag_pipeline_ref}, 0),
+        ({"GITHUB_WORKFLOW_REF": dispatch_ref}, 1),
         # No entry path at all proves nothing: fail closed.
         ({}, 1),
     ]

@@ -80,7 +80,7 @@ packages and (dry-run) publish them. See the
 | `download_release_binaries.sh` | Download release binaries for staging                      | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`    |
 | `smoke_test.sh`                | Pack + install the meta-package and run `lintro --version` | `./scripts/ci/npm/smoke_test.sh`                                |
 | `publish_packages.sh`          | Publish npm packages (dry-run unless `LIVE=1`)             | `./scripts/ci/npm/publish_packages.sh`                          |
-| `assert_dispatch_allowed.sh`   | Refuse a live `workflow_dispatch` of publish-npm (#2247)   | `./scripts/ci/npm/assert_dispatch_allowed.sh`                   |
+| `assert_dispatch_allowed.sh`   | Allow a live publish only from the tag pipeline (#2247)    | `./scripts/ci/npm/assert_dispatch_allowed.sh`                   |
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 

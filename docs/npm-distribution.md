@@ -60,32 +60,41 @@ mirroring the `pypi` environment; npm generates provenance attestations automati
 ### Which runs npm actually trusts
 
 The OIDC token npm receives identifies the **entry workflow of the run**, not the
-reusable workflow doing the publishing. Only one identity matches the trusted publisher
-configured for the `@lgtm-hq/lintro*` packages:
+reusable workflow doing the publishing. The trusted publisher configured for the
+`@lgtm-hq/lintro*` packages names one workflow **file** — `publish-pypi-on-tag.yml` —
+and the ref is not part of the match:
 
-| Entry path                                             | OIDC identity (`github.workflow_ref`)    | Live publish  |
-| ------------------------------------------------------ | ---------------------------------------- | ------------- |
-| Tag push → `publish-pypi-on-tag.yml` → `workflow_call` | `publish-pypi-on-tag.yml @ refs/tags/v*` | authenticates |
-| **Run workflow** on `Publish - npm`                    | `publish-npm.yml @ refs/heads/main`      | rejected      |
+| Entry path                                             | OIDC identity (`github.workflow_ref`) | Live publish  |
+| ------------------------------------------------------ | ------------------------------------- | ------------- |
+| Tag push → `publish-pypi-on-tag.yml` → `workflow_call` | `publish-pypi-on-tag.yml @ <ref>`     | authenticates |
+| **Run workflow** on `Publish - npm`                    | `publish-npm.yml @ <ref>`             | rejected      |
 
-A direct `workflow_dispatch` therefore cannot publish: the OIDC exchange fails, npm
-falls back to an unauthenticated `PUT`, and the registry masks the authorization failure
-as `npm error code E404` ("could not be found or you do not have permission to access
-it"). Provenance signing to Sigstore still succeeds, which makes the log look like the
-publish almost worked. See issue #2247 for two live dispatches that failed this way.
+In practice the trusted entry path is a tag push, so its ref is typically `refs/tags/v*`
+— but that is the usual example, not the identity: what npm checks is the workflow file
+the run entered through.
+
+Before #2247, a direct `workflow_dispatch` of `Publish - npm` therefore reached the
+registry and failed there: the OIDC exchange fails, npm falls back to an unauthenticated
+`PUT`, and the registry masks the authorization failure as `npm error code E404` ("could
+not be found or you do not have permission to access it"). Provenance signing to
+Sigstore still succeeds, which makes the log look like the publish almost worked. See
+issue #2247 for two live dispatches that died that way, three retries deep and after
+burning an `npm` environment approval. Such a run now fails in the `guard` job instead,
+before any of that.
 
 Two guards encode this:
 
 - The `guard` job in `publish-npm.yml` (`scripts/ci/npm/assert_dispatch_allowed.sh`)
-  fails such a run immediately. It carries no `environment:` and runs before the publish
-  job, so a doomed run never consumes an `npm` approval. It decides on
+  allows a live publish only when the run's entry workflow is the tag pipeline, and
+  fails every other run immediately. It carries no `environment:` and runs before the
+  publish job, so a doomed run never consumes an `npm` approval. It decides on
   `github.workflow_ref` — the entry workflow, which is exactly what npm matches — not on
   `github.event_name`, which a `workflow_call` run inherits from its caller (so a
-  dispatched `Publish - PyPI Production` run is still allowed to publish). The check is
-  an **allowlist**: only `publish-pypi-on-tag.yml` proceeds, and anything else — a
-  renamed workflow, a new caller, a run with no identity to inspect — is refused, so a
-  rename cannot fail the guard open. Dispatching `Publish - npm` with `dry_run: true` —
-  the dispatch default — stays supported for testing.
+  dispatched `Publish - PyPI Production` run is still allowed to publish). Being an
+  allowlist rather than a denylist on `publish-npm.yml`, an unknown caller, a renamed
+  workflow, or a run with no identity to inspect all fail closed. Dispatching
+  `Publish - npm` with `dry_run: true` — the dispatch default — stays supported for
+  testing.
 - `scripts/ci/npm/publish_packages.sh` classifies `E404` as a fatal auth failure, so a
   rejected publish is not retried three times per package.
 
@@ -106,10 +115,9 @@ deployment only after the preceding jobs have uploaded the release binaries.
 trusts:
 
 1. Open the run for the tag under Actions → `Publish - PyPI Production`.
-2. If it is still waiting, approve the `npm` environment on its npm job. If it already
-   finished or failed, choose **Re-run failed jobs**; the rerun keeps the PyPI →
-   binaries/Homebrew → npm order and the entry-path identity.
-3. Approve the `npm` environment when that same run reaches its waiting npm job.
+2. If it already finished or failed, choose **Re-run failed jobs**; the rerun keeps the
+   PyPI → binaries/Homebrew → npm order and the entry-path identity.
+3. Approve the `npm` environment when that run reaches its waiting npm job.
 
 Re-running a tag run is designed to be cheap (#2435): the Linux and macOS binary jobs
 detect the verified binary already attached to the release (SHA256-matched against the
@@ -124,10 +132,12 @@ Do **not** dispatch `Publish - npm` live as a substitute — it cannot authentic
 the `guard` job now refuses it outright. A `dry_run: true` dispatch remains available
 for exercising the packaging steps.
 
-If the tag pipeline is ever renamed, update `TRUSTED_ENTRY_WORKFLOW` in
-`scripts/ci/npm/assert_dispatch_allowed.sh` and the trusted publisher on npmjs together;
-`tests/unit/test_workflow_wiring.py` fails if the allowlisted workflow is missing or no
-longer calls `publish-npm.yml`.
+Renaming the tag pipeline means moving three things together: the workflow file itself,
+`TRUSTED_ENTRY_WORKFLOW` in `scripts/ci/npm/assert_dispatch_allowed.sh`, and the trusted
+publisher configured on npmjs (which lives outside this repo). The first two are pinned
+to each other by `tests/unit/test_workflow_wiring.py`, which fails if the allowlisted
+workflow is missing or no longer calls `publish-npm.yml`; the npmjs side is not, so
+update it in the same change or every publish will start failing with `E404`.
 
 Trusted publishing requires **npm ≥ 11.5.1**. The workflow uses **Node 24**, which ships
 a compatible bundled npm — do **not** run `npm install -g npm` (or any in-place
