@@ -118,12 +118,13 @@ fi
 #
 # E404 on a publish is an authorization failure, not a missing resource: npm
 # masks "you are not allowed to publish here" as a 404 ("could not be found or
-# you do not have permission to access it"). It is what an unauthenticated
-# trusted-publishing fallback produces, so retrying it burns three attempts per
-# package on a permanent condition (see issue #2247). Note the E404 handling in
-# the `npm view` pre-check below is unrelated: there a 404 legitimately means
-# "this version is not published yet".
-NON_RETRYABLE_ERROR_RE='E401|E403|E402|E404|ENEEDAUTH|EOTP|EPERM|unauthorized|forbidden|authentication failed|permission denied'
+# you do not have permission to access it" — that prose is matched too, so the
+# classification does not hinge on npm printing the code). It is what an
+# unauthenticated trusted-publishing fallback produces, so retrying it burns
+# three attempts per package on a permanent condition (see issue #2247). The
+# E404 handling in the `npm view` pre-check below is unrelated: there a 404
+# legitimately means "this version is not published yet".
+NON_RETRYABLE_ERROR_RE='E401|E403|E402|E404|ENEEDAUTH|EOTP|EPERM|unauthorized|forbidden|authentication failed|permission denied|do not have permission'
 # Transient failures that are safe to retry: the Rekor transparency-log 409
 # (TLOG_CREATE_ENTRY_ERROR), other Sigstore/tlog hiccups, registry 5xx,
 # rate-limit 429s, and transient network errors.

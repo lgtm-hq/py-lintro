@@ -77,13 +77,15 @@ publish almost worked. See issue #2247 for two live dispatches that failed this 
 Two guards encode this:
 
 - The `guard` job in `publish-npm.yml` (`scripts/ci/npm/assert_dispatch_allowed.sh`)
-  fails a live dispatch immediately. It carries no `environment:` and runs before the
-  publish job, so a doomed run never consumes an `npm` approval. It decides on
+  fails such a run immediately. It carries no `environment:` and runs before the publish
+  job, so a doomed run never consumes an `npm` approval. It decides on
   `github.workflow_ref` — the entry workflow, which is exactly what npm matches — not on
-  `github.event_name`, which a `workflow_call` run inherits from its caller. A
-  dispatched `Publish - PyPI Production` run is therefore still allowed to publish.
-  Dispatching `Publish - npm` with `dry_run: true` — the dispatch default — stays
-  supported for testing.
+  `github.event_name`, which a `workflow_call` run inherits from its caller (so a
+  dispatched `Publish - PyPI Production` run is still allowed to publish). The check is
+  an **allowlist**: only `publish-pypi-on-tag.yml` proceeds, and anything else — a
+  renamed workflow, a new caller, a run with no identity to inspect — is refused, so a
+  rename cannot fail the guard open. Dispatching `Publish - npm` with `dry_run: true` —
+  the dispatch default — stays supported for testing.
 - `scripts/ci/npm/publish_packages.sh` classifies `E404` as a fatal auth failure, so a
   rejected publish is not retried three times per package.
 
@@ -121,6 +123,11 @@ binary is the single delete-plus-rename API pair at the end; a kill there leaves
 Do **not** dispatch `Publish - npm` live as a substitute — it cannot authenticate, and
 the `guard` job now refuses it outright. A `dry_run: true` dispatch remains available
 for exercising the packaging steps.
+
+If the tag pipeline is ever renamed, update `TRUSTED_ENTRY_WORKFLOW` in
+`scripts/ci/npm/assert_dispatch_allowed.sh` and the trusted publisher on npmjs together;
+`tests/unit/test_workflow_wiring.py` fails if the allowlisted workflow is missing or no
+longer calls `publish-npm.yml`.
 
 Trusted publishing requires **npm ≥ 11.5.1**. The workflow uses **Node 24**, which ships
 a compatible bundled npm — do **not** run `npm install -g npm` (or any in-place

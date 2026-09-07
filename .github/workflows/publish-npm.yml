@@ -63,11 +63,11 @@ concurrency:
 
 jobs:
   # Runs BEFORE the environment-gated publish job and carries no
-  # `environment:`, so a doomed live dispatch fails without consuming an `npm`
-  # approval. npm trusted publishing only matches the tag-pipeline entry path
-  # (publish-pypi-on-tag.yml @ refs/tags/v*); a direct dispatch presents a
-  # different OIDC identity and the registry masks the rejection as E404
-  # (see #2247).
+  # `environment:`, so a run that cannot authenticate fails without consuming
+  # an `npm` approval. npm trusted publishing matches exactly one entry
+  # workflow (publish-pypi-on-tag.yml); any other entry path — a direct
+  # dispatch of this workflow, say — presents a different OIDC identity and the
+  # registry masks the rejection as E404 (see #2247).
   guard:
     name: Check entry path
     runs-on: ubuntu-24.04
@@ -91,14 +91,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Refuse live dispatch runs
+      - name: Refuse runs that cannot authenticate to npm
         # workflow_ref is the run's *entry* workflow — the OIDC subject npm
-        # matches on. event_name alone cannot tell a direct dispatch of this
-        # workflow from a dispatch of the tag pipeline that calls it, because
-        # a workflow_call run reports the caller's event.
+        # matches on. The script allowlists the one workflow npm trusts;
+        # event_name cannot substitute for it, because a workflow_call run
+        # reports the caller's event and so cannot distinguish a dispatch of
+        # this workflow from a dispatch of the tag pipeline that calls it.
         env:
           WORKFLOW_REF: ${{ github.workflow_ref }}
-          EVENT_NAME: ${{ github.event_name }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: scripts/ci/npm/assert_dispatch_allowed.sh
 

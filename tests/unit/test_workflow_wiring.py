@@ -1434,8 +1434,8 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
 
 
-def test_publish_npm_refuses_live_dispatch_before_the_npm_environment() -> None:
-    """A live workflow_dispatch is refused before the npm approval is spent.
+def test_publish_npm_refuses_untrusted_entry_before_the_npm_environment() -> None:
+    """A run that cannot authenticate fails before the npm approval is spent.
 
     npm trusted publishing only authenticates the tag-pipeline entry path
     (issue #2247), so a live direct dispatch can never publish. The guard must
@@ -1469,42 +1469,79 @@ def test_publish_npm_refuses_live_dispatch_before_the_npm_environment() -> None:
     assert_that(guard_step["run"].strip()).is_equal_to(
         "scripts/ci/npm/assert_dispatch_allowed.sh",
     )
-    # Every input the guard decides on must reach the script: the entry
-    # workflow (the OIDC subject), the event, and dry_run.
+    # Both inputs the guard decides on must reach the script: the entry
+    # workflow (the OIDC subject) and dry_run.
     assert_that(guard_step["env"]["WORKFLOW_REF"]).contains("github.workflow_ref")
-    assert_that(guard_step["env"]["EVENT_NAME"]).contains("github.event_name")
     assert_that(guard_step["env"]["DRY_RUN"]).contains("inputs.dry_run")
 
 
-def test_publish_npm_guard_script_gates_on_entry_workflow_and_dry_run() -> None:
-    """The guard fails only for a live run entering through publish-npm.yml.
+def _guard_allowlisted_workflow() -> str:
+    """Return the workflow filename the npm guard allowlists.
 
-    ``github.event_name`` is not sufficient on its own: a ``workflow_call``
-    run reports the *caller's* event, so a dispatched tag-pipeline run also
-    arrives as ``workflow_dispatch`` with ``dry_run: false`` and must still be
-    allowed. The entry workflow is the value npm actually matches.
+    Returns:
+        The basename of the entry workflow named in
+        ``TRUSTED_ENTRY_WORKFLOW`` inside ``assert_dispatch_allowed.sh``.
+    """
+    script = (
+        _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
+    ).read_text(encoding="utf-8")
+    match = re.search(
+        r"^readonly TRUSTED_ENTRY_WORKFLOW='/\.github/workflows/([^']+)@'",
+        script,
+        flags=re.MULTILINE,
+    )
+    assert_that(match).described_as("TRUSTED_ENTRY_WORKFLOW not found").is_not_none()
+    assert match is not None  # narrow type for mypy
+    return match.group(1)
+
+
+def test_publish_npm_guard_allowlists_a_workflow_that_calls_it() -> None:
+    """The allowlisted entry workflow exists and really calls publish-npm.yml.
+
+    The guard is an allowlist keyed on a workflow *filename*, so a rename on
+    either side would silently lock out every publish (or, with a denylist,
+    let an unauthenticable one through). Pin both halves: the named workflow
+    is on disk, and it is the one that invokes publish-npm.yml.
+    """
+    allowlisted = _guard_allowlisted_workflow()
+    entry_path = _REPO_ROOT / ".github" / "workflows" / allowlisted
+    assert_that(entry_path.is_file()).described_as(str(entry_path)).is_true()
+
+    entry_workflow = _load_workflow(name=allowlisted)
+    callers = [
+        job
+        for job in entry_workflow["jobs"].values()
+        if isinstance(job, dict)
+        and str(job.get("uses", "")).endswith("publish-npm.yml")
+    ]
+    assert_that(callers).described_as(
+        f"{allowlisted} must call publish-npm.yml",
+    ).is_not_empty()
+
+
+def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> None:
+    """Only the tag pipeline may run a live publish; everything else fails.
+
+    ``github.event_name`` cannot substitute for the entry workflow: a
+    ``workflow_call`` run reports the *caller's* event, so a dispatched
+    tag-pipeline run and a dispatched publish-npm.yml run look identical. And
+    the check is an allowlist, so an unknown or renamed caller is refused
+    rather than waved through.
     """
     script = _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
-    repo = "lgtm-hq/py-lintro/.github/workflows"
-    tag_pipeline_ref = f"{repo}/publish-pypi-on-tag.yml@refs/tags/v1.2.3"
-    dispatch_ref = f"{repo}/publish-npm.yml@refs/heads/main"
+    workflows = "lgtm-hq/py-lintro/.github/workflows"
+    trusted = _guard_allowlisted_workflow()
+    tag_pipeline_ref = f"{workflows}/{trusted}@refs/tags/v1.2.3"
+    dispatch_ref = f"{workflows}/publish-npm.yml@refs/heads/main"
     cases: list[tuple[dict[str, str], int]] = [
-        # Tag pipeline entry, however it was triggered: allowed.
-        ({"WORKFLOW_REF": tag_pipeline_ref, "EVENT_NAME": "push"}, 0),
-        ({"WORKFLOW_REF": tag_pipeline_ref, "EVENT_NAME": "workflow_dispatch"}, 0),
+        # The trusted entry workflow, on any ref: allowed.
+        ({"WORKFLOW_REF": tag_pipeline_ref}, 0),
+        ({"WORKFLOW_REF": f"{workflows}/{trusted}@refs/heads/main"}, 0),
         # Direct dispatch of this workflow: refused unless it is a dry run.
-        ({"WORKFLOW_REF": dispatch_ref, "EVENT_NAME": "workflow_dispatch"}, 1),
-        (
-            {
-                "WORKFLOW_REF": dispatch_ref,
-                "EVENT_NAME": "workflow_dispatch",
-                "DRY_RUN": "true",
-            },
-            0,
-        ),
-        # No workflow ref: fall back to the event, fail-closed on a dispatch.
-        ({"EVENT_NAME": "workflow_dispatch"}, 1),
-        ({"EVENT_NAME": "push"}, 0),
+        ({"WORKFLOW_REF": dispatch_ref}, 1),
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": "true"}, 0),
+        # An unknown caller is not on the allowlist.
+        ({"WORKFLOW_REF": f"{workflows}/some-other-pipeline.yml@refs/tags/v1"}, 1),
         # No entry path at all proves nothing: fail closed.
         ({}, 1),
     ]
