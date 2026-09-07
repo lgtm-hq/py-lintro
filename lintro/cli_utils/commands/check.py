@@ -237,6 +237,13 @@ def check_command(
     # Add default paths if none provided
     path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
+    # Handle cache clearing. This runs before the --explain-order early exit so
+    # `--no-cache --explain-order` still clears the incremental caches.
+    if no_cache:
+        from lintro.utils.file_cache import clear_all_caches
+
+        clear_all_caches()
+
     if explain_order:
         emit_order_explanation(
             tools=tools,
@@ -244,12 +251,6 @@ def check_command(
             paths=path_list,
             ignore_conflicts=ignore_conflicts,
         )
-
-    # Handle cache clearing
-    if no_cache:
-        from lintro.utils.file_cache import clear_all_caches
-
-        clear_all_caches()
 
     # Build tool-specific options string
     tool_option_parts: list[str] = []

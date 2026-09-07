@@ -88,3 +88,33 @@ def test_check_explain_order_still_validates_the_diff_base() -> None:
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(mock_run.called).is_false()
     assert_that(result.output).does_not_contain("Execution order (shadow mode)")
+
+
+def test_check_no_cache_still_clears_before_explain_order() -> None:
+    """``--no-cache`` clears the caches even when the run only explains."""
+    runner = CliRunner()
+    args = ["--tools", "ruff", "--no-cache", "--explain-order"]
+
+    with (
+        patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run,
+        patch("lintro.utils.file_cache.clear_all_caches") as mock_clear,
+    ):
+        result = runner.invoke(check_command, args)
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(mock_run.called).is_false()
+    assert_that(mock_clear.called).is_true()
+    assert_that(result.output).contains("Execution order (shadow mode)")
+
+
+def test_check_explain_order_uses_the_default_selection() -> None:
+    """Without ``--tools`` the diff covers the detected default toolset."""
+    runner = CliRunner()
+
+    with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
+        result = runner.invoke(check_command, ["--explain-order"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(mock_run.called).is_false()
+    assert_that(result.output).contains("Execution order (shadow mode)")
+    assert_that(result.output).contains("ruff")

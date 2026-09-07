@@ -21,10 +21,11 @@ Derivation rules:
 - **Edges.** Within a pattern, every earlier-phase tool precedes every
   later-phase tool. Equal phases produce no edge: that is a proven
   independence, so the tie breaks alphabetically.
-- **Pattern universe.** Patterns are compared literally, plus the fnmatch
-  subsumption that a broader claim pattern gives: a tool claiming ``*``
-  (typos, gitleaks, trufflehog) joins every pattern group. No glob-to-glob
-  semantics beyond that are attempted in shadow mode.
+- **Pattern universe.** Patterns are compared literally, plus the single
+  subsumption a universal claim gives: a tool claiming ``*`` (typos,
+  gitleaks, trufflehog) joins every pattern group. No glob-to-glob semantics
+  beyond that are attempted in shadow mode, so ``*.py`` and ``test_*.py``
+  stay separate groups.
 - **Project-scoped claims.** A claim with no patterns (osv-scanner) is not
   addressed by pattern and therefore produces no edges.
 - **Cycles.** Detected before linearisation and reported with the tools and
@@ -35,7 +36,6 @@ Derivation rules:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from fnmatch import fnmatch
 from typing import TYPE_CHECKING
 
 from lintro.enums.capability import Cap
@@ -169,9 +169,11 @@ def _claim_covers(claim_patterns: Sequence[str], pattern: str) -> bool:
         pattern: The pattern group being tested.
 
     Returns:
-        True when a declared pattern equals ``pattern`` or subsumes it.
+        True when a declared pattern equals ``pattern``, or when the claim is
+        the universal ``*``. No other glob-to-glob subsumption is attempted:
+        ``*.py`` does not join a ``test_*.py`` group.
     """
-    return any(p == pattern or fnmatch(pattern, p) for p in claim_patterns)
+    return any(p in {"*", pattern} for p in claim_patterns)
 
 
 def _phase_for(claims: Sequence[Claim], pattern: str) -> Cap | None:

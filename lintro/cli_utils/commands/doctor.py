@@ -7,6 +7,11 @@ Only presentation lives here. The probes themselves — and the
 ``{check, status, detail, remediation}`` health report the MCP ``lintro_doctor``
 tool serves — live in :mod:`lintro.utils.doctor_report`, so the same data backs
 the terminal output, ``--json``, and an agent (issue #1240).
+
+One exception: the shadow-mode execution-order section (issue #1741) is
+terminal-only. It is rendered on the Rich path after the ``--json`` and
+markdown early returns, so neither ``--json`` nor the MCP health report
+carries it.
 """
 
 from __future__ import annotations

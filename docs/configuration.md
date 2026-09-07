@@ -980,8 +980,12 @@ lintro doctor                             # compact summary section
 ```
 
 `--explain-order` prints the diff and exits without running a single tool. Tool
-selection is resolved exactly as the real run would resolve it, so the "current" order
-shown is the order that invocation would have executed.
+selection is resolved exactly as the real run would resolve it, so the selected _set_
+matches that invocation. The listed "current" order is the `tool_order` schedule for
+that set (after conflict resolution) — it is what `get_tools_to_run` returns, before the
+executor moves `[tool.lintro.post_checks]` tools out of the main phase and before any
+parallel execution. With the default post-checks, `black` is listed in the current order
+where a real run would defer it to the post-check phase.
 
 Derivation rules:
 
@@ -991,7 +995,7 @@ Derivation rules:
 | One invocation    | A tool that both fixes and checks a pattern sits in `FIX`; its diagnostics come out with it |
 | Edges             | Every earlier-phase tool precedes every later-phase tool for that pattern                   |
 | Ties              | Equal phases derive no edge, so the tie breaks alphabetically                               |
-| Broad claims      | A tool claiming `*` (typos, gitleaks, trufflehog) joins every pattern group                 |
+| Broad claims      | Only `*` subsumes: it joins every group, while `*.py` never joins `test_*.py`               |
 | Project-scoped    | A claim with no patterns (osv-scanner) derives no edges                                     |
 | Cycles            | Reported before ordering, naming the tools and the patterns whose edges closed them         |
 
@@ -999,7 +1003,7 @@ Sample output:
 
 ```text
 Execution order (shadow mode)
-  Reporting only: the scalar-priority order is still the one that runs.
+  Reporting only: current is the scalar-priority schedule before post-check splitting; nothing here changes execution.
 
   Current (scalar priority):
     1. black

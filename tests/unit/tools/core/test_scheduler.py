@@ -216,3 +216,16 @@ def test_shadow_mode_does_not_touch_the_live_order() -> None:
     live = tool_manager.get_tool_execution_order(["ruff", "black"])
 
     assert_that(list(live)).is_equal_to(["black", "ruff"])
+
+
+def test_narrow_globs_do_not_subsume_each_other() -> None:
+    """Only ``*`` subsumes: ``*.py`` never joins a ``test_*.py`` group."""
+    derived = derive_order(
+        {
+            "broad_fixer": _claims((["*.py"], {Cap.FIX})),
+            "narrow_checker": _claims((["test_*.py"], {Cap.CHECK})),
+        },
+    )
+
+    assert_that(derived.edges).is_empty()
+    assert_that(list(derived.tools)).is_equal_to(["broad_fixer", "narrow_checker"])

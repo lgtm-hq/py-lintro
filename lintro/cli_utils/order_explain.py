@@ -34,7 +34,8 @@ EXPLAIN_HEADER: str = "Execution order (shadow mode)"
 
 #: Repeated wherever the diff is shown, so nobody reads it as live behaviour.
 SHADOW_NOTE: str = (
-    "Reporting only: the scalar-priority order is still the one that runs."
+    "Reporting only: current is the scalar-priority schedule before "
+    "post-check splitting; nothing here changes execution."
 )
 
 #: Cap on the per-difference pattern list so a `*` claim cannot flood output.
@@ -175,8 +176,11 @@ def explain_order_lines(
     """Build the ``--explain-order`` output for a would-be run.
 
     Tool selection reuses the same resolution the run itself performs, so the
-    ``current`` order shown is exactly the order that invocation would have
-    executed.
+    selected *set* matches that invocation. The ``current`` order shown is the
+    ``tool_order`` schedule for that set (conflict-resolved) as
+    :func:`~lintro.utils.execution.tool_configuration.get_tools_to_run` returns
+    it — before the executor splits ``[tool.lintro.post_checks]`` tools out of
+    the main phase and before any parallel execution.
 
     Args:
         tools: ``--tools`` value, or None for the configured/detected set.
@@ -244,7 +248,7 @@ def doctor_order_lines() -> list[str]:
 
     try:
         selection = get_tools_to_run(None, "check")
-    except (ValueError, OSError):  # pragma: no cover - defensive
+    except (ValueError, OSError):
         return []
     return format_doctor_order_section(build_shadow_report(selection.to_run))
 

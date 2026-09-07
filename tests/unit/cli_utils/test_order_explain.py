@@ -24,7 +24,7 @@ from lintro.tools.core.scheduler import (
 
 GOLDEN_REPORT: list[str] = [
     "Execution order (shadow mode)",
-    "  Reporting only: the scalar-priority order is still the one that runs.",
+    "  Reporting only: current is the scalar-priority schedule before post-check splitting; nothing here changes execution.",
     "",
     "  Current (scalar priority):",
     "    1. black",

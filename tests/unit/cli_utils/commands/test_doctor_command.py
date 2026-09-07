@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -1084,20 +1085,13 @@ def test_doctor_renders_execution_order_shadow_section() -> None:
 
 
 def test_doctor_order_section_is_informational_only() -> None:
-    """Order differences never change the doctor exit code."""
+    """A real shadow report never changes the doctor exit code."""
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
 
     with (
         p1,
         p2,
-        patch(
-            "lintro.cli_utils.order_explain.doctor_order_lines",
-            return_value=[
-                "  Execution order (shadow)",
-                "    tools: 2  differences: 1  cycles: 0",
-            ],
-        ),
         patch("subprocess.run") as mock_run,
         patch("shutil.which", return_value="/usr/bin/ruff"),
     ):
@@ -1105,4 +1099,23 @@ def test_doctor_order_section_is_informational_only() -> None:
         result = runner.invoke(doctor_command, [])
 
     assert_that(result.exit_code).is_equal_to(0)
-    assert_that(result.output).contains("differences: 1")
+    assert_that(result.output).contains("Execution order (shadow)")
+    # The live workspace toolset disagrees with the scalar order, so this pins
+    # that a real, non-empty difference list still leaves the exit code at 0.
+    counts = re.search(r"differences: (\d+)", result.output)
+    assert_that(counts).is_not_none()
+    assert_that(int(counts.group(1) if counts else "0")).is_greater_than(0)
+    assert_that(re.search(r"\S+ before \S+ \(", result.output)).is_not_none()
+
+
+def test_doctor_order_lines_are_empty_when_selection_fails() -> None:
+    """An unusable toolset omits the section instead of breaking doctor."""
+    from lintro.cli_utils.order_explain import doctor_order_lines
+
+    with patch(
+        "lintro.utils.execution.tool_configuration.get_tools_to_run",
+        side_effect=ValueError("unknown tool"),
+    ):
+        lines = doctor_order_lines()
+
+    assert_that(lines).is_empty()
