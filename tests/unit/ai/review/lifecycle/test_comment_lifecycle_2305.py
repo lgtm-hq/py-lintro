@@ -39,6 +39,7 @@ from lintro.ai.review.lifecycle.comments import (
 from lintro.ai.review.lifecycle.decision import ExistingComment, decide
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.state_store import (
     load_ci_state,
@@ -862,8 +863,11 @@ def test_a_posting_run_recovers_the_stickys_history_before_persisting(
     )
     persisted = _read_back(tmp_path=tmp_path, in_actions=in_actions)
 
-    assert_that([run.round for run in loaded.runs]).is_equal_to([1, 2, 3])
-    assert_that([run.round for run in persisted.runs]).is_equal_to([1, 2, 3, 4])
+    loaded_rounds = [run.identity.round for run in loaded.runs]
+    persisted_rounds = [run.identity.round for run in persisted.runs]
+
+    assert_that(loaded_rounds).is_equal_to([1, 2, 3])
+    assert_that(persisted_rounds).is_equal_to([1, 2, 3, 4])
 
 
 def test_a_run_that_posts_nothing_never_reads_the_sticky(
@@ -921,7 +925,11 @@ def test_a_stored_state_wins_over_the_stickys_leftover_blob(
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     write_local_state(
         state=ReviewState(
-            runs=(RunRecord(round=1, sha="abc1234"),),
+            runs=(
+                RunRecord(
+                    identity=RunIdentity(round=1, sha="abc1234"),
+                ),
+            ),
             repo="lgtm-hq/py-lintro",
             pr_number=7,
         ),
@@ -940,8 +948,8 @@ def test_a_stored_state_wins_over_the_stickys_leftover_blob(
         post=True,
     )
 
-    assert_that([run.round for run in loaded.runs]).is_equal_to([1])
-    assert_that(loaded.runs[0].sha).is_equal_to("abc1234")
+    assert_that([run.identity.round for run in loaded.runs]).is_equal_to([1])
+    assert_that(loaded.runs[0].identity.sha).is_equal_to("abc1234")
 
 
 def test_an_unreachable_github_leaves_the_round_starting_fresh(

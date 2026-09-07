@@ -15,10 +15,13 @@ __all__ = ["CONVERGENCE_SCORE_PRECISION", "NARRATIVE_LIMIT", "RunOutcome"]
 #: way.
 CONVERGENCE_SCORE_PRECISION = 2
 
-#: Maximum characters of a stored per-round narrative, on the way in (it is
-#: persisted in the state blob, which competes for the same size cap) and on
-#: the way out. It is a property of the stored field rather than of any one
-#: renderer, so writer and reader cannot drift to different caps.
+#: Maximum characters of a per-round narrative: the factory truncates to it
+#: before the record is built (the narrative is persisted in the state blob,
+#: which competes for the same size cap), and every history renderer truncates
+#: to it again on display. The codec itself does not re-truncate, so a longer
+#: narrative written by some other producer still round-trips unchanged. It is
+#: a property of the stored field rather than of any one renderer, so no two
+#: surfaces can drift to different caps.
 NARRATIVE_LIMIT = 200
 
 

@@ -10,6 +10,9 @@ split and one that follows it can read each other's comments.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
@@ -264,3 +267,63 @@ def test_the_factory_fills_every_group_from_a_review_result(
             convergence_score=4.5,
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("files_total", "files_reviewed", "expected_skipped"),
+    [
+        pytest.param(7, 3, 4, id="some_files_were_skipped"),
+        pytest.param(3, 5, 0, id="a_nonsensical_total_clamps_to_zero"),
+    ],
+)
+def test_the_factory_derives_the_skipped_file_count(
+    sample_review_result: ReviewResult,
+    files_total: int,
+    files_reviewed: int,
+    expected_skipped: int,
+) -> None:
+    """Skipped files are the clamped difference, never a negative count.
+
+    The shared fixture reviews every changed file, so it cannot tell the
+    subtraction apart from its inverse or from the group default. Driving the
+    factory with metadata that actually skips files pins the direction, and a
+    reviewed count above the total pins the clamp: a state blob must never
+    carry a negative file count.
+
+    Args:
+        sample_review_result: Representative review result fixture.
+        files_total: Changed files the round was handed.
+        files_reviewed: Changed files the round actually looked at.
+        expected_skipped: Skip count the coverage group should record.
+    """
+    result = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            files_total=files_total,
+            files_reviewed=files_reviewed,
+            chunks_reviewed=1,
+            duration_seconds=12.5,
+        ),
+    )
+
+    record = run_record_from_result(
+        request=StickyRequest(
+            result=result,
+            head_sha="abc1234",
+            transport="api",
+            auth_mode="api_key",
+        ),
+        totals=RoundTotals(
+            round_number=1,
+            verdict=ReviewVerdict.BLOCKED,
+            resolved=0,
+            open_after=2,
+            convergence_score=1.5,
+        ),
+    )
+
+    assert_that(record.coverage.files_skipped).is_equal_to(expected_skipped)
+    assert_that(record.coverage.files_reviewed).is_equal_to(files_reviewed)
+    assert_that(record.coverage.chunks_reviewed).is_equal_to(1)
+    assert_that(record.usage.duration).is_equal_to(12.5)
