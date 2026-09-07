@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - only TimeoutExpired is constructed here
 from pathlib import Path
-from typing import cast
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -75,7 +74,9 @@ def test_check_with_issues(cppcheck_plugin: CppcheckPlugin, tmp_path: Path) -> N
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    issue = cast(CppcheckIssue, (result.issues or [])[0])
+    issues = [i for i in (result.issues or []) if isinstance(i, CppcheckIssue)]
+    assert_that(issues).is_not_empty()
+    issue = issues[0]
     assert_that(issue.code).is_equal_to("uninitvar")
     assert_that(issue.severity).is_equal_to("error")
     assert_that(issue.line).is_equal_to(11)
@@ -208,3 +209,51 @@ def test_fix_raises_not_implemented(cppcheck_plugin: CppcheckPlugin) -> None:
         ["a.c"],
         {},
     )
+
+
+def test_check_passes_configured_options_into_the_subprocess_argv(
+    cppcheck_plugin: CppcheckPlugin,
+    tmp_path: Path,
+) -> None:
+    """Options set through ``check()`` reach the real cppcheck argv.
+
+    The other execution tests assert command construction through the private
+    ``_build_command`` helper, which cannot catch a ``check()`` that builds a
+    command and then fails to pass it on. This spies the argv the subprocess
+    layer actually receives.
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    source = tmp_path / "a.c"
+    source.write_text("int main(void){return 0;}\n")
+    seen: list[list[str]] = []
+
+    def _spy(cmd: list[str], **kwargs: object) -> tuple[bool, str]:
+        seen.append(cmd)
+        return True, CLEAN_XML
+
+    # Options reach a plugin through set_options (which is how ToolManager
+    # drives it); check()'s dict only carries execution knobs such as timeout.
+    # prepare() is left real so discovery and the version gate run for real: a
+    # check() that stopped calling prepare, or built a command it never passed
+    # on, would otherwise still pass.
+    cppcheck_plugin.set_options(
+        enable=["warning", "style"],
+        std="c11",
+        inconclusive=True,
+        suppress="missingInclude",
+    )
+    with patch.object(cppcheck_plugin, "_run_subprocess", side_effect=_spy):
+        result = cppcheck_plugin.check([str(source)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(seen).is_length(1)
+    assert_that(seen[0]).contains(
+        "--enable=warning,style",
+        "--std=c11",
+        "--inconclusive",
+        "--suppress=missingInclude",
+    )
+    assert_that(seen[0][-1]).ends_with("a.c")

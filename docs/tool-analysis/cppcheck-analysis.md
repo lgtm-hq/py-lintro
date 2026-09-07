@@ -47,8 +47,9 @@ cppcheck --xml --quiet --error-exitcode=1 \
   [--std=<std>] [--inline-suppr] [--suppress=<spec> ...] <files>
 ```
 
-- The **XML report is written to stderr**; human-readable progress goes to stdout.
-  Lintro parses stderr only.
+- The **XML report is written to stderr**; `--quiet` leaves stdout empty. Lintro runs
+  one cppcheck process over the whole discovered file list and parses the combined
+  stdout+stderr the batch runner returns, so the report is picked up either way.
 - `--error-exitcode=1` is set so a clean run exits `0` and a run with findings exits
   `1`. Issue counting is driven entirely by the parsed XML; the exit code is only used
   to detect execution failures (a non-zero exit with no parseable findings is treated as
@@ -60,8 +61,9 @@ cppcheck --xml --quiet --error-exitcode=1 \
 `error`-severity checks always run. Lintro additionally enables
 `warning,style,performance,portability` by default. `unusedFunction` and `information`
 are intentionally excluded from the default: the former requires whole-program analysis
-and misfires on per-file runs, and the latter is mostly configuration noise (e.g.
-missing system includes). All of this is configurable via the `enable` option.
+and is unsupported because lintro may shard the file list, and the latter is mostly
+configuration noise (e.g. missing system includes). The rest is configurable via the
+`enable` option.
 
 ### Options
 
@@ -90,7 +92,6 @@ cppcheck**, so Lintro uses a native XML parser (`lintro/parsers/cppcheck/`):
   representation; the native parser keeps it.
 - **CWE representation**: the XML `cwe` attribute is a clean integer; SARIF encodes it
   indirectly as a `tags` entry (`external/cwe/cwe-NNN`).
-- **`<symbol>` context**: dropped by SARIF.
 
 The XML schema (version 2) is stable across cppcheck releases, so a native parser is not
 materially more fragile than consuming SARIF here.
@@ -107,8 +108,15 @@ materially more fragile than consuming SARIF here.
 ## Notes and limitations
 
 - No auto-fix: cppcheck only reports.
-- Per-file execution means whole-program checks (e.g. `unusedFunction`) are not reliable
-  and are excluded from the default enable set.
+- Cppcheck is declared `partitionable`, so lintro may run it over a subset of the tree.
+  Each source file is its own translation unit, so that is safe for every default check.
+  Whole-program checks are not: `unusedFunction` would report functions as unused merely
+  because their callers sat in another shard, so it is excluded from the default enable
+  set and enabling it explicitly is unsupported.
+- Only source files are passed to cppcheck. A header handed to it directly is analyzed
+  as a standalone translation unit, which misfires without the source that defines the
+  macros and uses the declarations; upstream's manual says to pass sources instead.
+  Headers are still covered — through the sources that `#include` them.
 - Cppcheck ships no portable single binary, so the tools image and `install-tools.sh`
   install the distro package (apt on Debian, Homebrew on macOS). The version recorded in
   `lintro/_tool_versions.py` — and propagated to `lintro/tools/manifest.json` by the

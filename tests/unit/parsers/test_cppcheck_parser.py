@@ -34,6 +34,15 @@ SAMPLE_XML = """<?xml version="1.0" encoding="UTF-8"?>
             <location file="violations.c" line="10" column="9"/>
             <symbol>value</symbol>
         </error>
+        <error id="passedByValue" severity="performance" msg="Function parameter 'v' should be passed by const reference." verbose="..." file0="violations.c">
+            <location file="violations.c" line="30" column="20"/>
+        </error>
+        <error id="invalidPrintfArgType_sint" severity="portability" msg="%i in format string requires 'int' but the argument type is 'long'." verbose="..." file0="violations.c">
+            <location file="violations.c" line="34" column="5"/>
+        </error>
+        <error id="missingIncludeSystem" severity="information" msg="Include file &lt;stdio.h&gt; not found." verbose="..." file0="violations.c">
+            <location file="violations.c" line="1" column="1"/>
+        </error>
     </errors>
 </results>"""
 
@@ -47,7 +56,7 @@ EMPTY_XML = """<?xml version="1.0" encoding="UTF-8"?>
 def test_parse_returns_all_errors() -> None:
     """All <error> entries are parsed into issues."""
     result = parse_cppcheck_output(SAMPLE_XML)
-    assert_that(result).is_length(4)
+    assert_that(result).is_length(7)
     assert_that(result[0]).is_instance_of(CppcheckIssue)
 
 
@@ -79,10 +88,17 @@ def test_parse_uses_first_location_for_traces() -> None:
         (0, "error"),
         (2, "warning"),
         (3, "style"),
+        (4, "performance"),
+        (5, "portability"),
+        (6, "information"),
     ],
+    ids=["error", "warning", "style", "performance", "portability", "information"],
 )
 def test_parse_preserves_native_severity(index: int, severity: str) -> None:
     """Native cppcheck severities are preserved verbatim (no collapsing).
+
+    All six levels are covered: SARIF would collapse the advisory four into a
+    single ``warning``, which is why the native XML parser exists.
 
     Args:
         index: Index of the error in SAMPLE_XML.
@@ -92,9 +108,22 @@ def test_parse_preserves_native_severity(index: int, severity: str) -> None:
     assert_that(result[index].severity).is_equal_to(severity)
 
 
-def test_style_severity_normalizes_to_info() -> None:
-    """A 'style' finding normalizes to INFO for display."""
-    issue = parse_cppcheck_output(SAMPLE_XML)[3]
+@pytest.mark.parametrize(
+    "index",
+    [3, 4, 5, 6],
+    ids=["style", "performance", "portability", "information"],
+)
+def test_advisory_severities_normalize_to_info(index: int) -> None:
+    """Every advisory cppcheck level displays as INFO.
+
+    Without an alias entry ``get_severity()`` falls back to WARNING, so a
+    dropped ``PERFORMANCE``/``PORTABILITY``/``INFORMATION`` key would silently
+    promote advisory findings.
+
+    Args:
+        index: Index of the error in SAMPLE_XML.
+    """
+    issue = parse_cppcheck_output(SAMPLE_XML)[index]
     assert_that(str(issue.get_severity())).is_equal_to("INFO")
 
 
@@ -130,7 +159,7 @@ def test_parse_non_xml_text_returns_empty() -> None:
 def test_parse_extracts_results_from_surrounding_noise() -> None:
     """A <results> block embedded in other text is still parsed."""
     noisy = f"Checking violations.c ...\n{SAMPLE_XML}\ndone"
-    assert_that(parse_cppcheck_output(noisy)).is_length(4)
+    assert_that(parse_cppcheck_output(noisy)).is_length(7)
 
 
 def test_parse_inconclusive_flag() -> None:

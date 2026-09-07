@@ -405,9 +405,12 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
 
     # C / C++ — both keys resolve to cppcheck in the manifest's language map,
     # so a mixed tree setting both is harmless.
-    if _has_source_files(cwd, ".c", ".h"):
+    # Source suffixes only, matching CPPCHECK_FILE_PATTERNS: cppcheck analyses
+    # headers through the sources that include them, so a header-only tree has
+    # nothing for it to run on.
+    if _has_source_files(cwd, ".c"):
         langs.add("c")
-    if _has_source_files(cwd, ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hxx", ".h++"):
+    if _has_source_files(cwd, ".cpp", ".cc", ".cxx", ".c++"):
         langs.add("cpp")
 
     # Markup and stylesheets that language_map already knows about.

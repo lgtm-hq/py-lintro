@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.cppcheck.definition import CppcheckPlugin
+from lintro.tools.cppcheck.definition import (
+    CPPCHECK_FILE_PATTERNS,
+    CppcheckPlugin,
+)
+from lintro.utils.project_detection import detect_project_languages
 from lintro.utils.tool_options import parse_tool_options
 
 
@@ -24,7 +29,11 @@ def test_definition_metadata(cppcheck_plugin: CppcheckPlugin) -> None:
     assert_that(definition.tool_type).is_equal_to(
         ToolType.LINTER | ToolType.SECURITY,
     )
-    assert_that(definition.file_patterns).contains("*.c", "*.cpp", "*.h")
+    assert_that(definition.file_patterns).contains("*.c", "*.cpp", "*.cc")
+    # Headers are deliberately absent: cppcheck analyses a header handed to it
+    # directly as a standalone translation unit and misfires without the source
+    # that includes it, so headers are covered through those sources instead.
+    assert_that(definition.file_patterns).does_not_contain("*.h", "*.hpp")
     assert_that(definition.version_command).is_equal_to(["cppcheck", "--version"])
 
 
@@ -149,3 +158,37 @@ def test_documented_tool_options_examples_parse(
         "--inconclusive",
         "--suppress=missingInclude",
     )
+
+
+def test_language_detection_suffixes_match_the_file_patterns(tmp_path: Path) -> None:
+    """C/C++ detection and cppcheck's globs stay in lockstep.
+
+    ``detect_project_languages`` re-lists the suffixes that
+    ``CPPCHECK_FILE_PATTERNS`` declares. If the two drift, either a header-only
+    tree selects a tool that can match nothing, or a real source tree stops
+    selecting cppcheck at all.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    for pattern in CPPCHECK_FILE_PATTERNS:
+        suffix = pattern.removeprefix("*")
+        (tmp_path / f"probe{suffix}").write_text("int main(void){return 0;}\n")
+        languages = detect_project_languages(root=tmp_path)
+        detected = [lang for lang in languages if lang in {"c", "cpp"}]
+        assert_that(detected).described_as(pattern).is_not_empty()
+        (tmp_path / f"probe{suffix}").unlink()
+
+
+def test_header_only_tree_is_not_detected_as_c_or_cpp(tmp_path: Path) -> None:
+    """Headers alone do not select cppcheck, which cannot analyse them alone.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    (tmp_path / "api.h").write_text("int f(void);\n")
+    (tmp_path / "api.hpp").write_text("int g();\n")
+
+    languages = detect_project_languages(root=tmp_path)
+
+    assert_that(languages).does_not_contain("c", "cpp")

@@ -43,6 +43,28 @@ else:
 	echo "$version"
 }
 
+# Get a tool's minimum *compatible* version (manifest ``min_version``), which is
+# the floor lintro enforces at runtime. Distro-packaged tools install whatever
+# the package manager ships, so the install path compares against this rather
+# than the recommended pin.
+get_tool_min_version() {
+	local tool_name="$1"
+	local version
+	version=$(python3 -c "
+import runpy
+import sys
+
+sys.path.insert(0, '$PROJECT_ROOT')
+mod = runpy.run_path('$PROJECT_ROOT/lintro/_tool_versions.py')
+print(mod['get_min_version'](mod['ToolName']('$tool_name')))
+" 2>/dev/null)
+	if [ -z "$version" ]; then
+		echo "ERROR: Minimum version for '$tool_name' not found" >&2
+		return 1
+	fi
+	echo "$version"
+}
+
 # Show help if requested
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -1638,12 +1660,22 @@ main() {
 	# Install cppcheck (C/C++ static analysis) via system package manager.
 	# cppcheck ships no portable single binary; it is provided by Homebrew
 	# (macOS) and apt (Debian/Ubuntu). In Docker it is pre-installed via the
-	# Dockerfile apt layer, so the command check below short-circuits.
+	# Dockerfile apt layer, so the already-installed branch short-circuits.
+	#
+	# Because every path installs whatever the package manager ships, the
+	# version cannot be pinned at install time. It is therefore verified
+	# afterwards against the manifest ``min_version`` floor: below it lintro
+	# skips the tool at runtime, so accepting it here would let setup finish
+	# green while C/C++ analysis silently never runs.
 	if should_install "cppcheck"; then
 		echo -e "${BLUE}Installing cppcheck...${NC}"
 		CPPCHECK_VERSION=$(get_tool_version "cppcheck") || exit 1
+		CPPCHECK_MIN_VERSION=$(get_tool_min_version "cppcheck") || exit 1
+		cppcheck_needs_verify=1
 		if [ $DRY_RUN -eq 1 ]; then
 			log_info "[DRY-RUN] Would install cppcheck v${CPPCHECK_VERSION}"
+			log_info "[DRY-RUN] Would verify cppcheck >= v${CPPCHECK_MIN_VERSION}"
+			cppcheck_needs_verify=0
 		elif command -v cppcheck &>/dev/null; then
 			echo -e "${GREEN}✓ cppcheck already installed${NC}"
 		elif command -v brew &>/dev/null; then
@@ -1672,6 +1704,23 @@ main() {
 		else
 			echo -e "${RED}✗ Cannot install cppcheck automatically; install via your package manager.${NC}"
 			exit 1
+		fi
+
+		if [ $cppcheck_needs_verify -eq 1 ]; then
+			# "Cppcheck 2.17.1" -> "2.17.1"
+			# `|| true`: grep exits 1 on no match, which under `set -e`/pipefail
+			# would abort the script before the explicit error below.
+			cppcheck_installed=$(cppcheck --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+			if [ -z "$cppcheck_installed" ]; then
+				echo -e "${RED}✗ Could not determine cppcheck version${NC}"
+				exit 1
+			elif version_ge "$cppcheck_installed" "$CPPCHECK_MIN_VERSION"; then
+				echo -e "${GREEN}✓ cppcheck v${cppcheck_installed} (>= v${CPPCHECK_MIN_VERSION})${NC}"
+			else
+				echo -e "${RED}✗ cppcheck v${cppcheck_installed} is older than the required v${CPPCHECK_MIN_VERSION}${NC}"
+				echo -e "${RED}  Your distribution's package is too old; install a newer cppcheck from Homebrew or upstream.${NC}"
+				exit 1
+			fi
 		fi
 	fi # cppcheck
 

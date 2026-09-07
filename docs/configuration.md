@@ -1288,6 +1288,13 @@ command-line options, so configuration goes through `--tool-options`. Cppcheck's
 project modes (`--project=compile_commands.json`, GUI project files) and suppression
 files are not wired into the Lintro integration.
 
+Only source files (`.c`, `.cpp`, `.cc`, `.cxx`, `.c++`) are passed to Cppcheck. Headers
+handed to Cppcheck directly are analyzed as standalone translation units and misfire
+without the source that defines their macros and uses their declarations, so — as
+upstream's manual recommends — Lintro lets Cppcheck reach headers through the sources
+that `#include` them. `unusedFunction` is likewise unsupported: it needs whole-program
+visibility, while Lintro may run Cppcheck over a subset of the tree.
+
 Lintro requires Cppcheck **2.13.0 or newer**. Cppcheck ships no portable single binary,
 so the Docker image installs Debian's package (currently 2.17.1 on trixie) and
 `install-tools.sh` uses apt or Homebrew. Distribution packages older than 2.13.0 are

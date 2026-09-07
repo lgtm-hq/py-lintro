@@ -50,16 +50,17 @@ CPPCHECK_DEFAULT_TIMEOUT: int = 60
 # High priority: catches memory-safety defects. Sourced from
 # ``DEFAULT_TOOL_PRIORITIES`` so the declared value stays the effective one.
 CPPCHECK_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("cppcheck", 85)
+# Source files only. Cppcheck treats a header passed on the command line as a
+# standalone translation unit, which misfires (unused members, unparsed macros)
+# because the defining/including source is absent; upstream's manual therefore
+# says to pass sources and let cppcheck pull in the headers they ``#include``.
+# Headers are still analyzed — through the sources that include them.
 CPPCHECK_FILE_PATTERNS: list[str] = [
     "*.c",
     "*.cpp",
     "*.cc",
     "*.cxx",
     "*.c++",
-    "*.h",
-    "*.hpp",
-    "*.hxx",
-    "*.h++",
 ]
 # ``error`` severity checks always run; these advisory categories are enabled by
 # default to surface actionable, low-false-positive findings. ``unusedFunction``
@@ -106,6 +107,11 @@ class CppcheckPlugin(BaseToolPlugin):
                 ),
             ],
             reads_tree=True,
+            # Each file is its own translation unit, so a shard's verdict does
+            # not depend on which other files ran. The one category that would
+            # break this, ``unusedFunction``, needs whole-program visibility and
+            # is excluded from the default enable set for that reason; enabling
+            # it explicitly is unsupported (see ``set_options``).
             partitionable=True,
             priority=CPPCHECK_DEFAULT_PRIORITY,
             conflicts_with=[],
@@ -140,6 +146,11 @@ class CppcheckPlugin(BaseToolPlugin):
                 regardless of this value. The CLI splits ``--tool-options`` on
                 commas, so a list (``enable=warning|style``) is the way to
                 request several categories from the command line.
+                ``unusedFunction`` is unsupported: it needs whole-program
+                visibility, while lintro declares cppcheck ``partitionable``
+                and may run it over a subset of the tree, which would report
+                functions as unused merely because their callers were in
+                another shard.
             inconclusive: Whether to report findings cppcheck cannot fully
                 confirm. Increases coverage at the cost of some false positives.
             std: Language standard to assume (e.g. ``c11``, ``c++17``).
