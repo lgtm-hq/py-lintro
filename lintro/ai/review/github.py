@@ -57,9 +57,6 @@ from lintro.ai.review.github_render import (
 )
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.github_sticky import (
-    _cap_body as _cap_body,
-)
-from lintro.ai.review.github_sticky import (
     build_sticky_bodies,
     build_sticky_comment,
     matcher_reviewed_paths,

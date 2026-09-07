@@ -21,7 +21,6 @@ from lintro.ai.review.github import (
     MAX_COMMENT_CHARS,
     STATE_MARKER_PREFIX,
     STICKY_MARKER,
-    _cap_body,
     _count_new_commits,
     _sticky_comment_id,
     _upsert_sticky,
@@ -34,6 +33,7 @@ from lintro.ai.review.github import (
     post_review_to_github,
     sanitize_comment_text,
 )
+from lintro.ai.review.github_contract import cap_body
 from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
@@ -898,10 +898,10 @@ def test_sticky_state_round_trips_after_truncation(
 
 
 def test_cap_body_leaves_under_cap_body_unchanged() -> None:
-    """Bodies under the cap pass through _cap_body untouched."""
+    """Bodies under the cap pass through ``cap_body`` untouched."""
     body = f"{STICKY_MARKER}\n\n## 🔎 Lintro Review · round 1"
 
-    capped = _cap_body(body=body)
+    capped = cap_body(body=body)
 
     assert_that(capped).is_equal_to(body)
 
@@ -909,14 +909,14 @@ def test_cap_body_leaves_under_cap_body_unchanged() -> None:
 def test_cap_body_truncates_visibly_as_a_last_resort() -> None:
     """Section-aware pruning handles real overflow; this is the backstop.
 
-    ``_fit_body`` sheds history, then resolved findings, then open findings —
-    each with its own marker. ``_cap_body`` only fires when a single
+    ``fit_body`` sheds history, then resolved findings, then open findings —
+    each with its own marker. ``cap_body`` only fires when a single
     unprunable section is itself over the cap, and even then the truncation
     must be announced rather than leaving a body that stops mid-sentence.
     """
     body = f"{STICKY_MARKER}\n\n" + "x" * (MAX_COMMENT_CHARS + 5_000)
 
-    capped = _cap_body(body=body)
+    capped = cap_body(body=body)
 
     assert_that(len(capped)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
     assert_that(capped).contains("Comment truncated to fit GitHub's size limit")

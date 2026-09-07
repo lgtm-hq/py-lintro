@@ -11,8 +11,9 @@ from lintro.ai.review.errors_taxonomy import (
     classify_provider_error,
     resolve_cause_text,
 )
-from lintro.ai.review.github_constants import _FOOTER, MAX_COMMENT_CHARS, STICKY_MARKER
-from lintro.ai.review.github_render import format_run_mechanics, sanitize_comment_text
+from lintro.ai.review.github_constants import _FOOTER, STICKY_MARKER
+from lintro.ai.review.github_contract import cap_body, sanitize_comment_text
+from lintro.ai.review.github_render import format_run_mechanics
 from lintro.ai.review.github_sticky import render_state_sticky
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_state import ReviewState
@@ -119,10 +120,11 @@ def format_error_comment(
     if metadata is not None and metadata.model:
         lines.extend(["", "<sub>" + format_run_mechanics(metadata=metadata) + "</sub>"])
     lines.extend(["", _FOOTER])
-    body = "\n".join(lines)
-    if len(body) > MAX_COMMENT_CHARS:
-        body = body[:MAX_COMMENT_CHARS].rstrip()
-    return body
+    # The same budget the sticky renderer fits its board to, applied to a
+    # surface with no prunable sections: a provider message long enough to
+    # overrun the cap is truncated with the visible notice rather than sliced
+    # silently, which is what this path used to do (#2303).
+    return cap_body(body="\n".join(lines))
 
 
 def _resolve_prior_state(

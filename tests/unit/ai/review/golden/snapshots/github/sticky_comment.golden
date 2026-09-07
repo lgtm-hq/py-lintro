@@ -1,0 +1,98 @@
+<!-- lintro-ai-review -->
+
+## 🔎 Lintro Review — ⛔ Blocked
+
+### Summary
+
+Two blocking issues remain; the session fix landed.
+
+### Why it's blocked
+
+### Findings · Round 3 · `0d15ea5` · coverage n/a · 3 open · 0 fixed this round
+
+<sub>Convergence score 16.05</sub>
+
+| Δ | Sev | Finding | Where | Since |
+|:-:|:-:|---|---|---|
+| — | 🔴 P1 | Unknown session status grants access | `src/auth/session.py:31` | round 1 |
+| **new** | 🟠 P2 | No test covers the expired branch | `tests/test_session.py:12` | round 3 |
+| **new** | 🟡 P3 | Docstring omits the raised error | `src/auth/tokens.py:7` | round 3 |
+
+> [!IMPORTANT]
+> ⚡ **Fix-all prompt — all 3 still-open findings (rounds 1–3)**
+>
+> <details><summary>Show prompt</summary>
+>
+> ```
+> Scope: ALL 3 findings still open on this PR after round 3 (not just the latest
+> review).
+>
+> These are open findings from a lintro AI code review. Verify each one against
+> the current code. Fix only still-valid issues, skip the rest with a brief
+> reason, keep changes minimal, and validate with tests.
+>
+> In `src/auth/session.py`:
+>
+> - Line 31 — **Unknown session status grants access** (P1 · security):
+>   The else branch treats any unrecognised status as active. No explicit default
+>   for unknown statuses.
+>   Fix: Default to expired and log the unrecognised value.
+>
+> In `tests/test_session.py`:
+>
+> - Line 12 — **No test covers the expired branch** (P2 · test-gap):
+>   The expired path is never exercised. Test gap.
+>   Fix: Add a case asserting the expired status is rejected.
+>
+> In `src/auth/tokens.py`:
+>
+> - Line 7 — **Docstring omits the raised error** (P3 · style):
+>   The Raises section is missing. Oversight.
+>   Fix: Document the ValueError.
+> ```
+>
+> </details>
+>
+> <sub>Regenerated every run · covers exactly the open table above</sub>
+
+**This run**
+
+| model | transport | est. cost | tokens in / out | depth | files | checks | duration |
+| --- | --- | --- | --- |:-:|:-:|:-:|---|
+| `claude-sonnet-4-20250514` | api · api-key | ~$0.1234 | 12,000 / 2,400 | 2 | 3 | 2 | 42s |
+
+---
+
+### 🕘 History · 2 previous runs · 1 fixed · $0.3485 · 41.2k tokens
+
+<details><summary>Run-by-run history</summary>
+
+| 🔴 blockers | 🟠 warnings | 🟡 nits | ✔ fixed |
+|:-:|:-:|:-:|:-:|
+| **1** | **1** | **1** | **1** |
+
+<details><summary><b>Round 2</b> · <code>1111111</code> · ⛔ blocked · 1 fixed, 1 left open · $0.1150 · 40s</summary>
+
+**Fixed this round**
+
+| Sev | Finding |
+|:-:|---|
+| 🟠 P2 | ~~Token refresh drops the expiry~~ |
+
+| model | transport | est. cost | tokens in / out | depth | files | checks | duration |
+| --- | --- | --- | --- |:-:|:-:|:-:|---|
+| `claude-sonnet-4-20250514` | api · api-key | $0.1150 | 11,500 / 2,200 | 2 | 3 | 2 | 40s |
+
+</details>
+
+<details><summary><b>Round 1</b> · <code>1111111</code> · ⛔ blocked · 0 fixed, 2 left open · $0.1101 · 38s</summary>
+
+| model | transport | est. cost | tokens in / out | depth | files | checks | duration |
+| --- | --- | --- | --- |:-:|:-:|:-:|---|
+| `claude-sonnet-4-20250514` | api · api-key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
+
+</details>
+
+</details>
+
+<sub>🤖 lintro review · findings are commented inline · [how to read this report](https://github.com/lgtm-hq/py-lintro/blob/main/docs/ai-review-report.md)</sub>
