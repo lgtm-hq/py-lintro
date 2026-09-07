@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.148.0] - 2026-09-07
+
+### Added
+
+- **plugins**: declare claims, capabilities and scope on all tools (#2420) (d80f0c3)
+
+### Changed
+
+- **ai/providers**: provider plugin contract and adr (#2421) (e14e9d7)
+- **tools**: delete the definition shims, discover per-tool packages (PR K) (#2409)
+  (e0f3786)
+- **ai/review**: one body-assembly pipeline for github comments (#2411) (33c5501)
+
 ## [0.147.7] - 2026-09-07
 
 ### Changed
