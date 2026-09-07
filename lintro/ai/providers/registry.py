@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING
 from lintro.ai.exceptions import (
     AIProviderAlreadyRegisteredError,
     AIProviderNotRegisteredError,
+    AIProviderRegistrationError,
 )
 from lintro.ai.provider_enum import AIProvider, accepted_provider_values
 
@@ -49,25 +50,34 @@ _LOCK = threading.RLock()
 
 
 def register_provider(plugin: ProviderPlugin) -> ProviderPlugin:
-    """Register one provider plugin under its declared name.
+    """Register one provider plugin instance under its declared name.
 
-    Usable as a decorator on a plugin factory or called directly with an
-    instance. Registration is keyed by ``plugin.name``, so a provider is
-    registered at most once per process.
+    Registration is keyed by ``plugin.name``, so a provider is registered at
+    most once per process.
 
     Args:
-        plugin: The plugin to register.
+        plugin: The plugin instance to register.
 
     Returns:
-        The plugin, so the call can be used as a decorator.
+        The plugin, so a module can register and bind it in one expression.
 
     Raises:
+        AIProviderRegistrationError: If ``plugin.metadata.provider`` names a
+            different provider than ``plugin.name``. The two are read by
+            different consumers, so a mismatch would make a plugin describe one
+            vendor and build another.
         AIProviderAlreadyRegisteredError: If a plugin is already registered
             under the same name. Re-registration is an import-order bug, not a
             supported override; tests that need a clean slate call
             :func:`clear_registered`.
     """
     name = plugin.name
+    if plugin.metadata.provider is not name:
+        raise AIProviderRegistrationError(
+            f"Provider plugin '{name.value}' declares metadata for "
+            f"'{plugin.metadata.provider.value}'; name and metadata.provider "
+            "must agree.",
+        )
     with _LOCK:
         existing = _PLUGINS.get(name)
         if existing is not None:

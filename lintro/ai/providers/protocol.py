@@ -31,6 +31,7 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -93,6 +94,16 @@ class ProviderMetadata:
     cli_binary: str | None = None
     cli_contract_id: str | None = None
     pricing: Mapping[str, ModelPricing] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Store *pricing* behind a read-only view.
+
+        A frozen dataclass stops the attribute being rebound but not the
+        mapping being edited in place, and consumers treat metadata as a
+        constant. Copying into a ``MappingProxyType`` also detaches the record
+        from a caller that keeps mutating the dict it passed in.
+        """
+        object.__setattr__(self, "pricing", MappingProxyType(dict(self.pricing)))
 
     @property
     def pricing_keys(self) -> tuple[str, ...]:

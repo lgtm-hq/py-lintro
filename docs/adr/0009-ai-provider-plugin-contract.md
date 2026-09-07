@@ -63,8 +63,9 @@ into.
 under its `name`; `get_registered` resolves one; `all_providers` returns them in
 `AIProvider` declaration order so nothing depends on import order. Duplicate names raise
 `AIProviderAlreadyRegisteredError` and unknown names raise
-`AIProviderNotRegisteredError` — both subclasses of `AIError`, so an existing
-`except AIError` boundary keeps working.
+`AIProviderNotRegisteredError`, and a plugin whose `metadata.provider` disagrees with
+its `name` is rejected outright — all three under `AIProviderRegistrationError` and so
+under `AIError`, leaving existing `except AIError` boundaries working.
 
 **5. Shared horizontals stay shared.** `cli_transport.py`, `cli_capabilities.py`,
 `cli_contracts.py`, `call_ai`, the review orchestrator, redaction/transcript, and the

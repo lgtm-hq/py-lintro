@@ -29,6 +29,7 @@ from lintro.ai.providers.protocol import (
 )
 from lintro.ai.providers.registry import (
     all_providers,
+    clear_registered,
     get_registered,
     is_registered,
     register_provider,
@@ -38,6 +39,26 @@ from lintro.ai.providers.registry import (
 if TYPE_CHECKING:
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import BaseAIProvider
+
+
+def _metadata_for(provider: AIProvider) -> ProviderMetadata:
+    """Build fake metadata describing *provider*.
+
+    Args:
+        provider: Provider the metadata describes.
+
+    Returns:
+        A metadata record whose ``provider`` matches *provider*.
+    """
+    return ProviderMetadata(
+        provider=provider,
+        default_model="fake-model",
+        default_api_key_env="FAKE_API_KEY",
+        sdk_package="fake-sdk",
+        cli_binary="fake-cli",
+        cli_contract_id="fake",
+        pricing={"fake-model": ModelPricing(1.0, 2.0)},
+    )
 
 
 @dataclass
@@ -70,15 +91,7 @@ class _FakePlugin:
 
     name: AIProvider = AIProvider.ANTHROPIC
     transports: frozenset[AITransport] = frozenset({AITransport.API})
-    metadata: ProviderMetadata = ProviderMetadata(
-        provider=AIProvider.ANTHROPIC,
-        default_model="fake-model",
-        default_api_key_env="FAKE_API_KEY",
-        sdk_package="fake-sdk",
-        cli_binary="fake-cli",
-        cli_contract_id="fake",
-        pricing={"fake-model": ModelPricing(1.0, 2.0)},
-    )
+    metadata: ProviderMetadata = _metadata_for(AIProvider.ANTHROPIC)
     built: list[str | None] = field(default_factory=list)
 
     def build(self, config: AIConfig) -> BaseAIProvider:
@@ -96,12 +109,13 @@ class _FakePlugin:
 
 @pytest.fixture()
 def _clean_registry() -> Iterator[None]:
-    """Restore the provider registry after a test mutates it.
+    """Run the test against an empty registry, then restore what was there.
 
     Yields:
         None: For the duration of the test.
     """
     saved = all_providers()
+    clear_registered()
     try:
         yield
     finally:
@@ -170,7 +184,12 @@ def test_known_provider_without_a_plugin_raises() -> None:
 @pytest.mark.usefixtures("_clean_registry")
 def test_all_providers_is_ordered_by_enum_not_registration() -> None:
     """Enumeration order is stable regardless of which plugin registered first."""
-    register_provider(_FakePlugin(name=AIProvider.CURSOR))
+    register_provider(
+        _FakePlugin(
+            name=AIProvider.CURSOR,
+            metadata=_metadata_for(AIProvider.CURSOR),
+        ),
+    )
     register_provider(_FakePlugin(name=AIProvider.ANTHROPIC))
 
     assert_that(list(all_providers())).is_equal_to(
@@ -236,3 +255,33 @@ def test_provider_metadata_is_frozen() -> None:
 
     with pytest.raises(AttributeError):
         metadata.default_model = "other"  # type: ignore[misc]
+
+
+@pytest.mark.usefixtures("_clean_registry")
+def test_metadata_naming_another_provider_is_rejected() -> None:
+    """A plugin cannot describe one vendor and register as another."""
+    plugin = _FakePlugin(name=AIProvider.OPENAI)
+
+    with pytest.raises(AIProviderRegistrationError) as excinfo:
+        register_provider(plugin)
+
+    assert_that(str(excinfo.value)).contains("openai", "anthropic", "must agree")
+    assert_that(is_registered(AIProvider.OPENAI)).is_false()
+
+
+def test_metadata_pricing_cannot_be_mutated_in_place() -> None:
+    """Pricing is stored behind a read-only view, not the caller's dict."""
+    source = {"fake-model": ModelPricing(1.0, 2.0)}
+    metadata = ProviderMetadata(
+        provider=AIProvider.ANTHROPIC,
+        default_model="fake-model",
+        default_api_key_env="FAKE_API_KEY",
+        pricing=source,
+    )
+
+    with pytest.raises(TypeError):
+        metadata.pricing["other"] = ModelPricing(3.0, 4.0)  # type: ignore[index]
+
+    source["other"] = ModelPricing(3.0, 4.0)
+
+    assert_that(metadata.pricing_keys).is_equal_to(("fake-model",))
