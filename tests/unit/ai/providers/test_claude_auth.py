@@ -13,7 +13,7 @@ from assertpy import assert_that
 
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.providers import claude_auth
-from lintro.ai.providers.anthropic import AnthropicProvider
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.claude_auth import (
     BARE_MODE_ENV,
     CLAUDE_API_KEY_ENV,
@@ -312,7 +312,7 @@ def _mock_claude_on_path() -> Iterator[None]:
         None: Control, with ``_find_claude`` returning a fake path.
     """
     with patch(
-        "lintro.ai.providers.anthropic._find_claude",
+        "lintro.ai.providers.anthropic.provider._find_claude",
         return_value="/usr/local/bin/claude",
     ):
         yield

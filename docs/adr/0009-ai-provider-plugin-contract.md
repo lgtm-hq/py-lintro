@@ -112,9 +112,14 @@ definition of "provider metadata" (`ProviderMetadata`) coexisting with `Provider
 bounded by the phase plan.
 
 Because discovery is in-tree, a provider still has to be imported for its registration
-to run; the migration phase owns choosing where those imports live. Revisit the
-entry-point non-goal only if an out-of-tree vendor plugin is actually requested — that
-is a later epic, not a stretch goal of this one.
+to run; the migration phase owns choosing where those imports live. It answered with
+`lintro/ai/providers/builtins.py`, which derives each package name from the `AIProvider`
+member (`anthropic` -> `lintro.ai.providers.anthropic`) rather than listing them, so no
+import map replaces the deleted class map. A provider package imports only its plugin
+and metadata modules, so registering all providers to serve one costs no more than the
+lazy per-vendor import the factory did before. Revisit the entry-point non-goal only if
+an out-of-tree vendor plugin is actually requested — that is a later epic, not a stretch
+goal of this one.
 
 ## References
 

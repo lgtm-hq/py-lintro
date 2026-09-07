@@ -16,9 +16,9 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.prompts.review import format_output_rules
-from lintro.ai.providers.anthropic import AnthropicProvider
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.cli_contracts import CliContract
-from lintro.ai.providers.openai import OpenAIProvider
+from lintro.ai.providers.openai.provider import OpenAIProvider
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.cli_limits import (
@@ -67,7 +67,7 @@ _TEST_CONTRACT = CliContract(
 def _mock_claude_on_path() -> Iterator[None]:
     """Patch claude binary discovery for CLI transport tests."""
     with patch(
-        "lintro.ai.providers.anthropic._find_claude",
+        "lintro.ai.providers.anthropic.provider._find_claude",
         return_value="/usr/local/bin/claude",
     ):
         yield
@@ -77,7 +77,7 @@ def _mock_claude_on_path() -> Iterator[None]:
 def _mock_codex_on_path() -> Iterator[None]:
     """Patch codex binary discovery for CLI transport tests."""
     with patch(
-        "lintro.ai.providers.openai._find_codex",
+        "lintro.ai.providers.openai.provider._find_codex",
         return_value="/usr/local/bin/codex",
     ):
         yield

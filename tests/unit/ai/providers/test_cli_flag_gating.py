@@ -17,9 +17,9 @@ from assertpy import assert_that
 
 from lintro.ai.enums import AITransport
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.anthropic import AnthropicProvider
-from lintro.ai.providers.cursor import CursorProvider
-from lintro.ai.providers.openai import OpenAIProvider
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
+from lintro.ai.providers.cursor.provider import CursorProvider
+from lintro.ai.providers.openai.provider import OpenAIProvider
 from tests.unit.ai.conftest import patch_cli_exec
 
 _CLAUDE_COMPLETION = json.dumps(
@@ -113,7 +113,7 @@ def _claude_on_path() -> Iterator[None]:
         None: For the duration of the patched lookup.
     """
     with patch(
-        "lintro.ai.providers.anthropic._find_claude",
+        "lintro.ai.providers.anthropic.provider._find_claude",
         return_value="/usr/local/bin/claude",
     ):
         yield
@@ -127,7 +127,7 @@ def _agent_on_path() -> Iterator[None]:
         None: For the duration of the patched lookup.
     """
     with patch(
-        "lintro.ai.providers.cursor._find_agent",
+        "lintro.ai.providers.cursor.provider._find_agent",
         return_value="/usr/local/bin/agent",
     ):
         yield
@@ -141,7 +141,7 @@ def _codex_on_path() -> Iterator[None]:
         None: For the duration of the patched lookup.
     """
     with patch(
-        "lintro.ai.providers.openai._find_codex",
+        "lintro.ai.providers.openai.provider._find_codex",
         return_value="/usr/local/bin/codex",
     ):
         yield

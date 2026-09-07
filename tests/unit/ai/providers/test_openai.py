@@ -17,8 +17,8 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
-from lintro.ai.providers import openai as mod
-from lintro.ai.providers.openai import OpenAIProvider
+from lintro.ai.providers.openai import provider as mod
+from lintro.ai.providers.openai.provider import OpenAIProvider
 
 
 @dataclass

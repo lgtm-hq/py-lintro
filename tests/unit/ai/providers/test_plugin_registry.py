@@ -1,7 +1,8 @@
 """Tests for the AI provider plugin contract and registry (#2306).
 
-The registry is empty on ``main`` — no provider registers yet — so every test
-here installs a fake plugin and restores the previous contents afterwards.
+These exercise the registry against a fake plugin, so every test that touches
+it clears the real in-tree registrations first and restores them afterwards.
+The migrated providers are covered by ``test_builtin_plugins.py`` instead.
 """
 
 from __future__ import annotations

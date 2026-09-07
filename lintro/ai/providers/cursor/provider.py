@@ -5,6 +5,10 @@ Cursor CreateAgent HTTP API is not used because it currently returns
 internal errors in environments where the ``agent`` binary works reliably.
 
 Authentication is handled by the CLI: ``CURSOR_API_KEY`` or ``agent login``.
+
+Imported on demand by
+:meth:`lintro.ai.providers.cursor.plugin.CursorPlugin.build`; importing
+:mod:`lintro.ai.providers.cursor` alone does not pull this module.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.providers.cursor.metadata import CURSOR_CLI_BINARY
 from lintro.ai.raw_response import (
     CLI_ENVELOPE_STAGE,
     describe_raw_response,
@@ -45,7 +50,7 @@ from lintro.ai.token_budget import estimate_tokens
 
 CURSOR_MIN_TIMEOUT = 600.0
 
-_AGENT_BIN = "agent"
+_AGENT_BIN = CURSOR_CLI_BINARY
 DEFAULT_MODEL = PROVIDERS.cursor.default_model
 DEFAULT_API_KEY_ENV = PROVIDERS.cursor.default_api_key_env
 
