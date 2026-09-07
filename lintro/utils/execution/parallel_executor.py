@@ -172,15 +172,17 @@ def run_tools_parallel(
                         )
                     except (OSError, ValueError, RuntimeError) as exc:
                         # Same telemetry the sequential path records: a
-                        # console line so the failure is visible on a TTY
-                        # (suppressed with the progress bar so machine-readable
-                        # stdout stays clean), and a duration so a crashed tool
-                        # still appears in ``--profile``.
+                        # console line so the failure is visible, and a
+                        # duration so a crashed tool still appears in
+                        # ``--profile``. The line goes to stderr because this
+                        # function has no ``RunContext`` logger to ask about
+                        # the output format, and stdout may be carrying JSON
+                        # or SARIF.
                         logger.exception(f"Error running {tool_name}")
-                        if not disable_progress:
-                            progress.console.print(
-                                f"Error running {tool_name}: {exc}",
-                            )
+                        print(
+                            f"Error running {tool_name}: {exc}",
+                            file=sys.stderr,
+                        )
                         all_results.append(
                             ToolResult(
                                 name=tool_name,

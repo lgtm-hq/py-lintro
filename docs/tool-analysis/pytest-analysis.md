@@ -66,8 +66,9 @@ cmd = self._get_executable_command("pytest") + ["--junitxml", "report.xml"]
 - 🔄 **Timeout Management**: Configurable timeout (default 300 seconds)
 - 🔄 **Ordering**: derived from claims; `CHECK` on `test_*.py` / `*_test.py` is
   unconstrained by ruff and black, whose `*.py` is a separate pattern group, but it
-  still follows any `*` claimant (typos, gitleaks, trufflehog) holding an earlier phase,
-  since `*` joins every group
+  still follows any `*` claimant holding an earlier phase — typos, which is `FIX` on `*`
+  — since `*` joins every group. gitleaks and trufflehog are `CHECK` on `*`, the same
+  phase, so they derive no edge
 - 🔄 **File Pattern Matching**: Automatic discovery of test files
 - 🔄 **Output Parsing**: Multiple output format parsing with fallback
 

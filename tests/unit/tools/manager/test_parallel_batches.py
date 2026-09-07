@@ -122,6 +122,20 @@ def test_get_parallel_batches_normalizes_mixed_case_names() -> None:
     assert_that(depth["ruff"]).is_less_than(depth["black"])
 
 
+def test_get_parallel_batches_tolerates_an_unregistered_name() -> None:
+    """Batching must not resolve names against the registry.
+
+    Resolving here would abort the whole run on a name the executor is
+    designed to degrade into a failed result, undoing the parallel
+    init-failure guard. This runs through the real scheduler, so batching
+    cannot grow a registry lookup without failing.
+    """
+    batches = get_parallel_batches(["ruff", "not-a-registered-tool"])
+
+    flattened = [name for batch in batches for name in batch]
+    assert_that(sorted(flattened)).is_equal_to(["not-a-registered-tool", "ruff"])
+
+
 def test_get_parallel_batches_rejects_duplicate_names() -> None:
     """A selection naming the same tool twice is a caller error."""
     assert_that(get_parallel_batches).raises(ValueError).when_called_with(

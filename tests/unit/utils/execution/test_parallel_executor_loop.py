@@ -283,7 +283,9 @@ def test_parallel_executor_survives_a_batch_where_every_tool_fails(
         max_workers=2,
     )
 
-    assert_that(sorted(result.name for result in results)).is_equal_to(
-        ["black", "ruff"],
-    )
-    assert_that([result.success for result in results]).is_equal_to([False, False])
+    by_name = {result.name: result for result in results}
+    assert_that(sorted(by_name)).is_equal_to(["black", "ruff"])
+    for name in ("black", "ruff"):
+        assert_that(by_name[name].success).is_false()
+        assert_that(by_name[name].output).contains("Failed to initialize tool")
+        assert_that(by_name[name].duration_seconds).is_not_none()
