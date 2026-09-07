@@ -21,7 +21,7 @@ def fake_repo(tmp_path: Path) -> Path:
     Returns:
         Path to the fake repo root.
     """
-    (tmp_path / "lintro" / "tools" / "definitions").mkdir(parents=True)
+    (tmp_path / "lintro" / "tools" / "oxfmt").mkdir(parents=True)
     (tmp_path / "lintro" / "plugins").mkdir()
 
     (tmp_path / "lintro" / "_tool_packages.py").write_text(
@@ -56,7 +56,8 @@ def fake_repo(tmp_path: Path) -> Path:
         )
         + "\n",
     )
-    (tmp_path / "lintro" / "tools" / "definitions" / "oxfmt.py").write_text(
+    (tmp_path / "lintro" / "tools" / "oxfmt" / "__init__.py").write_text("")
+    (tmp_path / "lintro" / "tools" / "oxfmt" / "definition.py").write_text(
         "@register_tool\nclass Plugin:\n    pass\n",
     )
     return tmp_path
