@@ -21,8 +21,9 @@ Usage:
   scripts/ci/compile-semgrep-lock.sh
 
 Rewrites the committed hash-pinned lockfile (Python 3.11 floor, matching
-requires-python). Commit the result together with the .in change; CI's
-scripts/ci/check-semgrep-lock.sh gate fails a PR whose lockfile drifted.
+requires-python). Commit the result together with the .in change; on a PR
+whose lockfile drifted, CI's scripts/ci/check-semgrep-lock.sh gate turns the
+"Semgrep Lockfile Drift" check red and the image publish will not run.
 
 Requires uv on PATH.
 EOF
