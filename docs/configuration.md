@@ -1288,19 +1288,20 @@ command-line options, so configuration goes through `--tool-options`. Cppcheck's
 project modes (`--project=compile_commands.json`, GUI project files) and suppression
 files are not wired into the Lintro integration.
 
-Lintro requires Cppcheck **2.13.0 or newer** (the version pinned for the Docker image
-and CI is 2.21.0). Distribution packages older than 2.13.0 are rejected by the version
-check; install from Homebrew or upstream in that case.
+Lintro requires Cppcheck **2.13.0 or newer**. The Docker image installs the Debian
+package rather than a pinned release; 2.21.0 is the Renovate-tracked recommended
+version, not an apt pin. Distribution packages older than 2.13.0 are rejected by the
+version check; install from Homebrew or upstream in that case.
 
 **Available Options via `--tool-options`:**
 
-| Option         | Type   | Description                                                                                                    |
-| -------------- | ------ | -------------------------------------------------------------------------------------------------------------- |
-| `enable`       | string | Comma-separated check categories. Default `warning,style,performance,portability` (`error` checks always run). |
-| `inconclusive` | bool   | Report findings cppcheck cannot fully confirm.                                                                 |
-| `std`          | string | Language standard (e.g. `c11`, `c++17`).                                                                       |
-| `inline_suppr` | bool   | Honor inline `// cppcheck-suppress` comments.                                                                  |
-| `suppress`     | list   | Suppression specifications (e.g. `missingInclude`).                                                            |
+| Option         | Type           | Description                                                                                                                       |
+| -------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `enable`       | string \| list | Check categories, comma-separated or pipe-delimited. Default `warning,style,performance,portability` (`error` checks always run). |
+| `inconclusive` | bool           | Report findings cppcheck cannot fully confirm.                                                                                    |
+| `std`          | string         | Language standard (e.g. `c11`, `c++17`).                                                                                          |
+| `inline_suppr` | bool           | Honor inline `// cppcheck-suppress` comments.                                                                                     |
+| `suppress`     | string \| list | Suppression specifications (e.g. `missingInclude`).                                                                               |
 
 **Example Usage:**
 
@@ -1308,12 +1309,17 @@ check; install from Homebrew or upstream in that case.
 # Run with the default check set
 lintro check src/ --tools cppcheck
 
-# Enable only warnings, and assume C11
-lintro check src/ --tools cppcheck --tool-options "cppcheck:enable=warning|std=c11"
+# Enable only warnings, and assume C11. Options are comma-separated; the pipe
+# is the list separator *within* one value.
+lintro check src/ --tools cppcheck \
+  --tool-options "cppcheck:enable=warning,cppcheck:std=c11"
+
+# Enable several categories (pipe-delimited list inside one option)
+lintro check src/ --tools cppcheck --tool-options "cppcheck:enable=warning|style"
 
 # Include inconclusive findings and suppress missing-include noise
 lintro check src/ --tools cppcheck \
-  --tool-options "cppcheck:inconclusive=true|suppress=missingInclude"
+  --tool-options "cppcheck:inconclusive=true,cppcheck:suppress=missingInclude"
 ```
 
 Cppcheck's structured output is parsed from its native XML report (schema version 2).

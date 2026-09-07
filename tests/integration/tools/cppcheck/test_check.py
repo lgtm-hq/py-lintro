@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import pytest
 from assertpy import assert_that
 
+from lintro.parsers.cppcheck.cppcheck_issue import CppcheckIssue
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
-    from lintro.parsers.cppcheck.cppcheck_issue import CppcheckIssue
     from lintro.plugins.base import BaseToolPlugin
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("cppcheck") is None,
-    reason="cppcheck not installed",
-)
+pytestmark = require_tool("cppcheck")
 
 
 def test_check_detects_seeded_defects(
@@ -76,12 +73,12 @@ def test_check_preserves_error_severity(
     result = plugin.check([cppcheck_violation_file], {})
 
     overruns = [
-        i
-        for i in (result.issues or [])
-        if str(getattr(i, "code", "")) == "arrayIndexOutOfBounds"
+        issue
+        for issue in (result.issues or [])
+        if isinstance(issue, CppcheckIssue) and issue.code == "arrayIndexOutOfBounds"
     ]
     assert_that(overruns).is_not_empty()
-    issue: CppcheckIssue = overruns[0]  # type: ignore[assignment]
+    issue = overruns[0]
     assert_that(issue.severity).is_equal_to("error")
     assert_that(issue.cwe).is_greater_than(0)
 

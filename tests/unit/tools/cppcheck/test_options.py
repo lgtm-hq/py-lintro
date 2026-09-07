@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.tools.cppcheck.definition import CppcheckPlugin
+from lintro.utils.tool_options import parse_tool_options
 
 
 def test_definition_metadata(cppcheck_plugin: CppcheckPlugin) -> None:
@@ -88,3 +91,61 @@ def test_doc_url_returns_manual(cppcheck_plugin: CppcheckPlugin) -> None:
     """
     assert_that(cppcheck_plugin.doc_url("uninitvar")).contains("cppcheck")
     assert_that(cppcheck_plugin.doc_url("")).is_none()
+
+
+def test_set_options_accepts_pipe_delimited_enable_list(
+    cppcheck_plugin: CppcheckPlugin,
+) -> None:
+    """A list of categories is joined into cppcheck's comma-separated form.
+
+    ``--tool-options`` splits on commas, so several categories can only reach
+    the plugin as the pipe-delimited list the CLI coerces (``enable=a|b``).
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+    """
+    cppcheck_plugin.set_options(enable=["warning", "style"])
+
+    assert_that(cppcheck_plugin.options.get("enable")).is_equal_to("warning,style")
+    assert_that(cppcheck_plugin._build_command(files=["a.c"])).contains(
+        "--enable=warning,style",
+    )
+
+
+def test_set_options_accepts_a_single_suppress_string(
+    cppcheck_plugin: CppcheckPlugin,
+) -> None:
+    """A bare suppression string is normalized to a one-element list.
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+    """
+    cppcheck_plugin.set_options(suppress="missingInclude")
+
+    assert_that(cppcheck_plugin._build_command(files=["a.c"])).contains(
+        "--suppress=missingInclude",
+    )
+
+
+def test_documented_tool_options_examples_parse(
+    cppcheck_plugin: CppcheckPlugin,
+) -> None:
+    """The ``--tool-options`` strings in the docs reach cppcheck's argv.
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+    """
+    parsed = parse_tool_options(
+        "cppcheck:enable=warning|style,cppcheck:std=c11,"
+        "cppcheck:inconclusive=true,cppcheck:suppress=missingInclude",
+    )
+    options: dict[str, Any] = dict(parsed["cppcheck"])
+    cppcheck_plugin.set_options(**options)
+    cmd = cppcheck_plugin._build_command(files=["a.c"])
+
+    assert_that(cmd).contains(
+        "--enable=warning,style",
+        "--std=c11",
+        "--inconclusive",
+        "--suppress=missingInclude",
+    )

@@ -39,8 +39,8 @@ from lintro.tools.core.batch_runner import (
 )
 from lintro.tools.core.option_validators import (
     filter_none_options,
+    normalize_str_or_list,
     validate_bool,
-    validate_list,
     validate_option_types,
 )
 from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
@@ -125,34 +125,36 @@ class CppcheckPlugin(BaseToolPlugin):
 
     def set_options(
         self,
-        enable: str | None = None,
+        enable: str | list[str] | None = None,
         inconclusive: bool | None = None,
         std: str | None = None,
         inline_suppr: bool | None = None,
-        suppress: list[str] | None = None,
+        suppress: str | list[str] | None = None,
         **kwargs: Any,
     ) -> None:
         """Set Cppcheck-specific options.
 
         Args:
-            enable: Comma-separated check categories to enable (e.g.
-                ``"warning,style,performance,portability"``). ``error`` checks
-                always run regardless of this value.
+            enable: Check categories to enable, either comma-separated (e.g.
+                ``"warning,style"``) or as a list. ``error`` checks always run
+                regardless of this value. The CLI splits ``--tool-options`` on
+                commas, so a list (``enable=warning|style``) is the way to
+                request several categories from the command line.
             inconclusive: Whether to report findings cppcheck cannot fully
                 confirm. Increases coverage at the cost of some false positives.
             std: Language standard to assume (e.g. ``c11``, ``c++17``).
             inline_suppr: Whether to honor inline ``// cppcheck-suppress`` comments.
-            suppress: List of suppression specifications (e.g.
+            suppress: Suppression specification, or a list of them (e.g.
                 ``["missingInclude", "unusedFunction:*"]``).
             **kwargs: Other tool options.
         """
-        validate_option_types(
-            {"enable": enable, "std": std},
-            {"enable": str, "std": str},
-        )
+        enable_list = normalize_str_or_list(enable, "enable")
+        if enable_list is not None:
+            enable = ",".join(part for part in enable_list if part)
+        suppress = normalize_str_or_list(suppress, "suppress")
+        validate_option_types({"std": std}, {"std": str})
         validate_bool(inconclusive, "inconclusive")
         validate_bool(inline_suppr, "inline_suppr")
-        validate_list(suppress, "suppress")
 
         options = filter_none_options(
             enable=enable,
