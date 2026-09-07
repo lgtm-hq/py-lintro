@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.149.0] - 2026-09-07
+
+### Added
+
+- **core**: shadow-mode diff of derived vs current tool order (#2422) (6aacad4)
+
 ## [0.148.1] - 2026-09-07
 
 ### Changed
