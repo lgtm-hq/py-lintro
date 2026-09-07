@@ -28,6 +28,7 @@ ingestion evaluation) and the resulting decision is distilled here.
 | [0006](0006-ai-effective-config-and-review-execution.md) | One effective AI config and shared review path | Accepted |
 | [0007](0007-review-resume-and-artifact-state.md)         | File-level review resume and artifact state    | Accepted |
 | [0008](0008-ai-review-architecture-invariants.md)        | AI review architecture invariants              | Accepted |
+| [0009](0009-ai-provider-plugin-contract.md)              | AI provider plugin contract                    | Accepted |
 
 ## Writing a new ADR
 
