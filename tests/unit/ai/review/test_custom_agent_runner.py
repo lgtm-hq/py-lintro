@@ -6,7 +6,7 @@ import asyncio
 import json
 from contextlib import AbstractContextManager
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from assertpy import assert_that
 
@@ -102,6 +102,9 @@ def _mock_provider(*, content: str) -> MagicMock:
         The configured provider mock.
     """
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-20250514"
     provider.name = "anthropic"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)
@@ -271,6 +274,7 @@ def test_run_custom_agent_passes_attributes_findings(tmp_path: Path) -> None:
                     context=_context(),
                     provider=provider,
                     ai_config=_ai_config(),
+                    provider_cache={},
                     budget=CostBudget(),
                 ),
             ),
@@ -299,6 +303,7 @@ def test_run_custom_agent_passes_applies_declared_severity(tmp_path: Path) -> No
                     context=_context(),
                     provider=provider,
                     ai_config=_ai_config(),
+                    provider_cache={},
                     budget=CostBudget(),
                 ),
             ),
@@ -322,6 +327,7 @@ def test_run_custom_agent_passes_tolerates_unparseable_response(
                     context=_context(),
                     provider=provider,
                     ai_config=_ai_config(),
+                    provider_cache={},
                     budget=CostBudget(),
                 ),
             ),
@@ -348,6 +354,7 @@ def test_run_custom_agent_passes_skips_agent_on_provider_error(
                     context=_context(),
                     provider=provider,
                     ai_config=_ai_config(),
+                    provider_cache={},
                     budget=CostBudget(),
                 ),
             ),
@@ -371,6 +378,7 @@ def test_run_custom_agent_passes_propagates_cost_cap(tmp_path: Path) -> None:
                     context=_context(),
                     provider=provider,
                     ai_config=_ai_config(),
+                    provider_cache={},
                     budget=budget,
                 ),
             ),
@@ -397,6 +405,7 @@ def test_run_custom_agent_passes_reports_each_completed_pass(
                     context=_context(),
                     provider=provider,
                     ai_config=_ai_config(),
+                    provider_cache={},
                     budget=CostBudget(),
                     on_pass_complete=lambda result: seen.append(result.agent_name),
                 ),

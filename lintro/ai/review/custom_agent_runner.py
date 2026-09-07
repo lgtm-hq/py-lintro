@@ -251,6 +251,12 @@ class CustomAgentPassRequest:
         repo_root: Absolute path to the repository under review.
         workspace_root: Optional workspace root for per-agent providers.
         use_one_shot: When True, avoid durable CLI provider sessions.
+        provider_cache: The owning
+            :class:`~lintro.ai.review.session.ReviewSession`'s cache of
+            providers built for ``model`` overrides, keyed by model name.
+            It is required, and required to be the session's own dict: a
+            local cache here would be dropped with the call frame and leak
+            every client an override built (issue #2302).
         on_pass_complete: Optional callback invoked with each completed pass
             as soon as it finishes, so a caller can recover work already done
             if a later pass trips the cost cap.
@@ -267,6 +273,7 @@ class CustomAgentPassRequest:
     repo_root: str = ""
     workspace_root: Path | None = None
     use_one_shot: bool = True
+    provider_cache: dict[str, BaseAIProvider]
     on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None
     on_agent_failed: Callable[[str], None] | None = None
 
@@ -303,7 +310,9 @@ async def run_custom_agent_passes(
     on_agent_failed = request.on_agent_failed
 
     results: list[CustomAgentPassResult] = []
-    provider_cache: dict[str, BaseAIProvider] = {}
+    # The session owns the providers an override builds, so its cache is
+    # filled in place rather than a local one being discarded here (#2302).
+    provider_cache = request.provider_cache
     for entry in selected:
         agent = entry.agent
         budget.check()

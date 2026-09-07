@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.merge import ChunkReviewPartial
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.run_planning import ReviewRunPlan
-    from lintro.ai.review.session import ReviewSessionOptions
+    from lintro.ai.review.session import ReviewSession, ReviewSessionOptions
 
 __all__ = [
     "RunProgress",
@@ -138,6 +138,7 @@ async def run_passes(
     plan: ReviewRunPlan,
     progress: RunProgress,
     interrupt: asyncio.Event,
+    session: ReviewSession,
 ) -> list[ChunkReviewPartial]:
     """Run the chunk fan-out and then the scoped custom-agent passes.
 
@@ -147,6 +148,7 @@ async def run_passes(
         plan: The resolved run plan.
         progress: Accumulator the completed work is appended to.
         interrupt: Event a SIGTERM/SIGINT handler sets to stop the run.
+        session: The run's provider owner (#2302).
 
     Returns:
         The completed chunk partials, in chunk order.
@@ -186,6 +188,9 @@ async def run_passes(
                 use_one_shot=True,
                 on_pass_complete=progress.custom_results.append,
                 on_agent_failed=progress.custom_agents_failed.append,
+                # Model-override providers land in the session's cache, so
+                # they close with the run rather than leaking (#2302).
+                provider_cache=session.provider_cache,
             ),
         )
     return partials
@@ -400,6 +405,7 @@ async def execute_run(
     context: ReviewContext,
     options: ReviewSessionOptions,
     plan: ReviewRunPlan,
+    session: ReviewSession,
 ) -> ReviewRunOutcome:
     """Make the run's provider calls and finalize however it ends.
 
@@ -407,6 +413,8 @@ async def execute_run(
         context: Collected review diff context.
         options: Session options for the run.
         plan: The resolved run plan.
+        session: The run's provider owner, forwarded so a custom agent's
+            ``model`` override registers its provider with the run (#2302).
 
     Returns:
         The outcome of the run, completed or gracefully stopped.
@@ -438,6 +446,7 @@ async def execute_run(
             plan=plan,
             progress=progress,
             interrupt=interrupt,
+            session=session,
         )
         provider_seconds = time.monotonic() - provider_started
         plan.timings.add_phase(name=ReviewPhase.PROVIDER, seconds=provider_seconds)

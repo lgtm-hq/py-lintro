@@ -518,6 +518,9 @@ async def _degradations_for(
     """
     chunk, context = _chunk_and_context(repo_root=str(tmp_path))
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     budget = MagicMock()
@@ -641,6 +644,9 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
     """
     _chunk, context = _chunk_and_context(repo_root=str(tmp_path))
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False

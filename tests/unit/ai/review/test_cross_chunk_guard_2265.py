@@ -747,6 +747,9 @@ async def test_a_full_run_downgrades_a_contradicted_p1(tmp_path: Path) -> None:
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False
@@ -802,6 +805,9 @@ async def test_a_full_run_guards_a_claim_about_a_rename_source(tmp_path: Path) -
         repo_root=str(tmp_path),
     )
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
     provider.capabilities.supports_sessions = False

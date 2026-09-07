@@ -11,6 +11,14 @@ chunk fan-out and the per-chunk passes share. It is derived from the session
 options once per run, and the two values that legitimately vary per chunk are
 applied with :func:`dataclasses.replace`.
 
+:class:`ReviewSession` is the run's provider owner (issue #2302). A review may
+build more providers than the one it was handed — every custom agent with a
+``model`` override adds one — and until this class existed nothing guaranteed
+any of them were closed. The session holds the primary provider and the
+per-run custom-agent provider cache, and closing it closes all of them exactly
+once, on success, failure, cost cap, timeout and cancellation alike. It is the
+only place in ``lintro`` that calls ``aclose()``.
+
 The stop-condition helpers answer whether an exception that ended a run is a
 graceful stop (cost cap, timeout) that should be reported as a partial review,
 or a genuine failure that must propagate.
@@ -18,7 +26,7 @@ or a genuine failure that must propagate.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -34,6 +42,8 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 if TYPE_CHECKING:
     import asyncio
     from pathlib import Path
+    from types import TracebackType
+    from typing import Self
 
     from lintro.ai.budget import CostBudget
     from lintro.ai.config import AIConfig
@@ -50,6 +60,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ChunkRunPlan",
+    "ReviewSession",
     "ReviewSessionOptions",
     "aborted_before_completion",
     "cost_cap_reason",
@@ -57,6 +68,128 @@ __all__ = [
     "is_timeout_stop",
     "timeout_reason",
 ]
+
+
+@dataclass(slots=True)
+class ReviewSession:
+    """The single owner of every provider one review run uses (issue #2302).
+
+    A run is handed one provider, but it can build more: each custom review
+    agent that declares a ``model`` override gets its own provider, cached for
+    the run so two agents on the same model share one client. Closing was
+    previously nobody's job, so those clients leaked whenever a run ended --
+    and a run ends on a cost cap, a timeout, a SIGTERM, a provider error or a
+    cancellation at least as often as it ends by completing.
+
+    The session is entered once per run by
+    :func:`~lintro.ai.review.orchestrator.run_review_async`, which wraps the
+    whole run in ``async with``, so every exit path closes the primary
+    provider and every cached agent provider exactly once. It is the only
+    place in ``lintro`` that calls ``aclose()``.
+
+    Closing is idempotent (a second :meth:`aclose` is a no-op) and never
+    stops early: one provider whose teardown raises does not orphan the
+    remaining ones. Nothing is swallowed -- every failure is logged, and the
+    first is re-raised once all providers have been closed, unless the run
+    itself is already failing, in which case the run's own exception is the
+    one worth seeing and the close failures stay in the log.
+
+    Attributes:
+        provider: The run's primary provider, supplied by the adapter.
+        provider_cache: Providers built for custom-agent ``model`` overrides,
+            keyed by model name. ``run_custom_agent_passes`` populates it in
+            place, which is what makes those providers session-owned rather
+            than function-local.
+    """
+
+    provider: BaseAIProvider
+    provider_cache: dict[str, BaseAIProvider] = field(default_factory=dict)
+    _closed: bool = field(default=False, repr=False)
+
+    async def __aenter__(self) -> Self:
+        """Enter the session.
+
+        Returns:
+            Self: This session, so the run can register agent providers on it.
+        """
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        """Close every owned provider, then let the run's outcome stand.
+
+        Returning ``None`` rather than a bool is deliberate: the session never
+        suppresses an exception, and saying so in the signature keeps callers
+        (and type checkers) from treating the block as one that might swallow
+        a failure.
+
+        A successful run re-raises the first teardown failure through
+        :meth:`aclose`. A run that is already failing keeps its own exception
+        and the teardown failures stay in the log, because replacing a real
+        review failure with a client-close error hides the reason the review
+        ended.
+
+        Args:
+            exc_type: Type of the exception ending the run, if any.
+            exc: The exception ending the run, if any.
+            traceback: Traceback of that exception, if any.
+        """
+        if exc is None:
+            await self.aclose()
+            return
+        await self._close_all()
+
+    async def aclose(self) -> None:
+        """Close every owned provider exactly once.
+
+        The first teardown failure is re-raised once every provider has been
+        closed. It names a local rather than a class, so it is described here
+        rather than in a "Raises" section.
+        """
+        failures = await self._close_all()
+        if failures:
+            raise failures[0]
+
+    async def _close_all(self) -> list[BaseException]:
+        """Close the primary and cached providers, collecting any failures.
+
+        Deduplicates by identity, so an agent whose override resolved back to
+        the run's own provider cannot cause a double close, and clears the
+        cache so a repeated call has nothing left to do.
+
+        Returns:
+            list[BaseException]: Teardown failures, in close order.
+        """
+        if self._closed:
+            return []
+        self._closed = True
+        owned: list[BaseAIProvider] = [self.provider]
+        seen = {id(self.provider)}
+        for cached in self.provider_cache.values():
+            if id(cached) not in seen:
+                seen.add(id(cached))
+                owned.append(cached)
+        self.provider_cache.clear()
+
+        failures: list[BaseException] = []
+        for owned_provider in owned:
+            try:
+                await owned_provider.aclose()
+            except Exception as error:
+                # One bad client must not orphan the rest: the failure is
+                # logged here and re-raised by the caller once every provider
+                # has had its turn.
+                logger.warning(
+                    "Closing provider {provider} failed: {error}",
+                    provider=str(owned_provider.name),
+                    error=error,
+                )
+                failures.append(error)
+        return failures
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

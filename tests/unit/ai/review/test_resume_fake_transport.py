@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from assertpy import assert_that
 
@@ -73,6 +73,9 @@ def _payload(*, file: str) -> str:
 def _provider() -> MagicMock:
     """Return a session-less provider whose complete() is unused."""
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "fake-model"
     provider.name = "fake"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)
