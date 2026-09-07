@@ -134,19 +134,30 @@ cmd_start() {
 	local sampler_pid=$!
 	echo "$sampler_pid" >"$pid_file"
 	log_info "Memory sampler started (PID $sampler_pid, interval ${interval}s, log: $log_file)"
+
+	# #2435: a runner kill skips every remaining step, so the artifact upload
+	# (failure-only, and never reached on a kill) is not a channel we can rely
+	# on. The step log is, up to the moment of the kill. The sampler loop keeps
+	# its stdio detached — a background writer holding the step's stdout would
+	# stall the runner waiting for EOF — so the baseline snapshot is teed here
+	# and cmd_stop replays the rest.
+	snapshot | tee -a "$log_file" || log_warning "Baseline snapshot failed (ignored)"
 }
 
 cmd_stop() {
 	local log_file="${1:?Log file is required}"
 	local pid_file="${2:?PID file is required}"
 
-	if [[ ! -f "$pid_file" ]]; then
+	local sampler_pid=""
+	if [[ -f "$pid_file" ]]; then
+		sampler_pid="$(cat "$pid_file")"
+	else
+		# Not an early return: whatever the sampler managed to write before the
+		# PID file went missing is still evidence, and the replay below is the
+		# only channel that reaches the step log (#2435).
 		log_warning "No sampler PID file at $pid_file; nothing to stop"
-		return 0
 	fi
 
-	local sampler_pid
-	sampler_pid="$(cat "$pid_file")"
 	if is_sampler_pid "$sampler_pid"; then
 		kill -TERM "$sampler_pid" 2>/dev/null || true
 		# The sampler PID belongs to an earlier step's shell, so `wait` cannot
@@ -160,17 +171,27 @@ cmd_stop() {
 			kill -9 "$sampler_pid" 2>/dev/null || true
 		fi
 		log_info "Memory sampler stopped (PID $sampler_pid)"
-	else
-		log_warning "Sampler PID ${sampler_pid:-unknown} is not a live sampler; cleaning up"
+	elif [[ -n "$sampler_pid" ]]; then
+		log_warning "Sampler PID ${sampler_pid} is not a live sampler; cleaning up"
 	fi
 	rm -f "$pid_file"
 
+	# #2435: replay everything sampled during the build into the step log before
+	# appending the end state, so the sampler evidence survives even when the
+	# failure-only artifact upload never runs. Display-only: a failure here must
+	# not fail an `if: always()` step, hence the fallbacks.
+	if [[ -s "$log_file" ]]; then
+		echo "=== sampler log: $log_file ==="
+		cat "$log_file" || log_warning "Could not replay $log_file (ignored)"
+	fi
+
 	# Capture the end state (peak memory right after the build finished) before
-	# the stop marker so the uploaded log brackets the whole compile.
+	# the stop marker so the uploaded log brackets the whole compile. `tee`
+	# puts it in both the artifact and the step log.
 	{
 		snapshot || echo "final snapshot failed (ignored)"
 		echo "=== sampler stopped $(date -u '+%Y-%m-%dT%H:%M:%SZ') ==="
-	} >>"$log_file"
+	} | tee -a "$log_file"
 }
 
 case "${1:-}" in

@@ -324,6 +324,57 @@ def test_start_fails_when_log_not_appendable(stub_bin: Path, tmp_path: Path) -> 
     )
 
 
+# --- step-log streaming (#2435) -----------------------------------------------
+
+
+def test_start_tees_a_baseline_snapshot_to_stdout(
+    stub_bin: Path,
+    tmp_path: Path,
+) -> None:
+    """Start streams a baseline snapshot to the step log and the artifact.
+
+    ``Upload memory diagnostics`` is ``if: failure()``, which never runs when
+    the runner itself is killed, so stdout is the only channel that survives.
+    """
+    _write_stub(stub_bin, "uname", 'echo "Linux"')
+    _write_stub(stub_bin, "vmstat", 'echo "VMSTAT_STUB_OUTPUT"')
+    _write_stub(stub_bin, "free", 'echo "FREE_STUB_OUTPUT"')
+    log_file = tmp_path / "memory-sampler.log"
+    pid_file = tmp_path / "memory-sampler.pid"
+
+    started = _run(["start", str(log_file), str(pid_file), "60"], stub_bin=stub_bin)
+    try:
+        assert_that(started.returncode).is_equal_to(0)
+        assert_that(started.stdout).contains("VMSTAT_STUB_OUTPUT")
+        assert_that(started.stdout).contains("FREE_STUB_OUTPUT")
+        # tee, not a redirect: the artifact copy is still written.
+        assert_that(log_file.read_text()).contains("VMSTAT_STUB_OUTPUT")
+    finally:
+        _run(["stop", str(log_file), str(pid_file)], stub_bin=stub_bin)
+
+
+def test_stop_replays_the_sampler_log_to_stdout(
+    stub_bin: Path,
+    tmp_path: Path,
+) -> None:
+    """Stop echoes what was sampled during the build plus the final snapshot."""
+    _write_stub(stub_bin, "uname", 'echo "Linux"')
+    _write_stub(stub_bin, "vmstat", 'echo "VMSTAT_STUB_OUTPUT"')
+    _write_stub(stub_bin, "free", 'echo "FREE_STUB_OUTPUT"')
+    log_file = tmp_path / "memory-sampler.log"
+    pid_file = tmp_path / "memory-sampler.pid"
+    log_file.write_text("MID_BUILD_SNAPSHOT_MARKER\n")
+
+    stopped = _run(["stop", str(log_file), str(pid_file)], stub_bin=stub_bin)
+
+    assert_that(stopped.returncode).is_equal_to(0)
+    assert_that(stopped.stdout).contains("MID_BUILD_SNAPSHOT_MARKER")
+    assert_that(stopped.stdout).contains("=== sampler stopped ")
+    # The replayed content is not duplicated into the artifact.
+    assert_that(log_file.read_text().count("MID_BUILD_SNAPSHOT_MARKER")).is_equal_to(1)
+    assert_that(log_file.read_text()).contains("=== sampler stopped ")
+
+
 # --- CLI contract -----------------------------------------------------------------
 
 

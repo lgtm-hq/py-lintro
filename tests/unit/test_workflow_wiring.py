@@ -2550,6 +2550,191 @@ def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:
     ).is_true()
 
 
+# --- Idempotent binary release jobs (#2435) ----------------------------------
+#
+# A rerun used to rebuild from scratch and then delete the published asset
+# before uploading its replacement; a runner kill in that window stripped
+# lintro-linux-x64 off v0.147.3. The jobs now reuse a checksum-verified asset
+# and swap uploads instead of overwriting them.
+
+_REUSE_GUARD = "steps.reuse.outputs.reuse != 'true'"
+_REUSE_SKIPPED_STEPS = (
+    "Build binary",
+    "Verify binary",
+    "Smoke-test tool registry",
+    "Finalize binary",
+)
+# These must keep running on reuse so a later attempt still finds the binary
+# and its checksum among the run artifacts.
+_REUSE_UNGATED_STEPS = (
+    "Upload artifact",
+    "Save SHA256 to file",
+    "Upload SHA256 file",
+)
+
+
+def test_build_binary_checks_for_a_reusable_release_asset() -> None:
+    """Both per-arch jobs consult the release before compiling.
+
+    The check runs before ``Build binary`` and passes the platform's asset
+    name, the same-run checksum artifact, and the finalized destination path.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    expected_args = {
+        "build-macos": (
+            "lintro-macos-$BUILD_ARCH",
+            "sha256-$BUILD_ARCH",
+            "dist/nuitka/lintro-macos-$BUILD_ARCH",
+        ),
+        "build-linux": (
+            "lintro-linux-$BUILD_ARCH",
+            "sha256-linux-$BUILD_ARCH",
+            "dist/nuitka/lintro-linux-$BUILD_ARCH",
+        ),
+    }
+    for job_id, (asset, artifact, dest) in expected_args.items():
+        steps = workflow["jobs"][job_id]["steps"]
+        names = [step.get("name") for step in steps]
+        by_name = {step.get("name"): step for step in steps}
+
+        check = by_name["Check for reusable release asset"]
+        assert_that(check["id"]).described_as(job_id).is_equal_to("reuse")
+        assert_that(check["run"]).described_as(job_id).contains(
+            "scripts/build/reuse_release_asset.sh",
+        )
+        for token in (asset, artifact, dest):
+            assert_that(check["run"]).described_as(job_id).contains(token)
+        assert_that(check["env"]).described_as(job_id).contains_key(
+            "GH_TOKEN",
+            "RELEASE_TAG",
+            "BUILD_ARCH",
+        )
+        assert_that(names.index("Check for reusable release asset")).described_as(
+            job_id,
+        ).is_less_than(names.index("Build binary"))
+
+
+def test_build_binary_skips_the_rebuild_when_the_asset_is_reused() -> None:
+    """Reuse skips build/verify/smoke/finalize but never the artifact uploads.
+
+    Verify and smoke-test are safe to skip only because the checksum that
+    authorised the reuse came from a same-run artifact written after those two
+    steps passed on an earlier attempt of the same job.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
+        for step_name in _REUSE_SKIPPED_STEPS:
+            assert_that(_normalize_github_expr(by_name[step_name]["if"])).described_as(
+                f"{job_id}:{step_name}",
+            ).is_equal_to(_REUSE_GUARD)
+        for step_name in _REUSE_UNGATED_STEPS:
+            assert_that(by_name[step_name].get("if")).described_as(
+                f"{job_id}:{step_name}",
+            ).is_none()
+
+
+def test_build_binary_save_sha256_falls_back_to_the_reused_checksum() -> None:
+    """Finalize binary is skipped on reuse, so its output cannot be the only source."""
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
+        sha_env = by_name["Save SHA256 to file"]["env"]["SHA256"]
+        assert_that(sha_env).described_as(job_id).contains(
+            "steps.sha256.outputs.sha256",
+        )
+        assert_that(sha_env).described_as(job_id).contains(
+            "steps.reuse.outputs.sha256",
+        )
+
+
+def test_build_binary_release_upload_swaps_instead_of_overwriting() -> None:
+    """The release upload never deletes the live asset before the new one lands.
+
+    ``softprops/action-gh-release`` (and ``gh release upload --clobber``)
+    delete first, which loses the binary when the runner dies mid-upload.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id, binary in (
+        ("build-macos", "dist/nuitka/lintro-macos-$BUILD_ARCH"),
+        ("build-linux", "dist/nuitka/lintro-linux-$BUILD_ARCH"),
+    ):
+        steps = workflow["jobs"][job_id]["steps"]
+        by_name = {step.get("name"): step for step in steps}
+        upload = by_name["Upload to release"]
+
+        assert_that(upload.get("uses")).described_as(job_id).is_none()
+        assert_that(upload["run"]).described_as(job_id).contains(
+            "scripts/build/upload_release_asset.sh",
+        )
+        assert_that(upload["run"]).described_as(job_id).contains(binary)
+        assert_that(upload["env"]).described_as(job_id).contains_key("GH_TOKEN")
+
+        guard = _normalize_github_expr(upload["if"])
+        assert_that(guard).described_as(job_id).contains(
+            "needs.get-release-info.outputs.release_tag != ''",
+        )
+        assert_that(guard).described_as(job_id).contains(_REUSE_GUARD)
+
+        # No step in these jobs may reintroduce a delete-then-upload overwrite.
+        for step in steps:
+            assert_that(step.get("with", {}) or {}).described_as(
+                f"{job_id}:{step.get('name')}",
+            ).does_not_contain_key("overwrite_files")
+            assert_that(step.get("run", "")).described_as(
+                f"{job_id}:{step.get('name')}",
+            ).does_not_contain("--clobber")
+
+
+def test_build_binary_jobs_may_read_their_own_run_artifacts() -> None:
+    """The reuse check needs the release (contents) and the run's artifacts."""
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        permissions = workflow["jobs"][job_id]["permissions"]
+        assert_that(permissions).described_as(job_id).contains_entry(
+            {"contents": "write"},
+        )
+        assert_that(permissions).described_as(job_id).contains_entry(
+            {"actions": "read"},
+        )
+
+
+def test_binary_release_scripts_are_executable() -> None:
+    """The #2435 scripts referenced by build-binary.yml exist and are executable."""
+    scripts = (
+        _REPO_ROOT / "scripts" / "build" / "reuse_release_asset.sh",
+        _REPO_ROOT / "scripts" / "build" / "upload_release_asset.sh",
+    )
+    for script in scripts:
+        assert_that(script.exists()).described_as(str(script)).is_true()
+        assert_that(script.stat().st_mode & 0o111).described_as(
+            f"{script} is not executable",
+        ).is_not_zero()
+
+
+def test_memory_sampler_tees_its_output_into_the_step_log() -> None:
+    """Sampler evidence reaches stdout, not only the failure-only artifact.
+
+    A runner kill skips every remaining step, so ``Upload memory diagnostics``
+    (``if: failure()``) never runs and the artifact channel is empty exactly
+    when the log matters. ``start`` tees a baseline snapshot and ``stop``
+    replays the log and tees the final snapshot, while the workflow keeps the
+    artifact upload for ordinary failures.
+    """
+    sampler = (_REPO_ROOT / "scripts" / "ci" / "memory-sampler.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(sampler).contains('snapshot | tee -a "$log_file"')
+    assert_that(sampler).contains('} | tee -a "$log_file"')
+
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
+        assert_that(by_name["Upload memory diagnostics"]["if"]).described_as(
+            job_id,
+        ).is_equal_to("failure()")
+
+
 _PUSH_SHA_TERNARY = "github.event_name == 'push' && github.sha || github.ref"
 
 # Job-level concurrency groups that legitimately key on ``github.ref`` even
