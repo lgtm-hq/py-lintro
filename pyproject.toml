@@ -433,6 +433,7 @@ include = [
   "lintro/tools/cargo_deny",
   "lintro/tools/clippy",
   "lintro/tools/commitlint",
+  "lintro/tools/cppcheck",
   "lintro/tools/dotenv_linter",
   "lintro/tools/gitleaks",
   "lintro/tools/golangci_lint",
@@ -728,6 +729,9 @@ ignore_imports = [
   "lintro.tools.commitlint.definition -> lintro.plugins.base",                      # owned by #2410
   "lintro.tools.commitlint.definition -> lintro.plugins.protocol",                  # owned by #2410
   "lintro.tools.commitlint.definition -> lintro.plugins.registry",                  # owned by #2410
+  "lintro.tools.cppcheck.definition -> lintro.plugins.base",                        # owned by #2410
+  "lintro.tools.cppcheck.definition -> lintro.plugins.protocol",                    # owned by #2410
+  "lintro.tools.cppcheck.definition -> lintro.plugins.registry",                    # owned by #2410
   "lintro.tools.core.batch_runner -> lintro.plugins.base",                          # owned by #2410
   "lintro.tools.core.check_runner -> lintro.plugins.base",                          # owned by #2410
   "lintro.tools.core.check_runner -> lintro.plugins.file_processor",                # owned by #2410

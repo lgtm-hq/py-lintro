@@ -6,7 +6,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.cppcheck import CppcheckPlugin
+from lintro.tools.cppcheck.definition import CppcheckPlugin
 
 
 def test_definition_metadata(cppcheck_plugin: CppcheckPlugin) -> None:
@@ -77,7 +77,7 @@ def test_set_options_rejects_bad_type(cppcheck_plugin: CppcheckPlugin) -> None:
         cppcheck_plugin: The plugin under test.
     """
     with pytest.raises(ValueError):
-        cppcheck_plugin.set_options(inconclusive="yes")
+        cppcheck_plugin.set_options(inconclusive="yes")  # type: ignore[arg-type]
 
 
 def test_doc_url_returns_manual(cppcheck_plugin: CppcheckPlugin) -> None:

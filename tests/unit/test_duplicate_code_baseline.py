@@ -57,6 +57,7 @@ GATE_PACKAGES: tuple[str, ...] = (
     "lintro/tools/cargo_deny",
     "lintro/tools/clippy",
     "lintro/tools/commitlint",
+    "lintro/tools/cppcheck",
     "lintro/tools/dotenv_linter",
     "lintro/tools/gitleaks",
     "lintro/tools/golangci_lint",

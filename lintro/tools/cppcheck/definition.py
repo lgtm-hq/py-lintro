@@ -135,9 +135,6 @@ class CppcheckPlugin(BaseToolPlugin):
             suppress: List of suppression specifications (e.g.
                 ``["missingInclude", "unusedFunction:*"]``).
             **kwargs: Other tool options.
-
-        Raises:
-            ValueError: If an option value has the wrong type.
         """
         validate_option_types(
             {"enable": enable, "std": std},

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.definitions.cppcheck import CppcheckPlugin
+from lintro.tools.cppcheck.definition import CppcheckPlugin
 
 
 @pytest.fixture

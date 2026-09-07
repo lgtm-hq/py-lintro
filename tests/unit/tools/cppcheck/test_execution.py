@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - only TimeoutExpired is constructed here
 from pathlib import Path
 from typing import cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.cppcheck.cppcheck_issue import CppcheckIssue
-from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.cppcheck import CppcheckPlugin
+from lintro.plugins.base import ExecutionContext
+from lintro.tools.cppcheck.definition import CppcheckPlugin
 
 ISSUE_XML = """<?xml version="1.0" encoding="UTF-8"?>
 <results version="2">
@@ -31,40 +32,21 @@ CLEAN_XML = """<?xml version="1.0" encoding="UTF-8"?>
 </results>"""
 
 
-def _ctx(tmp_path: Path, file_path: Path) -> MagicMock:
-    """Build a mocked execution context.
+def _ctx(tmp_path: Path, file_path: Path) -> ExecutionContext:
+    """Build a prepared execution context.
 
     Args:
         tmp_path: Temporary directory path.
         file_path: Source file included in the context.
 
     Returns:
-        A MagicMock standing in for the ExecutionContext.
+        An ExecutionContext naming the single source file.
     """
-    ctx = MagicMock()
-    ctx.should_skip = False
-    ctx.early_result = None
-    ctx.timeout = 60
-    ctx.cwd = str(tmp_path)
-    ctx.files = [str(file_path)]
-    return ctx
-
-
-def _subprocess_result(returncode: int, stderr: str) -> SubprocessResult:
-    """Build a SubprocessResult with the XML report on stderr.
-
-    Args:
-        returncode: Simulated exit code.
-        stderr: Simulated stderr (the cppcheck XML report).
-
-    Returns:
-        A SubprocessResult instance.
-    """
-    return SubprocessResult(
-        returncode=returncode,
-        stdout="Checking a.c ...\n",
-        stderr=stderr,
-        output=stderr,
+    return ExecutionContext(
+        files=[str(file_path)],
+        rel_files=[file_path.name],
+        cwd=str(tmp_path),
+        timeout=60,
     )
 
 
@@ -79,11 +61,11 @@ def test_check_with_issues(cppcheck_plugin: CppcheckPlugin, tmp_path: Path) -> N
     source.write_text("int main(void){int v;return v;}\n")
 
     with (
-        patch.object(cppcheck_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(cppcheck_plugin, "prepare") as mock_prepare,
         patch.object(
             cppcheck_plugin,
-            "_run_subprocess_result",
-            return_value=_subprocess_result(1, ISSUE_XML),
+            "_run_subprocess",
+            return_value=(False, ISSUE_XML),
         ),
     ):
         mock_prepare.return_value = _ctx(tmp_path, source)
@@ -93,7 +75,7 @@ def test_check_with_issues(cppcheck_plugin: CppcheckPlugin, tmp_path: Path) -> N
     assert_that(result.success).is_false()
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.issues).is_not_none()
-    issue = cast(CppcheckIssue, result.issues[0])  # type: ignore[index]
+    issue = cast(CppcheckIssue, (result.issues or [])[0])
     assert_that(issue.code).is_equal_to("uninitvar")
     assert_that(issue.severity).is_equal_to("error")
     assert_that(issue.line).is_equal_to(11)
@@ -110,11 +92,11 @@ def test_check_clean(cppcheck_plugin: CppcheckPlugin, tmp_path: Path) -> None:
     source.write_text("int main(void){return 0;}\n")
 
     with (
-        patch.object(cppcheck_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(cppcheck_plugin, "prepare") as mock_prepare,
         patch.object(
             cppcheck_plugin,
-            "_run_subprocess_result",
-            return_value=_subprocess_result(0, CLEAN_XML),
+            "_run_subprocess",
+            return_value=(True, CLEAN_XML),
         ),
     ):
         mock_prepare.return_value = _ctx(tmp_path, source)
@@ -138,11 +120,11 @@ def test_check_execution_failure_fails_closed(
     source.write_text("int main(void){return 0;}\n")
 
     with (
-        patch.object(cppcheck_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(cppcheck_plugin, "prepare") as mock_prepare,
         patch.object(
             cppcheck_plugin,
-            "_run_subprocess_result",
-            return_value=_subprocess_result(2, "cppcheck: error: unknown option"),
+            "_run_subprocess",
+            return_value=(False, "cppcheck: error: unknown option"),
         ),
     ):
         mock_prepare.return_value = _ctx(tmp_path, source)
@@ -167,10 +149,10 @@ def test_check_timeout_returns_failure(
     source.write_text("int main(void){return 0;}\n")
 
     with (
-        patch.object(cppcheck_plugin, "_prepare_execution") as mock_prepare,
+        patch.object(cppcheck_plugin, "prepare") as mock_prepare,
         patch.object(
             cppcheck_plugin,
-            "_run_subprocess_result",
+            "_run_subprocess",
             side_effect=subprocess.TimeoutExpired(cmd="cppcheck", timeout=60),
         ),
     ):
@@ -187,12 +169,13 @@ def test_check_skips_when_no_files(cppcheck_plugin: CppcheckPlugin) -> None:
     Args:
         cppcheck_plugin: The plugin under test.
     """
-    early = MagicMock()
-    with patch.object(cppcheck_plugin, "_prepare_execution") as mock_prepare:
-        ctx = MagicMock()
-        ctx.should_skip = True
-        ctx.early_result = early
-        mock_prepare.return_value = ctx
+    early = ToolResult(
+        name="cppcheck",
+        success=True,
+        output="No files to check.",
+        issues_count=0,
+    )
+    with patch.object(cppcheck_plugin, "prepare", return_value=early):
         result = cppcheck_plugin.check(["."], {})
 
     assert_that(result).is_same_as(early)
