@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.151.3] - 2026-09-07
+
+### Fixed
+
+- **ci**: refuse live npm dispatches that cannot authenticate and stop retrying e404
+  (#2443) (6544350)
+
 ## [0.151.2] - 2026-09-07
 
 ### Changed
