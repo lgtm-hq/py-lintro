@@ -858,6 +858,12 @@ jobs:
           # black:timeout=120: the 30s default timed out on the full repo (#2352).
           TOOL_OPTIONS: >-
             pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,osv_scanner:check_suppressions=false
+          # LINTRO_VERSION_TIMEOUT=120: semgrep's update check stalls past the
+          # 30s probe default under CI egress even though semgrep.dev is
+          # allowlisted (#2216 gate failures). The probe timeout is not the
+          # tool-execution timeout in TOOL_OPTIONS; a missing binary still
+          # fails the probe instantly, so the no-silent-skip gate is intact.
+          LINTRO_VERSION_TIMEOUT: '120'
           # Same image selection as dogfooding-lint: CI-built image for
           # same-repo PRs, pinned release digest for forks (no CI push).
           # Fork fallback comes from the single LINTRO_FORK_FALLBACK_IMAGE
