@@ -274,3 +274,87 @@ version_ge() {
 		exit 0  # versions are equal
 	}'
 }
+
+# =============================================================================
+# Checksums
+# =============================================================================
+
+# Print the SHA256 of a file, using whichever of sha256sum/shasum exists.
+# Returns 1 when neither is available so callers can fail closed with their own
+# message. Single implementation so the Linux (sha256sum) and macOS (shasum)
+# release paths cannot drift apart.
+# Usage: sha="$(sha256_file "$path")" || log_error "..."
+sha256_file() {
+	local file="$1"
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$file" | cut -d' ' -f1
+	elif command -v shasum >/dev/null 2>&1; then
+		shasum -a 256 "$file" | cut -d' ' -f1
+	else
+		return 1
+	fi
+}
+
+# =============================================================================
+# Release Assets (#2435)
+# =============================================================================
+#
+# Shared gh helpers for the crash-safe release-asset swap, used by
+# scripts/build/upload_release_asset.sh (which publishes the swap) and
+# scripts/build/reuse_release_asset.sh (which finishes an interrupted one), so
+# the two agree on what a staging asset is called and how it is promoted.
+# Require `gh` on PATH and a resolvable repository (GH_REPO or a git remote).
+
+# Name the swap stages an asset under while it is being uploaded.
+release_staging_name() {
+	printf '%s.new\n' "$1"
+}
+
+# Echo the numeric id of a named asset on the release, or nothing when absent.
+# Usage: release_asset_id <tag> <name>
+release_asset_id() {
+	local tag="$1"
+	local name="$2"
+	gh api "repos/{owner}/{repo}/releases/tags/${tag}" \
+		--jq ".assets[] | select(.name == \"${name}\") | .id" 2>/dev/null || true
+}
+
+# Usage: release_delete_asset <asset-id>
+release_delete_asset() {
+	local id="$1"
+	gh api -X DELETE "repos/{owner}/{repo}/releases/assets/${id}" >/dev/null
+}
+
+# Download a published asset into <dir> and echo its path, or return 1 when the
+# release has no such asset. Usage: release_download_asset <tag> <name> <dir>
+release_download_asset() {
+	local tag="$1"
+	local name="$2"
+	local dir="$3"
+	rm -rf "$dir"
+	mkdir -p "$dir"
+	gh release download "$tag" \
+		--pattern "$name" \
+		--dir "$dir" \
+		--clobber >/dev/null 2>&1 || return 1
+	[[ -f "${dir}/${name}" ]] || return 1
+	printf '%s\n' "${dir}/${name}"
+}
+
+# Delete whatever currently holds <final-name> and rename the staging asset
+# onto it. This is the only part of the swap that can leave the release without
+# the final name, and it is a delete plus a rename rather than a multi-second
+# upload. Usage: release_promote_asset <tag> <staging-id> <final-name>
+release_promote_asset() {
+	local tag="$1"
+	local staging_id="$2"
+	local final_name="$3"
+	local old_id
+	old_id="$(release_asset_id "$tag" "$final_name")"
+	if [[ -n "$old_id" ]]; then
+		log_info "Replacing existing ${final_name}"
+		release_delete_asset "$old_id"
+	fi
+	gh api -X PATCH "repos/{owner}/{repo}/releases/assets/${staging_id}" \
+		-f "name=${final_name}" >/dev/null
+}

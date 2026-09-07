@@ -34,7 +34,6 @@ from lintro.plugins.registry import register_tool
 
 # Constants for import-linter configuration
 IMPORT_LINTER_DEFAULT_TIMEOUT: int = 60
-IMPORT_LINTER_DEFAULT_PRIORITY: int = 50
 IMPORT_LINTER_FILE_PATTERNS: list[str] = ["*.py"]
 
 #: Config file names import-linter reads, in the order it prefers them.
@@ -177,8 +176,6 @@ class ImportLinterPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=IMPORT_LINTER_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["pyproject.toml", ".importlinter", "setup.cfg"],
             version_command=["lint-imports", "--version"],
             default_options={

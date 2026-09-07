@@ -133,8 +133,7 @@ async def refine_unverified_fixes(
             search_radius=ai_config.fix_search_radius,
         ):
             logger.debug(
-                f"Refinement: revert failed for "
-                f"{suggestion.file}:{suggestion.line}",
+                f"Refinement: revert failed for {suggestion.file}:{suggestion.line}",
             )
             continue
 

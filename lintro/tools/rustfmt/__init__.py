@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.rustfmt.definition import (
-    RUSTFMT_DEFAULT_PRIORITY,
     RUSTFMT_DEFAULT_TIMEOUT,
     RUSTFMT_FILE_PATTERNS,
     RustfmtPlugin,
 )
 
 __all__ = [
-    "RUSTFMT_DEFAULT_PRIORITY",
     "RUSTFMT_DEFAULT_TIMEOUT",
     "RUSTFMT_FILE_PATTERNS",
     "RustfmtPlugin",

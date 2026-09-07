@@ -45,7 +45,6 @@ from lintro.tools.core.timeout_utils import (
 
 # Constants for golangci-lint configuration
 GOLANGCI_LINT_DEFAULT_TIMEOUT: int = 120
-GOLANGCI_LINT_DEFAULT_PRIORITY: int = 85
 GOLANGCI_LINT_FILE_PATTERNS: list[str] = ["*.go", "go.mod"]
 
 
@@ -201,8 +200,6 @@ class GolangciLintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=GOLANGCI_LINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[
                 ".golangci.yml",
                 ".golangci.yaml",

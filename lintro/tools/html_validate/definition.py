@@ -45,11 +45,9 @@ from lintro.tools.core.node_fallback import (
     is_registry_fallback_command,
     registry_fallback_guidance,
 )
-from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for html-validate configuration
 HTML_VALIDATE_DEFAULT_TIMEOUT: int = 30
-HTML_VALIDATE_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("html_validate", 30)
 HTML_VALIDATE_FILE_PATTERNS: list[str] = ["*.html", "*.htm", "*.vue", "*.svelte"]
 HTML_VALIDATE_CONFIG_FILENAMES: list[str] = [
     ".htmlvalidate.json",
@@ -111,8 +109,6 @@ class HtmlValidatePlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=HTML_VALIDATE_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(HTML_VALIDATE_CONFIG_FILENAMES),
             version_command=["html-validate", "--version"],
             min_version=get_min_version(ToolName.HTML_VALIDATE),

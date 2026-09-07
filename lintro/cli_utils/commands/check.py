@@ -14,6 +14,7 @@ import click
 from lintro.api import core as api
 from lintro.api.pipeline import run_lint_with_ai
 from lintro.cli_utils.diff_option import validate_diff_base_ref
+from lintro.cli_utils.order_explain import emit_order_explanation
 from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 
@@ -158,6 +159,15 @@ DEFAULT_ACTION: str = "check"
     is_flag=True,
     help="Show a per-tool performance profile (timing table + suggestions)",
 )
+@click.option(
+    "--explain-order",
+    "explain_order",
+    is_flag=True,
+    help=(
+        "Print the execution order this run would use, with the claim behind "
+        "each constraint, then exit without running any tool."
+    ),
+)
 def check_command(
     paths: tuple[str, ...],
     tools: str | None,
@@ -182,6 +192,7 @@ def check_command(
     transport: str | None,
     no_art: bool,
     profile: bool,
+    explain_order: bool,
 ) -> None:
     """Check files for issues using the specified tools.
 
@@ -213,21 +224,32 @@ def check_command(
         transport: str | None: Override AI transport (``api`` or ``cli``).
         no_art: bool: Suppress the decorative ASCII art printed after the run.
         profile: bool: Whether to emit a per-tool performance profile.
+        explain_order: bool: Print the derived execution order
+            and exit without running tools.
 
     Raises:
         SystemExit: Process exit with the aggregated exit code from tools,
             or 1 when the config cannot be parsed.
     """
-    # Handle cache clearing
+    validate_diff_base_ref(diff_base=diff_base)
+
+    # Add default paths if none provided
+    path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
+
+    # Handle cache clearing. This runs before the --explain-order early exit so
+    # `--no-cache --explain-order` still clears the incremental caches.
     if no_cache:
         from lintro.utils.file_cache import clear_all_caches
 
         clear_all_caches()
 
-    validate_diff_base_ref(diff_base=diff_base)
-
-    # Add default paths if none provided
-    path_list: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
+    if explain_order:
+        emit_order_explanation(
+            tools=tools,
+            action=DEFAULT_ACTION,
+            paths=path_list,
+            ignore_conflicts=ignore_conflicts,
+        )
 
     # Build tool-specific options string
     tool_option_parts: list[str] = []

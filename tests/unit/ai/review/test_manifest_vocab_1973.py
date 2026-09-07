@@ -8,6 +8,8 @@ no regression in what either consumer recognises.
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+
 import pytest
 from assertpy import assert_that
 
@@ -113,3 +115,48 @@ def test_shared_manifests_resolve_a_local_action_root(name: str) -> None:
     assert_that(
         _github_action_reference_paths(path=f".github/actions/demo/{name}"),
     ).is_equal_to([".github/actions/demo"])
+
+
+def test_the_shared_core_pins_the_reconciled_lockfile() -> None:
+    """``yarn.lock``, which #1973 moved into the shared core, stays there.
+
+    The classifier reaches the dependency domain for any ``*.lock`` file, so a
+    round-trip through :func:`classify_changed_files` cannot tell whether a
+    lockfile is still in the vocabulary — the DEPS parametrize above stays
+    green even if every lockfile name is deleted from ``vocab.py``. Only
+    membership can pin it.
+    """
+    assert_that(SHARED_MANIFEST_NAMES).contains("yarn.lock")
+
+
+def test_the_extras_pin_the_reconciled_toolchain_lockfiles() -> None:
+    """The Python and Rust lockfiles #1973 added stay registered as extras."""
+    assert_that(DEPENDENCY_MANIFEST_EXTRA_NAMES).contains(
+        "cargo.lock",
+        "poetry.lock",
+        "uv.lock",
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    sorted(
+        name
+        for name in DEPENDENCY_MANIFEST_EXTRA_NAMES
+        if PurePosixPath(name).suffix in {".json", ".toml"}
+    ),
+)
+def test_extra_manifests_are_not_action_manifests(name: str) -> None:
+    """The resolver keeps the narrower core even inside ``.github/actions/``.
+
+    Only the config-suffixed extras can show this: the resolver treats any
+    other suffixed file under ``.github/actions/`` as an action implementation,
+    so a ``uv.lock`` there resolves a root through the generic fallback rather
+    than through the manifest set. A ``pyproject.toml`` or ``composer.json``
+    has a suffix the resolver rejects unless it is a known action manifest,
+    which is exactly the widening #1973 declined to do.
+    """
+    assert_that(_ACTION_MANIFEST_NAMES).does_not_contain(name)
+    assert_that(
+        _github_action_reference_paths(path=f".github/actions/demo/{name}"),
+    ).is_empty()

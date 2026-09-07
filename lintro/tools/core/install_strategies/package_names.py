@@ -22,6 +22,7 @@ BREW_FORMULA_NAMES: dict[str, str] = {
     # Binary tools
     "actionlint": "actionlint",
     "buf": "buf",
+    "cppcheck": "cppcheck",
     "dotenv_linter": "dotenv-linter",
     "gitleaks": "gitleaks",
     "golangci_lint": "golangci-lint",

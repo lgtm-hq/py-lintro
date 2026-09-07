@@ -37,6 +37,9 @@ set -euo pipefail
 #                  for report validation even when REPORT_JSON is supplied.
 #   TOOL_OPTIONS   Optional. lintro --tool-options string (match the dogfood
 #                  run so tool coverage — and thus skip behaviour — is identical).
+#   LINTRO_VERSION_TIMEOUT  Optional. Forwarded into the container when set;
+#                  bounds lintro's per-tool version probe (semgrep's update
+#                  check stalls past the 30s default under CI egress, #2216).
 #   ALLOWLIST      Optional. Allowlist path (default:
 #                  scripts/ci/dogfood-skip-allowlist.yaml).
 #   REPORT_JSON    Optional. Existing JSON report to consume. When set, the
@@ -137,6 +140,11 @@ declare -a docker_args=(
 	-v "$(pwd):/code"
 	-w /code
 )
+# Forward the probe budget when the caller sets it; `docker run -e NAME`
+# passes the host value through only when the variable is defined.
+if [[ -n "${LINTRO_VERSION_TIMEOUT:-}" ]]; then
+	docker_args+=(-e LINTRO_VERSION_TIMEOUT)
+fi
 if [[ "$MAP_HOST_USER" == "true" ]]; then
 	docker_args+=(--user "$(id -u):$(id -g)")
 fi

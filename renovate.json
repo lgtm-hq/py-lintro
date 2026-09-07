@@ -3,9 +3,6 @@
   "extends": [
     "local>lgtm-hq/.github:renovate-config"
   ],
-  "allowedCommands": [
-    "scripts/ci/compile-semgrep-lock.sh"
-  ],
   "packageRules": [
     {
       "description": "test_samples are fixed tool-test inputs; never update them",
@@ -139,23 +136,7 @@
       "automerge": false
     },
     {
-      "description": "Recompile the isolated semgrep lockfile after its .in pin changes",
-      "matchManagers": ["pip_requirements"],
-      "matchFileNames": [
-        "requirements-semgrep.in"
-      ],
-      "postUpgradeTasks": {
-        "commands": [
-          "scripts/ci/compile-semgrep-lock.sh"
-        ],
-        "fileFilters": [
-          "requirements-semgrep.txt"
-        ],
-        "executionMode": "branch"
-      }
-    },
-    {
-      "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in",
+      "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in by scripts/ci/compile-semgrep-lock.sh; CI gates the drift (#2436)",
       "matchFileNames": [
         "requirements-semgrep.txt"
       ],
@@ -219,10 +200,11 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
-      "description": "Exact uv pin for setup-uv in the binary build workflow (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
+      "description": "Exact uv pins for setup-uv in the binary build and semgrep-lock workflows (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
       "customType": "regex",
       "managerFilePatterns": [
-        ".github/workflows/build-binary.yml"
+        ".github/workflows/build-binary.yml",
+        ".github/workflows/docker-ci.yml"
       ],
       "matchStrings": [
         "UV_VERSION: '(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)'"

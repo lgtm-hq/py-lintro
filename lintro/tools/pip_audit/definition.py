@@ -33,7 +33,6 @@ from lintro.plugins.registry import register_tool
 
 # Constants for pip-audit configuration
 PIP_AUDIT_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
-PIP_AUDIT_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 PIP_AUDIT_FILE_PATTERNS: list[str] = [
     "requirements*.txt",
     "pyproject.toml",
@@ -174,8 +173,6 @@ class PipAuditPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=PIP_AUDIT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[],  # pip-audit has no native config file
             version_command=["pip-audit", "--version"],
             min_version=get_min_version(ToolName.PIP_AUDIT),

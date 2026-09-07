@@ -167,7 +167,7 @@ def _plural(*, count: int, noun: str) -> str:
 
 def _prior_sha(*, prior_state: ReviewState) -> str:
     """Return the head sha of the most recent prior round, if any."""
-    return prior_state.runs[-1].sha if prior_state.runs else ""
+    return prior_state.runs[-1].identity.sha if prior_state.runs else ""
 
 
 def _header(
@@ -378,7 +378,7 @@ def _commits_section(
         )
     else:
         sentence = (
-            f"This round reviewed the PR's full diff against `{base}` " f"at `{head}`."
+            f"This round reviewed the PR's full diff against `{base}` at `{head}`."
         )
     return "\n".join(
         [

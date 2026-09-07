@@ -49,7 +49,6 @@ from lintro.utils.path_filtering import filter_existing_paths
 
 # Constants for TruffleHog configuration
 TRUFFLEHOG_DEFAULT_TIMEOUT: int = 60
-TRUFFLEHOG_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 TRUFFLEHOG_FILE_PATTERNS: list[str] = ["*"]  # Scans all files
 
 
@@ -109,8 +108,6 @@ class TrufflehogPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=TRUFFLEHOG_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[],
             version_command=["trufflehog", "--version"],
             min_version=get_min_version(ToolName.TRUFFLEHOG),
@@ -221,8 +218,7 @@ class TrufflehogPlugin(BaseToolPlugin):
                 cmd.extend(["--exclude-paths", exclude_path])
             else:
                 logger.warning(
-                    f"[trufflehog] Skipping absent --exclude-paths file: "
-                    f"{exclude_opt}",
+                    f"[trufflehog] Skipping absent --exclude-paths file: {exclude_opt}",
                 )
 
         # Concurrency

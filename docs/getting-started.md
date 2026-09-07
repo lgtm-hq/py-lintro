@@ -120,6 +120,8 @@ order and for what changed.
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
   by default (`brew install trufflehog` or GitHub releases)
+- `cppcheck` - C/C++ static analyzer (`brew install cppcheck` or
+  `apt-get install cppcheck`)
 - `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
   <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
@@ -708,7 +710,7 @@ sudo lintro check
 ### Getting Help
 
 - **Command help:** `lintro --help` or `lintro check --help`
-- **List tools:** `lintro list-tools --show-conflicts`
+- **List tools:** `lintro list-tools`
 - **GitHub Issues:** Report bugs or request features
 - **Documentation:** Check other guides in the `docs/` directory
 

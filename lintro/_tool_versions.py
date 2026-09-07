@@ -7,7 +7,8 @@ Version sources (in priority order):
        ``package.json``, ``pyproject.toml``, and ``requirements-semgrep.txt``
        sources.
     3. ``TOOL_VERSIONS`` below — non-npm/non-pypi tools (binaries, cargo,
-       rustup) updated by Renovate via custom regex managers.
+       rustup), mostly updated by Renovate via custom regex managers. See
+       "Adding a new tool" for the entries that deliberately have none.
 
 Single-source-of-truth structure:
 
@@ -32,9 +33,14 @@ Adding a new tool:
     - npm or pypi: add a ToolName, edit ``lintro/_tool_packages.py``, pin in
       package.json or pyproject.toml, run the generator.
     - Other (binary/cargo/rustup): add to ``TOOL_VERSIONS`` below and add a
-      Renovate ``customManager`` entry. rustfmt and clippy are the exception:
-      they are bundled with ``ToolName.RUSTC`` and have no independent
-      managers — bump their records only alongside rustc (#2205).
+      Renovate ``customManager`` entry. Two kinds of entry are deliberately
+      unmanaged, so do not add managers for them:
+        - rustfmt and clippy, bundled with ``ToolName.RUSTC`` — bump their
+          records only alongside rustc (#2205).
+        - cppcheck, installed from Debian's package because upstream ships no
+          portable binary — its pin tracks the base image's distro release,
+          and the manifest-vs-image gate requires equality, so an upstream
+          tag apt cannot supply would fail CI permanently.
 
 For shell scripts:
     python3 -c "from lintro._tool_versions import get_tool_version; \\
@@ -71,6 +77,16 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CARGO_DENY: "0.20.0",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.CLIPPY: "1.98.0",
+    # cppcheck ships no portable single binary, so both the tools image and the
+    # app-image install-tools.sh bridge install Debian's package. This pin
+    # therefore tracks the version in the python base image's Debian release
+    # (trixie ships 2.17.1), not upstream's latest tag: the manifest-vs-image
+    # gate requires the installed version to equal this one, so a pin apt
+    # cannot supply can never pass. Bump it only when the base image moves to a
+    # new Debian release. Deliberately NOT Renovate-managed (see the exclusion
+    # test in tests/unit/test_workflow_wiring.py); the supported floor stays
+    # the lower ``min_version`` in manifest.src.json.
+    ToolName.CPPCHECK: "2.17.1",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
     ToolName.GOLANGCI_LINT: "2.13.2",

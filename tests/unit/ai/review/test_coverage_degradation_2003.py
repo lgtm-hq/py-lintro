@@ -44,6 +44,8 @@ from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review_async
@@ -348,20 +350,23 @@ def test_uncapped_run_renders_identically_on_every_surface(
 
 def test_run_record_round_trips_the_coverage_flag() -> None:
     """A coverage-limited round persists and parses back as limited."""
-    record = RunRecord(round=1, coverage_limited=True)
+    record = RunRecord(
+        identity=RunIdentity(round=1),
+        coverage=RunCoverage(coverage_limited=True),
+    )
 
     payload = record.to_dict()
 
     assert_that(payload).contains_key("coverage_limited")
-    assert_that(RunRecord.from_dict(payload).coverage_limited).is_true()
+    assert_that(RunRecord.from_dict(payload).coverage.coverage_limited).is_true()
 
 
 def test_run_record_omits_the_flag_for_a_complete_round() -> None:
     """A legacy or complete record keeps its byte-identical serialized shape."""
-    payload = RunRecord(round=1).to_dict()
+    payload = RunRecord(identity=RunIdentity(round=1)).to_dict()
 
     assert_that(payload).does_not_contain_key("coverage_limited")
-    assert_that(RunRecord.from_dict(payload).coverage_limited).is_false()
+    assert_that(RunRecord.from_dict(payload).coverage.coverage_limited).is_false()
 
 
 # --- machine-readable payloads ------------------------------------------------
@@ -724,12 +729,16 @@ def test_run_record_coverage_limited_uses_strict_bool_parsing() -> None:
     base = RunRecord().to_dict()
 
     assert_that(
-        RunRecord.from_dict({**base, "coverage_limited": "false"}).coverage_limited,
+        RunRecord.from_dict(
+            {**base, "coverage_limited": "false"},
+        ).coverage.coverage_limited,
     ).is_false()
     assert_that(
-        RunRecord.from_dict({**base, "coverage_limited": True}).coverage_limited,
+        RunRecord.from_dict(
+            {**base, "coverage_limited": True},
+        ).coverage.coverage_limited,
     ).is_true()
-    assert_that(RunRecord.from_dict(base).coverage_limited).is_false()
+    assert_that(RunRecord.from_dict(base).coverage.coverage_limited).is_false()
 
 
 def test_capped_and_retried_chunk_counts_once_in_the_description() -> None:
@@ -778,8 +787,12 @@ def test_run_record_partial_uses_strict_bool_parsing() -> None:
 
     base = RunRecord().to_dict()
 
-    assert_that(RunRecord.from_dict({**base, "partial": "false"}).partial).is_false()
-    assert_that(RunRecord.from_dict({**base, "partial": True}).partial).is_true()
+    assert_that(
+        RunRecord.from_dict({**base, "partial": "false"}).coverage.partial,
+    ).is_false()
+    assert_that(
+        RunRecord.from_dict({**base, "partial": True}).coverage.partial,
+    ).is_true()
 
 
 def test_sticky_history_marks_a_prior_capped_round(
@@ -793,8 +806,11 @@ def test_sticky_history_marks_a_prior_capped_round(
     from lintro.ai.review.models.run_record import RunRecord
     from lintro.ai.review.sticky import build_sticky_bodies
 
-    limited = RunRecord(round=1, sha="abc1234", coverage_limited=True).to_dict()
-    unlimited = RunRecord(round=1, sha="abc1234").to_dict()
+    limited = RunRecord(
+        identity=RunIdentity(round=1, sha="abc1234"),
+        coverage=RunCoverage(coverage_limited=True),
+    ).to_dict()
+    unlimited = RunRecord(identity=RunIdentity(round=1, sha="abc1234")).to_dict()
 
     # The primary sticky archives run history into its companion body, so the
     # marker is asserted across both bodies the public builder returns.
@@ -803,7 +819,7 @@ def test_sticky_history_marks_a_prior_capped_round(
         for body in build_sticky_bodies(
             request=StickyRequest(
                 result=sample_review_result,
-                prior_runs=[limited],
+                prior_state=ReviewState(runs=(RunRecord.from_dict(limited),)),
                 transport="cli",
             ),
         )
@@ -813,7 +829,7 @@ def test_sticky_history_marks_a_prior_capped_round(
         for body in build_sticky_bodies(
             request=StickyRequest(
                 result=sample_review_result,
-                prior_runs=[unlimited],
+                prior_state=ReviewState(runs=(RunRecord.from_dict(unlimited),)),
                 transport="cli",
             ),
         )
@@ -854,10 +870,12 @@ def test_advanced_state_persists_coverage_limited_from_a_capped_result(
     )
 
     capped_run = capped_state.runs[-1]
-    assert_that(capped_run.coverage_limited).is_true()
-    assert_that(clean_state.runs[-1].coverage_limited).is_false()
+    assert_that(capped_run.coverage.coverage_limited).is_true()
+    assert_that(clean_state.runs[-1].coverage.coverage_limited).is_false()
     # The flag survives the flat persisted shape.
-    assert_that(RunRecord.from_dict(capped_run.to_dict()).coverage_limited).is_true()
+    assert_that(
+        RunRecord.from_dict(capped_run.to_dict()).coverage.coverage_limited,
+    ).is_true()
 
 
 def test_unknown_degradation_reason_still_renders_a_clause(

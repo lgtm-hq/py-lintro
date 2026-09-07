@@ -15,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:1ede0226438b71fa832ca8bd5be38e25a5da4cf05c6bb17e8cbc1b2365ebbd8a AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:c46c3aead63cba079007a043a29ea7b3b69b762d51fe59e53c8b6a6b7fd680b8 AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -68,12 +68,13 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 
 # New binaries land in docker/tools.Dockerfile, but this app image still
 # FROMs a digest-pinned tools image that will not contain them until the
-# next published digest. Bridge typos, spectral, buf, import-linter, and
-# pylint here so dogfood and the manifest-vs-image gate actually run them
-# instead of failing with binary_missing. No-op once the digest already has
-# them on PATH.
+# next published digest. Bridge typos, spectral, buf, import-linter, pylint,
+# and cppcheck here so dogfood and the manifest-vs-image gate actually run
+# them instead of failing with binary_missing. No-op once the digest already
+# has them on PATH.
 RUN chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck && \
+    rm -rf /var/lib/apt/lists/*
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \

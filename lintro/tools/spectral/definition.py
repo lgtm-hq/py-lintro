@@ -39,11 +39,9 @@ from lintro.tools.core.option_validators import (
 )
 from lintro.utils.path_filtering import find_project_root
 from lintro.utils.path_utils import find_file_upward
-from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for Spectral configuration
 SPECTRAL_DEFAULT_TIMEOUT: int = 30
-SPECTRAL_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("spectral", 45)
 # Spectral targets structured API documents (OpenAPI/AsyncAPI/JSON Schema),
 # which are authored as YAML or JSON. It only runs when a ruleset is present
 # (see _find_ruleset), so these patterns do not cause every YAML/JSON file in a
@@ -121,8 +119,6 @@ class SpectralPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=SPECTRAL_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(SPECTRAL_RULESET_FILES),
             version_command=["spectral", "--version"],
             min_version=get_min_version(ToolName.SPECTRAL),

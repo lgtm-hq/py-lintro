@@ -78,12 +78,7 @@ def test_load_config_parses_review_strictness_and_overrides(
     """YAML review.strictness and sensitivity overrides are loaded."""
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text(
-        (
-            "review:\n"
-            "  strictness: focused\n"
-            "  sensitivity:\n"
-            "    migration_notes: true\n"
-        ),
+        ("review:\n  strictness: focused\n  sensitivity:\n    migration_notes: true\n"),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -102,7 +97,7 @@ def test_load_config_parses_review_depth_and_semantic_chunking(
     """YAML review.depth and force_semantic_chunking are loaded."""
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text(
-        ("review:\n" "  depth: 2\n" "  force_semantic_chunking: true\n"),
+        ("review:\n  depth: 2\n  force_semantic_chunking: true\n"),
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)

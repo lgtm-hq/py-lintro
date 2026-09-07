@@ -42,7 +42,6 @@ if TYPE_CHECKING:
 
 # Constants for dotenv-linter configuration
 DOTENV_LINTER_DEFAULT_TIMEOUT: int = 30
-DOTENV_LINTER_DEFAULT_PRIORITY: int = 50
 DOTENV_LINTER_FILE_PATTERNS: list[str] = [".env", ".env.*", "*.env"]
 
 
@@ -98,8 +97,6 @@ class DotenvLinterPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=DOTENV_LINTER_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[],
             version_command=["dotenv-linter", "--version"],
             min_version=get_min_version(ToolName.DOTENV_LINTER),

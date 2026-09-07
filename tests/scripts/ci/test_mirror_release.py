@@ -234,7 +234,7 @@ def _write_fake_curl(bin_dir: Path, payload: str) -> None:
     """Install a curl stub that prints *payload* and ignores URL/flags."""
     curl = bin_dir / "curl"
     curl.write_text(
-        "#!/usr/bin/env bash\n" "cat <<'EOF'\n" f"{payload}\n" "EOF\n",
+        f"#!/usr/bin/env bash\ncat <<'EOF'\n{payload}\nEOF\n",
         encoding="utf-8",
     )
     curl.chmod(0o755)

@@ -7,7 +7,6 @@ through that module (#2311).
 """
 
 from lintro.tools.yamllint.definition import (
-    YAMLLINT_DEFAULT_PRIORITY,
     YAMLLINT_DEFAULT_TIMEOUT,
     YAMLLINT_FILE_PATTERNS,
     YAMLLINT_FORMATS,
@@ -15,7 +14,6 @@ from lintro.tools.yamllint.definition import (
 )
 
 __all__ = [
-    "YAMLLINT_DEFAULT_PRIORITY",
     "YAMLLINT_DEFAULT_TIMEOUT",
     "YAMLLINT_FILE_PATTERNS",
     "YAMLLINT_FORMATS",

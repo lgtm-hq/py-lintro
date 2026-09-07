@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.cargo_deny.definition import (
-    CARGO_DENY_DEFAULT_PRIORITY,
     CARGO_DENY_DEFAULT_TIMEOUT,
     CARGO_DENY_FILE_PATTERNS,
     CargoDenyPlugin,
 )
 
 __all__ = [
-    "CARGO_DENY_DEFAULT_PRIORITY",
     "CARGO_DENY_DEFAULT_TIMEOUT",
     "CARGO_DENY_FILE_PATTERNS",
     "CargoDenyPlugin",

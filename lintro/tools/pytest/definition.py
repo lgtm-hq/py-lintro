@@ -43,7 +43,6 @@ from lintro.utils.path_utils import load_lintro_ignore
 
 # Constants for pytest configuration
 PYTEST_DEFAULT_TIMEOUT: int = 300  # 5 minutes for test runs
-PYTEST_DEFAULT_PRIORITY: int = 90
 PYTEST_FILE_PATTERNS: list[str] = ["test_*.py", "*_test.py"]
 
 
@@ -123,8 +122,6 @@ class PytestPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=PYTEST_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[
                 "pytest.ini",
                 "pyproject.toml",

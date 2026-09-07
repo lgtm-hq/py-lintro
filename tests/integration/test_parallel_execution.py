@@ -309,7 +309,9 @@ def test_parallel_runs_multiple_tools_over_mixed_samples(
         tool_option_dict={},
         exclude=None,
         include_venv=False,
-        post_tools=set(),
+        # Production passes the run's selection, which is what resolves
+        # per-pattern format authority (#1742).
+        selected_tools={"ruff", "yamllint"},
         max_workers=4,
     )
 

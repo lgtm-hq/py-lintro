@@ -43,7 +43,6 @@ from lintro.utils.env import get_subprocess_env
 
 # Constants for Astro check configuration
 ASTRO_CHECK_DEFAULT_TIMEOUT: int = 120
-ASTRO_CHECK_DEFAULT_PRIORITY: int = 83  # After tsc (82)
 ASTRO_CHECK_FILE_PATTERNS: list[str] = ["*.astro"]
 _ASTRO_CONFIG_NAMES: tuple[str, ...] = (
     "astro.config.mjs",
@@ -88,8 +87,6 @@ class AstroCheckPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=ASTRO_CHECK_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(_ASTRO_CONFIG_NAMES),
             version_command=["astro", "--version"],
             min_version=get_min_version(ToolName.ASTRO_CHECK),

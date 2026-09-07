@@ -17,12 +17,6 @@ def test_execution_config_default_enabled_tools() -> None:
     assert_that(config.enabled_tools).is_empty()
 
 
-def test_execution_config_default_tool_order() -> None:
-    """ExecutionConfig uses priority tool order by default."""
-    config = ExecutionConfig()
-    assert_that(config.tool_order).is_equal_to("priority")
-
-
 def test_execution_config_default_fail_fast() -> None:
     """ExecutionConfig has fail_fast disabled by default."""
     config = ExecutionConfig()
@@ -46,18 +40,6 @@ def test_execution_config_set_enabled_tools() -> None:
     """ExecutionConfig accepts enabled_tools list."""
     config = ExecutionConfig(enabled_tools=["ruff", "black"])
     assert_that(config.enabled_tools).contains("ruff", "black")
-
-
-def test_execution_config_tool_order_alphabetical() -> None:
-    """ExecutionConfig accepts alphabetical tool order."""
-    config = ExecutionConfig(tool_order="alphabetical")
-    assert_that(config.tool_order).is_equal_to("alphabetical")
-
-
-def test_execution_config_tool_order_custom_list() -> None:
-    """ExecutionConfig accepts custom tool order list."""
-    config = ExecutionConfig(tool_order=["black", "ruff", "mypy"])
-    assert_that(config.tool_order).is_equal_to(["black", "ruff", "mypy"])
 
 
 def test_execution_config_set_fail_fast() -> None:

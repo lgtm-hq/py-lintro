@@ -12,12 +12,6 @@ from assertpy import assert_that
 from lintro.tools.pydoclint.definition import PydoclintPlugin
 
 
-def test_plugin_definition_has_empty_conflicts_with() -> None:
-    """Plugin definition has empty conflicts_with list."""
-    plugin = PydoclintPlugin()
-    assert_that(plugin.definition.conflicts_with).is_empty()
-
-
 def test_plugin_definition_native_configs() -> None:
     """Plugin definition specifies native config files."""
     plugin = PydoclintPlugin()

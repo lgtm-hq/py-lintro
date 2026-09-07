@@ -36,7 +36,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Gitleaks configuration
 GITLEAKS_DEFAULT_TIMEOUT: int = 60
-GITLEAKS_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 GITLEAKS_FILE_PATTERNS: list[str] = ["*"]  # Scans all files
 GITLEAKS_OUTPUT_FORMAT: str = "json"
 
@@ -74,8 +73,6 @@ class GitleaksPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=GITLEAKS_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".gitleaks.toml"],
             version_command=["gitleaks", "version"],
             min_version=get_min_version(ToolName.GITLEAKS),
@@ -324,8 +321,7 @@ class GitleaksPlugin(BaseToolPlugin):
                     name=self.definition.name,
                     success=False,
                     output=(
-                        "Gitleaks report file was empty; "
-                        "treating as a parse failure."
+                        "Gitleaks report file was empty; treating as a parse failure."
                     ),
                     issues_count=0,
                     parse_failures_count=1,

@@ -31,7 +31,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for shfmt configuration
 SHFMT_DEFAULT_TIMEOUT: int = 30
-SHFMT_DEFAULT_PRIORITY: int = 50
 SHFMT_FILE_PATTERNS: list[str] = ["*.sh", "*.bash", "*.ksh"]
 
 
@@ -67,8 +66,6 @@ class ShfmtPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=SHFMT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".editorconfig"],
             version_command=["shfmt", "--version"],
             min_version=get_min_version(ToolName.SHFMT),

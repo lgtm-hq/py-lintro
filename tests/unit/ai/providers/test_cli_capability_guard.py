@@ -669,5 +669,12 @@ async def test_note_unsupported_flag_short_circuits_the_help_gate() -> None:
     )
     transport.capabilities.note_unsupported_flag("--resume")
 
-    # No subprocess is patched: a cached answer must not reach a help probe.
-    assert_that(await transport.supports_flag("--resume")).is_false()
+    # The help text advertises --resume, so a probe that ran would answer
+    # true: only a short-circuit can make this false, and ``call_count``
+    # proves no probe was spawned at all.
+    help_text = "  --resume <id>  Resume a session\n"
+    with patch_cli_exec(return_value=_completed(stdout=help_text)) as mock_run:
+        supported = await transport.supports_flag("--resume")
+
+    assert_that(supported).is_false()
+    assert_that(mock_run.call_count).is_equal_to(0)

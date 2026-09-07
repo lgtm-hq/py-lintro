@@ -11,7 +11,6 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.tools.pylint.definition import (
-    PYLINT_DEFAULT_PRIORITY,
     PYLINT_DEFAULT_TIMEOUT,
     PylintPlugin,
 )
@@ -31,7 +30,6 @@ def test_definition_metadata(pylint_plugin: PylintPlugin) -> None:
     assert_that(definition.tool_type).is_equal_to(ToolType.LINTER)
     assert_that(definition.file_patterns).is_equal_to(["*.py", "*.pyi"])
     # Literal values, not the production constants, so a changed default is caught.
-    assert_that(definition.priority).is_equal_to(50)
     assert_that(definition.default_timeout).is_equal_to(900)
     assert_that(definition.default_options).is_equal_to(
         {"timeout": 900, "disable": None, "enable": None, "include": None},
@@ -63,7 +61,6 @@ def test_module_constants_match_the_definition(pylint_plugin: PylintPlugin) -> N
     """
     definition = pylint_plugin.definition
 
-    assert_that(PYLINT_DEFAULT_PRIORITY).is_equal_to(definition.priority)
     assert_that(PYLINT_DEFAULT_TIMEOUT).is_equal_to(definition.default_timeout)
 
 

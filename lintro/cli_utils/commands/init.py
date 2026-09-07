@@ -33,7 +33,6 @@ enforce:
 
 execution:
   enabled_tools: []
-  tool_order: priority
   fail_fast: false
 
 defaults:
@@ -74,7 +73,6 @@ defaults:
     ignore_missing_imports: true
 
 execution:
-  tool_order: priority
 
 tools:
   ruff:
@@ -172,7 +170,6 @@ def _generate_config(
         [
             "execution:",
             f"  enabled_tools: [{', '.join(sorted(tools))}]",
-            "  tool_order: priority",
             "  fail_fast: false",
             "",
             "tools:",
@@ -421,8 +418,7 @@ def init_command(
         # dropping the line entirely.
         detected_display = ", ".join(detected_langs) if detected_langs else "none"
         console.print(
-            f"  [dim]Detected: {detected_display} | "
-            f"Profile: {effective_profile}[/dim]",
+            f"  [dim]Detected: {detected_display} | Profile: {effective_profile}[/dim]",
         )
         console.print()
         console.print("  [bold]Recommended:[/bold]")

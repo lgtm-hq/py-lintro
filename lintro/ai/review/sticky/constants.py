@@ -81,13 +81,3 @@ _DETAILS_TAG_RE = re.compile(r"<(/?)(details|summary)\b", re.IGNORECASE)
 
 #: Maximum characters of a finding title rendered in a table cell.
 _TITLE_LIMIT = 160
-
-#: End of the first sentence of a round narrative. Terminators other than the
-#: period are matched too: a headline ending in "?" or "!" is one sentence, and
-#: splitting on ". " alone would persist the whole paragraph after it.
-_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
-
-#: Maximum characters of a stored per-round narrative, on the way in (it is
-#: persisted in the state blob, which competes for the same size cap) and on
-#: the way out.
-_NARRATIVE_LIMIT = 200

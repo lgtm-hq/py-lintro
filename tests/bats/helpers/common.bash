@@ -6,6 +6,7 @@ HELPERS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${HELPERS_DIR}/../../.." && pwd)"
 export PROJECT_ROOT
 export BUILD_SCRIPTS_DIR="${PROJECT_ROOT}/scripts/build"
+export NPM_SCRIPTS_DIR="${PROJECT_ROOT}/scripts/ci/npm"
 
 _load_bats_library() {
 	local name="$1"

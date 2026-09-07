@@ -16,6 +16,7 @@ from lintro.ai.review.github_review_body import (
 )
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.skipped_file import SkippedFile
 
@@ -74,7 +75,12 @@ def _prior_state(*, rounds: int, sha: str = "484f51caaa") -> ReviewState:
     """
     return ReviewState(
         runs=tuple(
-            RunRecord(round=index, sha=sha if index == rounds else f"old{index}")
+            RunRecord(
+                identity=RunIdentity(
+                    round=index,
+                    sha=sha if index == rounds else f"old{index}",
+                ),
+            )
             for index in range(1, rounds + 1)
         ),
     )
@@ -105,7 +111,7 @@ def test_header_states_resolved_delta_against_previous_round(
         head_sha="484f51caaa",
     )
     prior_state = ReviewState(
-        runs=(RunRecord(round=1, sha="484f51caaa"),),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="484f51caaa")),),
         findings=first.records,
     )
     trimmed = replace(
@@ -131,7 +137,7 @@ def test_header_reports_zero_resolved_rather_than_hiding_the_delta(
         head_sha="484f51caaa",
     )
     prior_state = ReviewState(
-        runs=(RunRecord(round=1, sha="484f51caaa"),),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="484f51caaa")),),
         findings=first.records,
     )
 
@@ -189,7 +195,7 @@ def test_prompt_panel_renders_when_older_findings_remain_open(
         head_sha="484f51caaa",
     )
     prior_state = ReviewState(
-        runs=(RunRecord(round=1, sha="484f51caaa"),),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="484f51caaa")),),
         findings=first.records,
     )
     # This round re-reports only the first finding; round 1's second finding
@@ -421,7 +427,7 @@ def test_commits_section_names_the_new_commit_count(
 
     assert_that(body).contains("<details><summary>📥 Commits</summary>")
     assert_that(body).contains(
-        "This round reviewed the 2 new commits since round 2, " "`484f51c` → `fb740b2`",
+        "This round reviewed the 2 new commits since round 2, `484f51c` → `fb740b2`",
     )
     assert_that(body).contains("full diff against `main`")
 

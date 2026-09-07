@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, TypeVar
 
@@ -77,7 +78,7 @@ def run_tools_parallel(
     tool_option_dict: dict[str, dict[str, object]],
     exclude: str | None,
     include_venv: bool,
-    post_tools: set[str],
+    selected_tools: set[str],
     max_workers: int,
     incremental: bool = False,
     auto_install: bool = False,
@@ -94,7 +95,8 @@ def run_tools_parallel(
         tool_option_dict: Parsed tool options from CLI.
         exclude: Exclude patterns.
         include_venv: Whether to include venv.
-        post_tools: Set of post-check tool names.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         max_workers: Maximum parallel workers.
         incremental: Whether to only check changed files.
         auto_install: Whether to auto-install Node.js deps if missing.
@@ -106,13 +108,12 @@ def run_tools_parallel(
     """
     from loguru import logger
 
-    from lintro.utils.async_tool_executor import (
-        AsyncToolExecutor,
-        get_parallel_batches,
-    )
+    from lintro.utils.async_tool_executor import AsyncToolExecutor
 
-    # Group tools into batches that can run in parallel
-    batches = get_parallel_batches(tools_to_run, tool_manager)
+    # Group tools into batches that can run in parallel. The batching lives on
+    # the tool manager because it reads the same derived DAG that orders a
+    # sequential run (#1742).
+    batches = tool_manager.get_parallel_batches(tools_to_run)
     logger.debug(f"Parallel execution batches: {batches}")
 
     all_results: list[ToolResult] = []
@@ -142,29 +143,67 @@ def run_tools_parallel(
                 tools_with_instances: list[tuple[str, BaseToolPlugin]] = []
 
                 for tool_name in batch:
-                    tool = tool_manager.get_tool(tool_name)
+                    # A tool that cannot be resolved or configured becomes a
+                    # failed result, exactly as it does in the sequential
+                    # path. Before #1742 post-check filtering usually left one
+                    # tool in the main list, so this branch ran sequentially
+                    # and an unresolvable tool never reached here; now every
+                    # selected tool stays in one list and this path is live.
+                    attempt_started = time.monotonic()
+                    try:
+                        tool = tool_manager.get_tool(tool_name)
 
-                    # Configure tool using shared helper. This returns a
-                    # private per-invocation copy so concurrent batch
-                    # execution never races on the shared singleton's options.
-                    tool = configure_tool_for_execution(
-                        tool=tool,
-                        tool_name=tool_name,
-                        config_manager=config_manager,
-                        tool_option_dict=tool_option_dict,
-                        exclude=exclude,
-                        include_venv=include_venv,
-                        incremental=incremental,
-                        action=action,
-                        post_tools=post_tools,
-                        auto_install=auto_install,
-                        diff_base=diff_base,
-                    )
+                        # Configure tool using shared helper. This returns a
+                        # private per-invocation copy so concurrent batch
+                        # execution never races on the shared singleton's
+                        # options.
+                        tool = configure_tool_for_execution(
+                            tool=tool,
+                            tool_name=tool_name,
+                            config_manager=config_manager,
+                            tool_option_dict=tool_option_dict,
+                            exclude=exclude,
+                            include_venv=include_venv,
+                            incremental=incremental,
+                            action=action,
+                            selected_tools=selected_tools,
+                            auto_install=auto_install,
+                            diff_base=diff_base,
+                        )
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        # Same telemetry the sequential path records: a
+                        # console line so the failure is visible, and a
+                        # duration so a crashed tool still appears in
+                        # ``--profile``. The line goes to stderr because this
+                        # function has no ``RunContext`` logger to ask about
+                        # the output format, and stdout may be carrying JSON
+                        # or SARIF.
+                        logger.exception(f"Error running {tool_name}")
+                        print(
+                            f"Error running {tool_name}: {exc}",
+                            file=sys.stderr,
+                        )
+                        all_results.append(
+                            ToolResult(
+                                name=tool_name,
+                                success=False,
+                                output=f"Failed to initialize tool: {exc}",
+                                issues_count=0,
+                                duration_seconds=time.monotonic() - attempt_started,
+                            ),
+                        )
+                        completed_count += 1
+                        progress.update(task, completed=completed_count)
+                        continue
 
                     tools_with_instances.append((tool_name, tool))
 
+                if not tools_with_instances:
+                    # Every tool in the batch failed to initialize.
+                    continue
+
                 # Update progress description for this batch
-                batch_names = ", ".join(batch)
+                batch_names = ", ".join(name for name, _ in tools_with_instances)
                 progress.update(
                     task,
                     description=f"Running: {batch_names}",

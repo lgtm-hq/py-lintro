@@ -22,8 +22,10 @@ from lintro.ai.integrations.github_pr import _error_message
 from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
-from lintro.ai.review.github import _post_inline_findings, post_review_to_github
+from lintro.ai.review.github import post_review_to_github
+from lintro.ai.review.github_inline import post_inline_findings
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
+from lintro.ai.review.models.inline_post_request import InlinePostRequest
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.output import (
@@ -312,12 +314,13 @@ def test_inline_post_result_carries_the_status_and_attempted_ids(
         response=GitHubApiResponse(status=403, message=_RATE_LIMIT_MESSAGE),
     )
 
-    outcome = _post_inline_findings(
+    outcome = post_inline_findings(
         reporter=reporter,
-        findings=list(sample_review_result.findings),
-        checklist_display=ChecklistDisplay.OFF,
-        question_map={},
-        finding_keys=("key-a", "key-b"),
+        request=InlinePostRequest(
+            findings=list(sample_review_result.findings),
+            checklist_display=ChecklistDisplay.OFF,
+            finding_keys=("key-a", "key-b"),
+        ),
     )
 
     assert_that(outcome.ok).is_false()

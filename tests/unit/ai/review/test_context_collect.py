@@ -105,9 +105,7 @@ def test_collect_review_context_path_filter_omits_preamble_when_no_matches(
     queue_diff_snapshot(
         dispatcher,
         diff_ref="base123...head456",
-        unified=(
-            "==> PR status\n\n" "diff --git a/a.py b/a.py\n" "+++ b/a.py\n" "+a\n"
-        ),
+        unified=("==> PR status\n\ndiff --git a/a.py b/a.py\n+++ b/a.py\n+a\n"),
         name_status="M\0a.py\0",
         numstat="1\t0\ta.py\0",
     )

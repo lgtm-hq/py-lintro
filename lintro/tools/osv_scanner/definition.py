@@ -42,7 +42,6 @@ from lintro.utils.path_filtering import resolve_exclude_anchors, should_exclude_
 
 # Constants
 OSV_SCANNER_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
-OSV_SCANNER_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 
 # Placeholder source path used by the parser when a result carries no source.
 # It is not a real filesystem path and must never be exclusion-matched.
@@ -89,8 +88,6 @@ class OsvScannerPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=OSV_SCANNER_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".osv-scanner.toml"],
             version_command=["osv-scanner", "--version"],
             min_version=get_min_version(ToolName.OSV_SCANNER),

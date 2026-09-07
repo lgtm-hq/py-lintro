@@ -55,15 +55,17 @@ scripts/
 
 Scripts for building standalone binaries and distribution packages.
 
-| Script                                | Purpose                                                                                                     | Usage                                                           |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_macos.py`                    |
-| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_linux.py`                    |
-| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                             | `uv run python scripts/generate-man-page.py`                    |
-| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing) | `uv run python scripts/generate-checklist-corpus-schema.py`     |
-| `verify_built_binary.sh`              | Verify a built binary responds to `--version` and `--help`                                                  | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`     |
-| `finalize_binary.sh`                  | Rename binary, ensure executable, compute SHA256, write the `sha256` step output                            | `./scripts/build/finalize_binary.sh <source> <target> [label]`  |
-| `create_universal.sh`                 | Combine arm64 and x86_64 macOS binaries into a universal fat binary with `lipo`                             | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>` |
+| Script                                | Purpose                                                                                                     | Usage                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_macos.py`                             |
+| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_linux.py`                             |
+| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                             | `uv run python scripts/generate-man-page.py`                             |
+| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing) | `uv run python scripts/generate-checklist-corpus-schema.py`              |
+| `verify_built_binary.sh`              | Verify a built binary responds to `--version` and `--help`                                                  | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`              |
+| `finalize_binary.sh`                  | Rename binary, ensure executable, compute SHA256, write the `sha256` step output                            | `./scripts/build/finalize_binary.sh <source> <target> [label]`           |
+| `create_universal.sh`                 | Combine arm64 and x86_64 macOS binaries into a universal fat binary with `lipo`                             | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>`          |
+| `reuse_release_asset.sh`              | Reuse a release asset whose SHA256 matches this run's checksum artifact instead of rebuilding (#2435)       | `./scripts/build/reuse_release_asset.sh <tag> <asset> <artifact> <dest>` |
+| `upload_release_asset.sh`             | Attach a binary to a release by upload-then-swap, never deleting the live asset first (#2435)               | `./scripts/build/upload_release_asset.sh <tag> <file> [asset-name]`      |
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 
@@ -78,6 +80,7 @@ packages and (dry-run) publish them. See the
 | `download_release_binaries.sh` | Download release binaries for staging                      | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`    |
 | `smoke_test.sh`                | Pack + install the meta-package and run `lintro --version` | `./scripts/ci/npm/smoke_test.sh`                                |
 | `publish_packages.sh`          | Publish npm packages (dry-run unless `LIVE=1`)             | `./scripts/ci/npm/publish_packages.sh`                          |
+| `assert_dispatch_allowed.sh`   | Allow a live publish only from the tag pipeline (#2247)    | `./scripts/ci/npm/assert_dispatch_allowed.sh`                   |
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 
@@ -175,6 +178,8 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `compute-new-manifest-tools.py`             | Diff tool names between an old and new manifest (added names)                                                                    | `python scripts/ci/compute-new-manifest-tools.py --help`                                                                   |
 | `generate-tool-versions.py`                 | Generate the gitignored `_generated_versions.py` and render `manifest.json` from `manifest.src.json` (shim over `lintro_build/`) | `python3 scripts/ci/generate-tool-versions.py [--check]`                                                                   |
 | `compile-semgrep-lock.sh`                   | Recompile hash-pinned `requirements-semgrep.txt` from the `.in` pin                                                              | `./scripts/ci/compile-semgrep-lock.sh`                                                                                     |
+| `check-semgrep-lock.sh`                     | Fail when the committed `requirements-semgrep.txt` drifted from the `.in` pin (docker-ci `semgrep-lock` gate)                    | `./scripts/ci/check-semgrep-lock.sh`                                                                                       |
+| `semgrep-lock-lib.sh`                       | Shared compile invocation sourced by the two semgrep lockfile scripts (library; running it prints help)                          | `source scripts/ci/semgrep-lock-lib.sh`                                                                                    |
 | `generate-builtin-tool-index.py`            | Generate the gitignored `lintro/plugins/_builtin_index.py` from the per-tool packages (shim over `lintro_build/`)                | `python3 scripts/ci/generate-builtin-tool-index.py [--check]`                                                              |
 | `smoke-test-binary.py`                      | Assert a built binary's tool registry is populated (`#2006`)                                                                     | `python scripts/ci/smoke-test-binary.py dist/nuitka/lintro`                                                                |
 | `stage-python-coverage-html.sh`             | Stage flat HTML coverage for GitHub Pages bundling                                                                               | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                                                                |
@@ -475,7 +480,27 @@ Installs the lockfile-pinned semgrep into an isolated venv and symlinks `semgrep
 ```bash
 ./scripts/utils/install-semgrep.sh --local
 ./scripts/utils/install-semgrep.sh --docker
+```
+
+#### `compile-semgrep-lock.sh` / `check-semgrep-lock.sh`
+
+`compile-semgrep-lock.sh` re-resolves `requirements-semgrep.txt` from the
+`requirements-semgrep.in` pin (hash-pinned, Python 3.11 floor). Run it by hand whenever
+the `.in` pin changes and commit the result — nothing regenerates it automatically, and
+the Mend-hosted Renovate app never executed the `postUpgradeTasks` that once claimed
+otherwise (#2436).
+
+`check-semgrep-lock.sh` is the CI enforcement: the `semgrep-lock` job in `docker-ci.yml`
+re-resolves into a temporary file through the same shared helper, diffs it against the
+committed lockfile ignoring uv's generated header comments, and fails with the diff plus
+the recompile command. The named check goes red and `publish` will not promote an image;
+the image build itself still reports, because it is a required check.
+
+**Usage:**
+
+```bash
 ./scripts/ci/compile-semgrep-lock.sh
+./scripts/ci/check-semgrep-lock.sh
 ```
 
 #### `install-tools.sh`

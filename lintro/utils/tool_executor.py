@@ -13,7 +13,6 @@ from lintro.enums.action import Action, normalize_action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
-from lintro.utils.config import load_post_checks_config
 from lintro.utils.execution.exit_codes import (
     DEFAULT_EXIT_CODE_FAILURE,
     DEFAULT_EXIT_CODE_SUCCESS,
@@ -50,8 +49,8 @@ from lintro.utils.execution.tool_configuration import (
     get_tool_display_name,
     get_tools_to_run,
 )
+from lintro.utils.gates import execute_gates
 from lintro.utils.output import OutputManager
-from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -167,7 +166,7 @@ def _execute_tools_parallel(
     tool_option_dict: dict[str, Any],
     exclude: str | None,
     include_venv: bool,
-    post_tools: set[str],
+    selected_tools: set[str],
     incremental: bool,
     effective_auto_install: bool,
     diff_base: str | None,
@@ -183,7 +182,8 @@ def _execute_tools_parallel(
         tool_option_dict: Parsed ``--tool-options`` mapping.
         exclude: Exclude patterns.
         include_venv: Whether to include virtual environment directories.
-        post_tools: Tools reserved for the post-check phase.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         incremental: Whether to only scan files changed since the last run.
         effective_auto_install: Resolved auto-install setting.
         diff_base: Resolved ``--diff`` base ref, or ``None``.
@@ -205,7 +205,7 @@ def _execute_tools_parallel(
         tool_option_dict=tool_option_dict,
         exclude=exclude,
         include_venv=include_venv,
-        post_tools=post_tools,
+        selected_tools=selected_tools,
         max_workers=ctx.lintro_config.execution.max_workers,
         incremental=incremental,
         auto_install=effective_auto_install,
@@ -218,8 +218,10 @@ def _execute_tools_parallel(
         try:
             tool = tool_manager.get_tool(result.name)
             _enrich_issues_with_doc_urls(tool, result)
-        except (KeyError, ValueError):
-            pass  # Tool not found — skip enrichment
+        except (KeyError, OSError, ValueError, RuntimeError):
+            # Unresolvable tool: the parallel dispatcher already recorded a
+            # failure result for it, so there is nothing to enrich.
+            continue
 
     # Dry-run: restrict each result to would-fix issues before totals and
     # display so non-auto-fixable diagnostics don't inflate the count.
@@ -247,7 +249,7 @@ def _execute_tools_sequential(
     tool_option_dict: dict[str, Any],
     exclude: str | None,
     include_venv: bool,
-    post_tools: set[str],
+    selected_tools: set[str],
     incremental: bool,
     effective_auto_install: bool,
     diff_base: str | None,
@@ -263,7 +265,8 @@ def _execute_tools_sequential(
         tool_option_dict: Parsed ``--tool-options`` mapping.
         exclude: Exclude patterns.
         include_venv: Whether to include virtual environment directories.
-        post_tools: Tools reserved for the post-check phase.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         incremental: Whether to only scan files changed since the last run.
         effective_auto_install: Resolved auto-install setting.
         diff_base: Resolved ``--diff`` base ref, or ``None``.
@@ -302,7 +305,7 @@ def _execute_tools_sequential(
                 include_venv=include_venv,
                 incremental=incremental,
                 action=ctx.action,
-                post_tools=post_tools,
+                selected_tools=selected_tools,
                 auto_install=effective_auto_install,
                 lintro_config=ctx.lintro_config,
                 diff_base=diff_base,
@@ -380,7 +383,7 @@ def execute_run(
     incremental: bool = False,
     auto_install: bool = False,
     yes: bool = False,
-    run_post_checks: bool = True,
+    run_gates: bool = True,
     ignore_conflicts: bool = False,
     diff_base: str | None = None,
     ai_status_lines: list[str] | None = None,
@@ -401,7 +404,7 @@ def execute_run(
         tool_options: Additional tool options.
         exclude: Patterns to exclude.
         include_venv: Whether to include virtual environments.
-        group_by: How to group results (used by post-checks).
+        group_by: How to group results.
         output_format: Output format for results.
         verbose: Whether to enable verbose output.
         raw_output: Whether to show raw tool output instead of formatted output.
@@ -409,7 +412,8 @@ def execute_run(
         auto_install: Whether to auto-install Node.js deps if node_modules is
             missing.
         yes: Skip confirmation prompt and proceed immediately.
-        run_post_checks: Whether configured post-check tools may run.
+        run_gates: Whether the run-level gates (module size, duplicate
+            code) may run.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL`
@@ -473,7 +477,6 @@ def execute_run(
             total_issues=0,
             total_fixed=0,
             total_remaining=0,
-            main_phase_empty_due_to_filter=False,
         )
 
     if not tools_to_run and skipped_tools:
@@ -481,30 +484,6 @@ def execute_run(
             skipped_tools=skipped_tools,
             output_format=output_format,
             logger=logger,
-        )
-
-    # Load post-checks config early to exclude those tools from main phase
-    post_cfg_early = load_post_checks_config() if run_post_checks else {}
-    post_enabled_early = bool(post_cfg_early.get("enabled", False))
-    post_tools_early: set[str] = (
-        {t.lower() for t in (post_cfg_early.get("tools", []) or [])}
-        if post_enabled_early
-        else set()
-    )
-
-    # Filter out post-check tools from main phase
-    if post_tools_early:
-        tools_to_run = [t for t in tools_to_run if t.lower() not in post_tools_early]
-
-    # If early post-check filtering removed all tools from the main phase,
-    # that's okay - post-checks will still run. Track this state so we can
-    # return failure if post-checks don't run either.
-    main_phase_empty_due_to_filter = bool(not tools_to_run and post_tools_early)
-    if main_phase_empty_due_to_filter:
-        logger.console_output(
-            text=(
-                "All selected tools are configured as post-checks - skipping main phase"
-            ),
         )
 
     # Print main header with output directory information
@@ -591,7 +570,7 @@ def execute_run(
         tool_option_dict=tool_option_dict,
         exclude=exclude,
         include_venv=include_venv,
-        post_tools=post_tools_early,
+        selected_tools=set(tools_to_run),
         incremental=incremental,
         effective_auto_install=effective_auto_install,
         diff_base=resolved_diff_base,
@@ -620,27 +599,20 @@ def execute_run(
             ),
         )
 
-    # Execute post-checks if configured
-    if run_post_checks:
-        total_issues, total_fixed, total_remaining = execute_post_checks(
+    # Run the run-level gates (module size, duplicate code) over the results.
+    if run_gates:
+        total_issues = execute_gates(
             action=ctx.action,
             paths=paths,
             exclude=exclude,
             include_venv=include_venv,
-            group_by=group_by,
             output_format=output_format,
-            verbose=verbose,
-            raw_output=raw_output,
             logger=logger,
             all_results=all_results,
             total_issues=total_issues,
-            total_fixed=total_fixed,
-            total_remaining=total_remaining,
-            diff_base=resolved_diff_base,
-            tool_option_dict=tool_option_dict,
         )
 
-    # Dry-run: post-checks may append additional check-mode results. Restrict
+    # Dry-run: a gate may append an additional check-mode result. Restrict
     # every result to its would-fix subset and re-derive the totals so the
     # summary and exit code count only auto-fixable issues.
     if ctx.dry_run_preview:
@@ -659,7 +631,6 @@ def execute_run(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
-        main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
     )
 
 
@@ -682,7 +653,7 @@ def run_lint_tools_simple(
     no_log: bool = False,
     auto_install: bool = False,
     yes: bool = False,
-    run_post_checks: bool = True,
+    run_gates: bool = True,
     ai_fix: bool = False,
     ignore_conflicts: bool = False,
     transport: str | None = None,
@@ -713,7 +684,8 @@ def run_lint_tools_simple(
         no_log: Whether to disable file logging (not yet implemented).
         auto_install: Whether to auto-install Node.js deps if node_modules missing.
         yes: Skip confirmation prompt and proceed immediately.
-        run_post_checks: Whether configured post-check tools may run.
+        run_gates: Whether the run-level gates (module size, duplicate
+            code) may run.
         ai_fix: Accepted for signature compatibility; this wrapper runs no AI.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Accepted for signature compatibility; this wrapper runs no AI.
@@ -773,7 +745,7 @@ def run_lint_tools_simple(
             incremental=incremental,
             auto_install=auto_install,
             yes=yes,
-            run_post_checks=run_post_checks,
+            run_gates=run_gates,
             ignore_conflicts=ignore_conflicts,
             diff_base=diff_base,
             on_tool_result=result_display,

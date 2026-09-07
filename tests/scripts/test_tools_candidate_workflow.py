@@ -304,12 +304,10 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     assert "action" in resolve["outputs"]
     trigger = _trigger(workflow)
     assert promote["if"] == (
-        "needs.resolve.outputs.action == 'promote' && "
-        "github.ref == 'refs/heads/main'"
+        "needs.resolve.outputs.action == 'promote' && github.ref == 'refs/heads/main'"
     )
     assert fallback["if"] == (
-        "needs.resolve.outputs.action == 'publish' && "
-        "github.ref == 'refs/heads/main'"
+        "needs.resolve.outputs.action == 'publish' && github.ref == 'refs/heads/main'"
     )
     assert "reusable-docker.yml@" in fallback["uses"]
     assert resolve["permissions"]["packages"] == "read"

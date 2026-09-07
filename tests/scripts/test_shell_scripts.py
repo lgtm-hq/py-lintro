@@ -514,37 +514,29 @@ def test_renovate_regex_manager_current_value() -> None:
     assert_that(content).contains("currentValue")
 
 
-def test_renovate_has_no_version_artifact_regen_wiring() -> None:
-    """Renovate never runs the version-artifact generator (#2180).
+def test_renovate_runs_no_post_upgrade_commands() -> None:
+    """Renovate never runs repository commands (#2180, #2436).
 
-    The derived artifacts are generated at package build time; a bump PR is
-    complete on its own. Only the semgrep lock recompilation remains as a
-    postUpgradeTask. Regression guard: the Mend-hosted app never executed
-    custom commands anyway, so any reintroduced regen wiring would be a
+    Version artifacts are generated at package build time, and the isolated
+    semgrep lockfile is recompiled by a human or agent with
+    ``scripts/ci/compile-semgrep-lock.sh`` and enforced by the docker-ci
+    ``semgrep-lock`` gate. The Mend-hosted app executes neither
+    ``postUpgradeTasks`` nor ``allowedCommands`` (a self-hosted-only global
+    option that raised a permanent config warning), so any such wiring is a
     silent no-op that masks drift.
     """
     config_path = Path("renovate.json")
     content = config_path.read_text()
     assert_that(content).does_not_contain("generate-tool-versions")
     assert_that(content).does_not_contain("generate-builtin-tool-index")
+    assert_that(content).does_not_contain("postUpgradeTasks")
+    assert_that(content).does_not_contain("allowedCommands")
 
     config = json.loads(content)
-    assert_that(config.get("allowedCommands")).is_equal_to(
-        ["scripts/ci/compile-semgrep-lock.sh"],
-    )
-
-    task_rules = [
-        rule for rule in config.get("packageRules", []) if "postUpgradeTasks" in rule
-    ]
-    assert_that(task_rules).is_not_empty()
-    for rule in task_rules:
-        tasks = rule["postUpgradeTasks"]
-        assert_that(tasks.get("commands")).is_equal_to(
-            ["scripts/ci/compile-semgrep-lock.sh"],
-        )
-        assert_that(tasks.get("fileFilters")).is_equal_to(
-            ["requirements-semgrep.txt"],
-        )
+    assert_that(config).does_not_contain_key("allowedCommands")
+    assert_that(
+        [rule for rule in config.get("packageRules", []) if "postUpgradeTasks" in rule],
+    ).is_empty()
 
     disabled = [
         rule
@@ -553,6 +545,31 @@ def test_renovate_has_no_version_artifact_regen_wiring() -> None:
         and "requirements-semgrep.txt" in rule.get("matchFileNames", [])
     ]
     assert_that(disabled).is_not_empty()
+
+
+def test_semgrep_lock_scripts_share_one_compile_invocation() -> None:
+    """The drift gate and the recompile script cannot diverge (#2436).
+
+    Both go through ``semgrep_lock_compile`` in the shared library, so the
+    gate always checks exactly the command it tells contributors to run.
+    """
+    library = Path("scripts/ci/semgrep-lock-lib.sh").read_text()
+    assert_that(library).contains("uv pip compile")
+    assert_that(library).contains("--generate-hashes")
+
+    for script_name in ("compile-semgrep-lock.sh", "check-semgrep-lock.sh"):
+        script = Path("scripts/ci") / script_name
+        content = script.read_text()
+        assert_that(content).contains("semgrep-lock-lib.sh")
+        assert_that(content).contains("semgrep_lock_compile")
+        assert_that(content).does_not_contain("uv pip compile")
+
+
+def test_semgrep_lock_gate_names_the_recompile_command() -> None:
+    """A drifted lockfile prints the one command that fixes it (#2436)."""
+    content = Path("scripts/ci/check-semgrep-lock.sh").read_text()
+    assert_that(content).contains("Run: scripts/ci/compile-semgrep-lock.sh")
+    assert_that(content).contains("semgrep_lock_strip_header")
 
 
 def test_local_lintro_prepends_local_bin_without_install_flag() -> None:

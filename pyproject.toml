@@ -8,7 +8,7 @@ backend-path = ["."]
 
 [project]
 name = "lintro"
-version = "0.148.0"
+version = "0.151.2"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -258,8 +258,6 @@ max-statements = 50
 "lintro/ai/review/chunker/shell_run_parse.py" = ["C901", "PLR0912"]
 "lintro/ai/review/context/pr_metadata.py" = ["PLR0912"]
 "lintro/ai/review/finding_matcher.py" = ["PLR0915"]
-"lintro/ai/review/github_lifecycle.py" = ["PLR0913"]
-"lintro/ai/review/github.py" = ["PLR0913"]
 "lintro/ai/review/models/finding_record.py" = ["C901", "PLR0912"]
 "lintro/ai/summary.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
 "lintro/api/core.py" = ["PLR0913"]
@@ -334,7 +332,6 @@ max-statements = 50
 "lintro/utils/output/file_writer.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/utils/output/sarif/document.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/utils/path_filtering.py" = ["C901", "PLR0912"]
-"lintro/utils/post_checks.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
 "lintro/utils/project_detection.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/utils/result_formatters.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
 "lintro/utils/summary_tables.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
@@ -378,12 +375,6 @@ skips = [
 
 [tool.lintro]
 line_length = 88
-tool_order = "priority"
-
-[tool.lintro.post_checks]
-enabled = true
-tools = ["black"]
-enforce_failure = true
 
 # Warn-level module-size gate (issue #1052). Guards against the recurring
 # oversized-module pattern. Non-blocking today: existing violators are
@@ -433,6 +424,7 @@ include = [
   "lintro/tools/cargo_deny",
   "lintro/tools/clippy",
   "lintro/tools/commitlint",
+  "lintro/tools/cppcheck",
   "lintro/tools/dotenv_linter",
   "lintro/tools/gitleaks",
   "lintro/tools/golangci_lint",
@@ -728,6 +720,9 @@ ignore_imports = [
   "lintro.tools.commitlint.definition -> lintro.plugins.base",                      # owned by #2410
   "lintro.tools.commitlint.definition -> lintro.plugins.protocol",                  # owned by #2410
   "lintro.tools.commitlint.definition -> lintro.plugins.registry",                  # owned by #2410
+  "lintro.tools.cppcheck.definition -> lintro.plugins.base",                        # owned by #2410
+  "lintro.tools.cppcheck.definition -> lintro.plugins.protocol",                    # owned by #2410
+  "lintro.tools.cppcheck.definition -> lintro.plugins.registry",                    # owned by #2410
   "lintro.tools.core.batch_runner -> lintro.plugins.base",                          # owned by #2410
   "lintro.tools.core.check_runner -> lintro.plugins.base",                          # owned by #2410
   "lintro.tools.core.check_runner -> lintro.plugins.file_processor",                # owned by #2410
@@ -898,8 +893,6 @@ ignore_imports = [
   "lintro.utils.output.parser_registration -> lintro.parsers.yamllint.yamllint_parser",         # owned by #2312
   "lintro.utils.output.sarif.bridge -> lintro.parsers.base_issue",                              # owned by #2312
   "lintro.utils.output.sarif.document -> lintro.ai.models",                                     # owned by #2312
-  "lintro.utils.post_checks -> lintro.plugins.registry",                                        # owned by #2312
-  "lintro.utils.post_checks -> lintro.tools",                                                   # owned by #2312
   "lintro.utils.tool_executor -> lintro.config.config_loader",                                  # owned by #2312
   "lintro.utils.tool_executor -> lintro.tools",                                                 # owned by #2312
   # 11 edges owned by #2331

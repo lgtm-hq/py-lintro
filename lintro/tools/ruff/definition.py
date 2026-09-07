@@ -34,7 +34,6 @@ from lintro.utils.path_utils import load_lintro_ignore
 
 # Constants for Ruff configuration
 RUFF_DEFAULT_TIMEOUT: int = 30
-RUFF_DEFAULT_PRIORITY: int = 85
 RUFF_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 RUFF_OUTPUT_FORMAT: str = "json"
 RUFF_TEST_MODE_ENV: str = "LINTRO_TEST_MODE"
@@ -76,8 +75,6 @@ class RuffPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=RUFF_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["pyproject.toml", "ruff.toml", ".ruff.toml"],
             version_command=["ruff", "--version"],
             min_version="0.14.0",

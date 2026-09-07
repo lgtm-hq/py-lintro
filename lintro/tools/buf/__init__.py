@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.buf.definition import (
-    BUF_DEFAULT_PRIORITY,
     BUF_DEFAULT_TIMEOUT,
     BUF_FILE_PATTERNS,
     BufPlugin,
 )
 
 __all__ = [
-    "BUF_DEFAULT_PRIORITY",
     "BUF_DEFAULT_TIMEOUT",
     "BUF_FILE_PATTERNS",
     "BufPlugin",

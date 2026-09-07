@@ -47,18 +47,6 @@ def standard_patches(mock_tool_config_summary: dict[str, Any]) -> tuple[Any, ...
             return_value=88,
         ),
         patch(
-            "lintro.utils.config_reporting.get_tool_order_config",
-            return_value={"strategy": "priority"},
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_ordered_tools",
-            return_value=["ruff"],
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_tool_priority",
-            return_value=100,
-        ),
-        patch(
             "lintro.utils.config_reporting.validate_config_consistency",
             return_value=[],
         ),
@@ -78,9 +66,6 @@ def test_report_contains_header(standard_patches: tuple[Any, ...]) -> None:
         standard_patches[0],
         standard_patches[1],
         standard_patches[2],
-        standard_patches[3],
-        standard_patches[4],
-        standard_patches[5],
     ):
         report = get_config_report()
 
@@ -98,37 +83,12 @@ def test_report_contains_global_settings(standard_patches: tuple[Any, ...]) -> N
         standard_patches[0],
         standard_patches[1],
         standard_patches[2],
-        standard_patches[3],
-        standard_patches[4],
-        standard_patches[5],
     ):
         report = get_config_report()
 
         assert_that(report).contains("── Global Settings ──")
         assert_that(report).contains("Central line_length: 88")
-        assert_that(report).contains("Tool order strategy: priority")
-
-
-def test_report_contains_tool_execution_order(
-    standard_patches: tuple[Any, ...],
-) -> None:
-    """Test report contains tool execution order section.
-
-    Args:
-        standard_patches: Standard patches for testing.
-    """
-    with (
-        standard_patches[0],
-        standard_patches[1],
-        standard_patches[2],
-        standard_patches[3],
-        standard_patches[4],
-        standard_patches[5],
-    ):
-        report = get_config_report()
-
-        assert_that(report).contains("── Tool Execution Order ──")
-        assert_that(report).contains("1. ruff (priority: 100)")
+        assert_that(report).contains("Tool order: derived from tool claims")
 
 
 def test_report_contains_per_tool_config(standard_patches: tuple[Any, ...]) -> None:
@@ -141,9 +101,6 @@ def test_report_contains_per_tool_config(standard_patches: tuple[Any, ...]) -> N
         standard_patches[0],
         standard_patches[1],
         standard_patches[2],
-        standard_patches[3],
-        standard_patches[4],
-        standard_patches[5],
     ):
         report = get_config_report()
 
@@ -171,18 +128,6 @@ def test_report_shows_native_only_for_non_injectable() -> None:
             return_value=88,
         ),
         patch(
-            "lintro.utils.config_reporting.get_tool_order_config",
-            return_value={"strategy": "priority"},
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_ordered_tools",
-            return_value=["prettier"],
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_tool_priority",
-            return_value=50,
-        ),
-        patch(
             "lintro.utils.config_reporting.validate_config_consistency",
             return_value=[],
         ),
@@ -202,9 +147,6 @@ def test_report_shows_warnings(standard_patches: tuple[Any, ...]) -> None:
     with (
         standard_patches[0],
         standard_patches[1],
-        standard_patches[2],
-        standard_patches[3],
-        standard_patches[4],
         patch(
             "lintro.utils.config_reporting.validate_config_consistency",
             return_value=warnings,
@@ -227,48 +169,9 @@ def test_report_shows_no_warnings_message(standard_patches: tuple[Any, ...]) -> 
         standard_patches[0],
         standard_patches[1],
         standard_patches[2],
-        standard_patches[3],
-        standard_patches[4],
-        standard_patches[5],
     ):
         report = get_config_report()
         assert_that(report).contains("None - all configs consistent!")
-
-
-def test_report_with_custom_order(mock_tool_config_summary: dict[str, Any]) -> None:
-    """Test report shows custom order when configured.
-
-    Args:
-        mock_tool_config_summary: Mock tool config summary.
-    """
-    with (
-        patch(
-            "lintro.utils.unified_config.get_tool_config_summary",
-            return_value=mock_tool_config_summary,
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_effective_line_length",
-            return_value=88,
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_tool_order_config",
-            return_value={"strategy": "custom", "custom_order": ["ruff", "mypy"]},
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_ordered_tools",
-            return_value=["ruff"],
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_tool_priority",
-            return_value=100,
-        ),
-        patch(
-            "lintro.utils.config_reporting.validate_config_consistency",
-            return_value=[],
-        ),
-    ):
-        report = get_config_report()
-        assert_that(report).contains("Custom order: ruff, mypy")
 
 
 def test_report_line_length_not_configured(
@@ -287,18 +190,6 @@ def test_report_line_length_not_configured(
         patch(
             "lintro.utils.config_reporting.get_effective_line_length",
             return_value=None,
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_tool_order_config",
-            return_value={"strategy": "priority"},
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_ordered_tools",
-            return_value=["ruff"],
-        ),
-        patch(
-            "lintro.utils.config_reporting.get_tool_priority",
-            return_value=100,
         ),
         patch(
             "lintro.utils.config_reporting.validate_config_consistency",

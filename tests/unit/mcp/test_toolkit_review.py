@@ -498,6 +498,49 @@ def test_review_returns_findings_and_run_metadata(
     assert_that(payload["budget"]["exceeded"]).is_false()
 
 
+def test_review_labels_the_transcript_with_its_own_command(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP call site names the verb the transcript file is written under.
+
+    ``get_provider`` defaults ``transcript_command`` to ``None``, so dropping
+    the kwarg here would silently rename every MCP transcript. Asserting the
+    label inside :mod:`lintro.ai.transcript` cannot catch that; only the call
+    site can.
+
+    Args:
+        repo: Temporary workspace with a reviewable diff.
+        stub_ai: Installs the stubbed orchestrator.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.ai.providers as providers
+
+    stub_ai()
+    provider_kwargs: list[dict[str, Any]] = []
+
+    def _record(config: Any, **kwargs: Any) -> Any:
+        """Record the provider construction kwargs and return the fake.
+
+        Args:
+            config: AI config the toolkit passes positionally.
+            **kwargs: Keyword arguments under test.
+
+        Returns:
+            Any: The fake provider the stub would have returned.
+        """
+        provider_kwargs.append(kwargs)
+        return _FakeProvider()
+
+    monkeypatch.setattr(providers, "get_provider", _record)
+
+    result, _payload_body = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.is_error).is_false()
+    assert_that(provider_kwargs[0]).contains_entry({"transcript_command": "review"})
+
+
 def test_review_passes_depth_and_strictness_through(
     repo: Path,
     stub_ai: Callable[..., list[Any]],

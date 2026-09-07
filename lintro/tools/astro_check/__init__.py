@@ -7,7 +7,6 @@ through that module (#2311).
 """
 
 from lintro.tools.astro_check.definition import (
-    ASTRO_CHECK_DEFAULT_PRIORITY,
     ASTRO_CHECK_DEFAULT_TIMEOUT,
     ASTRO_CHECK_FILE_PATTERNS,
     ASTRO_CHECK_OPTION_TYPES,
@@ -15,7 +14,6 @@ from lintro.tools.astro_check.definition import (
 )
 
 __all__ = [
-    "ASTRO_CHECK_DEFAULT_PRIORITY",
     "ASTRO_CHECK_DEFAULT_TIMEOUT",
     "ASTRO_CHECK_FILE_PATTERNS",
     "ASTRO_CHECK_OPTION_TYPES",

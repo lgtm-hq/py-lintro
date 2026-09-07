@@ -391,6 +391,58 @@ def test_auth_failure_is_not_retried(tmp_path: Path) -> None:
     assert_that(log).does_not_contain("lintro")
 
 
+def test_publish_e404_is_not_retried(tmp_path: Path) -> None:
+    """A publish E404 is an auth failure, not a missing resource (issue #2247).
+
+    npm reports "you are not allowed to publish here" as a 404, which is what
+    an unauthenticated trusted-publishing fallback produces. Retrying it burns
+    every attempt on a permanent condition, so it must fail on the first try
+    like any other auth rejection.
+    """
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "darwin-arm64" ]]; then\n'
+        '  echo "npm error code E404" >&2\n'
+        "  echo \"npm error 404 '@lgtm-hq/lintro-darwin-arm64@9.9.9' could not "
+        'be found or you do not have permission to access it." >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        "exit 0"
+    )
+    result = _run(tmp_path, npm_body=npm_body)
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).contains("non-retryable auth/validation error")
+    # Exactly one attempt: the retry loop must not treat the 404 as transient.
+    log = _publish_log(result)
+    darwin_attempts = [
+        line for line in log.strip().splitlines() if "darwin-arm64" in line
+    ]
+    assert_that(darwin_attempts).is_length(1)
+    # The run aborts at the first hard failure: later packages never publish.
+    assert_that(log).does_not_contain("linux-x64")
+    assert_that(log).does_not_contain("lintro")
+
+
+def test_view_e404_still_means_version_absent(tmp_path: Path) -> None:
+    """The ``npm view`` pre-check keeps reading E404 as "not published yet".
+
+    Publish-side E404 became fatal in #2247; the existence check must be
+    unaffected, or every release would warn about an unverifiable lookup and
+    lose the idempotency skip.
+    """
+    view_body = (
+        'echo "npm error code E404" >&2\n'
+        'echo "npm error 404 Not Found" >&2\n'
+        "exit 1"
+    )
+    result = _run(tmp_path, npm_body="exit 0", view_body=view_body)
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).does_not_contain("could not verify")
+    # All five packages publish: nothing was skipped or aborted.
+    assert_that(_publish_log(result).strip().splitlines()).is_length(5)
+
+
 def test_auth_error_mentioning_sigstore_is_not_retried(tmp_path: Path) -> None:
     """An auth failure is a hard fail even if it names a Sigstore component.
 
@@ -465,6 +517,13 @@ def test_unknown_error_is_not_retried(tmp_path: Path) -> None:
     ("stderr_line", "expected_marker"),
     [
         ("npm error code E401", "non-retryable auth/validation error"),
+        # npm masks an unauthorized publish as a 404 (issue #2247).
+        ("npm error code E404", "non-retryable auth/validation error"),
+        (
+            "npm error 404 '@lgtm-hq/lintro-darwin-arm64@9.9.9' could not be "
+            "found or you do not have permission to access it.",
+            "non-retryable",
+        ),
         ("npm error 403 Forbidden - PUT registry", "non-retryable"),
         ("npm error code ENEEDAUTH", "non-retryable"),
         ("npm error permission denied", "non-retryable"),

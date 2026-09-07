@@ -29,7 +29,6 @@ from lintro.plugins.registry import register_tool
 
 # Constants for cargo-audit configuration
 CARGO_AUDIT_DEFAULT_TIMEOUT: int = 120  # Network operations can be slow
-CARGO_AUDIT_DEFAULT_PRIORITY: int = 95  # Security scans run late
 CARGO_AUDIT_FILE_PATTERNS: list[str] = ["Cargo.lock"]
 
 
@@ -86,8 +85,6 @@ class CargoAuditPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=CARGO_AUDIT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".cargo/audit.toml"],
             version_command=["cargo", "audit", "--version"],
             min_version=get_min_version(ToolName.CARGO_AUDIT),

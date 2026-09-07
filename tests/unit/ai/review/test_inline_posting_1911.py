@@ -20,7 +20,7 @@ from lintro.ai.review.github_constants import STICKY_MARKER
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.suggested_change import SuggestedChange
-from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.review_state_codec import leftover_state_block
 from lintro.ai.review.sticky import advance_review_state
 
 _TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
@@ -52,7 +52,7 @@ def _prior_sticky(*, result: ReviewResult, head_sha: str) -> str:
     state = advance_review_state(
         request=StickyRequest(result=result, head_sha=head_sha),
     )
-    return STICKY_MARKER + legacy_state_block(state=state)
+    return STICKY_MARKER + leftover_state_block(state=state)
 
 
 def _with_change(

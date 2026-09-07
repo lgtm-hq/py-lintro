@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.mypy.definition import (
     MYPY_DEFAULT_EXCLUDE_PATTERNS,
-    MYPY_DEFAULT_PRIORITY,
     MYPY_DEFAULT_TIMEOUT,
     MYPY_FILE_PATTERNS,
     MYPY_NO_FILES_MARKER,
@@ -18,7 +17,6 @@ from lintro.tools.mypy.definition import (
 
 __all__ = [
     "MYPY_DEFAULT_EXCLUDE_PATTERNS",
-    "MYPY_DEFAULT_PRIORITY",
     "MYPY_DEFAULT_TIMEOUT",
     "MYPY_FILE_PATTERNS",
     "MYPY_NO_FILES_MARKER",

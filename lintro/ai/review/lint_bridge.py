@@ -52,6 +52,11 @@ def run_lint_on_changed_files(
 
     config_manager = UnifiedConfigManager()
     results: list[ToolResult] = []
+    # Every tool this bridge is about to run. Format authority is resolved
+    # from the run's selection (#1742), so passing the real set keeps the
+    # bridge's ruff/black split identical to `lintro chk`; an empty set would
+    # leave ruff's format_check on and duplicate black's findings.
+    selected_tools = set(selection.to_run)
 
     for tool_name in selection.to_run:
         try:
@@ -69,7 +74,7 @@ def run_lint_on_changed_files(
                 include_venv=False,
                 incremental=False,
                 action=Action.CHECK,
-                post_tools=set(),
+                selected_tools=selected_tools,
                 auto_install=False,
                 lintro_config=lintro_config,
             )

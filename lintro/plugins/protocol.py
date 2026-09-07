@@ -115,8 +115,6 @@ class ToolDefinition:
             to a subset without changing its verdict. False for project-scoped
             tools whose analysis spans the whole graph (mypy, pylint,
             import-linter, type checkers, dependency audits).
-        priority: Execution priority (lower = runs first). Default is 50.
-        conflicts_with: Names of tools that conflict with this one.
         native_configs: Config files the tool respects natively
             (Lintro won't interfere).
         version_command: Command to check tool version
@@ -145,10 +143,6 @@ class ToolDefinition:
     reads_tree: bool = True
     partitionable: bool = False
 
-    # Execution
-    priority: int = 50
-    conflicts_with: list[str] = field(default_factory=list)
-
     # Native config files this tool respects (Lintro should NOT interfere)
     native_configs: list[str] = field(default_factory=list)
 
@@ -164,12 +158,10 @@ class ToolDefinition:
         """Validate tool definition.
 
         Raises:
-            ValueError: If name is empty or priority is negative.
+            ValueError: If name is empty.
         """
         if not self.name:
             raise ValueError("Tool name cannot be empty")
-        if self.priority < 0:
-            raise ValueError(f"Tool priority must be non-negative, got {self.priority}")
 
     @property
     def is_advisory(self) -> bool:

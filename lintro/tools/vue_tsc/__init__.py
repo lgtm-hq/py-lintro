@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.vue_tsc.definition import (
-    VUE_TSC_DEFAULT_PRIORITY,
     VUE_TSC_DEFAULT_TIMEOUT,
     VUE_TSC_FILE_PATTERNS,
     VueTscPlugin,
 )
 
 __all__ = [
-    "VUE_TSC_DEFAULT_PRIORITY",
     "VUE_TSC_DEFAULT_TIMEOUT",
     "VUE_TSC_FILE_PATTERNS",
     "VueTscPlugin",

@@ -86,7 +86,9 @@ lintro check src/ --tools astro-check --auto-install
 
 ## Priority and Conflicts
 
-- **Priority:** 83 (runs after tsc, same priority as svelte-check and vue-tsc)
+- **Order:** derived from claims; holds `CHECK` on `*.astro`, so it runs after
+  prettier's `FORMAT` on that pattern and after any `*` claimant in an earlier phase.
+  Python and JS/TS mutators claim different patterns and derive no edge here
 - **Tool Type:** LINTER | TYPE_CHECKER
 - **Conflicts:** None
 - **Complements:** oxlint, oxfmt, prettier (formatting/linting)

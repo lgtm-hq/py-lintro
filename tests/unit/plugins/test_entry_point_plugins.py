@@ -305,7 +305,7 @@ def test_list_tools_shows_origin_for_builtin_and_external() -> None:
 
     buffer = io.StringIO()
     with redirect_stdout(buffer):
-        list_tools(output=None, show_conflicts=False, json_output=True)
+        list_tools(output=None, json_output=True)
     data = json.loads(buffer.getvalue())
 
     assert_that(data["ruff"]["origin"]).is_equal_to("builtin")

@@ -157,7 +157,7 @@ def validate_review_context_diff(*, context: ReviewContext) -> None:
     ]
     if missing:
         raise ReviewContextError(
-            "Changed files missing diff sections: " f"{', '.join(missing)}.",
+            f"Changed files missing diff sections: {', '.join(missing)}.",
             code=ReviewContextErrorCode.DIFF_DESYNC,
         )
 
@@ -165,7 +165,7 @@ def validate_review_context_diff(*, context: ReviewContext) -> None:
     extra = [path for path in per_file_diffs if path not in changed_paths]
     if extra:
         raise ReviewContextError(
-            "Diff sections missing changed-file metadata: " f"{', '.join(extra)}.",
+            f"Diff sections missing changed-file metadata: {', '.join(extra)}.",
             code=ReviewContextErrorCode.DIFF_DESYNC,
         )
 

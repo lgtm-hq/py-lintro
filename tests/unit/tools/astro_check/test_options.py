@@ -10,7 +10,6 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.tools.astro_check.definition import (
-    ASTRO_CHECK_DEFAULT_PRIORITY,
     ASTRO_CHECK_DEFAULT_TIMEOUT,
     ASTRO_CHECK_FILE_PATTERNS,
     AstroCheckPlugin,
@@ -66,17 +65,6 @@ def test_definition_file_patterns(astro_check_plugin: AstroCheckPlugin) -> None:
         ASTRO_CHECK_FILE_PATTERNS,
     )
     assert_that(astro_check_plugin.definition.file_patterns).contains("*.astro")
-
-
-def test_definition_priority(astro_check_plugin: AstroCheckPlugin) -> None:
-    """Verify tool priority is set correctly.
-
-    Args:
-        astro_check_plugin: The AstroCheckPlugin instance to test.
-    """
-    assert_that(astro_check_plugin.definition.priority).is_equal_to(
-        ASTRO_CHECK_DEFAULT_PRIORITY,
-    )
 
 
 def test_definition_native_configs(astro_check_plugin: AstroCheckPlugin) -> None:

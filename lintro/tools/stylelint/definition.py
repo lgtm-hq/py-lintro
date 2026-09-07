@@ -34,7 +34,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Stylelint configuration
 STYLELINT_DEFAULT_TIMEOUT: int = 30
-STYLELINT_DEFAULT_PRIORITY: int = 50
 STYLELINT_FILE_PATTERNS: list[str] = ["*.css", "*.scss", "*.sass", "*.less"]
 # Rule codes that are not real stylelint rules (no documentation page).
 STYLELINT_PSEUDO_RULES: frozenset[str] = frozenset(
@@ -86,8 +85,6 @@ class StylelintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=STYLELINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(STYLELINT_CONFIG_FILENAMES),
             version_command=["stylelint", "--version"],
             min_version=get_min_version(ToolName.STYLELINT),

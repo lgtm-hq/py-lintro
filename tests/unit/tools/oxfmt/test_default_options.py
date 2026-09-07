@@ -9,7 +9,6 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.tools.oxfmt.definition import (
-    OXFMT_DEFAULT_PRIORITY,
     OXFMT_DEFAULT_TIMEOUT,
     OxfmtPlugin,
 )
@@ -33,7 +32,6 @@ if TYPE_CHECKING:
         ),
         ("can_fix", True),
         ("tool_type", ToolType.FORMATTER),
-        ("priority", OXFMT_DEFAULT_PRIORITY),
         ("default_timeout", OXFMT_DEFAULT_TIMEOUT),
     ],
     ids=[
@@ -41,7 +39,6 @@ if TYPE_CHECKING:
         "description_is_set",
         "can_fix_is_true",
         "tool_type_is_formatter",
-        "priority_equals_80",
         "default_timeout_equals_30",
     ],
 )
@@ -94,21 +91,6 @@ def test_definition_version_command(oxfmt_plugin: OxfmtPlugin) -> None:
     assert_that(oxfmt_plugin.definition.version_command).is_not_none()
     assert_that(oxfmt_plugin.definition.version_command).contains("oxfmt")
     assert_that(oxfmt_plugin.definition.version_command).contains("--version")
-
-
-def test_definition_conflicts_with(oxfmt_plugin: OxfmtPlugin) -> None:
-    """Definition specifies conflicting tools.
-
-    Args:
-        oxfmt_plugin: The OxfmtPlugin instance to test.
-    """
-    conflicts = oxfmt_plugin.definition.conflicts_with
-    assert_that(conflicts).is_empty()
-
-
-# =============================================================================
-# Tests for default options
-# =============================================================================
 
 
 def test_default_options_timeout(oxfmt_plugin: OxfmtPlugin) -> None:

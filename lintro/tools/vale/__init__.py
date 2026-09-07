@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.vale.definition import (
     VALE_CONFIG_FILENAMES,
-    VALE_DEFAULT_PRIORITY,
     VALE_DEFAULT_TIMEOUT,
     VALE_FILE_PATTERNS,
     ValePlugin,
@@ -16,7 +15,6 @@ from lintro.tools.vale.definition import (
 
 __all__ = [
     "VALE_CONFIG_FILENAMES",
-    "VALE_DEFAULT_PRIORITY",
     "VALE_DEFAULT_TIMEOUT",
     "VALE_FILE_PATTERNS",
     "ValePlugin",

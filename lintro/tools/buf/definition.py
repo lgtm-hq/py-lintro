@@ -46,7 +46,6 @@ from lintro.tools.core.timeout_utils import create_timeout_result
 
 # Constants for Buf configuration
 BUF_DEFAULT_TIMEOUT: int = 30
-BUF_DEFAULT_PRIORITY: int = 50
 BUF_FILE_PATTERNS: list[str] = ["*.proto"]
 
 # Rule ids that are not part of the lint rule catalog and therefore have no
@@ -84,8 +83,6 @@ class BufPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=BUF_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["buf.yaml", "buf.work.yaml"],
             version_command=["buf", "--version"],
             min_version=get_min_version(ToolName.BUF),

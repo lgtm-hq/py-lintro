@@ -21,6 +21,63 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.151.2] - 2026-09-07
+
+### Changed
+
+- **deps**: pin lintro-tools image digest to c46c3aea (#2445) (762fc2c)
+
+### Fixed
+
+- **ci**: make the binary release jobs idempotent and the asset swap atomic (#2440)
+  (452302c)
+- **ci**: give the dogfood gate's version probe 120s (#2444) (a41e739)
+
+## [0.151.1] - 2026-09-07
+
+### Fixed
+
+- **ci**: gate semgrep lockfile drift in ci and drop the dead renovate tasks (#2439)
+  (f7ee955)
+
+## [0.151.0] - 2026-09-07
+
+### Added
+
+- **core**: make derived DAG ordering authoritative, delete priority scalars (#2427)
+  (d9d49e2)
+
+### Changed
+
+- **ai/review**: decompose RunRecord into nested value objects (#2419) (e2c2541)
+
+## [0.150.0] - 2026-09-07
+
+### Added
+
+- **tools**: add cppcheck for C/C++ static analysis (#1157) (65ca506)
+
+### Changed
+
+- **ai/review**: single comment-lifecycle owner, v1 state paths retired (#2412)
+  (ad046a1)
+
+## [0.149.0] - 2026-09-07
+
+### Added
+
+- **core**: shadow-mode diff of derived vs current tool order (#2422) (6aacad4)
+
+## [0.148.1] - 2026-09-07
+
+### Changed
+
+- bump harden-runner to v2.21.1 and lgtm-ci to v0.69.6 (#2431) (ccdca32)
+
+### Fixed
+
+- **review**: address retro AI review findings from the Cursor outage (#2429) (d50415b)
+
 ## [0.148.0] - 2026-09-07
 
 ### Added

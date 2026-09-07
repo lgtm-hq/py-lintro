@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.tsc.definition import (
     FRAMEWORK_CONFIGS,
-    TSC_DEFAULT_PRIORITY,
     TSC_DEFAULT_TIMEOUT,
     TSC_FILE_PATTERNS,
     TscPlugin,
@@ -16,7 +15,6 @@ from lintro.tools.tsc.definition import (
 
 __all__ = [
     "FRAMEWORK_CONFIGS",
-    "TSC_DEFAULT_PRIORITY",
     "TSC_DEFAULT_TIMEOUT",
     "TSC_FILE_PATTERNS",
     "TscPlugin",

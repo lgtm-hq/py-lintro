@@ -38,7 +38,6 @@ from lintro.tools.core.option_validators import validate_positive_int
 
 # Constants for Commitlint configuration
 COMMITLINT_DEFAULT_TIMEOUT: int = 30
-COMMITLINT_DEFAULT_PRIORITY: int = 35
 # Broad pattern so shared execution preparation does not early-return; the
 # discovered file list is intentionally ignored (commitlint reads git state).
 COMMITLINT_FILE_PATTERNS: list[str] = ["*"]
@@ -71,8 +70,6 @@ class CommitlintPlugin(BaseToolPlugin):
             claims=[],
             reads_tree=False,
             partitionable=False,
-            priority=COMMITLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[
                 "commitlint.config.js",
                 "commitlint.config.cjs",

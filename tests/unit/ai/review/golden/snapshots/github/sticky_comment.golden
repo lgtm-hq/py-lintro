@@ -59,7 +59,7 @@ Two blocking issues remain; the session fix landed.
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api-key | ~$0.1234 | 12,000 / 2,400 | 2 | 3 | 2 | 42s |
+| `claude-sonnet-4-20250514` | api · api_key | ~$0.1234 | 12,000 / 2,400 | 2 | 3 | 2 | 42s |
 
 ---
 
@@ -81,7 +81,7 @@ Two blocking issues remain; the session fix landed.
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api-key | $0.1150 | 11,500 / 2,200 | 2 | 3 | 2 | 40s |
+| `claude-sonnet-4-20250514` | api · api_key | $0.1150 | 11,500 / 2,200 | 2 | 3 | 2 | 40s |
 
 </details>
 
@@ -89,7 +89,7 @@ Two blocking issues remain; the session fix landed.
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api-key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
+| `claude-sonnet-4-20250514` | api · api_key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
 
 </details>
 

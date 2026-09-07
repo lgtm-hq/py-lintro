@@ -44,7 +44,6 @@ from lintro.utils.path_utils import find_file_upward
 
 # Constants for Yamllint configuration
 YAMLLINT_DEFAULT_TIMEOUT: int = 15
-YAMLLINT_DEFAULT_PRIORITY: int = 40
 YAMLLINT_FILE_PATTERNS: list[str] = [
     "*.yml",
     "*.yaml",
@@ -85,8 +84,6 @@ class YamllintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=YAMLLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".yamllint", ".yamllint.yml", ".yamllint.yaml"],
             version_command=["yamllint", "--version"],
             min_version="1.26.0",

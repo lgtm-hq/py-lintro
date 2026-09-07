@@ -16,7 +16,7 @@ Behaviour:
     * The baseline may only shrink. Lower it in the pull request that removes
       duplication; never raise it.
 
-The gate is wired into the post-check phase (``lintro/utils/post_checks.py``),
+The gate is wired into the run-level gate phase (``lintro/utils/gates.py``),
 which runs after the primary tools and therefore sees the pylint result the
 run already produced — pylint is never invoked a second time.
 """
@@ -87,7 +87,7 @@ def resolve_duplicate_code_baseline(
 
     A missing, non-integral or negative value disables the gate rather than
     raising: a mistyped baseline must not be silently read as ``0`` and fail
-    every run, nor crash the post-check phase.
+    every run, nor crash the gate phase.
 
     Args:
         config: Raw ``[tool.lintro.pylint]`` configuration mapping.

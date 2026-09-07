@@ -7,7 +7,6 @@ through that module (#2311).
 """
 
 from lintro.tools.spectral.definition import (
-    SPECTRAL_DEFAULT_PRIORITY,
     SPECTRAL_DEFAULT_TIMEOUT,
     SPECTRAL_FILE_PATTERNS,
     SPECTRAL_RULESET_FILES,
@@ -15,7 +14,6 @@ from lintro.tools.spectral.definition import (
 )
 
 __all__ = [
-    "SPECTRAL_DEFAULT_PRIORITY",
     "SPECTRAL_DEFAULT_TIMEOUT",
     "SPECTRAL_FILE_PATTERNS",
     "SPECTRAL_RULESET_FILES",

@@ -28,6 +28,7 @@ from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import (
@@ -97,19 +98,6 @@ def test_banner_carries_the_kind_specific_guidance(prior_state: ReviewState) -> 
     assert_that(body).contains(f"> {_ROUND_2_FAILED}")
     assert_that(body).contains(KIND_COPY[ReviewErrorKind.AUTH_FAILED][1])
     assert_that(body).does_not_contain(KIND_COPY[ReviewErrorKind.SERVER_ERROR][1])
-
-
-def test_legacy_prior_runs_also_render_the_board(prior_state: ReviewState) -> None:
-    """A v1 sticky's run mappings route to the board, not the error surface."""
-    body = format_error_comment(
-        error=AIProviderError("Overloaded"),
-        prior_runs=[run.to_dict() for run in prior_state.runs],
-    )
-
-    assert_that(body).contains(f"> {_ROUND_2_FAILED}")
-    assert_that(body).contains("showing round 1 results below")
-    assert_that(body).does_not_contain(ERROR_ONLY_HEADLINE)
-    assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
 
 
 def test_banner_sits_directly_under_the_header(prior_state: ReviewState) -> None:
@@ -265,7 +253,13 @@ def test_failure_body_respects_the_hard_comment_limit() -> None:
     )
     state = ReviewState(
         runs=tuple(
-            RunRecord(round=round_number, sha=f"{round_number:040d}", model="m")
+            RunRecord(
+                identity=RunIdentity(
+                    round=round_number,
+                    sha=f"{round_number:040d}",
+                    model="m",
+                ),
+            )
             for round_number in range(1, 21)
         ),
         findings=findings,

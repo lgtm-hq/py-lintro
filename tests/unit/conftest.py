@@ -118,15 +118,6 @@ class FakeLogger:
         """
         self._rec("print_execution_summary", *a, **k)
 
-    def print_post_checks_header(self, *a: Any, **k: Any) -> None:
-        """Record post checks header printing.
-
-        Args:
-            *a: Positional arguments passed to the logger.
-            **k: Keyword arguments passed to the logger.
-        """
-        self._rec("print_post_checks_header", *a, **k)
-
     def save_console_log(self, *a: Any, **k: Any) -> None:
         """Record console log saving.
 

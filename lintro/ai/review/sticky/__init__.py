@@ -21,7 +21,7 @@ it:
    finding fixed this round
 7. the folded finding detail, when inline comments could not be posted
 8. the fix-all agent prompt panel, scoped to *all* still-open findings
-9. *This run* badges, two single-row tables (model-first ordering)
+9. *This run* badges, one single-row table (model-first ordering)
 10. the structured-checklist appendix, when the display mode asks for it
 11. ``---`` then exactly one ``🕘 Run history`` collapsible, which carries the
     severity tiles and the per-round expanders
@@ -38,15 +38,19 @@ header absorbed in the #2157 redesign. They are left where the split found
 them: reviving or deleting a section is a comment-design decision (#1905), and
 this package's job is to render whichever set that design settles on.
 
-Two invariants the renderer enforces, neither of them implemented here:
+One invariant the renderer enforces, not implemented here:
 
-* **No nested ``<details>``.** Every collapsible is top level; the run history
-  carries plain tables and the degraded fold-in flattens finding detail.
 * **The comment (body + state block) always fits ``MAX_COMMENT_CHARS``.**
   Oldest run history is pruned first, then resolved findings, then open
   findings — each with a visible marker, never a silent drop. That invariant
   lives in ``github_contract.py``, which the error surface consumes too, so the
   two posting paths cannot drift apart again (#2303, epic #1974).
+
+Collapsibles are *not* flat. ``🕘 Run history`` is one top-level
+``<details>``, and ``history._round_expander`` nests a per-round
+``<details>`` inside it. GitHub renders that fine; what the board does keep
+flat is the degraded fold-in, which inlines finding detail rather than adding
+a second collapsible layer of its own.
 
 The modules underneath are layered: ``cells`` formats one value, ``sections`` /
 ``findings`` / ``history`` render one block, ``body`` orders those blocks into
@@ -64,8 +68,7 @@ from lintro.ai.review.sticky.assembly import (
 )
 from lintro.ai.review.sticky.state import (
     matcher_reviewed_paths,
-    parse_review_state,
-    parse_review_state_v2,
+    parse_sticky_state,
     stamp_comment_ids,
 )
 
@@ -74,8 +77,7 @@ __all__ = [
     "build_sticky_bodies",
     "build_sticky_comment",
     "matcher_reviewed_paths",
-    "parse_review_state",
-    "parse_review_state_v2",
+    "parse_sticky_state",
     "render_state_sticky",
     "stamp_comment_ids",
 ]

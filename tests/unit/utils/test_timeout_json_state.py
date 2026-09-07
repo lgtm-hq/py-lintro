@@ -171,7 +171,6 @@ def _json_for(results: list[ToolResult]) -> dict[str, Any]:
             all_results=results,
             total_issues=total_issues,
             total_remaining=total_remaining,
-            main_phase_empty_due_to_filter=False,
         ),
     )
 
@@ -376,7 +375,6 @@ def test_timeout_still_fails_the_run_despite_zero_issues(
         all_results=results,
         total_issues=total_issues,
         total_remaining=total_remaining,
-        main_phase_empty_due_to_filter=False,
     )
 
     assert_that(total_issues).is_equal_to(0)

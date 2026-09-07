@@ -32,7 +32,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Taplo configuration
 TAPLO_DEFAULT_TIMEOUT: int = 30
-TAPLO_DEFAULT_PRIORITY: int = 50
 TAPLO_FILE_PATTERNS: list[str] = ["*.toml"]
 
 
@@ -66,8 +65,6 @@ class TaploPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=TAPLO_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["taplo.toml", ".taplo.toml"],
             version_command=["taplo", "--version"],
             min_version=get_min_version(ToolName.TAPLO),

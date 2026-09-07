@@ -17,6 +17,9 @@ from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.cli_utils.commands import review as review_module
 from lintro.cli_utils.commands.review import review_command
@@ -34,7 +37,10 @@ def _quiet_state(*, scores: tuple[float | None, ...]) -> ReviewState:
     """
     return ReviewState(
         runs=tuple(
-            RunRecord(round=index, sha=f"sha{index}", convergence_score=score)
+            RunRecord(
+                identity=RunIdentity(round=index, sha=f"sha{index}"),
+                outcome=RunOutcome(convergence_score=score),
+            )
             for index, score in enumerate(scores, start=1)
         ),
     )
@@ -163,7 +169,7 @@ def _with_prior_state(
     """
     monkeypatch.setattr(
         review_module,
-        "_load_prior_review_state",
+        "load_prior_review_state",
         lambda **_: state,
     )
 
@@ -316,8 +322,15 @@ def test_a_degraded_prior_round_still_reviews(
     del patched_review
     state = ReviewState(
         runs=(
-            RunRecord(round=1, convergence_score=0.5),
-            RunRecord(round=2, convergence_score=0.5, partial=True),
+            RunRecord(
+                identity=RunIdentity(round=1),
+                outcome=RunOutcome(convergence_score=0.5),
+            ),
+            RunRecord(
+                identity=RunIdentity(round=2),
+                coverage=RunCoverage(partial=True),
+                outcome=RunOutcome(convergence_score=0.5),
+            ),
         ),
     )
     _with_prior_state(monkeypatch=monkeypatch, state=state)
@@ -352,7 +365,7 @@ def test_post_loads_state_for_the_pr_detected_from_ci(
         seen.update(kwargs)
         return _quiet_state(scores=(1.0, 0.5))
 
-    monkeypatch.setattr(review_module, "_load_prior_review_state", _load)
+    monkeypatch.setattr(review_module, "load_prior_review_state", _load)
     monkeypatch.setattr(review_module, "_detect_pr_number_from_env", lambda: 42)
     posted: list[dict[str, object]] = []
 
@@ -395,8 +408,15 @@ def test_a_coverage_limited_prior_round_still_reviews(
     del patched_review
     state = ReviewState(
         runs=(
-            RunRecord(round=1, convergence_score=0.5),
-            RunRecord(round=2, convergence_score=0.5, coverage_limited=True),
+            RunRecord(
+                identity=RunIdentity(round=1),
+                outcome=RunOutcome(convergence_score=0.5),
+            ),
+            RunRecord(
+                identity=RunIdentity(round=2),
+                coverage=RunCoverage(coverage_limited=True),
+                outcome=RunOutcome(convergence_score=0.5),
+            ),
         ),
     )
     _with_prior_state(monkeypatch=monkeypatch, state=state)

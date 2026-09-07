@@ -38,7 +38,6 @@ def mock_config() -> LintroConfig:
     return LintroConfig(
         execution=ExecutionConfig(
             enabled_tools=[],
-            tool_order="priority",
             fail_fast=False,
         ),
         enforce=EnforceConfig(
@@ -122,14 +121,14 @@ def test_json_output_includes_line_length(
 @patch("lintro.cli_utils.commands.config.get_config")
 @patch("lintro.cli_utils.commands.config.validate_config_consistency")
 @patch("lintro.cli_utils.commands.config.is_tool_injectable")
-def test_json_output_includes_tool_order(
+def test_json_output_includes_derived_tool_order(
     mock_injectable: MagicMock,
     mock_validate: MagicMock,
     mock_get_config: MagicMock,
     mock_config: LintroConfig,
     cli_runner: CliRunner,
 ) -> None:
-    """JSON output includes tool execution order.
+    """JSON output includes the derived tool execution order.
 
     Args:
         mock_injectable: Mock for is_tool_injectable function.
@@ -145,13 +144,12 @@ def test_json_output_includes_tool_order(
     result = cli_runner.invoke(cli, ["config", "--json"])
 
     data = json.loads(result.output)
-    # Should have tools in priority order (black before ruff)
     assert_that(data).contains("tool_execution_order")
     tool_names = [t["tool"] for t in data["tool_execution_order"]]
-    assert_that(tool_names).contains("black")
-    # Verify black comes before ruff (lower priority = runs first)
-    assert_that(tool_names).contains("ruff")
-    assert_that(tool_names.index("black")).is_less_than(tool_names.index("ruff"))
+    assert_that(tool_names).contains("black", "ruff")
+    # The derived order runs ruff (FIX on *.py) before black (FORMAT).
+    assert_that(tool_names.index("ruff")).is_less_than(tool_names.index("black"))
+    assert_that(data["global_settings"]["tool_order"]).is_equal_to("derived")
 
 
 @patch("lintro.cli_utils.commands.config.get_config")

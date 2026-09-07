@@ -178,8 +178,7 @@ def get_install_hints() -> dict[str, str]:
             "or uv add pydoclint>={version}"
         ),
         "pylint": (
-            "Install via: pip install 'pylint>={version}' "
-            "or uv add 'pylint>={version}'"
+            "Install via: pip install 'pylint>={version}' or uv add 'pylint>={version}'"
         ),
         "ruff": ("Install via: pip install ruff>={version} or uv add ruff>={version}"),
         "yamllint": (
@@ -223,6 +222,10 @@ def get_install_hints() -> dict[str, str]:
             "Install via: https://github.com/rhysd/actionlint/releases (v{version}+)"
         ),
         "clippy": "Install via: rustup component add clippy (requires Rust {version}+)",
+        "cppcheck": (
+            "Install via: brew install cppcheck (macOS) or "
+            "apt-get install cppcheck (Debian/Ubuntu) (v{version}+)"
+        ),
         "dotenv_linter": (
             "Install via: brew install dotenv-linter, "
             "cargo install dotenv-linter, or "

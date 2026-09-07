@@ -20,6 +20,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.lifecycle.state import load_prior_review_state
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -30,7 +31,6 @@ from lintro.cli_utils.commands.review import (
     ReviewCommandOptions,
     _cli_overrides,
     _describe_config_source,
-    _load_prior_review_state,
     _merge_advisory_into_json,
 )
 from lintro.models.core.tool_result import ToolResult
@@ -203,6 +203,28 @@ def test_review_max_cost_flag_beats_transport_profile(
     rendered = mock_render.call_args.kwargs["result"]
     assert_that(rendered.metadata.max_cost_usd).is_none()
     assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("flag")
+
+
+def test_review_labels_the_transcript_with_its_own_command(
+    profile_cap_review_pipeline: dict[str, MagicMock],
+) -> None:
+    """The CLI call site names the verb the transcript file is written under.
+
+    ``get_provider`` defaults ``transcript_command`` to ``None``, so dropping
+    the kwarg here would silently rename every CLI review transcript without
+    failing a test of :mod:`lintro.ai.transcript` itself.
+
+    Args:
+        profile_cap_review_pipeline: Patched review pipeline over a CLI
+            transport-profile cap config.
+    """
+    result = CliRunner().invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    mock_get_provider = profile_cap_review_pipeline["get_provider"]
+    assert_that(mock_get_provider.call_args.kwargs).contains_entry(
+        {"transcript_command": "review"},
+    )
 
 
 def test_review_profile_cap_provenance_is_config(
@@ -2052,11 +2074,11 @@ def test_review_post_reports_config_source_and_transport() -> None:
         )
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = mock_post.call_args.kwargs
-    assert_that(kwargs["config_source"]).is_equal_to(
+    options = mock_post.call_args.kwargs["options"]
+    assert_that(options.config_source).is_equal_to(
         "`.lintro-config.yaml` + CLI overrides (--timeout 600)",
     )
-    assert_that(kwargs["transport"]).is_equal_to(str(AITransport.API))
+    assert_that(options.transport).is_equal_to(str(AITransport.API))
 
 
 def test_ci_does_not_import_the_local_ledger(
@@ -2081,11 +2103,10 @@ def test_ci_does_not_import_the_local_ledger(
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path / "empty-artifacts"))
     (tmp_path / "empty-artifacts").mkdir()
-    loaded = _load_prior_review_state(
+    loaded = load_prior_review_state(
         pr_number=999,
         head_ref="feature",
         repo="lgtm-hq/py-lintro",
-        post=False,
     )
     assert_that(loaded.coverage).is_empty()
 
@@ -2155,10 +2176,10 @@ def test_post_replay_guards_an_unguarded_checkpoint_finding() -> None:
         patches["run_review"],
         patches["render_review_output"],
         patch(
-            "lintro.cli_utils.commands.review._load_prior_review_state",
+            "lintro.cli_utils.commands.review.load_prior_review_state",
             return_value=prior,
         ),
-        patch("lintro.cli_utils.commands.review._persist_review_state"),
+        patch("lintro.cli_utils.commands.review.persist_review_state"),
         patch(
             "lintro.ai.review.github.post_review_to_github",
             return_value=True,

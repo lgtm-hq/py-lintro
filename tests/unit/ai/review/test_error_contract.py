@@ -105,8 +105,7 @@ def test_rate_limit_429_envelope_shape(rate_limit_error: AIRateLimitError) -> No
                 "retryable": True,
                 "provider_unavailable": True,
                 "message": (
-                    "Anthropic rate limit exceeded: Error code: 429 - "
-                    "rate_limit_error"
+                    "Anthropic rate limit exceeded: Error code: 429 - rate_limit_error"
                 ),
             },
         },

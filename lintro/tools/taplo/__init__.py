@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.taplo.definition import (
-    TAPLO_DEFAULT_PRIORITY,
     TAPLO_DEFAULT_TIMEOUT,
     TAPLO_FILE_PATTERNS,
     TaploPlugin,
 )
 
 __all__ = [
-    "TAPLO_DEFAULT_PRIORITY",
     "TAPLO_DEFAULT_TIMEOUT",
     "TAPLO_FILE_PATTERNS",
     "TaploPlugin",

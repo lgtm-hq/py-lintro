@@ -203,9 +203,10 @@ def _degraded_details(
 ) -> str:
     """Fold full finding detail into the sticky when inline posting failed.
 
-    Rendered flat inside a single ``<details>``: the sticky's no-nesting rule
-    means this cannot reuse the inline comment renderer, which carries its own
-    collapsible.
+    Rendered flat inside a single ``<details>``, so it cannot reuse the inline
+    comment renderer: that one wraps its agent prompt in a collapsible of its
+    own, which would put the detail two clicks away on the surface a reviewer
+    only reaches because the inline comments never arrived.
 
     Args:
         failure: Findings whose inline comments could not be posted.

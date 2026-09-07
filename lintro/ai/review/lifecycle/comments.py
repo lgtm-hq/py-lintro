@@ -1,0 +1,415 @@
+"""Carry out a comment-lifecycle decision against the GitHub API (#2305).
+
+:mod:`lintro.ai.review.lifecycle.decision` says what to do; this module does
+it, and it is the only place in the review that creates, edits, or replaces
+one of the review's pull-request comments. The success path, the error path
+and the converged path all reach GitHub through :func:`upsert_comment`, so a
+leftover comment from another actor is handled the same way whichever surface
+happens to run into it.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, replace
+from typing import Protocol
+
+from loguru import logger
+
+from lintro.ai.review.enums.comment_action import CommentAction
+from lintro.ai.review.enums.comment_kind import CommentKind
+from lintro.ai.review.github_constants import ARCHIVE_MARKER, STICKY_MARKER
+from lintro.ai.review.lifecycle.decision import (
+    CommentPlan,
+    ExistingComment,
+    decide,
+)
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.sticky import parse_sticky_state
+
+__all__ = [
+    "CommentClient",
+    "UpsertOutcome",
+    "load_sticky_comment",
+    "locate_comment",
+    "upsert_archive",
+    "upsert_comment",
+]
+
+#: Marker identifying each comment kind on the pull request. A kind is exactly
+#: "the comment carrying this marker", which is why one lookup serves them all.
+#:
+#: ``ERROR`` deliberately shares ``STICKY_MARKER``: a failed round is a *state
+#: of the board*, not a comment of its own, and ``format_error_comment``
+#: embeds the sticky marker in the body it renders. Giving it a marker of its
+#: own would make a superseded failure comment relocate by the wrong one.
+#:
+#: Every :class:`~lintro.ai.review.enums.comment_kind.CommentKind` must appear
+#: here — the lookups below index this map directly, so a missing kind is a
+#: ``KeyError`` at write time rather than a decision. The 2305 lifecycle tests
+#: assert the two sets are equal so a fourth kind cannot be added without one.
+_MARKERS: dict[CommentKind, str] = {
+    CommentKind.STICKY: STICKY_MARKER,
+    CommentKind.ARCHIVE: ARCHIVE_MARKER,
+    CommentKind.ERROR: STICKY_MARKER,
+}
+
+
+class CommentClient(Protocol):
+    """The GitHub operations this module needs, and nothing more.
+
+    Structural typing keeps the lifecycle independent of the reporter class,
+    the way :class:`~lintro.ai.review.lifecycle.threads.LifecycleClient`
+    already does for the inline threads: writing a comment is four calls, and
+    anything that makes them can be written through.
+
+    ``update_issue_comment_status`` is part of the contract because it is
+    what separates "GitHub refused this edit" from "GitHub refused this edit
+    *because you are not the author*", and only the second may supersede. A
+    client that could not answer with a status would have every failed edit —
+    a 500, a throttle — read as an actor mismatch and answered with a
+    duplicate comment.
+
+    ``create_issue_comment``, which answers with the new comment's id, is read
+    off the object when it has one: without it the comment is re-located by
+    its marker instead, which is a slower path rather than a wrong one.
+    """
+
+    def find_issue_comment(self, *, marker: str) -> tuple[int, str] | None:
+        """Locate the comment carrying a marker.
+
+        Args:
+            marker: Marker identifying the comment kind.
+
+        Returns:
+            tuple[int, str] | None: The comment's id and body, or ``None``.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def post_issue_comment(self, body: str) -> bool:
+        """Post a new comment.
+
+        Args:
+            body: Markdown body to write.
+
+        Returns:
+            bool: True when the comment was created.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def update_issue_comment(self, *, comment_id: int, body: str) -> bool:
+        """Edit an existing comment in place.
+
+        Args:
+            comment_id: Comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            bool: True when the edit took effect.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def delete_issue_comment(self, *, comment_id: int) -> bool:
+        """Delete a comment.
+
+        Args:
+            comment_id: Comment to delete.
+
+        Returns:
+            bool: True when the comment is gone.
+        """
+        ...  # pragma: no cover - structural type only
+
+    def update_issue_comment_status(self, *, comment_id: int, body: str) -> int | None:
+        """Edit a comment and answer with the HTTP status GitHub returned.
+
+        Args:
+            comment_id: Comment to edit.
+            body: New Markdown body.
+
+        Returns:
+            int | None: The status, or ``None`` when the request never
+            reached GitHub.
+        """
+        ...  # pragma: no cover - structural type only
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class UpsertOutcome:
+    """What happened when a plan was carried out.
+
+    Attributes:
+        ok: Whether the comment ended up carrying the new body.
+        comment_id: The comment a later refresh must PATCH: the original id
+            after an in-place edit, the replacement id after a supersede, or
+            ``None`` after a first-time create (the caller re-locates it by
+            marker) and after a failure.
+    """
+
+    ok: bool
+    comment_id: int | None
+
+
+def locate_comment(
+    *,
+    reporter: CommentClient,
+    kind: CommentKind,
+) -> ExistingComment:
+    """Find the review's comment of one kind on the pull request.
+
+    Args:
+        reporter: GitHub client used to list the pull request's comments.
+        kind: Which comment to look for.
+
+    Returns:
+        ExistingComment: The live comment, or an empty descriptor when the
+        kind has not been posted yet.
+    """
+    found = reporter.find_issue_comment(marker=_MARKERS[kind])
+    return ExistingComment(comment_id=None if found is None else found[0])
+
+
+def load_sticky_comment(
+    *,
+    reporter: CommentClient,
+) -> tuple[ExistingComment, ReviewState]:
+    """Locate the sticky comment and decode any state left behind in it.
+
+    Authoritative state lives in workflow artifacts since #2154, so the
+    decoded state is only ever a fallback for a comment written by an older
+    lintro. A pre-v2 blob decodes as no state at all (#2305).
+
+    Args:
+        reporter: GitHub client used to list the pull request's comments.
+
+    Returns:
+        tuple[ExistingComment, ReviewState]: The live sticky comment and the
+        state recovered from its body, both empty when there is no sticky.
+    """
+    found = reporter.find_issue_comment(marker=STICKY_MARKER)
+    if found is None:
+        return ExistingComment(), ReviewState()
+    comment_id, body = found
+    return ExistingComment(comment_id=comment_id), parse_sticky_state(body=body)
+
+
+def upsert_comment(
+    *,
+    reporter: CommentClient,
+    kind: CommentKind,
+    existing: ExistingComment,
+    body: str,
+) -> UpsertOutcome:
+    """Write a comment of one kind, creating, editing or replacing it.
+
+    GitHub only lets the creating actor PATCH a comment, and after #2050 the
+    poster is ``lintro-review[bot]``, so a leftover ``github-actions[bot]``
+    comment answers ``403`` and has to be superseded rather than edited. That
+    answer is fed back through :func:`decide` instead of being branched on
+    here, so the fallback is the same decision the caller started from.
+
+    Args:
+        reporter: GitHub client used to create, edit, or replace the
+            comment.
+        kind: Which of the review's comments is being written.
+        existing: What is already on the pull request for that kind.
+        body: Markdown body to write.
+
+    Returns:
+        UpsertOutcome: Whether the write landed, and the id later refreshes
+        must PATCH.
+    """
+    plan = decide(kind=kind, existing=existing, new=body)
+    if plan.action is CommentAction.CREATE:
+        return UpsertOutcome(ok=reporter.post_issue_comment(plan.body), comment_id=None)
+    if plan.action is CommentAction.UPDATE and plan.comment_id is not None:
+        outcome = _apply_update(
+            reporter=reporter,
+            plan=plan,
+            comment_id=plan.comment_id,
+        )
+        if outcome is not None:
+            return outcome
+        plan = decide(
+            kind=kind,
+            existing=replace(existing, editable=False),
+            new=body,
+        )
+    return _apply_supersede(reporter=reporter, plan=plan)
+
+
+def upsert_archive(*, reporter: CommentClient, body: str | None) -> UpsertOutcome:
+    """Write the history-archive comment when one was rendered.
+
+    Args:
+        reporter: GitHub client used to find and write the archive.
+        body: Archive Markdown, or ``None`` when history still fits the board.
+
+    Returns:
+        UpsertOutcome: What happened. A body of ``None`` is not a failure —
+        there was nothing to write — so it reports success with no id. A write
+        that *was* attempted and failed is logged here, because the caller
+        treats the archive as best-effort and would otherwise drop the only
+        evidence that a round's older history went nowhere.
+    """
+    if not body:
+        return UpsertOutcome(ok=True, comment_id=None)
+    outcome = upsert_comment(
+        reporter=reporter,
+        kind=CommentKind.ARCHIVE,
+        existing=locate_comment(reporter=reporter, kind=CommentKind.ARCHIVE),
+        body=body,
+    )
+    if not outcome.ok:
+        logger.warning(
+            "Could not write the run-history archive comment; this round's "
+            "older history is not on the pull request",
+        )
+    return outcome
+
+
+def _apply_update(
+    *,
+    reporter: CommentClient,
+    plan: CommentPlan,
+    comment_id: int,
+) -> UpsertOutcome | None:
+    """Edit the comment in place.
+
+    Args:
+        reporter: GitHub client used to edit the comment.
+        plan: The update plan.
+        comment_id: The comment to edit, narrowed by the caller.
+
+    Returns:
+        UpsertOutcome | None: The outcome, or ``None`` when GitHub refused the
+        edit with ``403`` and the caller must decide again.
+    """
+    status = _patch_status(reporter=reporter, comment_id=comment_id, body=plan.body)
+    if status is not None and 200 <= status < 300:
+        return UpsertOutcome(ok=True, comment_id=comment_id)
+    if status != 403:
+        logger.warning(
+            "Could not edit {} comment {} (HTTP {}); leaving it in place",
+            plan.kind.value,
+            comment_id,
+            status,
+        )
+        return UpsertOutcome(ok=False, comment_id=None)
+    return None
+
+
+def _apply_supersede(
+    *,
+    reporter: CommentClient,
+    plan: CommentPlan,
+) -> UpsertOutcome:
+    """Post a replacement comment and delete the one it supersedes.
+
+    Args:
+        reporter: GitHub client used to post and delete.
+        plan: The supersede plan.
+
+    Returns:
+        UpsertOutcome: The replacement's id when it landed. A failed delete
+        leaves both comments up rather than losing the new one.
+    """
+    logger.warning(
+        "Could not edit {} comment {}; posting a replacement "
+        "before deleting it (GitHub only lets the creating actor PATCH)",
+        plan.kind.value,
+        plan.comment_id,
+    )
+    live_id = _post_with_retry(
+        reporter=reporter,
+        body=plan.body,
+        marker=_MARKERS[plan.kind],
+    )
+    if live_id is None:
+        return UpsertOutcome(ok=False, comment_id=None)
+    if plan.comment_id is not None and not reporter.delete_issue_comment(
+        comment_id=plan.comment_id,
+    ):
+        logger.warning(
+            "Posted replacement {} comment {} but failed to delete {}; "
+            "both comments may remain",
+            plan.kind.value,
+            live_id,
+            plan.comment_id,
+        )
+    return UpsertOutcome(ok=True, comment_id=live_id)
+
+
+def _patch_status(
+    *,
+    reporter: CommentClient,
+    comment_id: int,
+    body: str,
+) -> int | None:
+    """Return the PATCH status, with a bool-reporter fallback.
+
+    Args:
+        reporter: GitHub client used to edit the comment.
+        comment_id: Existing comment id.
+        body: Markdown body to write.
+
+    Returns:
+        int | None: HTTP status when the reporter exposes one. A double that
+        predates the status method — it is on the protocol, but a ``Mock`` is
+        not checked against one — maps success to ``200`` and failure to
+        ``403``, which is how the actor-mismatch path was covered before
+        ``update_issue_comment_status`` existed.
+    """
+    status_fn = getattr(reporter, "update_issue_comment_status", None)
+    if callable(status_fn):
+        status = status_fn(comment_id=comment_id, body=body)
+        if isinstance(status, int) or status is None:
+            return status
+    if reporter.update_issue_comment(comment_id=comment_id, body=body):
+        return 200
+    return 403
+
+
+def _create(*, reporter: CommentClient, body: str, marker: str) -> int | None:
+    """Create a comment and return its id.
+
+    Args:
+        reporter: GitHub client used to post the comment.
+        body: Markdown body to write.
+        marker: Marker the comment carries, used to find it again when the
+            reporter's create call does not answer with an id.
+
+    Returns:
+        int | None: The new comment id, or ``None`` when creation failed.
+    """
+    create_fn = getattr(reporter, "create_issue_comment", None)
+    if callable(create_fn):
+        created = create_fn(body=body)
+        if isinstance(created, int) or created is None:
+            return created
+    if not reporter.post_issue_comment(body):
+        return None
+    found = reporter.find_issue_comment(marker=marker)
+    return None if found is None else found[0]
+
+
+def _post_with_retry(
+    *,
+    reporter: CommentClient,
+    body: str,
+    marker: str,
+) -> int | None:
+    """Create a comment, retrying once after a failed POST.
+
+    Args:
+        reporter: GitHub client used to post the comment.
+        body: Markdown body to write.
+        marker: Marker the comment carries.
+
+    Returns:
+        int | None: The new comment id, or ``None`` when both attempts failed.
+    """
+    created = _create(reporter=reporter, body=body, marker=marker)
+    if created is not None:
+        return created
+    logger.warning("Failed to recreate the comment; retrying once")
+    return _create(reporter=reporter, body=body, marker=marker)

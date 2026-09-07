@@ -14,20 +14,19 @@ from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
 
-# Tool specifications: (name, class, timeout, priority, can_fix)
+# Tool specifications: (name, class, timeout, can_fix)
 # Some tools need special initialization (mocked dependencies)
 TOOL_SPECS = [
-    # (tool_name, module_path, class_name, timeout, priority, can_fix)
-    (ToolName.RUFF, "lintro.tools.ruff.definition", "RuffPlugin", 30, 85, True),
-    (ToolName.BLACK, "lintro.tools.black.definition", "BlackPlugin", 30, 90, True),
-    (ToolName.CLIPPY, "lintro.tools.clippy.definition", "ClippyPlugin", 120, 85, True),
-    (ToolName.MYPY, "lintro.tools.mypy.definition", "MypyPlugin", 60, 82, False),
+    # (tool_name, module_path, class_name, timeout, can_fix)
+    (ToolName.RUFF, "lintro.tools.ruff.definition", "RuffPlugin", 30, True),
+    (ToolName.BLACK, "lintro.tools.black.definition", "BlackPlugin", 30, True),
+    (ToolName.CLIPPY, "lintro.tools.clippy.definition", "ClippyPlugin", 120, True),
+    (ToolName.MYPY, "lintro.tools.mypy.definition", "MypyPlugin", 60, False),
     (
         ToolName.YAMLLINT,
         "lintro.tools.yamllint.definition",
         "YamllintPlugin",
         15,
-        40,
         False,
     ),
     (
@@ -35,7 +34,6 @@ TOOL_SPECS = [
         "lintro.tools.hadolint.definition",
         "HadolintPlugin",
         30,
-        50,
         False,
     ),
     (
@@ -43,14 +41,12 @@ TOOL_SPECS = [
         "lintro.tools.pytest.definition",
         "PytestPlugin",
         300,
-        90,
         False,
     ),
     (
         ToolName.MARKDOWNLINT,
         "lintro.tools.markdownlint.definition",
         "MarkdownlintPlugin",
-        30,
         30,
         False,
     ),
@@ -59,10 +55,9 @@ TOOL_SPECS = [
         "lintro.tools.actionlint.definition",
         "ActionlintPlugin",
         30,
-        40,
         False,
     ),
-    (ToolName.BANDIT, "lintro.tools.bandit.definition", "BanditPlugin", 90, 90, False),
+    (ToolName.BANDIT, "lintro.tools.bandit.definition", "BanditPlugin", 90, False),
 ]
 
 
@@ -95,7 +90,6 @@ def _create_plugin_instance(module_path: str, class_name: str) -> Any:
         "module_path",
         "class_name",
         "expected_timeout",
-        "expected_priority",
         "expected_can_fix",
     ),
     TOOL_SPECS,
@@ -106,7 +100,6 @@ def test_tool_definition_name(
     module_path: str,
     class_name: str,
     expected_timeout: int,
-    expected_priority: int,
     expected_can_fix: bool,
 ) -> None:
     """Tool has correct name in definition.
@@ -116,7 +109,6 @@ def test_tool_definition_name(
         module_path: Module path containing the tool plugin.
         class_name: Class name of the tool plugin.
         expected_timeout: Expected timeout value for the tool.
-        expected_priority: Expected priority value for the tool.
         expected_can_fix: Whether the tool can perform fixes.
     """
     plugin = _create_plugin_instance(module_path, class_name)
@@ -129,7 +121,6 @@ def test_tool_definition_name(
         "module_path",
         "class_name",
         "expected_timeout",
-        "expected_priority",
         "expected_can_fix",
     ),
     TOOL_SPECS,
@@ -140,7 +131,6 @@ def test_tool_definition_has_description(
     module_path: str,
     class_name: str,
     expected_timeout: int,
-    expected_priority: int,
     expected_can_fix: bool,
 ) -> None:
     """Tool has non-empty description in definition.
@@ -150,7 +140,6 @@ def test_tool_definition_has_description(
         module_path: Module path containing the tool plugin.
         class_name: Class name of the tool plugin.
         expected_timeout: Expected timeout value for the tool.
-        expected_priority: Expected priority value for the tool.
         expected_can_fix: Whether the tool can perform fixes.
     """
     plugin = _create_plugin_instance(module_path, class_name)
@@ -163,7 +152,6 @@ def test_tool_definition_has_description(
         "module_path",
         "class_name",
         "expected_timeout",
-        "expected_priority",
         "expected_can_fix",
     ),
     TOOL_SPECS,
@@ -174,7 +162,6 @@ def test_tool_definition_timeout(
     module_path: str,
     class_name: str,
     expected_timeout: int,
-    expected_priority: int,
     expected_can_fix: bool,
 ) -> None:
     """Tool has correct default timeout.
@@ -184,7 +171,6 @@ def test_tool_definition_timeout(
         module_path: Module path containing the tool plugin.
         class_name: Class name of the tool plugin.
         expected_timeout: Expected timeout value for the tool.
-        expected_priority: Expected priority value for the tool.
         expected_can_fix: Whether the tool can perform fixes.
     """
     plugin = _create_plugin_instance(module_path, class_name)
@@ -197,41 +183,6 @@ def test_tool_definition_timeout(
         "module_path",
         "class_name",
         "expected_timeout",
-        "expected_priority",
-        "expected_can_fix",
-    ),
-    TOOL_SPECS,
-    ids=[spec[0] for spec in TOOL_SPECS],
-)
-def test_tool_definition_priority(
-    tool_name: str,
-    module_path: str,
-    class_name: str,
-    expected_timeout: int,
-    expected_priority: int,
-    expected_can_fix: bool,
-) -> None:
-    """Tool has correct priority.
-
-    Args:
-        tool_name: Name of the tool.
-        module_path: Module path containing the tool plugin.
-        class_name: Class name of the tool plugin.
-        expected_timeout: Expected timeout value for the tool.
-        expected_priority: Expected priority value for the tool.
-        expected_can_fix: Whether the tool can perform fixes.
-    """
-    plugin = _create_plugin_instance(module_path, class_name)
-    assert_that(plugin.definition.priority).is_equal_to(expected_priority)
-
-
-@pytest.mark.parametrize(
-    (
-        "tool_name",
-        "module_path",
-        "class_name",
-        "expected_timeout",
-        "expected_priority",
         "expected_can_fix",
     ),
     TOOL_SPECS,
@@ -242,7 +193,6 @@ def test_tool_definition_can_fix(
     module_path: str,
     class_name: str,
     expected_timeout: int,
-    expected_priority: int,
     expected_can_fix: bool,
 ) -> None:
     """Tool has correct can_fix value.
@@ -252,7 +202,6 @@ def test_tool_definition_can_fix(
         module_path: Module path containing the tool plugin.
         class_name: Class name of the tool plugin.
         expected_timeout: Expected timeout value for the tool.
-        expected_priority: Expected priority value for the tool.
         expected_can_fix: Whether the tool can perform fixes.
     """
     plugin = _create_plugin_instance(module_path, class_name)
@@ -270,7 +219,6 @@ def test_tool_definition_can_fix(
         "module_path",
         "class_name",
         "expected_timeout",
-        "expected_priority",
         "expected_can_fix",
     ),
     TOOL_SPECS,
@@ -281,7 +229,6 @@ def test_tool_has_file_patterns(
     module_path: str,
     class_name: str,
     expected_timeout: int,
-    expected_priority: int,
     expected_can_fix: bool,
 ) -> None:
     """Tool has non-empty file patterns.
@@ -291,7 +238,6 @@ def test_tool_has_file_patterns(
         module_path: Module path containing the tool plugin.
         class_name: Class name of the tool plugin.
         expected_timeout: Expected timeout value for the tool.
-        expected_priority: Expected priority value for the tool.
         expected_can_fix: Whether the tool can perform fixes.
     """
     plugin = _create_plugin_instance(module_path, class_name)
@@ -304,7 +250,6 @@ def test_tool_has_file_patterns(
         "module_path",
         "class_name",
         "expected_timeout",
-        "expected_priority",
         "expected_can_fix",
     ),
     TOOL_SPECS,
@@ -315,7 +260,6 @@ def test_tool_has_default_options(
     module_path: str,
     class_name: str,
     expected_timeout: int,
-    expected_priority: int,
     expected_can_fix: bool,
 ) -> None:
     """Tool has default options dictionary.
@@ -325,7 +269,6 @@ def test_tool_has_default_options(
         module_path: Module path containing the tool plugin.
         class_name: Class name of the tool plugin.
         expected_timeout: Expected timeout value for the tool.
-        expected_priority: Expected priority value for the tool.
         expected_can_fix: Whether the tool can perform fixes.
     """
     plugin = _create_plugin_instance(module_path, class_name)

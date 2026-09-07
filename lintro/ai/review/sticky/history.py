@@ -23,6 +23,7 @@ from lintro.ai.review.github_notes import (
 from lintro.ai.review.github_render import Section, assemble, sanitize_comment_text
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.run_outcome import NARRATIVE_LIMIT
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.sticky.cells import (
     _cell,
@@ -34,7 +35,6 @@ from lintro.ai.review.sticky.cells import (
 )
 from lintro.ai.review.sticky.constants import (
     _DETAILS_TAG_RE,
-    _NARRATIVE_LIMIT,
     _TITLE_LIMIT,
     VERDICT_EMOJI,
 )
@@ -48,17 +48,13 @@ def _this_run_section(
     transport: str,
     auth_mode: str,
 ) -> str:
-    """Render the two badge tables describing the current run.
+    """Render the single badge table describing the current run.
 
-    Both rows use the same badge-table renderer as the per-review body's run
-    stats, and the primary row's cells come from the shared
-    ``run_stats_primary_cells``, so the model, cost, and token figures cannot
-    drift between the two surfaces (#1955). The secondary row is this
-    surface's own: the status board omits the body's ``strictness`` and
-    ``lintro`` version. Ordering is fixed across every surface (epic #1905):
-    model, est. cost, tokens in, tokens out on row 1;
-    transport and mechanics on row 2. No figure is presented as billed — the
-    ``transport`` badge and the ``~`` prefix carry that honesty.
+    One table, one row: the status board's own shape, which omits the
+    per-review body's ``strictness`` and ``lintro`` version. Ordering is fixed
+    across every surface (epic #1905): model and transport first, then est.
+    cost and tokens in / out, then the mechanics. No figure is presented as
+    billed — the ``transport`` badge and the ``~`` prefix carry that honesty.
 
     Args:
         result: Current review result.
@@ -118,7 +114,9 @@ def _history_section(
 
     Everything historical lives here and nowhere else: cumulative badges, the
     per-run table, and one mini-summary line per prior round. It is the only
-    collapsible in the lower half of the comment, and it never nests another.
+    *top-level* collapsible in the lower half of the comment, and it does nest
+    one more layer: :func:`_round_expander` puts a per-round ``<details>``
+    inside it, which is where the mini-summaries live.
 
     Args:
         runs: Every retained run record, oldest first, current run last.
@@ -135,9 +133,9 @@ def _history_section(
     if len(runs) < 2:
         return ""
 
-    total_cost = sum(run.cost for run in runs)
-    total_tokens = sum(run.total for run in runs)
-    estimated = any(run.estimated for run in runs)
+    total_cost = sum(run.usage.cost for run in runs)
+    total_tokens = sum(run.usage.total for run in runs)
+    estimated = any(run.usage.estimated for run in runs)
     prefix = "~" if estimated else ""
 
     if limit is None:
@@ -167,7 +165,7 @@ def _history_section(
         Section(name="tiles", text=_tiles_section(records=records) if records else ""),
         *(
             Section(
-                name=f"round_{run.round}",
+                name=f"round_{run.identity.round}",
                 text=_round_expander(run=run, records=records),
             )
             for run in reversed(shown[:-1])
@@ -189,6 +187,22 @@ def _history_section(
     )
 
 
+def _open_after(*, run: RunRecord) -> int:
+    """Return how many findings were still open after a round.
+
+    Args:
+        run: Run record to read.
+
+    Returns:
+        The stored ``open_after`` count, or the raised total on a record
+        persisted before that count existed.
+    """
+    outcome = run.outcome
+    if outcome.open_after is not None:
+        return outcome.open_after
+    return outcome.p1 + outcome.p2 + outcome.p3
+
+
 def _history_row(*, run: RunRecord, latest: bool) -> str:
     """Render one row of the per-run history table.
 
@@ -205,22 +219,24 @@ def _history_row(*, run: RunRecord, latest: bool) -> str:
     Returns:
         A single Markdown table row.
     """
-    prefix = "~" if run.estimated else ""
-    short = _short_sha(sha=run.sha)
-    open_after = (
-        run.open_after if run.open_after is not None else run.p1 + run.p2 + run.p3
-    )
-    fixed = "—" if run.resolved is None else str(run.resolved)
+    identity = run.identity
+    usage = run.usage
+    outcome = run.outcome
+    prefix = "~" if usage.estimated else ""
+    short = _short_sha(sha=identity.sha)
+    verdict = verdict_label(verdict=outcome.verdict).lower()
+    fixed = "—" if outcome.resolved is None else str(outcome.resolved)
     return (
-        f"| {run.round}{' (latest)' if latest else ''} "
+        f"| {identity.round}{' (latest)' if latest else ''} "
         f"| {f'`{short}`' if short else '—'} "
-        f"| {VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()} "
-        f"| `{_cell(text=run.model or 'unknown', limit=60)}` "
-        f"| {open_after} "
+        f"| {VERDICT_EMOJI[outcome.verdict]} {verdict} "
+        f"| `{_cell(text=identity.model or 'unknown', limit=60)}` "
+        f"| {_open_after(run=run)} "
         f"| {fixed} "
-        f"| {prefix}{format_int(run.prompt)} / {prefix}{format_int(run.completion)} "
-        f"| {format_cost(run.cost, estimated=run.estimated)} "
-        f"| {run.duration:.0f}s |"
+        f"| {prefix}{format_int(usage.prompt)} / "
+        f"{prefix}{format_int(usage.completion)} "
+        f"| {format_cost(usage.cost, estimated=usage.estimated)} "
+        f"| {usage.duration:.0f}s |"
     )
 
 
@@ -238,26 +254,28 @@ def _round_expander(
     Returns:
         A ``<details>`` block for the round.
     """
-    short = _short_sha(sha=run.sha)
+    identity = run.identity
+    coverage = run.coverage
+    usage = run.usage
+    outcome = run.outcome
+    short = _short_sha(sha=identity.sha)
     sha_bit = f" · <code>{short}</code>" if short else ""
-    open_after = (
-        run.open_after if run.open_after is not None else run.p1 + run.p2 + run.p3
-    )
-    fixed = 0 if run.resolved is None else run.resolved
-    prefix = "~" if run.estimated else ""
+    fixed = 0 if outcome.resolved is None else outcome.resolved
+    prefix = "~" if usage.estimated else ""
     # A capped round stays marked in history (#2003) so a later reader can
     # tell a genuinely clean round from one that reported fewer findings.
-    limited = " · ⚠️ coverage limited" if run.coverage_limited else ""
+    limited = " · ⚠️ coverage limited" if coverage.coverage_limited else ""
+    verdict = verdict_label(verdict=outcome.verdict).lower()
     summary = (
-        f"<b>Round {run.round}</b>{sha_bit} · "
-        f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()} · "
-        f"{fixed} fixed, {open_after} left open · "
-        f"{format_cost(run.cost, estimated=run.estimated)} · "
-        f"{run.duration:.0f}s{limited}"
+        f"<b>Round {identity.round}</b>{sha_bit} · "
+        f"{VERDICT_EMOJI[outcome.verdict]} {verdict} · "
+        f"{fixed} fixed, {_open_after(run=run)} left open · "
+        f"{format_cost(usage.cost, estimated=usage.estimated)} · "
+        f"{usage.duration:.0f}s{limited}"
     )
     narrative = _DETAILS_TAG_RE.sub(
         r"&lt;\1\2",
-        _cell(text=run.narrative, limit=_NARRATIVE_LIMIT),
+        _cell(text=outcome.narrative, limit=NARRATIVE_LIMIT),
     )
     lines = [
         f"<details><summary>{summary}</summary>",
@@ -269,7 +287,7 @@ def _round_expander(
         record
         for record in records
         if record.status is FindingStatus.RESOLVED
-        and record.resolved_round == run.round
+        and record.resolved_round == identity.round
         and not record.is_question
     ]
     if fixed_rows:
@@ -287,22 +305,25 @@ def _round_expander(
                 f"| ~~{_cell(text=record.title, limit=_TITLE_LIMIT)}~~ |",
             )
         lines.append("")
-    transport = _transport_label(transport=run.transport, auth_mode=run.auth_mode)
+    transport = _transport_label(
+        transport=identity.transport,
+        auth_mode=identity.auth_mode,
+    )
     lines.extend(
         [
             "| model | transport | est. cost | tokens in / out | depth "
             "| files | checks | duration |",
             "| --- | --- | --- | --- |:-:|:-:|:-:|---|",
             (
-                f"| `{_cell(text=run.model or 'unknown', limit=60)}` "
+                f"| `{_cell(text=identity.model or 'unknown', limit=60)}` "
                 f"| {transport} "
-                f"| {format_cost(run.cost, estimated=run.estimated)} "
-                f"| {prefix}{format_int(run.prompt)} / "
-                f"{prefix}{format_int(run.completion)} "
-                f"| {run.depth} "
-                f"| {run.files_reviewed} "
-                f"| {run.checks} "
-                f"| {run.duration:.0f}s |"
+                f"| {format_cost(usage.cost, estimated=usage.estimated)} "
+                f"| {prefix}{format_int(usage.prompt)} / "
+                f"{prefix}{format_int(usage.completion)} "
+                f"| {identity.depth} "
+                f"| {coverage.files_reviewed} "
+                f"| {coverage.checks} "
+                f"| {usage.duration:.0f}s |"
             ),
             "",
             "</details>",
@@ -340,7 +361,7 @@ def _archive_body(
             ),
             *(
                 Section(
-                    name=f"round_{run.round}",
+                    name=f"round_{run.identity.round}",
                     text=_round_expander(run=run, records=records),
                 )
                 for run in reversed(runs[:-1])
@@ -362,17 +383,17 @@ def _archive_body(
     ]
     footer = Section(name="footer", text=STICKY_FOOTER)
     for run in reversed(runs[:-1]):
-        name = f"round_{run.round}"
+        name = f"round_{run.identity.round}"
         candidate = Section(name=name, text=_round_expander(run=run, records=records))
         probe = assemble(sections=[*trimmed, candidate, footer], budget=None)
         if len(probe) > MAX_COMMENT_CHARS:
-            short = _short_sha(sha=run.sha)
+            short = _short_sha(sha=run.identity.sha)
             trimmed.append(
                 Section(
                     name=name,
-                    text=f"**Round {run.round}**"
+                    text=f"**Round {run.identity.round}**"
                     + (f" · `{short}`" if short else "")
-                    + f" · {verdict_label(verdict=run.verdict).lower()}",
+                    + f" · {verdict_label(verdict=run.outcome.verdict).lower()}",
                 ),
             )
             continue
@@ -396,18 +417,20 @@ def _history_mini_summary(*, run: RunRecord) -> str:
     Returns:
         Markdown for the recap, as a round line plus its detail line.
     """
-    short = _short_sha(sha=run.sha)
+    outcome = run.outcome
+    short = _short_sha(sha=run.identity.sha)
     where = f" · `{short}`" if short else ""
+    verdict = verdict_label(verdict=outcome.verdict).lower()
     head = (
-        f"**Round {run.round}**{where} · "
-        f"{VERDICT_EMOJI[run.verdict]} {verdict_label(verdict=run.verdict).lower()}"
-        + (" · ⚠️ partial" if run.partial else "")
+        f"**Round {run.identity.round}**{where} · "
+        f"{VERDICT_EMOJI[outcome.verdict]} {verdict}"
+        + (" · ⚠️ partial" if run.coverage.partial else "")
     )
     # Table-safe *and* collapsible-safe: the recap sits inside the history
     # <details>, so a model-written closing tag would end it early.
     narrative = _DETAILS_TAG_RE.sub(
         r"&lt;\1\2",
-        _cell(text=run.narrative, limit=_NARRATIVE_LIMIT),
+        _cell(text=outcome.narrative, limit=NARRATIVE_LIMIT),
     )
-    detail = narrative or f"🔴 {run.p1} · 🟠 {run.p2} · 🟡 {run.p3}"
+    detail = narrative or f"🔴 {outcome.p1} · 🟠 {outcome.p2} · 🟡 {outcome.p3}"
     return f"{head}\n{detail}"

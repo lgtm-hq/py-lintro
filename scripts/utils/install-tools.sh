@@ -43,6 +43,28 @@ else:
 	echo "$version"
 }
 
+# Get a tool's minimum *compatible* version (manifest ``min_version``), which is
+# the floor lintro enforces at runtime. Distro-packaged tools install whatever
+# the package manager ships, so the install path compares against this rather
+# than the recommended pin.
+get_tool_min_version() {
+	local tool_name="$1"
+	local version
+	version=$(python3 -c "
+import runpy
+import sys
+
+sys.path.insert(0, '$PROJECT_ROOT')
+mod = runpy.run_path('$PROJECT_ROOT/lintro/_tool_versions.py')
+print(mod['get_min_version'](mod['ToolName']('$tool_name')))
+" 2>/dev/null)
+	if [ -z "$version" ]; then
+		echo "ERROR: Minimum version for '$tool_name' not found" >&2
+		return 1
+	fi
+	echo "$version"
+}
+
 # Show help if requested
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -73,6 +95,7 @@ This script installs:
   - Actionlint (GitHub Actions workflow linter)
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
+  - Cppcheck (C/C++ static analysis)
   - Clippy (Rust linter; requires Rust toolchain)
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
@@ -176,7 +199,7 @@ should_install() {
 # import-linter to lint-imports with an explicit alias branch.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc" "typos"
@@ -1634,6 +1657,75 @@ main() {
 		fi
 	fi # pip-audit
 
+	# Install cppcheck (C/C++ static analysis) via system package manager.
+	# cppcheck ships no portable single binary; it is provided by Homebrew
+	# (macOS) and apt (Debian/Ubuntu). In Docker it is pre-installed via the
+	# Dockerfile apt layer, so the already-installed branch short-circuits.
+	#
+	# Because every path installs whatever the package manager ships, the
+	# version cannot be pinned at install time. It is therefore verified
+	# afterwards against the manifest ``min_version`` floor: below it lintro
+	# skips the tool at runtime, so accepting it here would let setup finish
+	# green while C/C++ analysis silently never runs.
+	if should_install "cppcheck"; then
+		echo -e "${BLUE}Installing cppcheck...${NC}"
+		CPPCHECK_MIN_VERSION=$(get_tool_min_version "cppcheck") || exit 1
+		cppcheck_needs_verify=1
+		if [ $DRY_RUN -eq 1 ]; then
+			# No version is pinned at install time: brew and apt supply
+			# whatever the distribution ships, and the floor is enforced
+			# afterwards. Saying "would install v<pin>" would misdescribe it.
+			log_info "[DRY-RUN] Would install the cppcheck package provided by brew/apt (unpinned)"
+			log_info "[DRY-RUN] Would verify cppcheck >= v${CPPCHECK_MIN_VERSION}"
+			cppcheck_needs_verify=0
+		elif command -v cppcheck &>/dev/null; then
+			echo -e "${GREEN}✓ cppcheck already installed${NC}"
+		elif command -v brew &>/dev/null; then
+			if brew install cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via Homebrew${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via Homebrew${NC}"
+				exit 1
+			fi
+		elif command -v apt-get &>/dev/null; then
+			cppcheck_apt="apt-get"
+			if [ "$(id -u)" -ne 0 ]; then
+				if command -v sudo &>/dev/null; then
+					cppcheck_apt="sudo apt-get"
+				else
+					echo -e "${RED}✗ cppcheck needs apt-get but sudo is unavailable${NC}"
+					exit 1
+				fi
+			fi
+			if $cppcheck_apt update && $cppcheck_apt install -y --no-install-recommends cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via apt${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via apt${NC}"
+				exit 1
+			fi
+		else
+			echo -e "${RED}✗ Cannot install cppcheck automatically; install via your package manager.${NC}"
+			exit 1
+		fi
+
+		if [ $cppcheck_needs_verify -eq 1 ]; then
+			# "Cppcheck 2.17.1" -> "2.17.1"
+			# `|| true`: grep exits 1 on no match, which under `set -e`/pipefail
+			# would abort the script before the explicit error below.
+			cppcheck_installed=$(cppcheck --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+			if [ -z "$cppcheck_installed" ]; then
+				echo -e "${RED}✗ Could not determine cppcheck version${NC}"
+				exit 1
+			elif version_ge "$cppcheck_installed" "$CPPCHECK_MIN_VERSION"; then
+				echo -e "${GREEN}✓ cppcheck v${cppcheck_installed} (>= v${CPPCHECK_MIN_VERSION})${NC}"
+			else
+				echo -e "${RED}✗ cppcheck v${cppcheck_installed} is older than the required v${CPPCHECK_MIN_VERSION}${NC}"
+				echo -e "${RED}  Your distribution's package is too old; install a newer cppcheck from Homebrew or upstream.${NC}"
+				exit 1
+			fi
+		fi
+	fi # cppcheck
+
 	if should_install "shellcheck"; then
 		# Install shellcheck (shell script linter)
 		echo -e "${BLUE}Installing shellcheck...${NC}"
@@ -2061,6 +2153,7 @@ main() {
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
+		["cppcheck"]="C/C++ static analysis"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["golangci-lint"]="Go meta-linter (requires the Go toolchain)"
@@ -2102,7 +2195,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.

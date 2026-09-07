@@ -16,6 +16,8 @@ from lintro.ai.review.finding_parser import (
 )
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.severity_gate import (
     P1_DOWNGRADE_REASON,
@@ -251,20 +253,23 @@ def test_malformed_occurrences_degrade_to_the_findings_own_location(
 
 def test_run_record_round_trips_question_and_downgrade_counts() -> None:
     """Per-run severity distribution keeps inflation visible over time."""
-    record = RunRecord(round=2, p1=1, p2=3, p3=4, questions=2, downgraded=5)
+    record = RunRecord(
+        identity=RunIdentity(round=2),
+        outcome=RunOutcome(p1=1, p2=3, p3=4, questions=2, downgraded=5),
+    )
 
     restored = RunRecord.from_dict(record.to_dict())
 
-    assert_that(restored.questions).is_equal_to(2)
-    assert_that(restored.downgraded).is_equal_to(5)
+    assert_that(restored.outcome.questions).is_equal_to(2)
+    assert_that(restored.outcome.downgraded).is_equal_to(5)
 
 
 def test_legacy_run_record_defaults_the_new_counts_to_zero() -> None:
     """A run recorded before #1925 parses cleanly with empty new counts."""
     restored = RunRecord.from_dict({"round": 1, "p1": 2})
 
-    assert_that(restored.questions).is_equal_to(0)
-    assert_that(restored.downgraded).is_equal_to(0)
+    assert_that(restored.outcome.questions).is_equal_to(0)
+    assert_that(restored.outcome.downgraded).is_equal_to(0)
 
 
 @pytest.mark.parametrize(

@@ -31,11 +31,9 @@ from lintro.plugins.registry import register_tool
 from lintro.tools.core.batch_runner import batch_timeout_result
 from lintro.tools.core.option_validators import validate_positive_int
 from lintro.utils.config import get_central_line_length
-from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for Markdownlint configuration
 MARKDOWNLINT_DEFAULT_TIMEOUT: int = 30
-MARKDOWNLINT_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("markdownlint", 30)
 MARKDOWNLINT_FILE_PATTERNS: list[str] = ["*.md", "*.markdown"]
 
 
@@ -69,8 +67,6 @@ class MarkdownlintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=MARKDOWNLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[
                 ".markdownlint.json",
                 ".markdownlint.yaml",
@@ -314,6 +310,5 @@ class MarkdownlintPlugin(BaseToolPlugin):
             NotImplementedError: Markdownlint is a linter only and cannot fix issues.
         """
         raise NotImplementedError(
-            "Markdownlint cannot fix issues; use a Markdown formatter"
-            " for formatting.",
+            "Markdownlint cannot fix issues; use a Markdown formatter for formatting.",
         )

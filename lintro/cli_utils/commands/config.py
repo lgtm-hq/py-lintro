@@ -20,10 +20,9 @@ from lintro.cli_utils.commands.init import init_command
 from lintro.config import LintroConfig, get_config
 from lintro.config.config_validator import ValidationResult, validate_config_file
 from lintro.exceptions.errors import ConfigurationError
+from lintro.tools.core.scheduler import derive_execution_order
 from lintro.utils.unified_config import (
     _load_native_tool_config,
-    get_ordered_tools,
-    get_tool_priority,
     is_tool_injectable,
     validate_config_consistency,
 )
@@ -441,21 +440,10 @@ def _output_json(
     """
     import json
 
-    # Get tool order settings
-    tool_order = config.execution.tool_order
-    if isinstance(tool_order, list):
-        order_strategy = "custom"
-        custom_order = tool_order
-    else:
-        order_strategy = tool_order or "priority"
-        custom_order = []
-
-    # Get list of all known tools
+    # Get list of all known tools. The order reported here is the order that
+    # runs: both come from the same derived DAG (#1742).
     tool_names = _get_all_tool_names()
-    ordered_tools = get_ordered_tools(
-        tool_names=tool_names,
-        tool_order=config.execution.tool_order,
-    )
+    ordered_tools = derive_execution_order(tool_names)
 
     output: dict[str, Any] = {
         # A user-level global file is a real source; reporting "defaults" when
@@ -469,8 +457,7 @@ def _output_json(
         "global_settings": {
             "line_length": config.enforce.line_length,
             "target_python": config.enforce.target_python,
-            "tool_order": order_strategy,
-            "custom_order": custom_order,
+            "tool_order": "derived",
         },
         "execution": {
             "enabled_tools": config.execution.enabled_tools or "all",
@@ -478,7 +465,7 @@ def _output_json(
             "parallel": config.execution.parallel,
         },
         "tool_execution_order": [
-            {"tool": t, "priority": get_tool_priority(t)} for t in ordered_tools
+            {"tool": t, "position": index} for index, t in enumerate(ordered_tools, 1)
         ],
         "tool_configs": {},
         "warnings": validate_config_consistency(),
@@ -620,13 +607,7 @@ def _output_rich(
     exec_table.add_column("Setting", style="cyan", width=25)
     exec_table.add_column("Value", style="yellow")
 
-    tool_order = config.execution.tool_order
-    if isinstance(tool_order, list):
-        order_strategy = "custom"
-        exec_table.add_row("tool_order", order_strategy)
-        exec_table.add_row("custom_order", ", ".join(tool_order))
-    else:
-        exec_table.add_row("tool_order", tool_order or "priority")
+    exec_table.add_row("tool_order", "derived from tool claims")
 
     enabled_tools = config.execution.enabled_tools
     exec_table.add_row(
@@ -641,20 +622,15 @@ def _output_rich(
 
     # Tool Execution Order Section
     tool_names = _get_all_tool_names()
-    ordered_tools = get_ordered_tools(
-        tool_names=tool_names,
-        tool_order=config.execution.tool_order,
-    )
+    ordered_tools = derive_execution_order(tool_names)
 
-    order_table = Table(title="Tool Execution Order")
+    order_table = Table(title="Tool Execution Order (derived from tool claims)")
     order_table.add_column("#", style="dim", justify="right", width=3)
     order_table.add_column("Tool", style="cyan")
-    order_table.add_column("Priority", justify="center", style="yellow")
     order_table.add_column("Type", style="green")
     order_table.add_column("Enabled", justify="center")
 
     for idx, tool_name in enumerate(ordered_tools, 1):
-        priority = get_tool_priority(tool_name)
         injectable = is_tool_injectable(tool_name)
         tool_type = "Syncable" if injectable else "Native only"
         enabled = config.is_tool_enabled(tool_name)
@@ -663,7 +639,6 @@ def _output_rich(
         order_table.add_row(
             str(idx),
             tool_name,
-            str(priority),
             tool_type,
             enabled_display,
         )
@@ -732,5 +707,6 @@ def _output_rich(
         "[dim]  Run 'lintro init' to create a config file[/dim]",
     )
     console.print(
-        '[dim]  tool_order: "priority" | "alphabetical" | ["tool1", "tool2"][/dim]',
+        "[dim]  Execution order is derived from tool claims and is not "
+        "configurable[/dim]",
     )

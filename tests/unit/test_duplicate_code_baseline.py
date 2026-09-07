@@ -57,6 +57,7 @@ GATE_PACKAGES: tuple[str, ...] = (
     "lintro/tools/cargo_deny",
     "lintro/tools/clippy",
     "lintro/tools/commitlint",
+    "lintro/tools/cppcheck",
     "lintro/tools/dotenv_linter",
     "lintro/tools/gitleaks",
     "lintro/tools/golangci_lint",
@@ -188,6 +189,55 @@ def test_pylint_is_scoped_to_the_definition_packages() -> None:
     assert_that(_lintro_pylint_config()["include"]).is_equal_to(
         list(GATE_PACKAGES),
     )
+
+
+def test_every_tool_package_is_inside_the_gate() -> None:
+    """A tool cannot register and stay outside the zero-tolerance gate.
+
+    ``include`` used to be a catch-all prefix; #2311 turned it into a closed
+    per-package roster, which is precise but silent — a new
+    ``lintro/tools/<tool>/definition.py`` simply would not be scanned, and the
+    R0801 count would stay at 0 while its copy-pasted definition template grew
+    back. This scans the source tree instead of trusting the roster, so adding
+    a tool without adding its package fails here with the package named. Every
+    importable package is a tool package for this purpose (not only those
+    with a ``definition.py``): shared helpers such as ``ts_checker`` are in
+    the gate too, and a package without ``__init__.py`` is not importable and
+    is excluded, matching discovery's package rule.
+    """
+    tools_root = REPO_ROOT / "lintro" / "tools"
+    on_disk = {
+        f"lintro/tools/{path.name}"
+        for path in tools_root.iterdir()
+        if path.is_dir()
+        and (path / "__init__.py").is_file()
+        and not path.name.startswith("_")
+        and path.name != "core"
+    }
+
+    assert_that(on_disk).described_as("no per-tool packages found").is_not_empty()
+    assert_that(sorted(on_disk - set(GATE_PACKAGES))).described_as(
+        "tool packages missing from GATE_PACKAGES",
+    ).is_empty()
+    assert_that(
+        sorted(on_disk - set(_lintro_pylint_config()["include"])),
+    ).described_as("tool packages missing from [tool.lintro.pylint] include").is_empty()
+
+
+def test_the_gate_roster_names_only_packages_that_exist() -> None:
+    """A renamed or deleted tool leaves no stale entry behind in the roster.
+
+    A roster entry pointing at nothing is how a gate quietly stops covering
+    what its name says it covers, and it is the same failure mode as the
+    deleted ``lintro/tools/definitions`` tree (#2428 finding 7).
+    """
+    missing = [
+        package
+        for package in GATE_PACKAGES
+        if not (REPO_ROOT / package / "__init__.py").is_file()
+    ]
+
+    assert_that(missing).is_empty()
 
 
 def test_baseline_is_an_integer_within_its_ceiling() -> None:

@@ -9,7 +9,6 @@ it (#2311).
 """
 
 from lintro.tools.oxlint.definition import (
-    OXLINT_DEFAULT_PRIORITY,
     OXLINT_DEFAULT_TIMEOUT,
     OXLINT_FILE_PATTERNS,
     OxlintPlugin,
@@ -21,7 +20,6 @@ from lintro.tools.oxlint.doctor import (
 )
 
 __all__ = [
-    "OXLINT_DEFAULT_PRIORITY",
     "OXLINT_DEFAULT_TIMEOUT",
     "OXLINT_FILE_PATTERNS",
     "OxlintCheckResult",

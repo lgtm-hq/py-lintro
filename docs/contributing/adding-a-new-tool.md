@@ -112,8 +112,6 @@ class <Tool>Plugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=50,                        # see DEFAULT_TOOL_PRIORITIES
-            conflicts_with=[],
             native_configs=[".toolrc"],
             version_command=["<tool>", "--version"],
             min_version=get_min_version(ToolName.<TOOL>),
@@ -298,6 +296,11 @@ Choose the path that matches the tool's distribution mechanism.
    ./scripts/ci/compile-semgrep-lock.sh
    ```
 
+   Commit the recompiled lockfile with the `.in` change: nothing regenerates it
+   automatically. When the two drift apart, docker-ci's 🔐 Semgrep Lockfile Drift check
+   (`scripts/ci/check-semgrep-lock.sh`) goes red with the diff and the recompile
+   command, and the image `publish` job refuses to run.
+
    Keep the package listed in `REQUIREMENTS_PYPI_SOURCES` in
    `lintro_build/versions/generate.py` so the generator still reads the pin from
    `requirements-semgrep.txt`.
@@ -343,12 +346,11 @@ project (type checkers, contract checkers, dependency audits).
 
 ---
 
-## Step 6 — DEFAULT_TOOL_PRIORITIES
+## Step 6 — Execution order (nothing to do)
 
-The default priority for all tools is `50`. Only add an entry to
-`DEFAULT_TOOL_PRIORITIES` in `lintro/utils/config_priority.py` if the tool needs a
-non-default priority (e.g. formatters run first, type checkers run last). Check existing
-entries before deciding on a value.
+Execution order is derived from the `claims` you declared in Step 5, so there is no
+priority to pick and no table to edit. Run `lintro check --explain-order` after
+registering the tool to see where it lands and which claim put it there.
 
 ---
 
@@ -580,11 +582,11 @@ If the tool is available as a Homebrew formula and its version matches what
 
 A new-tool PR is **not mergeable** until all three gates pass:
 
-| Gate                                                                                   | What it checks                                                                                                                                                                                     |
-| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness    | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, `DEFAULT_TOOL_PRIORITIES` entry is consistent, and docs references exist |
-| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                                              |
-| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails                |
+| Gate                                                                                   | What it checks                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness    | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, and docs references exist                                 |
+| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                               |
+| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails |
 
 Until those gates are live, satisfy their intent manually by working through the
 [pre-submit checklist](#pre-submit-checklist) below.
@@ -635,7 +637,6 @@ Implementation checklist:
 - [ ] `lintro/tools/core/version_parsing.py` — `TOOLS_WITH_SIMPLE_VERSION_PATTERN` (if
       applicable)
 - [ ] `lintro/tools/core/version_checking.py` — install hints
-- [ ] `lintro/utils/config_priority.py` — `DEFAULT_TOOL_PRIORITIES` (if non-default)
 - [ ] `claims`, `reads_tree` and `partitionable` declared on the `ToolDefinition`
 - [ ] `pyproject.toml` — parser package added to `packages` list
 - [ ] `scripts/utils/install-tools.sh` — 4 sync points (help, SUPPORTED_TOOLS, install

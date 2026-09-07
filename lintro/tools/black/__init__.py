@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.black.definition import (
-    BLACK_DEFAULT_PRIORITY,
     BLACK_DEFAULT_TIMEOUT,
     BLACK_FILE_PATTERNS,
     BlackPlugin,
 )
 
 __all__ = [
-    "BLACK_DEFAULT_PRIORITY",
     "BLACK_DEFAULT_TIMEOUT",
     "BLACK_FILE_PATTERNS",
     "BlackPlugin",

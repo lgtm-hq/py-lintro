@@ -291,7 +291,7 @@ def format_convergence_banner(
     """
     noun = "finding" if open_p1 == 1 else "findings"
     remaining = (
-        f" Skipped: {open_p1} open P1 {noun} remain from the last reviewed " "round."
+        f" Skipped: {open_p1} open P1 {noun} remain from the last reviewed round."
         if open_p1 > 0
         else ""
     )

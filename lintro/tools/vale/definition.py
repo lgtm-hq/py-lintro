@@ -37,7 +37,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Vale configuration
 VALE_DEFAULT_TIMEOUT: int = 30
-VALE_DEFAULT_PRIORITY: int = 50
 VALE_FILE_PATTERNS: list[str] = ["*.md", "*.rst", "*.adoc", "*.txt"]
 VALE_CONFIG_FILENAMES: list[str] = [".vale.ini", "_vale.ini", "vale.ini"]
 
@@ -74,8 +73,6 @@ class ValePlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=VALE_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(VALE_CONFIG_FILENAMES),
             version_command=["vale", "--version"],
             min_version=get_min_version(ToolName.VALE),

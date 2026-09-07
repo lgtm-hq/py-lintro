@@ -7,7 +7,6 @@ through that module (#2311).
 """
 
 from lintro.tools.pip_audit.definition import (
-    PIP_AUDIT_DEFAULT_PRIORITY,
     PIP_AUDIT_DEFAULT_TIMEOUT,
     PIP_AUDIT_FILE_PATTERNS,
     PIP_AUDIT_PROJECT_FILES,
@@ -17,7 +16,6 @@ from lintro.tools.pip_audit.definition import (
 )
 
 __all__ = [
-    "PIP_AUDIT_DEFAULT_PRIORITY",
     "PIP_AUDIT_DEFAULT_TIMEOUT",
     "PIP_AUDIT_FILE_PATTERNS",
     "PIP_AUDIT_PROJECT_FILES",

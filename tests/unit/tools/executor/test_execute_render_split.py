@@ -175,14 +175,9 @@ def executor_doubles(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr(
         te,
-        "execute_post_checks",
-        lambda **kwargs: (
-            kwargs["total_issues"],
-            kwargs["total_fixed"],
-            kwargs["total_remaining"],
-        ),
+        "execute_gates",
+        lambda **kwargs: kwargs["total_issues"],
     )
-    monkeypatch.setattr(te, "load_post_checks_config", lambda: {"enabled": False})
 
 
 def _run_execute(

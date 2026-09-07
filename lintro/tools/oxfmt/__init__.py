@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.oxfmt.definition import (
-    OXFMT_DEFAULT_PRIORITY,
     OXFMT_DEFAULT_TIMEOUT,
     OXFMT_FILE_PATTERNS,
     OxfmtPlugin,
 )
 
 __all__ = [
-    "OXFMT_DEFAULT_PRIORITY",
     "OXFMT_DEFAULT_TIMEOUT",
     "OXFMT_FILE_PATTERNS",
     "OxfmtPlugin",

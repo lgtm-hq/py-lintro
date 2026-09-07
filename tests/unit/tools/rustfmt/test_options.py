@@ -9,7 +9,6 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.tools.rustfmt.definition import (
-    RUSTFMT_DEFAULT_PRIORITY,
     RUSTFMT_DEFAULT_TIMEOUT,
     RustfmtPlugin,
 )
@@ -30,7 +29,6 @@ if TYPE_CHECKING:
         ("description", "Rust's official code formatter"),
         ("can_fix", True),
         ("tool_type", ToolType.FORMATTER),
-        ("priority", RUSTFMT_DEFAULT_PRIORITY),
         ("default_timeout", RUSTFMT_DEFAULT_TIMEOUT),
     ],
     ids=[
@@ -38,7 +36,6 @@ if TYPE_CHECKING:
         "description_is_set",
         "can_fix_is_true",
         "tool_type_is_formatter",
-        "priority_equals_80",
         "default_timeout_equals_60",
     ],
 )

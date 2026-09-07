@@ -119,6 +119,6 @@ the native parser avoids all of that.
 
 ### Enhancements
 
-- Centralized execution priority (default 30, alongside other linters)
+- Execution order derived from claims (`CHECK` on `*.html`, after prettier)
 - Unified issue formatting (rule, severity, selector, doc URL) shared with all tools
 - stdout/stderr separation so stderr diagnostics never corrupt JSON parsing

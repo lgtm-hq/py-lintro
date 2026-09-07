@@ -104,8 +104,7 @@ def validate_and_read_file(
     """
     if not issue.file or not issue.line:
         logger.debug(
-            f"Skipping issue without file/line: "
-            f"file={issue.file!r} line={issue.line}",
+            f"Skipping issue without file/line: file={issue.file!r} line={issue.line}",
         )
         return None
 

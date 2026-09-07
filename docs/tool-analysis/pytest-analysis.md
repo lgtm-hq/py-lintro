@@ -64,7 +64,11 @@ cmd = self._get_executable_command("pytest") + ["--junitxml", "report.xml"]
 
 - 🔄 **Test Mode Isolation**: Adds `--strict-markers` and `--strict-config` in test mode
 - 🔄 **Timeout Management**: Configurable timeout (default 300 seconds)
-- 🔄 **Priority System**: High priority (90) for test execution
+- 🔄 **Ordering**: derived from claims; `CHECK` on `test_*.py` / `*_test.py` is
+  unconstrained by ruff and black, whose `*.py` is a separate pattern group, but it
+  still follows any `*` claimant holding an earlier phase — typos, which is `FIX` on `*`
+  — since `*` joins every group. gitleaks and trufflehog are `CHECK` on `*`, the same
+  phase, so they derive no edge
 - 🔄 **File Pattern Matching**: Automatic discovery of test files
 - 🔄 **Output Parsing**: Multiple output format parsing with fallback
 

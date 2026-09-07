@@ -9,7 +9,6 @@ through that module (#2311).
 from lintro.tools.pylint.definition import (
     PYLINT_ANALYSED_METADATA_KEY,
     PYLINT_CONFIG_FILES,
-    PYLINT_DEFAULT_PRIORITY,
     PYLINT_DEFAULT_TIMEOUT,
     PYLINT_FILE_PATTERNS,
     PYLINT_NO_INCLUDED_FILES,
@@ -23,7 +22,6 @@ from lintro.tools.pylint.definition import (
 __all__ = [
     "PYLINT_ANALYSED_METADATA_KEY",
     "PYLINT_CONFIG_FILES",
-    "PYLINT_DEFAULT_PRIORITY",
     "PYLINT_DEFAULT_TIMEOUT",
     "PYLINT_FILE_PATTERNS",
     "PYLINT_NOTHING_TO_LINT",

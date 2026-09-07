@@ -17,9 +17,8 @@ if TYPE_CHECKING:
     [
         ("name", "pip_audit"),
         ("can_fix", False),
-        ("priority", 90),
     ],
-    ids=["name", "can_fix", "priority"],
+    ids=["name", "can_fix"],
 )
 def test_definition_attributes(
     get_plugin: Callable[[str], BaseToolPlugin],

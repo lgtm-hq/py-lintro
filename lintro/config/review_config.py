@@ -78,10 +78,7 @@ class ReviewChecklistItemConfig(BaseModel):
     @model_validator(mode="after")
     def _validate_targets(self) -> ReviewChecklistItemConfig:
         if not self.domains and not self.languages:
-            msg = (
-                "review.checklist.items must set at least one of domains or "
-                "languages"
-            )
+            msg = "review.checklist.items must set at least one of domains or languages"
             raise ValueError(msg)
         return self
 
@@ -175,8 +172,7 @@ class ReviewSynthesisConfig(BaseModel):
         """
         if isinstance(value, bool):
             msg = (
-                "review.synthesis.max_findings must be an integer >= 1, "
-                f"got {value!r}"
+                f"review.synthesis.max_findings must be an integer >= 1, got {value!r}"
             )
             raise ValueError(msg)
         return value

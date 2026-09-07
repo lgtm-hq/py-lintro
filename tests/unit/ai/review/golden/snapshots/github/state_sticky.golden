@@ -25,7 +25,7 @@
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api-key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
+| `claude-sonnet-4-20250514` | api · api_key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
 
 </details>
 
