@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.151.1] - 2026-09-07
+
+### Fixed
+
+- **ci**: gate semgrep lockfile drift in ci and drop the dead renovate tasks (#2439)
+  (f7ee955)
+
 ## [0.151.0] - 2026-09-07
 
 ### Added
