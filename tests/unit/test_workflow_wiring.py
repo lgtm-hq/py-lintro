@@ -3136,6 +3136,49 @@ def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
     assert_that(versions).contains("bump only alongside rustc (#2205)")
 
 
+def test_renovate_does_not_track_cppcheck() -> None:
+    """The cppcheck pin follows Debian's package, not upstream's tags.
+
+    Cppcheck ships no portable single binary, so both the tools image and the
+    app-image ``install-tools.sh`` bridge install Debian's package. The
+    manifest-vs-image gate requires the installed version to *equal* the
+    manifest version, so a Renovate-driven bump to an upstream tag apt cannot
+    supply would fail CI permanently rather than merely lag. The pin moves
+    only when the ``python:3.14-slim`` base image changes Debian release.
+    """
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    managers = config.get("customManagers") or []
+
+    tracked = {
+        manager.get("packageNameTemplate")
+        for manager in managers
+        if manager.get("packageNameTemplate")
+    }
+    assert_that(tracked).does_not_contain("danmar/cppcheck")
+
+    match_strings = " ".join(
+        " ".join(manager.get("matchStrings") or []) for manager in managers
+    )
+    assert_that(match_strings).does_not_contain("ToolName.CPPCHECK")
+
+    grouped = [
+        package
+        for package in ("cppcheck", "danmar/cppcheck")
+        if any(
+            package in (rule.get("matchPackageNames") or [])
+            for rule in config.get("packageRules") or []
+        )
+    ]
+    assert_that(grouped).is_empty()
+
+    versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(versions).contains("NOT Renovate-managed")
+
+
 # Every workflow file carrying a pinned release reference, and how many sites
 # it must carry. Hard-coding the counts is deliberate: asserting only that the
 # surviving references agree would stay green if a refactor deleted all but one

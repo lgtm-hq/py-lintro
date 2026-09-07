@@ -23,8 +23,8 @@ choice (native XML vs. SARIF).
 - **Inconclusive analysis**: `--inconclusive` surfaces findings that cannot be fully
   confirmed, trading some false positives for coverage.
 - **Output formats**: human-readable text with a customizable `--template`, structured
-  XML (`--xml`, schema version 2), and — in recent versions (2.21.0 verified here) —
-  SARIF (`--output-format=sarif`).
+  XML (`--xml`, schema version 2), and — in recent versions (verified against upstream
+  2.21.0) — SARIF (`--output-format=sarif`).
 - **Exit codes**: `--error-exitcode=N` makes cppcheck exit with `N` when any enabled
   finding is reported; otherwise it exits `0`.
 
@@ -65,19 +65,20 @@ missing system includes). All of this is configurable via the `enable` option.
 
 ### Options
 
-| Option         | Type      | Purpose                                                 |
-| -------------- | --------- | ------------------------------------------------------- |
-| `enable`       | str       | Comma-separated check categories (`error` is implicit). |
-| `inconclusive` | bool      | Report findings cppcheck cannot fully confirm.          |
-| `std`          | str       | Language standard (e.g. `c11`, `c++17`).                |
-| `inline_suppr` | bool      | Honor inline `// cppcheck-suppress` comments.           |
-| `suppress`     | list[str] | Suppression specifications (e.g. `missingInclude`).     |
+| Option         | Type             | Purpose                                                 |
+| -------------- | ---------------- | ------------------------------------------------------- |
+| `enable`       | str              | Comma-separated check categories (`error` is implicit). |
+| `inconclusive` | bool             | Report findings cppcheck cannot fully confirm.          |
+| `std`          | str              | Language standard (e.g. `c11`, `c++17`).                |
+| `inline_suppr` | bool             | Honor inline `// cppcheck-suppress` comments.           |
+| `suppress`     | str \| list[str] | Suppression specifications (e.g. `missingInclude`).     |
 
 ## Parser choice: native XML (not SARIF)
 
-Cppcheck 2.21.0 can emit SARIF (`--output-format=sarif`), so the SARIF fidelity
-checklist from `docs/design/sarif-ingestion-evaluation.md` was applied. **SARIF is lossy
-for cppcheck**, so Lintro uses a native XML parser (`lintro/parsers/cppcheck/`):
+Recent cppcheck (upstream 2.21.0 was used for this evaluation) can emit SARIF
+(`--output-format=sarif`), so the SARIF fidelity checklist from
+`docs/design/sarif-ingestion-evaluation.md` was applied. **SARIF is lossy for
+cppcheck**, so Lintro uses a native XML parser (`lintro/parsers/cppcheck/`):
 
 - **Severity collapse (primary reason)**: SARIF has only
   `error`/`warning`/`note`/`none`. Cppcheck's `style`, `performance`, and `portability`
@@ -108,9 +109,12 @@ materially more fragile than consuming SARIF here.
 - No auto-fix: cppcheck only reports.
 - Per-file execution means whole-program checks (e.g. `unusedFunction`) are not reliable
   and are excluded from the default enable set.
-- `lintro/_tool_versions.py` records the Renovate-tracked _recommended_ version
-  (2.21.0), kept in sync with `lintro/tools/manifest.json` by the tool-version
-  generator. It is not an install pin: the Docker image and `install-tools.sh` install
-  the distro package (apt on Debian, Homebrew on macOS). What is enforced at runtime is
-  the manifest `min_version` floor of 2.13.0; the tools image base (`python:3.14-slim`,
-  Debian trixie) ships cppcheck 2.17.1, which clears it.
+- Cppcheck ships no portable single binary, so the tools image and `install-tools.sh`
+  install the distro package (apt on Debian, Homebrew on macOS). The version recorded in
+  `lintro/_tool_versions.py` — and propagated to `lintro/tools/manifest.json` by the
+  tool-version generator — therefore tracks the Debian release the `python:3.14-slim`
+  base ships, currently trixie's **2.17.1**. It is deliberately not Renovate-managed:
+  the manifest-vs-image gate requires the installed version to _equal_ the manifest
+  version, so bumping the pin to an upstream tag apt cannot supply would fail CI
+  permanently. Bump it when the base image moves to a new Debian release. The supported
+  floor is the separate `min_version` of **2.13.0**.

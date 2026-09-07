@@ -1288,10 +1288,10 @@ command-line options, so configuration goes through `--tool-options`. Cppcheck's
 project modes (`--project=compile_commands.json`, GUI project files) and suppression
 files are not wired into the Lintro integration.
 
-Lintro requires Cppcheck **2.13.0 or newer**. The Docker image installs the Debian
-package rather than a pinned release; 2.21.0 is the Renovate-tracked recommended
-version, not an apt pin. Distribution packages older than 2.13.0 are rejected by the
-version check; install from Homebrew or upstream in that case.
+Lintro requires Cppcheck **2.13.0 or newer**. Cppcheck ships no portable single binary,
+so the Docker image installs Debian's package (currently 2.17.1 on trixie) and
+`install-tools.sh` uses apt or Homebrew. Distribution packages older than 2.13.0 are
+rejected by the version check; install from Homebrew or upstream in that case.
 
 **Available Options via `--tool-options`:**
 
