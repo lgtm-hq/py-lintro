@@ -32,6 +32,7 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_thread import ReviewThread
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.review_state_codec import legacy_state_block
 
 _TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
@@ -862,11 +863,13 @@ def test_posting_survives_a_refused_comment_edit(
     assert_that(reporter.log.resolved_threads).is_empty()
     # The refused edit is not a crash; the prior comment id remains available
     # on the artifact state the next round will load.
-    from lintro.ai.review.github_sticky import advance_review_state
+    from lintro.ai.review.sticky import advance_review_state
 
     advanced = advance_review_state(
-        result=sample_review_result,
-        prior_state=_prior_state(findings=(record,)),
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_state=_prior_state(findings=(record,)),
+        ),
     )
     stored = [
         item for item in advanced.findings if item.fingerprint == record.fingerprint

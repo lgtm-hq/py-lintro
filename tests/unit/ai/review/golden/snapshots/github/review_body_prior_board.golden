@@ -1,0 +1,58 @@
+🔎 **Lintro review — 3 findings posted** · ✔ 0 resolved since round 2 · round 3 · commits `1111111..0d15ea5`
+
+> [!IMPORTANT]
+> ⚡ **Fix prompt — this round's 3 findings only**
+>
+> <details><summary>Show prompt</summary>
+>
+> ```
+> Scope: the 3 findings posted in round 3 of this PR's lintro review ONLY (older
+> open findings are covered by the fix-all prompt on the sticky status comment).
+>
+> These are open findings from a lintro AI code review. Verify each one against
+> the current code. Fix only still-valid issues, skip the rest with a brief
+> reason, keep changes minimal, and validate with tests.
+>
+> In `src/auth/session.py`:
+>
+> - Line 31 — **Unknown session status grants access** (P1 · security):
+>   The else branch treats any unrecognised status as active. No explicit default
+>   for unknown statuses.
+>   Fix: Default to expired and log the unrecognised value.
+>
+> In `tests/test_session.py`:
+>
+> - Line 12 — **No test covers the expired branch** (P2 · test-gap):
+>   The expired path is never exercised. Test gap.
+>   Fix: Add a case asserting the expired status is rejected.
+>
+> In `src/auth/tokens.py`:
+>
+> - Line 7 — **Docstring omits the raised error** (P3 · style):
+>   The Raises section is missing. Oversight.
+>   Fix: Document the ValueError.
+> ```
+>
+> </details>
+>
+> <sub>For everything still open across all rounds, use the sticky comment's fix-all prompt</sub>
+
+**📊 Run stats**
+
+| model | est. cost | tokens in | tokens out |
+| --- | --- | --- | --- |
+| `claude-sonnet-4-20250514` | $0.1234 | 12,000 | 2,400 |
+
+| transport | depth | strictness | files | checks | duration | lintro |
+| --- | --- | --- | --- | --- | --- | --- |
+| api · api-key | 2 | balanced | 3 | 2 | 42s | 0.0.0-golden |
+
+<sub>Config source: pyproject.toml</sub>
+
+<details><summary>📥 Commits</summary>
+
+This round reviewed the 2 new commits since round 2, `1111111` → `0d15ea5`, in the context of the PR's full diff against `main`.
+
+</details>
+
+<sub>🤖 lintro · cumulative status &amp; history → sticky comment · finding details → inline comments below</sub>

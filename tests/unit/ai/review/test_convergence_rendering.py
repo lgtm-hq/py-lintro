@@ -18,16 +18,17 @@ from lintro.ai.review.github_constants import (
     PRIMARY_SOFT_LIMIT,
     STATE_MARKER_PREFIX,
 )
-from lintro.ai.review.github_render import format_convergence_banner
-from lintro.ai.review.github_sticky import (
-    advance_review_state,
-    build_sticky_comment,
-    render_state_sticky,
-)
+from lintro.ai.review.github_notes import format_convergence_banner
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.sticky import (
+    advance_review_state,
+    build_sticky_comment,
+    render_state_sticky,
+)
 
 
 def _finding(
@@ -84,7 +85,7 @@ def test_a_completed_round_records_its_score_in_state(
         findings=(_finding(title="Leak"), _finding(title="Nit", line=44)),
     )
 
-    state = advance_review_state(result=result, head_sha="sha1")
+    state = advance_review_state(request=StickyRequest(result=result, head_sha="sha1"))
 
     assert_that(state.runs[-1].convergence_score).is_equal_to(20.0)
 
@@ -98,14 +99,18 @@ def test_a_round_that_fixed_everything_records_a_zero_score(
         sample_review_result: Baseline review result fixture.
     """
     first = advance_review_state(
-        result=replace(sample_review_result, findings=(_finding(title="Leak"),)),
-        head_sha="sha1",
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=(_finding(title="Leak"),)),
+            head_sha="sha1",
+        ),
     )
 
     second = advance_review_state(
-        result=replace(sample_review_result, findings=()),
-        prior_state=first,
-        head_sha="sha2",
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=()),
+            prior_state=first,
+            head_sha="sha2",
+        ),
     )
 
     assert_that(second.runs[-1].convergence_score).is_equal_to(0.0)
@@ -121,8 +126,13 @@ def test_the_sticky_shows_the_score_on_the_first_round(
     """
     body = _body_only(
         body=build_sticky_comment(
-            result=replace(sample_review_result, findings=(_finding(title="Leak"),)),
-            head_sha="sha1",
+            request=StickyRequest(
+                result=replace(
+                    sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                head_sha="sha1",
+            ),
         ),
     )
 
@@ -139,21 +149,25 @@ def test_the_sticky_shows_the_trajectory_once_there_is_one(
         sample_review_result: Baseline review result fixture.
     """
     first = advance_review_state(
-        result=replace(
-            sample_review_result,
-            findings=(_finding(title="Leak"), _finding(title="Nit", line=44)),
+        request=StickyRequest(
+            result=replace(
+                sample_review_result,
+                findings=(_finding(title="Leak"), _finding(title="Nit", line=44)),
+            ),
+            head_sha="sha1",
         ),
-        head_sha="sha1",
     )
 
     body = _body_only(
         body=build_sticky_comment(
-            result=replace(
-                sample_review_result,
-                findings=(_finding(title="Leak"),),
+            request=StickyRequest(
+                result=replace(
+                    sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                prior_state=first,
+                head_sha="sha2",
             ),
-            prior_state=first,
-            head_sha="sha2",
         ),
     )
 
@@ -170,8 +184,10 @@ def test_a_clean_round_still_shows_its_score(
     """
     body = _body_only(
         body=build_sticky_comment(
-            result=replace(sample_review_result, findings=()),
-            head_sha="sha1",
+            request=StickyRequest(
+                result=replace(sample_review_result, findings=()),
+                head_sha="sha1",
+            ),
         ),
     )
 
@@ -197,13 +213,16 @@ def test_the_sticky_stays_under_its_size_caps(
         sample_review_result: Baseline review result fixture.
     """
     body = build_sticky_comment(
-        result=replace(
-            sample_review_result,
-            findings=tuple(
-                _finding(title=f"Finding {index}", line=index) for index in range(1, 60)
+        request=StickyRequest(
+            result=replace(
+                sample_review_result,
+                findings=tuple(
+                    _finding(title=f"Finding {index}", line=index)
+                    for index in range(1, 60)
+                ),
             ),
+            head_sha="sha1",
         ),
-        head_sha="sha1",
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
@@ -227,7 +246,9 @@ def test_the_converged_banner_stamps_the_board_it_re_renders(
         sample_review_result: Baseline review result fixture.
     """
     state = replace(
-        advance_review_state(result=sample_review_result, head_sha="a" * 40),
+        advance_review_state(
+            request=StickyRequest(result=sample_review_result, head_sha="a" * 40),
+        ),
         runs=(
             RunRecord(round=1, sha="sha1", model="claude", convergence_score=1.0),
             RunRecord(round=2, sha="sha2", model="claude", convergence_score=0.5),

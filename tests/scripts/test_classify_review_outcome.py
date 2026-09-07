@@ -24,7 +24,7 @@ from lintro.ai.review.error_contract import (
     render_error_contract_json,
 )
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
-from lintro.ai.review.github_render import format_inline_post_cause
+from lintro.ai.review.github_notes import format_inline_post_cause
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity

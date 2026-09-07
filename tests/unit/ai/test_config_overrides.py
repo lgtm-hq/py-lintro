@@ -14,7 +14,7 @@ from lintro.ai.exceptions import AIConfigOverrideError
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
 from lintro.ai.review.display import render_review_terminal
-from lintro.ai.review.github_render import format_run_mechanics
+from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.transport import (

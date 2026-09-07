@@ -16,13 +16,14 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
-from lintro.ai.review.github_render import format_run_mechanics
+from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_timings import ReviewTimings
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.session import ReviewSessionOptions
@@ -809,11 +810,11 @@ def test_sticky_comment_carries_the_timing_summary(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary repository root.
     """
-    from lintro.ai.review.github_sticky import build_sticky_comment
+    from lintro.ai.review.sticky import build_sticky_comment
 
     result = _run(tmp_path=tmp_path, chunk_count=1)
 
-    sticky = build_sticky_comment(result=result, transport="api")
+    sticky = build_sticky_comment(request=StickyRequest(result=result, transport="api"))
 
     expected = format_timing_summary(timings=_timings_of(result=result))
     assert_that(sticky).contains(f"<sub>Timings: {expected}</sub>")

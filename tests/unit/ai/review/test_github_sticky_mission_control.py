@@ -24,18 +24,19 @@ from lintro.ai.review.github_constants import (
 # no genuine finding set can make a one-finding body overflow. Driving the
 # search with a stub assembler is the only way to prove the floor holds.
 from lintro.ai.review.github_contract import RenderLimits, SectionCounts, fit_body
-from lintro.ai.review.github_sticky import (
-    advance_review_state,
-    build_sticky_comment,
-)
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
+from lintro.ai.review.sticky import (
+    advance_review_state,
+    build_sticky_comment,
+)
 
 _DETAILS_TAG_RE = re.compile(r"</?details\b")
 _ROUND_RE = re.compile(r"(?:\*\*|<b>)Round (\d+)")
@@ -111,9 +112,11 @@ def test_title_verdict_is_derived_from_open_severities(
 ) -> None:
     """The title follows the highest open severity, never the model."""
     body = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(_finding(title="Leak", severity=severity),),
+        request=StickyRequest(
+            result=_with(
+                base=sample_review_result,
+                findings=(_finding(title="Leak", severity=severity),),
+            ),
         ),
     )
 
@@ -125,7 +128,9 @@ def test_title_reads_ready_with_nothing_open(
 ) -> None:
     """A round with no findings renders Ready and an empty findings table."""
     body = _body_only(
-        body=build_sticky_comment(result=_with(base=sample_review_result, findings=())),
+        body=build_sticky_comment(
+            request=StickyRequest(result=_with(base=sample_review_result, findings=())),
+        ),
     )
 
     assert_that(body).contains("## 🔎 Lintro Review — ✅ Ready")
@@ -139,13 +144,15 @@ def test_title_ignores_questions(
     """A question carries no severity, so it cannot block the PR."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(
-                base=sample_review_result,
-                findings=(
-                    _finding(
-                        title="Is this intentional?",
-                        severity=Severity.P1,
-                        kind=FindingKind.QUESTION,
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(
+                        _finding(
+                            title="Is this intentional?",
+                            severity=Severity.P1,
+                            kind=FindingKind.QUESTION,
+                        ),
                     ),
                 ),
             ),
@@ -162,12 +169,14 @@ def test_pill_counts_only_the_deciding_severity(
     """Two open blockers alongside a nit read as two blockers, not three."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(
-                base=sample_review_result,
-                findings=(
-                    _finding(title="Leak one", line=10),
-                    _finding(title="Leak two", line=20),
-                    _finding(title="Stale name", severity=Severity.P3, line=30),
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(
+                        _finding(title="Leak one", line=10),
+                        _finding(title="Leak two", line=20),
+                        _finding(title="Stale name", severity=Severity.P3, line=30),
+                    ),
                 ),
             ),
         ),
@@ -183,7 +192,9 @@ def test_round_one_renders_no_delta_line(
     sample_review_result: ReviewResult,
 ) -> None:
     """There is nothing to compare against on the first round."""
-    body = _body_only(body=build_sticky_comment(result=sample_review_result))
+    body = _body_only(
+        body=build_sticky_comment(request=StickyRequest(result=sample_review_result)),
+    )
 
     assert_that(body).does_not_contain("resolved ·")
     assert_that(body).contains("Round 1")
@@ -200,17 +211,21 @@ def test_delta_line_counts_resolved_new_and_unchanged(
             _finding(title="Slow loop", severity=Severity.P2, line=44),
         ),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(
-                _finding(title="Leak", line=12),
-                _finding(title="Unguarded divide", severity=Severity.P2, line=8),
+        request=StickyRequest(
+            result=_with(
+                base=sample_review_result,
+                findings=(
+                    _finding(title="Leak", line=12),
+                    _finding(title="Unguarded divide", severity=Severity.P2, line=8),
+                ),
             ),
+            prior_state=prior,
+            head_sha="sha2",
         ),
-        prior_state=prior,
-        head_sha="sha2",
     )
     body = _body_only(body=second)
 
@@ -234,26 +249,32 @@ def test_delta_line_reports_regressions_separately(
             _finding(title="Slow loop", severity=Severity.P2, line=44),
         ),
     )
-    after_first = advance_review_state(result=first_result, head_sha="sha1")
+    after_first = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     after_fixed = advance_review_state(
-        result=_with(
-            base=sample_review_result,
-            findings=(_finding(title="Slow loop", severity=Severity.P2, line=44),),
+        request=StickyRequest(
+            result=_with(
+                base=sample_review_result,
+                findings=(_finding(title="Slow loop", severity=Severity.P2, line=44),),
+            ),
+            prior_state=after_first,
+            head_sha="sha2",
         ),
-        prior_state=after_first,
-        head_sha="sha2",
     )
     third = _body_only(
         body=build_sticky_comment(
-            result=_with(
-                base=sample_review_result,
-                findings=(
-                    _finding(title="Leak"),
-                    _finding(title="Slow loop", severity=Severity.P2, line=44),
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(
+                        _finding(title="Leak"),
+                        _finding(title="Slow loop", severity=Severity.P2, line=44),
+                    ),
                 ),
+                prior_state=after_fixed,
+                head_sha="sha3",
             ),
-            prior_state=after_fixed,
-            head_sha="sha3",
         ),
     )
 
@@ -265,12 +286,19 @@ def test_delta_line_omits_the_regressed_clause_when_there_are_none(
 ) -> None:
     """The common case stays short — no "0 regressed" noise."""
     first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -288,9 +316,11 @@ def test_history_summary_renders_millions_of_tokens_as_millions(
 
     body = _body_only(
         body=build_sticky_comment(
-            result=sample_review_result,
-            prior_state=prior_state,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=sample_review_result,
+                prior_state=prior_state,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -303,18 +333,26 @@ def test_open_table_marks_new_and_carries_since_round(
 ) -> None:
     """The Δ column separates a newly raised finding from a carried one."""
     first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(
-                base=sample_review_result,
-                findings=(
-                    _finding(title="Leak"),
-                    _finding(title="Unguarded divide", severity=Severity.P2, line=8),
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(
+                        _finding(title="Leak"),
+                        _finding(
+                            title="Unguarded divide",
+                            severity=Severity.P2,
+                            line=8,
+                        ),
+                    ),
                 ),
+                prior_state=prior,
+                head_sha="sha2",
             ),
-            prior_state=prior,
-            head_sha="sha2",
         ),
     )
 
@@ -331,17 +369,26 @@ def test_open_table_marks_a_regressed_finding(
 ) -> None:
     """A finding that comes back after being fixed is flagged, not silently new."""
     first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
-    after_first = advance_review_state(result=first_result, head_sha="sha1")
+    after_first = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     after_fixed = advance_review_state(
-        result=_with(base=sample_review_result, findings=()),
-        prior_state=after_first,
-        head_sha="sha2",
+        request=StickyRequest(
+            result=_with(base=sample_review_result, findings=()),
+            prior_state=after_first,
+            head_sha="sha2",
+        ),
     )
     regressed = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=after_fixed,
-            head_sha="sha3",
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                prior_state=after_fixed,
+                head_sha="sha3",
+            ),
         ),
     )
 
@@ -365,12 +412,19 @@ def test_resolved_questions_do_not_inflate_the_fixed_tile(
             ),
         ),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -383,12 +437,16 @@ def test_resolved_table_stamps_the_fixing_commit(
 ) -> None:
     """A resolved finding is struck through and names where it was fixed."""
     first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
-    prior = advance_review_state(result=first_result, head_sha="0123456789abcdef")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="0123456789abcdef"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=()),
-            prior_state=prior,
-            head_sha="fedcba9876543210",
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=()),
+                prior_state=prior,
+                head_sha="fedcba9876543210",
+            ),
         ),
     )
 
@@ -404,16 +462,18 @@ def test_summary_bullets_tied_to_blockers_are_severity_marked(
     """A bullet about an open P1 cannot read as neutral prose."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(
-                base=sample_review_result,
-                findings=(_finding(title="Hardcoded password literal"),),
-                pr_summary=ReviewSummary(
-                    headline="Seeds a sandbox module.",
-                    walkthrough=(
-                        SummaryBullet(text="Adds three utility functions."),
-                        SummaryBullet(
-                            text="Stores an application password.",
-                            finding_ref="src/example.py:10",
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Hardcoded password literal"),),
+                    pr_summary=ReviewSummary(
+                        headline="Seeds a sandbox module.",
+                        walkthrough=(
+                            SummaryBullet(text="Adds three utility functions."),
+                            SummaryBullet(
+                                text="Stores an application password.",
+                                finding_ref="src/example.py:10",
+                            ),
                         ),
                     ),
                 ),
@@ -432,13 +492,15 @@ def test_reasoning_section_carries_rubric_and_attention_files(
     """Model reasoning and the attention files render in their own section."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(
-                base=sample_review_result,
-                findings=(_finding(title="Leak"),),
-                verdict_reasoning=VerdictReasoning(
-                    deciding_factor="The credential is evaluated at import time.",
-                    failure_mechanism="Every importer holds the secret.",
-                    files_needing_attention=("src/example.py",),
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                    verdict_reasoning=VerdictReasoning(
+                        deciding_factor="The credential is evaluated at import time.",
+                        failure_mechanism="Every importer holds the secret.",
+                        files_needing_attention=("src/example.py",),
+                    ),
                 ),
             ),
         ),
@@ -459,9 +521,11 @@ def test_this_run_badges_lead_with_the_model_and_name_the_transport(
     """No figure is presented as billed; the transport badge carries that."""
     body = _body_only(
         body=build_sticky_comment(
-            result=sample_review_result,
-            transport="cli",
-            auth_mode="subscription",
+            request=StickyRequest(
+                result=sample_review_result,
+                transport="cli",
+                auth_mode="subscription",
+            ),
         ),
     )
 
@@ -481,19 +545,23 @@ def test_body_nests_details_only_inside_history(
         base=sample_review_result,
         findings=(_finding(title="Leak"),),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     finding = _finding(title="Unguarded divide", severity=Severity.P2, line=8)
     body = build_sticky_comment(
-        result=_with(
-            base=sample_review_result,
-            findings=(_finding(title="Leak"), finding),
-        ),
-        prior_state=prior,
-        head_sha="sha2",
-        checklist_display=ChecklistDisplay.ALL,
-        inline_failure=InlinePostFailure(
-            reason="line not in diff",
-            findings=(finding,),
+        request=StickyRequest(
+            result=_with(
+                base=sample_review_result,
+                findings=(_finding(title="Leak"), finding),
+            ),
+            prior_state=prior,
+            head_sha="sha2",
+            checklist_display=ChecklistDisplay.ALL,
+            inline_failure=InlinePostFailure(
+                reason="line not in diff",
+                findings=(finding,),
+            ),
         ),
     )
 
@@ -504,14 +572,20 @@ def test_history_collapsible_appears_once_and_only_after_round_one(
     sample_review_result: ReviewResult,
 ) -> None:
     """History is a single collapsible, absent while there is no history."""
-    first = build_sticky_comment(result=sample_review_result, head_sha="sha1")
+    first = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result, head_sha="sha1"),
+    )
     assert_that(_body_only(body=first)).does_not_contain("🕘 History")
-    prior = advance_review_state(result=sample_review_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=sample_review_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=sample_review_result,
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=sample_review_result,
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -525,12 +599,19 @@ def test_fix_all_panel_is_scoped_to_all_open_findings(
 ) -> None:
     """The panel title and the prompt's first line both restate the scope."""
     first_result = _with(base=sample_review_result, findings=(_finding(title="Leak"),))
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     second = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(_finding(title="Leak"),)),
-            prior_state=prior,
-            head_sha="sha2",
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leak"),),
+                ),
+                prior_state=prior,
+                head_sha="sha2",
+            ),
         ),
     )
 
@@ -544,9 +625,11 @@ def test_table_cells_escape_pipes_from_model_titles(
     """An untrusted title cannot break out of its table cell."""
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(
-                base=sample_review_result,
-                findings=(_finding(title="Leaks a | b secret"),),
+            request=StickyRequest(
+                result=_with(
+                    base=sample_review_result,
+                    findings=(_finding(title="Leaks a | b secret"),),
+                ),
             ),
         ),
     )
@@ -565,10 +648,12 @@ def test_degraded_path_warns_and_folds_details_into_the_sticky(
 
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(finding,)),
-            inline_failure=InlinePostFailure(
-                reason="review API returned 422 - line not in diff",
-                findings=(finding,),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(finding,)),
+                inline_failure=InlinePostFailure(
+                    reason="review API returned 422 - line not in diff",
+                    findings=(finding,),
+                ),
             ),
         ),
     )
@@ -593,8 +678,10 @@ def test_warning_row_precedes_the_open_findings_table(
     finding = _finding(title="Leak")
     body = _body_only(
         body=build_sticky_comment(
-            result=_with(base=sample_review_result, findings=(finding,)),
-            inline_failure=InlinePostFailure(reason="422", findings=(finding,)),
+            request=StickyRequest(
+                result=_with(base=sample_review_result, findings=(finding,)),
+                inline_failure=InlinePostFailure(reason="422", findings=(finding,)),
+            ),
         ),
     )
 
@@ -607,7 +694,9 @@ def test_no_degraded_content_when_inline_posting_succeeded(
     sample_review_result: ReviewResult,
 ) -> None:
     """The healthy path never duplicates inline-comment detail."""
-    body = _body_only(body=build_sticky_comment(result=sample_review_result))
+    body = _body_only(
+        body=build_sticky_comment(request=StickyRequest(result=sample_review_result)),
+    )
 
     assert_that(body).does_not_contain("could not be posted as")
     assert_that(body).does_not_contain("not posted inline")
@@ -653,9 +742,11 @@ def _render_with_findings(
         for index in range(count)
     )
     return build_sticky_comment(
-        result=_with(base=base, findings=findings),
-        prior_state=prior_state,
-        head_sha="deadbee",
+        request=StickyRequest(
+            result=_with(base=base, findings=findings),
+            prior_state=prior_state,
+            head_sha="deadbee",
+        ),
     )
 
 
@@ -757,7 +848,9 @@ def test_comment_stays_under_the_hard_limit_with_huge_finding_sets(
     )
 
     body = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=findings),
+        request=StickyRequest(
+            result=_with(base=sample_review_result, findings=findings),
+        ),
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
@@ -813,8 +906,10 @@ def test_untrusted_text_cannot_close_the_folded_collapsible(
     )
 
     body = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=(hostile,)),
-        inline_failure=InlinePostFailure(reason="422", findings=(hostile,)),
+        request=StickyRequest(
+            result=_with(base=sample_review_result, findings=(hostile,)),
+            inline_failure=InlinePostFailure(reason="422", findings=(hostile,)),
+        ),
     )
 
     assert_that(_max_details_depth(body=body)).is_equal_to(1)
@@ -839,8 +934,10 @@ def test_folded_details_shrink_under_size_pressure(
     )
 
     body = build_sticky_comment(
-        result=_with(base=sample_review_result, findings=findings),
-        inline_failure=InlinePostFailure(reason="422", findings=findings),
+        request=StickyRequest(
+            result=_with(base=sample_review_result, findings=findings),
+            inline_failure=InlinePostFailure(reason="422", findings=findings),
+        ),
     )
 
     rendered = _body_only(body=body)

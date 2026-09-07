@@ -39,6 +39,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 
 
 @dataclass
@@ -292,7 +293,7 @@ def test_build_sticky_comment_has_markers_and_verdict_header(
     sample_review_result: ReviewResult,
 ) -> None:
     """First-run sticky comment leads with the round and the derived verdict."""
-    body = build_sticky_comment(result=sample_review_result)
+    body = build_sticky_comment(request=StickyRequest(result=sample_review_result))
 
     assert_that(body).contains(STICKY_MARKER)
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
@@ -319,7 +320,9 @@ def test_build_sticky_comment_aggregates_prior_runs(
             "p3": 0,
         },
     ]
-    body = build_sticky_comment(result=sample_review_result, prior_runs=prior)
+    body = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result, prior_runs=prior),
+    )
 
     assert_that(body).contains("### 🕘 History · 1 previous run")
     # Mixed estimate => cumulative flagged approximate.
@@ -329,11 +332,11 @@ def test_build_sticky_comment_aggregates_prior_runs(
 
 def test_round_trip_state_parsing(sample_review_result: ReviewResult) -> None:
     """New stickies carry no leftover blob; parse yields empty runs."""
-    from lintro.ai.review.github_sticky import advance_review_state
+    from lintro.ai.review.sticky import advance_review_state
 
-    body = build_sticky_comment(result=sample_review_result)
+    body = build_sticky_comment(request=StickyRequest(result=sample_review_result))
     runs = parse_review_state(body=body)
-    state = advance_review_state(result=sample_review_result)
+    state = advance_review_state(request=StickyRequest(result=sample_review_result))
 
     assert_that(runs).is_empty()
     assert_that(state.runs[0].model).is_equal_to("claude-sonnet-4-20250514")
@@ -478,7 +481,9 @@ def test_post_review_updates_existing_sticky(
 ) -> None:
     """An existing sticky comment is updated in place, not duplicated."""
     reporter = _fresh_reporter()
-    prior_body = build_sticky_comment(result=sample_review_result)
+    prior_body = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result),
+    )
     reporter.find_issue_comment.return_value = (42, prior_body)
 
     posted = post_review_to_github(
@@ -670,7 +675,9 @@ def test_refresh_uses_replacement_id_after_cross_actor_recreate(
     failure details has to target the replacement id; the deleted id 404s.
     """
     reporter = _fresh_reporter()
-    prior_body = build_sticky_comment(result=sample_review_result)
+    prior_body = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result),
+    )
     reporter.find_issue_comment.side_effect = [
         (42, prior_body),
         (99, "replacement"),
@@ -768,11 +775,11 @@ def test_post_error_comment_recovers_prior_state(
     sample_review_result: ReviewResult,
 ) -> None:
     """post_review_error_to_github reloads prior runs and keeps their state."""
-    from lintro.ai.review.github_sticky import advance_review_state
     from lintro.ai.review.review_state_codec import legacy_state_block
+    from lintro.ai.review.sticky import advance_review_state
 
     reporter = _fresh_reporter()
-    prior = advance_review_state(result=sample_review_result)
+    prior = advance_review_state(request=StickyRequest(result=sample_review_result))
     prior_body = f"{STICKY_MARKER}\n\nprior round{legacy_state_block(state=prior)}"
     reporter.find_issue_comment.return_value = (9, prior_body)
 
@@ -858,7 +865,9 @@ def test_sticky_indexes_every_finding_and_stays_under_the_cap(
         findings=(*mapped, fallback),
     )
 
-    body = build_sticky_comment(result=result, diff_lines=diff_lines)
+    body = build_sticky_comment(
+        request=StickyRequest(result=result, diff_lines=diff_lines),
+    )
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains("### Findings ·")
@@ -888,7 +897,9 @@ def test_sticky_state_round_trips_after_truncation(
         findings=findings,
     )
 
-    body = build_sticky_comment(result=result, diff_lines=diff_lines)
+    body = build_sticky_comment(
+        request=StickyRequest(result=result, diff_lines=diff_lines),
+    )
 
     assert_that(body).contains("## 🔎 Lintro Review —")
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
@@ -938,7 +949,7 @@ def test_build_sticky_survives_overflowing_finding_sets(
     )
     result = _result_with_findings(base=sample_review_result, findings=findings)
 
-    body = build_sticky_comment(result=result, diff_lines=None)
+    body = build_sticky_comment(request=StickyRequest(result=result, diff_lines=None))
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(body).contains("### Findings ·")
@@ -979,7 +990,7 @@ def test_post_review_body_carries_the_fix_prompt_inline(
     reporter = _fresh_reporter()
     reporter.find_issue_comment.return_value = (
         42,
-        build_sticky_comment(result=sample_review_result),
+        build_sticky_comment(request=StickyRequest(result=sample_review_result)),
     )
     reporter.fetch_pr_commit_shas.return_value = []
 
@@ -1059,8 +1070,8 @@ def test_review_body_and_degraded_sticky_coexist(
     )
     reporter.find_issue_comment.side_effect = [
         None,
-        (77, build_sticky_comment(result=sample_review_result)),
-        (77, build_sticky_comment(result=sample_review_result)),
+        (77, build_sticky_comment(request=StickyRequest(result=sample_review_result))),
+        (77, build_sticky_comment(request=StickyRequest(result=sample_review_result))),
     ]
 
     posted = post_review_to_github(result=sample_review_result, reporter=reporter)

@@ -17,18 +17,19 @@ from lintro.ai.review.github_constants import (
     STATE_MARKER_SUFFIX,
 )
 from lintro.ai.review.github_errors import format_error_comment
-from lintro.ai.review.github_sticky import (
-    advance_review_state,
-    build_sticky_comment,
-    parse_review_state_v2,
-)
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.review_state_codec import decode_state, legacy_state_block
+from lintro.ai.review.sticky import (
+    advance_review_state,
+    build_sticky_comment,
+    parse_review_state_v2,
+)
 
 
 def _finding(
@@ -65,10 +66,14 @@ def test_sticky_writes_no_state_blob(
     sample_review_result: ReviewResult,
 ) -> None:
     """A fresh sticky is rendering only; state lives in the artifact."""
-    body = build_sticky_comment(result=sample_review_result, head_sha="abc123")
+    body = build_sticky_comment(
+        request=StickyRequest(result=sample_review_result, head_sha="abc123"),
+    )
     state = advance_review_state(
-        result=sample_review_result,
-        head_sha="abc123",
+        request=StickyRequest(
+            result=sample_review_result,
+            head_sha="abc123",
+        ),
     )
 
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
@@ -83,10 +88,12 @@ def test_sticky_records_transport_auth_and_cost_basis(
 ) -> None:
     """Transport, auth mode, and cost_basis are persisted with the run record."""
     state = advance_review_state(
-        result=sample_review_result,
-        transport="cli",
-        auth_mode="subscription",
-        cost_basis="unpriceable",
+        request=StickyRequest(
+            result=sample_review_result,
+            transport="cli",
+            auth_mode="subscription",
+            cost_basis="unpriceable",
+        ),
     )
     run = state.runs[0]
 
@@ -105,13 +112,17 @@ def test_sticky_verdict_is_derived_from_open_severities(
 ) -> None:
     """The recorded verdict follows the open findings, not the model."""
     blocked = advance_review_state(
-        result=_with_findings(
-            base=sample_review_result,
-            findings=(_finding(title="Leak"),),
+        request=StickyRequest(
+            result=_with_findings(
+                base=sample_review_result,
+                findings=(_finding(title="Leak"),),
+            ),
         ),
     )
     ready = advance_review_state(
-        result=_with_findings(base=sample_review_result, findings=()),
+        request=StickyRequest(
+            result=_with_findings(base=sample_review_result, findings=()),
+        ),
     )
 
     assert_that(blocked.runs[0].verdict).is_equal_to(ReviewVerdict.BLOCKED)
@@ -129,14 +140,18 @@ def test_second_round_carries_and_resolves_findings(
             _finding(title="Slow loop", line=44, severity=Severity.P2),
         ),
     )
-    prior = advance_review_state(result=first_result, head_sha="sha1")
+    prior = advance_review_state(
+        request=StickyRequest(result=first_result, head_sha="sha1"),
+    )
     state = advance_review_state(
-        result=_with_findings(
-            base=sample_review_result,
-            findings=(_finding(title="Leak", line=15),),
+        request=StickyRequest(
+            result=_with_findings(
+                base=sample_review_result,
+                findings=(_finding(title="Leak", line=15),),
+            ),
+            prior_state=prior,
+            head_sha="sha2",
         ),
-        prior_state=prior,
-        head_sha="sha2",
     )
 
     assert_that(state.runs).is_length(2)
@@ -164,8 +179,10 @@ def test_sticky_migrates_a_v1_state_blob(
     prior_body = f"## old\n\n{STATE_MARKER_PREFIX} {legacy} {STATE_MARKER_SUFFIX}"
     prior = parse_review_state_v2(body=prior_body)
     state = advance_review_state(
-        result=sample_review_result,
-        prior_state=prior,
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_state=prior,
+        ),
     )
 
     assert_that([run.round for run in state.runs]).is_equal_to([1, 2, 3])
@@ -176,14 +193,18 @@ def test_legacy_prior_runs_argument_still_works(
     sample_review_result: ReviewResult,
 ) -> None:
     """The ``prior_runs`` compatibility path keeps cumulative telemetry."""
-    first = advance_review_state(result=sample_review_result)
+    first = advance_review_state(request=StickyRequest(result=sample_review_result))
     body = build_sticky_comment(
-        result=sample_review_result,
-        prior_runs=[run.to_dict() for run in first.runs],
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_runs=[run.to_dict() for run in first.runs],
+        ),
     )
     state = advance_review_state(
-        result=sample_review_result,
-        prior_runs=[run.to_dict() for run in first.runs],
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_runs=[run.to_dict() for run in first.runs],
+        ),
     )
 
     assert_that(body).contains("### 🕘 History")
@@ -200,8 +221,10 @@ def test_legacy_prior_runs_with_multiple_raw_v1_dicts_renumbers_positionally(
         {"model": "claude", "total": 200, "cost": 0.02},
     ]
     state = advance_review_state(
-        result=sample_review_result,
-        prior_runs=raw_v1_runs,
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_runs=raw_v1_runs,
+        ),
     )
 
     assert_that([run.round for run in state.runs]).is_equal_to([1, 2, 3])
@@ -212,11 +235,13 @@ def test_error_comment_preserves_finding_history(
 ) -> None:
     """A failed round re-renders the prior board instead of resetting it."""
     prior_state = advance_review_state(
-        result=_with_findings(
-            base=sample_review_result,
-            findings=(_finding(title="Leak"),),
+        request=StickyRequest(
+            result=_with_findings(
+                base=sample_review_result,
+                findings=(_finding(title="Leak"),),
+            ),
+            head_sha="sha1",
         ),
-        head_sha="sha1",
     )
     body = format_error_comment(
         error=RuntimeError("boom"),
@@ -236,7 +261,9 @@ def test_error_comment_legacy_prior_runs_path_preserves_history(
     sample_review_result: ReviewResult,
 ) -> None:
     """The legacy ``prior_runs`` branch (no ``prior_state``) also survives."""
-    first = advance_review_state(result=sample_review_result, head_sha="sha1")
+    first = advance_review_state(
+        request=StickyRequest(result=sample_review_result, head_sha="sha1"),
+    )
     body = format_error_comment(
         error=RuntimeError("boom"),
         provider="anthropic",
@@ -261,7 +288,9 @@ def test_sticky_comment_never_exceeds_github_hard_limit(
         for index in range(300)
     )
     body = build_sticky_comment(
-        result=_with_findings(base=sample_review_result, findings=findings),
+        request=StickyRequest(
+            result=_with_findings(base=sample_review_result, findings=findings),
+        ),
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
@@ -287,11 +316,15 @@ def test_forged_state_marker_in_finding_text_is_not_authoritative(
     )
     result = _with_findings(base=sample_review_result, findings=(hostile,))
     body = build_sticky_comment(
-        result=result,
-        head_sha="realsha",
-        inline_failure=InlinePostFailure(reason="422", findings=(hostile,)),
+        request=StickyRequest(
+            result=result,
+            head_sha="realsha",
+            inline_failure=InlinePostFailure(reason="422", findings=(hostile,)),
+        ),
     )
-    state = advance_review_state(result=result, head_sha="realsha")
+    state = advance_review_state(
+        request=StickyRequest(result=result, head_sha="realsha"),
+    )
 
     assert_that(body).contains(forged_payload)
     assert_that(state.runs[0].sha).is_equal_to("realsha")
@@ -335,9 +368,11 @@ def test_sticky_body_respects_max_comment_chars_with_oversized_history(
     )
     prior_state = ReviewState(runs=prior_runs, truncated=False)
     body = build_sticky_comment(
-        result=_with_findings(base=sample_review_result, findings=findings),
-        prior_state=prior_state,
-        head_sha=f"{MAX_STORED_RUNS + 1:040d}",
+        request=StickyRequest(
+            result=_with_findings(base=sample_review_result, findings=findings),
+            prior_state=prior_state,
+            head_sha=f"{MAX_STORED_RUNS + 1:040d}",
+        ),
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
@@ -354,9 +389,11 @@ def test_dropping_runs_past_max_stored_runs_marks_state_truncated(
     )
     prior_state = ReviewState(runs=prior_runs, truncated=False)
     state = advance_review_state(
-        result=sample_review_result,
-        prior_state=prior_state,
-        head_sha=f"sha{MAX_STORED_RUNS + 1}",
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_state=prior_state,
+            head_sha=f"sha{MAX_STORED_RUNS + 1}",
+        ),
     )
 
     assert_that(state.runs).is_length(MAX_STORED_RUNS)

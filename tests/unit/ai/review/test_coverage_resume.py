@@ -400,8 +400,8 @@ def test_inherited_sibling_is_not_a_matcher_reviewed_path(
     """Same-hash credit covers the denominator without resolving findings."""
     from dataclasses import replace
 
-    from lintro.ai.review.github_sticky import matcher_reviewed_paths
     from lintro.ai.review.models.coverage_counts import CoverageCounts
+    from lintro.ai.review.sticky import matcher_reviewed_paths
 
     result = replace(
         sample_review_result,

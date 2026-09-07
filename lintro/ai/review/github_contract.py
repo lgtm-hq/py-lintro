@@ -1,7 +1,7 @@
 """The one contract every GitHub review comment obeys.
 
 Two comments are posted for a review — the sticky mission-control board
-(``github_sticky.py``) and the failure surface (``github_errors.py``) — and
+(``sticky/``) and the failure surface (``github_errors.py``) — and
 before this module they enforced the size invariant twice, differently: the
 sticky pruned section by section and reserved room for a trailing state block,
 while the error path sliced the string at the cap and hoped. Same invariant,

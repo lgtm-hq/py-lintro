@@ -17,10 +17,11 @@ from lintro.ai.integrations.github_pr import GitHubPRReporter
 from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.review.github import post_review_to_github
 from lintro.ai.review.github_constants import STICKY_MARKER
-from lintro.ai.review.github_sticky import advance_review_state
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.suggested_change import SuggestedChange
 from lintro.ai.review.review_state_codec import legacy_state_block
+from lintro.ai.review.sticky import advance_review_state
 
 _TEST_TOKEN = "ghp_test_fixture_token"  # nosec B105 — fake test fixture token
 
@@ -48,7 +49,9 @@ def _reporter() -> MagicMock:
 
 def _prior_sticky(*, result: ReviewResult, head_sha: str) -> str:
     """Render a leftover v2 sticky so posting can migrate prior state."""
-    state = advance_review_state(result=result, head_sha=head_sha)
+    state = advance_review_state(
+        request=StickyRequest(result=result, head_sha=head_sha),
+    )
     return STICKY_MARKER + legacy_state_block(state=state)
 
 

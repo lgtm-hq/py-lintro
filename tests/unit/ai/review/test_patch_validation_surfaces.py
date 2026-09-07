@@ -18,7 +18,6 @@ from rich.console import Console
 
 from lintro.ai.review.display import render_review_terminal
 from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
-from lintro.ai.review.github_sticky import _suggestion_drops_row
 from lintro.ai.review.inline_fix import finding_suggested_change
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
@@ -27,6 +26,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.suggested_change import SuggestedChange
 from lintro.ai.review.patch_validation import validate_suggested_patches
+from lintro.ai.review.sticky.sections import _suggestion_drops_row
 
 
 def _completed(*, stdout: str = "", returncode: int = 0) -> CompletedProcess[str]:

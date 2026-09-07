@@ -67,6 +67,7 @@ from lintro.ai.review.exceptions import ReviewContextError, ReviewPreparationErr
 from lintro.ai.review.finding_matcher import count_blocking_findings
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import guard_changed_paths
 from lintro.ai.review.output import (
     render_convergence_outcome_json,
@@ -1057,7 +1058,7 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
     the provider returned no usage counters the orchestrator set
     ``token_usage_estimated``, so the honest post-run basis is ESTIMATED.
     Stamping billed here would also suppress the legacy derivation in
-    ``github_sticky._run_record``, which only fires on an empty basis.
+    ``sticky.state._run_record``, which only fires on an empty basis.
 
     Args:
         result: The completed review.
@@ -1617,21 +1618,23 @@ def _persist_review_state(
     """Write coverage parts for the artifact upload and local ledger."""
     from importlib.metadata import version as pkg_version
 
-    from lintro.ai.review.github_sticky import advance_review_state
     from lintro.ai.review.models.review_result import ReviewResult
+    from lintro.ai.review.sticky import advance_review_state
 
     del force_full
     if not isinstance(result, ReviewResult):
         return
     advanced = advance_review_state(
-        result=result,
-        prior_state=prior,
-        head_sha=str(getattr(context, "head_ref", "") or ""),
-        transport=result.metadata.transport,
-        auth_mode=result.metadata.auth_mode,
-        cost_basis=result.metadata.cost_basis,
-        inline_comment_ids=inline_comment_ids,
-        departed_paths=_departed_paths(context=context),
+        request=StickyRequest(
+            result=result,
+            prior_state=prior,
+            head_sha=str(getattr(context, "head_ref", "") or ""),
+            transport=result.metadata.transport,
+            auth_mode=result.metadata.auth_mode,
+            cost_basis=result.metadata.cost_basis,
+            inline_comment_ids=inline_comment_ids,
+            departed_paths=_departed_paths(context=context),
+        ),
     )
     state = replace(
         advanced,

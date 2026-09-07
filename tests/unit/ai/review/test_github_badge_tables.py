@@ -12,15 +12,16 @@ from dataclasses import replace
 from assertpy import assert_that
 
 from lintro.ai.review.finding_matcher import match_findings
-from lintro.ai.review.github_render import (
+from lintro.ai.review.github_badges import (
     format_badge_table,
     format_badge_tables,
     run_stats_primary_cells,
 )
 from lintro.ai.review.github_review_body import build_review_body
-from lintro.ai.review.github_sticky import build_sticky_comment
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.sticky import build_sticky_comment
 
 _PRIMARY_HEADER = "| model | est. cost | tokens in | tokens out |"
 _STICKY_THIS_RUN_HEADER = (
@@ -32,9 +33,11 @@ _STICKY_THIS_RUN_HEADER = (
 def _sticky(*, result: ReviewResult) -> str:
     """Render the sticky comment for ``result`` with a known transport."""
     return build_sticky_comment(
-        result=result,
-        transport="cli",
-        auth_mode="subscription",
+        request=StickyRequest(
+            result=result,
+            transport="cli",
+            auth_mode="subscription",
+        ),
     )
 
 
