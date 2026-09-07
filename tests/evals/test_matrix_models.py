@@ -27,15 +27,6 @@ MATRIX = load_matrix(HARNESS_ROOT / "matrix.yaml")
 #: matrix name a model the CLI actually accepts. See docs/ai-features.md.
 CURSOR_CLI_MODEL_ALLOWLIST = frozenset({"cursor-grok-4.6-high"})
 
-#: Cursor rejects anything but CLI transport
-#: (:class:`lintro.ai.providers.cursor.CursorProvider`); the SDK providers
-#: support both.
-SUPPORTED_TRANSPORTS: dict[AIProvider, frozenset[AITransport]] = {
-    AIProvider.ANTHROPIC: frozenset({AITransport.API, AITransport.CLI}),
-    AIProvider.OPENAI: frozenset({AITransport.API, AITransport.CLI}),
-    AIProvider.CURSOR: frozenset({AITransport.CLI}),
-}
-
 
 @pytest.mark.parametrize(
     "config",
@@ -84,4 +75,4 @@ def test_matrix_cell_transport_is_supported(config: MatrixConfig) -> None:
     provider = AIProvider(config.provider)
     transport = AITransport(config.transport)
 
-    assert_that(SUPPORTED_TRANSPORTS[provider]).contains(transport)
+    assert_that(metadata_for(provider).supported_transports).contains(transport)

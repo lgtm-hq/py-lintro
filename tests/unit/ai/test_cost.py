@@ -58,7 +58,13 @@ def test_estimate_cost_with_floor_partial_zero_uses_default():
         "lintro.ai.cost.model_pricing",
         return_value={"partial-zero": partial_zero},
     ):
+        unfloored = estimate_cost("partial-zero", 1_000_000, 1_000_000)
         cost = estimate_cost_with_floor("partial-zero", 1_000_000, 1_000_000)
+
+    # The unfloored estimate proves the patched lookup is live: an inert patch
+    # would fall back to DEFAULT_PRICING here too, and the floor assertion
+    # below could not tell "found and zero-rated" from "not found at all".
+    assert_that(unfloored).is_close_to(partial_zero.input_per_million, 1e-10)
     expected = DEFAULT_PRICING.input_per_million + DEFAULT_PRICING.output_per_million
     assert_that(cost).is_close_to(expected, 1e-10)
 

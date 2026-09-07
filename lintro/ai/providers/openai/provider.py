@@ -14,7 +14,6 @@ import json
 import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -64,19 +63,11 @@ except ImportError:
 DEFAULT_MODEL = OPENAI_METADATA.default_model
 DEFAULT_API_KEY_ENV = OPENAI_METADATA.default_api_key_env
 _CODEX_BIN = OPENAI_CLI_BINARY
-_CODEX_AUTH_PATH = Path.home() / ".codex" / "auth.json"
 
 
 def _find_codex() -> str | None:
     """Return the full path to the ``codex`` binary, or None."""
     return CliTransport.find_binary(_CODEX_BIN)
-
-
-def _codex_authenticated() -> bool:
-    """Return True when Codex CLI auth is likely configured."""
-    if os.environ.get("CODEX_API_KEY"):
-        return True
-    return _CODEX_AUTH_PATH.is_file()
 
 
 class _CodexCliTransport(CliTransport):
@@ -90,7 +81,7 @@ class _CodexCliTransport(CliTransport):
     ) -> None:
         super().__init__(
             binary_path=binary_path,
-            binary_name="Codex",
+            binary_name=cli_contract_for(AIProvider.OPENAI).display_name,
             install_hint="Install Codex CLI: https://developers.openai.com/codex/cli",
             api_key_env="CODEX_API_KEY",
             contract=cli_contract_for(AIProvider.OPENAI),

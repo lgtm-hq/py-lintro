@@ -6,9 +6,11 @@ SDK, and the :class:`ProviderPlugin` protocol that turns an
 :class:`~lintro.ai.config.AIConfig` into a live
 :class:`~lintro.ai.providers.base.BaseAIProvider`.
 
-This module declares the contract only. No provider implements it yet — the
-hardcoded class map in :func:`lintro.ai.providers.get_provider` remains the
-factory until the migration in the follow-up phase. See
+Every in-tree provider implements this contract:
+:func:`lintro.ai.providers.get_provider` resolves through the plugin registry
+(#2307), and since #2308 a plugin's
+:class:`ProviderMetadata` is the only declaration of that vendor's defaults,
+pricing, credentials and CLI identity. See
 ``docs/adr/0009-ai-provider-plugin-contract.md`` for the decision and the
 explicit non-goals (no per-vendor parser packages, no install-tools mirror, no
 entry-point discovery in v1).

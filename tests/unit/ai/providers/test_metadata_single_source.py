@@ -93,16 +93,18 @@ def test_cli_facts_agree_within_one_record(provider: AIProvider) -> None:
 
     These three used to live in three modules, where nothing stopped them
     drifting apart. Declared together, they can still be mistyped — so assert
-    they agree.
+    they agree. Every provider lintro ships serves the CLI transport, and
+    ``tests/unit/ai/providers/test_cli_capability_guard.py`` asserts a contract
+    exists for every enum member, so this asserts the same rule rather than
+    branching on a case that cannot occur. ``ProviderMetadata`` still allows the
+    CLI fields to be ``None`` for a future API-only vendor; that vendor would
+    relax both tests together.
 
     Args:
         provider: The provider under test.
     """
     metadata = metadata_for(provider)
-    if not metadata.supports(AITransport.CLI):
-        assert_that(metadata.cli_binary).is_none()
-        assert_that(metadata.cli_contract).is_none()
-        return
+    assert_that(metadata.supports(AITransport.CLI)).is_true()
     assert_that(metadata.cli_binary).is_not_none()
     assert_that(metadata.cli_contract_id).is_equal_to(provider.value)
     assert_that(cli_contract_for(provider).binary).is_equal_to(metadata.cli_binary)

@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIProviderNotRegisteredError
 from lintro.ai.provider_enum import (
     accepted_provider_values,
     provider_required_error,
+)
+from lintro.ai.providers.base import BaseAIProvider
+from lintro.ai.providers.protocol import ProviderMetadata
+from lintro.ai.providers.registry import (
+    all_providers,
+    clear_registered,
+    register_provider,
+    restore_registered,
 )
 from lintro.ai.registry import (
     DEFAULT_PRICING,
@@ -21,6 +32,62 @@ from lintro.ai.registry import (
     metadata_for,
     model_pricing,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _FakeAnthropicPlugin:
+    """A plugin that registers under Anthropic with obviously fake metadata."""
+
+    @property
+    def name(self) -> AIProvider:
+        """Return the registry key this plugin claims.
+
+        Returns:
+            :attr:`AIProvider.ANTHROPIC`.
+        """
+        return AIProvider.ANTHROPIC
+
+    @property
+    def transports(self) -> frozenset[AITransport]:
+        """Return the transports this fake serves.
+
+        Returns:
+            The API transport only.
+        """
+        return self.metadata.supported_transports
+
+    @property
+    def metadata(self) -> ProviderMetadata:
+        """Return the fake description.
+
+        Returns:
+            A minimal record naming a model no real provider ships.
+        """
+        return ProviderMetadata(
+            provider=AIProvider.ANTHROPIC,
+            display_name="Fake",
+            default_model="fake-model",
+            default_api_key_env="FAKE_API_KEY",
+            supported_transports=frozenset({AITransport.API}),
+            default_transport=AITransport.API,
+            sdk_package="fake-sdk",
+            pricing={"fake-model": ModelPricing(1.0, 2.0)},
+        )
+
+    def build(self, config: AIConfig) -> BaseAIProvider:
+        """Refuse to build; no test in this module constructs a provider.
+
+        Args:
+            config: Ignored.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError
+
 
 # -- AIProvider StrEnum ----------------------------------------------------
 
@@ -130,12 +197,48 @@ def test_default_api_key_envs() -> None:
     assert_that(envs[AIProvider.CURSOR]).is_equal_to("CURSOR_API_KEY")
 
 
-def test_facade_lookups_are_not_cached_snapshots() -> None:
-    """Each call rebuilds from the registry rather than a module-level table."""
-    first = all_metadata()
-    second = all_metadata()
-    assert_that(first).is_equal_to(second)
-    assert_that(first).is_not_same_as(second)
+def test_facade_projections_carry_the_plugins_own_values() -> None:
+    """The derived mappings restate metadata fields rather than re-deriving."""
+    for provider, record in all_metadata().items():
+        assert_that(default_models()[provider]).is_equal_to(record.default_model)
+        assert_that(default_api_key_envs()[provider]).is_equal_to(
+            record.default_api_key_env,
+        )
+        for name, pricing in record.pricing.items():
+            assert_that(model_pricing()[name]).is_same_as(pricing)
+
+
+def test_facade_reflects_a_swapped_plugin() -> None:
+    """Lookups read the registry live, so a swapped plugin is picked up.
+
+    A module-level snapshot — the shape #2308 removed — would keep answering
+    with the plugin that was registered first.
+    """
+    saved = all_providers()
+    try:
+        clear_registered()
+        register_provider(_FakeAnthropicPlugin())
+        assert_that(metadata_for(AIProvider.ANTHROPIC).default_model).is_equal_to(
+            "fake-model",
+        )
+        assert_that(model_pricing()).contains_key("fake-model")
+        # The other two are re-registered by the loader from their already
+        # imported packages, so the facade still answers for every provider.
+        assert_that(list(all_metadata())).is_equal_to(list(AIProvider))
+    finally:
+        restore_registered(saved)
+
+    assert_that(metadata_for(AIProvider.ANTHROPIC).default_model).is_not_equal_to(
+        "fake-model",
+    )
+
+
+def test_metadata_for_rejects_an_unknown_provider() -> None:
+    """A name outside the enum is an error, not an empty record."""
+    with pytest.raises(AIProviderNotRegisteredError) as excinfo:
+        metadata_for("gemini")
+
+    assert_that(str(excinfo.value)).contains("gemini", "anthropic, cursor, openai")
 
 
 # -- DEFAULT_PRICING -------------------------------------------------------

@@ -1072,7 +1072,7 @@ and the per-model prices — is declared once, in that provider's plugin metadat
 `tests/unit/ai/providers/test_docs_provider_table.py`, so they cannot drift from the
 code. Do not hand-edit them; change the metadata.
 
-<!-- BEGIN GENERATED: provider-table -->
+<!-- BEGIN SNAPSHOT: provider-table -->
 
 | Provider  | Default model       | API key env         | Transports             | CLI binary |
 | --------- | ------------------- | ------------------- | ---------------------- | ---------- |
@@ -1080,13 +1080,13 @@ code. Do not hand-edit them; change the metadata.
 | OpenAI    | `gpt-4o`            | `OPENAI_API_KEY`    | `api` (default), `cli` | `codex`    |
 | Cursor    | `auto`              | `CURSOR_API_KEY`    | `cli` (default)        | `agent`    |
 
-<!-- END GENERATED: provider-table -->
+<!-- END SNAPSHOT: provider-table -->
 
 Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
 reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
 subscription); `estimate_cost_with_floor` is what keeps a cost cap meaningful for those.
 
-<!-- BEGIN GENERATED: model-pricing-table -->
+<!-- BEGIN SNAPSHOT: model-pricing-table -->
 
 | Provider  | Model                       | Input  | Output |
 | --------- | --------------------------- | ------ | ------ |
@@ -1102,7 +1102,7 @@ subscription); `estimate_cost_with_floor` is what keeps a cost cap meaningful fo
 | Cursor    | `auto`                      | $0.00  | $0.00  |
 | Cursor    | `gpt-5.3-codex-fast`        | $0.00  | $0.00  |
 
-<!-- END GENERATED: model-pricing-table -->
+<!-- END SNAPSHOT: model-pricing-table -->
 
 #### [Anthropic](https://docs.anthropic.com/)
 

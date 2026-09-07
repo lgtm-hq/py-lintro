@@ -148,7 +148,7 @@ class _CursorCliTransport(CliTransport):
     ) -> None:
         super().__init__(
             binary_path=binary_path,
-            binary_name="Cursor agent",
+            binary_name=cli_contract_for(AIProvider.CURSOR).display_name,
             install_hint="Install with: curl https://cursor.com/install -fsS | bash",
             api_key_env=DEFAULT_API_KEY_ENV,
             contract=cli_contract_for(AIProvider.CURSOR),

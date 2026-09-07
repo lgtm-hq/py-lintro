@@ -115,6 +115,9 @@ def test_every_consumer_reads_the_same_metadata_record(
         cli_contract_for(provider).binary,
     )
     assert_that(metadata.cli_contract).is_same_as(cli_contract_for(provider))
+    assert_that(get_registered(provider).transports).is_equal_to(
+        metadata.supported_transports,
+    )
 
 
 @pytest.mark.usefixtures("_registered")

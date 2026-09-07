@@ -111,7 +111,7 @@ class _AnthropicCliTransport(CliTransport):
     ) -> None:
         super().__init__(
             binary_path=binary_path,
-            binary_name="Claude",
+            binary_name=cli_contract_for(AIProvider.ANTHROPIC).display_name,
             install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
             api_key_env=DEFAULT_API_KEY_ENV,
             contract=cli_contract_for(AIProvider.ANTHROPIC),

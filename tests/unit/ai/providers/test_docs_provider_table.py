@@ -1,9 +1,10 @@
 """The provider tables in ``docs/ai-features.md`` are asserted from metadata.
 
-Acceptance criterion 4 of #2308: the published provider table is generated from
+Acceptance criterion 4 of #2308: the published provider table is a snapshot of
 the same records doctor, pricing and validation read, so a changed default or a
 new priced model updates the docs or fails the suite — it can no longer quietly
-disagree with the code.
+disagree with the code. There is no code generator; this test is the update
+path, printing the table to paste back.
 
 Both tables are compared cell by cell after normalising whitespace, so
 prettier's column padding is free to differ from what the renderer emits. A
@@ -24,7 +25,7 @@ from lintro.ai.registry import all_metadata
 #: The published document under test.
 _DOC = Path(__file__).resolve().parents[4] / "docs" / "ai-features.md"
 
-#: Header rows the renderer emits, used to build the paste-back block.
+#: Column titles the published tables must carry.
 _PROVIDER_HEADER = (
     "Provider",
     "Default model",
@@ -49,7 +50,7 @@ def _marked_block(*, name: str) -> str:
             marker fails loudly instead of asserting on nothing.
     """
     pattern = re.compile(
-        rf"<!-- BEGIN GENERATED: {re.escape(name)} -->(.*?)<!-- END GENERATED: {re.escape(name)} -->",
+        rf"<!-- BEGIN SNAPSHOT: {re.escape(name)} -->(.*?)<!-- END SNAPSHOT: {re.escape(name)} -->",
         re.DOTALL,
     )
     match = pattern.search(_DOC.read_text(encoding="utf-8"))
@@ -65,8 +66,8 @@ def _table_rows(*, block: str) -> list[tuple[str, ...]]:
         block: Markdown text holding exactly one table.
 
     Returns:
-        Body rows as cell tuples; the header and the ``---`` separator are
-        dropped, so formatting churn in either is not a failure.
+        Every content row as a cell tuple, header first; the ``---`` separator
+        is dropped, so prettier's padding churn is not a failure.
     """
     rows: list[tuple[str, ...]] = []
     for line in block.splitlines():
@@ -77,7 +78,7 @@ def _table_rows(*, block: str) -> list[tuple[str, ...]]:
         if all(set(cell) <= {"-", ":"} and cell for cell in cells):
             continue
         rows.append(cells)
-    return rows[1:] if rows else rows
+    return rows
 
 
 def _transport_cell(*, supported: frozenset[AITransport], default: AITransport) -> str:
@@ -160,8 +161,9 @@ def _paste_back(*, header: tuple[str, ...], rows: list[tuple[str, ...]]) -> str:
 def test_docs_provider_table_matches_plugin_metadata() -> None:
     """The published provider table restates exactly what the plugins declare."""
     expected = _expected_provider_rows()
-    actual = _table_rows(block=_marked_block(name="provider-table"))
+    header, *actual = _table_rows(block=_marked_block(name="provider-table"))
 
+    assert_that(header).is_equal_to(_PROVIDER_HEADER)
     assert_that(actual).described_as(
         "docs/ai-features.md provider table is stale; replace the generated "
         "block with:\n" + _paste_back(header=_PROVIDER_HEADER, rows=expected),
@@ -171,8 +173,9 @@ def test_docs_provider_table_matches_plugin_metadata() -> None:
 def test_docs_model_pricing_table_matches_plugin_metadata() -> None:
     """The published pricing table restates exactly what the plugins declare."""
     expected = _expected_pricing_rows()
-    actual = _table_rows(block=_marked_block(name="model-pricing-table"))
+    header, *actual = _table_rows(block=_marked_block(name="model-pricing-table"))
 
+    assert_that(header).is_equal_to(_PRICING_HEADER)
     assert_that(actual).described_as(
         "docs/ai-features.md model pricing table is stale; replace the "
         "generated block with:\n" + _paste_back(header=_PRICING_HEADER, rows=expected),

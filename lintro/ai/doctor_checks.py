@@ -20,6 +20,7 @@ from lintro.ai.provider_enum import (
     accepted_provider_values,
     provider_required_error,
 )
+from lintro.ai.providers.protocol import ProviderMetadata
 from lintro.ai.registry import metadata_for
 from lintro.ai.transcript import TRANSCRIPT_DIR, is_transcript_enabled
 from lintro.enums.tool_status import ToolStatus
@@ -166,10 +167,7 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
                     f"{config.provider.value} provider only supports "
                     f"transport: {only}"
                 ),
-                hint=(
-                    f"Set `transport: {only}` and install the "
-                    f"{metadata.display_name} agent CLI"
-                ),
+                hint=_pairing_hint(metadata=metadata),
             ),
         )
         return results
@@ -251,6 +249,23 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
         )
 
     return results
+
+
+def _pairing_hint(*, metadata: ProviderMetadata) -> str:
+    """Return the hint for a provider paired with a transport it cannot serve.
+
+    Args:
+        metadata: The configured provider's plugin metadata.
+
+    Returns:
+        Guidance naming the transport to set, and the CLI to install when that
+        transport is the CLI one.
+    """
+    only = metadata.default_transport
+    hint = f"Set `transport: {only.value}`"
+    if only is AITransport.CLI:
+        return f"{hint} and install the {metadata.display_name} agent CLI"
+    return hint
 
 
 def _cli_install_hint(*, provider: AIProvider) -> str:
