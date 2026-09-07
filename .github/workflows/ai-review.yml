@@ -304,7 +304,7 @@ jobs:
         # checkpoints before a cancel skips later always() steps.
         id: artifact-runtime
         # yamllint disable-line rule:line-length
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const token = process.env.ACTIONS_RUNTIME_TOKEN || ''
