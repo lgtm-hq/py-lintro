@@ -11,7 +11,7 @@ import pytest
 
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.trufflehog import TrufflehogPlugin
+from lintro.tools.trufflehog.definition import TrufflehogPlugin
 
 
 @pytest.fixture

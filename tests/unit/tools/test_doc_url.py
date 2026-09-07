@@ -20,10 +20,6 @@ from lintro.tools.bandit.definition import BanditPlugin
 from lintro.tools.cargo_audit.definition import CargoAuditPlugin
 from lintro.tools.cargo_deny.definition import CargoDenyPlugin
 from lintro.tools.clippy.definition import ClippyPlugin
-from lintro.tools.definitions.taplo import TaploPlugin
-from lintro.tools.definitions.tsc import TscPlugin
-from lintro.tools.definitions.vue_tsc import VueTscPlugin
-from lintro.tools.definitions.yamllint import YamllintPlugin
 from lintro.tools.hadolint.definition import HadolintPlugin
 from lintro.tools.markdownlint.definition import MarkdownlintPlugin
 from lintro.tools.mypy.definition import MypyPlugin
@@ -34,6 +30,10 @@ from lintro.tools.ruff.definition import RuffPlugin
 from lintro.tools.semgrep.definition import SemgrepPlugin
 from lintro.tools.shellcheck.definition import ShellcheckPlugin
 from lintro.tools.sqlfluff.definition import SqlfluffPlugin
+from lintro.tools.taplo.definition import TaploPlugin
+from lintro.tools.tsc.definition import TscPlugin
+from lintro.tools.vue_tsc.definition import VueTscPlugin
+from lintro.tools.yamllint.definition import YamllintPlugin
 
 # =============================================================================
 # Simple URL-pattern tools (no subprocess needed)

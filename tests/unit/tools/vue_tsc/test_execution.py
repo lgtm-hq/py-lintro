@@ -10,7 +10,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.vue_tsc.vue_tsc_issue import VueTscIssue
-from lintro.tools.definitions.vue_tsc import VueTscPlugin
+from lintro.tools.vue_tsc.definition import VueTscPlugin
 
 
 def _mock_subprocess_success(**kwargs: Any) -> tuple[bool, str]:

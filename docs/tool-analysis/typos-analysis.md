@@ -25,7 +25,7 @@ parser-selection decision.
 
 ## Lintro Implementation
 
-- **Definition**: `lintro/tools/definitions/typos.py` — `can_fix=True`,
+- **Definition**: `lintro/tools/typos/definition.py` — `can_fix=True`,
   `tool_type=ToolType.LINTER`, `file_patterns=["*"]`, native configs `typos.toml` /
   `.typos.toml` / `_typos.toml`.
 - **Check**: runs `typos --format json --force-exclude <files>` and parses the

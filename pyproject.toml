@@ -296,8 +296,6 @@ max-statements = 50
 "lintro/tools/buf/definition.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/core/update_channels.py" = ["PLR0912"]
 "lintro/tools/core/version_parsing.py" = ["C901", "PLR0912", "PLR0915"]
-"lintro/tools/definitions/_ts_checker_execution.py" = ["PLR0912", "PLR0915"]
-"lintro/tools/definitions/yamllint.py" = ["PLR0912", "PLR0915"]
 "lintro/tools/mypy/definition.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/oxlint/definition.py" = ["PLR0913"]
 "lintro/tools/pytest/collection.py" = ["PLR0912"]
@@ -317,6 +315,8 @@ max-statements = 50
 "lintro/tools/ruff/fix.py" = ["C901", "PLR0912", "PLR0915"]
 "lintro/tools/spectral/definition.py" = ["PLR0912"]
 "lintro/tools/stylelint/definition.py" = ["PLR0912"]
+"lintro/tools/ts_checker/execution.py" = ["PLR0912", "PLR0915"]
+"lintro/tools/yamllint/definition.py" = ["PLR0912", "PLR0915"]
 "lintro/utils/console/logger.py" = ["C901", "PLR0912", "PLR0913", "PLR0915"]
 "lintro/utils/console/pre_execution_summary.py" = ["PLR0912"]
 "lintro/utils/display_helpers.py" = ["PLR0912"]
@@ -461,6 +461,14 @@ include = [
   "lintro/tools/sqlfluff",
   "lintro/tools/stylelint",
   "lintro/tools/svelte_check",
+  "lintro/tools/taplo",
+  "lintro/tools/trufflehog",
+  "lintro/tools/ts_checker",
+  "lintro/tools/tsc",
+  "lintro/tools/typos",
+  "lintro/tools/vale",
+  "lintro/tools/vue_tsc",
+  "lintro/tools/yamllint",
 ]
 duplicate_code_baseline = 0
 
@@ -732,27 +740,6 @@ ignore_imports = [
   "lintro.tools.core.tool_manager -> lintro.plugins.base",                          # owned by #2311
   "lintro.tools.core.tool_manager -> lintro.plugins.discovery",                     # owned by #2311
   "lintro.tools.core.tool_manager -> lintro.plugins.registry",                      # owned by #2311
-  "lintro.tools.definitions._ts_checker_base -> lintro.plugins.base",               # owned by #2311
-  "lintro.tools.definitions._ts_checker_execution -> lintro.plugins.base",          # owned by #2311
-  "lintro.tools.definitions.taplo -> lintro.plugins.base",                          # owned by #2311
-  "lintro.tools.definitions.taplo -> lintro.plugins.protocol",                      # owned by #2311
-  "lintro.tools.definitions.taplo -> lintro.plugins.registry",                      # owned by #2311
-  "lintro.tools.definitions.trufflehog -> lintro.plugins.base",                     # owned by #2311
-  "lintro.tools.definitions.trufflehog -> lintro.plugins.protocol",                 # owned by #2311
-  "lintro.tools.definitions.trufflehog -> lintro.plugins.registry",                 # owned by #2311
-  "lintro.tools.definitions.tsc -> lintro.plugins.protocol",                        # owned by #2311
-  "lintro.tools.definitions.tsc -> lintro.plugins.registry",                        # owned by #2311
-  "lintro.tools.definitions.typos -> lintro.plugins.base",                          # owned by #2311
-  "lintro.tools.definitions.typos -> lintro.plugins.protocol",                      # owned by #2311
-  "lintro.tools.definitions.typos -> lintro.plugins.registry",                      # owned by #2311
-  "lintro.tools.definitions.vale -> lintro.plugins.base",                           # owned by #2311
-  "lintro.tools.definitions.vale -> lintro.plugins.protocol",                       # owned by #2311
-  "lintro.tools.definitions.vale -> lintro.plugins.registry",                       # owned by #2311
-  "lintro.tools.definitions.vue_tsc -> lintro.plugins.protocol",                    # owned by #2311
-  "lintro.tools.definitions.vue_tsc -> lintro.plugins.registry",                    # owned by #2311
-  "lintro.tools.definitions.yamllint -> lintro.plugins.base",                       # owned by #2311
-  "lintro.tools.definitions.yamllint -> lintro.plugins.protocol",                   # owned by #2311
-  "lintro.tools.definitions.yamllint -> lintro.plugins.registry",                   # owned by #2311
   "lintro.tools.dotenv_linter.definition -> lintro.plugins.base",                   # owned by #2311
   "lintro.tools.dotenv_linter.definition -> lintro.plugins.protocol",               # owned by #2311
   "lintro.tools.dotenv_linter.definition -> lintro.plugins.registry",               # owned by #2311
@@ -833,6 +820,27 @@ ignore_imports = [
   "lintro.tools.svelte_check.definition -> lintro.plugins.base",                    # owned by #2311
   "lintro.tools.svelte_check.definition -> lintro.plugins.protocol",                # owned by #2311
   "lintro.tools.svelte_check.definition -> lintro.plugins.registry",                # owned by #2311
+  "lintro.tools.taplo.definition -> lintro.plugins.base",                           # owned by #2311
+  "lintro.tools.taplo.definition -> lintro.plugins.protocol",                       # owned by #2311
+  "lintro.tools.taplo.definition -> lintro.plugins.registry",                       # owned by #2311
+  "lintro.tools.trufflehog.definition -> lintro.plugins.base",                      # owned by #2311
+  "lintro.tools.trufflehog.definition -> lintro.plugins.protocol",                  # owned by #2311
+  "lintro.tools.trufflehog.definition -> lintro.plugins.registry",                  # owned by #2311
+  "lintro.tools.ts_checker.base -> lintro.plugins.base",                            # owned by #2311
+  "lintro.tools.ts_checker.execution -> lintro.plugins.base",                       # owned by #2311
+  "lintro.tools.tsc.definition -> lintro.plugins.protocol",                         # owned by #2311
+  "lintro.tools.tsc.definition -> lintro.plugins.registry",                         # owned by #2311
+  "lintro.tools.typos.definition -> lintro.plugins.base",                           # owned by #2311
+  "lintro.tools.typos.definition -> lintro.plugins.protocol",                       # owned by #2311
+  "lintro.tools.typos.definition -> lintro.plugins.registry",                       # owned by #2311
+  "lintro.tools.vale.definition -> lintro.plugins.base",                            # owned by #2311
+  "lintro.tools.vale.definition -> lintro.plugins.protocol",                        # owned by #2311
+  "lintro.tools.vale.definition -> lintro.plugins.registry",                        # owned by #2311
+  "lintro.tools.vue_tsc.definition -> lintro.plugins.protocol",                     # owned by #2311
+  "lintro.tools.vue_tsc.definition -> lintro.plugins.registry",                     # owned by #2311
+  "lintro.tools.yamllint.definition -> lintro.plugins.base",                        # owned by #2311
+  "lintro.tools.yamllint.definition -> lintro.plugins.protocol",                    # owned by #2311
+  "lintro.tools.yamllint.definition -> lintro.plugins.registry",                    # owned by #2311
   # 61 edges owned by #2312
   "lintro.utils.async_tool_executor -> lintro.plugins.base",                                    # owned by #2312
   "lintro.utils.doctor_report -> lintro.ai.doctor_checks",                                      # owned by #2312

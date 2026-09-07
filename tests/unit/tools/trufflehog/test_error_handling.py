@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.trufflehog import TrufflehogPlugin
+from lintro.tools.trufflehog.definition import TrufflehogPlugin
 
 
 def test_check_timeout(trufflehog_plugin: TrufflehogPlugin, tmp_path: Path) -> None:

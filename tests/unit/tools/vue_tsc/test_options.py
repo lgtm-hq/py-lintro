@@ -9,7 +9,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.vue_tsc import (
+from lintro.tools.vue_tsc.definition import (
     VUE_TSC_DEFAULT_PRIORITY,
     VUE_TSC_DEFAULT_TIMEOUT,
     VUE_TSC_FILE_PATTERNS,
