@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.151.0] - 2026-09-07
+
+### Added
+
+- **core**: make derived DAG ordering authoritative, delete priority scalars (#2427)
+  (d9d49e2)
+
+### Changed
+
+- **ai/review**: decompose RunRecord into nested value objects (#2419) (e2c2541)
+
 ## [0.150.0] - 2026-09-07
 
 ### Added
