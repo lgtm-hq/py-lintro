@@ -38,7 +38,6 @@ from lintro.tools.core.timeout_utils import (
 
 # Constants for Rustfmt configuration
 RUSTFMT_DEFAULT_TIMEOUT: int = 60
-RUSTFMT_DEFAULT_PRIORITY: int = 80  # Formatter, runs after linters
 RUSTFMT_FILE_PATTERNS: list[str] = ["*.rs"]
 
 
@@ -90,8 +89,6 @@ class RustfmtPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=RUSTFMT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["rustfmt.toml", ".rustfmt.toml"],
             version_command=["rustfmt", "--version"],
             min_version=get_min_version(ToolName.RUSTFMT),

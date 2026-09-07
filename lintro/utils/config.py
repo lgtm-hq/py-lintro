@@ -26,8 +26,6 @@ __all__ = [
     # Lintro config loading
     "load_lintro_global_config",
     "load_lintro_tool_config",
-    "get_tool_order_config",
-    "load_post_checks_config",
     "load_module_size_config",
     # Tool-specific loaders
     "load_ruff_config",
@@ -152,7 +150,6 @@ def _get_lintro_section() -> dict[str, Any]:
 # returned by ``load_lintro_global_config``.
 STRUCTURAL_SECTIONS: frozenset[str] = frozenset(
     {
-        "post_checks",
         "module_size",
         "versions",
     },
@@ -216,40 +213,6 @@ def load_lintro_tool_config(tool_name: str) -> dict[str, Any]:
     lintro_config = _get_lintro_section()
     tool_config = lintro_config.get(tool_name, {})
     return tool_config if isinstance(tool_config, dict) else {}
-
-
-def get_tool_order_config() -> dict[str, Any]:
-    """Get tool ordering configuration from [tool.lintro].
-
-    Returns:
-        Tool ordering configuration with keys:
-        - strategy: "priority", "alphabetical", or "custom"
-        - custom_order: list of tool names (for custom strategy)
-        - priority_overrides: dict of tool -> priority (for priority strategy)
-    """
-    global_config = load_lintro_global_config()
-
-    return {
-        "strategy": global_config.get("tool_order", "priority"),
-        "custom_order": global_config.get("tool_order_custom", []),
-        "priority_overrides": global_config.get("tool_priorities", {}),
-    }
-
-
-def load_post_checks_config() -> dict[str, Any]:
-    """Load post-checks configuration from pyproject.
-
-    Returns:
-        Dict with keys like:
-            - enabled: bool
-            - tools: list[str]
-            - enforce_failure: bool
-    """
-    cfg = _get_lintro_section()
-    section = cfg.get("post_checks", {})
-    if isinstance(section, dict):
-        return section
-    return {}
 
 
 def load_module_size_config() -> dict[str, Any]:

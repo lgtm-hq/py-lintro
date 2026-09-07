@@ -309,7 +309,7 @@ def test_parallel_runs_multiple_tools_over_mixed_samples(
         tool_option_dict={},
         exclude=None,
         include_venv=False,
-        post_tools=set(),
+        selected_tools=set(),
         max_workers=4,
     )
 

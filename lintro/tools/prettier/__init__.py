@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.prettier.definition import (
     PRETTIER_CONFIG_FILENAMES,
-    PRETTIER_DEFAULT_PRIORITY,
     PRETTIER_DEFAULT_TIMEOUT,
     PRETTIER_FILE_PATTERNS,
     PrettierPlugin,
@@ -16,7 +15,6 @@ from lintro.tools.prettier.definition import (
 
 __all__ = [
     "PRETTIER_CONFIG_FILENAMES",
-    "PRETTIER_DEFAULT_PRIORITY",
     "PRETTIER_DEFAULT_TIMEOUT",
     "PRETTIER_FILE_PATTERNS",
     "PrettierPlugin",

@@ -164,9 +164,8 @@ DEFAULT_ACTION: str = "check"
     "explain_order",
     is_flag=True,
     help=(
-        "Print the claims-derived execution order next to the current one, "
-        "with the pattern behind each disagreement, then exit without "
-        "running any tool. Reporting only (#1741)."
+        "Print the execution order this run would use, with the claim behind "
+        "each constraint, then exit without running any tool."
     ),
 )
 def check_command(
@@ -225,7 +224,7 @@ def check_command(
         transport: str | None: Override AI transport (``api`` or ``cli``).
         no_art: bool: Suppress the decorative ASCII art printed after the run.
         profile: bool: Whether to emit a per-tool performance profile.
-        explain_order: bool: Print the shadow-mode execution-order diff
+        explain_order: bool: Print the derived execution order
             and exit without running tools.
 
     Raises:

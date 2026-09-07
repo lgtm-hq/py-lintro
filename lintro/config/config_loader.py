@@ -55,8 +55,7 @@ LINTRO_CONFIG_FILENAMES = [
 
 # Config sections that are valid in both ``.lintro-config.yaml`` and
 # ``[tool.lintro]`` but are parsed by other loaders: ``module_size`` and
-# ``post_checks`` by ``lintro.utils.config``, ``licenses`` by
-# ``lintro.config.licenses_config``, and ``plugins`` by
+# ``licenses`` by ``lintro.config.licenses_config``, and ``plugins`` by
 # ``lintro.plugins.discovery``. They are part of the schema even though
 # ``LintroConfig`` does not model them, so consumers that build an allowlist
 # of known top-level keys must include them.
@@ -65,15 +64,6 @@ EXTERNALLY_HANDLED_SECTIONS: frozenset[str] = frozenset(
         "licenses",
         "module_size",
         "plugins",
-    },
-)
-
-# Flat pyproject-only ordering keys read by ``get_tool_order_config``. Unlike
-# the sections above these have no ``.lintro-config.yaml`` equivalent.
-PYPROJECT_ORDERING_KEYS: frozenset[str] = frozenset(
-    {
-        "tool_order_custom",
-        "tool_priorities",
     },
 )
 
@@ -601,8 +591,6 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
     if isinstance(enabled_tools, str):
         enabled_tools = [enabled_tools]
 
-    tool_order = data.get("tool_order", "priority")
-
     # Validate max_fix_retries
     raw_retries = data.get("max_fix_retries")
     if raw_retries is None:
@@ -643,7 +631,6 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
 
     return ExecutionConfig(
         enabled_tools=enabled_tools,
-        tool_order=tool_order,
         fail_fast=data.get("fail_fast", False),
         parallel=data.get("parallel", True),
         auto_install_deps=data.get("auto_install_deps"),
@@ -992,9 +979,7 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
 
     execution_keys = frozenset(ExecutionConfig.model_fields)
     enforce_keys = frozenset(EnforceConfig.model_fields)
-    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
-        PYPROJECT_ORDERING_KEYS,
-    )
+    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS)
     reserved_keys = (
         set(execution_keys)
         | set(enforce_keys)
@@ -1008,7 +993,6 @@ def _pyproject_lintro_catalog() -> _PyprojectLintroCatalog:
             "tool",
             "tools",
             "watch",
-            ConfigKey.POST_CHECKS.value.lower(),
             ConfigKey.VERSIONS.value.lower(),
         }
     )
@@ -1088,9 +1072,7 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
     # Keys and sections that are valid under [tool.lintro] but are parsed by
     # other loaders, not by this converter. Listing them keeps the unknown-key
     # warning below from crying wolf about legitimate config.
-    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS) | set(
-        PYPROJECT_ORDERING_KEYS,
-    )
+    externally_handled_sections = set(EXTERNALLY_HANDLED_SECTIONS)
 
     unknown_keys: list[str] = []
 
@@ -1146,9 +1128,6 @@ def _convert_pyproject_to_config(data: dict[str, Any]) -> dict[str, Any]:
         elif key in enforce_keys or key.replace("-", "_") in enforce_keys:
             # Enforce config
             result["enforce"][key.replace("-", "_")] = value
-        elif key_lower == ConfigKey.POST_CHECKS.value.lower():
-            # Skip post_checks (handled separately)
-            pass
         elif key_lower == ConfigKey.VERSIONS.value.lower():
             # Skip versions (handled separately)
             pass
@@ -1422,9 +1401,7 @@ def get_default_config() -> LintroConfig:
             line_length=88,
             target_python=None,
         ),
-        execution=ExecutionConfig(
-            tool_order="priority",
-        ),
+        execution=ExecutionConfig(),
     )
 
 

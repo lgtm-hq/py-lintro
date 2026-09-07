@@ -138,6 +138,6 @@ bun add -d stylelint stylelint-config-standard
 
 ## Priority and Conflicts
 
-- **Priority:** 50 (default linter priority)
+- **Order:** derived from claims (`FIX` on CSS, before prettier's `FORMAT`)
 - **Conflicts:** none declared. Prettier also touches `*.css`/`*.scss`/`*.less` for
   formatting; stylelint focuses on lint rules, so they are complementary.

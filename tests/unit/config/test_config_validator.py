@@ -73,7 +73,7 @@ def test_valid_config_passes(write_config: Callable[..., Path]) -> None:
 enforce:
   line_length: 88
 execution:
-  tool_order: priority
+  fail_fast: false
 tools:
   ruff:
     enabled: true

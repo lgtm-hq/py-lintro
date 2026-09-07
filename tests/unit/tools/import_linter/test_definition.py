@@ -11,7 +11,6 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.tools.import_linter.definition import (
-    IMPORT_LINTER_DEFAULT_PRIORITY,
     IMPORT_LINTER_DEFAULT_TIMEOUT,
     ImportLinterPlugin,
 )
@@ -34,7 +33,6 @@ def test_definition_metadata(import_linter_plugin: ImportLinterPlugin) -> None:
     assert_that(definition.tool_type).is_equal_to(ToolType.LINTER)
     assert_that(definition.file_patterns).is_equal_to(["*.py"])
     # Literal values, not the production constants, so a changed default is caught.
-    assert_that(definition.priority).is_equal_to(50)
     assert_that(definition.default_timeout).is_equal_to(60)
     assert_that(definition.default_options).is_equal_to({"timeout": 60})
     assert_that(definition.version_command).is_equal_to(["lint-imports", "--version"])
@@ -55,7 +53,6 @@ def test_module_constants_match_the_definition(
     """
     definition = import_linter_plugin.definition
 
-    assert_that(IMPORT_LINTER_DEFAULT_PRIORITY).is_equal_to(definition.priority)
     assert_that(IMPORT_LINTER_DEFAULT_TIMEOUT).is_equal_to(definition.default_timeout)
 
 

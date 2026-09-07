@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.cargo_audit.definition import (
-    CARGO_AUDIT_DEFAULT_PRIORITY,
     CARGO_AUDIT_DEFAULT_TIMEOUT,
     CARGO_AUDIT_FILE_PATTERNS,
     CargoAuditPlugin,
 )
 
 __all__ = [
-    "CARGO_AUDIT_DEFAULT_PRIORITY",
     "CARGO_AUDIT_DEFAULT_TIMEOUT",
     "CARGO_AUDIT_FILE_PATTERNS",
     "CargoAuditPlugin",

@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.trufflehog.definition import (
-    TRUFFLEHOG_DEFAULT_PRIORITY,
     TRUFFLEHOG_DEFAULT_TIMEOUT,
     TRUFFLEHOG_FILE_PATTERNS,
     TrufflehogPlugin,
 )
 
 __all__ = [
-    "TRUFFLEHOG_DEFAULT_PRIORITY",
     "TRUFFLEHOG_DEFAULT_TIMEOUT",
     "TRUFFLEHOG_FILE_PATTERNS",
     "TrufflehogPlugin",

@@ -330,40 +330,6 @@ def test_definition_has_file_patterns(
     PLUGIN_DEFINITIONS,
     ids=[str(t[0]) for t in PLUGIN_DEFINITIONS],
 )
-def test_definition_has_priority(
-    tool_name: ToolName,
-    plugin_class_path: str,
-    can_fix: bool,
-    tool_type: ToolType,
-    keywords: list[str],
-    configs: list[str],
-) -> None:
-    """Each plugin definition has a valid priority.
-
-    Args:
-        tool_name: The expected tool name.
-        plugin_class_path: Full module path to the plugin class.
-        can_fix: Whether the tool can fix issues.
-        tool_type: The type of tool.
-        keywords: Keywords expected in the description.
-        configs: Native configuration files supported.
-    """
-    plugin = _get_plugin_instance(plugin_class_path)
-    assert_that(plugin.definition.priority).is_greater_than(0)
-
-
-@pytest.mark.parametrize(
-    (
-        "tool_name",
-        "plugin_class_path",
-        "can_fix",
-        "tool_type",
-        "keywords",
-        "configs",
-    ),
-    PLUGIN_DEFINITIONS,
-    ids=[str(t[0]) for t in PLUGIN_DEFINITIONS],
-)
 def test_definition_has_default_timeout(
     tool_name: ToolName,
     plugin_class_path: str,

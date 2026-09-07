@@ -56,7 +56,6 @@ The configuration system works in a specific order:
      still selected when their native config file is present at a scan root. Nested
      YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
      tools.
-   - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
@@ -203,7 +202,6 @@ Create a `.lintro-config.yaml` in your project root:
 # Tier 1: EXECUTION - What tools run and how
 execution:
   enabled_tools: [] # Empty = all enabled tools (config present); no-config first run is language-scoped
-  tool_order: priority # priority | alphabetical | [custom list]
   fail_fast: false
   parallel: true # Run tools in parallel (default: true)
   max_workers: 10 # Max parallel workers, 1-32 (default: CPU count)
@@ -258,8 +256,7 @@ lintro config --json
 The config command shows:
 
 - **Enforce settings**: Central `line_length`, `target_python`
-- **Tool execution order**: Based on configured strategy (priority, alphabetical, or
-  custom)
+- **Tool execution order**: Derived from each tool's declared claims
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
@@ -920,72 +917,12 @@ defaults:
 
 ### Tool Ordering Configuration
 
-Lintro supports configurable tool execution order. By default, tools run in priority
-order (formatters before linters), but you can change this behavior.
-
-```toml
-[tool.lintro]
-# Tool order strategy: "priority" (default), "alphabetical", or "custom"
-tool_order = "priority"
-
-# For "custom" strategy, specify the order explicitly
-tool_order_custom = ["prettier", "black", "ruff", "markdownlint", "yamllint"]
-
-# Override individual tool priorities (lower = runs first)
-tool_priorities = { ruff = 5, black = 10, prettier = 1 }
-```
-
-**Tool Order Strategies:**
-
-| Strategy       | Description                                                      |
-| -------------- | ---------------------------------------------------------------- |
-| `priority`     | Formatters run before linters based on priority values (default) |
-| `alphabetical` | Tools run in alphabetical order by name                          |
-| `custom`       | Tools run in order specified by `tool_order_custom`              |
-
-**Default Tool Priorities:**
-
-| Tool          | Priority | Type             |
-| ------------- | -------- | ---------------- |
-| prettier      | 10       | Formatter        |
-| black         | 15       | Formatter        |
-| ruff          | 20       | Linter/Formatter |
-| markdownlint  | 30       | Linter           |
-| html_validate | 30       | Linter           |
-| yamllint      | 35       | Linter           |
-| pydoclint     | 40       | Linter           |
-| bandit        | 45       | Security         |
-| buf           | 50       | Linter/Formatter |
-| hadolint      | 50       | Infrastructure   |
-| vale          | 50       | Linter (docs)    |
-| actionlint    | 55       | Infrastructure   |
-| pytest        | 100      | Test Runner      |
-
-Lower priority values run first. This ensures formatters run before linters, avoiding
-false positives from linters detecting issues that formatters would fix.
-
-### Shadow-mode order diff
-
-The scalar priorities above are being replaced by an order **derived** from each tool's
-declared claims and capabilities (epic #1735). Step 3 of that epic computes the derived
-order alongside the live one and reports the difference; nothing about execution
-changes, and `tool_order`, `tool_order_custom` and `tool_priorities` still decide what
-runs.
-
-```bash
-lintro check --explain-order              # derived vs current, then exit
-lintro check --tools ruff,black --explain-order
-lintro format --explain-order
-lintro doctor                             # compact summary section
-```
-
-`--explain-order` prints the diff and exits without running a single tool. Tool
-selection is resolved exactly as the real run would resolve it, so the selected _set_
-matches that invocation. The listed "current" order is the `tool_order` schedule for
-that set (after conflict resolution) — it is what `get_tools_to_run` returns, before the
-executor moves `[tool.lintro.post_checks]` tools out of the main phase and before any
-parallel execution. With the default post-checks, `black` is listed in the current order
-where a real run would defer it to the post-check phase.
+**Execution order is not configurable.** Since #1742 it is _derived_ from what each tool
+declares it touches and what it does to it, so it is complete, verifiable and the same
+everywhere lintro reports it. The scalar `tool_order`, `tool_order_custom`,
+`tool_priorities` and `definition.priority` settings are deleted; so is the
+`[tool.lintro.post_checks]` table, whose only real job — running black after ruff — now
+falls out of the model.
 
 Derivation rules:
 
@@ -999,80 +936,50 @@ Derivation rules:
 | Project-scoped    | A claim with no patterns (osv-scanner) derives no edges                                     |
 | Cycles            | Reported before ordering, naming the tools and the patterns whose edges closed them         |
 
+The pairings this recovers include `ruff → black` on Python, `oxlint → oxfmt` on JS/TS,
+`stylelint → prettier` on CSS, `prettier → html-validate` on HTML and
+`shfmt → shellcheck` on shell.
+
+Parallel runs use the same graph: two tools share a batch only when no derived edge
+separates them, so a mutator and a tool that must observe its writes never run
+concurrently.
+
+### Inspecting the order
+
+```bash
+lintro check --explain-order              # the order this run would use, then exit
+lintro check --tools ruff,black --explain-order
+lintro format --explain-order
+lintro doctor                             # compact summary section
+lintro config                             # the same order, as a table
+```
+
+`--explain-order` prints the order and exits without running a single tool. Tool
+selection is resolved exactly as the real run would resolve it, and the order comes from
+the same scheduler the run uses, so what you see is what would have executed.
+
 Sample output:
 
 ```text
-Execution order (shadow mode)
-  Reporting only: current is the scalar-priority schedule before post-check splitting; nothing here changes execution.
+Execution order (derived from tool claims)
+  This is the order that runs. It is derived from what each tool claims to touch, not configured.
 
-  Current (scalar priority):
-    1. black
-    2. ruff
-
-  Derived (claims):
     1. ruff
+        (unconstrained; alphabetical tiebreak)
     2. black
-
-  Differences (1):
-    ruff should run before black (current order runs black first)
-      *.py: ruff(fix) -> black(format)
-      *.pyi: ruff(fix) -> black(format)
+        after ruff — *.py: ruff(fix) -> black(format)
+        after ruff — *.pyi: ruff(fix) -> black(format)
 
   Cycles (0): the derived graph is a DAG.
 ```
 
-The derived order recovers the intended pairings that the priority table gets wrong
-today — `ruff → black` on Python (which `[tool.lintro.post_checks]` currently patches up
-separately), `oxlint → oxfmt` on JS/TS, `prettier → html-validate` on HTML and
-`shfmt → shellcheck` on shell.
+### Format authority on Python
 
-### Post-checks Configuration
-
-Black is integrated as a post-check tool by default. Post-checks run after the main
-tools complete and can be configured to enforce failure if issues are found. This avoids
-double-formatting with Ruff and keeps formatting decisions explicit.
-
-```toml
-[tool.lintro.post_checks]
-enabled = true
-tools = ["black"]        # Black runs after core tools
-enforce_failure = true   # Fail the run if Black finds issues in check mode
-```
-
-Notes:
-
-- With post-checks enabled for Black, Ruff’s `format`/`format_check` stages can be
-  disabled or overridden via CLI when desired.
-- In `lintro check`, Black runs with `--check` and contributes to failure when
-  `enforce_failure` is true. In `lintro format`, Black formats files in the post-check
-  phase.
-
-#### Black Options via `--tool-options`
-
-You can override Black behavior on the CLI. Supported options include `line_length`,
-`target_version`, `fast`, `preview`, and `diff`.
-
-```bash
-# Increase line length and target a specific Python version
-lintro check --tool-options "black:line_length=100,black:target_version=py313"
-
-# Enable fast and preview modes
-lintro format --tool-options "black:fast=True,black:preview=True"
-
-# Show diffs during formatting (in addition to applying changes)
-lintro format --tool-options "black:diff=True"
-```
-
-These options can also be set in `pyproject.toml` under `[tool.lintro.black]`:
-
-```toml
-[tool.lintro.black]
-line_length = 100
-target_version = "py313"
-fast = false
-preview = false
-diff = false
-```
+`*.py` is the one pattern in the 42-tool set with two mutating claimants. Black holds
+`{FORMAT}` and ruff holds `{FIX, FORMAT}`, so black owns the format phase (fewest
+mutating capabilities wins) and ruff is demoted to its fix capability: when black is in
+the run, ruff's `format` / `format_check` stages are switched off unless you ask for
+them explicitly through `--tool-options` or `[tool.lintro.ruff]`.
 
 ### Ruff vs Black Policy (Python)
 
@@ -3538,20 +3445,20 @@ lintro review --advisory-only --tool-options idiom-review:enabled=true
 
 ## Advanced Configuration
 
-### Tool Conflicts and Priorities
+### Tool Overlap
 
-Some tools may conflict with each other. Lintro handles this by:
-
-1. **Priority system** - Higher priority tools run first
-2. **Conflict detection** - Warns about conflicting tools
-3. **Auto-resolution** - Chooses the best tool for each task
+Two tools that touch the same files are not a conflict to be resolved by dropping one.
+They are ordered by the derived DAG, and where both would _format_ the same pattern the
+loser is demoted rather than dropped — ruff keeps its fix capability and black owns
+formatting on `*.py`. No tool is ever removed from a run, so `--ignore-conflicts` is
+inert and kept only for call-site compatibility.
 
 ```bash
-# Check for conflicts
-lintro list-tools --show-conflicts
+# See the order and the claim behind every constraint
+lintro check --explain-order
 
-# Force conflicting tools to run
-lintro check --tools ruff,black --ignore-conflicts
+# List every tool with its position in that order
+lintro list-tools
 ```
 
 ### Performance Optimization

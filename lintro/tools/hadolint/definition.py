@@ -36,7 +36,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Hadolint configuration
 HADOLINT_DEFAULT_TIMEOUT: int = 30
-HADOLINT_DEFAULT_PRIORITY: int = 50
 HADOLINT_FILE_PATTERNS: list[str] = ["Dockerfile", "Dockerfile.*"]
 HADOLINT_DEFAULT_FORMAT: str = "tty"
 HADOLINT_DEFAULT_FAILURE_THRESHOLD: str = "info"
@@ -75,8 +74,6 @@ class HadolintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=HADOLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".hadolint.yaml", ".hadolint.yml"],
             version_command=["hadolint", "--version"],
             min_version=get_min_version(ToolName.HADOLINT),

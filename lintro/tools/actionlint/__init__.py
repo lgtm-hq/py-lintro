@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.actionlint.definition import (
-    ACTIONLINT_DEFAULT_PRIORITY,
     ACTIONLINT_DEFAULT_TIMEOUT,
     ACTIONLINT_FILE_PATTERNS,
     ActionlintPlugin,
 )
 
 __all__ = [
-    "ACTIONLINT_DEFAULT_PRIORITY",
     "ACTIONLINT_DEFAULT_TIMEOUT",
     "ACTIONLINT_FILE_PATTERNS",
     "ActionlintPlugin",

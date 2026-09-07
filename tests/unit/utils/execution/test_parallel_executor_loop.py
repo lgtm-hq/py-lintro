@@ -84,9 +84,9 @@ def patched_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(async_module, "AsyncToolExecutor", _FakeExecutor)
     monkeypatch.setattr(
-        async_module,
+        tool_manager,
         "get_parallel_batches",
-        lambda tools, tool_manager: [list(tools)],
+        lambda tools: [list(tools)],
     )
     monkeypatch.setattr(
         tool_manager,
@@ -114,7 +114,7 @@ def _invoke() -> list[ToolResult]:
         tool_option_dict={},
         exclude=None,
         include_venv=False,
-        post_tools=set(),
+        selected_tools=set(),
         max_workers=2,
     )
 

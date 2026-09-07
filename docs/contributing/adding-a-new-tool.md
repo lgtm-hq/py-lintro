@@ -112,8 +112,6 @@ class <Tool>Plugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=50,                        # see DEFAULT_TOOL_PRIORITIES
-            conflicts_with=[],
             native_configs=[".toolrc"],
             version_command=["<tool>", "--version"],
             min_version=get_min_version(ToolName.<TOOL>),
@@ -343,12 +341,11 @@ project (type checkers, contract checkers, dependency audits).
 
 ---
 
-## Step 6 — DEFAULT_TOOL_PRIORITIES
+## Step 6 — Execution order (nothing to do)
 
-The default priority for all tools is `50`. Only add an entry to
-`DEFAULT_TOOL_PRIORITIES` in `lintro/utils/config_priority.py` if the tool needs a
-non-default priority (e.g. formatters run first, type checkers run last). Check existing
-entries before deciding on a value.
+Execution order is derived from the `claims` you declared in Step 5, so there is no
+priority to pick and no table to edit. Run `lintro check --explain-order` after
+registering the tool to see where it lands and which claim put it there.
 
 ---
 
@@ -635,7 +632,6 @@ Implementation checklist:
 - [ ] `lintro/tools/core/version_parsing.py` — `TOOLS_WITH_SIMPLE_VERSION_PATTERN` (if
       applicable)
 - [ ] `lintro/tools/core/version_checking.py` — install hints
-- [ ] `lintro/utils/config_priority.py` — `DEFAULT_TOOL_PRIORITIES` (if non-default)
 - [ ] `claims`, `reads_tree` and `partitionable` declared on the `ToolDefinition`
 - [ ] `pyproject.toml` — parser package added to `packages` list
 - [ ] `scripts/utils/install-tools.sh` — 4 sync points (help, SUPPORTED_TOOLS, install

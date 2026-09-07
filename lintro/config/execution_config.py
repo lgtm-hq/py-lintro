@@ -30,10 +30,6 @@ class ExecutionConfig(BaseModel):
             to detected languages (use ``--tools all`` or ``lintro init``
             for the full set). An explicit comma-separated ``--tools`` list
             bypasses this allowlist.
-        tool_order: Execution order strategy. One of:
-            - "priority": Use default priority (formatters before linters)
-            - "alphabetical": Alphabetical order
-            - list[str]: Custom order as explicit list
         fail_fast: Stop on first tool failure.
         parallel: Run tools in parallel where possible.
         max_workers: Maximum number of parallel workers (default: CPU count).
@@ -52,7 +48,6 @@ class ExecutionConfig(BaseModel):
     model_config = ConfigDict(frozen=False, extra="forbid")
 
     enabled_tools: list[str] = Field(default_factory=list)
-    tool_order: str | list[str] = "priority"
     fail_fast: bool = False
     parallel: bool = True
     max_workers: int = Field(default_factory=_get_default_max_workers, ge=1, le=32)

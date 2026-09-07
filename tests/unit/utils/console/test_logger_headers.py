@@ -12,7 +12,6 @@ import pytest
 from assertpy import assert_that
 
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
-from tests.unit.utils.console.conftest import patch_tty_streams
 
 
 def test_print_lintro_header_with_run_dir(
@@ -99,30 +98,3 @@ def test_print_tool_header_various_tools(
     lines = capsys.readouterr().out.splitlines()
     assert_that(lines).is_length(4)
     assert_that(lines[1]).contains(f"Running {tool_name} ({action})")
-
-
-def test_print_post_checks_header_outputs_styled_header(
-    logger: ThreadSafeConsoleLogger,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The post-checks banner uses magenta heavy borders around its own title.
-
-    The distinct style is what separates optional follow-up checks from the
-    primary tool runs, so the colour is part of the behaviour.
-
-    Args:
-        logger: ThreadSafeConsoleLogger instance fixture.
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    stdout, _ = patch_tty_streams(monkeypatch=monkeypatch)
-
-    logger.print_post_checks_header()
-
-    lines = stdout.getvalue().splitlines()
-    assert_that(lines).is_length(5)
-    assert_that(lines[0]).contains("\u2501")
-    assert_that(lines[0]).starts_with("\x1b[35m")
-    assert_that(lines[1]).contains("POST-CHECKS")
-    assert_that(lines[2]).contains("Running optional follow-up checks")
-    assert_that(lines[3]).is_equal_to(lines[0])
-    assert_that(lines[4]).is_empty()

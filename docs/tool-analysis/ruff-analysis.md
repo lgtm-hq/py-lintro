@@ -64,10 +64,10 @@ When Black is configured as a post-check in Lintro, Ruff focuses on linting by d
   overridden via `--tool-options ruff:format_check=True`.
 
 This avoids double-formatting and lets Black handle final formatting. You can override
-either side via CLI or `[tool.lintro.ruff]` and `[tool.lintro.post_checks]`.
+either side via CLI or `[tool.lintro.ruff]`.
 
 ```bash
-# Force Ruff to format even with Black post-checks enabled
+# Force Ruff to format even when Black is in the run
 lintro format --tool-options "ruff:format=True"
 
 # Force Ruff to include format-check during check

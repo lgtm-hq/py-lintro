@@ -121,7 +121,7 @@ class WatchRunner:
                 "verbose": False,
                 "yes": True,
                 "no_art": True,
-                "run_post_checks": False,
+                "run_gates": False,
                 "on_tool_result": self._render_tool_result,
                 "render_summary": False,
             }

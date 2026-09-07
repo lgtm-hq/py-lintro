@@ -14,32 +14,9 @@ from lintro.enums.action import Action
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools import tool_manager
+from lintro.tools.core.scheduler import derive_execution_order
 from lintro.utils.console import get_tool_emoji
-from lintro.utils.unified_config import get_tool_priority, is_tool_injectable
-
-
-def _resolve_conflicts(
-    plugin: BaseToolPlugin,
-    available_tools: dict[str, BaseToolPlugin],
-) -> list[str]:
-    """Resolve conflict names for a tool.
-
-    Args:
-        plugin: The plugin instance.
-        available_tools: Dictionary of available tools.
-
-    Returns:
-        List of conflict tool names.
-    """
-    conflict_names: list[str] = []
-    conflicts_with = plugin.definition.conflicts_with
-    if conflicts_with:
-        for conflict in conflicts_with:
-            conflict_lower = conflict.lower()
-            if conflict_lower in available_tools:
-                conflict_names.append(conflict_lower)
-    return conflict_names
-
+from lintro.utils.unified_config import is_tool_injectable
 
 #: Capability label reported for advisory AI finders, which run under
 #: ``lintro review`` instead of ``chk``/``fmt`` (#1308).
@@ -85,11 +62,6 @@ def _tool_capabilities(
     help="Output file path for writing results",
 )
 @click.option(
-    "--show-conflicts",
-    is_flag=True,
-    help="Show potential conflicts between tools",
-)
-@click.option(
     "--json",
     "json_output",
     is_flag=True,
@@ -103,7 +75,6 @@ def _tool_capabilities(
 )
 def list_tools_command(
     output: str | None,
-    show_conflicts: bool,
     json_output: bool,
     verbose: bool,
 ) -> None:
@@ -113,13 +84,11 @@ def list_tools_command(
 
     Args:
         output: Path to output file for writing results.
-        show_conflicts: Whether to show potential conflicts between tools.
         json_output: Output tool list as JSON.
         verbose: Show verbose output including file extensions and patterns.
     """
     list_tools(
         output=output,
-        show_conflicts=show_conflicts,
         json_output=json_output,
         verbose=verbose,
     )
@@ -127,7 +96,6 @@ def list_tools_command(
 
 def list_tools(
     output: str | None,
-    show_conflicts: bool,
     json_output: bool = False,
     verbose: bool = False,
 ) -> None:
@@ -135,13 +103,21 @@ def list_tools(
 
     Args:
         output: Output file path.
-        show_conflicts: Whether to show potential conflicts between tools.
         json_output: Output tool list as JSON.
         verbose: Show verbose output including file extensions and patterns.
     """
     available_tools = tool_manager.get_all_tools()
     check_tools = tool_manager.get_check_tools()
     fix_tools = tool_manager.get_fix_tools()
+    # Position in the derived execution order, so list-tools reports the same
+    # ordering authority as every other surface (#1742).
+    order_positions = {
+        name: index
+        for index, name in enumerate(
+            derive_execution_order(list(available_tools)),
+            start=1,
+        )
+    }
 
     # JSON output mode
     if json_output:
@@ -158,7 +134,7 @@ def list_tools(
                 "description": plugin.definition.description,
                 "capabilities": capabilities,
                 "execution_class": plugin.definition.execution_class.value,
-                "priority": get_tool_priority(tool_name),
+                "order": order_positions[tool_name],
                 "syncable": is_tool_injectable(tool_name),
                 "origin": ToolRegistry.get_origin(tool_name),
             }
@@ -166,13 +142,6 @@ def list_tools(
             # Only include file_patterns in verbose mode (consistent with table output)
             if verbose:
                 tool_info["file_patterns"] = plugin.definition.file_patterns
-
-            if show_conflicts:
-                conflict_names = _resolve_conflicts(
-                    plugin=plugin,
-                    available_tools=available_tools,
-                )
-                tool_info["conflicts_with"] = conflict_names
 
             tools_data[tool_name] = tool_info
 
@@ -195,15 +164,12 @@ def list_tools(
     table.add_column("Tool", style="cyan", no_wrap=True)
     table.add_column("Description", style="white", max_width=40)
     table.add_column("Capabilities", style="green")
-    table.add_column("Priority", justify="center", style="yellow")
+    table.add_column("Order", justify="center", style="yellow")
     table.add_column("Type", style="magenta")
     table.add_column("Origin", style="blue")
 
     if verbose:
         table.add_column("Extensions", style="dim", max_width=30)
-
-    if show_conflicts:
-        table.add_column("Conflicts", style="red")
 
     for tool_name, plugin in available_tools.items():
         tool_description = plugin.definition.description
@@ -218,8 +184,8 @@ def list_tools(
         )
         caps_display = ", ".join(tool_capabilities) if tool_capabilities else "-"
 
-        # Priority and type
-        priority = get_tool_priority(tool_name)
+        # Derived execution position and type
+        position = order_positions[tool_name]
         injectable = is_tool_injectable(tool_name)
         tool_type = "Syncable" if injectable else "Native only"
 
@@ -229,7 +195,7 @@ def list_tools(
             f"{emoji} {tool_name}",
             tool_description,
             caps_display,
-            str(priority),
+            str(position),
             tool_type,
             origin,
         ]
@@ -241,14 +207,6 @@ def list_tools(
             if len(patterns) > 5:
                 pat_display += f" (+{len(patterns) - 5})"
             row.append(pat_display if patterns else "-")
-
-        # Conflicts
-        if show_conflicts:
-            conflict_names = _resolve_conflicts(
-                plugin=plugin,
-                available_tools=available_tools,
-            )
-            row.append(", ".join(conflict_names) if conflict_names else "-")
 
         table.add_row(*row)
 
@@ -278,7 +236,6 @@ def list_tools(
                 available_tools=available_tools,
                 check_tools=check_tools,
                 fix_tools=fix_tools,
-                show_conflicts=show_conflicts,
             )
             with open(output, "w", encoding="utf-8") as f:
                 f.write("\n".join(output_lines) + "\n")
@@ -292,7 +249,6 @@ def _generate_plain_text_output(
     available_tools: dict[str, BaseToolPlugin],
     check_tools: dict[str, BaseToolPlugin],
     fix_tools: dict[str, BaseToolPlugin],
-    show_conflicts: bool,
 ) -> list[str]:
     """Generate plain text output for file writing.
 
@@ -300,7 +256,6 @@ def _generate_plain_text_output(
         available_tools: Dictionary of available tools.
         check_tools: Dictionary of check-capable tools.
         fix_tools: Dictionary of fix-capable tools.
-        show_conflicts: Whether to include conflict information.
 
     Returns:
         List of output lines.
@@ -329,14 +284,6 @@ def _generate_plain_text_output(
         output_lines.append(f"{emoji} {tool_name}: {tool_description}")
         output_lines.append(f"  Capabilities: {capabilities_display}")
         output_lines.append(f"  Origin: {ToolRegistry.get_origin(tool_name)}")
-
-        if show_conflicts:
-            conflict_names = _resolve_conflicts(
-                plugin=plugin,
-                available_tools=available_tools,
-            )
-            if conflict_names:
-                output_lines.append(f"  Conflicts with: {', '.join(conflict_names)}")
 
         output_lines.append("")
 

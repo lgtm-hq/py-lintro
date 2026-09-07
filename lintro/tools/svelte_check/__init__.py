@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.svelte_check.definition import (
-    SVELTE_CHECK_DEFAULT_PRIORITY,
     SVELTE_CHECK_DEFAULT_TIMEOUT,
     SVELTE_CHECK_FILE_PATTERNS,
     SvelteCheckPlugin,
 )
 
 __all__ = [
-    "SVELTE_CHECK_DEFAULT_PRIORITY",
     "SVELTE_CHECK_DEFAULT_TIMEOUT",
     "SVELTE_CHECK_FILE_PATTERNS",
     "SvelteCheckPlugin",

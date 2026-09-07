@@ -31,7 +31,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Shellcheck configuration
 SHELLCHECK_DEFAULT_TIMEOUT: int = 30
-SHELLCHECK_DEFAULT_PRIORITY: int = 50
 SHELLCHECK_FILE_PATTERNS: list[str] = ["*.sh", "*.bash", "*.ksh"]
 SHELLCHECK_DEFAULT_FORMAT: str = "json1"
 SHELLCHECK_DEFAULT_SEVERITY: str = "style"
@@ -114,8 +113,6 @@ class ShellcheckPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=SHELLCHECK_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".shellcheckrc"],
             version_command=["shellcheck", "--version"],
             min_version=get_min_version(ToolName.SHELLCHECK),

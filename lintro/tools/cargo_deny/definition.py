@@ -32,7 +32,6 @@ from lintro.tools.core.timeout_utils import (
 
 # Constants for cargo-deny configuration
 CARGO_DENY_DEFAULT_TIMEOUT: int = 60
-CARGO_DENY_DEFAULT_PRIORITY: int = 90  # High priority for security tool
 CARGO_DENY_FILE_PATTERNS: list[str] = ["Cargo.toml", "deny.toml"]
 
 
@@ -84,8 +83,6 @@ class CargoDenyPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=CARGO_DENY_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["deny.toml"],
             version_command=["cargo", "deny", "--version"],
             min_version="0.14.0",

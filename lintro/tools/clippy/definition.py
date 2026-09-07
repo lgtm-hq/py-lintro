@@ -44,7 +44,6 @@ from lintro.tools.core.timeout_utils import (
 
 # Constants for Clippy configuration
 CLIPPY_DEFAULT_TIMEOUT: int = 120
-CLIPPY_DEFAULT_PRIORITY: int = 85
 CLIPPY_FILE_PATTERNS: list[str] = ["*.rs", "Cargo.toml"]
 
 
@@ -99,8 +98,6 @@ class ClippyPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=CLIPPY_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["clippy.toml", ".clippy.toml"],
             version_command=["rustc", "--version"],
             min_version=get_min_version(ToolName.CLIPPY),

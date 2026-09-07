@@ -134,8 +134,6 @@ class MyToolPlugin(BaseToolPlugin):
             ],
             reads_tree=True,  # Must run after mutating tools settle
             partitionable=False,  # True if the file set can be sharded
-            priority=50,  # Execution priority (higher = runs earlier)
-            conflicts_with=[],  # Names of conflicting tools
             native_configs=["pyproject.toml", ".mytool.yaml"],  # Config files
             version_command=["my-tool", "--version"],  # Command to get version
             min_version="1.0.0",  # Minimum supported version
@@ -209,8 +207,6 @@ The `ToolDefinition` dataclass defines your tool's metadata:
 | `claims`          | `list[Claim]` | Patterns plus the capabilities applied to them       |
 | `reads_tree`      | `bool`        | Reads the working tree, so runs after mutation       |
 | `partitionable`   | `bool`        | File set may be sharded without changing the verdict |
-| `priority`        | `int`         | Execution order (higher = earlier)                   |
-| `conflicts_with`  | `list[str]`   | Names of conflicting tools                           |
 | `native_configs`  | `list[str]`   | Config file names                                    |
 | `version_command` | `list[str]`   | Command to check version                             |
 | `min_version`     | `str`         | Minimum supported version                            |
@@ -219,9 +215,10 @@ The `ToolDefinition` dataclass defines your tool's metadata:
 
 ### Claims and capabilities
 
-`claims` declares _what a tool touches_ and _what it does to it_, replacing the scalar
-`priority` integer as the input to execution ordering (epic #1735). A `Claim` pairs glob
-patterns with a set of `Cap` values:
+`claims` declares _what a tool touches_ and _what it does to it_. It is the **only**
+input to execution ordering: the scalar `priority` integer it replaced, and the unused
+`conflicts_with` list, were deleted in #1742. A `Claim` pairs glob patterns with a set
+of `Cap` values:
 
 | Capability   | Meaning                                                    |
 | ------------ | ---------------------------------------------------------- |

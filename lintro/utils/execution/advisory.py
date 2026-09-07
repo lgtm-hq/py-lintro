@@ -223,7 +223,7 @@ def run_advisory_tools(
                 include_venv=False,
                 incremental=False,
                 action=Action.CHECK,
-                post_tools=set(),
+                selected_tools=set(),
                 lintro_config=config,
             )
             results.append(tool.check(paths, check_options))

@@ -24,7 +24,6 @@ from lintro.tools.idiom_review.definition import (
     IDIOM_REVIEW_DEFAULT_MAX_FILES,
     IDIOM_REVIEW_DEFAULT_TIMEOUT,
     IDIOM_REVIEW_FILE_PATTERNS,
-    IDIOM_REVIEW_PRIORITY,
     IDIOM_REVIEW_TOOL_NAME,
     IdiomReviewPlugin,
 )
@@ -36,7 +35,6 @@ __all__ = [
     "IDIOM_REVIEW_DEFAULT_MAX_FILES",
     "IDIOM_REVIEW_DEFAULT_TIMEOUT",
     "IDIOM_REVIEW_FILE_PATTERNS",
-    "IDIOM_REVIEW_PRIORITY",
     "IDIOM_REVIEW_TOOL_NAME",
     "IdiomReviewEngine",
     "IdiomReviewMode",

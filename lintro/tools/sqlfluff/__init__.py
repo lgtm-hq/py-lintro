@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.sqlfluff.definition import (
     SQLFLUFF_DEFAULT_FORMAT,
-    SQLFLUFF_DEFAULT_PRIORITY,
     SQLFLUFF_DEFAULT_TIMEOUT,
     SQLFLUFF_FILE_PATTERNS,
     SqlfluffPlugin,
@@ -16,7 +15,6 @@ from lintro.tools.sqlfluff.definition import (
 
 __all__ = [
     "SQLFLUFF_DEFAULT_FORMAT",
-    "SQLFLUFF_DEFAULT_PRIORITY",
     "SQLFLUFF_DEFAULT_TIMEOUT",
     "SQLFLUFF_FILE_PATTERNS",
     "SqlfluffPlugin",

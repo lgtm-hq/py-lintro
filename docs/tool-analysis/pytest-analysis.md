@@ -64,7 +64,7 @@ cmd = self._get_executable_command("pytest") + ["--junitxml", "report.xml"]
 
 - 🔄 **Test Mode Isolation**: Adds `--strict-markers` and `--strict-config` in test mode
 - 🔄 **Timeout Management**: Configurable timeout (default 300 seconds)
-- 🔄 **Priority System**: High priority (90) for test execution
+- 🔄 **Ordering**: derived from claims; the test action runs independently
 - 🔄 **File Pattern Matching**: Automatic discovery of test files
 - 🔄 **Output Parsing**: Multiple output format parsing with fallback
 

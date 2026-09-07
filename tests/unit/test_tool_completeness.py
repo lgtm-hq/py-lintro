@@ -6,8 +6,6 @@ the full set of integration surfaces and to keep its sources of truth in
 agreement:
 
 - ``lintro/tools/manifest.src.json`` entry
-- ``DEFAULT_TOOL_PRIORITIES`` drives the *effective* priority (no dead
-  ``priority=`` declarations that silently fall back to 50)
 - manifest ``tags`` agree with the definition's ``tool_type``
 - install hints in ``lintro/tools/core/version_checking.py``
 - ``docs/tool-analysis/<tool>-analysis.md`` and a ``docs/configuration.md``
@@ -43,7 +41,6 @@ from lintro.tools.core.version_checking import (
     get_install_hints,
     get_minimum_versions,
 )
-from lintro.utils.unified_config import get_tool_priority
 
 # ── Repository layout ──────────────────────────────────────────────────────
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -202,34 +199,6 @@ TAGS_EXEMPT: dict[str, str] = {
     "vue-tsc": "manifest omits 'type_checker' present in tool_type (#1490)",
 }
 
-# Tools whose definition priority is "dead": DEFAULT_TOOL_PRIORITIES either has
-# no entry (falls back to 50) or a different value, so the declared priority is
-# never the effective one. pip-audit is the tracked example (#1506); align each
-# definition's priority with DEFAULT_TOOL_PRIORITIES.
-PRIORITY_EXEMPT: dict[str, str] = {
-    "pip_audit": "declares 90 but DEFAULT_TOOL_PRIORITIES lacks entry (eff. 50) — TODO(#1506)",
-    "actionlint": "declares 40, DEFAULT_TOOL_PRIORITIES says 55 (#1490)",
-    "astro-check": "declares 83, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "bandit": "declares 90, DEFAULT_TOOL_PRIORITIES says 45 (#1490)",
-    "black": "declares 90, DEFAULT_TOOL_PRIORITIES says 15 (#1490)",
-    "cargo_audit": "declares 95, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "cargo_deny": "declares 90, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "clippy": "declares 85, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "commitlint": "declares 35, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "gitleaks": "declares 90, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "idiom-review": "declares 95, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1496)",
-    "oxfmt": "declares 80, DEFAULT_TOOL_PRIORITIES says 25 (#1490)",
-    "prettier": "declares 80, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "pydoclint": "declares 45, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "pytest": "declares 90, DEFAULT_TOOL_PRIORITIES says 100 (#1490)",
-    "ruff": "declares 85, DEFAULT_TOOL_PRIORITIES says 20 (#1490)",
-    "rustfmt": "declares 80, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "semgrep": "declares 85, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "svelte-check": "declares 83, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "vue-tsc": "declares 83, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "yamllint": "declares 40, DEFAULT_TOOL_PRIORITIES says 35 (#1490)",
-}
-
 # No install hint template in version_checking.py.
 INSTALL_HINT_EXEMPT: dict[str, str] = {
     "idiom-review": "AI plugin installed via lintro[ai] extra, not an external binary (#1496)",
@@ -386,24 +355,6 @@ def test_manifest_entry_exists(tool: str) -> None:
     assert_that(_MANIFEST_TOOLS).described_as(
         f"{tool}: missing manifest.src.json entry",
     ).contains_key(_canonical(tool))
-
-
-@pytest.mark.parametrize("tool", TOOL_NAMES)
-def test_priority_is_effective(tool: str) -> None:
-    """The definition's declared priority is the effective priority.
-
-    Guards against "dead" priorities where a definition declares a value that
-    ``DEFAULT_TOOL_PRIORITIES`` overrides (or omits, falling back to 50).
-
-    Args:
-        tool: Registry tool name (parametrized).
-    """
-    _skip_if_exempt(tool, PRIORITY_EXEMPT)
-    declared = _DEFINITIONS[tool].priority  # type: ignore[attr-defined]
-    effective = get_tool_priority(tool)
-    assert_that(effective).described_as(
-        f"{tool}: declared priority {declared} != effective {effective}",
-    ).is_equal_to(declared)
 
 
 @pytest.mark.parametrize("tool", TOOL_NAMES)

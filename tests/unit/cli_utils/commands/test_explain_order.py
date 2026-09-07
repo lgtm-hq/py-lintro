@@ -1,7 +1,7 @@
-"""Tests for ``--explain-order`` on check and format (#1741).
+"""Tests for ``--explain-order`` on check and format (#1741, #1742).
 
-The flag is reporting only: it prints the shadow diff and returns without
-handing anything to the execution pipeline.
+The flag is reporting only: it prints the order the run would use and
+returns without handing anything to the execution pipeline.
 """
 
 from __future__ import annotations
@@ -26,10 +26,10 @@ def test_check_explain_order_prints_diff_and_runs_nothing() -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_run.called).is_false()
-    assert_that(result.output).contains("Execution order (shadow mode)")
-    assert_that(result.output).contains("Current (scalar priority):")
-    assert_that(result.output).contains("Derived (claims):")
-    assert_that(result.output).contains("ruff should run before black")
+    assert_that(result.output).contains("Execution order (derived from tool claims)")
+    assert_that(result.output).contains("1. ruff")
+    assert_that(result.output).contains("2. black")
+    assert_that(result.output).contains("after ruff")
 
 
 def test_format_explain_order_prints_diff_and_runs_nothing() -> None:
@@ -44,7 +44,7 @@ def test_format_explain_order_prints_diff_and_runs_nothing() -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_run.called).is_false()
-    assert_that(result.output).contains("Execution order (shadow mode)")
+    assert_that(result.output).contains("Execution order (derived from tool claims)")
     assert_that(result.output).contains("*.py: ruff(fix) -> black(format)")
 
 
@@ -74,7 +74,9 @@ def test_check_without_explain_order_still_runs() -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_run.called).is_true()
-    assert_that(result.output).does_not_contain("Execution order (shadow mode)")
+    assert_that(result.output).does_not_contain(
+        "Execution order (derived from tool claims)",
+    )
 
 
 def test_check_explain_order_still_validates_the_diff_base() -> None:
@@ -87,7 +89,9 @@ def test_check_explain_order_still_validates_the_diff_base() -> None:
 
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(mock_run.called).is_false()
-    assert_that(result.output).does_not_contain("Execution order (shadow mode)")
+    assert_that(result.output).does_not_contain(
+        "Execution order (derived from tool claims)",
+    )
 
 
 def test_check_no_cache_still_clears_before_explain_order() -> None:
@@ -104,11 +108,11 @@ def test_check_no_cache_still_clears_before_explain_order() -> None:
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_run.called).is_false()
     assert_that(mock_clear.called).is_true()
-    assert_that(result.output).contains("Execution order (shadow mode)")
+    assert_that(result.output).contains("Execution order (derived from tool claims)")
 
 
 def test_check_explain_order_uses_the_default_selection() -> None:
-    """Without ``--tools`` the diff covers the detected default toolset."""
+    """Without ``--tools`` the order covers the detected default toolset."""
     runner = CliRunner()
 
     with patch("lintro.cli_utils.commands.check.run_lint_with_ai") as mock_run:
@@ -116,5 +120,5 @@ def test_check_explain_order_uses_the_default_selection() -> None:
 
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(mock_run.called).is_false()
-    assert_that(result.output).contains("Execution order (shadow mode)")
+    assert_that(result.output).contains("Execution order (derived from tool claims)")
     assert_that(result.output).contains("ruff")

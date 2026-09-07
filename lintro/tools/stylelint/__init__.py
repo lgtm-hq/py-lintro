@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.stylelint.definition import (
     STYLELINT_CONFIG_FILENAMES,
-    STYLELINT_DEFAULT_PRIORITY,
     STYLELINT_DEFAULT_TIMEOUT,
     STYLELINT_FILE_PATTERNS,
     STYLELINT_PSEUDO_RULES,
@@ -17,7 +16,6 @@ from lintro.tools.stylelint.definition import (
 
 __all__ = [
     "STYLELINT_CONFIG_FILENAMES",
-    "STYLELINT_DEFAULT_PRIORITY",
     "STYLELINT_DEFAULT_TIMEOUT",
     "STYLELINT_FILE_PATTERNS",
     "STYLELINT_PSEUDO_RULES",

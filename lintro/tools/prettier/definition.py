@@ -43,7 +43,6 @@ from lintro.utils.path_utils import find_file_upward
 
 # Constants for Prettier configuration
 PRETTIER_DEFAULT_TIMEOUT: int = 120
-PRETTIER_DEFAULT_PRIORITY: int = 80
 # Note: JS/TS/Vue files are handled by oxfmt (faster).
 # Prettier handles file types that oxfmt doesn't support.
 PRETTIER_CONFIG_FILENAMES: tuple[str, ...] = (
@@ -110,8 +109,6 @@ class PrettierPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=PRETTIER_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(PRETTIER_CONFIG_FILENAMES),
             version_command=["prettier", "--version"],
             min_version=get_min_version(ToolName.PRETTIER),

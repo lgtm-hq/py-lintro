@@ -39,7 +39,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for oxfmt configuration
 OXFMT_DEFAULT_TIMEOUT: int = 30
-OXFMT_DEFAULT_PRIORITY: int = 80
 # Note: oxfmt (from oxc toolchain) supports JavaScript/TypeScript and Vue files.
 # Unlike Prettier, it does not support Svelte, Astro, JSON, CSS, HTML, Markdown, etc.
 OXFMT_FILE_PATTERNS: list[str] = [
@@ -87,8 +86,6 @@ class OxfmtPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=OXFMT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".oxfmtrc.json", ".oxfmtrc.jsonc"],
             version_command=["oxfmt", "--version"],
             min_version=get_min_version(ToolName.OXFMT),

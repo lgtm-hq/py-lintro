@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.pydoclint.definition import (
-    PYDOCLINT_DEFAULT_PRIORITY,
     PYDOCLINT_DEFAULT_TIMEOUT,
     PYDOCLINT_FILE_PATTERNS,
     PydoclintPlugin,
 )
 
 __all__ = [
-    "PYDOCLINT_DEFAULT_PRIORITY",
     "PYDOCLINT_DEFAULT_TIMEOUT",
     "PYDOCLINT_FILE_PATTERNS",
     "PydoclintPlugin",

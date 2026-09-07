@@ -42,7 +42,6 @@ from lintro.tools.ts_checker.base import TypeScriptCheckerPlugin
 
 # Constants for Vue-tsc configuration
 VUE_TSC_DEFAULT_TIMEOUT: int = 120
-VUE_TSC_DEFAULT_PRIORITY: int = 83  # After tsc (82)
 VUE_TSC_FILE_PATTERNS: list[str] = ["*.vue"]
 
 
@@ -90,8 +89,6 @@ class VueTscPlugin(TypeScriptCheckerPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=VUE_TSC_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["tsconfig.json", "tsconfig.app.json"],
             version_command=self._vue_tsc_cmd + ["--version"],
             min_version=get_min_version(ToolName.VUE_TSC),

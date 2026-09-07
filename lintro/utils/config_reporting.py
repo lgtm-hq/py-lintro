@@ -1,15 +1,18 @@
 """Configuration reporting utilities.
 
-Generates human-readable reports of tool configurations and validation warnings.
+Generates human-readable reports of tool configurations and validation
+warnings.
+
+Execution order is deliberately absent here. Since #1742 the order is derived
+from tool claims rather than configured, and it is reported by the commands
+that can resolve it — ``lintro config``, ``lintro check --explain-order`` and
+``lintro doctor``.
 """
 
 from loguru import logger
 
 from lintro.utils.unified_config import (
     get_effective_line_length,
-    get_ordered_tools,
-    get_tool_order_config,
-    get_tool_priority,
     validate_config_consistency,
 )
 
@@ -28,7 +31,6 @@ def get_config_report() -> str:
 
     summary = get_tool_config_summary()
     central_ll = get_effective_line_length("ruff")
-    order_config = get_tool_order_config()
 
     lines: list[str] = []
     lines.append("=" * 60)
@@ -39,18 +41,7 @@ def get_config_report() -> str:
     # Global settings section
     lines.append("── Global Settings ──")
     lines.append(f"  Central line_length: {central_ll or 'Not configured'}")
-    lines.append(f"  Tool order strategy: {order_config.get('strategy', 'priority')}")
-    if order_config.get("custom_order"):
-        lines.append(f"  Custom order: {', '.join(order_config['custom_order'])}")
-    lines.append("")
-
-    # Tool execution order section
-    lines.append("── Tool Execution Order ──")
-    tool_names = list(summary.keys())
-    ordered_tools = get_ordered_tools(tool_names)
-    for idx, tool_name in enumerate(ordered_tools, 1):
-        priority = get_tool_priority(tool_name)
-        lines.append(f"  {idx}. {tool_name} (priority: {priority})")
+    lines.append("  Tool order: derived from tool claims (lintro config)")
     lines.append("")
 
     # Per-tool configuration section

@@ -103,12 +103,8 @@ def _install_executor_doubles(
     )
     monkeypatch.setattr(
         te,
-        "execute_post_checks",
-        lambda **kwargs: (
-            kwargs["total_issues"],
-            kwargs["total_fixed"],
-            kwargs["total_remaining"],
-        ),
+        "execute_gates",
+        lambda **kwargs: kwargs["total_issues"],
     )
 
     import lintro.config.config_loader as config_loader
@@ -132,7 +128,6 @@ def _install_executor_doubles(
         "write_reports_from_results",
         lambda self, results: None,
     )
-    monkeypatch.setattr(te, "load_post_checks_config", lambda: {"enabled": False})
 
 
 def _ai_enabled_config() -> LintroConfig:
@@ -218,7 +213,6 @@ def test_fix_recomputes_totals_after_ai_changes(monkeypatch, fake_logger):
         all_results,
         total_issues,
         total_remaining,
-        main_phase_empty_due_to_filter,
     ):
         captured["total_issues"] = total_issues
         captured["total_remaining"] = total_remaining
@@ -253,7 +247,6 @@ def test_ai_disabled_means_no_ai_and_unchanged_exit_code(monkeypatch, fake_logge
         all_results,
         total_issues,
         total_remaining,
-        main_phase_empty_due_to_filter,
     ):
         captured["total_remaining"] = total_remaining
         return 0 if total_remaining == 0 else 1

@@ -337,8 +337,6 @@ class ExamplePlugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,
             file_patterns=["*.py"],
-            priority=60,
-            conflicts_with=[],
             native_configs=["pyproject.toml"],
             version_command=["example", "--version"],
             min_version="1.0.0",

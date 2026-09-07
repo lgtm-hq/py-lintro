@@ -1065,8 +1065,8 @@ def test_output_json_includes_optional_extras() -> None:
     assert_that(extras).contains_key("mcp")
 
 
-def test_doctor_renders_execution_order_shadow_section() -> None:
-    """The shadow-mode execution-order section (#1741) is part of doctor output."""
+def test_doctor_renders_execution_order_section() -> None:
+    """The derived execution-order section (#1742) is part of doctor output."""
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
 
@@ -1079,13 +1079,29 @@ def test_doctor_renders_execution_order_shadow_section() -> None:
         mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
         result = runner.invoke(doctor_command, [])
 
-    assert_that(result.output).contains("Execution order (shadow)")
-    assert_that(result.output).contains("Reporting only")
+    assert_that(result.output).contains("Execution order (derived)")
+    assert_that(result.output).contains("This is the order that runs")
     assert_that(result.output).contains("lintro check --explain-order")
 
 
 def test_doctor_order_section_is_informational_only() -> None:
-    """A real shadow report never changes the doctor exit code."""
+    """A constrained derived order never changes the doctor exit code."""
+    from lintro.enums.capability import Cap
+    from lintro.tools.core.scheduler import DerivedOrder, OrderEdge
+
+    report = DerivedOrder(
+        tools=("ruff", "black"),
+        edges=(
+            OrderEdge(
+                before="ruff",
+                after="black",
+                pattern="*.py",
+                before_capability=Cap.FIX,
+                after_capability=Cap.FORMAT,
+            ),
+        ),
+        cycles=(),
+    )
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
 
@@ -1094,18 +1110,19 @@ def test_doctor_order_section_is_informational_only() -> None:
         p2,
         patch("subprocess.run") as mock_run,
         patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "lintro.cli_utils.order_explain.build_order_report",
+            return_value=report,
+        ),
     ):
         mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
         result = runner.invoke(doctor_command, [])
 
     assert_that(result.exit_code).is_equal_to(0)
-    assert_that(result.output).contains("Execution order (shadow)")
-    # The live workspace toolset disagrees with the scalar order, so this pins
-    # that a real, non-empty difference list still leaves the exit code at 0.
-    counts = re.search(r"differences: (\d+)", result.output)
-    assert_that(counts).is_not_none()
-    assert_that(int(counts.group(1) if counts else "0")).is_greater_than(0)
-    assert_that(re.search(r"\S+ before \S+ \(", result.output)).is_not_none()
+    assert_that(result.output).contains("Execution order (derived)")
+    # A non-empty, constrained section still leaves the exit code at 0.
+    assert_that(re.search(r"constraints: [1-9]", result.output)).is_not_none()
+    assert_that(re.search(r"black after ruff \(\*\.py\)", result.output)).is_not_none()
 
 
 def test_doctor_order_lines_are_empty_when_selection_fails() -> None:

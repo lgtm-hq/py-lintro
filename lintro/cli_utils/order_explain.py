@@ -1,12 +1,14 @@
-"""Rendering for the shadow-mode execution-order diff (#1741).
+"""Rendering for the derived execution order (#1742).
 
 Presentation only. The derivation lives in
 :mod:`lintro.tools.core.scheduler`; this module turns its report into the
 lines printed by ``lintro check --explain-order``, ``lintro fmt
 --explain-order`` and the ``lintro doctor`` order section.
 
-Nothing here influences execution: ``--explain-order`` prints the diff and
-returns instead of running tools, and the doctor section is informational.
+Since #1742 the derived order *is* the order that runs, so what these
+surfaces print is not a preview of a future scheduler: it is an explanation
+of the run that would have happened, tool by tool, with the claim that put
+each tool where it is.
 """
 
 from __future__ import annotations
@@ -16,74 +18,73 @@ from typing import TYPE_CHECKING, NoReturn
 import click
 from rich.text import Text
 
-from lintro.tools.core.scheduler import build_shadow_report
+from lintro.tools.core.scheduler import build_order_report
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from rich.console import Console
 
-    from lintro.tools.core.scheduler import (
-        OrderCycle,
-        OrderDifference,
-        OrderShadowReport,
-    )
+    from lintro.tools.core.scheduler import DerivedOrder, OrderCycle, OrderEdge
 
 #: Header printed above every explanation.
-EXPLAIN_HEADER: str = "Execution order (shadow mode)"
+EXPLAIN_HEADER: str = "Execution order (derived from tool claims)"
 
-#: Repeated wherever the diff is shown, so nobody reads it as live behaviour.
-SHADOW_NOTE: str = (
-    "Reporting only: current is the scalar-priority schedule before "
-    "post-check splitting; nothing here changes execution."
+#: Repeated wherever the order is shown, so its authority is unambiguous.
+DERIVED_NOTE: str = (
+    "This is the order that runs. It is derived from what each tool claims "
+    "to touch, not configured."
 )
 
-#: Cap on the per-difference pattern list so a `*` claim cannot flood output.
-MAX_EDGES_PER_DIFFERENCE: int = 5
+#: Cap on the per-tool constraint list so a `*` claim cannot flood output.
+MAX_EDGES_PER_TOOL: int = 5
 
-#: Cap on the differences listed in the compact doctor section.
-MAX_DOCTOR_DIFFERENCES: int = 5
+#: Cap on the tools listed with their constraints in the doctor section.
+MAX_DOCTOR_CONSTRAINTS: int = 5
 
 
-def _format_order(label: str, names: Sequence[str]) -> list[str]:
-    """Render one numbered order listing.
+def _predecessors(report: DerivedOrder) -> dict[str, list[OrderEdge]]:
+    """Group derived edges by the tool they constrain.
 
     Args:
-        label: Section label (e.g. ``"Current (scalar priority)"``).
-        names: Tool names in order.
+        report: Result of
+            :func:`lintro.tools.core.scheduler.build_order_report`.
 
     Returns:
-        Lines for the listing, including its label.
+        Mapping of tool name to the edges requiring another tool first.
     """
-    lines = [f"  {label}:"]
-    if not names:
-        lines.append("    (no tools selected)")
+    grouped: dict[str, list[OrderEdge]] = {name: [] for name in report.tools}
+    for edge in report.edges:
+        grouped.setdefault(edge.after, []).append(edge)
+    return grouped
+
+
+def _format_tool(
+    index: int,
+    width: int,
+    name: str,
+    edges: Sequence[OrderEdge],
+) -> list[str]:
+    """Render one tool's position and the constraints that put it there.
+
+    Args:
+        index: 1-based position in the order.
+        width: Field width for the position number.
+        name: Tool name.
+        edges: Derived edges requiring another tool to run before this one.
+
+    Returns:
+        Lines for this tool.
+    """
+    lines = [f"    {index:>{width}}. {name}"]
+    if not edges:
+        lines.append("        (unconstrained; alphabetical tiebreak)")
         return lines
-    width = len(str(len(names)))
-    lines.extend(
-        f"    {index:>{width}}. {name}" for index, name in enumerate(names, start=1)
-    )
-    return lines
-
-
-def _format_difference(difference: OrderDifference) -> list[str]:
-    """Render one disagreement and the edges that produced it.
-
-    Args:
-        difference: The disagreement to render.
-
-    Returns:
-        Lines describing the pair and the claiming patterns.
-    """
-    lines = [
-        f"    {difference.before} should run before {difference.after} "
-        f"(current order runs {difference.after} first)",
-    ]
-    shown = difference.edges[:MAX_EDGES_PER_DIFFERENCE]
-    lines.extend(f"      {edge.reason}" for edge in shown)
-    hidden = len(difference.edges) - len(shown)
+    shown = edges[:MAX_EDGES_PER_TOOL]
+    lines.extend(f"        after {edge.before} — {edge.reason}" for edge in shown)
+    hidden = len(edges) - len(shown)
     if hidden > 0:
-        lines.append(f"      ... and {hidden} more pattern(s)")
+        lines.append(f"        ... and {hidden} more constraint(s)")
     return lines
 
 
@@ -102,67 +103,68 @@ def _format_cycle(cycle: OrderCycle) -> list[str]:
     ]
 
 
-def format_shadow_report(report: OrderShadowReport) -> list[str]:
-    """Render the full shadow-order explanation.
+def format_order_report(report: DerivedOrder) -> list[str]:
+    """Render the full execution-order explanation.
 
     Args:
         report: Report produced by
-            :func:`lintro.tools.core.scheduler.build_shadow_report`.
+            :func:`lintro.tools.core.scheduler.build_order_report`.
 
     Returns:
         Plain-text lines, ready to print one per line.
     """
-    lines = [EXPLAIN_HEADER, f"  {SHADOW_NOTE}", ""]
-    lines.extend(_format_order("Current (scalar priority)", report.current))
-    lines.append("")
-    lines.extend(_format_order("Derived (claims)", report.derived))
-    lines.append("")
+    lines = [EXPLAIN_HEADER, f"  {DERIVED_NOTE}", ""]
+    if not report.tools:
+        lines.append("    (no tools selected)")
+        return lines
 
-    if report.differences:
-        lines.append(f"  Differences ({len(report.differences)}):")
-        for difference in report.differences:
-            lines.extend(_format_difference(difference))
-    else:
-        lines.append("  Differences (0): the current order satisfies every")
-        lines.append("  derived constraint.")
+    predecessors = _predecessors(report)
+    width = len(str(len(report.tools)))
+    for index, name in enumerate(report.tools, start=1):
+        lines.extend(_format_tool(index, width, name, predecessors[name]))
 
     lines.append("")
     if report.cycles:
         lines.append(f"  Cycles ({len(report.cycles)}):")
         for cycle in report.cycles:
             lines.extend(_format_cycle(cycle))
+        lines.append(
+            "  Cycles are broken alphabetically so a run stays deterministic.",
+        )
     else:
         lines.append("  Cycles (0): the derived graph is a DAG.")
     return lines
 
 
-def format_doctor_order_section(report: OrderShadowReport) -> list[str]:
+def format_doctor_order_section(report: DerivedOrder) -> list[str]:
     """Render the compact ``lintro doctor`` order section.
 
     Args:
         report: Report produced by
-            :func:`lintro.tools.core.scheduler.build_shadow_report`.
+            :func:`lintro.tools.core.scheduler.build_order_report`.
 
     Returns:
         Plain-text lines for the doctor section.
     """
+    predecessors = _predecessors(report)
+    constrained = [name for name in report.tools if predecessors[name]]
     lines = [
-        "  Execution order (shadow)",
-        f"    {SHADOW_NOTE}",
-        f"    tools: {len(report.current)}"
-        f"  differences: {len(report.differences)}"
+        "  Execution order (derived)",
+        f"    {DERIVED_NOTE}",
+        f"    tools: {len(report.tools)}"
+        f"  constraints: {len(report.edges)}"
         f"  cycles: {len(report.cycles)}",
     ]
-    shown = report.differences[:MAX_DOCTOR_DIFFERENCES]
+    shown = constrained[:MAX_DOCTOR_CONSTRAINTS]
     lines.extend(
-        f"    {difference.before} before {difference.after} "
-        f"({difference.edges[0].pattern})"
-        for difference in shown
+        f"    {name} after {predecessors[name][0].before} "
+        f"({predecessors[name][0].pattern})"
+        for name in shown
     )
-    hidden = len(report.differences) - len(shown)
+    hidden = len(constrained) - len(shown)
     if hidden > 0:
-        lines.append(f"    ... and {hidden} more difference(s)")
-    lines.append("    Run 'lintro check --explain-order' for the full diff.")
+        lines.append(f"    ... and {hidden} more constrained tool(s)")
+    lines.append("    Run 'lintro check --explain-order' for the full order.")
     return lines
 
 
@@ -175,12 +177,9 @@ def explain_order_lines(
 ) -> list[str]:
     """Build the ``--explain-order`` output for a would-be run.
 
-    Tool selection reuses the same resolution the run itself performs, so the
-    selected *set* matches that invocation. The ``current`` order shown is the
-    ``tool_order`` schedule for that set (conflict-resolved) as
-    :func:`~lintro.utils.execution.tool_configuration.get_tools_to_run` returns
-    it — before the executor splits ``[tool.lintro.post_checks]`` tools out of
-    the main phase and before any parallel execution.
+    Tool selection reuses the same resolution the run itself performs, and the
+    order comes from the same scheduler the run uses, so what is printed is
+    exactly what that invocation would have executed.
 
     Args:
         tools: ``--tools`` value, or None for the configured/detected set.
@@ -199,7 +198,7 @@ def explain_order_lines(
         ignore_conflicts=ignore_conflicts,
         scan_roots=list(paths),
     )
-    return format_shadow_report(build_shadow_report(selection.to_run))
+    return format_order_report(build_order_report(selection.to_run))
 
 
 def emit_order_explanation(
@@ -209,7 +208,7 @@ def emit_order_explanation(
     paths: Sequence[str],
     ignore_conflicts: bool = False,
 ) -> NoReturn:
-    """Print the ``--explain-order`` diff and exit without running any tool.
+    """Print the ``--explain-order`` output and exit without running any tool.
 
     Args:
         tools: ``--tools`` value, or None for the configured/detected set.
@@ -218,7 +217,7 @@ def emit_order_explanation(
         ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
 
     Raises:
-        SystemExit: Always. ``0`` once the diff is printed, ``1`` when the
+        SystemExit: Always. ``0`` once the order is printed, ``1`` when the
             tool selection itself is invalid.
     """
     try:
@@ -250,15 +249,14 @@ def doctor_order_lines() -> list[str]:
         selection = get_tools_to_run(None, "check")
     except (ValueError, OSError):
         return []
-    return format_doctor_order_section(build_shadow_report(selection.to_run))
+    return format_doctor_order_section(build_order_report(selection.to_run))
 
 
 def render_doctor_order_section(console: Console) -> None:
-    """Print the shadow-mode execution-order section of ``lintro doctor``.
+    """Print the derived execution-order section of ``lintro doctor``.
 
-    Informational only: it reports how the claims-derived order differs from
-    the scalar-priority order that actually runs, and never influences a
-    doctor exit code.
+    Informational only: it reports the order the next run will use and never
+    influences a doctor exit code.
 
     Args:
         console: Rich console to print to.

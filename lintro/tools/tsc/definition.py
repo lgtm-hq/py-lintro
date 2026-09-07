@@ -50,7 +50,6 @@ from lintro.tools.ts_checker.base import TypeScriptCheckerPlugin
 
 # Constants for Tsc configuration
 TSC_DEFAULT_TIMEOUT: int = 60
-TSC_DEFAULT_PRIORITY: int = 82  # Same as mypy (type checkers)
 TSC_FILE_PATTERNS: list[str] = ["*.ts", "*.tsx", "*.mts", "*.cts"]
 
 # Framework config files that indicate tsc should defer to framework-specific checker
@@ -86,8 +85,7 @@ class TscPlugin(TypeScriptCheckerPlugin):
     _no_files_message: ClassVar[str] = "No TypeScript files to check."
     _temp_config_prefix: ClassVar[str] = ".lintro-tsc-"
     _fix_error_message: ClassVar[str] = (
-        "Tsc cannot automatically fix issues. Type errors require "
-        "manual code changes."
+        "Tsc cannot automatically fix issues. Type errors require manual code changes."
     )
     _tsconfig_candidates: ClassVar[tuple[str, ...]] = ("tsconfig.json",)
 
@@ -112,8 +110,6 @@ class TscPlugin(TypeScriptCheckerPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=TSC_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["tsconfig.json"],
             version_command=["tsc", "--version"],
             min_version=get_min_version(ToolName.TSC),

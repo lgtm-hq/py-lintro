@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.semgrep.definition import (
     SEMGREP_DEFAULT_CONFIG,
-    SEMGREP_DEFAULT_PRIORITY,
     SEMGREP_DEFAULT_TIMEOUT,
     SEMGREP_FILE_PATTERNS,
     SEMGREP_OUTPUT_FORMAT,
@@ -17,7 +16,6 @@ from lintro.tools.semgrep.definition import (
 
 __all__ = [
     "SEMGREP_DEFAULT_CONFIG",
-    "SEMGREP_DEFAULT_PRIORITY",
     "SEMGREP_DEFAULT_TIMEOUT",
     "SEMGREP_FILE_PATTERNS",
     "SEMGREP_OUTPUT_FORMAT",

@@ -1,14 +1,13 @@
-"""Shadow-mode derivation of execution order from declared tool claims.
+"""Derivation of execution order from declared tool claims.
 
-Step 3 of epic #1735 (#1741). This module computes the execution order that
-the claims/capabilities model implies and diffs it against the order lintro
-actually runs today (scalar ``priority`` via
-:func:`lintro.utils.unified_config.get_ordered_tools`). Nothing here changes
-what runs: :meth:`ToolManager.get_tool_execution_order` is untouched and no
-caller of it consults this module. The output is a report — surfaced by
-``lintro check --explain-order``, ``lintro fmt --explain-order`` and the
-``lintro doctor`` order section — so the disagreements are read as a diff
-before step 4 flips the scheduler over.
+Step 4 of epic #1735 (#1742). This module is the **authoritative** scheduler:
+:meth:`lintro.tools.core.tool_manager.ToolManager.get_tool_execution_order`
+returns what :func:`derive_execution_order` computes here, and the scalar
+``priority`` system it replaced (``DEFAULT_TOOL_PRIORITIES``,
+``ToolDefinition.priority``, ``execution.tool_order``) is deleted. The same
+derivation backs ``lintro check --explain-order``, ``lintro fmt
+--explain-order``, the ``lintro doctor`` order section and ``lintro config``,
+so every report shows the order that actually runs.
 
 Derivation rules:
 
@@ -17,20 +16,23 @@ Derivation rules:
   tool is invoked once, so a tool that both fixes and checks ``*.py`` sits in
   the ``FIX`` phase and its diagnostics come out of the same invocation. This
   is what keeps ruff ``{FIX, FORMAT, CHECK}`` from contesting black
-  ``{FORMAT, CHECK}`` in both directions on ``*.py``.
+  ``{FORMAT, CHECK}`` in both directions on ``*.py``, and it is what makes
+  ``ruff -> black`` fall out of the model instead of needing the deleted
+  ``[tool.lintro.post_checks]`` workaround.
 - **Edges.** Within a pattern, every earlier-phase tool precedes every
   later-phase tool. Equal phases produce no edge: that is a proven
   independence, so the tie breaks alphabetically.
 - **Pattern universe.** Patterns are compared literally, plus the single
   subsumption a universal claim gives: a tool claiming ``*`` (typos,
   gitleaks, trufflehog) joins every pattern group. No glob-to-glob semantics
-  beyond that are attempted in shadow mode, so ``*.py`` and ``test_*.py``
-  stay separate groups.
+  beyond that are attempted, so ``*.py`` and ``test_*.py`` stay separate
+  groups.
 - **Project-scoped claims.** A claim with no patterns (osv-scanner) is not
   addressed by pattern and therefore produces no edges.
 - **Cycles.** Detected before linearisation and reported with the tools and
-  the patterns whose edges close them. Linearisation stays deterministic: a
-  stalled topological sort emits the alphabetically first remaining tool.
+  the patterns whose edges close them. Linearisation stays deterministic and
+  total: a stalled topological sort emits the alphabetically first remaining
+  tool, so a cycle degrades ordering rather than failing a run.
 """
 
 from __future__ import annotations
@@ -105,21 +107,6 @@ class OrderCycle:
 
 
 @dataclass(frozen=True)
-class OrderDifference:
-    """One disagreement between the derived order and the current order.
-
-    Attributes:
-        before: Tool the derived order requires to run first.
-        after: Tool the derived order requires to run second.
-        edges: Derived edges that force ``before`` ahead of ``after``.
-    """
-
-    before: str
-    after: str
-    edges: tuple[OrderEdge, ...]
-
-
-@dataclass(frozen=True)
 class DerivedOrder:
     """The order derived from claims, with the graph it came from.
 
@@ -133,32 +120,6 @@ class DerivedOrder:
     tools: tuple[str, ...]
     edges: tuple[OrderEdge, ...]
     cycles: tuple[OrderCycle, ...]
-
-
-@dataclass(frozen=True)
-class OrderShadowReport:
-    """The derived order, the current order, and where they disagree.
-
-    Attributes:
-        current: Order lintro runs today (scalar priority).
-        derived: Order the claims model implies.
-        differences: Pairs the current order runs the other way round.
-        cycles: Cycles in the derived graph.
-    """
-
-    current: tuple[str, ...]
-    derived: tuple[str, ...]
-    differences: tuple[OrderDifference, ...]
-    cycles: tuple[OrderCycle, ...]
-
-    @property
-    def agrees(self) -> bool:
-        """Report whether the two orders impose the same constraints.
-
-        Returns:
-            True when no derived constraint is violated by the current order.
-        """
-        return not self.differences
 
 
 def _claim_covers(claim_patterns: Sequence[str], pattern: str) -> bool:
@@ -400,39 +361,14 @@ def derive_order(claims_by_tool: Mapping[str, Sequence[Claim]]) -> DerivedOrder:
     )
 
 
-def diff_orders(
-    derived: DerivedOrder,
-    current: Sequence[str],
-) -> tuple[OrderDifference, ...]:
-    """Find derived constraints the current order violates.
-
-    Args:
-        derived: Result of :func:`derive_order`.
-        current: Tool names in the order lintro runs today.
-
-    Returns:
-        One difference per violated ``(before, after)`` pair, sorted, each
-        carrying the edges — and therefore the patterns — that force it.
-    """
-    position = {name: index for index, name in enumerate(current)}
-    grouped: dict[tuple[str, str], list[OrderEdge]] = {}
-    for edge in derived.edges:
-        if edge.before not in position or edge.after not in position:
-            continue
-        if position[edge.after] < position[edge.before]:
-            grouped.setdefault((edge.before, edge.after), []).append(edge)
-    return tuple(
-        OrderDifference(
-            before=before,
-            after=after,
-            edges=tuple(sorted(grouped[(before, after)], key=_edge_sort_key)),
-        )
-        for before, after in sorted(grouped)
-    )
-
-
 def collect_tool_claims(tool_names: Sequence[str]) -> dict[str, list[Claim]]:
     """Read the declared claims for the named tools out of the registry.
+
+    A tool that cannot be resolved, or whose definition predates ``claims``,
+    contributes no claims and is therefore unordered. Ordering must not be the
+    thing that fails a run: an unresolvable tool is reported by the executor
+    as a failed result, and an unknown name is rejected up front by
+    :meth:`ToolManager.get_tool_execution_order`.
 
     Args:
         tool_names: Tool names to look up (case-insensitive).
@@ -442,29 +378,42 @@ def collect_tool_claims(tool_names: Sequence[str]) -> dict[str, list[Claim]]:
     """
     from lintro.tools import tool_manager
 
-    return {
-        name.lower(): list(tool_manager.get_tool(name).definition.claims)
-        for name in tool_names
-    }
+    claims: dict[str, list[Claim]] = {}
+    for name in tool_names:
+        try:
+            definition = tool_manager.get_tool(name).definition
+        except (KeyError, ValueError, RuntimeError, AttributeError):
+            claims[name.lower()] = []
+            continue
+        claims[name.lower()] = list(getattr(definition, "claims", None) or ())
+    return claims
 
 
-def build_shadow_report(current_order: Sequence[str]) -> OrderShadowReport:
-    """Diff the claims-derived order against an order lintro would run.
+def build_order_report(tool_names: Sequence[str]) -> DerivedOrder:
+    """Derive the execution order for a set of tools, with its reasoning.
 
     Args:
-        current_order: Tool names in the order the current scheduler chose.
-            Pass the list exactly as produced by
-            :meth:`ToolManager.get_tool_execution_order`, which this function
-            never calls and never changes.
+        tool_names: Tool names to order (case-insensitive).
 
     Returns:
-        The shadow report for those tools.
+        The derived order together with the edges and cycles behind it.
     """
-    normalized = [name.lower() for name in current_order]
-    derived = derive_order(collect_tool_claims(normalized))
-    return OrderShadowReport(
-        current=tuple(normalized),
-        derived=derived.tools,
-        differences=diff_orders(derived, normalized),
-        cycles=derived.cycles,
-    )
+    normalized = [name.lower() for name in tool_names]
+    return derive_order(collect_tool_claims(normalized))
+
+
+def derive_execution_order(tool_names: Sequence[str]) -> list[str]:
+    """Return the authoritative execution order for a set of tools.
+
+    This is the single ordering authority: every caller that needs to know
+    what runs when — the executor, ``--explain-order``, ``lintro doctor`` and
+    ``lintro config`` — resolves it through this function, so a report can
+    never print an order other than the one that runs.
+
+    Args:
+        tool_names: Tool names to order (case-insensitive).
+
+    Returns:
+        The same tool names, lowercased, in derived execution order.
+    """
+    return list(build_order_report(tool_names).tools)

@@ -39,7 +39,6 @@ from lintro.plugins.registry import register_tool
 # has to clear a whole-repo run, not a single package, or the tool times out
 # exactly where it is most useful.
 PYLINT_DEFAULT_TIMEOUT: int = 900
-PYLINT_DEFAULT_PRIORITY: int = 50
 PYLINT_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 PYLINT_OUTPUT_FORMAT: str = "json2"
 
@@ -288,8 +287,6 @@ class PylintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=PYLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(PYLINT_CONFIG_FILES),
             version_command=["pylint", "--version"],
             # json2 is the reporter this plugin parses; it first shipped in

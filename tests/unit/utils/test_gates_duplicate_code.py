@@ -1,4 +1,4 @@
-"""Wiring tests for the duplicate-code gate inside post-checks (issue #2293)."""
+"""Wiring tests for the duplicate-code gate inside the gate phase (#2293)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.pylint.pylint_issue import PylintIssue
-from lintro.utils import post_checks
+from lintro.utils import gates
 from lintro.utils.duplicate_code import PYLINT_ANALYSED_METADATA_KEY
 
 
@@ -72,7 +72,7 @@ def baseline_config(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch: Pytest monkeypatch fixture.
     """
     monkeypatch.setattr(
-        post_checks,
+        gates,
         "load_lintro_tool_config",
         lambda _name: {"duplicate_code_baseline": 2},
     )
@@ -89,7 +89,7 @@ def test_gate_clears_baselined_findings_from_the_totals(
     logger = _RecordingLogger()
     results = [_duplicate_result(2)]
 
-    total = post_checks._run_duplicate_code_gate(
+    total = gates._run_duplicate_code_gate(
         all_results=results,
         total_issues=2,
         json_output_mode=False,
@@ -111,7 +111,7 @@ def test_gate_fails_the_run_above_the_baseline(baseline_config: None) -> None:
     logger = _RecordingLogger()
     results = [_duplicate_result(3)]
 
-    total = post_checks._run_duplicate_code_gate(
+    total = gates._run_duplicate_code_gate(
         all_results=results,
         total_issues=3,
         json_output_mode=False,
@@ -136,11 +136,11 @@ def test_gate_is_inert_without_a_configured_baseline(
     Args:
         monkeypatch: Pytest monkeypatch fixture.
     """
-    monkeypatch.setattr(post_checks, "load_lintro_tool_config", lambda _name: {})
+    monkeypatch.setattr(gates, "load_lintro_tool_config", lambda _name: {})
     logger = _RecordingLogger()
     results = [_duplicate_result(3)]
 
-    total = post_checks._run_duplicate_code_gate(
+    total = gates._run_duplicate_code_gate(
         all_results=results,
         total_issues=3,
         json_output_mode=False,
@@ -162,7 +162,7 @@ def test_gate_stays_quiet_in_json_mode(baseline_config: None) -> None:
     logger = _RecordingLogger()
     results = [_duplicate_result(2)]
 
-    post_checks._run_duplicate_code_gate(
+    gates._run_duplicate_code_gate(
         all_results=results,
         total_issues=2,
         json_output_mode=True,
@@ -172,35 +172,29 @@ def test_gate_stays_quiet_in_json_mode(baseline_config: None) -> None:
     assert_that(logger.lines).is_empty()
 
 
-def test_execute_post_checks_applies_the_gate_end_to_end(
+def test_execute_gates_applies_the_gate_end_to_end(
     baseline_config: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The public post-check entry point returns the gated totals.
+    """The public gate entry point returns the gated totals.
 
     Args:
         baseline_config: Fixture configuring a baseline of two.
         monkeypatch: Pytest monkeypatch fixture.
     """
-    monkeypatch.setattr(post_checks, "load_post_checks_config", lambda: {})
-    monkeypatch.setattr(post_checks, "load_module_size_config", lambda: {})
+    monkeypatch.setattr(gates, "load_module_size_config", lambda: {})
     logger = _RecordingLogger()
     results = [_duplicate_result(3)]
 
-    total_issues, _total_fixed, _total_remaining = post_checks.execute_post_checks(
+    total_issues = gates.execute_gates(
         action=Action.CHECK,
         paths=["lintro/utils"],
         exclude=None,
         include_venv=False,
-        group_by="auto",
         output_format="grid",
-        verbose=False,
-        raw_output=False,
         logger=logger,  # type: ignore[arg-type]
         all_results=results,
         total_issues=3,
-        total_fixed=0,
-        total_remaining=0,
     )
 
     assert_that(total_issues).is_equal_to(1)

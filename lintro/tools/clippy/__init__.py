@@ -7,14 +7,12 @@ through that module (#2311).
 """
 
 from lintro.tools.clippy.definition import (
-    CLIPPY_DEFAULT_PRIORITY,
     CLIPPY_DEFAULT_TIMEOUT,
     CLIPPY_FILE_PATTERNS,
     ClippyPlugin,
 )
 
 __all__ = [
-    "CLIPPY_DEFAULT_PRIORITY",
     "CLIPPY_DEFAULT_TIMEOUT",
     "CLIPPY_FILE_PATTERNS",
     "ClippyPlugin",

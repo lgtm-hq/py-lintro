@@ -10,7 +10,6 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.tools.svelte_check.definition import (
-    SVELTE_CHECK_DEFAULT_PRIORITY,
     SVELTE_CHECK_DEFAULT_TIMEOUT,
     SVELTE_CHECK_FILE_PATTERNS,
     SvelteCheckPlugin,
@@ -66,17 +65,6 @@ def test_definition_file_patterns(svelte_check_plugin: SvelteCheckPlugin) -> Non
         SVELTE_CHECK_FILE_PATTERNS,
     )
     assert_that(svelte_check_plugin.definition.file_patterns).contains("*.svelte")
-
-
-def test_definition_priority(svelte_check_plugin: SvelteCheckPlugin) -> None:
-    """Verify tool priority is set correctly.
-
-    Args:
-        svelte_check_plugin: The SvelteCheckPlugin instance to test.
-    """
-    assert_that(svelte_check_plugin.definition.priority).is_equal_to(
-        SVELTE_CHECK_DEFAULT_PRIORITY,
-    )
 
 
 def test_definition_native_configs(svelte_check_plugin: SvelteCheckPlugin) -> None:

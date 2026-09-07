@@ -37,7 +37,6 @@ def finalize_artifact(
     total_issues: int,
     total_fixed: int,
     total_remaining: int,
-    main_phase_empty_due_to_filter: bool,
 ) -> RunArtifact:
     """Tally the run and resolve its exit code into a :class:`RunArtifact`.
 
@@ -47,8 +46,6 @@ def finalize_artifact(
         total_issues: Aggregated issue count.
         total_fixed: Aggregated fixed count.
         total_remaining: Aggregated remaining count.
-        main_phase_empty_due_to_filter: Whether post-check filtering emptied
-            the main phase.
 
     Returns:
         RunArtifact: The completed artifact for the render phase.
@@ -68,7 +65,6 @@ def finalize_artifact(
             all_results=all_results,
             total_issues=total_issues,
             total_remaining=total_remaining,
-            main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
         ),
     )
 
@@ -102,7 +98,6 @@ def finalize_artifact(
         total_remaining=total_remaining,
         exit_code=exit_code,
         dry_run_preview=ctx.dry_run_preview,
-        main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
     )
 
 
@@ -120,9 +115,7 @@ def refresh_artifact(
     then raised to 1 when the consumer demands failure.
 
     Args:
-        artifact: The artifact whose results were mutated. Its
-            ``main_phase_empty_due_to_filter`` state is carried over so the
-            exit code is resolved exactly as it was on the first pass.
+        artifact: The artifact whose results were mutated.
         ctx: Shared run context.
         fail_under: Ignored. Accepted only so the AI layer's
             :func:`lintro.ai.interface.enhance_artifact` keeps calling this
@@ -144,7 +137,6 @@ def refresh_artifact(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
-        main_phase_empty_due_to_filter=artifact.main_phase_empty_due_to_filter,
     )
     if force_failure:
         refreshed.exit_code = DEFAULT_EXIT_CODE_FAILURE

@@ -69,7 +69,7 @@ def run_lint_on_changed_files(
                 include_venv=False,
                 incremental=False,
                 action=Action.CHECK,
-                post_tools=set(),
+                selected_tools=set(),
                 auto_install=False,
                 lintro_config=lintro_config,
             )

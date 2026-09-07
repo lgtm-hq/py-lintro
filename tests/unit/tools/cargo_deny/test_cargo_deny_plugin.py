@@ -58,15 +58,6 @@ def test_definition_file_patterns(cargo_deny_plugin: CargoDenyPlugin) -> None:
     assert_that(patterns).contains("deny.toml")
 
 
-def test_definition_priority(cargo_deny_plugin: CargoDenyPlugin) -> None:
-    """Verify the priority is 90.
-
-    Args:
-        cargo_deny_plugin: The plugin instance.
-    """
-    assert_that(cargo_deny_plugin.definition.priority).is_equal_to(90)
-
-
 def test_definition_timeout(cargo_deny_plugin: CargoDenyPlugin) -> None:
     """Verify the default timeout is 60.
 

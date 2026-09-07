@@ -42,7 +42,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Oxlint configuration
 OXLINT_DEFAULT_TIMEOUT: int = 30
-OXLINT_DEFAULT_PRIORITY: int = 50
 OXLINT_FILE_PATTERNS: list[str] = [
     "*.js",
     "*.mjs",
@@ -88,8 +87,6 @@ class OxlintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=OXLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".oxlintrc.json"],
             version_command=["oxlint", "--version"],
             min_version=get_min_version(ToolName.OXLINT),

@@ -121,7 +121,6 @@ BASELINE: dict[str, tuple[str, ...]] = {
     "lintro/utils/output/file_writer.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/utils/output/sarif/document.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/utils/path_filtering.py": ("C901", "PLR0912"),
-    "lintro/utils/post_checks.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
     "lintro/utils/project_detection.py": ("C901", "PLR0912", "PLR0915"),
     "lintro/utils/result_formatters.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),
     "lintro/utils/summary_tables.py": ("C901", "PLR0912", "PLR0913", "PLR0915"),

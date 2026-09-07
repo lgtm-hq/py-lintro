@@ -34,7 +34,6 @@ from lintro.utils.config import load_mypy_config
 
 # Constants for Mypy configuration
 MYPY_DEFAULT_TIMEOUT: int = 60
-MYPY_DEFAULT_PRIORITY: int = 82
 MYPY_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 
 # mypy prints this diagnostic (to stderr, not as JSON) and exits non-zero when
@@ -149,8 +148,6 @@ class MypyPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=MYPY_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["mypy.ini", ".mypy.ini", "pyproject.toml", "setup.cfg"],
             version_command=["mypy", "--version"],
             min_version="1.0.0",

@@ -9,6 +9,5 @@ from enum import StrEnum, auto
 class ConfigKey(StrEnum):
     """Supported configuration key identifiers."""
 
-    POST_CHECKS = auto()
     VERSIONS = auto()
     DEFAULTS = auto()

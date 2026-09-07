@@ -77,7 +77,7 @@ def run_tools_parallel(
     tool_option_dict: dict[str, dict[str, object]],
     exclude: str | None,
     include_venv: bool,
-    post_tools: set[str],
+    selected_tools: set[str],
     max_workers: int,
     incremental: bool = False,
     auto_install: bool = False,
@@ -94,7 +94,8 @@ def run_tools_parallel(
         tool_option_dict: Parsed tool options from CLI.
         exclude: Exclude patterns.
         include_venv: Whether to include venv.
-        post_tools: Set of post-check tool names.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         max_workers: Maximum parallel workers.
         incremental: Whether to only check changed files.
         auto_install: Whether to auto-install Node.js deps if missing.
@@ -106,13 +107,12 @@ def run_tools_parallel(
     """
     from loguru import logger
 
-    from lintro.utils.async_tool_executor import (
-        AsyncToolExecutor,
-        get_parallel_batches,
-    )
+    from lintro.utils.async_tool_executor import AsyncToolExecutor
 
-    # Group tools into batches that can run in parallel
-    batches = get_parallel_batches(tools_to_run, tool_manager)
+    # Group tools into batches that can run in parallel. The batching lives on
+    # the tool manager because it reads the same derived DAG that orders a
+    # sequential run (#1742).
+    batches = tool_manager.get_parallel_batches(tools_to_run)
     logger.debug(f"Parallel execution batches: {batches}")
 
     all_results: list[ToolResult] = []
@@ -156,7 +156,7 @@ def run_tools_parallel(
                         include_venv=include_venv,
                         incremental=incremental,
                         action=action,
-                        post_tools=post_tools,
+                        selected_tools=selected_tools,
                         auto_install=auto_install,
                         diff_base=diff_base,
                     )

@@ -296,10 +296,9 @@ def test_badge_live_no_files_found_prints_no_badge() -> None:
     assert_that(result.output).does_not_contain("img.shields.io")
 
 
-def test_resolve_severity_counts_accepts_filter_empty_with_post_checks() -> None:
-    """A filter-empty main phase is usable when a post-check inspected files."""
+def test_resolve_severity_counts_accepts_a_run_that_inspected_files() -> None:
+    """Counts are publishable when at least one tool inspected files."""
     artifact = _counted_artifact(warnings=4)
-    artifact.main_phase_empty_due_to_filter = True
 
     with patch(
         "lintro.cli_utils.commands.badge.api.check_run",

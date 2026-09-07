@@ -34,7 +34,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for SQLFluff configuration
 SQLFLUFF_DEFAULT_TIMEOUT: int = 60
-SQLFLUFF_DEFAULT_PRIORITY: int = 50
 SQLFLUFF_FILE_PATTERNS: list[str] = ["*.sql"]
 SQLFLUFF_DEFAULT_FORMAT: str = "json"
 
@@ -69,8 +68,6 @@ class SqlfluffPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=SQLFLUFF_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".sqlfluff", "pyproject.toml"],
             version_command=["sqlfluff", "--version"],
             min_version=get_min_version(ToolName.SQLFLUFF),

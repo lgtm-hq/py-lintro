@@ -49,8 +49,6 @@ if TYPE_CHECKING:
     from lintro.tools.idiom_review.engine import IdiomReviewEngine
 
 IDIOM_REVIEW_TOOL_NAME = "idiom-review"
-# Late priority so idiom review runs after the fast syntax linters.
-IDIOM_REVIEW_PRIORITY = 95
 IDIOM_REVIEW_DEFAULT_TIMEOUT = 120
 IDIOM_REVIEW_FILE_PATTERNS = ["*.py"]
 # Bound cost: cap files reviewed per run unless the user raises it.
@@ -104,8 +102,6 @@ class IdiomReviewPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=IDIOM_REVIEW_PRIORITY,
-            conflicts_with=[],
             native_configs=[],
             version_command=None,
             min_version=None,

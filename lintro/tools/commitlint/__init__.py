@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.commitlint.definition import (
     COMMITLINT_CONFIG_MISSING_EXIT,
-    COMMITLINT_DEFAULT_PRIORITY,
     COMMITLINT_DEFAULT_TIMEOUT,
     COMMITLINT_FILE_PATTERNS,
     CommitlintPlugin,
@@ -16,7 +15,6 @@ from lintro.tools.commitlint.definition import (
 
 __all__ = [
     "COMMITLINT_CONFIG_MISSING_EXIT",
-    "COMMITLINT_DEFAULT_PRIORITY",
     "COMMITLINT_DEFAULT_TIMEOUT",
     "COMMITLINT_FILE_PATTERNS",
     "CommitlintPlugin",

@@ -42,9 +42,6 @@ class RunArtifact:
         total_remaining: Issues still outstanding after the run.
         exit_code: Process exit code the run resolved to.
         dry_run_preview: Whether this was a ``fmt --dry-run`` preview.
-        main_phase_empty_due_to_filter: Whether post-check filtering left the
-            main phase with no tools to run. Carried here so a refreshed
-            artifact resolves its exit code the same way the first pass did.
         early_exit: Whether the run stopped before executing any tool (bad
             tool selection, unresolvable ``--diff`` base, or a declined
             confirmation prompt). Renderers must emit nothing for such a run;
@@ -61,7 +58,6 @@ class RunArtifact:
     total_remaining: int = 0
     exit_code: int = 0
     dry_run_preview: bool = False
-    main_phase_empty_due_to_filter: bool = False
     early_exit: bool = False
 
     @property

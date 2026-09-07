@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.import_linter.definition import (
     IMPORT_LINTER_CONFIG_FILES,
-    IMPORT_LINTER_DEFAULT_PRIORITY,
     IMPORT_LINTER_DEFAULT_TIMEOUT,
     IMPORT_LINTER_FILE_PATTERNS,
     ImportLinterPlugin,
@@ -17,7 +16,6 @@ from lintro.tools.import_linter.definition import (
 
 __all__ = [
     "IMPORT_LINTER_CONFIG_FILES",
-    "IMPORT_LINTER_DEFAULT_PRIORITY",
     "IMPORT_LINTER_DEFAULT_TIMEOUT",
     "IMPORT_LINTER_FILE_PATTERNS",
     "ImportLinterPlugin",

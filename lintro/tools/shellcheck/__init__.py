@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.shellcheck.definition import (
     SHELLCHECK_DEFAULT_FORMAT,
-    SHELLCHECK_DEFAULT_PRIORITY,
     SHELLCHECK_DEFAULT_SEVERITY,
     SHELLCHECK_DEFAULT_TIMEOUT,
     SHELLCHECK_FILE_PATTERNS,
@@ -21,7 +20,6 @@ from lintro.tools.shellcheck.definition import (
 
 __all__ = [
     "SHELLCHECK_DEFAULT_FORMAT",
-    "SHELLCHECK_DEFAULT_PRIORITY",
     "SHELLCHECK_DEFAULT_SEVERITY",
     "SHELLCHECK_DEFAULT_TIMEOUT",
     "SHELLCHECK_FILE_PATTERNS",

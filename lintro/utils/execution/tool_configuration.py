@@ -211,7 +211,7 @@ def configure_tool_for_execution(
     include_venv: bool,
     incremental: bool,
     action: Action,
-    post_tools: set[str],
+    selected_tools: set[str],
     auto_install: bool = False,
     lintro_config: LintroConfig | None = None,
     diff_base: str | None = None,
@@ -237,7 +237,8 @@ def configure_tool_for_execution(
         include_venv: Whether to include virtual environment directories.
         incremental: Whether to only check changed files.
         action: The action being performed (check/fix).
-        post_tools: Set of post-check tool names.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         auto_install: Whether to auto-install Node.js deps if missing (global default).
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
         diff_base: Resolved git base ref for ``--diff`` scanning, or None to scan
@@ -293,10 +294,12 @@ def configure_tool_for_execution(
     if effective_tool_auto_install:
         tool.set_options(auto_install=True)
 
-    # Handle Black post-check coordination with Ruff
-    # If Black is configured as a post-check, avoid double formatting by
-    # disabling Ruff's formatting stages unless explicitly overridden.
-    if "black" in post_tools and tool_name == ToolName.RUFF.value:
+    # Format authority on ``*.py`` (#1735 rule (d): fewest mutating
+    # capabilities wins). When black is in the run it owns FORMAT, so ruff is
+    # demoted to its FIX capability and its formatting stages are switched off
+    # unless the user explicitly asked for them. The derived DAG already puts
+    # ruff before black; this stops the two from formatting the same file.
+    if "black" in selected_tools and tool_name == ToolName.RUFF.value:
         tool_config = config_manager.get_tool_config(tool_name)
         lintro_tool_cfg = tool_config.lintro_tool_config or {}
         if action == Action.FIX:

@@ -8,7 +8,6 @@ through that module (#2311).
 
 from lintro.tools.html_validate.definition import (
     HTML_VALIDATE_CONFIG_FILENAMES,
-    HTML_VALIDATE_DEFAULT_PRIORITY,
     HTML_VALIDATE_DEFAULT_TIMEOUT,
     HTML_VALIDATE_FILE_PATTERNS,
     HtmlValidatePlugin,
@@ -17,7 +16,6 @@ from lintro.tools.html_validate.definition import (
 
 __all__ = [
     "HTML_VALIDATE_CONFIG_FILENAMES",
-    "HTML_VALIDATE_DEFAULT_PRIORITY",
     "HTML_VALIDATE_DEFAULT_TIMEOUT",
     "HTML_VALIDATE_FILE_PATTERNS",
     "HtmlValidatePlugin",

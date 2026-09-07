@@ -38,7 +38,6 @@ from lintro.tools.core.node_modules import ensure_node_modules
 
 # Constants for Svelte-check configuration
 SVELTE_CHECK_DEFAULT_TIMEOUT: int = 120
-SVELTE_CHECK_DEFAULT_PRIORITY: int = 83  # After tsc (82)
 SVELTE_CHECK_FILE_PATTERNS: list[str] = ["*.svelte"]
 
 
@@ -72,8 +71,6 @@ class SvelteCheckPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=False,
-            priority=SVELTE_CHECK_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[
                 "svelte.config.js",
                 "svelte.config.ts",

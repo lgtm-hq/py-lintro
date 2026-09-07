@@ -7,7 +7,6 @@ through that module (#2311).
 """
 
 from lintro.tools.bandit.definition import (
-    BANDIT_DEFAULT_PRIORITY,
     BANDIT_DEFAULT_TIMEOUT,
     BANDIT_FILE_PATTERNS,
     BANDIT_OUTPUT_FORMAT,
@@ -15,7 +14,6 @@ from lintro.tools.bandit.definition import (
 )
 
 __all__ = [
-    "BANDIT_DEFAULT_PRIORITY",
     "BANDIT_DEFAULT_TIMEOUT",
     "BANDIT_FILE_PATTERNS",
     "BANDIT_OUTPUT_FORMAT",

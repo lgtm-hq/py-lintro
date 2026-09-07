@@ -67,12 +67,10 @@ def test_config_loader_handles_missing_and_malformed_pyproject(
     # 1) Missing pyproject.toml
     monkeypatch.chdir(tmp_path)
     assert_that(cfg.load_lintro_tool_config("ruff")).is_equal_to({})
-    assert_that(cfg.load_post_checks_config()).is_equal_to({})
 
     # 2) Malformed pyproject.toml should be handled gracefully
     (tmp_path / "pyproject.toml").write_text("not: [valid\n")
     assert_that(cfg.load_lintro_tool_config("ruff")).is_equal_to({})
-    assert_that(cfg.load_post_checks_config()).is_equal_to({})
 
 
 # =============================================================================

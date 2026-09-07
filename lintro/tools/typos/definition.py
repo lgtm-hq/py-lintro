@@ -29,7 +29,6 @@ from lintro.tools.core.argv_batching import argv_cost, chunk_paths
 
 # Constants for typos configuration
 TYPOS_DEFAULT_TIMEOUT: int = 30
-TYPOS_DEFAULT_PRIORITY: int = 50
 # typos inspects text of any kind, so a catch-all pattern is appropriate here.
 # Binary files are filtered out by :meth:`TyposPlugin._text_files` before the
 # command line is built (typos itself only auto-detects binary content for
@@ -168,8 +167,6 @@ class TyposPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=TYPOS_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=list(TYPOS_CONFIG_FILENAMES),
             version_command=["typos", "--version"],
             min_version=get_min_version(ToolName.TYPOS),

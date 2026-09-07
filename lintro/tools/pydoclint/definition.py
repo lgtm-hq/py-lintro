@@ -25,7 +25,6 @@ from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_chec
 
 # Constants for Pydoclint configuration
 PYDOCLINT_DEFAULT_TIMEOUT: int = 30
-PYDOCLINT_DEFAULT_PRIORITY: int = 45
 PYDOCLINT_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 
 
@@ -59,8 +58,6 @@ class PydoclintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=PYDOCLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["pyproject.toml", ".pydoclint.toml"],
             version_command=["pydoclint", "--version"],
             default_options={

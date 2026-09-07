@@ -27,7 +27,6 @@ from lintro.plugins.registry import register_tool
 
 # Constants for Actionlint configuration
 ACTIONLINT_DEFAULT_TIMEOUT: int = 30
-ACTIONLINT_DEFAULT_PRIORITY: int = 40
 ACTIONLINT_FILE_PATTERNS: list[str] = ["*.yml", "*.yaml"]
 
 
@@ -61,8 +60,6 @@ class ActionlintPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=ACTIONLINT_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[],
             version_command=["actionlint", "--version"],
             min_version=get_min_version(ToolName.ACTIONLINT),

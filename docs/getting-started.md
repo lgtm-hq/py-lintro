@@ -710,7 +710,7 @@ sudo lintro check
 ### Getting Help
 
 - **Command help:** `lintro --help` or `lintro check --help`
-- **List tools:** `lintro list-tools --show-conflicts`
+- **List tools:** `lintro list-tools`
 - **GitHub Issues:** Report bugs or request features
 - **Documentation:** Check other guides in the `docs/` directory
 

@@ -35,7 +35,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Semgrep configuration
 SEMGREP_DEFAULT_TIMEOUT: int = 300  # Semgrep needs more time on larger codebases
-SEMGREP_DEFAULT_PRIORITY: int = 85  # High priority for security tool
 SEMGREP_FILE_PATTERNS: list[str] = [
     "*.py",
     "*.js",
@@ -124,8 +123,6 @@ class SemgrepPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=SEMGREP_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[".semgrep.yaml", ".semgrep.yml", ".semgrep/"],
             version_command=["semgrep", "--version"],
             min_version=get_min_version(ToolName.SEMGREP),

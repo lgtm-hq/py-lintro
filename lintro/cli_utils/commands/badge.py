@@ -50,9 +50,7 @@ def _live_counts_are_usable(artifact: RunArtifact) -> bool:
         artifact: Completed check run.
 
     Returns:
-        bool: ``True`` when the counts are a publishable quality signal. A
-        filter-empty main phase is still usable when post-checks produced a
-        real result.
+        bool: ``True`` when the counts are a publishable quality signal.
     """
     if artifact.early_exit:
         return False

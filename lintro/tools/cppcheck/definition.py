@@ -43,13 +43,9 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_option_types,
 )
-from lintro.utils.unified_config import DEFAULT_TOOL_PRIORITIES
 
 # Constants for Cppcheck configuration
 CPPCHECK_DEFAULT_TIMEOUT: int = 60
-# High priority: catches memory-safety defects. Sourced from
-# ``DEFAULT_TOOL_PRIORITIES`` so the declared value stays the effective one.
-CPPCHECK_DEFAULT_PRIORITY: int = DEFAULT_TOOL_PRIORITIES.get("cppcheck", 85)
 # Source files only. Cppcheck treats a header passed on the command line as a
 # standalone translation unit, which misfires (unused members, unparsed macros)
 # because the defining/including source is absent; upstream's manual therefore
@@ -150,8 +146,6 @@ class CppcheckPlugin(BaseToolPlugin):
             # is excluded from the default enable set for that reason; enabling
             # it explicitly is unsupported (see ``set_options``).
             partitionable=True,
-            priority=CPPCHECK_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=[],
             version_command=["cppcheck", "--version"],
             min_version=get_min_version(ToolName.CPPCHECK),

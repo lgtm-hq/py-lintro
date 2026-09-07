@@ -7,13 +7,11 @@ through that module (#2311).
 """
 
 from lintro.tools.osv_scanner.definition import (
-    OSV_SCANNER_DEFAULT_PRIORITY,
     OSV_SCANNER_DEFAULT_TIMEOUT,
     OsvScannerPlugin,
 )
 
 __all__ = [
-    "OSV_SCANNER_DEFAULT_PRIORITY",
     "OSV_SCANNER_DEFAULT_TIMEOUT",
     "OsvScannerPlugin",
 ]

@@ -41,7 +41,6 @@ def test_definition_metadata() -> None:
     definition = IdiomReviewPlugin().definition
 
     assert_that(definition.name).is_equal_to("idiom-review")
-    assert_that(definition.priority).is_equal_to(95)
     assert_that(definition.can_fix).is_false()
     assert_that(definition.version_command).is_none()
     assert_that(definition.file_patterns).contains("*.py")

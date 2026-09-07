@@ -31,7 +31,6 @@ from lintro.tools.core.option_validators import (
 
 # Constants for Black configuration
 BLACK_DEFAULT_TIMEOUT: int = 30
-BLACK_DEFAULT_PRIORITY: int = 90  # Prefer Black ahead of Ruff formatting
 BLACK_FILE_PATTERNS: list[str] = ["*.py", "*.pyi"]
 
 
@@ -64,8 +63,6 @@ class BlackPlugin(BaseToolPlugin):
             ],
             reads_tree=True,
             partitionable=True,
-            priority=BLACK_DEFAULT_PRIORITY,
-            conflicts_with=[],
             native_configs=["pyproject.toml"],
             version_command=["black", "--version"],
             min_version="24.0.0",
@@ -183,8 +180,7 @@ class BlackPlugin(BaseToolPlugin):
         black_issues: list[BlackIssue] = []
         for violation in violations:
             message = (
-                f"Line {violation.line} exceeds line length limit "
-                f"({violation.message})"
+                f"Line {violation.line} exceeds line length limit ({violation.message})"
             )
             black_issues.append(
                 BlackIssue(

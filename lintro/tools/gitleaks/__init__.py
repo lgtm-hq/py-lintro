@@ -7,7 +7,6 @@ through that module (#2311).
 """
 
 from lintro.tools.gitleaks.definition import (
-    GITLEAKS_DEFAULT_PRIORITY,
     GITLEAKS_DEFAULT_TIMEOUT,
     GITLEAKS_FILE_PATTERNS,
     GITLEAKS_OUTPUT_FORMAT,
@@ -15,7 +14,6 @@ from lintro.tools.gitleaks.definition import (
 )
 
 __all__ = [
-    "GITLEAKS_DEFAULT_PRIORITY",
     "GITLEAKS_DEFAULT_TIMEOUT",
     "GITLEAKS_FILE_PATTERNS",
     "GITLEAKS_OUTPUT_FORMAT",
