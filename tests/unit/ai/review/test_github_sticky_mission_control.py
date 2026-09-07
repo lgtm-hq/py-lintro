@@ -881,7 +881,7 @@ def test_pruning_never_settles_on_zero_open_findings() -> None:
 
     body = fit_body(
         assemble=assemble,
-        counts=SectionCounts(prior_runs=0, open=8, resolved=0),
+        counts=SectionCounts(history_rows=0, open=8, resolved=0),
     )
 
     assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)

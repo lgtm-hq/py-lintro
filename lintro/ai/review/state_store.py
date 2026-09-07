@@ -17,13 +17,11 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from lintro.ai.review.github_constants import STATE_VERSION_V1
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.review_state_codec import decode_state
 
 __all__ = [
     "ARTIFACT_STATE_VERSION",
@@ -32,7 +30,6 @@ __all__ = [
     "LOCAL_STATE_LRU",
     "load_ci_state",
     "load_local_state",
-    "migrate_legacy_sticky",
     "state_dir",
     "union_states",
     "write_local_state",
@@ -157,7 +154,6 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
     findings: tuple[FindingRecord, ...] = ()
     pending: tuple[tuple[str, str], ...] = ()
     consumed: dict[tuple[str, str], None] = {}
-    legacy = False
     truncated = False
     identity = ReviewState()
     for state in states:
@@ -173,7 +169,6 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         pending = state.pending_invalidations
         for key in state.consumed_flags:
             consumed[key] = None
-        legacy = legacy or state.legacy
         truncated = truncated or state.truncated
     return ReviewState(
         version=ARTIFACT_STATE_VERSION,
@@ -191,34 +186,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         event=identity.event,
         run_id=identity.run_id,
         lintro_version=identity.lintro_version,
-        legacy=legacy,
         truncated=truncated,
-    )
-
-
-def migrate_legacy_sticky(*, body: str) -> ReviewState:
-    """Seed findings and runs from a v1/v2 sticky blob.
-
-    Coverage is never seeded. Migrated history is marked ``legacy`` so
-    rendering can label it and the gate cannot go greener from it.
-
-    Args:
-        body: Sticky comment body, possibly without a blob.
-
-    Returns:
-        State with findings/runs only, or empty state.
-    """
-    state = decode_state(body=body)
-    if state.version <= STATE_VERSION_V1 and not state.runs and not state.findings:
-        return ReviewState()
-    return ReviewState(
-        version=ARTIFACT_STATE_VERSION,
-        runs=state.runs,
-        findings=state.findings,
-        coverage=(),
-        flagged_files=(),
-        legacy=True,
-        truncated=state.truncated,
     )
 
 

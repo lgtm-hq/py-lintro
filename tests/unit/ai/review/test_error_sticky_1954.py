@@ -99,19 +99,6 @@ def test_banner_carries_the_kind_specific_guidance(prior_state: ReviewState) -> 
     assert_that(body).does_not_contain(KIND_COPY[ReviewErrorKind.SERVER_ERROR][1])
 
 
-def test_legacy_prior_runs_also_render_the_board(prior_state: ReviewState) -> None:
-    """A v1 sticky's run mappings route to the board, not the error surface."""
-    body = format_error_comment(
-        error=AIProviderError("Overloaded"),
-        prior_runs=[run.to_dict() for run in prior_state.runs],
-    )
-
-    assert_that(body).contains(f"> {_ROUND_2_FAILED}")
-    assert_that(body).contains("showing round 1 results below")
-    assert_that(body).does_not_contain(ERROR_ONLY_HEADLINE)
-    assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
-
-
 def test_banner_sits_directly_under_the_header(prior_state: ReviewState) -> None:
     r"""Nothing separates the failure notice from the sticky's title line.
 
