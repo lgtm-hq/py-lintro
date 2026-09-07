@@ -764,7 +764,7 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
         "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
         "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-        "actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd",
+        "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
     ],
 )
 def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
