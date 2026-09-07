@@ -21,6 +21,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.147.7] - 2026-09-07
+
+### Changed
+
+- **ai/review**: one contract module for github comment invariants (#2407) (6ce23df)
+- **ai**: drop argv command inference from transcript filenames (#2415) (65918df)
+- **ai**: reconcile manifest-name vocabularies in chunker and classifier (#2413)
+  (e2e9391)
+- **tools**: move 10 more definitions into per-tool packages (PR I) (#2406) (6ce6325)
+- **ai**: the review session owns provider lifetime and closes it once (#2405) (a11b64a)
+- **tools**: move 12 more definitions into per-tool packages (PR H) (#2402) (28295b4)
+- **ai**: split the last oversized review modules and ratchet the size (#2401) (6e2ed12)
+- **tools**: move 12 definitions into per-tool packages (PR G) (#2397) (de1c09a)
+- **ai**: extract the chunk runner and drop the orchestrator baselines (#2398) (cf533ba)
+
+### Fixed
+
+- **ci**: extend typos and black timeouts in the dogfood runs (#2404) (89b7c25)
+
 ## [0.147.6] - 2026-09-06
 
 ### Changed
