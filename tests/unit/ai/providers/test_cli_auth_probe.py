@@ -40,18 +40,31 @@ def _probe(provider: AIProvider) -> CliAuthProbe:
 _RENAMED_KEY = "RENAMED_API_KEY"
 
 
-def _api_key_honouring_providers() -> list[AIProvider]:
-    """Return the providers whose CLI reads the resolved API-key variable.
+#: The providers whose CLI reads the resolved API-key variable, pinned rather
+#: than derived: a list filtered by ``honors_api_key_env`` would silently drop
+#: a provider's cases if that flag were flipped, which is the very thing these
+#: tests exist to lock. ``test_honouring_providers_match_the_metadata`` is what
+#: ties the two together.
+_API_KEY_HONOURING: tuple[AIProvider, ...] = (
+    AIProvider.ANTHROPIC,
+    AIProvider.CURSOR,
+)
 
-    Returns:
-        Providers whose probe sets ``honors_api_key_env``.
+
+def test_honouring_providers_match_the_metadata() -> None:
+    """The pinned list is exactly what the plugin records declare.
+
+    Flipping ``honors_api_key_env`` on any provider fails here rather than
+    quietly removing that provider's parametrized cases.
     """
-    return [
+    derived = tuple(
         provider
         for provider in AIProvider
         if metadata_for(provider).cli_auth_probe is not None
         and _probe(provider).honors_api_key_env
-    ]
+    )
+
+    assert_that(derived).is_equal_to(_API_KEY_HONOURING)
 
 
 @pytest.fixture(autouse=True)
@@ -97,7 +110,7 @@ def test_probe_reports_unconfigured_without_any_credential(
     ).is_false()
 
 
-@pytest.mark.parametrize("provider", _api_key_honouring_providers())
+@pytest.mark.parametrize("provider", _API_KEY_HONOURING)
 def test_api_key_honouring_probes_accept_the_resolved_variable(
     provider: AIProvider,
     monkeypatch: pytest.MonkeyPatch,
@@ -116,7 +129,7 @@ def test_api_key_honouring_probes_accept_the_resolved_variable(
     assert_that(probe.describe(key_env=key_env)).contains(key_env)
 
 
-@pytest.mark.parametrize("provider", _api_key_honouring_providers())
+@pytest.mark.parametrize("provider", _API_KEY_HONOURING)
 def test_api_key_honouring_probes_accept_a_renamed_variable(
     provider: AIProvider,
     monkeypatch: pytest.MonkeyPatch,

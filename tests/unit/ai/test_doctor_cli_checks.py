@@ -149,6 +149,32 @@ def test_missing_cli_binary_reports_the_metadata_install_hint(
 
 
 @pytest.mark.parametrize("provider", list(AIProvider))
+def test_a_binary_on_path_is_reported_ok_with_its_location(
+    provider: AIProvider,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resolvable binary is OK and the result names where it was found.
+
+    The autouse fixture hides every binary, so without this case a doctor that
+    ignored ``PATH`` and always reported MISSING would pass the file.
+
+    Args:
+        provider: The provider under test.
+        monkeypatch: Pytest attribute patcher.
+    """
+    metadata = metadata_for(provider)
+    found = f"/usr/local/bin/{metadata.cli_binary}"
+    monkeypatch.setattr("shutil.which", lambda binary: f"/usr/local/bin/{binary}")
+
+    results = check_ai_configuration(_cli_config(provider))
+    result = _result(results, f"ai.cli.{metadata.cli_binary}")
+
+    assert_that(result.status).is_equal_to(ToolStatus.OK)
+    assert_that(result.message).contains(str(metadata.cli_binary), found)
+    assert_that(result.hint).is_empty()
+
+
+@pytest.mark.parametrize("provider", list(AIProvider))
 def test_unproven_cli_auth_is_unknown_not_a_failure(provider: AIProvider) -> None:
     """No credential means doctor says "not verified", never "broken".
 

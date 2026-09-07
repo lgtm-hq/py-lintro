@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import FrozenInstanceError, dataclass
 
 import pytest
@@ -165,14 +166,60 @@ def test_all_metadata_covers_every_provider() -> None:
         assert_that(record.provider).is_equal_to(provider)
 
 
-@pytest.mark.parametrize("name", ["anthropic", "Anthropic", "ANTHROPIC"])
-def test_metadata_for_accepts_enum_and_any_casing(name: str) -> None:
+@pytest.mark.parametrize("provider", list(AIProvider))
+@pytest.mark.parametrize("spelling", [str.lower, str.upper, str.title])
+def test_metadata_for_accepts_enum_and_any_casing(
+    provider: AIProvider,
+    spelling: Callable[[str], str],
+) -> None:
     """A user-typed provider name resolves to the same record as the enum.
 
+    Value equality, not identity: a plugin that returned an equal copy of its
+    record each call would still satisfy every caller.
+
     Args:
-        name: Spelling a user might type for ``--provider``.
+        provider: The provider under test.
+        spelling: Casing a user might type for ``--provider``.
     """
-    assert_that(metadata_for(name)).is_same_as(metadata_for(AIProvider.ANTHROPIC))
+    assert_that(metadata_for(spelling(provider.value))).is_equal_to(
+        metadata_for(provider),
+    )
+
+
+def test_metadata_for_rejects_a_known_provider_with_no_plugin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A recognised name with nothing registered is an error, not a blank record.
+
+    Args:
+        monkeypatch: Pytest attribute patcher.
+    """
+    saved = all_providers()
+    # The facade imports the loader at call time, so the stub belongs on the
+    # module that defines it.
+    monkeypatch.setattr(
+        "lintro.ai.providers.builtins.load_builtin_providers",
+        lambda: None,
+    )
+    try:
+        clear_registered()
+        with pytest.raises(AIProviderNotRegisteredError) as excinfo:
+            metadata_for(AIProvider.ANTHROPIC)
+    finally:
+        restore_registered(saved)
+
+    assert_that(str(excinfo.value)).contains("anthropic", "no registered plugin")
+
+
+@pytest.mark.parametrize("name", ["", "   ", "gemini"])
+def test_metadata_for_rejects_an_unusable_name(name: str) -> None:
+    """Blank and unknown names raise rather than resolving to something.
+
+    Args:
+        name: A name no provider answers to.
+    """
+    with pytest.raises(AIProviderNotRegisteredError):
+        metadata_for(name)
 
 
 def test_facade_loads_the_builtin_plugins_itself() -> None:
@@ -237,7 +284,7 @@ def test_facade_projections_carry_the_plugins_own_values() -> None:
             record.default_api_key_env,
         )
         for name, pricing in record.pricing.items():
-            assert_that(model_pricing()[name]).is_same_as(pricing)
+            assert_that(model_pricing()[name]).is_equal_to(pricing)
 
 
 def test_facade_reflects_a_swapped_plugin() -> None:
@@ -265,8 +312,8 @@ def test_facade_reflects_a_swapped_plugin() -> None:
     )
 
 
-def test_metadata_for_rejects_an_unknown_provider() -> None:
-    """A name outside the enum is an error, not an empty record."""
+def test_metadata_for_names_the_accepted_providers_when_rejecting() -> None:
+    """The unknown-provider error is actionable, listing what is accepted."""
     with pytest.raises(AIProviderNotRegisteredError) as excinfo:
         metadata_for("gemini")
 

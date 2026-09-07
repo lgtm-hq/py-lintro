@@ -1068,9 +1068,11 @@ CLI flags always override config: passing `--fix` on the CLI turns it on even if
 Every provider fact below — defaults, transports, the API-key variable, the CLI binary
 and the per-model prices — is declared once, in that provider's plugin metadata
 (`lintro/ai/providers/<name>/metadata.py`), and read everywhere else through
-`lintro.ai.registry`. These two tables are asserted equal to that metadata by
-`tests/unit/ai/providers/test_docs_provider_table.py`, so they cannot drift from the
-code. Do not hand-edit them; change the metadata.
+`lintro.ai.registry`. The two tables below are snapshots of that metadata, asserted cell
+by cell by `tests/unit/ai/providers/test_docs_provider_table.py`, so they cannot drift
+from the code. There is no code generator, so updating them is two steps: change the
+metadata, then run that test and paste the SNAPSHOT block it prints between the markers.
+CI runs the same test, so a metadata change without the paste-back fails the build.
 
 <!-- BEGIN SNAPSHOT: provider-table -->
 
@@ -1090,7 +1092,9 @@ provider, Cursor included — which is why leaving `ai.transport` unset with
 
 Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
 reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
-subscription); `estimate_cost_with_floor` is what keeps a cost cap meaningful for those.
+subscription); `estimate_cost_with_floor` gives those calls a non-zero estimate so a
+_flag or env_ cap can still stop the run. It does not make a committed YAML cap
+enforceable on an `unpriceable` transport — see the Cursor section below.
 
 <!-- BEGIN SNAPSHOT: model-pricing-table -->
 
@@ -1154,8 +1158,17 @@ ai:
 ```
 
 The `agent` CLI bills against a Cursor subscription rather than per token, so its models
-are priced at zero above. `ai.max_cost_usd` still applies: unpriced calls are charged at
-the fallback rate so a cost cap stays a real ceiling.
+are priced at zero above and the run's cost basis is `unpriceable`
+(`lintro/ai/transport.py`). What that means for `ai.max_cost_usd` depends on where the
+cap was set (`cap_is_enforced` in `lintro/ai/review/cost_cap.py`, #2154):
+
+- `--max-cost-usd` or `LINTRO_AI_MAX_COST_USD` — **enforced**. Operator intent for this
+  run enforces on every cost basis, and `estimate_cost_with_floor` is what gives the
+  budget a non-zero number to count against.
+- `ai.max_cost_usd` in committed YAML — **display-only** on this path. Committed policy
+  is transport-unaware and enforces only where real money is at stake (`billed` or
+  `estimated`), so `run_planning.py` builds the `CostBudget` with `max_cost_usd=None`
+  and the reported `$` figure is a shadow estimate, not a ceiling.
 
 #### Measuring a provider choice
 
@@ -1180,9 +1193,11 @@ Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures
 decision table and `ai.transports.*` profiles (#1923).
 
 `ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
-`ai.review` is enabled. Omitting it is not fatal: `lintro doctor` reports the config as
-incompatible, and the provider factory falls back to `api` so an existing run keeps
-working. That fallback exists for backward compatibility — legacy configs that set only
+`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility. Whether
+the run then still works depends on the provider: the factory falls back to `api` for
+every provider, which keeps `anthropic` and `openai` going but is **fatal for
+`cursor`**, where it surfaces as `cursor provider only supports transport: cli`. That
+fallback exists for backward compatibility — legacy configs that set only
 `ai.enabled: true` (which implicitly switches `lint` and `review` on) rely on it — and
 is not something to depend on in new config.
 

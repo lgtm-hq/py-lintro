@@ -56,7 +56,9 @@ class CliAuthProbe:
         Args:
             key_env: The API-key variable resolved for this run — the user's
                 ``ai.api_key_env`` override when set, else the provider
-                default. Consulted only when :attr:`honors_api_key_env`.
+                default. Only read when :attr:`honors_api_key_env`; callers
+                pass an empty string otherwise, so a provider whose CLI reads a
+                different variable than its SDK is never handed the SDK one.
 
         Returns:
             True when an environment variable or auth file proves the CLI can
@@ -66,6 +68,10 @@ class CliAuthProbe:
             return True
         if any(os.environ.get(name) for name in self.extra_env_vars):
             return True
+        if not self.auth_files:
+            # An env-only probe has no reason to resolve a home directory, and
+            # `Path.home()` raises rather than returning None when it cannot.
+            return False
         home = Path.home()
         return any((home / name).is_file() for name in self.auth_files)
 

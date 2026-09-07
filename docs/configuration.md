@@ -3321,10 +3321,12 @@ uv pip install 'lintro[ai]'
 # Or from source checkout:
 uv sync --extra ai
 
-# Set API key for your configured provider
-# Anthropic (default): ANTHROPIC_API_KEY
-# OpenAI:              OPENAI_API_KEY
-# Custom:              set ai.api_key_env in config to use any env var name
+# Set the API key for your configured provider. `ai.provider` is required;
+# lintro has no default provider.
+# Anthropic: ANTHROPIC_API_KEY
+# OpenAI:    OPENAI_API_KEY
+# Cursor:    CURSOR_API_KEY
+# Custom:    set ai.api_key_env in config to use any env var name
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 

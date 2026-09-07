@@ -307,7 +307,16 @@ def _check_cli_auth(
     probe = metadata_for(provider).cli_auth_probe
     if probe is None:
         return None
-    key_env = config.api_key_env or provider_api_key_env(provider)
+    # Resolved only for the probes that read it. A provider whose CLI reads a
+    # different variable than its SDK (OpenAI: `codex` reads CODEX_API_KEY,
+    # never OPENAI_API_KEY) declares ``honors_api_key_env=False`` and is never
+    # handed the API-transport variable, so the CLI verdict cannot be swayed by
+    # an SDK credential.
+    key_env = (
+        config.api_key_env or provider_api_key_env(provider)
+        if probe.honors_api_key_env
+        else ""
+    )
     if probe.is_configured(key_env=key_env):
         return AICheckResult(
             name="ai.cli.auth",

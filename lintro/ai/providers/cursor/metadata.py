@@ -6,9 +6,11 @@ Cursor has no API transport: the CreateAgent HTTP API is not used (see
 backend. Everything here is answerable without spawning that binary.
 
 Since #2308 this module *is* the declaration: pricing, defaults, the API-key
-variable, the CLI binary and its contract, the install hint and the auth probe
-are stated once here and read everywhere else through
-:mod:`lintro.ai.registry`'s facade.
+variable, the CLI binary and its contract, the doctor install hint and the auth
+probe are stated once here and read everywhere else through
+:mod:`lintro.ai.registry`'s facade. The runtime ``CliTransport`` install hint in
+:mod:`lintro.ai.providers.cursor.provider` is still a separate string; unifying
+the two would change a user-visible message, so it is left to #2449.
 """
 
 from __future__ import annotations
