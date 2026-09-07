@@ -22,6 +22,9 @@ from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 
 
@@ -122,10 +125,9 @@ def _run(
         The run record.
     """
     return RunRecord(
-        round=round_number,
-        convergence_score=score,
-        partial=partial,
-        coverage_limited=coverage_limited,
+        identity=RunIdentity(round=round_number),
+        coverage=RunCoverage(partial=partial, coverage_limited=coverage_limited),
+        outcome=RunOutcome(convergence_score=score),
     )
 
 
@@ -597,8 +599,14 @@ def test_unusable_or_zero_thresholds_disable_the_rule(threshold: object) -> None
         threshold: Raw threshold value under test.
     """
     runs = (
-        RunRecord(round=1, convergence_score=0.0),
-        RunRecord(round=2, convergence_score=0.0),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=0.0),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=0.0),
+        ),
     )
 
     decision = evaluate_convergence(
@@ -621,8 +629,14 @@ def test_unusable_stable_rounds_never_converge(stable_rounds: object) -> None:
         stable_rounds: Raw streak length under test.
     """
     runs = (
-        RunRecord(round=1, convergence_score=0.0),
-        RunRecord(round=2, convergence_score=0.0),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=0.0),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=0.0),
+        ),
     )
 
     decision = evaluate_convergence(
@@ -637,8 +651,14 @@ def test_unusable_stable_rounds_never_converge(stable_rounds: object) -> None:
 def test_unmeasured_latest_round_leaves_the_score_unset() -> None:
     """A window whose latest round was never scored reports no score at all."""
     runs = (
-        RunRecord(round=1, convergence_score=0.5),
-        RunRecord(round=2, convergence_score=None),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=None),
+        ),
     )
 
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
@@ -662,8 +682,14 @@ def test_default_decision_serializes_without_fabricated_numbers() -> None:
 def test_score_at_the_threshold_is_not_quiet() -> None:
     """Quiet means strictly below: a score equal to the threshold still reviews."""
     runs = (
-        RunRecord(round=1, convergence_score=3.0),
-        RunRecord(round=2, convergence_score=3.0),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=3.0),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=3.0),
+        ),
     )
 
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
@@ -769,7 +795,10 @@ def test_a_non_finite_score_is_never_serialized(bad_score: float) -> None:
     """
     import json
 
-    payload = RunRecord(round=1, convergence_score=bad_score).to_dict()
+    payload = RunRecord(
+        identity=RunIdentity(round=1),
+        outcome=RunOutcome(convergence_score=bad_score),
+    ).to_dict()
 
     assert_that(payload).does_not_contain_key("convergence_score")
     assert_that(json.loads(json.dumps(payload, allow_nan=False))).is_equal_to(payload)
@@ -784,7 +813,7 @@ def test_a_negative_persisted_score_decodes_as_unmeasured() -> None:
     """
     decoded = RunRecord.from_dict({"round": 1, "convergence_score": -1.0})
 
-    assert_that(decoded.convergence_score).is_none()
+    assert_that(decoded.outcome.convergence_score).is_none()
 
 
 @pytest.mark.parametrize(
@@ -801,8 +830,14 @@ def test_an_unusable_in_memory_score_never_reaches_the_decision(
         bad_score: Unusable score value under test.
     """
     runs = (
-        RunRecord(round=1, convergence_score=0.5),
-        RunRecord(round=2, convergence_score=bad_score),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=bad_score),
+        ),
     )
 
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
@@ -822,8 +857,14 @@ def test_pending_resume_work_refuses_to_converge() -> None:
     this — skipping would drop that work rather than deferring it (#2099).
     """
     runs = (
-        RunRecord(round=1, convergence_score=0.5),
-        RunRecord(round=2, convergence_score=0.5),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
     )
 
     without = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
@@ -849,8 +890,14 @@ def test_a_boolean_score_never_reads_as_a_quiet_round() -> None:
     switch itself on by accident.
     """
     runs = (
-        RunRecord(round=1, convergence_score=True),
-        RunRecord(round=2, convergence_score=True),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=True),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=True),
+        ),
     )
 
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
@@ -862,7 +909,7 @@ def test_a_boolean_score_is_dropped_on_decode() -> None:
     """The decode path refuses a boolean the same way the config does."""
     decoded = RunRecord.from_dict({"round": 1, "convergence_score": True})
 
-    assert_that(decoded.convergence_score).is_none()
+    assert_that(decoded.outcome.convergence_score).is_none()
 
 
 def test_stamp_refuses_a_decision_that_did_not_converge() -> None:
@@ -874,8 +921,14 @@ def test_stamp_refuses_a_decision_that_did_not_converge() -> None:
     round N" onto a board for a round that is about to review.
     """
     runs = (
-        RunRecord(round=1, convergence_score=5.0),
-        RunRecord(round=2, convergence_score=5.0),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=5.0),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=5.0),
+        ),
     )
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
 
@@ -903,8 +956,14 @@ def test_the_trajectory_omits_unusable_scores(bad_score: float) -> None:
         bad_score: Unusable score value under test.
     """
     runs = (
-        RunRecord(round=1, convergence_score=1.0),
-        RunRecord(round=2, convergence_score=bad_score),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=1.0),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=bad_score),
+        ),
     )
 
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
@@ -930,8 +989,14 @@ def test_non_finite_or_negative_stored_scores_are_not_quiet(bad: float) -> None:
         bad: Stored score that must not count as below the threshold.
     """
     runs = (
-        RunRecord(round=1, convergence_score=0.5),
-        RunRecord(round=2, convergence_score=bad),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=bad),
+        ),
     )
 
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)

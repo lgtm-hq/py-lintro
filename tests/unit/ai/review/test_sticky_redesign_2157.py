@@ -16,7 +16,11 @@ from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import (
     build_sticky_bodies,
@@ -112,20 +116,21 @@ def test_archive_comment_is_created_when_history_overflows(
     """History expanders move to the archive past the soft limit."""
     runs = tuple(
         RunRecord(
-            round=index,
-            sha=f"{index:07x}",
-            model="m",
-            narrative="x" * 400,
-            cost=1.0,
-            total=10_000,
-            prompt=8000,
-            completion=2000,
-            duration=100,
-            files_reviewed=20,
-            checks=10,
-            verdict=ReviewVerdict.CHANGES_REQUESTED,
-            resolved=2,
-            open_after=3,
+            identity=RunIdentity(round=index, sha=f"{index:07x}", model="m"),
+            coverage=RunCoverage(files_reviewed=20, checks=10),
+            usage=RunUsage(
+                cost=1.0,
+                total=10_000,
+                prompt=8000,
+                completion=2000,
+                duration=100,
+            ),
+            outcome=RunOutcome(
+                narrative="x" * 400,
+                verdict=ReviewVerdict.CHANGES_REQUESTED,
+                resolved=2,
+                open_after=3,
+            ),
         )
         for index in range(1, 40)
     )

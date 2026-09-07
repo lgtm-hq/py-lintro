@@ -22,6 +22,8 @@ from lintro.ai.review.github_notes import format_convergence_banner
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import (
@@ -87,7 +89,7 @@ def test_a_completed_round_records_its_score_in_state(
 
     state = advance_review_state(request=StickyRequest(result=result, head_sha="sha1"))
 
-    assert_that(state.runs[-1].convergence_score).is_equal_to(20.0)
+    assert_that(state.runs[-1].outcome.convergence_score).is_equal_to(20.0)
 
 
 def test_a_round_that_fixed_everything_records_a_zero_score(
@@ -113,7 +115,7 @@ def test_a_round_that_fixed_everything_records_a_zero_score(
         ),
     )
 
-    assert_that(second.runs[-1].convergence_score).is_equal_to(0.0)
+    assert_that(second.runs[-1].outcome.convergence_score).is_equal_to(0.0)
 
 
 def test_the_sticky_shows_the_score_on_the_first_round(
@@ -197,7 +199,13 @@ def test_a_clean_round_still_shows_its_score(
 
 def test_legacy_state_renders_no_convergence_line() -> None:
     """History from before scoring existed says nothing rather than zero."""
-    state = ReviewState(runs=(RunRecord(round=1, sha="sha1", model="claude"),))
+    state = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha="sha1", model="claude"),
+            ),
+        ),
+    )
 
     body = render_state_sticky(state=state)
 
@@ -250,8 +258,14 @@ def test_the_converged_banner_stamps_the_board_it_re_renders(
             request=StickyRequest(result=sample_review_result, head_sha="a" * 40),
         ),
         runs=(
-            RunRecord(round=1, sha="sha1", model="claude", convergence_score=1.0),
-            RunRecord(round=2, sha="sha2", model="claude", convergence_score=0.5),
+            RunRecord(
+                identity=RunIdentity(round=1, sha="sha1", model="claude"),
+                outcome=RunOutcome(convergence_score=1.0),
+            ),
+            RunRecord(
+                identity=RunIdentity(round=2, sha="sha2", model="claude"),
+                outcome=RunOutcome(convergence_score=0.5),
+            ),
         ),
     )
     decision = evaluate_convergence(
@@ -282,8 +296,14 @@ def test_the_banner_names_open_p1_findings_the_skip_leaves_behind() -> None:
     """
     decision = evaluate_convergence(
         runs=(
-            RunRecord(round=1, convergence_score=1.0),
-            RunRecord(round=2, convergence_score=0.5),
+            RunRecord(
+                identity=RunIdentity(round=1),
+                outcome=RunOutcome(convergence_score=1.0),
+            ),
+            RunRecord(
+                identity=RunIdentity(round=2),
+                outcome=RunOutcome(convergence_score=0.5),
+            ),
         ),
         threshold=3.0,
         stable_rounds=2,
@@ -301,9 +321,18 @@ def test_the_banner_names_open_p1_findings_the_skip_leaves_behind() -> None:
 def test_the_converged_banner_names_the_streak_that_earned_the_stop() -> None:
     """A reader can tell how much evidence the stop rule had."""
     runs = (
-        RunRecord(round=1, convergence_score=1.0),
-        RunRecord(round=2, convergence_score=0.5),
-        RunRecord(round=3, convergence_score=0.5),
+        RunRecord(
+            identity=RunIdentity(round=1),
+            outcome=RunOutcome(convergence_score=1.0),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
+        RunRecord(
+            identity=RunIdentity(round=3),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
     )
     decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=3)
 

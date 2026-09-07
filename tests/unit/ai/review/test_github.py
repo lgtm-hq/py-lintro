@@ -37,6 +37,7 @@ from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 
@@ -342,7 +343,7 @@ def test_round_trip_state_parsing(sample_review_result: ReviewResult) -> None:
     state = advance_review_state(request=StickyRequest(result=sample_review_result))
 
     assert_that(parsed.runs).is_empty()
-    assert_that(state.runs[0].model).is_equal_to("claude-sonnet-4-20250514")
+    assert_that(state.runs[0].identity.model).is_equal_to("claude-sonnet-4-20250514")
 
 
 def test_parse_sticky_state_handles_missing_block() -> None:
@@ -853,7 +854,13 @@ def test_count_new_commits_measures_from_the_prior_head(
     """The count is commits after the prior head, or None when unresolvable."""
     reporter = _fresh_reporter()
     reporter.fetch_pr_commit_shas.return_value = shas
-    prior_state = ReviewState(runs=(RunRecord(round=1, sha=prior_sha),))
+    prior_state = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha=prior_sha),
+            ),
+        ),
+    )
 
     counted = _count_new_commits(reporter=reporter, prior_state=prior_state)
 
@@ -874,7 +881,13 @@ def test_count_new_commits_is_none_when_the_listing_fails() -> None:
     """An unavailable commit listing yields None rather than a wrong count."""
     reporter = _fresh_reporter()
     reporter.fetch_pr_commit_shas.return_value = None
-    prior_state = ReviewState(runs=(RunRecord(round=1, sha="aaa111"),))
+    prior_state = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha="aaa111"),
+            ),
+        ),
+    )
 
     assert_that(
         _count_new_commits(reporter=reporter, prior_state=prior_state),

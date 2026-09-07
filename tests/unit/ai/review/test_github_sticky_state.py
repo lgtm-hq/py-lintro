@@ -22,7 +22,10 @@ from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.review_state_codec import decode_state, leftover_state_block
 from lintro.ai.review.sticky import (
@@ -78,8 +81,8 @@ def test_sticky_writes_no_state_blob(
 
     assert_that(body).does_not_contain(STATE_MARKER_PREFIX)
     assert_that(state.runs).is_length(1)
-    assert_that(state.runs[0].round).is_equal_to(1)
-    assert_that(state.runs[0].sha).is_equal_to("abc123")
+    assert_that(state.runs[0].identity.round).is_equal_to(1)
+    assert_that(state.runs[0].identity.sha).is_equal_to("abc123")
     assert_that(state.findings).is_length(len(sample_review_result.findings))
 
 
@@ -97,14 +100,18 @@ def test_sticky_records_transport_auth_and_cost_basis(
     )
     run = state.runs[0]
 
-    assert_that(run.transport).is_equal_to("cli")
-    assert_that(run.auth_mode).is_equal_to("subscription")
-    assert_that(run.cost_basis).is_equal_to("unpriceable")
-    assert_that(run.strictness).is_equal_to(sample_review_result.metadata.strictness)
-    assert_that(run.files_reviewed).is_equal_to(
+    assert_that(run.identity.transport).is_equal_to("cli")
+    assert_that(run.identity.auth_mode).is_equal_to("subscription")
+    assert_that(run.usage.cost_basis).is_equal_to("unpriceable")
+    assert_that(run.identity.strictness).is_equal_to(
+        sample_review_result.metadata.strictness,
+    )
+    assert_that(run.coverage.files_reviewed).is_equal_to(
         sample_review_result.metadata.files_reviewed,
     )
-    assert_that(run.checks).is_equal_to(sample_review_result.metadata.checklist_items)
+    assert_that(run.coverage.checks).is_equal_to(
+        sample_review_result.metadata.checklist_items,
+    )
 
 
 def test_sticky_verdict_is_derived_from_open_severities(
@@ -125,8 +132,8 @@ def test_sticky_verdict_is_derived_from_open_severities(
         ),
     )
 
-    assert_that(blocked.runs[0].verdict).is_equal_to(ReviewVerdict.BLOCKED)
-    assert_that(ready.runs[0].verdict).is_equal_to(ReviewVerdict.READY)
+    assert_that(blocked.runs[0].outcome.verdict).is_equal_to(ReviewVerdict.BLOCKED)
+    assert_that(ready.runs[0].outcome.verdict).is_equal_to(ReviewVerdict.READY)
 
 
 def test_second_round_carries_and_resolves_findings(
@@ -155,7 +162,7 @@ def test_second_round_carries_and_resolves_findings(
     )
 
     assert_that(state.runs).is_length(2)
-    assert_that(state.runs[-1].round).is_equal_to(2)
+    assert_that(state.runs[-1].identity.round).is_equal_to(2)
     assert_that(state.open_findings).is_length(1)
     assert_that(state.open_findings[0].since_round).is_equal_to(1)
     assert_that(state.resolved_findings).is_length(1)
@@ -186,7 +193,7 @@ def test_sticky_treats_a_v1_state_blob_as_absent(
     )
 
     assert_that(prior.runs).is_empty()
-    assert_that([run.round for run in state.runs]).is_equal_to([1])
+    assert_that([run.identity.round for run in state.runs]).is_equal_to([1])
     assert_that(state.findings).is_not_empty()
 
 
@@ -270,8 +277,8 @@ def test_forged_state_marker_in_finding_text_is_not_authoritative(
     )
 
     assert_that(body).contains(forged_payload)
-    assert_that(state.runs[0].sha).is_equal_to("realsha")
-    assert_that([run.sha for run in state.runs]).does_not_contain("forged")
+    assert_that(state.runs[0].identity.sha).is_equal_to("realsha")
+    assert_that([run.identity.sha for run in state.runs]).does_not_contain("forged")
 
 
 def test_sticky_body_respects_max_comment_chars_with_oversized_history(
@@ -282,21 +289,27 @@ def test_sticky_body_respects_max_comment_chars_with_oversized_history(
     fat_narrative = "n" * 200
     prior_runs = tuple(
         RunRecord(
-            round=round_number,
-            sha=f"{round_number:040d}",
-            model=fat_model,
-            provider="anthropic",
-            transport="cli",
-            auth_mode="subscription",
-            prompt=12_000 + round_number,
-            completion=4_000 + round_number,
-            total=16_000 + round_number,
-            cost=0.12 + round_number * 0.01,
-            narrative=fat_narrative,
-            verdict=ReviewVerdict.CHANGES_REQUESTED,
-            p1=1,
-            p2=2,
-            p3=3,
+            identity=RunIdentity(
+                round=round_number,
+                sha=f"{round_number:040d}",
+                model=fat_model,
+                provider="anthropic",
+                transport="cli",
+                auth_mode="subscription",
+            ),
+            usage=RunUsage(
+                prompt=12_000 + round_number,
+                completion=4_000 + round_number,
+                total=16_000 + round_number,
+                cost=0.12 + round_number * 0.01,
+            ),
+            outcome=RunOutcome(
+                narrative=fat_narrative,
+                verdict=ReviewVerdict.CHANGES_REQUESTED,
+                p1=1,
+                p2=2,
+                p3=3,
+            ),
         )
         for round_number in range(1, MAX_STORED_RUNS + 1)
     )
@@ -327,7 +340,7 @@ def test_dropping_runs_past_max_stored_runs_marks_state_truncated(
 ) -> None:
     """The state is marked truncated when the run-count cap drops history."""
     prior_runs = tuple(
-        RunRecord(round=round_number, sha=f"sha{round_number}")
+        RunRecord(identity=RunIdentity(round=round_number, sha=f"sha{round_number}"))
         for round_number in range(1, MAX_STORED_RUNS + 1)
     )
     prior_state = ReviewState(runs=prior_runs, truncated=False)
@@ -359,7 +372,14 @@ def test_error_comment_prunes_a_near_limit_prior_state() -> None:
         )
         for index in range(200)
     )
-    prior_state = ReviewState(runs=(RunRecord(round=1, sha="sha1"),), findings=findings)
+    prior_state = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha="sha1"),
+            ),
+        ),
+        findings=findings,
+    )
     body = format_error_comment(
         error=RuntimeError("boom"),
         provider="anthropic",
@@ -372,7 +392,7 @@ def test_error_comment_prunes_a_near_limit_prior_state() -> None:
 def test_leftover_blob_still_decodes_for_migration() -> None:
     """A leftover v2 blob remains readable for one-time sticky migration."""
     state = ReviewState(
-        runs=(RunRecord(round=1, sha="realsha", model="claude"),),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="realsha", model="claude")),),
         findings=(
             FindingRecord(
                 fingerprint="a" * 16,
@@ -386,7 +406,7 @@ def test_leftover_blob_still_decodes_for_migration() -> None:
     body = f"## Review{leftover_state_block(state=state)}"
     decoded = decode_state(body=body)
 
-    assert_that(decoded.runs[0].sha).is_equal_to("realsha")
+    assert_that(decoded.runs[0].identity.sha).is_equal_to("realsha")
     assert_that(decoded.findings).is_length(1)
 
 
@@ -394,7 +414,10 @@ def test_floor_overflow_no_longer_appends_a_state_block() -> None:
     """``fit_body_with_state`` is leftover; new stickies append nothing."""
     from lintro.ai.review.github_contract import SectionCounts, fit_body_with_state
 
-    monster_run = RunRecord(round=1, sha="realsha", narrative="n" * 70_000)
+    monster_run = RunRecord(
+        identity=RunIdentity(round=1, sha="realsha"),
+        outcome=RunOutcome(narrative="n" * 70_000),
+    )
     state = ReviewState(runs=(monster_run,), findings=(), truncated=False)
     body = fit_body_with_state(
         assemble=lambda *, limits: "visible body",

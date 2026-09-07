@@ -23,7 +23,11 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.sticky import matcher_reviewed_paths
 
 #: Head commit of the round the goldens render.
@@ -111,8 +115,7 @@ def golden_review_result() -> ReviewResult:
                 file="src/auth/session.py",
                 line=31,
                 title="Unknown session status grants access",
-                description="The else branch treats any unrecognised status "
-                "as active.",
+                description="The else branch treats any unrecognised status as active.",
                 cause="No explicit default for unknown statuses.",
                 fix="Default to expired and log the unrecognised value.",
                 confidence="high",
@@ -155,47 +158,54 @@ def golden_prior_state() -> ReviewState:
     return ReviewState(
         runs=(
             RunRecord(
-                round=1,
-                timestamp="2026-09-03T09:00:00+00:00",
-                sha=GOLDEN_PRIOR_SHA,
-                model="claude-sonnet-4-20250514",
-                provider="anthropic",
-                transport="api",
-                auth_mode="api_key",
-                cost_basis="estimated",
-                depth=2,
-                strictness="balanced",
-                files_reviewed=3,
-                checks=2,
-                duration=38.0,
-                prompt=11_000,
-                completion=2_100,
-                total=13_100,
-                cost=0.1101,
-                verdict=ReviewVerdict.BLOCKED,
-                open_after=2,
+                identity=RunIdentity(
+                    round=1,
+                    timestamp="2026-09-03T09:00:00+00:00",
+                    sha=GOLDEN_PRIOR_SHA,
+                    model="claude-sonnet-4-20250514",
+                    provider="anthropic",
+                    transport="api",
+                    auth_mode="api_key",
+                    depth=2,
+                    strictness="balanced",
+                ),
+                coverage=RunCoverage(files_reviewed=3, checks=2),
+                usage=RunUsage(
+                    cost_basis="estimated",
+                    duration=38.0,
+                    prompt=11_000,
+                    completion=2_100,
+                    total=13_100,
+                    cost=0.1101,
+                ),
+                outcome=RunOutcome(verdict=ReviewVerdict.BLOCKED, open_after=2),
             ),
             RunRecord(
-                round=2,
-                timestamp="2026-09-04T09:00:00+00:00",
-                sha=GOLDEN_PRIOR_SHA,
-                model="claude-sonnet-4-20250514",
-                provider="anthropic",
-                transport="api",
-                auth_mode="api_key",
-                cost_basis="estimated",
-                depth=2,
-                strictness="balanced",
-                files_reviewed=3,
-                checks=2,
-                duration=40.0,
-                prompt=11_500,
-                completion=2_200,
-                total=13_700,
-                cost=0.1150,
-                verdict=ReviewVerdict.BLOCKED,
-                resolved=1,
-                open_after=1,
+                identity=RunIdentity(
+                    round=2,
+                    timestamp="2026-09-04T09:00:00+00:00",
+                    sha=GOLDEN_PRIOR_SHA,
+                    model="claude-sonnet-4-20250514",
+                    provider="anthropic",
+                    transport="api",
+                    auth_mode="api_key",
+                    depth=2,
+                    strictness="balanced",
+                ),
+                coverage=RunCoverage(files_reviewed=3, checks=2),
+                usage=RunUsage(
+                    cost_basis="estimated",
+                    duration=40.0,
+                    prompt=11_500,
+                    completion=2_200,
+                    total=13_700,
+                    cost=0.1150,
+                ),
+                outcome=RunOutcome(
+                    verdict=ReviewVerdict.BLOCKED,
+                    resolved=1,
+                    open_after=1,
+                ),
             ),
         ),
         findings=(

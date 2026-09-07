@@ -32,7 +32,10 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_summary import ReviewSummary
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
@@ -318,7 +321,12 @@ def test_history_summary_renders_millions_of_tokens_as_millions(
 ) -> None:
     """A long-running PR's cumulative tokens must not read as ``1500.0k``."""
     prior_state = ReviewState(
-        runs=(RunRecord(round=1, sha="sha1", model="m", total=1_500_000, cost=1.0),),
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, sha="sha1", model="m"),
+                usage=RunUsage(total=1_500_000, cost=1.0),
+            ),
+        ),
     )
 
     body = _body_only(
@@ -717,15 +725,19 @@ def _history_prior_state() -> ReviewState:
     return ReviewState(
         runs=tuple(
             RunRecord(
-                round=round_number,
-                sha=f"{round_number:040d}",
-                model="claude-sonnet-4-6",
-                p1=1,
-                prompt=100,
-                completion=200,
-                total=300,
-                cost=0.01,
-                duration=10.0,
+                identity=RunIdentity(
+                    round=round_number,
+                    sha=f"{round_number:040d}",
+                    model="claude-sonnet-4-6",
+                ),
+                usage=RunUsage(
+                    prompt=100,
+                    completion=200,
+                    total=300,
+                    cost=0.01,
+                    duration=10.0,
+                ),
+                outcome=RunOutcome(p1=1),
             )
             for round_number in range(1, _PRIOR_ROUNDS + 1)
         ),

@@ -168,7 +168,7 @@ def round_diff_lines(
     """
     if not prior_state.runs:
         return diff_lines
-    prior_sha = prior_state.runs[-1].sha
+    prior_sha = prior_state.runs[-1].identity.sha
     if not prior_sha or not head_sha:
         return None
     return reporter.fetch_compare_lines(base=prior_sha, head=head_sha)

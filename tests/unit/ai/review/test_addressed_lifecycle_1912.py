@@ -31,6 +31,7 @@ from lintro.ai.review.models.lifecycle_sync_request import LifecycleSyncRequest
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.review_thread import ReviewThread
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.review_state_codec import leftover_state_block
@@ -569,7 +570,10 @@ def _prior_state(*, findings: tuple[FindingRecord, ...]) -> ReviewState:
     Returns:
         The state.
     """
-    return ReviewState(runs=(RunRecord(round=1, sha="0f0f0f0"),), findings=findings)
+    return ReviewState(
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="0f0f0f0")),),
+        findings=findings,
+    )
 
 
 @dataclass

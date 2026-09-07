@@ -28,6 +28,7 @@ from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import (
@@ -252,7 +253,13 @@ def test_failure_body_respects_the_hard_comment_limit() -> None:
     )
     state = ReviewState(
         runs=tuple(
-            RunRecord(round=round_number, sha=f"{round_number:040d}", model="m")
+            RunRecord(
+                identity=RunIdentity(
+                    round=round_number,
+                    sha=f"{round_number:040d}",
+                    model="m",
+                ),
+            )
             for round_number in range(1, 21)
         ),
         findings=findings,

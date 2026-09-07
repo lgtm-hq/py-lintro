@@ -425,7 +425,7 @@ def _count_new_commits(
     """
     if not prior_state.runs:
         return None
-    prior_sha = prior_state.runs[-1].sha
+    prior_sha = prior_state.runs[-1].identity.sha
     if not prior_sha:
         return None
     shas = reporter.fetch_pr_commit_shas()

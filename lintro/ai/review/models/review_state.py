@@ -68,7 +68,7 @@ class ReviewState:
         """Return the round number the next review run should record."""
         if not self.runs:
             return 1
-        return max(run.round for run in self.runs) + 1
+        return max(run.identity.round for run in self.runs) + 1
 
     @property
     def open_findings(self) -> tuple[FindingRecord, ...]:

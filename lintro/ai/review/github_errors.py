@@ -163,7 +163,7 @@ def _failure_banner(
         provider=provider,
         cause_limit=BANNER_CAUSE_LIMIT,
     )
-    shown = max(run.round for run in state.runs)
+    shown = max(run.identity.round for run in state.runs)
     headline = FAILURE_BANNER_HEADLINE.format(round_number=state.next_round)
     return (
         f"> {headline} — {detail} · showing round {shown} results below. " f"{guidance}"

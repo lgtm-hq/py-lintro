@@ -248,12 +248,12 @@ def score_trajectory(*, runs: tuple[RunRecord, ...]) -> tuple[float, ...]:
         The usable recorded scores in round order.
     """
     return tuple(
-        run.convergence_score
+        run.outcome.convergence_score
         for run in runs
-        if run.convergence_score is not None
-        and not isinstance(run.convergence_score, bool)
-        and math.isfinite(run.convergence_score)
-        and run.convergence_score >= 0.0
+        if run.outcome.convergence_score is not None
+        and not isinstance(run.outcome.convergence_score, bool)
+        and math.isfinite(run.outcome.convergence_score)
+        and run.outcome.convergence_score >= 0.0
     )
 
 
@@ -406,8 +406,10 @@ def evaluate_convergence(
     window = _stability_window(runs=runs, stable_rounds=stable_rounds)
     if not window:
         return ConvergenceDecision(threshold=threshold, trajectory=trajectory)
-    scores = [run.convergence_score for run in window]
-    degraded = any(run.partial or run.coverage_limited for run in window)
+    scores = [run.outcome.convergence_score for run in window]
+    degraded = any(
+        run.coverage.partial or run.coverage.coverage_limited for run in window
+    )
     # ``bool`` is an ``int`` subclass, so a ``True`` that reached a record
     # in memory would otherwise read as the very quiet score 1.0. Decoding
     # already drops booleans (``_optional_score``); this closes the same door
@@ -428,7 +430,7 @@ def evaluate_convergence(
         latest = None
     return ConvergenceDecision(
         converged=quiet and not degraded and not pending_resume_work,
-        round_number=window[-1].round + 1,
+        round_number=window[-1].identity.round + 1,
         score=latest,
         threshold=threshold,
         stable_rounds=stable_rounds,

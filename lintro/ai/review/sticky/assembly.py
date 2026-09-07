@@ -38,10 +38,13 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.round_outcome import RoundOutcome
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.run_record_factory import (
+    RoundTotals,
+    run_record_from_result,
+)
 from lintro.ai.review.sticky.body import round_sections, state_sections
 from lintro.ai.review.sticky.history import _archive_body
 from lintro.ai.review.sticky.state import (
-    _run_record,
     matcher_reviewed_paths,
     stamp_comment_ids,
 )
@@ -106,13 +109,15 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
     open_count = sum(
         1 for record in match.records if record.status is FindingStatus.OPEN
     )
-    current = _run_record(
+    current = run_record_from_result(
         request=request,
-        round_number=round_number,
-        verdict=verdict,
-        resolved=len(match.resolved),
-        open_after=open_count,
-        convergence_score=score_records(records=match.records),
+        totals=RoundTotals(
+            round_number=round_number,
+            verdict=verdict,
+            resolved=len(match.resolved),
+            open_after=open_count,
+            convergence_score=score_records(records=match.records),
+        ),
     )
     combined_runs = [*state.runs, current]
     return RoundOutcome(
@@ -288,10 +293,12 @@ def render_state_sticky(
     plan = StickyPlan(
         match=FindingMatchResult(records=records),
         verdict=(
-            latest.verdict if latest is not None else derive_verdict(findings=records)
+            latest.outcome.verdict
+            if latest is not None
+            else derive_verdict(findings=records)
         ),
-        round_number=latest.round if latest is not None else 1,
-        head_sha=latest.sha if latest is not None else "",
+        round_number=latest.identity.round if latest is not None else 1,
+        head_sha=latest.identity.sha if latest is not None else "",
         runs=runs,
         repo=repo,
         pr_number=pr_number,

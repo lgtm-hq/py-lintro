@@ -236,7 +236,7 @@ def _model_counts(*, runs: list[RunRecord]) -> list[tuple[str, int]]:
     """
     counts: dict[str, int] = {}
     for run in runs:
-        model = run.model or "unknown"
+        model = run.identity.model or "unknown"
         counts[model] = counts.get(model, 0) + 1
     return sorted(counts.items())
 
