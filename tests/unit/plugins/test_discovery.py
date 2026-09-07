@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -760,3 +763,188 @@ def test_registering_index_matches_the_real_registry() -> None:
     expected = {name.replace("-", "_") for name in REGISTERING_TOOL_PACKAGES}
 
     assert_that(sorted(registered)).is_equal_to(sorted(expected))
+
+
+# =============================================================================
+# Tests for the entry-module scan rule (issue #2428, findings 15, 17, 19)
+# =============================================================================
+
+
+def test_the_live_scan_equals_the_generated_index() -> None:
+    """The source-tree scan and the generated index name the same modules.
+
+    ``NON_TOOL_PACKAGES`` and the entry-module rule reimplement
+    ``lintro_build.builtin_index``'s package-entry rule against an importable
+    package rather than a source directory. Two implementations of one rule
+    only stay in step if something compares them, and this is that something:
+    a drift in either direction — a scan that starts naming ``core.*``, an
+    index that stops naming a tool — fails here.
+    """
+    assert_that(_module_names_from_package_scan()).is_equal_to(
+        set(BUILTIN_TOOL_MODULES),
+    )
+
+
+def test_the_live_scan_skips_the_shared_scaffolding_package() -> None:
+    """``lintro.tools.core`` holds scaffolding, never a tool to import."""
+    scanned = _module_names_from_package_scan()
+
+    assert_that([name for name in scanned if name.startswith("core.")]).is_empty()
+
+
+def test_the_live_scan_leaves_the_lazy_idiom_review_engine_unimported() -> None:
+    """A package with a ``definition`` module names only that module.
+
+    ``idiom_review.engine`` reaches into :mod:`lintro.ai`, so naming it would
+    make every lintro start-up import the AI stack. The rule that keeps it out
+    is "``definition`` wins", and this pins its most expensive consequence.
+    """
+    scanned = _module_names_from_package_scan()
+
+    assert_that(scanned).contains("idiom_review.definition")
+    assert_that(scanned).does_not_contain("idiom_review.engine")
+
+
+def _write_package(*, root: Path, name: str, modules: tuple[str, ...]) -> None:
+    """Create a fake per-tool package under ``root``.
+
+    Args:
+        root: Directory standing in for ``lintro/tools``.
+        name: Package base name.
+        modules: Module base names to create beside ``__init__.py``.
+    """
+    package = root / name
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for module in modules:
+        (package / f"{module}.py").write_text("", encoding="utf-8")
+
+
+def _scan_fake_tools_tree(*, root: Path, monkeypatch: pytest.MonkeyPatch) -> set[str]:
+    """Run the real package scan against a fake ``lintro/tools`` tree.
+
+    Only the two lookups that reach the installed package are redirected, and
+    only for ``lintro.tools`` itself — everything else is delegated to the real
+    machinery, because a blanket patch of ``import_module`` breaks the lazy
+    imports other libraries perform during the scan, and the scan swallows the
+    resulting error as an empty result. The scan's own rules (package-only, no
+    leading underscore, not a scaffolding package, definition-wins) stay the
+    code under test rather than a reimplementation.
+
+    Args:
+        root: Directory standing in for ``lintro/tools``.
+        monkeypatch: Fixture used to redirect the two lookups.
+
+    Returns:
+        set[str]: ``<package>.<module>`` names the scan yields for that tree.
+    """
+    tools_package = MagicMock()
+    tools_package.__path__ = [str(root)]
+    real_import_module = importlib.import_module
+    real_find_spec = importlib.util.find_spec
+
+    def _import_module(name: str, package: str | None = None) -> Any:
+        """Return the fake tools package, delegating every other import.
+
+        Args:
+            name: Dotted module name being imported.
+            package: Anchor for a relative import.
+
+        Returns:
+            Any: The fake package, or whatever the real machinery returns.
+        """
+        if name == BUILTIN_TOOLS_PACKAGE:
+            return tools_package
+        return real_import_module(name, package)
+
+    def _find_spec(name: str, package: str | None = None) -> Any:
+        """Resolve one fake per-tool package, delegating every other lookup.
+
+        Args:
+            name: Dotted module name discovery asks for.
+            package: Anchor for a relative import.
+
+        Returns:
+            Any: A spec whose search locations point into the fake tree, with
+            locations ``None`` when the directory is not a package, or
+            whatever the real machinery returns for an unrelated name.
+        """
+        prefix = f"{BUILTIN_TOOLS_PACKAGE}."
+        if not name.startswith(prefix):
+            return real_find_spec(name, package)
+        directory = root / name[len(prefix) :]
+        spec = MagicMock()
+        spec.submodule_search_locations = (
+            [str(directory)] if (directory / "__init__.py").is_file() else None
+        )
+        return spec
+
+    monkeypatch.setattr(importlib, "import_module", _import_module)
+    monkeypatch.setattr(importlib.util, "find_spec", _find_spec)
+    return _module_names_from_package_scan()
+
+
+@pytest.mark.parametrize(
+    ("modules", "expected"),
+    [
+        (("definition", "engine", "renderer"), {"faketool.definition"}),
+        (("shared", "helpers"), {"faketool.helpers", "faketool.shared"}),
+        (("_private", "definition"), {"faketool.definition"}),
+        (("_private",), set()),
+    ],
+    ids=[
+        "definition_wins",
+        "all_public_without_definition",
+        "private_never_named",
+        "private_only_names_nothing",
+    ],
+)
+def test_the_scan_enters_a_package_through_definition_else_all_public(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    modules: tuple[str, ...],
+    expected: set[str],
+) -> None:
+    """A package is entered through ``definition``, else through every public module.
+
+    Mirrors ``lintro_build.builtin_index._entry_modules``: naming the rest of a
+    package that has a ``definition`` would defeat the laziness that keeps
+    ``idiom_review.engine`` — and therefore :mod:`lintro.ai` — out of start-up.
+
+    Args:
+        tmp_path: Directory standing in for ``lintro/tools``.
+        monkeypatch: Fixture used to point the scan at the fake tree.
+        modules: Module base names the fake package holds.
+        expected: ``<package>.<module>`` names the scan must yield.
+    """
+    _write_package(root=tmp_path, name="faketool", modules=modules)
+
+    assert_that(
+        _scan_fake_tools_tree(root=tmp_path, monkeypatch=monkeypatch),
+    ).is_equal_to(expected)
+
+
+def test_the_scan_skips_scaffolding_private_and_non_package_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only public, non-scaffolding packages are entered.
+
+    ``core`` is shared scaffolding, ``_internal`` is private, and a directory
+    with no ``__init__.py`` is not a package at all — none of the three is a
+    tool, and each is skipped for its own reason.
+
+    Args:
+        tmp_path: Directory standing in for ``lintro/tools``.
+        monkeypatch: Fixture used to point the scan at the fake tree.
+    """
+    _write_package(root=tmp_path, name="realtool", modules=("definition",))
+    _write_package(root=tmp_path, name="core", modules=("definition",))
+    _write_package(root=tmp_path, name="_internal", modules=("definition",))
+    loose = tmp_path / "notapackage"
+    loose.mkdir()
+    (loose / "definition.py").write_text("", encoding="utf-8")
+
+    assert_that(
+        _scan_fake_tools_tree(root=tmp_path, monkeypatch=monkeypatch),
+    ).is_equal_to({"realtool.definition"})

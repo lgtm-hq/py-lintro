@@ -289,27 +289,51 @@ def review_findings_from_unposted(
             continue
         if not (record.description or record.cause or record.fix):
             continue
-        extra.append(
-            ReviewFinding(
-                severity=record.severity,
-                category=record.category,
-                file=record.file,
-                line=record.line,
-                title=record.title,
-                description=record.description or record.title,
-                cause=record.cause,
-                fix=record.fix,
-                confidence=record.confidence or "medium",
-                checklist_ids=record.checklist_ids,
-                kind=record.kind,
-                occurrences=record.occurrences,
-                severity_downgraded=record.severity_downgraded,
-                cross_chunk_contradiction=record.cross_chunk_contradiction,
-                origin=record.origin,
-                evidence_style=record.evidence_style,
-            ),
-        )
+        extra.append(review_finding_from_record(record=record))
     return tuple(extra)
+
+
+def review_finding_from_record(*, record: FindingRecord) -> ReviewFinding:
+    """Rebuild the finding a tracked record was made from.
+
+    Copies the fields a record persists: severity, category, file, line,
+    title, description, cause, fix, confidence, checklist ids, kind,
+    occurrences, the P1 downgrade flag, the cross-chunk tag, origin and
+    evidence style. ``description`` and ``confidence`` fall back to the title
+    and ``medium`` because a record written before those fields existed leaves
+    them empty.
+
+    The rebuild is **not** a round trip. ``suggested_change``,
+    ``suggested_code``, ``failure_scenario`` and ``source`` are not persisted
+    on a record, so they come back at their defaults — a rebuilt finding can
+    render prose (the agent prompt, the sticky's folded detail) but never a
+    committable suggestion block.
+
+    Args:
+        record: The tracked record to rebuild.
+
+    Returns:
+        ReviewFinding: The finding the record describes, minus the fields a
+        record does not persist.
+    """
+    return ReviewFinding(
+        severity=record.severity,
+        category=record.category,
+        file=record.file,
+        line=record.line,
+        title=record.title,
+        description=record.description or record.title,
+        cause=record.cause,
+        fix=record.fix,
+        confidence=record.confidence or "medium",
+        checklist_ids=record.checklist_ids,
+        kind=record.kind,
+        occurrences=record.occurrences,
+        severity_downgraded=record.severity_downgraded,
+        cross_chunk_contradiction=record.cross_chunk_contradiction,
+        origin=record.origin,
+        evidence_style=record.evidence_style,
+    )
 
 
 def match_findings(

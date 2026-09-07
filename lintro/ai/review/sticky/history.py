@@ -48,17 +48,13 @@ def _this_run_section(
     transport: str,
     auth_mode: str,
 ) -> str:
-    """Render the two badge tables describing the current run.
+    """Render the single badge table describing the current run.
 
-    Both rows use the same badge-table renderer as the per-review body's run
-    stats, and the primary row's cells come from the shared
-    ``run_stats_primary_cells``, so the model, cost, and token figures cannot
-    drift between the two surfaces (#1955). The secondary row is this
-    surface's own: the status board omits the body's ``strictness`` and
-    ``lintro`` version. Ordering is fixed across every surface (epic #1905):
-    model, est. cost, tokens in, tokens out on row 1;
-    transport and mechanics on row 2. No figure is presented as billed — the
-    ``transport`` badge and the ``~`` prefix carry that honesty.
+    One table, one row: the status board's own shape, which omits the
+    per-review body's ``strictness`` and ``lintro`` version. Ordering is fixed
+    across every surface (epic #1905): model and transport first, then est.
+    cost and tokens in / out, then the mechanics. No figure is presented as
+    billed — the ``transport`` badge and the ``~`` prefix carry that honesty.
 
     Args:
         result: Current review result.
@@ -118,7 +114,9 @@ def _history_section(
 
     Everything historical lives here and nowhere else: cumulative badges, the
     per-run table, and one mini-summary line per prior round. It is the only
-    collapsible in the lower half of the comment, and it never nests another.
+    *top-level* collapsible in the lower half of the comment, and it does nest
+    one more layer: :func:`_round_expander` puts a per-round ``<details>``
+    inside it, which is where the mini-summaries live.
 
     Args:
         runs: Every retained run record, oldest first, current run last.

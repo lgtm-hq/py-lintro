@@ -2466,7 +2466,10 @@ def test_create_universal_binary_smoke_tests_the_post_lipo_artifact() -> None:
     )
 
     checkout = by_name["Checkout scripts"]
-    sparse = checkout["with"]["sparse-checkout"]
+    # Split into paths: ``contains`` on the raw block is a substring match, so
+    # it would keep passing for a now-deleted sibling path such as the old
+    # ``lintro/tools/definitions`` (#2428).
+    sparse = checkout["with"]["sparse-checkout"].split()
     assert_that(sparse).contains("scripts")
     assert_that(sparse).contains("lintro/plugins")
     # #2202: the builtin index is generated, not committed (#2180), and this

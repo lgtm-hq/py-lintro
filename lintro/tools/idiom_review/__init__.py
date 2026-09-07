@@ -6,7 +6,8 @@ Everything the ``idiom-review`` tool owns lives here: the plugin and its
 signature extraction, and the AI-calling engine it delegates to. These live in
 their own package (rather than under ``lintro/ai/prompts``) so the tool is
 self-contained and its prompt surface can evolve independently.
-Plugin discovery enters the package through that module (#2311).
+Plugin discovery enters the package through
+:mod:`lintro.tools.idiom_review.definition` (#2311).
 
 :class:`~lintro.tools.idiom_review.engine.IdiomReviewEngine` is re-exported
 lazily: importing it eagerly here would pull :mod:`lintro.ai` into plugin

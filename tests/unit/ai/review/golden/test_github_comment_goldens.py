@@ -1,10 +1,13 @@
 """Characterization goldens for the GitHub comment surfaces (issue #2303).
 
 Both comments a review posts — the sticky mission-control board and the
-failure surface — are snapshotted byte for byte here before #1974 moves the
-size, state, and sanitisation invariants behind one contract module. The
-comment is the product: a diff in these files is a change a reviewer sees, so
-it has to be a decision rather than a side effect of a refactor.
+failure surface — are snapshotted byte for byte here, alongside the inline
+finding comment. The snapshots were first taken to hold the surfaces still
+while #1974 moved the size, state, and sanitisation invariants behind
+:mod:`lintro.ai.review.github_contract`, and they stay as the standing pin on
+what a reviewer sees. The comment is the product: a diff in these files is a
+change a reviewer sees, so it has to be a decision rather than a side effect
+of a refactor.
 
 Rewriting a golden is the same explicit opt-in the rest of the suite uses::
 
@@ -31,6 +34,7 @@ from lintro.ai.review.github_contract import (
 from lintro.ai.review.github_errors import format_error_comment
 from lintro.ai.review.github_render import format_finding_comment
 from lintro.ai.review.github_review_body import build_review_body
+from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import (
@@ -127,7 +131,7 @@ def _sticky_kwargs() -> dict[str, Any]:
         "prior_state": golden_prior_state(),
         "head_sha": GOLDEN_HEAD_SHA,
         "transport": "api",
-        "auth_mode": "api-key",
+        "auth_mode": "api_key",
         "cost_basis": "estimated",
         "repo": GOLDEN_REPO,
         "pr_number": GOLDEN_PR_NUMBER,
@@ -271,8 +275,8 @@ def test_review_body_first_round_golden(
         match=golden_first_round_match(),
         head_sha=GOLDEN_HEAD_SHA,
         transport="api",
-        auth_mode="api-key",
-        config_source="pyproject.toml",
+        auth_mode="api_key",
+        config_source="`pyproject.toml`",
         new_commits=None,
     )
 
@@ -293,8 +297,8 @@ def test_review_body_over_a_prior_board_golden(
         match=golden_match(),
         head_sha=GOLDEN_HEAD_SHA,
         transport="api",
-        auth_mode="api-key",
-        config_source="pyproject.toml",
+        auth_mode="api_key",
+        config_source="`pyproject.toml`",
         new_commits=2,
     )
 
@@ -306,12 +310,21 @@ def test_inline_finding_comment_golden() -> None:
 
     The finding renderer moves modules in #2304's split of ``github_render``;
     a golden makes that move provable rather than assumed.
+
+    ``inline_fix`` is planned rather than left at its ``None`` default: the
+    posting path in ``lintro.ai.review.github._post_inline_findings`` always
+    passes a :func:`plan_inline_fix` result, so a golden without one pins a
+    fix slot production never renders.
     """
     result = golden_review_result()
     body = format_finding_comment(
         finding=result.findings[0],
         checklist_display=ChecklistDisplay.LINKED,
         question_map={1: "Does an unknown status fail closed?"},
+        inline_fix=plan_inline_fix(
+            finding=result.findings[0],
+            round_diff_lines=None,
+        ),
     )
 
     assert_golden(name="github/inline_finding_comment.golden", actual=body)

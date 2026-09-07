@@ -1,7 +1,7 @@
-"""The one contract every GitHub review comment obeys.
+"""The one contract the two posted comment bodies obey.
 
-Two comments are posted for a review — the sticky mission-control board
-(``sticky/``) and the failure surface (``github_errors.py``) — and
+Two whole-comment bodies are posted for a review — the sticky mission-control
+board (``sticky/``) and the failure surface (``github_errors.py``) — and
 before this module they enforced the size invariant twice, differently: the
 sticky pruned section by section and reserved room for a trailing state block,
 while the error path sliced the string at the cap and hoped. Same invariant,
@@ -23,6 +23,10 @@ lives here, and both paths import it:
 * :func:`render_state_block` / :func:`parse_state_block` and
   :func:`sanitize_comment_text`, re-exported so a caller reaches for the
   contract rather than for whichever module happens to define them.
+
+Inline review comments (``format_finding_comment``) are outside this contract:
+they are per-finding bodies posted against a diff position, are nowhere near
+the comment cap, and carry no state block.
 
 The module is pure: it renders and measures strings and performs no I/O.
 """

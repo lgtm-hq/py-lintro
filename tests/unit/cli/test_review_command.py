@@ -205,6 +205,28 @@ def test_review_max_cost_flag_beats_transport_profile(
     assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("flag")
 
 
+def test_review_labels_the_transcript_with_its_own_command(
+    profile_cap_review_pipeline: dict[str, MagicMock],
+) -> None:
+    """The CLI call site names the verb the transcript file is written under.
+
+    ``get_provider`` defaults ``transcript_command`` to ``None``, so dropping
+    the kwarg here would silently rename every CLI review transcript without
+    failing a test of :mod:`lintro.ai.transcript` itself.
+
+    Args:
+        profile_cap_review_pipeline: Patched review pipeline over a CLI
+            transport-profile cap config.
+    """
+    result = CliRunner().invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    mock_get_provider = profile_cap_review_pipeline["get_provider"]
+    assert_that(mock_get_provider.call_args.kwargs).contains_entry(
+        {"transcript_command": "review"},
+    )
+
+
 def test_review_profile_cap_provenance_is_config(
     profile_cap_review_pipeline: dict[str, MagicMock],
 ) -> None:

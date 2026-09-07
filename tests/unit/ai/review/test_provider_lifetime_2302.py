@@ -257,6 +257,45 @@ def test_a_cancelled_run_closes_the_provider_once() -> None:
     assert_that(provider.aclose_calls).is_equal_to(1)
 
 
+def test_an_externally_cancelled_run_closes_the_provider_once() -> None:
+    """An outside ``task.cancel()`` still closes the provider exactly once.
+
+    Raising ``CancelledError`` from inside the provider call unwinds without a
+    cancelling task, so ``__aexit__`` gets a clean event loop to close on. Real
+    cancellation arrives from outside — a shutdown, a parent task group — and
+    leaves the close itself running under a cancellation that has already been
+    delivered. This drives that path: the run parks in ``call_ai`` until the
+    test cancels the task holding it.
+    """
+    provider = SpyProvider()
+
+    async def _run() -> None:
+        """Start a review, park it in the provider call, then cancel it."""
+        entered = asyncio.Event()
+
+        async def _park(**_kwargs: Any) -> AIResponse:
+            """Signal the test and then wait to be cancelled."""
+            entered.set()
+            await asyncio.sleep(3600)
+            raise AssertionError("the parked provider call was never cancelled")
+
+        with patch(
+            "lintro.ai.review.provider_call.call_ai",
+            side_effect=_park,
+        ):
+            task = asyncio.create_task(
+                run_review_async(_context(), options=_options(provider=provider)),
+            )
+            await entered.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(_run())
+
+    assert_that(provider.aclose_calls).is_equal_to(1)
+
+
 def test_a_timeout_stop_closes_the_provider_once() -> None:
     """A graceful timeout stop is still the end of the provider's life.
 

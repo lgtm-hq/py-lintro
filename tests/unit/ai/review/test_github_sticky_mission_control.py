@@ -11,6 +11,8 @@ from assertpy import assert_that
 
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.finding_matcher import fingerprint_for
 from lintro.ai.review.github_constants import (
     GITHUB_COMMENT_HARD_LIMIT,
     MAX_COMMENT_CHARS,
@@ -24,6 +26,7 @@ from lintro.ai.review.github_constants import (
 # no genuine finding set can make a one-finding body overflow. Driving the
 # search with a stub assembler is the only way to prove the floor holds.
 from lintro.ai.review.github_contract import RenderLimits, SectionCounts, fit_body
+from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
@@ -36,6 +39,10 @@ from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 from lintro.ai.review.sticky import (
     advance_review_state,
     build_sticky_comment,
+)
+from lintro.ai.review.sticky.cells import (
+    _open_prompt_findings,
+    _sorted_open_records,
 )
 
 _DETAILS_TAG_RE = re.compile(r"</?details\b")
@@ -944,3 +951,165 @@ def test_folded_details_shrink_under_size_pressure(
     assert_that(len(body)).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(rendered).contains("not detailed")
     assert_that(_max_details_depth(body=body)).is_equal_to(1)
+
+
+def _open_record(
+    *,
+    title: str,
+    file: str,
+    line: int,
+    severity: Severity = Severity.P1,
+    category: str = "security",
+) -> FindingRecord:
+    """Build an OPEN tracked record carrying enough text to render.
+
+    Args:
+        title: Finding title.
+        file: Repository-relative path.
+        line: Line number.
+        severity: Finding severity.
+        category: Finding category.
+
+    Returns:
+        FindingRecord: An open record from an earlier round.
+    """
+    return FindingRecord(
+        fingerprint=fingerprint_for(file=file, category=category, title=title),
+        severity=severity,
+        category=category,
+        title=title,
+        file=file,
+        line=line,
+        status=FindingStatus.OPEN,
+        since_round=1,
+        description=f"{title} still reproduces.",
+        fix=f"Address {title}.",
+        confidence="high",
+    )
+
+
+def test_fix_all_prompt_covers_findings_this_round_never_re_read(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Every open finding reaches the fix-all prompt, not just this round's.
+
+    Under incomplete coverage the matcher carries a prior open record on a file
+    this round never read (``finding_matcher.match_findings``, the ``unread and
+    not left_diff`` branch). The record stays OPEN and lists in the Findings
+    table, but it is not in ``result.findings``, so a prompt built from this
+    round's findings alone would scope "fix all open findings" to a subset a
+    reviewer can see is incomplete (#2428 finding 9).
+
+    Args:
+        sample_review_result: Representative review result fixture.
+    """
+    carried = _open_record(
+        title="Token refresh drops the expiry",
+        file="src/unread.py",
+        line=42,
+    )
+    result = _with(
+        base=sample_review_result,
+        findings=(_finding(title="Leak", file="src/example.py"),),
+        metadata=replace(
+            sample_review_result.metadata,
+            reviewed_paths=("src/example.py",),
+        ),
+    )
+
+    body = _body_only(
+        body=build_sticky_comment(
+            request=StickyRequest(
+                result=result,
+                prior_state=ReviewState(findings=(carried,)),
+            ),
+        ),
+    )
+
+    prompt = body.split("Fix-all prompt", 1)[1]
+    assert_that(prompt).contains("2 still-open findings")
+    assert_that(prompt).contains("src/unread.py")
+    assert_that(prompt).contains("Token refresh drops the expiry")
+    assert_that(prompt).contains("src/example.py")
+
+
+def test_fix_all_prompt_covers_a_round_that_reported_nothing(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A carry-only round still prompts for every finding left open.
+
+    Nothing was re-reported, so ``result.findings`` is empty; the open set is
+    entirely carried records. A prompt built from this round's findings would
+    render nothing at all while the table still lists two open findings.
+
+    Args:
+        sample_review_result: Representative review result fixture.
+    """
+    prior = ReviewState(
+        findings=(
+            _open_record(title="Token refresh drops the expiry", file="a.py", line=4),
+            _open_record(title="Unknown status grants access", file="b.py", line=9),
+        ),
+    )
+    result = _with(
+        base=sample_review_result,
+        findings=(),
+        metadata=replace(
+            sample_review_result.metadata,
+            reviewed_paths=("untouched.py",),
+        ),
+    )
+
+    body = _body_only(
+        body=build_sticky_comment(
+            request=StickyRequest(result=result, prior_state=prior),
+        ),
+    )
+
+    prompt = body.split("Fix-all prompt", 1)[1]
+    assert_that(prompt).contains("2 still-open findings")
+    assert_that(prompt).contains("a.py")
+    assert_that(prompt).contains("b.py")
+
+
+@pytest.mark.parametrize("limit", [1, 2, 3, None])
+def test_the_prompt_and_the_table_select_the_same_findings(
+    limit: int | None,
+) -> None:
+    """Under truncation the prompt covers exactly the rows the table shows.
+
+    Both sections shrink under the same ``RenderLimits.open`` pressure, so a
+    prompt that selected its own subset would tell an agent to fix a finding
+    the reader cannot see, or omit one they can.
+
+    Args:
+        limit: Open-finding limit applied to both selections.
+    """
+    records = (
+        _open_record(title="Zeta", file="z.py", line=1),
+        _open_record(title="Alpha", file="a.py", line=30),
+        _open_record(title="Beta", file="a.py", line=2, severity=Severity.P2),
+        _open_record(title="Gamma", file="m.py", line=7),
+    )
+
+    prompt = _open_prompt_findings(records=records, limit=limit)
+    table = _sorted_open_records(records=records, limit=limit)
+
+    assert_that([(item.file, item.line, item.title) for item in prompt]).is_equal_to(
+        [(record.file, record.line, record.title) for record in table],
+    )
+
+
+def test_the_prompt_keeps_every_ordinal_of_a_repeated_fingerprint() -> None:
+    """Two open records sharing a fingerprint both reach the prompt.
+
+    The fingerprint deliberately excludes the line number, so one pattern
+    flagged twice in a file is two records distinguished only by their
+    ordinal. Deduplicating the prompt by fingerprint would drop the second.
+    """
+    first = _open_record(title="Hardcoded credential", file="a.py", line=3)
+    second = replace(first, ordinal=2, line=11)
+
+    prompt = _open_prompt_findings(records=(first, second), limit=None)
+
+    assert_that([finding.line for finding in prompt]).is_equal_to([3, 11])

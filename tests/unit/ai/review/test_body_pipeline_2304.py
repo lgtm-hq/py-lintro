@@ -27,13 +27,13 @@ from lintro.ai.review.github_contract import (
     CommentBudget,
 )
 from lintro.ai.review.github_render import Section, assemble
-from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import assembly, build_sticky_comment
 from lintro.ai.review.sticky import history as sticky_history
 from tests.unit.ai.review.golden.github_comment_fixtures import (
     GOLDEN_HEAD_SHA,
+    golden_match,
     golden_prior_state,
     golden_review_result,
 )
@@ -55,14 +55,23 @@ _REVIEW_PACKAGE = Path(__file__).resolve().parents[4] / "lintro" / "ai" / "revie
 def _sticky_body() -> str:
     """Render the sticky board from the pinned golden fixtures.
 
+    ``transport`` and ``auth_mode`` come from the fixture metadata rather than
+    being left at their empty defaults: the posting path always stamps them,
+    and an empty ``auth_mode`` takes the sticky down a degraded cost-basis
+    branch the posted comment never reaches.
+
     Returns:
         str: The primary sticky body.
     """
+    result = golden_review_result()
     return build_sticky_comment(
         request=StickyRequest(
-            result=golden_review_result(),
+            result=result,
             prior_state=golden_prior_state(),
             head_sha=GOLDEN_HEAD_SHA,
+            transport=result.metadata.transport,
+            auth_mode=result.metadata.auth_mode,
+            cost_basis=result.metadata.cost_basis,
         ),
     )
 
@@ -70,14 +79,22 @@ def _sticky_body() -> str:
 def _review_body() -> str:
     """Render the per-round review body from the pinned golden fixtures.
 
+    The match is the production matcher's output over the pinned prior state,
+    not an empty ``FindingMatchResult()``: an empty match renders a board
+    with no rows, which is the one shape that cannot show the pipeline
+    carrying real content.
+
     Returns:
         str: The review comment body.
     """
+    result = golden_review_result()
     return github_review_body.build_review_body(
-        result=golden_review_result(),
-        prior_state=ReviewState(),
-        match=FindingMatchResult(),
+        result=result,
+        prior_state=golden_prior_state(),
+        match=golden_match(),
         head_sha=GOLDEN_HEAD_SHA,
+        transport=result.metadata.transport,
+        auth_mode=result.metadata.auth_mode,
     )
 
 
@@ -112,11 +129,11 @@ def test_every_comment_surface_binds_the_one_assemble() -> None:
 
 
 @pytest.mark.parametrize(
-    ("module_name", "render", "expected_section"),
+    ("module_name", "render", "expected_section", "expected_budget"),
     [
-        ("sticky.assembly", _sticky_body, "findings_round"),
-        ("github_review_body", _review_body, "header"),
-        ("github_errors", _error_body, "guidance"),
+        ("sticky.assembly", _sticky_body, "findings_round", None),
+        ("github_review_body", _review_body, "header", DEFAULT_BUDGET),
+        ("github_errors", _error_body, "guidance", DEFAULT_BUDGET),
     ],
 )
 def test_each_posting_path_assembles_through_the_pipeline(
@@ -124,6 +141,7 @@ def test_each_posting_path_assembles_through_the_pipeline(
     module_name: str,
     render: Callable[[], str],
     expected_section: str,
+    expected_budget: CommentBudget | None,
 ) -> None:
     """Spying on one surface's ``assemble`` sees that surface's whole body.
 
@@ -131,20 +149,34 @@ def test_each_posting_path_assembles_through_the_pipeline(
     reached the pipeline carrying something unrelated fails here rather than
     passing an existence check.
 
+    The budget is asserted alongside the sections because it decides whether
+    the surface caps its own body: the sticky passes ``None`` and lets
+    :func:`~lintro.ai.review.github_contract.fit_body` own the size contract,
+    while the two single-shot surfaces cap at ``DEFAULT_BUDGET`` in the call
+    itself. A surface that started passing its own budget would still route
+    through the pipeline and still assemble the right sections.
+
+    The assertion picks the call carrying the expected section rather than the
+    last one: a surface driven through ``fit_body`` assembles once per pruning
+    probe, and ``largest_fitting`` returns the largest body that *fit* rather
+    than the last one it rendered (``github_contract.py`` lines 240-247), so
+    the final call is not necessarily the posted body.
+
     Args:
         monkeypatch: Fixture used to swap the module's bound ``assemble``.
         module_name: Surface under test, for the failure message.
         render: Callable driving that surface end to end.
         expected_section: Section this surface must always assemble.
+        expected_budget: Budget this surface asks the pipeline for.
     """
-    calls: list[tuple[Section, ...]] = []
+    calls: list[tuple[tuple[Section, ...], CommentBudget | None]] = []
 
     def spy(
         *,
         sections: Sequence[Section],
         budget: CommentBudget | None = DEFAULT_BUDGET,
     ) -> str:
-        """Record the sections and delegate to the real pipeline.
+        """Record the sections and the budget, then delegate to the pipeline.
 
         Args:
             sections: Sections the surface assembled.
@@ -153,7 +185,7 @@ def test_each_posting_path_assembles_through_the_pipeline(
         Returns:
             str: Whatever the real ``assemble`` returns.
         """
-        calls.append(tuple(sections))
+        calls.append((tuple(sections), budget))
         return assemble(sections=sections, budget=budget)
 
     module = {
@@ -167,7 +199,39 @@ def test_each_posting_path_assembles_through_the_pipeline(
 
     assert_that(calls).described_as(f"{module_name} bypassed assemble").is_not_empty()
     assert_that(body).is_not_empty()
-    assert_that(calls[-1]).extracting("name").contains(expected_section)
+    carrying = [
+        (sections, budget)
+        for sections, budget in calls
+        if expected_section in {section.name for section in sections}
+    ]
+    assert_that(carrying).described_as(
+        f"{module_name} never assembled {expected_section}",
+    ).is_not_empty()
+    assert_that([budget for _sections, budget in carrying]).is_equal_to(
+        [expected_budget] * len(carrying),
+    )
+
+
+def _blank_line_constant_names(*, tree: ast.Module) -> frozenset[str]:
+    r"""Return the names a module binds to the blank-line separator.
+
+    Args:
+        tree: Parsed module to scan.
+
+    Returns:
+        frozenset[str]: Names assigned the literal ``"\\n\\n"``.
+    """
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign):
+            continue
+        value = node.value
+        if not isinstance(value, ast.Constant) or value.value != "\n\n":
+            continue
+        names.update(
+            target.id for target in node.targets if isinstance(target, ast.Name)
+        )
+    return frozenset(names)
 
 
 def test_no_surface_joins_its_own_sections() -> None:
@@ -177,18 +241,28 @@ def test_no_surface_joins_its_own_sections() -> None:
     in one of these modules is a second body assembler by another name. Joins
     *inside* one section (``"\\n".join``) are the section's own business and
     are deliberately not matched.
+
+    A module-level constant holding the separator is matched too: binding
+    ``"\\n\\n"`` to a name and joining on that is the same assembler wearing a
+    different spelling, and a scan that only looked at string literals would
+    wave it through.
     """
     offenders: dict[str, int] = {}
     for name in _SURFACE_MODULES:
         path = _REVIEW_PACKAGE / name
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        separator_names = _blank_line_constant_names(tree=tree)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
             if not isinstance(func, ast.Attribute) or func.attr != "join":
                 continue
-            if isinstance(func.value, ast.Constant) and func.value.value == "\n\n":
+            target = func.value
+            joins_blank_line = (
+                isinstance(target, ast.Constant) and target.value == "\n\n"
+            ) or (isinstance(target, ast.Name) and target.id in separator_names)
+            if joins_blank_line:
                 offenders[name] = node.lineno
 
     assert_that(offenders).is_empty()

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
-from lintro.ai.review.finding_matcher import normalize_file_path
+from lintro.ai.review.finding_matcher import review_finding_from_record
 from lintro.ai.review.github_constants import _SEVERITY_EMOJI, SHORT_SHA_LENGTH
 from lintro.ai.review.github_lifecycle import inline_comment_url
 from lintro.ai.review.github_render import sanitize_comment_text
@@ -50,37 +50,41 @@ def _sorted_open_records(
     return ordered if limit is None else ordered[:limit]
 
 
-def _sorted_open_findings(
+def _open_prompt_findings(
     *,
-    findings: tuple[ReviewFinding, ...],
+    records: tuple[FindingRecord, ...],
     limit: int | None,
 ) -> tuple[ReviewFinding, ...]:
-    """Return this round's findings in the same order as the open table.
+    """Return every still-open finding the fix-all prompt must cover.
 
-    Every open finding is, by construction, reported in the current round: the
-    matcher resolves any prior record this round did not repeat. Sorting both
-    the table and the prompt by the same key keeps them aligned without pairing
-    records to findings one by one.
+    Built from the same ``_sorted_open_records`` call the Findings table is
+    built from, so the prompt and the table cover the identical set in the
+    identical order — by construction rather than by two selections agreeing.
+
+    This round's ``result.findings`` is not that set. Under incomplete
+    coverage the matcher carries a prior open record on a file this round
+    never read (``finding_matcher.match_findings``, the ``unread and not
+    left_diff`` branch), so it stays OPEN and lists in the table while being
+    absent from ``result.findings``. Reconciling the two by fingerprint would
+    also lose an extra ordinal whenever one fingerprint has several open
+    records, so the records are simply the source.
+
+    Records carry the merged text of the most recent sighting
+    (``finding_matcher`` rebuilds a record from each round's finding), and the
+    prompt renders only fields a record persists, so nothing the panel shows
+    is lost by reading records rather than findings.
 
     Args:
-        findings: This round's findings.
+        records: Every tracked record, open and resolved.
         limit: Maximum number to return, or ``None`` for all.
 
     Returns:
-        Findings sorted by severity, then file, then line.
+        Open findings sorted by severity, then file, then line.
     """
-    # Records store the *normalized* path, so sorting findings by the raw one
-    # would let ``limit`` select a different subset for the prompt than for the
-    # table (for example "./z.py" vs "a.py").
-    ordered = sorted(
-        findings,
-        key=lambda finding: (
-            finding.severity.value,
-            normalize_file_path(finding.file),
-            finding.line,
-        ),
+    return tuple(
+        review_finding_from_record(record=record)
+        for record in _sorted_open_records(records=records, limit=limit)
     )
-    return tuple(ordered if limit is None else ordered[:limit])
 
 
 def _sorted_resolved_records(

@@ -22,7 +22,7 @@ from lintro.ai.review.github_render import (
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.sticky_plan import StickyPlan
-from lintro.ai.review.sticky.cells import _sorted_open_findings
+from lintro.ai.review.sticky.cells import _open_prompt_findings
 from lintro.ai.review.sticky.findings import (
     _degraded_details,
     _findings_round_section,
@@ -187,8 +187,8 @@ def round_sections(
         Section(
             name="fix_all_prompt",
             text=render_agent_prompt_panel(
-                findings=_sorted_open_findings(
-                    findings=result.findings,
+                findings=_open_prompt_findings(
+                    records=plan.match.records,
                     limit=limits.open,
                 ),
                 scope=AgentPromptScope(
