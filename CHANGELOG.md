@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.150.0] - 2026-09-07
+
+### Added
+
+- **tools**: add cppcheck for C/C++ static analysis (#1157) (65ca506)
+
+### Changed
+
+- **ai/review**: single comment-lifecycle owner, v1 state paths retired (#2412)
+  (ad046a1)
+
 ## [0.149.0] - 2026-09-07
 
 ### Added
