@@ -262,7 +262,7 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
     """Detect all languages and ecosystems in a project tree.
 
     Checks for Python, JavaScript/TypeScript (including Astro, Svelte, Vue),
-    Rust, Go, Ruby, Shell, Docker, GitHub Actions, SQL, Protocol Buffers,
+    Rust, Go, Ruby, C/C++, Shell, Docker, GitHub Actions, SQL, Protocol Buffers,
     YAML, Markdown, TOML, HTML, CSS, and dotenv files by inspecting manifests,
     directories, and source-file extensions. Language tools still run in
     source-only trees that have no ``pyproject.toml`` / ``package.json`` /
@@ -402,6 +402,13 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
         ),
     ):
         langs.add("toml")
+
+    # C / C++ — both keys resolve to cppcheck in the manifest's language map,
+    # so a mixed tree setting both is harmless.
+    if _has_source_files(cwd, ".c", ".h"):
+        langs.add("c")
+    if _has_source_files(cwd, ".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hxx", ".h++"):
+        langs.add("cpp")
 
     # Markup and stylesheets that language_map already knows about.
     if _has_source_files(cwd, ".html", ".htm"):

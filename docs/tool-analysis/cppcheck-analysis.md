@@ -108,5 +108,9 @@ materially more fragile than consuming SARIF here.
 - No auto-fix: cppcheck only reports.
 - Per-file execution means whole-program checks (e.g. `unusedFunction`) are not reliable
   and are excluded from the default enable set.
-- Version is pinned in `lintro/_tool_versions.py` and kept in sync with
-  `lintro/tools/manifest.json` by the tool-version generator.
+- `lintro/_tool_versions.py` records the Renovate-tracked _recommended_ version
+  (2.21.0), kept in sync with `lintro/tools/manifest.json` by the tool-version
+  generator. It is not an install pin: the Docker image and `install-tools.sh` install
+  the distro package (apt on Debian, Homebrew on macOS). What is enforced at runtime is
+  the manifest `min_version` floor of 2.13.0; the tools image base (`python:3.14-slim`,
+  Debian trixie) ships cppcheck 2.17.1, which clears it.
