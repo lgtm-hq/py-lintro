@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.148.1] - 2026-09-07
+
+### Changed
+
+- bump harden-runner to v2.21.1 and lgtm-ci to v0.69.6 (#2431) (ccdca32)
+
+### Fixed
+
+- **review**: address retro AI review findings from the Cursor outage (#2429) (d50415b)
+
 ## [0.148.0] - 2026-09-07
 
 ### Added
