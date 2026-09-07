@@ -29,7 +29,7 @@ EOF
 	exit 0
 fi
 
-# shellcheck source=scripts/ci/semgrep-lock-lib.sh
+# shellcheck source=./semgrep-lock-lib.sh disable=SC1091 # sibling helper; resolved from SCRIPT_DIR at runtime
 source "${SCRIPT_DIR}/semgrep-lock-lib.sh"
 
 semgrep_lock_require_inputs
