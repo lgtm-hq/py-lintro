@@ -68,10 +68,47 @@ CPPCHECK_FILE_PATTERNS: list[str] = [
 # analysis and misfires on per-file runs, the latter is mostly configuration
 # noise (missing includes, etc.).
 CPPCHECK_DEFAULT_ENABLE: str = "warning,style,performance,portability"
+# Enable categories lintro refuses. ``unusedFunction`` needs whole-program
+# visibility; lintro invokes cppcheck on the file list discovered for the run
+# (a user-supplied path, a ``--diff`` scope, or the whole tree), so a function
+# whose only caller sat outside that list would be reported unused. ``all``
+# implies ``unusedFunction``, so it is refused for the same reason. Rejecting
+# is deliberate: silently dropping a category the user explicitly asked for
+# would be worse than saying it is unsupported.
+CPPCHECK_UNSUPPORTED_ENABLE: frozenset[str] = frozenset({"unusedFunction", "all"})
 # Cppcheck exits 0 when clean and with this code when any enabled finding is
 # reported (see ``--error-exitcode``). Issue counting is driven by the parsed
 # XML; the exit code is only used to detect execution failures.
 CPPCHECK_ERROR_EXITCODE: int = 1
+
+
+def _reject_unsupported_enable(enable: str) -> None:
+    """Reject enable categories that need whole-program analysis.
+
+    Both spellings a user can reach ``unusedFunction`` through are refused: the
+    category itself and ``all``, which implies it. Tokens are compared
+    case-insensitively after splitting on commas, so neither a list nor a
+    comma-joined string can smuggle one past.
+
+    Args:
+        enable: The comma-joined enable value.
+
+    Raises:
+        ValueError: If any token names an unsupported category.
+    """
+    lowered = {token.strip().lower() for token in enable.split(",")}
+    rejected = sorted(
+        name for name in CPPCHECK_UNSUPPORTED_ENABLE if name.lower() in lowered
+    )
+    if not rejected:
+        return
+    raise ValueError(
+        f"cppcheck enable category not supported: {', '.join(rejected)}. "
+        "These require whole-program analysis, but lintro runs cppcheck over "
+        "the files discovered for the run, which may be a subset of the tree "
+        "(a path argument or a --diff scope), so functions would be reported "
+        "unused merely because their callers were outside it.",
+    )
 
 
 @register_tool
@@ -146,11 +183,10 @@ class CppcheckPlugin(BaseToolPlugin):
                 regardless of this value. The CLI splits ``--tool-options`` on
                 commas, so a list (``enable=warning|style``) is the way to
                 request several categories from the command line.
-                ``unusedFunction`` is unsupported: it needs whole-program
-                visibility, while lintro declares cppcheck ``partitionable``
-                and may run it over a subset of the tree, which would report
-                functions as unused merely because their callers were in
-                another shard.
+                ``unusedFunction`` and ``all`` are rejected: they need
+                whole-program visibility, while lintro invokes cppcheck on the
+                file list discovered for the run, which may be a subset of the
+                tree.
             inconclusive: Whether to report findings cppcheck cannot fully
                 confirm. Increases coverage at the cost of some false positives.
             std: Language standard to assume (e.g. ``c11``, ``c++17``).
@@ -162,6 +198,7 @@ class CppcheckPlugin(BaseToolPlugin):
         enable_list = normalize_str_or_list(enable, "enable")
         if enable_list is not None:
             enable = ",".join(part for part in enable_list if part)
+            _reject_unsupported_enable(enable)
         suppress = normalize_str_or_list(suppress, "suppress")
         validate_option_types({"std": std}, {"std": str})
         validate_bool(inconclusive, "inconclusive")

@@ -147,8 +147,21 @@ def test_parse_invalid_input_returns_empty(value: str | None) -> None:
 
 
 def test_parse_malformed_xml_returns_empty() -> None:
-    """Malformed XML (no closing tags) returns an empty list."""
+    """Malformed XML (no closing tags) returns an empty list.
+
+    This input fails the ``<results>`` regex, so it never reaches the parser.
+    """
     assert_that(parse_cppcheck_output("<results><errors><error")).is_empty()
+
+
+def test_parse_unparseable_results_block_returns_empty() -> None:
+    """A well-delimited but ill-formed block hits the ParseError branch.
+
+    Unlike the truncated input above this *does* match the ``<results>...
+    </results>`` regex, so it reaches ``ElementTree.fromstring`` and exercises
+    the ``ParseError`` guard rather than the regex miss.
+    """
+    assert_that(parse_cppcheck_output("<results><errors><error></results>")).is_empty()
 
 
 def test_parse_non_xml_text_returns_empty() -> None:

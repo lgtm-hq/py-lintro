@@ -61,9 +61,9 @@ cppcheck --xml --quiet --error-exitcode=1 \
 `error`-severity checks always run. Lintro additionally enables
 `warning,style,performance,portability` by default. `unusedFunction` and `information`
 are intentionally excluded from the default: the former requires whole-program analysis
-and is unsupported because lintro may shard the file list, and the latter is mostly
-configuration noise (e.g. missing system includes). The rest is configurable via the
-`enable` option.
+and is rejected outright because the file list handed to cppcheck is often a subset of
+the project, and the latter is mostly configuration noise (e.g. missing system
+includes). The rest is configurable via the `enable` option.
 
 ### Options
 
@@ -108,11 +108,14 @@ materially more fragile than consuming SARIF here.
 ## Notes and limitations
 
 - No auto-fix: cppcheck only reports.
-- Cppcheck is declared `partitionable`, so lintro may run it over a subset of the tree.
-  Each source file is its own translation unit, so that is safe for every default check.
-  Whole-program checks are not: `unusedFunction` would report functions as unused merely
-  because their callers sat in another shard, so it is excluded from the default enable
-  set and enabling it explicitly is unsupported.
+- Lintro invokes cppcheck on the file list discovered for the run — a path the user
+  passed, a `--diff` scope, or the whole tree — so the input is frequently a subset of
+  the project. Each source file is its own translation unit, so that is safe for every
+  default check, which is why the tool is declared `partitionable`. Whole-program checks
+  are not safe: `unusedFunction` would report functions as unused merely because their
+  callers were outside the list. It is excluded from the default enable set, and
+  `set_options` rejects it (and `all`, which implies it) with a `ValueError` rather than
+  silently dropping a category the user asked for.
 - Only source files are passed to cppcheck. A header handed to it directly is analyzed
   as a standalone translation unit, which misfires without the source that defines the
   macros and uses the declarations; upstream's manual says to pass sources instead.

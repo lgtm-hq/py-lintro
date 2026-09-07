@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro._tool_versions import get_tool_version
+from lintro._tool_versions import get_min_version
+from lintro.enums.tool_name import ToolName
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
@@ -50,15 +51,17 @@ requires_modern_bash = pytest.mark.skipif(
 
 
 @requires_modern_bash
-def test_dry_run_selects_cppcheck() -> None:
-    """``--tools cppcheck`` reaches the cppcheck install block.
+def test_dry_run_selects_cppcheck_and_describes_an_unpinned_install() -> None:
+    """``--tools cppcheck`` reaches the block and reports what it would do.
 
     The dry run proves the filter name the Dockerfile bridge passes actually
-    selects a block, rather than being silently ignored.
+    selects a block, rather than being silently ignored. It also pins the
+    wording: no version is pinned at install time, because brew and apt supply
+    whatever the distribution ships, so the message must promise an unpinned
+    install plus an after-the-fact floor check rather than a specific version.
     """
     assert _BASH is not None  # nosec B101 - guarded by requires_modern_bash
-    version = get_tool_version("cppcheck")
-    assert_that(version).is_not_none()
+    minimum = get_min_version(ToolName.CPPCHECK)
 
     result = subprocess.run(  # nosec B603 - fixed argv in a controlled test
         [_BASH, str(_INSTALL_TOOLS), "--dry-run", "--tools", "cppcheck"],
@@ -69,7 +72,31 @@ def test_dry_run_selects_cppcheck() -> None:
     )
 
     assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains(f"Would install cppcheck v{version}")
+    assert_that(result.stdout).contains("Would install the cppcheck package")
+    assert_that(result.stdout).contains("unpinned")
+    assert_that(result.stdout).contains(f"Would verify cppcheck >= v{minimum}")
+
+
+def test_install_block_checks_path_before_any_package_manager() -> None:
+    """``command -v cppcheck`` is tested before the brew and apt branches.
+
+    The two live installer tests below run the real script with a stub binary
+    on PATH rather than under ``--dry-run``. That is only safe while an
+    already-present cppcheck short-circuits ahead of any package manager; if
+    the branches were reordered those tests could start invoking brew or apt
+    on a developer machine or CI runner.
+    """
+    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    block_at = script.find('if should_install "cppcheck"; then')
+    block = script[block_at : script.find("fi # cppcheck", block_at)]
+
+    already_installed_at = block.find("command -v cppcheck")
+    brew_at = block.find("command -v brew")
+    apt_at = block.find("command -v apt-get")
+
+    assert_that(already_installed_at).is_greater_than(-1)
+    assert_that(brew_at).is_greater_than(already_installed_at)
+    assert_that(apt_at).is_greater_than(already_installed_at)
 
 
 def test_supported_tools_lists_cppcheck() -> None:
@@ -166,8 +193,13 @@ def test_installer_rejects_a_cppcheck_below_the_minimum(tmp_path: Path) -> None:
 
     This is the failure the version gate exists for: below the floor lintro
     skips the tool at runtime, so an installer that accepted it would leave
-    setup green with C/C++ analysis silently disabled. A stub binary reporting
-    2.12.0 stands in for a stale distro package.
+    setup green with C/C++ analysis silently disabled.
+
+    The stub on PATH exercises the **already-installed-too-old** path
+    specifically. ``command -v cppcheck`` is tested before the brew and apt
+    branches, so a stub that answers it short-circuits into the
+    already-installed branch and no package manager is ever invoked — which is
+    what keeps this test safe to run live, without ``--dry-run``.
 
     Args:
         tmp_path: Temporary directory holding the stub binary.
@@ -195,6 +227,9 @@ def test_installer_rejects_a_cppcheck_below_the_minimum(tmp_path: Path) -> None:
 @requires_modern_bash
 def test_installer_rejects_an_unparseable_cppcheck_version(tmp_path: Path) -> None:
     """An unreadable ``--version`` fails closed instead of being assumed good.
+
+    Like the too-old case this takes the already-installed branch (the stub
+    answers ``command -v cppcheck``), so brew and apt are never reached.
 
     Args:
         tmp_path: Temporary directory holding the stub binary.

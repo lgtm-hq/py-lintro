@@ -1669,11 +1669,13 @@ main() {
 	# green while C/C++ analysis silently never runs.
 	if should_install "cppcheck"; then
 		echo -e "${BLUE}Installing cppcheck...${NC}"
-		CPPCHECK_VERSION=$(get_tool_version "cppcheck") || exit 1
 		CPPCHECK_MIN_VERSION=$(get_tool_min_version "cppcheck") || exit 1
 		cppcheck_needs_verify=1
 		if [ $DRY_RUN -eq 1 ]; then
-			log_info "[DRY-RUN] Would install cppcheck v${CPPCHECK_VERSION}"
+			# No version is pinned at install time: brew and apt supply
+			# whatever the distribution ships, and the floor is enforced
+			# afterwards. Saying "would install v<pin>" would misdescribe it.
+			log_info "[DRY-RUN] Would install the cppcheck package provided by brew/apt (unpinned)"
 			log_info "[DRY-RUN] Would verify cppcheck >= v${CPPCHECK_MIN_VERSION}"
 			cppcheck_needs_verify=0
 		elif command -v cppcheck &>/dev/null; then

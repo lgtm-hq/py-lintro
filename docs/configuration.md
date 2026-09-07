@@ -1292,8 +1292,11 @@ Only source files (`.c`, `.cpp`, `.cc`, `.cxx`, `.c++`) are passed to Cppcheck. 
 handed to Cppcheck directly are analyzed as standalone translation units and misfire
 without the source that defines their macros and uses their declarations, so — as
 upstream's manual recommends — Lintro lets Cppcheck reach headers through the sources
-that `#include` them. `unusedFunction` is likewise unsupported: it needs whole-program
-visibility, while Lintro may run Cppcheck over a subset of the tree.
+that `#include` them. `unusedFunction` is likewise unsupported and rejected with a
+`ValueError`, as is `all`, which implies it: they need whole-program visibility, while
+Lintro invokes Cppcheck on the file list discovered for the run — a path argument, a
+`--diff` scope, or the whole tree — so functions would be reported unused merely because
+their callers were outside that list.
 
 Lintro requires Cppcheck **2.13.0 or newer**. Cppcheck ships no portable single binary,
 so the Docker image installs Debian's package (currently 2.17.1 on trixie) and
@@ -1302,13 +1305,13 @@ rejected by the version check; install from Homebrew or upstream in that case.
 
 **Available Options via `--tool-options`:**
 
-| Option         | Type           | Description                                                                                                                       |
-| -------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| `enable`       | string \| list | Check categories, comma-separated or pipe-delimited. Default `warning,style,performance,portability` (`error` checks always run). |
-| `inconclusive` | bool           | Report findings cppcheck cannot fully confirm.                                                                                    |
-| `std`          | string         | Language standard (e.g. `c11`, `c++17`).                                                                                          |
-| `inline_suppr` | bool           | Honor inline `// cppcheck-suppress` comments.                                                                                     |
-| `suppress`     | string \| list | Suppression specifications (e.g. `missingInclude`).                                                                               |
+| Option         | Type           | Description                                                                                                                                                                                                                                                                                 |
+| -------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enable`       | string \| list | Check categories forwarded to `--enable=`. Commas separate `--tool-options` entries, so several values are written pipe-separated (`cppcheck:enable=warning\|style`). Default `warning,style,performance,portability` (`error` checks always run). `unusedFunction` and `all` are rejected. |
+| `inconclusive` | bool           | Report findings cppcheck cannot fully confirm.                                                                                                                                                                                                                                              |
+| `std`          | string         | Language standard (e.g. `c11`, `c++17`).                                                                                                                                                                                                                                                    |
+| `inline_suppr` | bool           | Honor inline `// cppcheck-suppress` comments.                                                                                                                                                                                                                                               |
+| `suppress`     | string \| list | Suppression specifications forwarded to `--suppress=`, one flag per value. Several values are written pipe-separated (`cppcheck:suppress=missingInclude\|unusedStructMember`).                                                                                                              |
 
 **Example Usage:**
 

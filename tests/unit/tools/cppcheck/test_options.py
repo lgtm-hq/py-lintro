@@ -192,3 +192,100 @@ def test_header_only_tree_is_not_detected_as_c_or_cpp(tmp_path: Path) -> None:
     languages = detect_project_languages(root=tmp_path)
 
     assert_that(languages).does_not_contain("c", "cpp")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "unusedFunction",
+        "all",
+        "warning,unusedFunction",
+        ["warning", "unusedFunction"],
+        ["style", "all"],
+        "UNUSEDFUNCTION",
+    ],
+    ids=[
+        "direct",
+        "all-direct",
+        "combined-string",
+        "combined-list",
+        "all-in-list",
+        "case-insensitive",
+    ],
+)
+def test_set_options_rejects_whole_program_enable_categories(
+    cppcheck_plugin: CppcheckPlugin,
+    value: str | list[str],
+) -> None:
+    """``unusedFunction`` and ``all`` are refused however they are spelled.
+
+    Lintro runs cppcheck over the files discovered for the run, which may be a
+    subset of the tree, so a whole-program check would report functions as
+    unused merely because their callers were outside that list. Refusing is
+    deliberate: silently dropping a requested category would be worse.
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+        value: An ``enable`` value that must be rejected.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        cppcheck_plugin.set_options(enable=value)
+
+    assert_that(str(excinfo.value)).contains("whole-program analysis")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["warning", "warning,style", ["performance", "portability"]],
+    ids=["single", "comma-string", "list"],
+)
+def test_set_options_accepts_supported_enable_categories(
+    cppcheck_plugin: CppcheckPlugin,
+    value: str | list[str],
+) -> None:
+    """The rejection does not catch legitimate categories.
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+        value: An ``enable`` value that must be accepted.
+    """
+    cppcheck_plugin.set_options(enable=value)
+
+    assert_that(cppcheck_plugin.options.get("enable")).is_not_none()
+
+
+def test_default_enable_excludes_the_unsupported_categories(
+    cppcheck_plugin: CppcheckPlugin,
+) -> None:
+    """The default enable set is itself acceptable to the validator.
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+    """
+    default_enable = cppcheck_plugin.definition.default_options["enable"]
+
+    assert_that(str(default_enable)).does_not_contain("unusedFunction")
+    cppcheck_plugin.set_options(enable=str(default_enable))
+
+
+def test_default_options_reach_the_built_command(
+    cppcheck_plugin: CppcheckPlugin,
+) -> None:
+    """Every declared default is visible in the argv built with no overrides.
+
+    Args:
+        cppcheck_plugin: The plugin under test.
+    """
+    defaults = cppcheck_plugin.definition.default_options
+    cmd = cppcheck_plugin._build_command(files=["a.c"])
+
+    assert_that(cmd).contains(
+        "--xml",
+        "--quiet",
+        "--error-exitcode=1",
+        f"--enable={defaults['enable']}",
+    )
+    # Defaults that are False/None must contribute no flag at all.
+    assert_that(cmd).does_not_contain("--inconclusive", "--inline-suppr")
+    assert_that([arg for arg in cmd if arg.startswith("--std=")]).is_empty()
+    assert_that([arg for arg in cmd if arg.startswith("--suppress=")]).is_empty()

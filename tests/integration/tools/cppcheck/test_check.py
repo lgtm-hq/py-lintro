@@ -56,6 +56,10 @@ def test_check_clean_file_passes(
 
     assert_that(result).is_not_none()
     assert_that(result.success).is_true()
+    # skipped must be False as well: a skipped result is also successful with
+    # zero issues, so success alone cannot tell "ran and found nothing" from
+    # "never ran".
+    assert_that(result.skipped).is_false()
     assert_that(result.issues_count).is_equal_to(0)
 
 
@@ -101,5 +105,11 @@ def test_check_empty_directory(
     # report zero issues, so asserting only the count would not distinguish
     # "nothing to do" from "the invocation broke".
     assert_that(result.success).is_true()
+    assert_that(result.skipped).is_false()
     assert_that(result.issues_count).is_equal_to(0)
-    assert_that(result.output).contains("No .c/.cpp")
+    # Order-independent: the message lists the tool's extensions, whose order
+    # follows file_patterns and is not part of the contract being asserted.
+    assert_that(result.output).starts_with("No ")
+    assert_that(result.output).contains("found to check")
+    for suffix in (".c", ".cpp", ".cc", ".cxx", ".c++"):
+        assert_that(result.output).contains(suffix)
