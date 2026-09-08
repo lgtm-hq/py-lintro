@@ -1165,10 +1165,14 @@ cap was set (`cap_is_enforced` in `lintro/ai/review/cost_cap.py`, #2154):
 - `--max-cost-usd` or `LINTRO_AI_MAX_COST_USD` — **enforced**. Operator intent for this
   run enforces on every cost basis, and `estimate_cost_with_floor` is what gives the
   budget a non-zero number to count against.
-- `ai.max_cost_usd` in committed YAML — **display-only** on this path. Committed policy
-  is transport-unaware and enforces only where real money is at stake (`billed` or
-  `estimated`), so `run_planning.py` builds the `CostBudget` with `max_cost_usd=None`
-  and the reported `$` figure is a shadow estimate, not a ceiling.
+- `ai.max_cost_usd` in committed YAML — **display-only for `lintro review`**. Committed
+  policy is transport-unaware and enforces only where real money is at stake (`billed`
+  or `estimated`), so `run_planning.py` builds the review's `CostBudget` with
+  `max_cost_usd=None` and the reported `$` figure is a shadow estimate, not a ceiling.
+  This is the review path only: the AI lint sessions behind `lintro chk` / `fmt` build
+  `CostBudget(max_cost_usd=ai_config.max_cost_usd)` unconditionally
+  (`lintro/ai/orchestrator.py`), so a YAML cap does stop those, priced off the same
+  fallback estimate.
 
 #### Measuring a provider choice
 

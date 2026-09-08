@@ -253,6 +253,41 @@ def test_metadata_exposes_pricing_keys_without_importing_a_sdk() -> None:
     assert_that(PROVIDER_PLUGIN_API_VERSION).is_equal_to(1)
 
 
+@pytest.mark.parametrize(
+    ("supported", "default"),
+    [
+        (frozenset({AITransport.API}), AITransport.CLI),
+        (frozenset({AITransport.CLI}), AITransport.API),
+        (frozenset(), AITransport.API),
+    ],
+)
+def test_a_default_transport_the_provider_cannot_serve_is_rejected(
+    supported: frozenset[AITransport],
+    default: AITransport,
+) -> None:
+    """A record cannot advertise a default outside its supported transports.
+
+    Doctor and the generated docs table steer users towards
+    ``default_transport``, so an unserveable one is rejected where it is
+    declared rather than surfacing as an unusable hint.
+
+    Args:
+        supported: Transports the fake provider claims to serve.
+        default: The default it declares, which is not among them.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        ProviderMetadata(
+            provider=AIProvider.ANTHROPIC,
+            display_name="Fake",
+            default_model="fake-model",
+            default_api_key_env="FAKE_API_KEY",
+            supported_transports=supported,
+            default_transport=default,
+        )
+
+    assert_that(str(excinfo.value)).contains("anthropic", default.value)
+
+
 def test_provider_metadata_is_frozen() -> None:
     """Metadata cannot be edited in place by a consumer."""
     metadata = _FakePlugin().metadata

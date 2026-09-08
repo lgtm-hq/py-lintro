@@ -240,6 +240,18 @@ def test_facade_loads_the_builtin_plugins_itself() -> None:
         assert_that(get_default_model("Anthropic")).is_equal_to("claude-sonnet-4-6")
         clear_registered()
         assert_that(list(declared_cli_providers())).is_equal_to(list(AIProvider))
+
+        # Equal-to-builtin answers alone would also be produced by a leftover
+        # import-time snapshot. Registering a fake under Anthropic first is
+        # what distinguishes the two: `load_builtin_providers` skips a provider
+        # that is already registered, so a live read returns the fake's values
+        # and a snapshot would still return the real ones.
+        clear_registered()
+        register_provider(_FakeAnthropicPlugin())
+        assert_that(get_default_model("anthropic")).is_equal_to("fake-model")
+        assert_that(list(declared_cli_providers())).is_equal_to(
+            [AIProvider.OPENAI, AIProvider.CURSOR],
+        )
     finally:
         restore_registered(saved)
 

@@ -55,6 +55,10 @@ def _no_ambient_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
         tmp_path: Empty directory used as the home directory.
     """
     monkeypatch.delenv(_RENAMED_KEY, raising=False)
+    # `is_transcript_enabled` honours this even when `AIConfig.transcript_logging`
+    # is false, and doctor then prepends an `ai.transcript` result, which would
+    # break the result-count assertions below on a machine that exports it.
+    monkeypatch.delenv("LINTRO_AI_TRANSCRIPT", raising=False)
     for provider in AIProvider:
         metadata = metadata_for(provider)
         monkeypatch.delenv(metadata.default_api_key_env, raising=False)
@@ -241,6 +245,59 @@ def test_a_renamed_api_key_variable_is_honoured(
         return
     assert_that(result.status).is_equal_to(ToolStatus.OK)
     assert_that(result.message).contains(_RENAMED_KEY)
+
+
+def test_a_renamed_api_key_env_cannot_prove_openai_cli_auth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An `ai.api_key_env` override must not reach a probe that ignores it.
+
+    The `codex` binary authenticates with `CODEX_API_KEY` or `~/.codex/auth.json`
+    and never reads an SDK variable, whatever it is named. This pins the override
+    path specifically: every other OpenAI case leaves `ai.api_key_env` at its
+    default, so only this one would catch a `key_env` that leaked past
+    `honors_api_key_env`.
+
+    Args:
+        monkeypatch: Pytest environment patcher.
+    """
+    monkeypatch.setenv(_RENAMED_KEY, "secret")
+
+    results = check_ai_configuration(
+        _cli_config(AIProvider.OPENAI, api_key_env=_RENAMED_KEY),
+    )
+    result = _result(results, "ai.cli.auth")
+
+    assert_that(result.status).is_equal_to(ToolStatus.UNKNOWN)
+    assert_that(result.message).is_equal_to("Codex CLI auth not verified")
+
+
+def test_doctor_never_hands_a_non_honouring_probe_an_api_key_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Doctor resolves the API-key variable only for probes that read it.
+
+    The verdict is already safe without this — ``is_configured`` guards on
+    ``honors_api_key_env`` itself, which is why the test above cannot fail on
+    the doctor line alone. This pins the other half of that defence: what doctor
+    *passes*, so the two layers cannot quietly drift into relying on each other.
+
+    Args:
+        monkeypatch: Pytest attribute patcher.
+    """
+    seen: list[tuple[bool, str]] = []
+    original = CliAuthProbe.is_configured
+
+    def _spy(probe: CliAuthProbe, *, key_env: str) -> bool:
+        seen.append((probe.honors_api_key_env, key_env))
+        return original(probe, key_env=key_env)
+
+    monkeypatch.setattr(CliAuthProbe, "is_configured", _spy)
+    monkeypatch.setenv(_RENAMED_KEY, "secret")
+
+    check_ai_configuration(_cli_config(AIProvider.OPENAI, api_key_env=_RENAMED_KEY))
+
+    assert_that(seen).is_equal_to([(False, "")])
 
 
 def test_openai_cli_auth_accepts_codex_key(monkeypatch: pytest.MonkeyPatch) -> None:

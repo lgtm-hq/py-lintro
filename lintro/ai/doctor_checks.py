@@ -310,13 +310,14 @@ def _check_cli_auth(
     # Resolved only for the probes that read it. A provider whose CLI reads a
     # different variable than its SDK (OpenAI: `codex` reads CODEX_API_KEY,
     # never OPENAI_API_KEY) declares ``honors_api_key_env=False`` and is never
-    # handed the API-transport variable, so the CLI verdict cannot be swayed by
-    # an SDK credential.
-    key_env = (
-        config.api_key_env or provider_api_key_env(provider)
-        if probe.honors_api_key_env
-        else ""
-    )
+    # handed the API-transport variable, so neither the provider default nor an
+    # `ai.api_key_env` override can sway its CLI verdict. Written as a statement
+    # rather than a conditional expression: the one-liner parsed correctly, but
+    # two readers in a row misread `a or b if c else d`, and this is a
+    # credential check.
+    key_env = ""
+    if probe.honors_api_key_env:
+        key_env = config.api_key_env or provider_api_key_env(provider)
     if probe.is_configured(key_env=key_env):
         return AICheckResult(
             name="ai.cli.auth",
