@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.2] - 2026-09-08
+
+### Fixed
+
+- **ai**: normalize the codex review schema for OpenAI strict mode (#2480) (79acce7)
+
 ## [0.152.1] - 2026-09-08
 
 ### Changed
