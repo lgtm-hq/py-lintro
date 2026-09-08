@@ -36,9 +36,9 @@ PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
 #: Lane credentials added by #2472. The Codex subscription session is decoded
 #: into ~/.codex/auth.json by a dedicated step (its own injection site); the
 #: z.ai gateway token is forwarded under the ANTHROPIC_AUTH_TOKEN env name.
-CODEX_SESSION_SECRET = "CODEX_AUTH_JSON"
-ZAI_GATEWAY_SECRET = "ZAI_AUTH_TOKEN"
-GATEWAY_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN"
+CODEX_SESSION_ENV = "CODEX_AUTH_JSON"
+ZAI_GATEWAY_ENV = "ZAI_AUTH_TOKEN"
+GATEWAY_AUTH_ENV = "ANTHROPIC_AUTH_TOKEN"
 _OPENAI_EGRESS_HOSTS = (
     "api.openai.com:443",
     "auth.openai.com:443",
@@ -291,7 +291,7 @@ def test_shell_accepts_gateway_token_for_anthropic_without_oauth() -> None:
         args=[],
         env_overrides={
             CREDENTIAL_ENV: "",
-            GATEWAY_TOKEN_ENV: "dummy-gateway-token",
+            GATEWAY_AUTH_ENV: "dummy-gateway-token",
             "LINTRO_AI_PROVIDER": "anthropic",
             "PR_NUMBER": "",
         },
@@ -302,25 +302,21 @@ def test_shell_accepts_gateway_token_for_anthropic_without_oauth() -> None:
     assert_that(result.stdout).does_not_contain("no provider credential")
 
 
-def test_codex_session_path_is_bound_between_workflow_and_wrapper() -> None:
-    """The workflow must restore auth.json where the wrapper's gate looks.
+def test_codex_session_path_is_bound_between_scripts() -> None:
+    """The restore script must write the session where the wrapper's gate looks.
 
-    The restore step decodes CODEX_AUTH_JSON into ``$HOME/.codex/auth.json``
-    and the openai credential branch stats exactly that file (#2472); if the
-    two paths drift apart, the review fails as "no provider credential" on a
-    run whose secret was delivered correctly.
+    ``restore-codex-session.sh`` decodes CODEX_AUTH_JSON into
+    ``$HOME/.codex/auth.json`` and the openai credential branch stats exactly
+    that file (#2472); if the two paths drift apart, the review fails as "no
+    provider credential" on a run whose secret was delivered correctly.
     """
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
     assert_that(shell_text).contains('/.codex/auth.json"')
 
-    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    restore_steps = [
-        step
-        for step in loaded["jobs"]["ai-review"]["steps"]
-        if str(step.get("name", "")).startswith("Restore Codex subscription session")
-    ]
-    assert_that(restore_steps).is_length(1)
-    assert_that(restore_steps[0]["run"]).contains('.codex/auth.json')
+    restore_text = (
+        REPO_ROOT / "scripts" / "ci" / "restore-codex-session.sh"
+    ).read_text(encoding="utf-8")
+    assert_that(restore_text).contains("/.codex/auth.json")
 
 
 def test_shell_lowercases_provider_without_bash4_syntax() -> None:
@@ -793,25 +789,21 @@ def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
 
 
 def test_workflow_secret_scoped_to_review_step_only() -> None:
-    """Provider credentials are injected only into post-trust-install steps.
+    """Provider credentials are injected only into the review step env.
 
     Secrets must not appear in workflow- or job-level env maps, nor in
     earlier steps (checkout, CLI install, uv sync, etc.), so PR-controlled code
     paths never receive a token before the trusted base-ref install completes.
-    This is the ordering control audited in #1317. #2472 adds two legitimate
-    injection sites: the Codex session-restore step (CODEX_AUTH_JSON, decoded
-    into ~/.codex/auth.json after the trusted install) and the review step's
-    z.ai gateway token (ANTHROPIC_AUTH_TOKEN mapped from secrets.ZAI_AUTH_TOKEN).
+    This is the ordering control audited in #1317. #2472 adds the z.ai gateway
+    token to the review step env (ANTHROPIC_AUTH_TOKEN mapped from
+    secrets.ZAI_AUTH_TOKEN); the Codex session secret joins with the follow-up
+    invocation PR's restore step.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     workflow_env = loaded.get("env")
     job_env = loaded["jobs"]["ai-review"].get("env")
-    for credential_env in (
-        *PROVIDER_CREDENTIAL_ENVS,
-        CODEX_SESSION_SECRET,
-        GATEWAY_TOKEN_ENV,
-    ):
+    for credential_env in (*PROVIDER_CREDENTIAL_ENVS, GATEWAY_AUTH_ENV):
         if workflow_env is not None:
             assert_that(workflow_env).does_not_contain_key(credential_env)
         if job_env is not None:
@@ -822,12 +814,6 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
         step for step in steps if str(step.get("name", "")).startswith("Run AI review")
     ]
     assert_that(review_steps).is_length(1)
-    restore_steps = [
-        step
-        for step in steps
-        if str(step.get("name", "")).startswith("Restore Codex subscription session")
-    ]
-    assert_that(restore_steps).is_length(1)
 
     # Assert on the parsed env map, not on a dump of the whole step: a mention
     # in a `run:` line or a comment would satisfy a text search while the step
@@ -841,23 +827,14 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
     assert_that(review_step["env"][CURSOR_CREDENTIAL_ENV]).is_equal_to(
         "${{ secrets.CURSOR_API_KEY }}",
     )
-    assert_that(review_step["env"][GATEWAY_TOKEN_ENV]).contains(
+    assert_that(review_step["env"][GATEWAY_AUTH_ENV]).contains(
         "secrets.ZAI_AUTH_TOKEN",
     )
-    restore_step = restore_steps[0]
-    assert_that(restore_step["env"][CODEX_SESSION_SECRET]).is_equal_to(
-        "${{ secrets.CODEX_AUTH_JSON }}",
-    )
-    injection_sites = (review_step, restore_step)
     for step in steps:
-        if step in injection_sites:
+        if step is review_step:
             continue
         step_env = step.get("env") or {}
-        for credential_env in (
-            *PROVIDER_CREDENTIAL_ENVS,
-            CODEX_SESSION_SECRET,
-            GATEWAY_TOKEN_ENV,
-        ):
+        for credential_env in (*PROVIDER_CREDENTIAL_ENVS, GATEWAY_AUTH_ENV):
             assert_that(step_env).described_as(
                 f"step {step.get('name')!r}",
             ).does_not_contain_key(credential_env)
@@ -1037,7 +1014,7 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     resolve_steps = [
         step for step in steps if "ai_tools_arg_pin.py" in str(step.get("run", ""))
     ]
-    assert_that(resolve_steps).is_length(3)
+    assert_that(resolve_steps).is_length(2)
 
     claude_pins = next(step for step in resolve_steps if step.get("id") == "pins")
     pin_run = claude_pins["run"]
@@ -1084,26 +1061,11 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
         "${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}",
     )
 
-    # Codex lane (#2472): Renovate-pinned npm install, gated on the provider.
-    codex_pins = next(step for step in resolve_steps if step.get("id") == "codex-pins")
-    assert_that(codex_pins["if"]).is_equal_to(
-        "${{ vars.LINTRO_AI_PROVIDER == 'openai' }}",
-    )
-    assert_that(codex_pins["run"]).contains("CODEX_VERSION")
-    assert_that(codex_pins["run"]).contains("--exact")
-
-    codex_install_steps = [
-        step for step in steps if "npm install --global" in str(step.get("run", ""))
-    ]
-    assert_that(codex_install_steps).is_length(1)
-    codex_install = codex_install_steps[0]
-    assert_that(codex_install["if"]).is_equal_to(
-        "${{ vars.LINTRO_AI_PROVIDER == 'openai' }}",
-    )
-    assert_that(codex_install["run"]).contains("@openai/codex@")
-    assert_that(codex_install["env"]["CODEX_VERSION"]).is_equal_to(
-        "${{ steps.codex-pins.outputs.codex-version }}",
-    )
+    # Codex lane (#2472): the runner steps (pin resolution, pinned install,
+    # session restore) are added by the follow-up invocation PR per the
+    # two-PR bootstrap convention; this PR lands the scripts inert. The
+    # egress allowlist and the wrapper's openai credential branch are
+    # covered by their own tests above.
 
 
 # The only wildcard the AI Review job may allowlist: GitHub's hosted-runner

@@ -27,6 +27,10 @@ name: AI Review - Dogfood
 #     credential is the ~/.codex/auth.json session (org secret CODEX_AUTH_JSON,
 #     decoded by a dedicated step) — Codex has no OAuth-token env var, and
 #     CODEX_API_KEY would bill metered API credits instead of the subscription.
+#     The runner steps (pinned install via scripts/ci/install-codex-cli.sh,
+#     session restore via scripts/ci/restore-codex-session.sh) land in the
+#     follow-up invocation PR, per the two-PR bootstrap convention below;
+#     until then provider=openai fails visibly at the credential gate.
 #   - anthropic + gateway: when the repo variable ZAI_BASE_URL is set (e.g.
 #     z.ai's GLM Coding Plan endpoint), the same pinned `claude` binary is
 #     pointed at the gateway via ANTHROPIC_BASE_URL and authenticated with
@@ -61,9 +65,10 @@ name: AI Review - Dogfood
 #   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
 #   2. Trusted install: checkout ref is pull_request.base.sha, never PR head.
 #   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN,
-#      CURSOR_API_KEY, CODEX_AUTH_JSON, and ZAI_AUTH_TOKEN) are injected only
-#      into the review step / codex-session-restore step env, after
-#      the trusted base-ref checkout, the pinned CLI installs, and uv sync.
+#      CURSOR_API_KEY, and ZAI_AUTH_TOKEN — CODEX_AUTH_JSON joins with the
+#      follow-up invocation PR) are injected only into the review step /
+#      codex-session-restore step env, after the trusted base-ref checkout,
+#      the pinned CLI installs, and uv sync.
 # No GitHub Environment gate is required once (1–3) hold; the trusted-install
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
@@ -288,16 +293,11 @@ jobs:
           python3 scripts/ci/ai_tools_arg_pin.py CURSOR_AGENT_VERSION \
             CURSOR_AGENT_SHA256_X64 --format github >>"$GITHUB_OUTPUT"
 
-      - name: Resolve pinned codex version
-        id: codex-pins
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
-        # Same pin site as the claude pin: docker/ai-tools.Dockerfile's
-        # Renovate-managed CODEX_VERSION ARG, so the codex binary this job
-        # drives is the one lintro ships and the contract tests verify.
-        # Gated so the anthropic/cursor paths never touch the codex pin.
-        run: |
-          python3 scripts/ci/ai_tools_arg_pin.py CODEX_VERSION \
-            --exact --format github >>"$GITHUB_OUTPUT"
+      # NOTE (#2472): the codex lane's runner steps (pin resolution, pinned
+      # install via scripts/ci/install-codex-cli.sh, session restore via
+      # scripts/ci/restore-codex-session.sh) follow the two-PR bootstrap
+      # convention: this PR lands the scripts inert; the invocation steps are
+      # added by a follow-up PR once this is on main.
 
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -316,18 +316,6 @@ jobs:
           # yamllint disable-line rule:line-length
           CURSOR_AGENT_SHA256_X64: ${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}
         run: scripts/ci/install-cursor-agent.sh
-
-      - name: Install pinned codex CLI
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
-        # Inline npm install, not a scripts/ci installer: codex needs no
-        # checksum plumbing beyond the Renovate pin, and inlining keeps this
-        # out of the two-PR bootstrap convention for new scripts (#2472).
-        env:
-          # yamllint disable-line rule:line-length
-          CODEX_VERSION: ${{ steps.codex-pins.outputs.codex-version }}
-        run: |
-          npm install --global "@openai/codex@${CODEX_VERSION:?}"
-          codex --version
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
@@ -360,29 +348,12 @@ jobs:
             core.setOutput('runtime-token', token)
             core.setOutput('results-url', results)
 
-      - name: Restore Codex subscription session
-        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
-        # Lane 1 credential (#2472): the ChatGPT-plan session is the
-        # ~/.codex/auth.json file written by `codex login` — Codex has no
-        # OAuth-token env var, and CODEX_API_KEY would bill metered API
-        # credits instead of the subscription. The org secret holds the
-        # base64 of that file; it is decoded only here, after the trusted
-        # base-ref checkout and the pinned installs, and lintro picks the
-        # session up from the file (codex_auth_configured). An unset secret
-        # is a warning here, not a skip: the wrapper's credential gate
-        # reports it through the classifier so the failure stays visible
-        # and classified. Deliberately ahead of the App-token mint so the
-        # mint stays immediately before the review step (#2050 invariant).
-        env:
-          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
-        run: |
-          if [[ -z "${CODEX_AUTH_JSON:-}" ]]; then
-            echo "::warning::CODEX_AUTH_JSON is unset — review will report it."
-            exit 0
-          fi
-          mkdir -p "${HOME}/.codex"
-          printf '%s' "${CODEX_AUTH_JSON}" | base64 --decode >"${HOME}/.codex/auth.json"
-          chmod 600 "${HOME}/.codex/auth.json"
+      # NOTE (#2472): the codex lane's session-restore step (invoking
+      # scripts/ci/restore-codex-session.sh with the CODEX_AUTH_JSON secret)
+      # is added by the follow-up invocation PR, once the script is on main
+      # (two-PR bootstrap convention). It must sit after the trusted base-ref
+      # checkout and the pinned installs, and ahead of the App-token mint so
+      # the mint stays immediately before the review step (#2050 invariant).
 
       - name: Mint lintro-review App token
         id: lintro-review-app
