@@ -79,11 +79,12 @@ of scope so the subscription token is actually used.
 
 The dogfood job can also run two further CLI lanes without an API key (#2472): provider
 `anthropic` against a gateway such as z.ai's GLM Coding Plan by forwarding
-`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` to the pinned `claude` binary (wired
-today), and provider `openai` on a restored `~/.codex/auth.json` subscription session
-(org secret `CODEX_AUTH_JSON`; `CODEX_API_KEY` would bill metered API credits, not the
-plan) — the openai lane's install and session-restore steps land in a follow-up
-invocation PR, so selecting it fails visibly at the credential gate until then.
+`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` to the pinned `claude` binary, and
+provider `openai` on a restored `~/.codex/auth.json` subscription session (org secret
+`CODEX_AUTH_JSON`; `CODEX_API_KEY` would bill metered API credits, not the plan) — the
+workflow resolves the Renovate-pinned codex version, installs it and decodes the secret
+into the session file before the review step; with the secret unset the run fails
+visibly at the credential gate.
 
 ## Reported numbers
 
