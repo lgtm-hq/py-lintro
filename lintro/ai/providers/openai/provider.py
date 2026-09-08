@@ -10,8 +10,10 @@ Imported on demand by
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import tempfile
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -348,37 +350,52 @@ class OpenAIProvider(ApiStreamingProvider):
             effective_model,
         ]
         candidates: list[OptionalArg] = []
+        schema_path: str | None = None
         if cli_schema is not None:
+            # codex's --output-schema expects a file PATH, not inline JSON:
+            # passing the schema itself as the value makes codex try to open a
+            # file named after the whole schema text and abort with
+            # "Filename too long" (os error 36) before any request is sent.
+            schema_fd, schema_path = tempfile.mkstemp(
+                suffix=".json",
+                prefix="lintro-review-schema-",
+            )
+            with os.fdopen(schema_fd, "w", encoding="utf-8") as schema_file:
+                json.dump(cli_schema.schema, schema_file)
             candidates.append(
                 OptionalArg(
                     flag="--output-schema",
-                    values=(json.dumps(cli_schema.schema),),
+                    values=(schema_path,),
                 ),
             )
+        try:
+            optional_args = await self._cli.apply_optional_args(cmd, candidates)
+            # Prompt rides on stdin (#1967): a trailing positional would be a
+            # single argv element and hits Linux MAX_ARG_STRLEN (128 KiB) on large
+            # review diffs. The ``-`` sentinel forces stdin-as-prompt.
+            cmd.append("-")
 
-        optional_args = await self._cli.apply_optional_args(cmd, candidates)
-        # Prompt rides on stdin (#1967): a trailing positional would be a
-        # single argv element and hits Linux MAX_ARG_STRLEN (128 KiB) on large
-        # review diffs. The ``-`` sentinel forces stdin-as-prompt.
-        cmd.append("-")
+            logger.debug(
+                f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
+            )
 
-        logger.debug(
-            f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
-        )
-
-        result = await self._cli.run_guarded(
-            cmd,
-            optional_args=optional_args,
-            input_text=prompt,
-            timeout=timeout,
-            cwd=repo_root or os.getcwd(),
-        )
-        self._cli.check_exit_code(
-            result,
-            auth_patterns=("authentication", "login", "not authenticated"),
-            auth_hint="Run 'codex login' or set CODEX_API_KEY.",
-        )
-        return self._cli.parse_stdout(result.stdout)
+            result = await self._cli.run_guarded(
+                cmd,
+                optional_args=optional_args,
+                input_text=prompt,
+                timeout=timeout,
+                cwd=repo_root or os.getcwd(),
+            )
+            self._cli.check_exit_code(
+                result,
+                auth_patterns=("authentication", "login", "not authenticated"),
+                auth_hint="Run 'codex login' or set CODEX_API_KEY.",
+            )
+            return self._cli.parse_stdout(result.stdout)
+        finally:
+            if schema_path is not None:
+                with contextlib.suppress(OSError):
+                    os.unlink(schema_path)
 
     async def complete(
         self,

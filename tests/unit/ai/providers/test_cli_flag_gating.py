@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - CompletedProcess objects are constructed to drive the providers under test
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -321,6 +322,66 @@ async def test_codex_sends_output_schema_when_advertised(_codex_on_path: None) -
     assert_that(cmd).contains("--output-schema")
     # The prompt stays the trailing positional even after optional flags.
     assert_that(cmd[-1]).is_equal_to("-")
+
+
+async def test_codex_output_schema_points_at_temp_file_not_inline_json(
+    _codex_on_path: None,
+) -> None:
+    """--output-schema must carry a file PATH containing the schema.
+
+    codex reads the flag's value as a filename: passing the schema JSON itself
+    made codex try to open a file named after the whole schema text and abort
+    with "Filename too long" (os error 36) before any request was sent
+    (first live Codex-lane dogfood, #2472). The file must hold the schema and
+    be cleaned up after the call.
+    """
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json\n  --sandbox <mode>\n  --output-schema <file>\n",
+        completion=_CODEX_COMPLETION,
+        version="codex-cli 0.60.0",
+        calls=calls,
+    )
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
+
+    cmd = _completion_calls(calls)[-1]
+    schema_arg = cmd[cmd.index("--output-schema") + 1]
+    assert_that(schema_arg).ends_with(".json")
+    assert_that(schema_arg.startswith("{")).is_false()
+    # The schema rides in the file, and the temp file is cleaned up.
+    assert_that(Path(schema_arg).exists()).is_false()
+    # The path was written with the schema when the call was made.
+    assert_that(cmd.count("--output-schema")).is_equal_to(1)
+
+
+async def test_codex_output_schema_temp_file_cleaned_up_after_retry_ladder(
+    _codex_on_path: None,
+) -> None:
+    """The schema temp file outlives the backstop retry, then is removed.
+
+    The cleanup runs after the guarded call returns (including its retry
+    ladder): the first attempt carries the schema file, the retry drops the
+    rejected flag, and no temp file is left behind once the call settles.
+    """
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json\n  --sandbox <mode>\n  --output-schema <file>\n",
+        completion=_CODEX_COMPLETION,
+        version="codex-cli 0.60.0",
+        reject="--output-schema",
+        calls=calls,
+    )
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
+
+    completions = _completion_calls(calls)
+    assert_that(completions).is_length(2)
+    first_schema_path = completions[0][completions[0].index("--output-schema") + 1]
+    assert_that(completions[-1]).does_not_contain("--output-schema")
+    assert_that(Path(first_schema_path).exists()).is_false()
 
 
 async def test_codex_omits_output_schema_when_not_advertised(
