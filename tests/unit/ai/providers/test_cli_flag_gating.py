@@ -439,7 +439,7 @@ async def test_codex_output_schema_is_normalized_for_openai_strict_mode(
     )
     assert_that(bullet["properties"]["text"]["type"]).is_equal_to("string")
     # Required, non-optional properties keep their original type.
-    assert_that(summary["properties"]["summary"]["type"]).is_equal_to("object")
+    assert_that(written["properties"]["summary"]["type"]).is_equal_to("object")
     # And the temp file did not survive the call.
     schema_arg = _completion_calls(calls)[-1][
         _completion_calls(calls)[-1].index("--output-schema") + 1
