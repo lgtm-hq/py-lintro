@@ -165,7 +165,12 @@ elif [[ "$provider" == "openai" ]]; then
 	fi
 else
 	credential="${CLAUDE_CODE_OAUTH_TOKEN:-}"
-	if [[ -z "$credential" && -n "${ANTHROPIC_AUTH_TOKEN:-}" ]]; then
+	# Gateway mode needs BOTH halves: a token without ANTHROPIC_BASE_URL
+	# would be forwarded to the default api.anthropic.com endpoint, sending
+	# the gateway credential to an unintended host — so it fails visibly
+	# here instead (#2472).
+	if [[ -z "$credential" && -n "${ANTHROPIC_AUTH_TOKEN:-}" &&
+		-n "${ANTHROPIC_BASE_URL:-}" ]]; then
 		credential="anthropic-gateway"
 	fi
 fi

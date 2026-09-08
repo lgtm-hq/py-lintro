@@ -88,3 +88,44 @@ def test_script_pins_the_openai_package_and_verifies_binary() -> None:
         'npm install -g --no-fund --no-audit "@openai/codex@${CODEX_VERSION}"',
     )
     assert_that(script).contains("codex --version")
+
+
+def test_well_formed_pin_passes_validation(tmp_path: Path) -> None:
+    """A well-formed X.Y.Z pin passes the regex and drives the install.
+
+    Only rejections are covered above, so a regex tightened one character
+    too far would reject every real pin unnoticed. Stub ``npm``/``codex``
+    binaries stand in for the network: the install line must carry the
+    pinned package and the ``codex --version`` probe must run.
+    """
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    npm_log = tmp_path / "npm-args.log"
+    npm_stub = stub_dir / "npm"
+    npm_stub.write_text(
+        "#!/usr/bin/env bash\n" f'printf \'%s\\n\' "$@" >> "{npm_log}"\n',
+        encoding="utf-8",
+    )
+    codex_stub = stub_dir / "codex"
+    codex_stub.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [ "$1" = "--version" ]; then echo "' + VALID_VERSION + '"; fi\n',
+        encoding="utf-8",
+    )
+    npm_stub.chmod(0o755)
+    codex_stub.chmod(0o755)
+
+    result = _run(
+        env_overrides={
+            "CODEX_VERSION": VALID_VERSION,
+            "PATH": f"{stub_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains(
+        f"Installing @openai/codex@{VALID_VERSION}...",
+    )
+    assert_that(npm_log.read_text(encoding="utf-8")).contains(
+        f"@openai/codex@{VALID_VERSION}",
+    )

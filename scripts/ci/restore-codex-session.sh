@@ -43,6 +43,10 @@ if [[ -z "${CODEX_AUTH_JSON:-}" ]]; then
 	exit 0
 fi
 
+# The session is live credential material: create the directory and the
+# file owner-only from the start, so the tokens are never briefly
+# group/world readable before the explicit chmod below.
+umask 077
 mkdir -p "${HOME:-}/.codex"
 # A mistyped secret (raw JSON pasted unencoded, a truncated value, invalid
 # base64) should fail here with a clear message rather than at the review, as
@@ -55,8 +59,18 @@ if ! printf '%s' "${CODEX_AUTH_JSON}" | base64 --decode >"${auth_target}" 2>/dev
 fi
 chmod 600 "${auth_target}"
 
-# auth.json is a JSON object; anything else decoded cleanly but is wrong.
-if [[ ! -s "${auth_target}" ]] || [[ "$(head -c 1 "${auth_target}")" != "{" ]]; then
+# auth.json must parse as a JSON object. A truncated secret can decode
+# cleanly and still start with "{", which a first-byte check alone would
+# wave through to the confusing CLI auth error this script exists to
+# prevent; valid JSON that starts with whitespace must not be rejected.
+if ! python3 -c '
+import json
+import sys
+
+with open(sys.argv[1]) as handle:
+    value = json.load(handle)
+sys.exit(0 if isinstance(value, dict) else 1)
+' "${auth_target}" 2>/dev/null; then
 	rm -f "${auth_target}"
 	echo "ERROR: CODEX_AUTH_JSON did not decode to a JSON session file" >&2
 	exit 1

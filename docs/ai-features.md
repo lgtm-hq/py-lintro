@@ -1392,14 +1392,16 @@ developer's login.
   because `--bare` disables OAuth session login (see the `--bare` note above). Set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
   binary's egress and version predictable under an egress allowlist.
-- **Two more subscription lanes (#2472).** `LINTRO_AI_PROVIDER=openai` runs the
-  version-pinned `codex` CLI on a ChatGPT-plan session: the workflow decodes an
+- **Two more subscription lanes (#2472).** With provider `anthropic` (the default) and
+  the `ZAI_BASE_URL` variable set, the pinned `claude` binary is pointed at a gateway
+  (e.g. z.ai's GLM Coding Plan endpoint) via `ANTHROPIC_BASE_URL` +
+  `ANTHROPIC_AUTH_TOKEN` — the CLI transport forwards `os.environ` to the subprocess, so
+  no product code is involved; this lane is wired today. `LINTRO_AI_PROVIDER=openai`
+  runs the version-pinned `codex` CLI on a ChatGPT-plan session: the workflow decodes an
   org secret into `~/.codex/auth.json` (Codex has no OAuth-token env var;
-  `CODEX_API_KEY` is metered API billing, not the subscription). With provider
-  `anthropic` and the `ZAI_BASE_URL` variable set, the same pinned `claude` binary
-  is pointed at a gateway (e.g. z.ai's GLM Coding Plan endpoint) via
-  `ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` — the CLI transport forwards
-  `os.environ` to the subprocess, so no product code is involved.
+  `CODEX_API_KEY` is metered API billing, not the subscription) — that lane's install
+  and session-restore steps land in a follow-up invocation PR, so it fails visibly at
+  the credential gate until then.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing

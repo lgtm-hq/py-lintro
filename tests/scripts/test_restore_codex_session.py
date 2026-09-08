@@ -99,7 +99,18 @@ def test_valid_secret_is_decoded_with_owner_only_permissions(tmp_path: Path) -> 
     assert_that(oct(auth_file.stat().st_mode & 0o777)).is_equal_to("0o600")
 
 
-@pytest.mark.parametrize("bad_payload", ["", "not base64 at all!", "[]"])
+@pytest.mark.parametrize(
+    "bad_payload",
+    [
+        "",
+        "not base64 at all!",
+        "[]",
+        # Decodes cleanly and starts with "{", but is not valid JSON —
+        # exactly what a truncated secret looks like at a 4-char boundary.
+        "{not-json",
+        '{"OPENAI_API_KEY": "trunca',
+    ],
+)
 def test_malformed_secret_fails_and_cleans_up(
     tmp_path: Path,
     bad_payload: str,

@@ -172,7 +172,7 @@ jobs:
       # yamllint disable-line rule:line-length
       AI_REVIEW_OPENAI_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'openai' && 'api.openai.com:443 auth.openai.com:443 chatgpt.com:443' || '' }}
       # yamllint disable-line rule:line-length
-      AI_REVIEW_ZAI_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'anthropic' && vars.ZAI_BASE_URL != '' && 'api.z.ai:443' || '' }}
+      AI_REVIEW_ZAI_EGRESS: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL != '' && 'api.z.ai:443' || '' }}
 
     steps:
       - name: Harden Runner
@@ -383,8 +383,11 @@ jobs:
           # Empty in the z.ai gateway lane (#2472) so the subscription
           # session and the gateway token are never both in play — there the
           # ANTHROPIC_AUTH_TOKEN/ANTHROPIC_BASE_URL pair below carries auth.
+          # The condition is inverted (secret in the TRUE branch) because
+          # `cond && '' || secret` can never yield '': GHA's `||` falls
+          # through on the falsy ''.
           # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ vars.LINTRO_AI_PROVIDER == 'anthropic' && vars.ZAI_BASE_URL && '' || secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') != 'anthropic' || vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # Cursor CLI auth when LINTRO_AI_PROVIDER=cursor. Empty when the
           # org/repo secret is unset — the wrapper then fails visibly rather
           # than posting nothing.
@@ -414,7 +417,8 @@ jobs:
           LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
           LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
           LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
-          # z.ai GLM gateway lane (#2472 lane 2). With provider anthropic and
+          # z.ai GLM gateway lane (#2472 lane 2). With provider anthropic
+          # (explicit or via the same default the review step applies) and
           # ZAI_BASE_URL set, the pinned `claude` binary is pointed at the
           # gateway (z.ai's documented Anthropic-compatible endpoint) and
           # ANTHROPIC_AUTH_TOKEN authenticates it — the GLM Coding Plan
@@ -425,9 +429,9 @@ jobs:
           # intact. A non-default gateway host (e.g. open.bigmodel.cn) needs
           # a matching AI_REVIEW_ZAI_EGRESS allowlist edit.
           # yamllint disable-line rule:line-length
-          ANTHROPIC_BASE_URL: ${{ vars.LINTRO_AI_PROVIDER == 'anthropic' && vars.ZAI_BASE_URL || '' }}
+          ANTHROPIC_BASE_URL: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL || '' }}
           # yamllint disable-line rule:line-length
-          ANTHROPIC_AUTH_TOKEN: ${{ vars.LINTRO_AI_PROVIDER == 'anthropic' && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}
+          ANTHROPIC_AUTH_TOKEN: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}
           # Spend ceiling overlay (#2024 / #2154 / #2156). Unset falls
           # through to committed YAML (now unset = no cap). Overlay
           # `uncapped` is the explicit lift; overlay `0` is rejected as
