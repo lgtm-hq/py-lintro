@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.1] - 2026-09-08
+
+### Changed
+
+- **ai**: close out the #2473 dogfood review test gaps (#2477) (06727fa)
+- **ai**: invoke the codex installer and session restore steps (#2476) (1db5c04)
+
+### Fixed
+
+- **ai**: pass the codex review schema as a file path (#2478) (63ec662)
+
 ## [0.152.0] - 2026-09-08
 
 ### Added
