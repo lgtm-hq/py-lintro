@@ -208,6 +208,31 @@ def test_shell_fails_visibly_without_oauth_token() -> None:
     assert_that(result.stderr).contains("nothing was reviewed")
 
 
+def test_shell_standard_anthropic_path_with_empty_gateway_env() -> None:
+    """Empty gateway env must not disturb the standard claude subscription path.
+
+    The workflow always emits ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN into
+    the review step; in non-gateway mode they resolve to '' and reach the
+    claude subprocess via os.environ (#2473). With a valid OAuth token and
+    both gateway vars empty, the gate must still pass — the failure here must
+    be the missing PR number, not a no-credential skip.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "dummy-claude-token",
+            GATEWAY_AUTH_ENV: "",
+            "ANTHROPIC_BASE_URL": "",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).does_not_contain("no provider credential")
+
+
 def test_shell_fails_visibly_without_cursor_key_when_provider_is_cursor() -> None:
     """Cursor overlay must not treat a Claude token as the Cursor credential.
 
@@ -441,6 +466,7 @@ def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
             "HOME": str(tmp_path.joinpath("empty-home")),
         },
     )
+    assert_that(not_restored.returncode).is_equal_to(1)
     assert_that(not_restored.stdout).contains("no provider credential")
 
 
@@ -978,7 +1004,7 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
     )
     assert_that(review_step["env"][GATEWAY_AUTH_ENV]).is_equal_to(
         "${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
-        " && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}",
+        " && vars.ZAI_BASE_URL && secrets." + ZAI_GATEWAY_ENV + " || '' }}",
     )
     assert_that(review_step["env"]["ANTHROPIC_BASE_URL"]).is_equal_to(
         "${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
