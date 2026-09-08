@@ -425,6 +425,7 @@ class OpenAIProvider(ApiStreamingProvider):
         ]
         candidates: list[OptionalArg] = []
         schema_path: str | None = None
+        schema_fd = -1
         if cli_schema is not None:
             # codex's --output-schema expects a file PATH, not inline JSON:
             # passing the schema itself as the value makes codex try to open a
@@ -436,6 +437,8 @@ class OpenAIProvider(ApiStreamingProvider):
             )
         try:
             if cli_schema is not None and schema_path is not None:
+                # Both are set together above; the second check narrows the
+                # type for mypy and keeps the tempfile write inside the try.
                 with os.fdopen(schema_fd, "w", encoding="utf-8") as schema_file:
                     json.dump(_openai_strict_schema(cli_schema.schema), schema_file)
                 candidates.append(
