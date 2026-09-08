@@ -328,6 +328,29 @@ def test_shell_rejects_gateway_token_without_gateway_endpoint() -> None:
     assert_that(result.stdout).does_not_contain("never invoked")
 
 
+def test_shell_rejects_gateway_endpoint_without_token() -> None:
+    """A gateway endpoint without ANTHROPIC_AUTH_TOKEN fails the gate too.
+
+    The mirror of the orphan-token case: pointing the CLI at a gateway it
+    cannot authenticate to must not half-activate the lane — with the Claude
+    OAuth secret absent, the gate reports the missing credential visibly
+    rather than running unauthenticated against the gateway URL (#2472).
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stdout).does_not_contain("never invoked")
+
+
 def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
     """The restore script must write the session where the wrapper's gate looks.
 
