@@ -926,10 +926,6 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
             assert_that(workflow_env).does_not_contain_key(credential_env)
         if job_env is not None:
             assert_that(job_env).does_not_contain_key(credential_env)
-        if workflow_env is not None:
-            assert_that(workflow_env).does_not_contain_key(credential_env)
-        if job_env is not None:
-            assert_that(job_env).does_not_contain_key(credential_env)
 
     steps = loaded["jobs"]["ai-review"]["steps"]
     review_steps = [
@@ -966,6 +962,10 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
         "${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
         " && vars.ZAI_BASE_URL || '' }}",
     )
+    # The review step must not receive the Codex session either: when the
+    # follow-up invocation PR lands it, CODEX_AUTH_JSON is injected into the
+    # restore step only — never into the step that runs the review (#2473).
+    assert_that(review_step["env"]).does_not_contain_key(CODEX_SESSION_ENV)
     for step in steps:
         if step is review_step:
             continue
@@ -1289,7 +1289,6 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'",
     )
     assert_that(zai_egress).contains("vars.ZAI_BASE_URL != ''")
-    assert_that(zai_egress).contains("vars.ZAI_BASE_URL")
     zai_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", zai_egress)
     if zai_branch is None:
         pytest.fail("z.ai egress expression must quote hosts and default to empty")
