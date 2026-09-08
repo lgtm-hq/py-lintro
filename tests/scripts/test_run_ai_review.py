@@ -929,16 +929,18 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
     # in a `run:` line or a comment would satisfy a text search while the step
     # never actually received the secret.
     review_step = review_steps[0]
-    # The claude token is empty in the z.ai gateway lane (#2472) so the two
-    # anthropic auth sources are never both in play. Exact-expression
+    # The claude token rides only in the non-gateway anthropic lane
+    # (#2473 review): gateway mode empties it so the two anthropic auth
+    # sources are never both in play, and the openai/cursor lanes don't
+    # receive a Claude credential they cannot use. Exact-expression
     # assertions, not substring checks: GitHub Actions has no ternary, and
     # `cond && '' || secret` degrades to always-secret because '' is falsy —
     # only the inverted form (secret in the TRUE branch) can yield ''. The
     # provider comparison uses the defaulted form the review step itself
     # applies, so the lane activates when LINTRO_AI_PROVIDER is unset.
     assert_that(review_step["env"][CREDENTIAL_ENV]).is_equal_to(
-        "${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') != 'anthropic'"
-        " || vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN"
+        "${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+        " && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN"
         " || '' }}",
     )
     assert_that(review_step["env"][CURSOR_CREDENTIAL_ENV]).is_equal_to(

@@ -80,6 +80,20 @@ def test_unset_secret_warns_and_exits_zero_without_writing(tmp_path: Path) -> No
     assert_that(tmp_path.joinpath(".codex", "auth.json").exists()).is_false()
 
 
+def test_empty_secret_is_treated_as_unset(tmp_path: Path) -> None:
+    """An empty CODEX_AUTH_JSON follows the unset contract exactly.
+
+    Empty and unset are the same delivery failure (the org secret exists but
+    resolved to nothing), so both warn and exit 0 for the credential gate to
+    report — neither may fail the step itself.
+    """
+    result = _run(env_overrides={"HOME": str(tmp_path), "CODEX_AUTH_JSON": ""})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("::warning")
+    assert_that(tmp_path.joinpath(".codex", "auth.json").exists()).is_false()
+
+
 def test_valid_secret_is_decoded_with_owner_only_permissions(tmp_path: Path) -> None:
     """A valid session lands at $HOME/.codex/auth.json, mode 600.
 
@@ -102,10 +116,9 @@ def test_valid_secret_is_decoded_with_owner_only_permissions(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     "bad_payload",
     [
-        "",
         "not base64 at all!",
         "[]",
-        # Decodes cleanly and starts with "{", but is not valid JSON —
+        # Both decode cleanly and start with "{", but are not valid JSON —
         # exactly what a truncated secret looks like at a 4-char boundary.
         "{not-json",
         '{"OPENAI_API_KEY": "trunca',
@@ -119,8 +132,10 @@ def test_malformed_secret_fails_and_cleans_up(
 
     A mistyped secret should fail here, loudly, rather than surface later as
     a confusing CLI auth error — and the partial file must not linger.
+    (The empty payload is not in this list: empty follows the unset
+    contract — warn + exit 0 — covered by its own test above.)
     """
-    encoded = _encoded(bad_payload) if bad_payload else "!!!not-base64!!!"
+    encoded = _encoded(bad_payload)
 
     result = _run(env_overrides={"HOME": str(tmp_path), "CODEX_AUTH_JSON": encoded})
 

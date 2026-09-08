@@ -380,14 +380,15 @@ jobs:
           # its account has no balance, and its mere presence would make
           # lintro's bare-mode detection think a bare `claude` call could
           # authenticate (LINTRO_CLI_BARE pins the decision regardless).
-          # Empty in the z.ai gateway lane (#2472) so the subscription
-          # session and the gateway token are never both in play — there the
-          # ANTHROPIC_AUTH_TOKEN/ANTHROPIC_BASE_URL pair below carries auth.
-          # The condition is inverted (secret in the TRUE branch) because
+          # Only the non-gateway anthropic lane carries the subscription
+          # token (#2473 review): gateway mode empties it so the session and
+          # the gateway token are never both in play, and the openai/cursor
+          # lanes don't receive a Claude credential they cannot use. The
+          # condition is inverted (secret in the TRUE branch) because
           # `cond && '' || secret` can never yield '': GHA's `||` falls
           # through on the falsy ''.
           # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') != 'anthropic' || vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # Cursor CLI auth when LINTRO_AI_PROVIDER=cursor. Empty when the
           # org/repo secret is unset — the wrapper then fails visibly rather
           # than posting nothing.
