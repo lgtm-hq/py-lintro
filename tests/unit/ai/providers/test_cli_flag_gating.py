@@ -356,6 +356,97 @@ async def test_codex_output_schema_points_at_temp_file_not_inline_json(
     assert_that(cmd.count("--output-schema")).is_equal_to(1)
 
 
+async def test_codex_output_schema_is_normalized_for_openai_strict_mode(
+    _codex_on_path: None,
+) -> None:
+    """The written schema must satisfy OpenAI strict structured outputs.
+
+    OpenAI rejects schemas whose ``required`` omits any ``properties`` key
+    (``invalid_json_schema``: "Missing 'finding_ref'") — the exact failure of
+    the first live Codex-lane dogfood. The temp file must therefore carry the
+    normalized form: every property required, formerly-optional ones nullable,
+    and the temp file removed after the call.
+    """
+    schema_with_optional_key = CliSchemaRequest(
+        schema={
+            "type": "object",
+            "required": ["summary"],
+            "additionalProperties": False,
+            "properties": {
+                "summary": {
+                    "type": "object",
+                    "required": ["headline"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "headline": {"type": "string"},
+                        "walkthrough": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["text"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "text": {"type": "string"},
+                                    "finding_ref": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                },
+                "flagged_files": {"type": "array"},
+            },
+        },
+        schema_name="lintro_review",
+    )
+    captured: dict[str, str] = {}
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json\n  --sandbox <mode>\n  --output-schema <file>\n",
+        completion=_CODEX_COMPLETION,
+        version="codex-cli 0.60.0",
+        calls=calls,
+    )
+
+    def _spy(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Capture the schema file content at spawn time (pre-cleanup)."""
+        if "--output-schema" in cmd:
+            path = cmd[cmd.index("--output-schema") + 1]
+            captured["schema"] = Path(path).read_text(encoding="utf-8")
+        return runner(cmd, **kwargs)
+
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=_spy):
+        await provider.complete(
+            "hello",
+            repo_root="/tmp/repo",
+            cli_schema=schema_with_optional_key,
+        )
+
+    written = json.loads(captured["schema"])
+    summary = written["properties"]["summary"]
+    # Every property is required; optional ones are nullable instead.
+    assert_that(sorted(written["required"])).is_equal_to(
+        ["flagged_files", "summary"],
+    )
+    assert_that(written["properties"]["flagged_files"]["type"]).is_equal_to(
+        ["array", "null"],
+    )
+    assert_that(sorted(summary["required"])).is_equal_to(["headline", "walkthrough"])
+    bullet = summary["properties"]["walkthrough"]["items"]
+    assert_that(sorted(bullet["required"])).is_equal_to(["finding_ref", "text"])
+    assert_that(bullet["properties"]["finding_ref"]["type"]).is_equal_to(
+        ["string", "null"],
+    )
+    assert_that(bullet["properties"]["text"]["type"]).is_equal_to("string")
+    # Required, non-optional properties keep their original type.
+    assert_that(summary["properties"]["summary"]["type"]).is_equal_to("object")
+    # And the temp file did not survive the call.
+    schema_arg = _completion_calls(calls)[-1][
+        _completion_calls(calls)[-1].index("--output-schema") + 1
+    ]
+    assert_that(Path(schema_arg).exists()).is_false()
+
+
 async def test_codex_output_schema_temp_file_cleaned_up_after_retry_ladder(
     _codex_on_path: None,
 ) -> None:

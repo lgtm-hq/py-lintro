@@ -11,6 +11,7 @@ Imported on demand by
 from __future__ import annotations
 
 import contextlib
+import copy
 import json
 import os
 import tempfile
@@ -70,6 +71,51 @@ _CODEX_BIN = OPENAI_CLI_BINARY
 def _find_codex() -> str | None:
     """Return the full path to the ``codex`` binary, or None."""
     return CliTransport.find_binary(_CODEX_BIN)
+
+
+def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize *schema* for OpenAI strict structured outputs.
+
+    OpenAI's strict mode requires every object's ``required`` list to include
+    all of its ``properties`` keys; optionality is expressed by making the
+    property's type nullable instead (``{"type": ["string", "null"]}``). The
+    review schema uses plain JSON-Schema style — optional keys are simply
+    omitted from ``required`` — which the Responses API rejects with
+    ``invalid_json_schema`` (e.g. "Missing 'finding_ref'"). This returns a
+    deep-copied, normalized variant: every property becomes required, and
+    formerly-optional properties gain a nullable type.
+
+    Args:
+        schema: The JSON schema to normalize.
+
+    Returns:
+        A strict-mode-compliant deep copy of *schema*.
+    """
+    normalized = copy.deepcopy(schema)
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        properties = node.get("properties")
+        if isinstance(properties, dict) and properties:
+            required = node.get("required")
+            required_keys = set(required) if isinstance(required, list) else set()
+            for key, child in properties.items():
+                if key in required_keys:
+                    continue
+                child_type = child.get("type") if isinstance(child, dict) else None
+                if isinstance(child_type, str):
+                    child["type"] = [child_type, "null"]
+            node["required"] = list(properties)
+        for value in node.values():
+            _walk(value)
+
+    _walk(normalized)
+    return normalized
 
 
 class _CodexCliTransport(CliTransport):
@@ -361,7 +407,7 @@ class OpenAIProvider(ApiStreamingProvider):
                 prefix="lintro-review-schema-",
             )
             with os.fdopen(schema_fd, "w", encoding="utf-8") as schema_file:
-                json.dump(cli_schema.schema, schema_file)
+                json.dump(_openai_strict_schema(cli_schema.schema), schema_file)
             candidates.append(
                 OptionalArg(
                     flag="--output-schema",
