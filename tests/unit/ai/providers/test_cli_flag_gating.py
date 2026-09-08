@@ -20,7 +20,10 @@ from lintro.ai.enums import AITransport
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.cursor.provider import CursorProvider
-from lintro.ai.providers.openai.provider import OpenAIProvider
+from lintro.ai.providers.openai.provider import (
+    OpenAIProvider,
+    _openai_strict_schema,
+)
 from tests.unit.ai.conftest import patch_cli_exec
 
 _CLAUDE_COMPLETION = json.dumps(
@@ -432,6 +435,9 @@ async def test_codex_output_schema_is_normalized_for_openai_strict_mode(
         ["array", "null"],
     )
     assert_that(sorted(summary["required"])).is_equal_to(["headline", "walkthrough"])
+    assert_that(summary["properties"]["walkthrough"]["type"]).is_equal_to(
+        ["array", "null"],
+    )
     bullet = summary["properties"]["walkthrough"]["items"]
     assert_that(sorted(bullet["required"])).is_equal_to(["finding_ref", "text"])
     assert_that(bullet["properties"]["finding_ref"]["type"]).is_equal_to(
@@ -445,6 +451,41 @@ async def test_codex_output_schema_is_normalized_for_openai_strict_mode(
         _completion_calls(calls)[-1].index("--output-schema") + 1
     ]
     assert_that(Path(schema_arg).exists()).is_false()
+
+
+def test_openai_strict_schema_makes_composite_optional_types_nullable() -> None:
+    """Optional list-typed and anyOf/oneOf properties gain a null variant."""
+    schema = {
+        "type": "object",
+        "required": ["kept"],
+        "properties": {
+            "kept": {"type": ["string", "number"]},
+            "multi": {"type": ["string", "number"]},
+            "already": {"type": ["string", "null"]},
+            "any": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+            "one": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+            "untyped": {"description": "no type key"},
+        },
+    }
+
+    normalized = _openai_strict_schema(schema)
+
+    props = normalized["properties"]
+    assert_that(sorted(normalized["required"])).is_equal_to(
+        ["already", "any", "kept", "multi", "one", "untyped"],
+    )
+    assert_that(props["kept"]["type"]).is_equal_to(["string", "number"])
+    assert_that(props["multi"]["type"]).is_equal_to(["string", "number", "null"])
+    assert_that(props["already"]["type"]).is_equal_to(["string", "null"])
+    assert_that(props["any"]["anyOf"]).is_equal_to(
+        [{"type": "string"}, {"type": "integer"}, {"type": "null"}],
+    )
+    assert_that(props["one"]["oneOf"]).is_equal_to(
+        [{"type": "string"}, {"type": "null"}],
+    )
+    assert_that(props["untyped"]).is_equal_to({"description": "no type key"})
+    # Input is not mutated.
+    assert_that(schema["required"]).is_equal_to(["kept"])
 
 
 async def test_codex_output_schema_temp_file_cleaned_up_after_retry_ladder(

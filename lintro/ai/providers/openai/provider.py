@@ -73,6 +73,56 @@ def _find_codex() -> str | None:
     return CliTransport.find_binary(_CODEX_BIN)
 
 
+def _make_nullable(child: dict[str, Any]) -> None:
+    """Add a ``null`` variant to a property schema in place.
+
+    Handles plain ``type`` strings, ``type`` lists, and ``anyOf``/``oneOf``
+    unions. Schemas with none of those are left untouched.
+
+    Args:
+        child: The property schema to make nullable.
+    """
+    child_type = child.get("type")
+    if isinstance(child_type, str):
+        child["type"] = [child_type, "null"]
+        return
+    if isinstance(child_type, list):
+        if "null" not in child_type:
+            child["type"] = [*child_type, "null"]
+        return
+    for combinator in ("anyOf", "oneOf"):
+        variants = child.get(combinator)
+        if not isinstance(variants, list):
+            continue
+        if not any(isinstance(v, dict) and v.get("type") == "null" for v in variants):
+            variants.append({"type": "null"})
+        return
+
+
+def _strict_walk(node: Any) -> None:
+    """Recursively apply OpenAI strict-mode rules to *node* in place.
+
+    Args:
+        node: A JSON schema fragment.
+    """
+    if isinstance(node, list):
+        for item in node:
+            _strict_walk(item)
+        return
+    if not isinstance(node, dict):
+        return
+    properties = node.get("properties")
+    if isinstance(properties, dict) and properties:
+        required = node.get("required")
+        required_keys = set(required) if isinstance(required, list) else set()
+        for key, child in properties.items():
+            if key not in required_keys and isinstance(child, dict):
+                _make_nullable(child)
+        node["required"] = list(properties)
+    for value in node.values():
+        _strict_walk(value)
+
+
 def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
     """Normalize *schema* for OpenAI strict structured outputs.
 
@@ -92,29 +142,7 @@ def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
         A strict-mode-compliant deep copy of *schema*.
     """
     normalized = copy.deepcopy(schema)
-
-    def _walk(node: Any) -> None:
-        if isinstance(node, list):
-            for item in node:
-                _walk(item)
-            return
-        if not isinstance(node, dict):
-            return
-        properties = node.get("properties")
-        if isinstance(properties, dict) and properties:
-            required = node.get("required")
-            required_keys = set(required) if isinstance(required, list) else set()
-            for key, child in properties.items():
-                if key in required_keys:
-                    continue
-                child_type = child.get("type") if isinstance(child, dict) else None
-                if isinstance(child_type, str):
-                    child["type"] = [child_type, "null"]
-            node["required"] = list(properties)
-        for value in node.values():
-            _walk(value)
-
-    _walk(normalized)
+    _strict_walk(normalized)
     return normalized
 
 
@@ -406,15 +434,16 @@ class OpenAIProvider(ApiStreamingProvider):
                 suffix=".json",
                 prefix="lintro-review-schema-",
             )
-            with os.fdopen(schema_fd, "w", encoding="utf-8") as schema_file:
-                json.dump(_openai_strict_schema(cli_schema.schema), schema_file)
-            candidates.append(
-                OptionalArg(
-                    flag="--output-schema",
-                    values=(schema_path,),
-                ),
-            )
         try:
+            if cli_schema is not None and schema_path is not None:
+                with os.fdopen(schema_fd, "w", encoding="utf-8") as schema_file:
+                    json.dump(_openai_strict_schema(cli_schema.schema), schema_file)
+                candidates.append(
+                    OptionalArg(
+                        flag="--output-schema",
+                        values=(schema_path,),
+                    ),
+                )
             optional_args = await self._cli.apply_optional_args(cmd, candidates)
             # Prompt rides on stdin (#1967): a trailing positional would be a
             # single argv element and hits Linux MAX_ARG_STRLEN (128 KiB) on large
