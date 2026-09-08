@@ -77,6 +77,12 @@ ai:
 (#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out
 of scope so the subscription token is actually used.
 
+The dogfood job can also run two further CLI lanes without an API key (#2472): provider
+`openai` on a restored `~/.codex/auth.json` subscription session (org secret
+`CODEX_AUTH_JSON`; `CODEX_API_KEY` would bill metered API credits, not the plan), and
+provider `anthropic` against a gateway such as z.ai's GLM Coding Plan by forwarding
+`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` to the pinned `claude` binary.
+
 ## Reported numbers
 
 Per-run sticky state records `transport`, `auth_mode`, and `cost_basis` (`billed` /
