@@ -913,7 +913,19 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
 
     workflow_env = loaded.get("env")
     job_env = loaded["jobs"]["ai-review"].get("env")
-    for credential_env in (*PROVIDER_CREDENTIAL_ENVS, GATEWAY_AUTH_ENV):
+    # CODEX_SESSION_ENV (CODEX_AUTH_JSON) is checked from day one: until the
+    # follow-up invocation PR adds the restore step, no step may carry it,
+    # and after that PR only the restore step may (#2473 review).
+    lane_credentials = (
+        *PROVIDER_CREDENTIAL_ENVS,
+        GATEWAY_AUTH_ENV,
+        CODEX_SESSION_ENV,
+    )
+    for credential_env in lane_credentials:
+        if workflow_env is not None:
+            assert_that(workflow_env).does_not_contain_key(credential_env)
+        if job_env is not None:
+            assert_that(job_env).does_not_contain_key(credential_env)
         if workflow_env is not None:
             assert_that(workflow_env).does_not_contain_key(credential_env)
         if job_env is not None:
@@ -958,7 +970,7 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
         if step is review_step:
             continue
         step_env = step.get("env") or {}
-        for credential_env in (*PROVIDER_CREDENTIAL_ENVS, GATEWAY_AUTH_ENV):
+        for credential_env in lane_credentials:
             assert_that(step_env).described_as(
                 f"step {step.get('name')!r}",
             ).does_not_contain_key(credential_env)

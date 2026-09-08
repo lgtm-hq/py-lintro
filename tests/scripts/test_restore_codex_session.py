@@ -142,3 +142,20 @@ def test_malformed_secret_fails_and_cleans_up(
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stderr).contains("did not decode to a JSON session file")
     assert_that(tmp_path.joinpath(".codex", "auth.json").exists()).is_false()
+
+
+def test_undecodable_secret_fails_and_cleans_up(tmp_path: Path) -> None:
+    """A value that is not base64 at all fails at the decode step.
+
+    The parametrized cases above travel through ``_encoded`` and so arrive
+    as decodable base64, exercising the JSON guard; this one supplies raw
+    garbage so the ``base64 --decode`` failure branch itself is covered —
+    the "raw JSON pasted unencoded" mistake from the script's comment.
+    """
+    result = _run(
+        env_overrides={"HOME": str(tmp_path), "CODEX_AUTH_JSON": "!!!not-base64!!!"},
+    )
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stderr).contains("did not decode to a JSON session file")
+    assert_that(tmp_path.joinpath(".codex", "auth.json").exists()).is_false()
