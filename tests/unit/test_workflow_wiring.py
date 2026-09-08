@@ -1851,6 +1851,37 @@ def test_binary_jobs_never_install_the_dev_group() -> None:
             ).contains("--no-default-groups")
 
 
+def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
+    """The Linux binary build must allow GitHub's hosted-runner watchdog.
+
+    harden-runner block mode denied ``hosted-compute-watchdog-*.githubapp.com``
+    and ``hosted-compute-request-orchestrator-*.githubapp.com``, and the x64
+    build was reclaimed mid-run on every attempt for v0.147.7 with "The runner
+    has received a shutdown signal" (#1761, #2339). The arm64 sibling runs the
+    same source on the same runner class and has never been observed dying that
+    way, which leaves the enforced egress allowlist as the lead.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    job = workflow["jobs"]["build-linux"]
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    endpoints = str(harden["with"]["allowed-endpoints"]).split()
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(endpoints).contains("*.githubapp.com:443")
+    assert_that(endpoints).does_not_contain_duplicates()
+    # The watchdog domain is the only wildcard this job may allow; a bare
+    # catch-all would defeat the egress policy entirely.
+    for endpoint in endpoints:
+        if "*" in endpoint:
+            assert_that(endpoint).described_as(endpoint).is_equal_to(
+                "*.githubapp.com:443",
+            )
+
+
 def test_auto_rerun_covers_tag_publish_workflows() -> None:
     """Auto-rerun must watch publish workflows and not filter to main only.
 
