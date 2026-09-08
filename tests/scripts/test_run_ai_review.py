@@ -351,6 +351,29 @@ def test_shell_rejects_gateway_endpoint_without_token() -> None:
     assert_that(result.stdout).does_not_contain("never invoked")
 
 
+def test_shell_rejects_cleartext_gateway_endpoint() -> None:
+    """A non-https gateway URL fails the gate even with a token present.
+
+    The gateway credential travels in a header to ANTHROPIC_BASE_URL, so a
+    cleartext scheme would expose it in transit (CWE-319) — the gate only
+    accepts https endpoints (#2473 review).
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            GATEWAY_AUTH_ENV: "dummy-gateway-token",
+            "ANTHROPIC_BASE_URL": "http://api.z.ai/api/anthropic",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stdout).does_not_contain("never invoked")
+
+
 def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
     """The restore script must write the session where the wrapper's gate looks.
 
@@ -1245,11 +1268,13 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
 
     # z.ai lane (#2472): gateway host, gated on the effective provider
     # (defaulted to anthropic, matching the review step) AND the
-    # ZAI_BASE_URL variable being set.
+    # ZAI_BASE_URL variable being set — the comparison direction is pinned
+    # so a ==/!= sign inversion cannot enable egress on an UNSET variable.
     zai_egress = job_env["AI_REVIEW_ZAI_EGRESS"]
     assert_that(zai_egress).contains(
         "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'",
     )
+    assert_that(zai_egress).contains("vars.ZAI_BASE_URL != ''")
     assert_that(zai_egress).contains("vars.ZAI_BASE_URL")
     zai_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", zai_egress)
     if zai_branch is None:
