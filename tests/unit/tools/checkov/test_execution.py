@@ -11,6 +11,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.checkov.checkov_issue import CheckovIssue
@@ -56,6 +57,8 @@ def _report(failed: list[dict[str, Any]]) -> str:
         },
     )
 
+
+GUIDELINE_URL = "https://docs.paloaltonetworks.com/checkov/CKV_AWS_1"
 
 ISSUE_JSON = _report([_FAILED_CHECK])
 CLEAN_JSON = _report([])
@@ -109,6 +112,42 @@ def test_check_with_issues(checkov_plugin: CheckovPlugin, tmp_path: Path) -> Non
     assert_that(issue.check_id).is_equal_to("CKV_AWS_260")
     assert_that(issue.resource).is_equal_to("aws_security_group.allow_all")
     assert_that(issue.line).is_equal_to(10)
+
+
+def test_check_attaches_doc_urls_and_prefers_a_native_guideline(
+    checkov_plugin: CheckovPlugin,
+    tmp_path: Path,
+) -> None:
+    """Findings carry a doc URL; a native ``guideline`` outranks the fallback.
+
+    ``CheckovIssue.__post_init__`` only propagates a guideline into
+    ``doc_url``; nothing else assigned the plugin's static policy-index URL, so
+    every finding rendered without a documentation link. The fallback must be
+    applied without clobbering the more specific guideline when one is present.
+
+    Args:
+        checkov_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    source = tmp_path / "main.tf"
+    source.write_text('resource "aws_s3_bucket" "b" {}\n')
+    guided = {**_FAILED_CHECK, "check_id": "CKV_AWS_1", "guideline": GUIDELINE_URL}
+    report = _report([_FAILED_CHECK, guided])
+
+    with (
+        patch.object(checkov_plugin, "prepare") as mock_prepare,
+        patch.object(checkov_plugin, "_run_subprocess", return_value=(False, report)),
+    ):
+        mock_prepare.return_value = _ctx(tmp_path, source)
+        result = checkov_plugin.check([str(source)], {})
+
+    urls = {
+        issue.check_id: issue.doc_url
+        for issue in (result.issues or [])
+        if isinstance(issue, CheckovIssue)
+    }
+    assert_that(urls["CKV_AWS_260"]).is_equal_to(DocUrlTemplate.CHECKOV)
+    assert_that(urls["CKV_AWS_1"]).is_equal_to(GUIDELINE_URL)
 
 
 def test_check_clean(checkov_plugin: CheckovPlugin, tmp_path: Path) -> None:

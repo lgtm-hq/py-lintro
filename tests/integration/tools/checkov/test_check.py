@@ -87,8 +87,9 @@ def test_check_preserves_resource_attribution(
         # ``--skip-download`` suppresses the platform metadata a native
         # ``guideline`` would come from, so the issue carries none and the
         # plugin's policy-index fallback is what the report renders.
-        assert_that(issue.doc_url).is_empty()
-        assert_that(plugin.doc_url(issue.check_id)).contains("checkov.io")
+        assert_that(issue.guideline).is_none()
+        assert_that(issue.doc_url).is_equal_to(plugin.doc_url(issue.check_id))
+        assert_that(issue.doc_url).contains("checkov.io")
 
 
 def test_check_clean_file_passes(

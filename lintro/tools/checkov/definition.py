@@ -246,7 +246,14 @@ class CheckovPlugin(BaseToolPlugin):
             if payload is None:
                 unparseable.append(output)
                 return []
-            return parse_checkov_output(payload)
+            issues = parse_checkov_output(payload)
+            for issue in issues:
+                # ``or`` and not an unconditional assignment: a report that
+                # carried a native ``guideline`` already propagated it into
+                # ``doc_url``, and that link is more specific than the static
+                # policy index this falls back to.
+                issue.doc_url = issue.doc_url or self.doc_url(issue.check_id) or ""
+            return issues
 
         # Checkov exits 0 on a clean report and 1 when any check failed, so
         # exit status and findings must both be clean. A non-zero exit with
