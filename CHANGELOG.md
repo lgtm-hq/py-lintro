@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.7] - 2026-09-09
+
+### Changed
+
+- **deps**: override smol-toml to 1.8.0 to clear GHSA-7w5x-hrqm-74c2 (#2520) (c0297e5)
+
+### Fixed
+
+- **release**: grant actions: read on the homebrew-tap caller job (#2518) (3e37ec7)
+
 ## [0.152.6] - 2026-09-09
 
 ### Fixed
