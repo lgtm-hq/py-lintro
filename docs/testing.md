@@ -42,6 +42,15 @@ them.
 Put a test in `tests/integration/` when it needs a real tool binary or exercises the
 full check/format pipeline; put it in `tests/unit/` otherwise.
 
+## Assertions
+
+Tests assert with [`assertpy`](https://github.com/assertpy/assertpy)
+(`assert_that(...)`), which stays the project standard despite Renovate's abandoned flag
+— [`assertpy2`](https://github.com/Solganis/assertpy2) is the designated drop-in
+fallback if a future interpreter ever breaks it, `tests/unit/test_assertpy_guard.py` is
+the canary that would catch that, and the choice is re-evaluated in March 2027
+([#2437](https://github.com/lgtm-hq/py-lintro/issues/2437)).
+
 ## Test markers
 
 Markers are declared in `pyproject.toml` (`[tool.pytest.ini_options]`) and enforced with

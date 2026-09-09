@@ -1851,6 +1851,57 @@ def test_binary_jobs_never_install_the_dev_group() -> None:
             ).contains("--no-default-groups")
 
 
+def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
+    """The Linux binary build must allow GitHub's hosted-runner watchdog.
+
+    harden-runner block mode denied ``hosted-compute-watchdog-*.githubapp.com``
+    and ``hosted-compute-request-orchestrator-*.githubapp.com``, and the x64
+    build was reclaimed mid-run on every attempt for v0.147.7 with "The runner
+    has received a shutdown signal" (#1761, #2339). The arm64 sibling runs the
+    same source on the same runner class and has never been observed dying that
+    way, which leaves the enforced egress allowlist as the lead.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    job = workflow["jobs"]["build-linux"]
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    endpoints = str(harden["with"]["allowed-endpoints"]).split()
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    # Exact hosts by owner decision (#2339): every hosted-compute shard
+    # observed in this repo's job logs, for both control-plane families, plus
+    # the results receiver. The agreed fallback if a new shard appears is a
+    # revert to the `*.githubapp.com:443` wildcard in a follow-up PR, so this
+    # test pins the literals but does not forbid that wildcard.
+    for family in ("hosted-compute-watchdog", "hosted-compute-request-orchestrator"):
+        for shard in ("iad-01", "iad-02", "eus-01", "eus-02"):
+            assert_that(endpoints).contains(
+                f"{family}-prod-{shard}.githubapp.com:443",
+            )
+    assert_that(endpoints).contains(
+        "actions-results-receiver-production.githubapp.com:443",
+    )
+    # The job must still carry its baseline: build-binary.yml is read from
+    # the tag, so a shrunk list passes every PR and fails at the release.
+    assert_that(endpoints).contains(
+        "pypi.org:443",
+        "files.pythonhosted.org:443",
+        "nuitka.net:443",
+        "release-assets.githubusercontent.com:443",
+    )
+    assert_that(endpoints).does_not_contain_duplicates()
+    # Any other glob would silently widen the block policy; the agreed
+    # revert-to-wildcard fallback is the single form permitted here.
+    for endpoint in endpoints:
+        if "*" in endpoint:
+            assert_that(endpoint).described_as(
+                f"{endpoint}: only the agreed *.githubapp.com:443 fallback may glob",
+            ).is_equal_to("*.githubapp.com:443")
+
+
 def test_auto_rerun_covers_tag_publish_workflows() -> None:
     """Auto-rerun must watch publish workflows and not filter to main only.
 

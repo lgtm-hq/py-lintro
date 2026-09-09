@@ -21,6 +21,113 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.8] - 2026-09-09
+
+### Changed
+
+- **tsc**: restore the `set_options` validation tests removed by #2427 (#2525) (a382c9c)
+
+### Fixed
+
+- **deps**: restore astro 7.2.9 in the docs site (#2526) (32b7115)
+
+## [0.152.7] - 2026-09-09
+
+### Changed
+
+- **deps**: override smol-toml to 1.8.0 to clear GHSA-7w5x-hrqm-74c2 (#2520) (c0297e5)
+
+### Fixed
+
+- **release**: grant actions: read on the homebrew-tap caller job (#2518) (3e37ec7)
+
+## [0.152.6] - 2026-09-09
+
+### Fixed
+
+- **ci**: give the AI Review job a 120-minute budget for large diffs (#2508) (f51c971)
+
+## [0.152.5] - 2026-09-09
+
+### Changed
+
+- **deps**: update lintro-ai-tools docker digest to 5dfda12 (#2496) (2e3e2bd)
+- allow the hosted-compute watchdog hosts on the linux binary job (#2487) (5d5572a)
+
+### Fixed
+
+- **ci**: grant actions:read at the publish caller; upgrade httpx2 (#2503) (4522f34)
+
+## [0.152.4] - 2026-09-09
+
+### Changed
+
+- **deps**: renovate bump (#2486) (af2d97b)
+- **deps**: update rust-lang/rust to 1.98.1 (#2465) (cbe03f5)
+
+### Fixed
+
+- **ci**: pin the lintro-tools image built from main's rustc 1.98.1 manifest (#2499)
+  (e8d2293)
+
+## [0.152.3] - 2026-09-09
+
+### Changed
+
+- **deps**: update svelte to 5.57.0 (#2474) (65ef998)
+- **deps**: renovate bump (#2463) (0e250b8)
+- **deps**: renovate bump (#2462) (8dc9d05)
+- **deps**: renovate bump (#2469) (2f89251)
+
+### Fixed
+
+- **deps**: update dependency astro to 7.2.8 (patch) [security] (#2483) (54c5a5e)
+
+## [0.152.2] - 2026-09-08
+
+### Fixed
+
+- **ai**: normalize the codex review schema for OpenAI strict mode (#2480) (79acce7)
+
+## [0.152.1] - 2026-09-08
+
+### Changed
+
+- **ai**: close out the #2473 dogfood review test gaps (#2477) (06727fa)
+- **ai**: invoke the codex installer and session restore steps (#2476) (1db5c04)
+
+### Fixed
+
+- **ai**: pass the codex review schema as a file path (#2478) (63ec662)
+
+## [0.152.0] - 2026-09-08
+
+### Added
+
+- **ci**: add Codex subscription and z.ai GLM lanes to dogfood AI review (#2473)
+  (f758656)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.147.7 (patch) (#2467)
+  (6595048)
+- **deps**: update lintro-ai-tools docker digest to b5f7f65 (#2466) (527b6cc)
+- **deps**: update lintro-ai-tools docker digest to b5f7f65 (#2466) (6cb9930)
+- **deps**: renovate bump (#2461) (930b30f)
+- **deps**: renovate bump (#2460) (a66be9f)
+- **ai/providers**: make plugin metadata the single source for doctor, pricing and
+  validation (#2453) (83a21e0)
+- **deps**: update devalue to 5.9.2 (#2459) (5164734)
+- **deps**: tools digest bump (#2458) (08bc361)
+- **deps**: update astral-sh/uv to 0.12.10 (#2457) (c6e3f3f)
+- **deps**: renovate bump (#2454) (e1ff951)
+- **deps**: renovate bump (#2448) (4afd6ae)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.69.8 (patch) (#2455) (000634e)
+- **deps**: renovate bump (#2423) (1857c96)
+- **deps**: renovate bump (#2451) (573acc3)
+- **deps**: renovate bump (#2424) (3df2c20)
+- **deps**: renovate bump (#2234) (f8ea406)
+
 ## [0.151.4] - 2026-09-07
 
 ### Changed
