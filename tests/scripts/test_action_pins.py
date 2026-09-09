@@ -85,7 +85,7 @@ def test_pins_are_derived_from_the_workflow_files(tmp_path: Path) -> None:
     )
 
 
-def test_local_and_unpinned_references_are_ignored(tmp_path: Path) -> None:
+def test_local_references_are_ignored(tmp_path: Path) -> None:
     """Local ``./`` references have nothing to pin and must not be flagged.
 
     Args:
@@ -104,6 +104,22 @@ def test_local_and_unpinned_references_are_ignored(tmp_path: Path) -> None:
     assert_that([use.action for use in iter_action_uses(root=tmp_path)]).is_equal_to(
         ["actions/checkout"],
     )
+
+
+def test_reference_without_a_ref_fails(tmp_path: Path) -> None:
+    """A third-party ``uses:`` with no ``@`` at all is unpinned and rejected.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    _write_workflow(
+        root=tmp_path,
+        name="a.yml",
+        body=_steps("docker/build-push-action", f"actions/checkout@{_SHA} # v7.0.1"),
+    )
+
+    with pytest.raises(AssertionError, match="docker/build-push-action@"):
+        pinned_action_shas(root=tmp_path)
 
 
 def test_mismatched_sha_across_workflows_fails(tmp_path: Path) -> None:

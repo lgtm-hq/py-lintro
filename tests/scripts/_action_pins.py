@@ -115,8 +115,10 @@ def _file_action_uses(path: Path) -> list[ActionUse]:
         if match is None:
             continue
         ref = match.group("ref").strip("\"'")
-        if ref.startswith(_LOCAL_PREFIXES) or "@" not in ref:
+        if ref.startswith(_LOCAL_PREFIXES) or ref.startswith("docker://"):
             continue
+        # A third-party ref without ``@`` is unpinned; record it with an empty
+        # pin so ``pinned_action_shas`` rejects it instead of skipping it.
         action, _, pin = ref.partition("@")
         uses.append(
             ActionUse(
