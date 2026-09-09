@@ -1084,11 +1084,11 @@ CI runs the same test, so a metadata change without the paste-back fails the bui
 
 <!-- END SNAPSHOT: provider-table -->
 
-`(default)` marks the transport lintro documents and `lintro doctor` steers you to; it
-is **not** a fallback for an omitted `ai.transport`. That fallback is `api` for every
-provider, Cursor included — which is why leaving `ai.transport` unset with
-`provider: cursor` fails with `cursor provider only supports transport: cli`. Set
-`ai.transport` explicitly.
+`(default)` marks the transport lintro documents and `lintro doctor` steers you to. It
+is also the fallback for an omitted `ai.transport`: `api` for `anthropic` and `openai`,
+`cli` for `cursor`, the only transport Cursor serves (#2449). An explicit
+`transport: api` with `provider: cursor` still fails with
+`cursor provider only supports transport: cli`. Set `ai.transport` explicitly anyway.
 
 Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
 reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
@@ -1197,13 +1197,13 @@ Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures
 decision table and `ai.transports.*` profiles (#1923).
 
 `ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
-`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility. Whether
-the run then still works depends on the provider: the factory falls back to `api` for
-every provider, which keeps `anthropic` and `openai` going but is **fatal for
-`cursor`**, where it surfaces as `cursor provider only supports transport: cli`. That
-fallback exists for backward compatibility — legacy configs that set only
-`ai.enabled: true` (which implicitly switches `lint` and `review` on) rely on it — and
-is not something to depend on in new config.
+`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility, but the
+run still works: each provider plugin falls back to the transport it documents — `api`
+for `anthropic` and `openai`, `cli` for `cursor` (#2449). That fallback exists for
+backward compatibility — legacy configs that set only `ai.enabled: true` (which
+implicitly switches `lint` and `review` on) rely on it — and is not something to depend
+on in new config. Asking Cursor for `transport: api` explicitly is still fatal:
+`cursor provider only supports transport: cli`.
 
 `cursor` is a CLI-only provider: pair it with `transport: cli`. `anthropic` and `openai`
 support both transports.
