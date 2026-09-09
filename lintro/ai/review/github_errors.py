@@ -6,6 +6,7 @@ import re
 
 from lintro.ai.review.errors_taxonomy import (
     KIND_COPY,
+    RESET_TIME_PATTERN,
     ReviewErrorKind,
     classify_provider_error,
     resolve_cause_text,
@@ -168,6 +169,32 @@ def _failure_banner(
     return f"> {headline} — {detail} · showing round {shown} results below. {guidance}"
 
 
+def describe_kind(*, kind: ReviewErrorKind, cause_text: str = "") -> tuple[str, str]:
+    """Return the copy for an error kind, enriched from the provider cause.
+
+    Identical to a :data:`KIND_COPY` lookup, except that a quota failure whose
+    cause text names a reset time (the claude CLI's exhausted usage window
+    reports ``resets 9:40am (UTC)``) carries that time in the message, so the
+    sticky says when the review can run again rather than only that a limit
+    was hit (#2470).
+
+    Args:
+        kind: Resolved canonical error kind.
+        cause_text: The surfaced provider cause text, when available.
+
+    Returns:
+        Tuple of ``(message, guidance)`` copy strings.
+    """
+    message, guidance = KIND_COPY[kind]
+    if kind is ReviewErrorKind.QUOTA_EXCEEDED:
+        match = RESET_TIME_PATTERN.search(cause_text or "")
+        if match is not None:
+            reset_at = match.group("when").strip()
+            if reset_at:
+                message = f"{message}; resets at {reset_at}"
+    return message, guidance
+
+
 def _render_error_copy(
     *,
     kind: ReviewErrorKind,
@@ -191,9 +218,10 @@ def _render_error_copy(
     Returns:
         Tuple of ``(detail, guidance)`` markdown strings.
     """
-    message, guidance = KIND_COPY[kind]
+    cause_text = resolve_cause_text(error=error)
+    message, guidance = describe_kind(kind=kind, cause_text=cause_text)
     cause = condense_provider_error(
-        text=resolve_cause_text(error=error),
+        text=cause_text,
         limit=cause_limit,
     )
     label = f"`{sanitize_comment_text(provider, limit=40)}` " if provider else ""

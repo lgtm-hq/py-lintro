@@ -12,12 +12,34 @@ from assertpy import assert_that
 
 from lintro.ai.exceptions import AIAuthenticationError, AIProviderError
 from lintro.ai.providers.cli_transport import CliTransport
+from lintro.ai.review.error_contract import is_retryable_kind
+from lintro.ai.review.errors_taxonomy import (
+    ReviewErrorKind,
+    classify_provider_error,
+)
+from lintro.ai.review.github_errors import describe_kind
 from tests.unit.ai.conftest import completed_process as _completed
 
 #: The exact envelope a logged-out ``claude`` CLI writes to stdout on exit 1.
 _CLAUDE_LOGGED_OUT_STDOUT = (
     '{"type":"result","subtype":"error_during_execution","is_error":true,'
     '"result":"Not logged in · Please run /login"}'
+)
+
+
+#: The envelope a ``claude`` CLI writes when the subscription usage window is
+#: exhausted (#2470, seen on #2452 round 6 and #1156 chunk 11). The live
+#: envelope also carries ``"terminal_reason":"api_error"``, which used to win
+#: the classification and report the quota stop as a provider outage.
+_CLAUDE_SESSION_LIMIT_STDOUT = (
+    '{"is_error": true, "duration_api_ms": 0, "total_cost_usd": 0, '
+    '"result": "You\'ve hit your session limit · resets 9:40am (UTC)"}'
+)
+
+#: The same stop without a reset clock in the result text.
+_CLAUDE_SESSION_LIMIT_NO_RESET_STDOUT = (
+    '{"is_error": true, "duration_api_ms": 0, "total_cost_usd": 0, '
+    '"result": "You\'ve hit your session limit"}'
 )
 
 
@@ -159,3 +181,67 @@ def test_stderr_auth_still_matches_with_noisy_stdout(
 
     with pytest.raises(AIAuthenticationError):
         transport.check_exit_code(result)
+
+
+def _session_limit_error(
+    transport: _FakeTransport,
+    stdout: str,
+) -> AIProviderError:
+    """Return the provider error a session-limited ``claude`` CLI produces.
+
+    Args:
+        transport: The transport under test.
+        stdout: The CLI's stdout envelope.
+
+    Returns:
+        The raised ``AIProviderError``.
+    """
+    with pytest.raises(AIProviderError) as excinfo:
+        transport.check_exit_code(
+            _completed(returncode=1, stdout=stdout, stderr=""),
+            auth_patterns=("authentication", "login", "not logged in"),
+        )
+    return excinfo.value
+
+
+def test_session_limit_envelope_classifies_as_quota_with_reset_time(
+    transport: _FakeTransport,
+) -> None:
+    """The usage-window stop is a quota failure that names its reset time."""
+    error = _session_limit_error(transport, _CLAUDE_SESSION_LIMIT_STDOUT)
+
+    kind = classify_provider_error(provider="anthropic", error=error)
+    message, _guidance = describe_kind(kind=kind, cause_text=str(error))
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.QUOTA_EXCEEDED)
+    assert_that(is_retryable_kind(kind=kind)).is_false()
+    assert_that(message).contains("9:40am (UTC)")
+
+
+def test_session_limit_envelope_is_not_a_server_error(
+    transport: _FakeTransport,
+) -> None:
+    """An ``api_error`` terminal reason no longer reads as a provider outage."""
+    stdout = _CLAUDE_SESSION_LIMIT_STDOUT.replace(
+        '"is_error": true,',
+        '"is_error": true, "terminal_reason": "api_error", "subtype": "success",',
+    )
+
+    error = _session_limit_error(transport, stdout)
+
+    assert_that(
+        classify_provider_error(provider="anthropic", error=error),
+    ).is_equal_to(ReviewErrorKind.QUOTA_EXCEEDED)
+
+
+def test_session_limit_without_reset_time_still_classifies_as_quota(
+    transport: _FakeTransport,
+) -> None:
+    """A reset clock is optional: the wording alone resolves the kind."""
+    error = _session_limit_error(transport, _CLAUDE_SESSION_LIMIT_NO_RESET_STDOUT)
+
+    kind = classify_provider_error(provider="anthropic", error=error)
+    message, _guidance = describe_kind(kind=kind, cause_text=str(error))
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.QUOTA_EXCEEDED)
+    assert_that(message).does_not_contain("resets at")
