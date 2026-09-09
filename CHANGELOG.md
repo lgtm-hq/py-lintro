@@ -21,6 +21,51 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.2] - 2026-09-08
+
+### Fixed
+
+- **ai**: normalize the codex review schema for OpenAI strict mode (#2480) (79acce7)
+
+## [0.152.1] - 2026-09-08
+
+### Changed
+
+- **ai**: close out the #2473 dogfood review test gaps (#2477) (06727fa)
+- **ai**: invoke the codex installer and session restore steps (#2476) (1db5c04)
+
+### Fixed
+
+- **ai**: pass the codex review schema as a file path (#2478) (63ec662)
+
+## [0.152.0] - 2026-09-08
+
+### Added
+
+- **ci**: add Codex subscription and z.ai GLM lanes to dogfood AI review (#2473)
+  (f758656)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.147.7 (patch) (#2467)
+  (6595048)
+- **deps**: update lintro-ai-tools docker digest to b5f7f65 (#2466) (527b6cc)
+- **deps**: update lintro-ai-tools docker digest to b5f7f65 (#2466) (6cb9930)
+- **deps**: renovate bump (#2461) (930b30f)
+- **deps**: renovate bump (#2460) (a66be9f)
+- **ai/providers**: make plugin metadata the single source for doctor, pricing and
+  validation (#2453) (83a21e0)
+- **deps**: update devalue to 5.9.2 (#2459) (5164734)
+- **deps**: tools digest bump (#2458) (08bc361)
+- **deps**: update astral-sh/uv to 0.12.10 (#2457) (c6e3f3f)
+- **deps**: renovate bump (#2454) (e1ff951)
+- **deps**: renovate bump (#2448) (4afd6ae)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.69.8 (patch) (#2455) (000634e)
+- **deps**: renovate bump (#2423) (1857c96)
+- **deps**: renovate bump (#2451) (573acc3)
+- **deps**: renovate bump (#2424) (3df2c20)
+- **deps**: renovate bump (#2234) (f8ea406)
+
 ## [0.151.4] - 2026-09-07
 
 ### Changed
