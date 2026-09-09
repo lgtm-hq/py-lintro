@@ -1884,6 +1884,14 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
     assert_that(endpoints).contains(
         "actions-results-receiver-production.githubapp.com:443",
     )
+    # The job must still carry its baseline: build-binary.yml is read from
+    # the tag, so a shrunk list passes every PR and fails at the release.
+    assert_that(endpoints).contains(
+        "pypi.org:443",
+        "files.pythonhosted.org:443",
+        "nuitka.net:443",
+        "release-assets.githubusercontent.com:443",
+    )
     assert_that(endpoints).does_not_contain_duplicates()
     # Any other glob would silently widen the block policy; the agreed
     # revert-to-wildcard fallback is the single form permitted here.
