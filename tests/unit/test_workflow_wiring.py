@@ -2498,6 +2498,21 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     )
 
 
+def test_publish_pypi_top_level_permissions_are_empty() -> None:
+    """The tag publisher grants no scopes at the top level (#2511).
+
+    Every job in ``publish-pypi-on-tag.yml`` declares its own ``permissions``
+    block, so a top-level grant is dead configuration that only widens the
+    default token. The ``actions: read`` that the reusable ``build-binary``
+    chain needs belongs on the ``homebrew-tap`` caller job (#2440).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    assert_that(publish["permissions"]).is_equal_to({})
+    homebrew = publish["jobs"]["homebrew-tap"]["permissions"]
+    assert_that(homebrew).contains_entry({"actions": "read"})
+    assert_that(homebrew).contains_entry({"contents": "write"})
+
+
 def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     """Release SBOM must gate publishes on high/critical vulns (#1118)."""
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
