@@ -76,7 +76,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
-    ToolName.CLIPPY: "1.98.0",
+    ToolName.CLIPPY: "1.98.1",
     # cppcheck ships no portable single binary, so both the tools image and the
     # app-image install-tools.sh bridge install Debian's package. This pin
     # therefore tracks the version in the python base image's Debian release
