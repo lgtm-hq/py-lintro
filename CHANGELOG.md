@@ -21,6 +21,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.3] - 2026-09-09
+
+### Changed
+
+- **deps**: update svelte to 5.57.0 (#2474) (65ef998)
+- **deps**: renovate bump (#2463) (0e250b8)
+- **deps**: renovate bump (#2462) (8dc9d05)
+- **deps**: renovate bump (#2469) (2f89251)
+
+### Fixed
+
+- **deps**: update dependency astro to 7.2.8 (patch) [security] (#2483) (54c5a5e)
+
 ## [0.152.2] - 2026-09-08
 
 ### Fixed
