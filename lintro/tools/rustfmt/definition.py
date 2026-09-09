@@ -140,6 +140,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 success=True,
                 output="No Cargo.toml found; skipping rustfmt.",
                 issues_count=0,
+                no_files=True,
             )
 
         cmd = _build_rustfmt_check_command()
@@ -187,6 +188,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 initial_issues_count=0,
                 fixed_issues_count=0,
                 remaining_issues_count=0,
+                no_files=True,
             )
 
         check_cmd = _build_rustfmt_check_command()

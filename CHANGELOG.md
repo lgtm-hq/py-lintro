@@ -31,6 +31,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **core**: a verifying tool whose `CHECK` timed out is no longer read as a verdict. A
+  multi-root aggregator such as golangci-lint returns one result carrying the findings
+  the roots that finished produced plus `timed_out=True`; the run-level verify pass now
+  treats that partial answer as no answer, so every pre-fix finding survives and the run
+  reports a failure instead of counting the difference as fixed.
+- **tools**: every plugin-built "nothing was examined" result now carries the structured
+  `no_files` flag (actionlint, bandit, cargo-audit, cargo-deny, clippy, golangci-lint,
+  mypy, osv-scanner, pip-audit, rustfmt, stylelint, trufflehog, typos, yamllint). The
+  summary table reads the flag before falling back to matching the message text, so a
+  tool whose wording the suffix list does not recognise is still annotated.
+
 ### Security
 
 ## [0.152.3] - 2026-09-09

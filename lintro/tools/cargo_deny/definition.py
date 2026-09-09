@@ -147,6 +147,7 @@ class CargoDenyPlugin(BaseToolPlugin):
                 success=True,
                 output="No Cargo.toml found; skipping cargo-deny.",
                 issues_count=0,
+                no_files=True,
             )
 
         cmd = _build_cargo_deny_command()

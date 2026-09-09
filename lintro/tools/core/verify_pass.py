@@ -593,8 +593,23 @@ def run_verify_pass(
             # verify path indistinguishable from a tool that genuinely could
             # not run.
             raise
-        except (KeyError, OSError, RuntimeError, ValueError):
+        except (KeyError, OSError, RuntimeError, ValueError) as exc:
+            # A brand-new failure path: the row that follows flips to failed
+            # with a note that reads like a lint finding, so say plainly that
+            # the residual is unknown rather than measured. The traceback
+            # stays at debug so the default level keeps one line per tool.
+            logger.warning(
+                f"Verify pass for {name} could not run: "
+                f"{type(exc).__name__}: {exc}",
+            )
             logger.opt(exception=True).debug(f"Verify pass failed for {name}")
+            outcomes.append(VerifyOutcome(tool=name, result=None, ran=False))
+            continue
+        if result.timed_out:
+            # A timed-out CHECK examined only part of its target set — a
+            # multi-root aggregator such as golangci-lint still returns the
+            # findings the roots that finished produced — so it is no verdict
+            # over the scope at all.
             outcomes.append(VerifyOutcome(tool=name, result=None, ran=False))
             continue
         if result.skipped:
@@ -686,16 +701,20 @@ def _fold_one(
     verify = outcome.result
     # A verify that could not run has verified nothing, so every pre-fix issue
     # is carried and the run reports a failure rather than a silent zero. The
-    # same holds for a CHECK that ran but produced no verdict: a timeout or an
-    # execution error comes back as ``success=False`` with no parsed issues,
-    # and treating that as "clean" would drop the pre-fix findings. A skipped
-    # or no-files result is the same fail-open wearing ``success=True``:
-    # ``run_verify_pass`` already converts both to ``result=None``, and the
-    # guard below keeps a hand-built outcome from re-opening the hole.
+    # same holds for a CHECK that ran but produced no verdict. An execution
+    # error comes back as ``success=False`` with no parsed issues, so it fails
+    # the guard on its own. A timeout does not: a multi-root aggregator can
+    # time out on one root and still return the findings the other roots
+    # produced, which is a partial answer and therefore no answer over the
+    # scope. A skipped or no-files result is the same fail-open wearing
+    # ``success=True``. ``run_verify_pass`` already converts all three to
+    # ``result=None``, and the guard below keeps a hand-built outcome from
+    # re-opening the hole.
     check_answered = (
         verify is not None
         and not verify.skipped
         and not verify.no_files
+        and not verify.timed_out
         and (verify.success or bool(verify.issues))
     )
     verified_paths = _verified_paths(
@@ -708,7 +727,11 @@ def _fold_one(
         for issue in _pre_fix_issues(mutation)
         if _issue_path(issue, cwd=mutation.cwd) not in verified_paths
     ]
-    if verify is not None and verify.issues:
+    if check_answered and verify is not None and verify.issues:
+        # Only an answered CHECK contributes findings. A partial one — a
+        # multi-root aggregator that timed out on one root — carries real
+        # findings from the roots that finished, but every pre-fix finding is
+        # already being carried above, so appending them would double-count.
         survivors.extend(list(verify.issues))
 
     residual = len(survivors)

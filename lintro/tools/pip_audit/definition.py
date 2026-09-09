@@ -307,6 +307,7 @@ class PipAuditPlugin(BaseToolPlugin):
                 success=True,
                 output="No requirements or project files found; skipping pip-audit.",
                 issues_count=0,
+                no_files=True,
             )
 
         base_cmd = self._build_command()

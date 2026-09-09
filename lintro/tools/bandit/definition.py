@@ -438,6 +438,7 @@ class BanditPlugin(BaseToolPlugin):
                     success=True,
                     output=None,
                     issues_count=0,
+                    no_files=True,
                 )
 
             if ("{" not in output or "}" not in output) and execution_failure:

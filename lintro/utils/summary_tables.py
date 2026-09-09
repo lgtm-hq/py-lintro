@@ -131,15 +131,24 @@ def _get_ai_unverified_count(result: object) -> int:
     return get_ai_count(result, "unverified_count")
 
 
-def _is_no_files_result(output: object) -> bool:
+def _is_no_files_result(output: object, result: object = None) -> bool:
     """Report whether a tool result means "no files were inspected".
+
+    The structured ``no_files`` flag on ``ToolResult`` is the authority: it is
+    stamped by every producer of a "nothing to check" result. The prose match
+    stays as a fallback for legacy result shapes (plain objects and dicts built
+    in tests or by out-of-tree consumers) that carry only the message.
 
     Args:
         output: The tool result ``output`` value.
+        result: The tool result itself, when available.
 
     Returns:
-        True when the output is one of the framework's no-files messages.
+        True when the result is flagged as a no-files result, or its output is
+        one of the framework's no-files messages.
     """
+    if result is not None and getattr(result, "no_files", False):
+        return True
     if not isinstance(output, str):
         return False
     text = output.strip().rstrip(".")
@@ -436,7 +445,7 @@ def print_summary_table(
                 ai_unverified_value = _get_ai_unverified_count(result)
                 if ai_unverified_value > 0:
                     notes_display = f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
-                elif _is_no_files_result(result_output):
+                elif _is_no_files_result(result_output, result):
                     notes_display = f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
                 else:
                     notes_display = ""
@@ -485,7 +494,7 @@ def print_summary_table(
 
                 notes_display = (
                     f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
-                    if _is_no_files_result(result_output)
+                    if _is_no_files_result(result_output, result)
                     else ""
                 )
 

@@ -193,6 +193,7 @@ class ClippyPlugin(BaseToolPlugin):
                 success=True,
                 output="No Cargo.toml found; skipping clippy.",
                 issues_count=0,
+                no_files=True,
             )
 
         cmd = _build_clippy_command(fix=False)
@@ -242,6 +243,7 @@ class ClippyPlugin(BaseToolPlugin):
                 initial_issues_count=0,
                 fixed_issues_count=0,
                 remaining_issues_count=0,
+                no_files=True,
             )
 
         check_cmd = _build_clippy_command(fix=False)

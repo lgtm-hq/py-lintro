@@ -1034,6 +1034,13 @@ verify pass. So does `lintro format --dry-run`, which is a check-mode preview.
 Tools that declare no `CHECK` capability (prettier is `FORMAT`-only) have no residual to
 report and are not asked for one; they keep their own counts.
 
+**When the verify `CHECK` cannot answer** — it was skipped by a version gate, it raised,
+or it timed out — the pass reports no verdict rather than a clean one. A timeout counts
+here even when the tool returned findings: a multi-root checker such as golangci-lint
+aggregates one result across module roots, so missing the deadline on one root leaves
+the others unchecked. In every such case the tool keeps all of its pre-fix findings and
+the run fails, because "we could not tell" must never render as zero.
+
 ### Ruff vs Black Policy (Python)
 
 Lintro enforces Ruff-first linting and Black-first formatting when Black is configured
