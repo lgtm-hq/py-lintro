@@ -96,9 +96,9 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.RUSTFMT: "1.9.0",
     ToolName.SHELLCHECK: "0.11.0",
-    ToolName.SHFMT: "3.14.0",
+    ToolName.SHFMT: "3.14.1",
     ToolName.TAPLO: "0.10.0",
-    ToolName.TRUFFLEHOG: "3.97.3",
+    ToolName.TRUFFLEHOG: "3.97.4",
     ToolName.TYPOS: "1.49.0",
     ToolName.VALE: "3.20.0",
 }
