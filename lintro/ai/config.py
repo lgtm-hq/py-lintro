@@ -454,6 +454,12 @@ class AIConfig(BaseModel):
                 diagnostics=not _SUPPRESS_DIAGNOSTICS.get(),
             )
         raw_blocks = migrated.get("providers")
+        if raw_blocks is None and "providers" in migrated:
+            # ``providers:`` with nothing under it is an empty YAML section,
+            # the same "this key, all defaults" spelling an empty inner block
+            # already gets. Only a non-null non-mapping is left for pydantic.
+            migrated["providers"] = {}
+            return migrated
         if not isinstance(raw_blocks, Mapping) or not raw_blocks:
             return migrated
 

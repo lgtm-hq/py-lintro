@@ -42,6 +42,7 @@ from lintro.ai.provider_blocks import nested_source_key
 from lintro.ai.provider_config import (
     LEGACY_KEY_REMOVAL_ISSUE,
     ProviderConfig,
+    legacy_key_field_paths,
     legacy_key_warning,
     reset_legacy_key_warnings,
 )
@@ -382,6 +383,49 @@ def test_unknown_block_field_is_rejected_where_it_was_written() -> None:
     assert_that(str(excinfo.value)).contains("ai.providers.cursor.workspace_trust")
 
 
+@pytest.mark.parametrize("block", [None, {}])
+def test_an_empty_provider_block_means_all_defaults(
+    block: dict[str, Any] | None,
+) -> None:
+    """``cursor:`` written empty is "this provider, all defaults", not an error.
+
+    Both spellings a user reaches for reach the validator differently: YAML
+    parses a key with nothing under it as ``None``, while an explicit ``{}``
+    arrives as an empty mapping.
+
+    Args:
+        block: The empty block spelling under test.
+    """
+    config = AIConfig(
+        provider=AIProvider.CURSOR,
+        providers={AIProvider.CURSOR: block},  # type: ignore[dict-item]
+    )
+
+    settings = cursor_settings(config)
+    assert_that(settings).is_instance_of(CursorConfig)
+    assert_that(settings.trust_workspace).is_equal_to(
+        CursorConfig().trust_workspace,
+    )
+
+
+def test_an_empty_providers_section_means_no_blocks() -> None:
+    """``providers:`` with nothing under it is an empty section, not a failure.
+
+    An empty inner block already normalizes to "all defaults", so the empty
+    container must not be the one spelling that hard-fails the run. A present
+    non-mapping that is not null is still rejected.
+    """
+    config = AIConfig.model_validate({"provider": "cursor", "providers": None})
+
+    assert_that(config.providers).is_equal_to({})
+    assert_that(cursor_settings(config).trust_workspace).is_equal_to(
+        CursorConfig().trust_workspace,
+    )
+
+    with pytest.raises(ValueError):
+        AIConfig.model_validate({"provider": "cursor", "providers": "cursor"})
+
+
 def test_unknown_provider_block_is_dropped_with_a_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -600,15 +644,7 @@ def test_anthropic_legacy_key_is_still_honoured() -> None:
 
 @pytest.mark.parametrize(
     ("legacy_key", "path"),
-    sorted(
-        (key, path)
-        for key, path in __import__(
-            "lintro.ai.provider_config",
-            fromlist=["legacy_key_field_paths"],
-        )
-        .legacy_key_field_paths()
-        .items()
-    ),
+    sorted(legacy_key_field_paths().items()),
 )
 def test_every_declared_legacy_key_migrates_and_warns(
     legacy_key: str,
@@ -824,6 +860,38 @@ def test_lintro_config_json_carries_the_same_block(
         {"trust_workspace": {"value": False, "source": "config"}},
     )
     assert_that(payload["other_provider_blocks"]).is_equal_to(1)
+
+
+def test_lintro_config_nudges_a_legacy_key_once(
+    isolated_project: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``lintro config`` reports the legacy spelling it silently migrated.
+
+    This report runs no execution path afterwards, so suppressing the
+    deprecation here would leave the shim invisible for the whole invocation.
+
+    Args:
+        isolated_project: Empty project directory with the user tier isolated.
+        caplog: Pytest log capture fixture.
+    """
+    (isolated_project / ".lintro-config.yaml").write_text(
+        yaml.safe_dump({"ai": {"provider": "cursor", "cursor_trust_workspace": False}}),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+
+    handler_id = logger.add(caplog.handler, format="{message}")
+    try:
+        result = CliRunner().invoke(cli, ["config"])
+    finally:
+        logger.remove(handler_id)
+        clear_config_cache()
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(
+        caplog.text.count("ai.cursor_trust_workspace is deprecated"),
+    ).is_equal_to(1)
 
 
 def test_lintro_config_survives_an_invalid_provider_block(
