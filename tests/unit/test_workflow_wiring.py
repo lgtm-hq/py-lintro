@@ -4999,3 +4999,372 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
     # Fail closed: a classifier that did not succeed still pings.
     assert_that(condition).contains("needs.classify-failure.result != 'success'")
+
+
+# --- Reusable-workflow permission wiring (#2484) ---------------------------
+#
+# GitHub refuses a called workflow that requests a permission its caller job
+# does not grant, and it refuses it before any job starts: the run reports
+# `startup_failure` with no jobs and no logs. #2440 added `actions: read` to
+# build-binary.yml's compile jobs without adding it to the `homebrew-tap` job
+# that calls them, and every tag from v0.151.2 through v0.152.2 died that way.
+# Nothing caught it because the only caller is the tag pipeline, which never
+# runs on a PR or on main, and a `workflow_dispatch` of the callee uses its own
+# token so the mismatch does not apply.
+
+_PERMISSION_LEVELS = {"none": 0, "read": 1, "write": 2}
+_LOCAL_WORKFLOW_CALL_PREFIX = "./.github/workflows/"
+
+
+def _permission_level(value: object) -> int:
+    """Map a workflow permission value to a comparable access level.
+
+    Args:
+        value: The raw YAML value of a single permission scope.
+
+    Returns:
+        ``0`` for none, ``1`` for read, ``2`` for write.
+    """
+    return _PERMISSION_LEVELS.get(str(value).strip().lower(), 0)
+
+
+def _normalize_permissions(raw: object) -> dict[str, int] | None:
+    """Normalize a ``permissions:`` value to per-scope access levels.
+
+    Args:
+        raw: A ``permissions`` mapping, the ``read-all``/``write-all``
+            shorthand, or ``None`` when the block is absent.
+
+    Returns:
+        A scope-to-level mapping, or ``None`` when no block was declared.
+        The ``read-all``/``write-all`` shorthands return ``{"*": level}``,
+        which :func:`_granted_level` reads as a floor for every scope.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        shorthand = raw.strip().lower()
+        if shorthand in {"read-all", "write-all"}:
+            return {"*": _permission_level(shorthand.removesuffix("-all"))}
+        return {}
+    if isinstance(raw, dict):
+        return {str(scope): _permission_level(value) for scope, value in raw.items()}
+    return {}
+
+
+def _granted_level(grant: dict[str, int], *, scope: str) -> int:
+    """Return the access level ``grant`` gives ``scope``.
+
+    Args:
+        grant: A normalized permission mapping.
+        scope: The permission scope being looked up.
+
+    Returns:
+        The granted level, falling back to any ``read-all``/``write-all``
+        wildcard and then to ``0``.
+    """
+    return max(grant.get(scope, 0), grant.get("*", 0))
+
+
+def _effective_grant(
+    *,
+    job: dict[str, Any],
+    workflow: dict[str, Any],
+) -> dict[str, int]:
+    """Return the permissions a job actually holds.
+
+    A job without its own ``permissions`` block inherits the workflow-level
+    block; with neither, the grant is empty. Most workflows here declare
+    ``permissions: {}`` at the top, so the empty grant is the usual outcome -
+    but not all of them do (``docker-build-publish.yml`` declares a top-level
+    ``contents: read``), which is exactly why the workflow-level block is
+    consulted rather than assumed empty.
+
+    Args:
+        job: The parsed job mapping.
+        workflow: The parsed workflow that contains ``job``.
+
+    Returns:
+        A scope-to-level mapping.
+    """
+    job_level = _normalize_permissions(job.get("permissions"))
+    if job_level is not None:
+        return job_level
+    return _normalize_permissions(workflow.get("permissions")) or {}
+
+
+def _local_workflow_calls(
+    *,
+    workflow: dict[str, Any],
+) -> list[tuple[str, dict[str, Any], str]]:
+    """Find the jobs of ``workflow`` that call a local reusable workflow.
+
+    Args:
+        workflow: The parsed caller workflow.
+
+    Returns:
+        ``(job id, job mapping, callee file name)`` for each local call.
+    """
+    calls: list[tuple[str, dict[str, Any], str]] = []
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        uses = job.get("uses")
+        if isinstance(uses, str) and uses.startswith(_LOCAL_WORKFLOW_CALL_PREFIX):
+            calls.append(
+                (
+                    str(job_id),
+                    job,
+                    uses.removeprefix(_LOCAL_WORKFLOW_CALL_PREFIX),
+                ),
+            )
+    return calls
+
+
+def _permission_shortfalls(
+    *,
+    caller_label: str,
+    caller_grant: dict[str, int],
+    callee_name: str,
+    depth: int,
+) -> list[str]:
+    """Collect every permission a callee requests beyond its caller's grant.
+
+    Recurses one level so a callee that itself calls a local workflow is
+    checked against the grant it received, not against the root caller's.
+
+    Args:
+        caller_label: Human-readable ``workflow::job`` label of the caller.
+        caller_grant: The caller job's effective permissions.
+        callee_name: File name of the called workflow.
+        depth: Remaining recursion depth; ``0`` stops the walk.
+
+    Returns:
+        One message per scope the callee requests and the caller withholds.
+    """
+    callee = _load_workflow(name=callee_name)
+    shortfalls: list[str] = []
+    for callee_job_id, callee_job in (callee.get("jobs") or {}).items():
+        if not isinstance(callee_job, dict):
+            continue
+        requested = _effective_grant(job=callee_job, workflow=callee)
+        for scope, level in requested.items():
+            if level == 0:
+                continue
+            granted = _granted_level(caller_grant, scope=scope)
+            if granted < level:
+                shortfalls.append(
+                    f"{caller_label} grants {scope}="
+                    f"{'none' if granted == 0 else 'read'} but "
+                    f"{callee_name}::{callee_job_id} requests {scope}="
+                    f"{'read' if level == 1 else 'write'}",
+                )
+        if depth > 0:
+            nested_uses = callee_job.get("uses")
+            if isinstance(nested_uses, str) and nested_uses.startswith(
+                _LOCAL_WORKFLOW_CALL_PREFIX,
+            ):
+                shortfalls.extend(
+                    _permission_shortfalls(
+                        caller_label=f"{callee_name}::{callee_job_id}",
+                        caller_grant=requested,
+                        callee_name=nested_uses.removeprefix(
+                            _LOCAL_WORKFLOW_CALL_PREFIX,
+                        ),
+                        depth=depth - 1,
+                    ),
+                )
+    return shortfalls
+
+
+@pytest.fixture
+def workflow_files() -> list[Path]:
+    """Return every workflow definition under ``.github/workflows``.
+
+    Returns:
+        Sorted paths of the repository's workflow YAML files.
+    """
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    return sorted(
+        path
+        for path in workflows_dir.iterdir()
+        if path.suffix in {".yml", ".yaml"} and path.is_file()
+    )
+
+
+@pytest.fixture
+def parsed_workflows(workflow_files: list[Path]) -> dict[str, dict[str, Any]]:
+    """Parse every workflow once, keyed by file name.
+
+    Args:
+        workflow_files: The workflow paths to parse.
+
+    Returns:
+        A mapping of file name to parsed workflow.
+    """
+    return {path.name: _load_workflow(name=path.name) for path in workflow_files}
+
+
+def test_reusable_workflow_callers_grant_what_callees_request(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """Every local `uses:` caller grants at least what the callee requests.
+
+    A shortfall is not a job failure but a whole-run `startup_failure` with no
+    logs to point at it, so it has to be caught here. See #2484.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    shortfalls: list[str] = []
+    for workflow_name, workflow in parsed_workflows.items():
+        for job_id, job, callee_name in _local_workflow_calls(workflow=workflow):
+            shortfalls.extend(
+                _permission_shortfalls(
+                    caller_label=f"{workflow_name}::{job_id}",
+                    caller_grant=_effective_grant(job=job, workflow=workflow),
+                    callee_name=callee_name,
+                    depth=1,
+                ),
+            )
+    assert_that(shortfalls).described_as("caller/callee permission gaps").is_empty()
+
+
+def test_reusable_workflow_permission_check_covers_the_release_pipeline(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """The check actually walks the tag pipeline's reusable-workflow calls.
+
+    An empty walk would make the test above pass vacuously, which is exactly
+    how #2440's regression stayed invisible.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    calls = _local_workflow_calls(
+        workflow=parsed_workflows["publish-pypi-on-tag.yml"],
+    )
+    callees = {callee for _, _, callee in calls}
+    assert_that(callees).contains("build-binary.yml")
+    caller_job = next(job for job_id, job, _ in calls if job_id == "homebrew-tap")
+    grant = _effective_grant(
+        job=caller_job,
+        workflow=parsed_workflows["publish-pypi-on-tag.yml"],
+    )
+    assert_that(_granted_level(grant, scope="actions")).is_greater_than_or_equal_to(
+        _PERMISSION_LEVELS["read"],
+    )
+
+
+def test_permission_shortfalls_detects_a_withheld_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_permission_shortfalls` reports a scope the caller withholds.
+
+    Guards the detector itself against a synthetic callee: without this, a
+    detector that always returned an empty list would leave the walk above
+    green forever.
+
+    Args:
+        monkeypatch: pytest attribute patcher, used to substitute a synthetic
+            callee workflow for the on-disk one.
+    """
+    callee = {
+        "permissions": {},
+        "jobs": {
+            "compile": {"permissions": {"contents": "write", "actions": "read"}},
+        },
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: callee,
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="caller.yml::calls",
+        caller_grant=_normalize_permissions({"contents": "write"}) or {},
+        callee_name="callee.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_length(1)
+    assert_that(shortfalls[0]).contains("actions=none")
+    assert_that(shortfalls[0]).contains("requests actions=read")
+
+
+def test_permission_shortfalls_is_silent_when_the_grant_covers_the_callee(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller granting at least as much as the callee produces no message.
+
+    Args:
+        monkeypatch: pytest attribute patcher.
+    """
+    callee = {
+        "permissions": {"contents": "read"},
+        "jobs": {"compile": {"permissions": {"actions": "read"}}, "docs": {}},
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: callee,
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="caller.yml::calls",
+        caller_grant=_normalize_permissions(
+            {"contents": "write", "actions": "read"},
+        )
+        or {},
+        callee_name="callee.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_empty()
+
+
+def test_permission_shortfalls_recurses_into_a_nested_local_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A grandchild's request is checked against the grant its caller received.
+
+    Args:
+        monkeypatch: pytest attribute patcher.
+    """
+    workflows = {
+        "middle.yml": {
+            "permissions": {},
+            "jobs": {
+                "relay": {
+                    "permissions": {"contents": "write"},
+                    "uses": "./.github/workflows/leaf.yml",
+                },
+            },
+        },
+        "leaf.yml": {
+            "permissions": {},
+            "jobs": {"compile": {"permissions": {"packages": "write"}}},
+        },
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: workflows[name],
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="root.yml::calls",
+        caller_grant=_normalize_permissions({"contents": "write"}) or {},
+        callee_name="middle.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_length(1)
+    assert_that(shortfalls[0]).contains("middle.yml::relay")
+    assert_that(shortfalls[0]).contains("requests packages=write")
+
+
+def test_permission_shorthands_normalize_to_levels() -> None:
+    """``read-all``/``write-all`` and a missing block normalize correctly."""
+    assert_that(_normalize_permissions(None)).is_none()
+    assert_that(_normalize_permissions({})).is_equal_to({})
+    read_all = _normalize_permissions("read-all") or {}
+    assert_that(_granted_level(read_all, scope="actions")).is_equal_to(1)
+    write_all = _normalize_permissions("write-all") or {}
+    assert_that(_granted_level(write_all, scope="packages")).is_equal_to(2)
+    explicit = _normalize_permissions({"contents": "read", "id-token": "write"}) or {}
+    assert_that(_granted_level(explicit, scope="contents")).is_equal_to(1)
+    assert_that(_granted_level(explicit, scope="id-token")).is_equal_to(2)
+    assert_that(_granted_level(explicit, scope="actions")).is_equal_to(0)
