@@ -1055,15 +1055,27 @@ ai:
 ```
 
 Each block is declared and validated by the provider's own plugin
-(`lintro/ai/providers/<name>/config.py`), so a setting that vendor does not understand
-is rejected under the key you wrote it, and switching providers never means re-reading
-which top-level keys still apply. A block for a provider lintro does not know is dropped
-with a warning naming it, matching how an unrecognized top-level `ai:` key is treated —
-whereas an unknown provider or field in an **override** (`LINTRO_AI_PROVIDERS__…` or
-`--provider-option`) is a hard error, because an override that silently does nothing is
-worse than one that stops the run. Blocks for providers you are not using are kept but
-not applied; `lintro config` shows only the selected provider's block and a one-line
-count of the rest.
+(`lintro/ai/providers/<name>/config.py`), so switching providers never means re-reading
+which top-level keys still apply. Two kinds of key you might get wrong are treated
+differently, and the split is by **what** is unrecognized, not by which layer you wrote
+it on:
+
+- **An unknown field inside a block lintro knows** fails the config load on every layer,
+  including `.lintro-config.yaml`. The message names the full path you wrote —
+  `ai.providers.cursor.workspace_trust: Extra inputs are not permitted`. A vendor's own
+  block is a closed set of settings, so a typo there means the setting you wanted is not
+  applied, and failing loudly beats a silent default.
+- **A block for a provider lintro does not know** is dropped from a config file with a
+  warning naming it, matching how an unrecognized top-level `ai:` key is treated: a
+  stale `providers.<vendor>` block must not break every run. On an **override**
+  (`LINTRO_AI_PROVIDERS__…` or `--provider-option`) an unknown provider is a hard error
+  instead, because an override typed for one invocation that silently does nothing is
+  worse than one that stops the run.
+
+An empty block means "this provider, all defaults": `cursor:` with nothing under it and
+an empty `providers:` section are both accepted. Blocks for providers you are not using
+are kept but not applied; `lintro config` shows only the selected provider's block and a
+one-line count of the rest.
 
 Nested settings resolve on exactly the same layers as the shared ones — **flag > env >
 project config > user config > default** — and carry the same per-field provenance,
