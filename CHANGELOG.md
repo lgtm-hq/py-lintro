@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.6] - 2026-09-09
+
+### Fixed
+
+- **ci**: give the AI Review job a 120-minute budget for large diffs (#2508) (f51c971)
+
 ## [0.152.5] - 2026-09-09
 
 ### Changed
