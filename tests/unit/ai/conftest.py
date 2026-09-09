@@ -392,18 +392,22 @@ class MockIssue(BaseIssue):
 
 @pytest.fixture(autouse=True)
 def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unset every ``LINTRO_AI_PROVIDERS__*`` override for the whole AI suite.
+    """Unset the env overrides that would skew any AI-suite assertion.
 
-    These variables are resolved for any config parse, so one exported in the
-    developer's shell would silently change what an assertion about a
-    provider block observes (#2309). The flat ``LINTRO_AI_*`` overrides are
-    left alone: tests that care set them explicitly.
+    Every ``LINTRO_AI_PROVIDERS__*`` variable is resolved for any config
+    parse, so one exported in the developer's shell would silently change what
+    an assertion about a provider block observes (#2309). ``LINTRO_CLI_BARE``
+    is cleared for the same reason: it supersedes the resolved ``cli_bare``
+    inside ``should_send_bare()``, so an exported ``never`` would drop
+    ``--bare`` from the CLI completion tests. The remaining flat ``LINTRO_AI_*``
+    overrides are left alone: tests that care set them explicitly.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
     """
     for name in [n for n in os.environ if n.startswith(ENV_PROVIDER_BLOCK_PREFIX)]:
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
 
 
 @pytest.fixture
