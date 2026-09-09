@@ -1871,15 +1871,17 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
     endpoints = str(harden["with"]["allowed-endpoints"]).split()
 
     assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
-    assert_that(endpoints).contains("*.githubapp.com:443")
+    # Exact hosts by owner decision (#2339): every watchdog shard observed in
+    # recent CI logs, and nothing broader.
+    for shard in ("iad-01", "iad-02", "eus-01", "eus-02"):
+        assert_that(endpoints).contains(
+            f"hosted-compute-watchdog-prod-{shard}.githubapp.com:443",
+        )
     assert_that(endpoints).does_not_contain_duplicates()
-    # The watchdog domain is the only wildcard this job may allow; a bare
-    # catch-all would defeat the egress policy entirely.
+    # No wildcard at all on this job; a catch-all would defeat the egress
+    # policy entirely.
     for endpoint in endpoints:
-        if "*" in endpoint:
-            assert_that(endpoint).described_as(endpoint).is_equal_to(
-                "*.githubapp.com:443",
-            )
+        assert_that(endpoint).described_as(endpoint).does_not_contain("*")
 
 
 def test_auto_rerun_covers_tag_publish_workflows() -> None:

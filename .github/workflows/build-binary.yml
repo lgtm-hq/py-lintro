@@ -394,19 +394,16 @@ jobs:
 
     steps:
       - name: Harden Runner
-        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
-        # request-orchestrator endpoints (hosted-compute-watchdog-*,
-        # hosted-compute-request-orchestrator-*). The x64 job was reclaimed
-        # mid-run on 7 of 7 attempts for v0.147.7 ("The runner has received a
-        # shutdown signal", 15-20 minutes in) while this list denied them,
-        # while the arm64 sibling -- same source, same runner class -- has
-        # never been observed dying that way (#1761, #2339).
-        # The whole-label subdomain wildcard is the form harden-runner
-        # documents and the form the long Docker CI jobs already carry
-        # (#2353): the watchdog region shard rotates (iad-01, iad-02, eus-01
-        # and eus-02 all observed), so exact hosts would leave this job
-        # killable in every other region. githubapp.com is GitHub-owned; a
-        # bare `*` or `*:443` catch-all stays forbidden.
+        # The four hosted-compute-watchdog-prod-* hosts are GitHub's own
+        # hosted-runner watchdog. The x64 job was reclaimed mid-run on 7 of 7
+        # attempts for v0.147.7 ("The runner has received a shutdown signal",
+        # 15-20 minutes in) while this list denied them, while the arm64
+        # sibling -- same source, same runner class -- has never been observed
+        # dying that way (#1761, #2339). Exact hosts, not a wildcard, by owner
+        # decision: these four (iad-01, iad-02, eus-01, eus-02) are every
+        # shard observed across recent CI logs. If GitHub adds a shard the
+        # kills return and the harden-runner summary names the new host; add
+        # it here. A bare `*` or `*:443` catch-all stays forbidden.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -426,7 +423,10 @@ jobs:
             nuitka.net:443
             pipelines.actions.githubusercontent.com:443
             results-receiver.actions.githubusercontent.com:443
-            *.githubapp.com:443
+            hosted-compute-watchdog-prod-iad-01.githubapp.com:443
+            hosted-compute-watchdog-prod-iad-02.githubapp.com:443
+            hosted-compute-watchdog-prod-eus-01.githubapp.com:443
+            hosted-compute-watchdog-prod-eus-02.githubapp.com:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
