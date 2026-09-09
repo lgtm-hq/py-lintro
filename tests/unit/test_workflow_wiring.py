@@ -1885,9 +1885,13 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
         "actions-results-receiver-production.githubapp.com:443",
     )
     assert_that(endpoints).does_not_contain_duplicates()
-    # A bare catch-all would defeat the egress policy entirely.
+    # Any other glob would silently widen the block policy; the agreed
+    # revert-to-wildcard fallback is the single form permitted here.
     for endpoint in endpoints:
-        assert_that(endpoint).described_as(endpoint).is_not_in("*", "*:443")
+        if "*" in endpoint:
+            assert_that(endpoint).described_as(
+                f"{endpoint}: only the agreed *.githubapp.com:443 fallback may glob",
+            ).is_equal_to("*.githubapp.com:443")
 
 
 def test_auto_rerun_covers_tag_publish_workflows() -> None:
