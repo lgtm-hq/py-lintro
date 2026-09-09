@@ -120,6 +120,11 @@ def migrate_legacy_provider_keys(
     Returns:
         A copy with legacy keys removed and their values moved under
         ``providers``. Returns *data* unchanged when it carries no legacy key.
+
+    Raises:
+        ValueError: If ``providers`` is present but is not a mapping. The
+            migration would otherwise replace it with an empty mapping and the
+            malformed value would never reach validation.
     """
     from lintro.ai.registry import provider_config_models
 
@@ -135,9 +140,15 @@ def migrate_legacy_provider_keys(
 
     migrated = dict(data)
     providers_raw = migrated.get("providers")
-    providers: dict[Any, Any] = (
-        dict(providers_raw) if isinstance(providers_raw, Mapping) else {}
-    )
+    if providers_raw is not None and not isinstance(providers_raw, Mapping):
+        # Overwriting a malformed scalar with ``{}`` would let the migrated
+        # legacy key stand in for it, so a bad ``ai.providers`` value would be
+        # accepted instead of reported.
+        raise ValueError(
+            "ai.providers must be a mapping of provider blocks, got "
+            f"{type(providers_raw).__name__}",
+        )
+    providers: dict[Any, Any] = dict(providers_raw) if providers_raw else {}
     for legacy, (provider, field) in present.items():
         value = migrated.pop(legacy)
         key = provider.value
