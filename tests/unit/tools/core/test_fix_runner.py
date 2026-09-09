@@ -213,7 +213,13 @@ def test_verification_after_a_successful_fix_scores_the_survivors(
     Args:
         tmp_path: Temporary directory for the dotenv file.
     """
-    env_file = tmp_path / ".env"
+    # A project marker pins the anchor: without it ``get_execution_cwd``
+    # returns the files' common ancestor, so the assertion below would pin the
+    # no-marker fallback rather than the discovered root a real run resolves.
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "x"\n')
+    package_dir = tmp_path / "src"
+    package_dir.mkdir()
+    env_file = package_dir / ".env"
     env_file.write_text("foo=1\n")
     plugin = DotenvLinterPlugin()
     with patch.object(
@@ -232,8 +238,9 @@ def test_verification_after_a_successful_fix_scores_the_survivors(
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(0)
     # The stamped directory is the project root the per-file paths were
-    # resolved from; the run-level verify pass anchors relative issue paths
-    # there (#1743), so dropping the stamp must fail a test.
+    # resolved from — the marker directory, not the file's own parent; the
+    # run-level verify pass anchors relative issue paths there (#1743), so
+    # dropping the stamp must fail a test.
     assert_that(result.cwd).is_equal_to(str(tmp_path))
 
 

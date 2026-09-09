@@ -8,6 +8,7 @@ degrading to the documented floor when fingerprints cannot be trusted.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 from dataclasses import dataclass
@@ -38,6 +39,7 @@ from lintro.tools.core.verify_pass import (
     run_verify_pass,
     verifying_tools,
 )
+from lintro.tools.typos.definition import TyposPlugin
 from lintro.utils.file_cache import (
     FileFingerprint,
     FingerprintSnapshot,
@@ -1435,3 +1437,157 @@ def test_the_verify_baseline_reads_the_incremental_cache_without_writing_it(
         ["black.json"],
     )
     assert_that(cache_file.read_text(encoding="utf-8")).is_equal_to(before)
+
+
+def test_run_verify_pass_reports_a_timed_out_check_as_unverified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A partial CHECK is no verdict, even when it parsed findings.
+
+    golangci-lint loops over module roots and returns one aggregated result
+    carrying ``issues`` from the roots that finished and ``timed_out=True``
+    from the one that did not. Reading that as an answer would mark every file
+    in the scope verified and drop the pre-fix findings on the module that was
+    never re-checked.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    golangci = _FakeTool(
+        definition=_FakeDefinition(
+            claims=[Claim(patterns=["*.go"], capabilities={Cap.FIX, Cap.CHECK})],
+        ),
+        result=ToolResult(
+            name="golangci-lint",
+            success=False,
+            output="golangci-lint timed out",
+            issues_count=1,
+            issues=[_issue("/repo/a.go")],
+            timed_out=True,
+        ),
+    )
+    _register(monkeypatch, {"golangci-lint": golangci})
+
+    outcomes = run_verify_pass(
+        tools_to_run=["golangci-lint"],
+        scope=VerifyScope(files=("/repo/a.go",), narrowed=True),
+        configure=lambda *, tool_name: cast("VerifiableTool", golangci),
+    )
+
+    assert_that(outcomes[0].ran).is_false()
+    assert_that(outcomes[0].result).is_none()
+
+
+def test_fold_never_reads_a_timed_out_check_as_a_verdict() -> None:
+    """A hand-built timed-out outcome cannot re-open the fail-open either.
+
+    ``run_verify_pass`` already converts a timed-out CHECK to ``result=None``,
+    so this pins the guard in ``_fold_one``: a partial result that still
+    carries parsed findings must leave every pre-fix finding standing rather
+    than count the difference as fixed.
+    """
+    mutation = ToolResult(
+        name="golangci-lint",
+        success=True,
+        output="Fixed 2 issue(s)",
+        issues_count=0,
+        issues=[],
+        initial_issues=[_issue("/repo/a.go"), _issue("/repo/b.go")],
+        initial_issues_count=2,
+        fixed_issues_count=2,
+        remaining_issues_count=0,
+        capability=Cap.FIX,
+    )
+    verify = ToolResult(
+        name="golangci-lint",
+        success=False,
+        output="golangci-lint timed out",
+        issues_count=1,
+        issues=[_issue("/repo/a.go")],
+        timed_out=True,
+        capability=Cap.CHECK,
+    )
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[VerifyOutcome(tool="golangci-lint", result=verify)],
+        scope=VerifyScope(files=("/repo/a.go", "/repo/b.go"), narrowed=True),
+    )
+
+    folded = results[0]
+    # Both pre-fix findings survive: neither file was re-checked to completion.
+    assert_that(folded.remaining_issues_count).is_equal_to(2)
+    assert_that(folded.fixed_issues_count).is_equal_to(0)
+    assert_that(folded.success).is_false()
+
+
+def _tool_result_calls() -> list[tuple[str, int, str, set[str]]]:
+    """Return every literal ``ToolResult(...)`` construction under ``lintro``.
+
+    Returns:
+        ``(path, lineno, output_text, keyword_names)`` for each call whose
+        ``output`` is a literal string (f-strings contribute their constant
+        parts).
+    """
+    calls: list[tuple[str, int, str, set[str]]] = []
+    package_root = Path(verify_pass.__file__).parents[2]
+    for source in sorted(package_root.rglob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            if getattr(node.func, "id", None) != "ToolResult":
+                continue
+            keywords = {kw.arg for kw in node.keywords if kw.arg}
+            output = next(
+                (kw.value for kw in node.keywords if kw.arg == "output"),
+                None,
+            )
+            if isinstance(output, ast.Constant) and isinstance(output.value, str):
+                text = output.value
+            elif isinstance(output, ast.JoinedStr):
+                text = "".join(
+                    part.value
+                    for part in output.values
+                    if isinstance(part, ast.Constant) and isinstance(part.value, str)
+                )
+            else:
+                continue
+            calls.append((str(source), node.lineno, text, keywords))
+    return calls
+
+
+def test_every_nothing_examined_result_is_flagged() -> None:
+    """A "no files" result must say so structurally, not only in prose.
+
+    ``run_verify_pass`` reads ``no_files`` (and ``skipped``) to tell "I
+    examined nothing" apart from "I examined the scope and it is clean". A
+    plugin that builds the first shape by hand without the flag hands the pass
+    a clean verdict it never earned, and the tool's pre-fix findings are
+    dropped as fixed. Missing-configuration results are excluded: they mean
+    the tool could not run at all, which the display already renders on its
+    own terms.
+    """
+    unflagged = [
+        f"{path}:{lineno} {text!r}"
+        for path, lineno, text, keywords in _tool_result_calls()
+        if text.startswith("No ")
+        and "configuration" not in text
+        and not keywords & {"no_files", "skipped"}
+    ]
+
+    assert_that(unflagged).is_empty()
+
+
+def test_typos_reports_an_all_binary_candidate_set_as_no_files() -> None:
+    """Typos builds its own no-files result, so it must stamp the flag too.
+
+    The message is ``None`` there, so the display's prose fallback cannot see
+    it at all — only the structured flag can.
+    """
+    result = TyposPlugin()._no_files_result(cwd="/repo")
+
+    assert_that(result.no_files).is_true()
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)

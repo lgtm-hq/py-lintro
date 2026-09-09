@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -28,9 +29,10 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
 from lintro.tools import tool_manager
 from lintro.tools.core import verify_pass
+from lintro.utils.execution import parallel_executor
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
-from lintro.utils.file_cache import FingerprintSnapshot
+from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
 from lintro.utils.tool_executor import execute_run
 from tests.unit.conftest import FakeLogger
 
@@ -38,9 +40,13 @@ from tests.unit.conftest import FakeLogger
 class _FakeDefinition:
     """Definition double carrying the claims the scheduler and pass read."""
 
-    def __init__(self) -> None:
-        """Declare a ``*.py`` claim that both mutates and checks."""
-        self.name = "ruff"
+    def __init__(self, name: str = "ruff") -> None:
+        """Declare a ``*.py`` claim that both mutates and checks.
+
+        Args:
+            name: Registry key this double stands in for.
+        """
+        self.name = name
         self.can_fix = True
         self.claims = [
             Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK}),
@@ -55,19 +61,35 @@ class _MutatingTool:
     the run must check rather than believe.
     """
 
-    def __init__(self, *, target: Path, residual: int) -> None:
+    def __init__(
+        self,
+        *,
+        target: Path,
+        residual: int,
+        name: str = "ruff",
+        converge_after: int = 1,
+    ) -> None:
         """Store what to rewrite and what a later check should find.
 
         Args:
             target: File the fix rewrites, moving its fingerprint.
             residual: Issues the verify pass should report afterwards.
+            name: Registry key this double stands in for.
+            converge_after: Number of ``fix`` passes before the double stops
+                reporting a remaining issue. ``run_fix_with_retry`` re-invokes
+                ``fix`` while the result reports a non-zero remaining count,
+                so anything above 1 exercises the retry loop.
         """
-        self.definition = _FakeDefinition()
+        self.name = name
+        self.definition = _FakeDefinition(name)
         self._target = target
         self._residual = residual
+        self._converge_after = converge_after
         self.fix_calls = 0
         self.time_out = False
         self.checked_paths: list[str] | None = None
+        self.checked_text: str | None = None
+        self.events: list[str] = []
 
     def set_options(self, **_kwargs: Any) -> None:
         """Accept and ignore runtime options."""
@@ -96,7 +118,11 @@ class _MutatingTool:
             ToolResult: A mutation result reporting no residual.
         """
         self.fix_calls += 1
-        self._target.write_text("x = 2\n", encoding="utf-8")
+        self.events.append(f"fix:{self.name}")
+        self._target.write_text(
+            f"x = {self.fix_calls + 1}\n",
+            encoding="utf-8",
+        )
         detected = [
             RuffIssue(
                 file=str(self._target),
@@ -109,7 +135,7 @@ class _MutatingTool:
             # What every real plugin reports on a deadline: nothing fixed,
             # every issue it had already detected still remaining.
             return ToolResult(
-                name="ruff",
+                name=self.name,
                 success=False,
                 timed_out=True,
                 output="Ruff execution timed out",
@@ -120,8 +146,22 @@ class _MutatingTool:
                 fixed_issues_count=0,
                 remaining_issues_count=len(detected),
             )
+        if self.fix_calls < self._converge_after:
+            # Not converged yet: the retry loop re-invokes ``fix``, which
+            # rewrites the file again after the pre-mutation snapshot.
+            return ToolResult(
+                name=self.name,
+                success=True,
+                output="Fixed 1 issue(s), 1 remaining",
+                issues_count=1,
+                issues=detected,
+                initial_issues=detected,
+                initial_issues_count=1,
+                fixed_issues_count=0,
+                remaining_issues_count=1,
+            )
         return ToolResult(
-            name="ruff",
+            name=self.name,
             success=True,
             output="Fixed 1 issue(s)",
             issues_count=0,
@@ -142,7 +182,9 @@ class _MutatingTool:
         Returns:
             ToolResult: The verify-pass result.
         """
+        self.events.append(f"check:{self.name}")
         self.checked_paths = list(paths)
+        self.checked_text = self._target.read_text(encoding="utf-8")
         issues = [
             RuffIssue(
                 file=str(self._target),
@@ -153,7 +195,7 @@ class _MutatingTool:
             for index in range(self._residual)
         ]
         return ToolResult(
-            name="ruff",
+            name=self.name,
             success=self._residual == 0,
             issues_count=self._residual,
             issues=issues,
@@ -163,10 +205,11 @@ class _MutatingTool:
 class _FakeOutputManager:
     """Output manager double that writes nothing.
 
-    ``base_dir`` is present because ``resolve_log_root`` reads it: without it
-    the severity baseline is skipped for a reason no test states, and
-    ``previous_severity_counts`` is ``None`` by accident rather than because
-    the tmp log root holds no baseline file.
+    ``base_dir`` exists only so this double mirrors the real output manager's
+    surface. The FIX runs in this file never consult the severity baseline —
+    ``baseline_is_eligible`` returns False for any action other than CHECK, so
+    ``finalize_artifact`` never reaches ``resolve_log_root`` and never reads
+    ``base_dir`` at all.
     """
 
     def __init__(self, run_dir: Path) -> None:
@@ -237,7 +280,58 @@ def _seed(path: Path) -> Path:
     path.write_text("x = 1\n", encoding="utf-8")
     stamp = float(int(time.time())) + 0.25
     os.utime(path, (stamp, stamp))
+    if not path.stat().st_mtime % 1:
+        # The filesystem truncated the stamp to whole seconds, so
+        # ``is_reliable`` will refuse to narrow and the pass would be handed
+        # the scan root instead of this file. Skip rather than fail: the
+        # narrowing contract cannot be observed here at all.
+        pytest.skip("filesystem mtime granularity is whole seconds")
     return path
+
+
+def _spy_on_snapshots(
+    *,
+    monkeypatch: pytest.MonkeyPatch,
+    events: list[str],
+    delegate: bool,
+) -> list[list[str]]:
+    """Record every pre-mutation fingerprint snapshot the run takes.
+
+    The spy is installed on the ``verify_pass`` module attribute, which is
+    where the call site resolves the name. Recording into the tool double's
+    own ordering list is what keeps the read-only tests honest: a spy the SUT
+    never reaches records nothing, which is indistinguishable from "no
+    snapshot was taken" unless some other test proves the same install does
+    see a call.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        events: Ordering list shared with the tool double.
+        delegate: Whether to call the real implementation. Runs that go on to
+            mutate need the real snapshot; read-only runs must not take one at
+            all, so there is nothing to delegate to.
+
+    Returns:
+        list[list[str]]: The file list of each snapshot call, in order.
+    """
+    real = snapshot_fingerprints
+    recorded: list[list[str]] = []
+
+    def _spy(files: Sequence[str]) -> FingerprintSnapshot | None:
+        """Record the call and optionally delegate.
+
+        Args:
+            files: Files the pass asked to fingerprint.
+
+        Returns:
+            FingerprintSnapshot | None: The real snapshot when delegating.
+        """
+        events.append("snapshot")
+        recorded.append(list(files))
+        return real(files) if delegate else None
+
+    monkeypatch.setattr(verify_pass, "snapshot_fingerprints", _spy)
+    return recorded
 
 
 def _pinned_config(*, max_fix_retries: int = 1) -> LintroConfig:
@@ -288,6 +382,7 @@ def _run_fmt(
     ctx: RunContext,
     workspace: Path,
     incremental: bool = False,
+    tools: str = "ruff",
 ) -> RunArtifact:
     """Execute a ``fmt`` run over one workspace directory.
 
@@ -295,6 +390,7 @@ def _run_fmt(
         ctx: The fix-mode run context.
         workspace: Directory to scan.
         incremental: Whether to run in incremental mode.
+        tools: Comma-separated tool selection to pass through.
 
     Returns:
         RunArtifact: The artifact the execute phase produced.
@@ -302,7 +398,7 @@ def _run_fmt(
     return execute_run(
         ctx=ctx,
         paths=[str(workspace)],
-        tools="ruff",
+        tools=tools,
         tool_options=None,
         exclude=None,
         include_venv=False,
@@ -332,6 +428,14 @@ def test_the_verify_pass_residual_beats_the_fixing_tools_own_zero(
     target = _seed(workspace / "a.py")
     tool = _MutatingTool(target=target, residual=2)
     monkeypatch.setattr(tool_manager, "get_tool", lambda name: tool)
+    # The same spy the read-only tests use, here in its positive case: it has
+    # to record a call, or their "no snapshot was taken" assertion would pass
+    # just as well against a spy the SUT never reaches.
+    snapshots = _spy_on_snapshots(
+        monkeypatch=monkeypatch,
+        events=tool.events,
+        delegate=True,
+    )
 
     artifact = _run_fmt(
         ctx=_fix_context(tmp_path=tmp_path, fake_logger=fake_logger),
@@ -340,6 +444,8 @@ def test_the_verify_pass_residual_beats_the_fixing_tools_own_zero(
 
     # The snapshot must predate the mutation, or the rewritten file would not
     # look changed and the pass would verify nothing.
+    assert_that(snapshots).is_equal_to([[str(target)]])
+    assert_that(tool.events).is_equal_to(["snapshot", "fix:ruff", "check:ruff"])
     assert_that(tool.checked_paths).is_equal_to([str(target)])
     assert_that(artifact.total_remaining).is_equal_to(2)
     assert_that(artifact.total_fixed).is_equal_to(0)
@@ -382,9 +488,10 @@ def test_a_clean_verify_pass_leaves_the_run_green(
     assert_that(artifact.total_remaining).is_equal_to(0)
     assert_that(artifact.total_fixed).is_equal_to(1)
     assert_that(artifact.exit_code).is_equal_to(0)
-    # The double's ``base_dir`` is a real (empty) log root, so the severity
-    # baseline is genuinely consulted and genuinely finds nothing — an
-    # asserted outcome rather than a silently skipped code path.
+    # ``previous_severity_counts`` is None here because the run is a FIX: the
+    # baseline is only eligible for CHECK runs (``baseline_is_eligible``), so
+    # this pins "fmt does not compare against a baseline", not the read path —
+    # that is the check-mode test's job.
     assert_that(artifact.previous_severity_counts).is_none()
 
 
@@ -419,11 +526,10 @@ def test_check_runs_no_verify_pass_and_takes_no_snapshot(
         profile=False,
     )
 
-    snapshots: list[Any] = []
-    monkeypatch.setattr(
-        verify_pass,
-        "snapshot_fingerprints",
-        lambda files: snapshots.append(files),
+    snapshots = _spy_on_snapshots(
+        monkeypatch=monkeypatch,
+        events=tool.events,
+        delegate=False,
     )
 
     artifact = _run_fmt(ctx=ctx, workspace=workspace)
@@ -519,11 +625,10 @@ def test_a_dry_run_preview_stays_read_only(
     target = _seed(workspace / "a.py")
     tool = _MutatingTool(target=target, residual=2)
     monkeypatch.setattr(tool_manager, "get_tool", lambda name: tool)
-    snapshots: list[Any] = []
-    monkeypatch.setattr(
-        verify_pass,
-        "snapshot_fingerprints",
-        lambda files: snapshots.append(files),
+    snapshots = _spy_on_snapshots(
+        monkeypatch=monkeypatch,
+        events=tool.events,
+        delegate=False,
     )
     ctx = RunContext(
         action=Action.CHECK,
@@ -603,3 +708,149 @@ def test_a_timed_out_tool_is_not_asked_to_verify(
     ).is_equal_to(["F401"])
     assert_that(artifact.total_remaining).is_equal_to(1)
     assert_that(artifact.exit_code).is_equal_to(1)
+
+
+def test_two_mutating_tools_are_verified_once_on_the_parallel_path(
+    monkeypatch: pytest.MonkeyPatch,
+    _executor_doubles: list[dict[str, Any]],
+    tmp_path: Path,
+    fake_logger: FakeLogger,
+) -> None:
+    """The default multi-tool ``fmt`` run is mutate-then-verify too.
+
+    ``use_parallel`` is ``execution.parallel and len(tools_to_run) > 1``, and
+    ``execution.parallel`` defaults to True, so a real ``lintro fmt`` takes the
+    parallel branch. This is also the change's headline scenario: tool A fixes
+    a file, tool B rewrites it again and reintroduces A's finding, and A's own
+    post-fix number cannot see that. One verify pass after both mutations does.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        _executor_doubles: Recorded configuration calls and gate doubles.
+        tmp_path: Temporary workspace.
+        fake_logger: Console logger double.
+    """
+    workspace = tmp_path / "src"
+    workspace.mkdir()
+    target = _seed(workspace / "a.py")
+    # ``ruff`` fixes the file and reports itself clean; ``black`` then rewrites
+    # the same file, which is what puts ``ruff``'s finding back. Only ``ruff``
+    # has a residual afterwards.
+    ruff = _MutatingTool(target=target, residual=1, name="ruff")
+    black = _MutatingTool(target=target, residual=0, name="black")
+    tools = {"ruff": ruff, "black": black}
+    monkeypatch.setattr(tool_manager, "get_tool", lambda name: tools[name])
+    monkeypatch.setattr(
+        te,
+        "get_tools_to_run",
+        lambda tools, action, **_kw: ToolsToRunResult(to_run=["ruff", "black"]),
+    )
+    # ``run_tools_parallel`` imports ``configure_tool_for_execution`` directly,
+    # so the sequential path's patch point does not reach it.
+    parallel_calls: list[dict[str, Any]] = []
+
+    def _record_parallel_configure(*, tool: Any, **kwargs: Any) -> Any:
+        """Record a parallel-path configure and hand the tool back.
+
+        Args:
+            tool: The plugin double being configured.
+            **kwargs: Configuration keyword arguments.
+
+        Returns:
+            Any: The same double.
+        """
+        parallel_calls.append(kwargs)
+        _executor_doubles.append(kwargs)
+        return tool
+
+    monkeypatch.setattr(
+        parallel_executor,
+        "configure_tool_for_execution",
+        _record_parallel_configure,
+    )
+    ctx = _fix_context(tmp_path=tmp_path, fake_logger=fake_logger)
+    ctx.lintro_config.execution.parallel = True
+
+    artifact = _run_fmt(ctx=ctx, workspace=workspace, tools="ruff,black")
+
+    # The mutation phase really went through the parallel executor rather than
+    # the sequential helper the other tests in this file exercise.
+    assert_that(parallel_calls).is_length(2)
+    # Both tools mutated before either verified: four configures, with the two
+    # verify configures last.
+    actions = [call["action"] for call in _executor_doubles]
+    assert_that(actions[:2]).is_equal_to([Action.FIX, Action.FIX])
+    assert_that(sorted(str(action) for action in actions[2:])).is_equal_to(
+        [str(Action.CHECK), str(Action.CHECK)],
+    )
+    assert_that(ruff.fix_calls).is_equal_to(1)
+    assert_that(black.fix_calls).is_equal_to(1)
+    assert_that(ruff.checked_paths).is_equal_to([str(target)])
+    assert_that(black.checked_paths).is_equal_to([str(target)])
+    # The verify CHECK runs with the run's own tool options: only the action
+    # and the incremental flag differ from the mutation configure.
+    mutation_call = _executor_doubles[0]
+    verify_call = next(
+        call for call in _executor_doubles[2:] if call["tool_name"] == "ruff"
+    )
+    for key in ("tool_option_dict", "exclude", "include_venv", "diff_base"):
+        assert_that(verify_call[key]).is_equal_to(mutation_call[key])
+    assert_that(verify_call["incremental"]).is_false()
+    # ``ruff`` said ``remaining=0``; the pass says otherwise, and the run
+    # reports the pass's number.
+    folded = {result.name: result for result in artifact.tool_results}
+    assert_that(folded["ruff"].remaining_issues_count).is_equal_to(1)
+    assert_that(folded["ruff"].fixed_issues_count).is_equal_to(0)
+    # ``black``'s own count is not inflated by the finding it reintroduced in
+    # another tool's row.
+    assert_that(folded["black"].remaining_issues_count).is_equal_to(0)
+    assert_that(folded["black"].fixed_issues_count).is_equal_to(1)
+    assert_that(artifact.total_remaining).is_equal_to(1)
+    assert_that(artifact.exit_code).is_equal_to(1)
+
+
+def test_the_retry_loop_snapshots_once_and_verifies_the_final_file(
+    monkeypatch: pytest.MonkeyPatch,
+    _executor_doubles: list[dict[str, Any]],
+    tmp_path: Path,
+    fake_logger: FakeLogger,
+) -> None:
+    """At the production convergence budget the baseline is still taken once.
+
+    ``run_fix_with_retry`` re-invokes ``fix`` while the result still reports a
+    remaining count, so a tool can rewrite its target several times. The
+    snapshot has to predate the *first* of those rewrites and the verify CHECK
+    has to see the *last* of them.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        _executor_doubles: Recorded configuration calls and gate doubles.
+        tmp_path: Temporary workspace.
+        fake_logger: Console logger double.
+    """
+    workspace = tmp_path / "src"
+    workspace.mkdir()
+    target = _seed(workspace / "a.py")
+    tool = _MutatingTool(target=target, residual=0, converge_after=2)
+    monkeypatch.setattr(tool_manager, "get_tool", lambda name: tool)
+    snapshots = _spy_on_snapshots(
+        monkeypatch=monkeypatch,
+        events=tool.events,
+        delegate=True,
+    )
+    ctx = _fix_context(tmp_path=tmp_path, fake_logger=fake_logger)
+    # The production default, not the file's pin: the retry loop is live.
+    ctx.lintro_config.execution.max_fix_retries = 3
+
+    artifact = _run_fmt(ctx=ctx, workspace=workspace)
+
+    assert_that(tool.fix_calls).is_equal_to(2)
+    assert_that(snapshots).is_equal_to([[str(target)]])
+    assert_that(tool.events).is_equal_to(
+        ["snapshot", "fix:ruff", "fix:ruff", "check:ruff"],
+    )
+    # The CHECK read what the second pass wrote, not what the first did.
+    assert_that(tool.checked_text).is_equal_to("x = 3\n")
+    assert_that(tool.checked_paths).is_equal_to([str(target)])
+    assert_that(artifact.total_remaining).is_equal_to(0)
+    assert_that(artifact.exit_code).is_equal_to(0)
