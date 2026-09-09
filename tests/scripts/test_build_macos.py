@@ -86,6 +86,61 @@ _BUILD_VARIANTS = [
 ]
 
 
+# ``build_nuitka_command`` takes an ``arch`` keyword on macOS only.
+_COMMAND_VARIANTS = [
+    ("build_macos.py", {"arch": "arm64"}),
+    ("build_linux.py", {}),
+]
+
+
+@pytest.mark.parametrize(
+    ("script_name", "command_kwargs"),
+    _COMMAND_VARIANTS,
+    ids=["platform=macos", "platform=linux"],
+)
+def test_build_nuitka_command_ships_pygments_as_bytecode(
+    script_name: str,
+    command_kwargs: dict[str, str],
+) -> None:
+    """Both builds load the bytecode plugin and drop httpx's CLI.
+
+    #2484: pygments contributed 321 of the ~1500 generated C units for one
+    ``rich.syntax`` call site. The user plugin ships it as bytecode and
+    ``--nofollow-import-to`` prunes the import routes that reached it. Neither
+    flag changes behaviour, so a silent removal would only show up as a build
+    that is minutes slower and megabytes larger.
+
+    Args:
+        script_name: Basename of the build script under ``scripts/build/``.
+        command_kwargs: Keyword arguments for ``build_nuitka_command``.
+    """
+    module = _load_build_module(script_name)
+    cmd = module.build_nuitka_command(**command_kwargs)
+
+    plugin_flags = [arg for arg in cmd if arg.startswith("--user-plugin=")]
+    assert_that(plugin_flags).is_length(1)
+    plugin_path = Path(plugin_flags[0].split("=", 1)[1])
+    assert_that(plugin_path.name).is_equal_to("nuitka_bytecode_plugin.py")
+    assert_that(plugin_path).is_equal_to(
+        _REPO_ROOT / "scripts" / "build" / "nuitka_bytecode_plugin.py",
+    )
+    assert_that(plugin_path.exists()).described_as(str(plugin_path)).is_true()
+
+    nofollow = [arg for arg in cmd if arg.startswith("--nofollow-import-to=")]
+    assert_that(nofollow).is_equal_to(["--nofollow-import-to=httpx._main"])
+    # The library itself is still bundled; only its click-based CLI is pruned.
+    assert_that(cmd).contains("--include-package=httpx")
+
+
+def test_build_nuitka_command_flags_agree_across_platforms() -> None:
+    """Both build scripts must not drift on the #2484 size flags."""
+    macos = _load_build_module("build_macos.py")
+    linux = _load_build_module("build_linux.py")
+
+    assert_that(linux.NOFOLLOW_MODULES).is_equal_to(macos.NOFOLLOW_MODULES)
+    assert_that(linux.BYTECODE_PLUGIN).is_equal_to(macos.BYTECODE_PLUGIN)
+
+
 @pytest.mark.parametrize(
     ("script_name", "builder_attr", "builder_kwargs"),
     _BUILD_VARIANTS,

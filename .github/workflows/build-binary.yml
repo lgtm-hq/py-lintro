@@ -167,7 +167,9 @@ jobs:
     name: Build macOS Binary
     needs: get-release-info
     runs-on: ${{ matrix.arch == 'x86_64' && 'macos-15-intel' || 'macos-latest' }}
-    # 40 min compile + 20 min smoke + 10 min setup/diagnostic headroom.
+    # 40 min compile + 20 min smoke + ~10 min shared by setup (harden-runner,
+    # checkout, setup-python, uv sync), the cache restore and save, the
+    # artifact and release uploads and the failure diagnostics.
     # The smoke step's 20-minute budget used to sit inside a 35-minute job
     # that already spent 25 minutes on compile, so the parent could cancel a
     # valid smoke test. #2484 raised the compile bound to 40, so the job
@@ -298,6 +300,10 @@ jobs:
 
       - name: Restore Nuitka compile cache
         if: steps.reuse.outputs.reuse != 'true'
+        # Best-effort: a cache-service error must not fail a build that is
+        # otherwise fine, and the save step sits ahead of the verify, smoke
+        # and upload gates (#2484).
+        continue-on-error: true
         # yamllint disable rule:line-length
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -346,6 +352,10 @@ jobs:
       # the C files it did compile are the head start the next attempt needs.
       - name: Save Nuitka compile cache
         if: always() && steps.reuse.outputs.reuse != 'true'
+        # Best-effort: see the restore step. A path-validation error when the
+        # build died before creating .nuitka-cache must not discard a
+        # finished binary (#2484).
+        continue-on-error: true
         # yamllint disable rule:line-length
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -454,7 +464,9 @@ jobs:
     name: Build Linux Binary
     needs: get-release-info
     runs-on: ${{ matrix.runner }}
-    # 40 min compile + 20 min smoke + 10 min setup/diagnostic headroom.
+    # 40 min compile + 20 min smoke + ~10 min shared by setup (harden-runner,
+    # checkout, setup-python, uv sync), the cache restore and save, the
+    # artifact and release uploads and the failure diagnostics.
     # The smoke step's 20-minute budget used to sit inside a 35-minute job
     # that already spent 25 minutes on compile, so the parent could cancel a
     # valid smoke test. #2484 raised the compile bound to 40, so the job
@@ -603,6 +615,10 @@ jobs:
 
       - name: Restore Nuitka compile cache
         if: steps.reuse.outputs.reuse != 'true'
+        # Best-effort: a cache-service error must not fail a build that is
+        # otherwise fine, and the save step sits ahead of the verify, smoke
+        # and upload gates (#2484).
+        continue-on-error: true
         # yamllint disable rule:line-length
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -644,6 +660,10 @@ jobs:
       # the C files it did compile are the head start the next attempt needs.
       - name: Save Nuitka compile cache
         if: always() && steps.reuse.outputs.reuse != 'true'
+        # Best-effort: see the restore step. A path-validation error when the
+        # build died before creating .nuitka-cache must not discard a
+        # finished binary (#2484).
+        continue-on-error: true
         # yamllint disable rule:line-length
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:

@@ -58,6 +58,30 @@ def _normalize_github_expr(expr: str) -> str:
     return expr.strip()
 
 
+def _collect_python_version_pins(*, node: Any) -> list[str]:
+    """Return every literal ``python-version`` value nested under a node.
+
+    Args:
+        node: Parsed YAML fragment to walk.
+
+    Returns:
+        The literal pins found, in document order, skipping ``${{ }}``
+        expressions and multi-version matrix strings.
+    """
+    found: list[str] = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == "python-version" and isinstance(value, str):
+                if "${{" not in value and "," not in value:
+                    found.append(value)
+                continue
+            found.extend(_collect_python_version_pins(node=value))
+    elif isinstance(node, list):
+        for item in node:
+            found.extend(_collect_python_version_pins(node=item))
+    return found
+
+
 def _replace_github_token(expr: str, *, token: str, replacement: str) -> str:
     pattern = r"\s+".join(re.escape(part) for part in token.split())
     return re.sub(pattern, replacement, expr)
@@ -1796,6 +1820,172 @@ def test_build_binary_pins_setup_uv_version() -> None:
         assert_that(version).contains("env.UV_VERSION")
 
 
+# --- #2484 upload gate ------------------------------------------------------
+#
+# Every publishing step and job carries the same opt-in disjunction. Asserting
+# it by substring lets an inverted or conjunctive rewrite through, so the tests
+# below pin the literal disjunct *and* evaluate the whole condition against the
+# three payloads that matter. build-binary.yml is read from the tag, so a
+# regression here passes every PR and only shows up at the release.
+
+_UPLOAD_OPT_IN_DISJUNCTION = (
+    "(inputs.release_tag != '' || inputs.upload_to_release == true)"
+)
+
+# The exact publishing surface. A rename or a new upload step must be added
+# here deliberately, so the sweep cannot silently shrink.
+_UPLOAD_STEPS = (
+    ("generate-man-page", "Upload to release"),
+    ("build-macos", "Upload to release"),
+    ("build-linux", "Upload to release"),
+    ("create-universal-binary", "Upload to release"),
+)
+
+# Operands that are true on every payload under test: the tag resolved by
+# get-release-info (its latest-release fallback covers the dispatch path), the
+# #2435 reuse guard and the universal-arch guards.
+_UPLOAD_GATE_TRUE_OPERANDS = (
+    "needs.get-release-info.outputs.release_tag != ''",
+    "steps.reuse.outputs.reuse != 'true'",
+    "inputs.arch == 'universal'",
+    "needs.get-release-info.outputs.is_prerelease == 'false'",
+)
+
+
+def _evaluate_boolean_tokens(tokens: list[str]) -> bool:
+    """Evaluate a ``True``/``False``/``&&``/``||``/parenthesis token list.
+
+    ``&&`` binds tighter than ``||``, matching GitHub Actions expressions.
+
+    Args:
+        tokens: Tokens to evaluate, consumed left to right.
+
+    Returns:
+        The value of the expression.
+    """
+    position = 0
+
+    def parse_atom() -> bool:
+        nonlocal position
+        symbol = tokens[position]
+        position += 1
+        if symbol == "(":
+            value = parse_or()
+            assert_that(tokens[position]).is_equal_to(")")
+            position += 1
+            return value
+        return symbol == "True"
+
+    def parse_and() -> bool:
+        nonlocal position
+        value = parse_atom()
+        while position < len(tokens) and tokens[position] == "&&":
+            position += 1
+            value = parse_atom() and value
+        return value
+
+    def parse_or() -> bool:
+        nonlocal position
+        value = parse_and()
+        while position < len(tokens) and tokens[position] == "||":
+            position += 1
+            value = parse_and() or value
+        return value
+
+    result = parse_or()
+    assert_that(position).described_as(f"unconsumed tokens in {tokens}").is_equal_to(
+        len(tokens),
+    )
+    return result
+
+
+def _evaluate_upload_gate(
+    condition: str,
+    *,
+    release_tag: str,
+    upload_to_release: str,
+) -> bool:
+    """Evaluate an upload-gate condition against one dispatch/call payload.
+
+    Only the token forms this workflow actually uses are understood; anything
+    else is left in the string and fails the tokenizer's completeness check, so
+    a rewrite into an unrecognised shape cannot pass silently.
+
+    Args:
+        condition: The raw ``if:`` expression.
+        release_tag: Value of ``inputs.release_tag`` (``''`` on a dispatch).
+        upload_to_release: Value of ``inputs.upload_to_release`` (``''`` when
+            the input is undeclared, as on the ``workflow_call`` path).
+
+    Returns:
+        Whether the step or job would run.
+    """
+    expr = _normalize_github_expr(condition)
+    for operand in _UPLOAD_GATE_TRUE_OPERANDS:
+        expr = expr.replace(operand, "True")
+    expr = expr.replace(
+        "inputs.release_tag != ''",
+        "True" if release_tag != "" else "False",
+    )
+    expr = expr.replace(
+        "inputs.upload_to_release == true",
+        "True" if upload_to_release == "true" else "False",
+    )
+    tokens = re.findall(r"\(|\)|&&|\|\||True|False", expr)
+    assert_that("".join(tokens)).described_as(
+        f"unrecognised operand in {condition!r} (reduced to {expr!r})",
+    ).is_equal_to(re.sub(r"\s+", "", expr))
+    return _evaluate_boolean_tokens(tokens)
+
+
+def _assert_upload_gate_behaviour(condition: str, *, described_as: str) -> None:
+    """Assert one condition publishes on exactly the three intended payloads.
+
+    Args:
+        condition: The raw ``if:`` expression.
+        described_as: Label for assertion failures.
+    """
+    # workflow_call from the tag pipeline: release_tag is passed, and the
+    # undeclared upload_to_release evaluates to the empty string.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="v1", upload_to_release=""),
+    ).described_as(f"{described_as}: workflow_call must publish").is_true()
+    # Plain dispatch (cache seeding): publishes nothing.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="", upload_to_release="false"),
+    ).described_as(f"{described_as}: plain dispatch must not publish").is_false()
+    # Repair dispatch: upload_to_release alone is enough.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="", upload_to_release="true"),
+    ).described_as(f"{described_as}: repair dispatch must publish").is_true()
+
+
+def test_upload_gate_evaluator_rejects_a_conjunctive_gate() -> None:
+    """The gate assertions are not vacuous: a conjunctive rewrite must fail.
+
+    ``inputs.release_tag != '' && inputs.upload_to_release == true`` is the
+    plausible regression — it looks equivalent and silently disables publishing
+    on the tag path, where ``upload_to_release`` is undeclared and empty.
+    """
+    conjunctive = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "(inputs.release_tag != '' && inputs.upload_to_release == true)"
+    )
+    assert_that(
+        _evaluate_upload_gate(conjunctive, release_tag="v1", upload_to_release=""),
+    ).is_false()
+    with pytest.raises(AssertionError):
+        _assert_upload_gate_behaviour(conjunctive, described_as="conjunctive")
+
+    # An inverted arm publishes on the plain dispatch this issue exists to stop.
+    inverted = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "(inputs.release_tag != '' || inputs.upload_to_release == false)"
+    )
+    with pytest.raises(AssertionError):
+        _assert_upload_gate_behaviour(inverted, described_as="inverted")
+
+
 def test_build_binary_dispatch_uploads_are_opt_in() -> None:
     """A plain ``workflow_dispatch`` must not republish release assets.
 
@@ -1812,24 +2002,34 @@ def test_build_binary_dispatch_uploads_are_opt_in() -> None:
     assert_that(upload_input["default"]).is_false()
     assert_that(upload_input["description"]).contains("repair")
 
-    upload_steps = [
-        (job_id, step)
+    upload_steps = tuple(
+        (job_id, str(step.get("name")))
         for job_id, job in workflow["jobs"].items()
         for step in job.get("steps") or []
-        if step.get("name") == "Upload to release"
-    ]
-    assert_that(upload_steps).is_not_empty()
-    for job_id, step in upload_steps:
-        condition = str(step.get("if", ""))
-        assert_that(condition).described_as(
-            f"{job_id}: Upload to release must be gated on upload_to_release",
-        ).contains("inputs.upload_to_release")
-        assert_that(condition).contains("inputs.release_tag != ''")
+        if str(step.get("name", "")).startswith("Upload to release")
+    )
+    assert_that(upload_steps).described_as(
+        "the publishing surface must not grow or shrink unnoticed",
+    ).is_equal_to(_UPLOAD_STEPS)
+
+    for job_id, step_name in _UPLOAD_STEPS:
+        step = next(
+            candidate
+            for candidate in workflow["jobs"][job_id]["steps"]
+            if candidate.get("name") == step_name
+        )
+        condition = _normalize_github_expr(str(step.get("if", "")))
+        label = f"{job_id}/{step_name}"
+        assert_that(condition).described_as(label).contains(
+            _UPLOAD_OPT_IN_DISJUNCTION,
+        )
+        _assert_upload_gate_behaviour(str(step["if"]), described_as=label)
 
     homebrew = str(workflow["jobs"]["homebrew-dispatch"].get("if", ""))
-    assert_that(homebrew).described_as(
+    assert_that(_normalize_github_expr(homebrew)).described_as(
         "homebrew-dispatch publishes downstream and must honour the gate",
-    ).contains("inputs.upload_to_release")
+    ).contains(_UPLOAD_OPT_IN_DISJUNCTION)
+    _assert_upload_gate_behaviour(homebrew, described_as="homebrew-dispatch")
 
 
 def test_build_binary_jobs_share_one_python_version() -> None:
@@ -1853,6 +2053,19 @@ def test_build_binary_jobs_share_one_python_version() -> None:
         assert_that(version).described_as(
             f"{job_id} must reference env.PYTHON_VERSION, not a literal",
         ).contains("env.PYTHON_VERSION")
+
+    # #2484 hoisted the pin off the `python-version:` key a repo-wide bump
+    # sweep finds, so pin it against the release pipeline's own interpreter:
+    # the binaries must be built on the Python the wheels are built and
+    # published with.
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    published_pins = set(_collect_python_version_pins(node=publish))
+    assert_that(published_pins).described_as(
+        "publish-pypi-on-tag.yml must itself use one interpreter",
+    ).is_length(1)
+    assert_that(str(workflow["env"]["PYTHON_VERSION"])).described_as(
+        "build-binary.yml must build on the released interpreter",
+    ).is_equal_to(next(iter(published_pins)))
 
 
 def test_verify_built_binary_uses_a_registered_doctor_flag() -> None:
@@ -2092,6 +2305,49 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
     # fallback, and the Azure blob hosts actions/cache streams through
     # (#2484), whose storage account prefix is not a stable name.
     permitted_globs = ("*.githubapp.com:443", "*.blob.core.windows.net:443")
+    for endpoint in endpoints:
+        if "*" in endpoint:
+            assert_that(endpoint).described_as(
+                f"{endpoint}: only whole-label wildcards {permitted_globs} may glob",
+            ).is_in(*permitted_globs)
+
+
+def test_build_macos_egress_allowlist_stays_pinned() -> None:
+    """The macOS binary build's allow-list must not shrink or grow globs.
+
+    build-binary.yml is read from the tag, so a shrunk list passes every PR
+    and fails at the release. #2484 added the Actions cache endpoints here as
+    well as on Linux, including the ``*.blob.core.windows.net`` wildcard the
+    cache streams its entries through; nothing else may glob. The
+    ``githubapp.com`` hosted-compute shards are deliberately Linux-only
+    (#1761, #2339) — the macOS runners have never been observed reclaimed.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    job = workflow["jobs"]["build-macos"]
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    endpoints = str(harden["with"]["allowed-endpoints"]).split()
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(endpoints).contains(
+        "github.com:443",
+        "api.github.com:443",
+        "pypi.org:443",
+        "files.pythonhosted.org:443",
+        "nuitka.net:443",
+        "release-assets.githubusercontent.com:443",
+        "uploads.github.com:443",
+    )
+    # #2484: the cache service and the blob store its entries live in.
+    assert_that(endpoints).contains(
+        "results-receiver.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+    )
+    assert_that(endpoints).does_not_contain_duplicates()
+    permitted_globs = ("*.blob.core.windows.net:443",)
     for endpoint in endpoints:
         if "*" in endpoint:
             assert_that(endpoint).described_as(
@@ -3229,6 +3485,11 @@ def test_binary_release_scripts_are_executable() -> None:
     scripts = (
         _REPO_ROOT / "scripts" / "build" / "reuse_release_asset.sh",
         _REPO_ROOT / "scripts" / "build" / "upload_release_asset.sh",
+        # #2484: the Nuitka compile-cache pair. The workflow runs the first
+        # one and Nuitka loads the second, so a missing exec bit fails only
+        # at the next release build.
+        _REPO_ROOT / "scripts" / "ci" / "resolve-nuitka-version.py",
+        _REPO_ROOT / "scripts" / "build" / "nuitka_bytecode_plugin.py",
     )
     for script in scripts:
         assert_that(script.exists()).described_as(str(script)).is_true()
@@ -5309,6 +5570,11 @@ def test_nuitka_cache_steps_share_the_reuse_gating(job_id: str) -> None:
     assert_that(_normalize_github_expr(save["if"])).described_as(job_id).is_equal_to(
         f"always() && {reuse_guard}",
     )
+    # Both steps are best effort: a cache-service error must not fail the job,
+    # and the save step sits ahead of the verify, smoke and upload gates, none
+    # of which carry always()/failure().
+    assert_that(restore.get("continue-on-error")).described_as(job_id).is_true()
+    assert_that(save.get("continue-on-error")).described_as(job_id).is_true()
     version_step = next(
         step
         for step in workflow["jobs"][job_id]["steps"]
