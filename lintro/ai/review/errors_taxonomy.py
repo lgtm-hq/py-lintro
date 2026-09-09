@@ -105,11 +105,34 @@ _KIND_PRIORITY: tuple[ReviewErrorKind, ...] = (
 )
 
 
+# The claude CLI reports an exhausted subscription usage window as
+# "You've hit your session limit · resets 9:40am (UTC)" while tagging the
+# same envelope ``"terminal_reason":"api_error"`` — which read as a provider
+# outage before #2470. This pattern only *extracts* the reset clock for the
+# error sticky; it never classifies on its own, because "rate limit resets
+# 25s" is a rate limit, not an exhausted quota. The limit phrase below is the
+# discriminator.
+RESET_TIME_PATTERN: re.Pattern[str] = re.compile(
+    r"resets\s+(?:at\s+)?"
+    r"(?P<when>\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?(?:\s*\([^)\n]{1,24}\))?)",
+    re.IGNORECASE,
+)
+
+# Usage-window wording, shared by the claude CLI and the fallback set
+# ("session limit" subsumes "you've hit your session limit").
+_USAGE_WINDOW_SUBSTRINGS: tuple[str, ...] = ("session limit", "usage limit")
+
+
 PROVIDER_ERROR_SIGNATURES: dict[str, dict[ReviewErrorKind, ErrorMatcher]] = {
     "anthropic": {
         # Depleted credits: HTTP 400 invalid_request_error, NOT 402/429.
         ReviewErrorKind.INSUFFICIENT_CREDITS: ErrorMatcher(
             substrings=("credit balance is too low", "credit balance"),
+        ),
+        # Subscription usage window exhausted (claude CLI): a plan quota with a
+        # known reset time, not a depleted balance and not an outage (#2470).
+        ReviewErrorKind.QUOTA_EXCEEDED: ErrorMatcher(
+            substrings=_USAGE_WINDOW_SUBSTRINGS,
         ),
         ReviewErrorKind.RATE_LIMITED: ErrorMatcher(
             substrings=("rate_limit_error", "rate limit"),
@@ -221,7 +244,11 @@ _SHARED_SIGNATURES: dict[ReviewErrorKind, ErrorMatcher] = {
         statuses=(402,),
     ),
     ReviewErrorKind.QUOTA_EXCEEDED: ErrorMatcher(
-        substrings=("quota exceeded", "exceeded your current quota", "usage limit"),
+        substrings=(
+            "quota exceeded",
+            "exceeded your current quota",
+            *_USAGE_WINDOW_SUBSTRINGS,
+        ),
     ),
     ReviewErrorKind.AUTH_FAILED: ErrorMatcher(
         substrings=(
