@@ -66,6 +66,7 @@ def print_ai_config(
         config: Loaded Lintro configuration.
     """
     from pydantic import ValidationError
+    from rich.markup import escape
 
     from lintro.ai.effective_config import resolve_effective_ai_config
     from lintro.ai.exceptions import AIConfigOverrideError
@@ -78,7 +79,12 @@ def print_ai_config(
         # A bad ``ai:`` block degrades this section to one line rather than
         # killing the report: ``lintro config`` is the command a user runs to
         # diagnose a bad config, so it must still print the rest of it.
-        console.print(f"[bold]AI Settings[/bold]  [red]{_describe_failure(exc)}[/red]")
+        # The failure text quotes the value the user wrote, so a value such
+        # as ``[/]`` would otherwise make this line invalid Rich markup and
+        # crash the report it exists to keep printable.
+        console.print(
+            f"[bold]AI Settings[/bold]  [red]{escape(_describe_failure(exc))}[/red]",
+        )
         console.print()
         return
 
@@ -106,7 +112,11 @@ def print_ai_config(
     table.add_row(
         "model",
         format_sourced_value(
-            ai_config.model or "[dim]provider default[/dim]",
+            (
+                escape(ai_config.model)
+                if ai_config.model
+                else "[dim]provider default[/dim]"
+            ),
             resolved.sources.get("model"),
         ),
     )
@@ -117,7 +127,7 @@ def print_ai_config(
         if fields:
             for name in sorted(fields):
                 value = getattr(settings, name)
-                rendered = str(getattr(value, "value", value))
+                rendered = escape(str(getattr(value, "value", value)))
                 key = nested_source_key(provider=provider, field=name)
                 table.add_row(
                     key,
