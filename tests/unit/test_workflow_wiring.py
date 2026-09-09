@@ -2087,13 +2087,16 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
         "release-assets.githubusercontent.com:443",
     )
     assert_that(endpoints).does_not_contain_duplicates()
-    # Any other glob would silently widen the block policy; the agreed
-    # revert-to-wildcard fallback is the single form permitted here.
+    # Any other glob would silently widen the block policy. Two whole-label
+    # subdomain wildcards are permitted: the agreed revert-to-wildcard
+    # fallback, and the Azure blob hosts actions/cache streams through
+    # (#2484), whose storage account prefix is not a stable name.
+    permitted_globs = ("*.githubapp.com:443", "*.blob.core.windows.net:443")
     for endpoint in endpoints:
         if "*" in endpoint:
             assert_that(endpoint).described_as(
-                f"{endpoint}: only the agreed *.githubapp.com:443 fallback may glob",
-            ).is_equal_to("*.githubapp.com:443")
+                f"{endpoint}: only whole-label wildcards {permitted_globs} may glob",
+            ).is_in(*permitted_globs)
 
 
 def test_auto_rerun_covers_tag_publish_workflows() -> None:
