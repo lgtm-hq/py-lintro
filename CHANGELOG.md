@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.4] - 2026-09-09
+
+### Changed
+
+- **deps**: renovate bump (#2486) (af2d97b)
+- **deps**: update rust-lang/rust to 1.98.1 (#2465) (cbe03f5)
+
+### Fixed
+
+- **ci**: pin the lintro-tools image built from main's rustc 1.98.1 manifest (#2499)
+  (e8d2293)
+
 ## [0.152.3] - 2026-09-09
 
 ### Changed
