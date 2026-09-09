@@ -2816,16 +2816,18 @@ def test_build_binary_every_job_declares_timeout_minutes() -> None:
 def test_build_binary_compile_step_has_step_level_timeout() -> None:
     """The Build binary step is bounded tighter than its job.
 
-    A stalled compile must be attributable to the compile itself (25 min vs
+    A stalled compile must be attributable to the compile itself (40 min vs
     the observed healthy norm of 16-24 min), not surface as a whole-job
-    timeout with no failed step.
+    timeout with no failed step. #2484 raised the bound from 25: module
+    growth had eaten the margin and cold-cache runs were timing out during
+    onefile packaging after a 19-22 minute compile.
     """
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     for job_id in ("build-macos", "build-linux"):
         steps = workflow["jobs"][job_id]["steps"]
         build_steps = [step for step in steps if step.get("name") == "Build binary"]
         assert_that(build_steps).described_as(job_id).is_length(1)
-        assert_that(build_steps[0]["timeout-minutes"]).is_equal_to(25)
+        assert_that(build_steps[0]["timeout-minutes"]).is_equal_to(40)
 
 
 def test_build_binary_job_timeout_leaves_diagnostic_headroom() -> None:
