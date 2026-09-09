@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.5] - 2026-09-09
+
+### Changed
+
+- **deps**: update lintro-ai-tools docker digest to 5dfda12 (#2496) (2e3e2bd)
+- allow the hosted-compute watchdog hosts on the linux binary job (#2487) (5d5572a)
+
+### Fixed
+
+- **ci**: grant actions:read at the publish caller; upgrade httpx2 (#2503) (4522f34)
+
 ## [0.152.4] - 2026-09-09
 
 ### Changed
