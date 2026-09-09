@@ -19,14 +19,13 @@ name: Publish - PyPI Production
       - v*.*.*rc*
   workflow_dispatch:
 
-# actions: read is required by the chain: build-binary's jobs download this
-# run's own sha256 artifacts (#2435), and GitHub startup-rejects a reusable
-# chain whose nested jobs request a scope the top-level caller does not grant
-# (v0.152.1+ tags died as startup_failure). contents: write covers the
-# release/artifact writes further down the chain.
-permissions:
-  actions: read
-  contents: write
+# NOTE: this caller intentionally declares permissions: {}. GitHub
+# startup-rejects a reusable-workflow chain whose nested jobs request a scope
+# the top-level caller does not grant - granting actions: read here does NOT
+# lift that restriction (verified by dispatch on 2026-09-09), so the chain
+# must not request it: build-binary's jobs therefore carry contents: write
+# only, and the #2435 reuse check fails open to a rebuild.
+permissions: {}
 
 concurrency:
   group: publish-pypi-${{ github.ref }}

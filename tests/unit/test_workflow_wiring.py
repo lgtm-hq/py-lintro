@@ -2997,16 +2997,24 @@ def test_build_binary_release_upload_swaps_instead_of_overwriting() -> None:
             ).does_not_contain("--clobber")
 
 
-def test_build_binary_jobs_may_read_their_own_run_artifacts() -> None:
-    """The reuse check needs the release (contents) and the run's artifacts."""
+def test_build_binary_jobs_do_not_request_actions_read() -> None:
+    """Build-binary jobs must not request actions: read.
+
+    GitHub startup-rejects a reusable-workflow chain whose nested jobs
+    request a scope the top-level caller (publish-pypi-on-tag.yml,
+    ``permissions: {}``) does not grant, and granting ``actions: read`` at
+    the caller does not lift the rejection (verified by dispatch,
+    2026-09-09). The #2435 reuse check fails open to a full rebuild
+    without the scope, which is the accepted trade-off.
+    """
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     for job_id in ("build-macos", "build-linux"):
         permissions = workflow["jobs"][job_id]["permissions"]
         assert_that(permissions).described_as(job_id).contains_entry(
             {"contents": "write"},
         )
-        assert_that(permissions).described_as(job_id).contains_entry(
-            {"actions": "read"},
+        assert_that(permissions).described_as(job_id).does_not_contain_key(
+            "actions",
         )
 
 

@@ -155,10 +155,11 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
-      # #2435: the reuse check lists and downloads this run's own sha256
-      # artifact (including earlier attempts) to decide whether the asset on
-      # the release is one this job already verified.
-      actions: read
+      # actions: read is deliberately absent: GitHub startup-rejects reusable
+      # chains where a nested job requests it while the top-level caller does
+      # not grant it, and granting it at the caller does not lift the
+      # rejection (verified by dispatch, 2026-09-09). The #2435 reuse check
+      # fails open to a full rebuild without this scope.
     strategy:
       fail-fast: false
       matrix:
@@ -379,10 +380,11 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
-      # #2435: the reuse check lists and downloads this run's own sha256
-      # artifact (including earlier attempts) to decide whether the asset on
-      # the release is one this job already verified.
-      actions: read
+      # actions: read is deliberately absent: GitHub startup-rejects reusable
+      # chains where a nested job requests it while the top-level caller does
+      # not grant it, and granting it at the caller does not lift the
+      # rejection (verified by dispatch, 2026-09-09). The #2435 reuse check
+      # fails open to a full rebuild without this scope.
     strategy:
       fail-fast: false
       matrix:
