@@ -63,10 +63,10 @@ class CursorPlugin:
 
         ``cursor_trust_workspace`` is a Cursor-only knob with its single
         default on :class:`~lintro.ai.config.AIConfig`, so the plugin forwards
-        the resolved value here. The unset-transport fallback stays ``api``
-        rather than ``cli``: the provider constructor rejects it with
-        ``cursor provider only supports transport: cli``, and that message is
-        the pre-migration behaviour.
+        the resolved value here. An unset transport resolves to ``cli``, the
+        only transport Cursor serves (#2449); an explicit ``transport: api``
+        is still rejected by the provider constructor with
+        ``cursor provider only supports transport: cli``.
 
         Args:
             config: Effective AI configuration for this run.
@@ -81,6 +81,6 @@ class CursorPlugin:
             api_key_env=config.api_key_env,
             max_tokens=config.max_tokens,
             base_url=config.api_base_url,
-            transport=config.transport or AITransport.API,
+            transport=config.transport or CURSOR_METADATA.default_transport,
             cursor_trust_workspace=config.cursor_trust_workspace,
         )

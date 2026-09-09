@@ -136,6 +136,11 @@
       "automerge": false
     },
     {
+      "description": "assertpy is deliberately kept despite the abandoned flag: pure Python, works on 3.14, guarded by tests/unit/test_assertpy_guard.py, assertpy2 is the designated fallback (#2437). Null threshold suppresses the dependency-dashboard abandonment notice for it",
+      "matchPackageNames": ["assertpy"],
+      "abandonmentThreshold": null
+    },
+    {
       "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in by scripts/ci/compile-semgrep-lock.sh; CI gates the drift (#2436)",
       "matchFileNames": [
         "requirements-semgrep.txt"

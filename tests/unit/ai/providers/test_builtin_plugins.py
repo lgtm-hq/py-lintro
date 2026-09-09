@@ -239,16 +239,38 @@ def test_get_provider_threads_the_cursor_only_knob(trust: bool) -> None:
     assert_that(cast(CursorProvider, built)._trust_workspace).is_equal_to(trust)
 
 
-def test_cursor_still_rejects_api_transport_with_its_own_message() -> None:
-    """The unset-transport fallback stays ``api``, so Cursor's guard still fires."""
-    from lintro.ai.exceptions import AINotAvailableError
-
+def test_cursor_unset_transport_resolves_to_cli() -> None:
+    """An unset transport builds Cursor on ``cli``, the only one it serves (#2449)."""
     config = AIConfig.model_construct(
         provider=AIProvider.CURSOR,
         transport=None,
         model=None,
         api_key_env=None,
         max_tokens=4096,
+        cursor_trust_workspace=True,
+    )
+
+    with patch(
+        _BINARY_FINDERS[AIProvider.CURSOR],
+        return_value="/usr/local/bin/agent",
+    ):
+        built = get_provider(config)
+
+    assert_that(type(built).__name__).is_equal_to("CursorProvider")
+    assert_that(built._transport).is_equal_to(AITransport.CLI)
+
+
+def test_cursor_still_rejects_api_transport_with_its_own_message() -> None:
+    """An explicit ``transport: api`` keeps Cursor's pre-migration guard message."""
+    from lintro.ai.exceptions import AINotAvailableError
+
+    config = AIConfig.model_construct(
+        provider=AIProvider.CURSOR,
+        transport=AITransport.API,
+        model=None,
+        api_key_env=None,
+        max_tokens=4096,
+        cursor_trust_workspace=True,
     )
 
     with (

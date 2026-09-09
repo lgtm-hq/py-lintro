@@ -10,8 +10,11 @@ Imported on demand by
 
 from __future__ import annotations
 
+import contextlib
+import copy
 import json
 import os
+import tempfile
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -68,6 +71,79 @@ _CODEX_BIN = OPENAI_CLI_BINARY
 def _find_codex() -> str | None:
     """Return the full path to the ``codex`` binary, or None."""
     return CliTransport.find_binary(_CODEX_BIN)
+
+
+def _make_nullable(child: dict[str, Any]) -> None:
+    """Add a ``null`` variant to a property schema in place.
+
+    Handles plain ``type`` strings, ``type`` lists, and ``anyOf``/``oneOf``
+    unions. Schemas with none of those are left untouched.
+
+    Args:
+        child: The property schema to make nullable.
+    """
+    child_type = child.get("type")
+    if isinstance(child_type, str):
+        child["type"] = [child_type, "null"]
+        return
+    if isinstance(child_type, list):
+        if "null" not in child_type:
+            child["type"] = [*child_type, "null"]
+        return
+    for combinator in ("anyOf", "oneOf"):
+        variants = child.get(combinator)
+        if not isinstance(variants, list):
+            continue
+        if not any(isinstance(v, dict) and v.get("type") == "null" for v in variants):
+            variants.append({"type": "null"})
+        return
+
+
+def _strict_walk(node: Any) -> None:
+    """Recursively apply OpenAI strict-mode rules to *node* in place.
+
+    Args:
+        node: A JSON schema fragment.
+    """
+    if isinstance(node, list):
+        for item in node:
+            _strict_walk(item)
+        return
+    if not isinstance(node, dict):
+        return
+    properties = node.get("properties")
+    if isinstance(properties, dict) and properties:
+        required = node.get("required")
+        required_keys = set(required) if isinstance(required, list) else set()
+        for key, child in properties.items():
+            if key not in required_keys and isinstance(child, dict):
+                _make_nullable(child)
+        node["required"] = list(properties)
+    for value in node.values():
+        _strict_walk(value)
+
+
+def _openai_strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Normalize *schema* for OpenAI strict structured outputs.
+
+    OpenAI's strict mode requires every object's ``required`` list to include
+    all of its ``properties`` keys; optionality is expressed by making the
+    property's type nullable instead (``{"type": ["string", "null"]}``). The
+    review schema uses plain JSON-Schema style — optional keys are simply
+    omitted from ``required`` — which the Responses API rejects with
+    ``invalid_json_schema`` (e.g. "Missing 'finding_ref'"). This returns a
+    deep-copied, normalized variant: every property becomes required, and
+    formerly-optional properties gain a nullable type.
+
+    Args:
+        schema: The JSON schema to normalize.
+
+    Returns:
+        A strict-mode-compliant deep copy of *schema*.
+    """
+    normalized = copy.deepcopy(schema)
+    _strict_walk(normalized)
+    return normalized
 
 
 class _CodexCliTransport(CliTransport):
@@ -348,37 +424,56 @@ class OpenAIProvider(ApiStreamingProvider):
             effective_model,
         ]
         candidates: list[OptionalArg] = []
+        schema_path: str | None = None
+        schema_fd = -1
         if cli_schema is not None:
-            candidates.append(
-                OptionalArg(
-                    flag="--output-schema",
-                    values=(json.dumps(cli_schema.schema),),
-                ),
+            # codex's --output-schema expects a file PATH, not inline JSON:
+            # passing the schema itself as the value makes codex try to open a
+            # file named after the whole schema text and abort with
+            # "Filename too long" (os error 36) before any request is sent.
+            schema_fd, schema_path = tempfile.mkstemp(
+                suffix=".json",
+                prefix="lintro-review-schema-",
+            )
+        try:
+            if cli_schema is not None and schema_path is not None:
+                # Both are set together above; the second check narrows the
+                # type for mypy and keeps the tempfile write inside the try.
+                with os.fdopen(schema_fd, "w", encoding="utf-8") as schema_file:
+                    json.dump(_openai_strict_schema(cli_schema.schema), schema_file)
+                candidates.append(
+                    OptionalArg(
+                        flag="--output-schema",
+                        values=(schema_path,),
+                    ),
+                )
+            optional_args = await self._cli.apply_optional_args(cmd, candidates)
+            # Prompt rides on stdin (#1967): a trailing positional would be a
+            # single argv element and hits Linux MAX_ARG_STRLEN (128 KiB) on large
+            # review diffs. The ``-`` sentinel forces stdin-as-prompt.
+            cmd.append("-")
+
+            logger.debug(
+                f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
             )
 
-        optional_args = await self._cli.apply_optional_args(cmd, candidates)
-        # Prompt rides on stdin (#1967): a trailing positional would be a
-        # single argv element and hits Linux MAX_ARG_STRLEN (128 KiB) on large
-        # review diffs. The ``-`` sentinel forces stdin-as-prompt.
-        cmd.append("-")
-
-        logger.debug(
-            f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
-        )
-
-        result = await self._cli.run_guarded(
-            cmd,
-            optional_args=optional_args,
-            input_text=prompt,
-            timeout=timeout,
-            cwd=repo_root or os.getcwd(),
-        )
-        self._cli.check_exit_code(
-            result,
-            auth_patterns=("authentication", "login", "not authenticated"),
-            auth_hint="Run 'codex login' or set CODEX_API_KEY.",
-        )
-        return self._cli.parse_stdout(result.stdout)
+            result = await self._cli.run_guarded(
+                cmd,
+                optional_args=optional_args,
+                input_text=prompt,
+                timeout=timeout,
+                cwd=repo_root or os.getcwd(),
+            )
+            self._cli.check_exit_code(
+                result,
+                auth_patterns=("authentication", "login", "not authenticated"),
+                auth_hint="Run 'codex login' or set CODEX_API_KEY.",
+            )
+            return self._cli.parse_stdout(result.stdout)
+        finally:
+            if schema_path is not None:
+                with contextlib.suppress(OSError):
+                    os.unlink(schema_path)
 
     async def complete(
         self,

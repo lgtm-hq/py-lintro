@@ -1088,11 +1088,11 @@ CI runs the same test, so a metadata change without the paste-back fails the bui
 
 <!-- END SNAPSHOT: provider-table -->
 
-`(default)` marks the transport lintro documents and `lintro doctor` steers you to; it
-is **not** a fallback for an omitted `ai.transport`. That fallback is `api` for every
-provider, Cursor included — which is why leaving `ai.transport` unset with
-`provider: cursor` fails with `cursor provider only supports transport: cli`. Set
-`ai.transport` explicitly.
+`(default)` marks the transport lintro documents and `lintro doctor` steers you to. It
+is also the fallback for an omitted `ai.transport`: `api` for `anthropic` and `openai`,
+`cli` for `cursor`, the only transport Cursor serves (#2449). An explicit
+`transport: api` with `provider: cursor` still fails with
+`cursor provider only supports transport: cli`. Set `ai.transport` explicitly anyway.
 
 Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
 reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
@@ -1206,13 +1206,13 @@ Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures
 decision table and `ai.transports.*` profiles (#1923).
 
 `ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
-`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility. Whether
-the run then still works depends on the provider: the factory falls back to `api` for
-every provider, which keeps `anthropic` and `openai` going but is **fatal for
-`cursor`**, where it surfaces as `cursor provider only supports transport: cli`. That
-fallback exists for backward compatibility — legacy configs that set only
-`ai.enabled: true` (which implicitly switches `lint` and `review` on) rely on it — and
-is not something to depend on in new config.
+`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility, but the
+run still works: each provider plugin falls back to the transport it documents — `api`
+for `anthropic` and `openai`, `cli` for `cursor` (#2449). That fallback exists for
+backward compatibility — legacy configs that set only `ai.enabled: true` (which
+implicitly switches `lint` and `review` on) rely on it — and is not something to depend
+on in new config. Asking Cursor for `transport: api` explicitly is still fatal:
+`cursor provider only supports transport: cli`.
 
 `cursor` is a CLI-only provider: pair it with `transport: cli`. `anthropic` and `openai`
 support both transports.
@@ -1401,6 +1401,16 @@ developer's login.
   because `--bare` disables OAuth session login (see the `--bare` note above). Set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
   binary's egress and version predictable under an egress allowlist.
+- **Two more subscription lanes (#2472).** With provider `anthropic` (the default) and
+  the `ZAI_BASE_URL` variable set, the pinned `claude` binary is pointed at a gateway
+  (e.g. z.ai's GLM Coding Plan endpoint) via `ANTHROPIC_BASE_URL` +
+  `ANTHROPIC_AUTH_TOKEN` — the CLI transport forwards `os.environ` to the subprocess, so
+  no product code is involved. `LINTRO_AI_PROVIDER=openai` runs the version-pinned
+  `codex` CLI on a ChatGPT-plan session: the workflow resolves the Renovate-pinned
+  version, installs the CLI and decodes an org secret into `~/.codex/auth.json` (Codex
+  has no OAuth-token env var; `CODEX_API_KEY` is metered API billing, not the
+  subscription) before the review step; with the secret unset the run fails visibly at
+  the credential gate.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing
