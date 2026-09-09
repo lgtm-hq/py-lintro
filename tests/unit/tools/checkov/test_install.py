@@ -18,18 +18,35 @@ from lintro.tools.core.install_hints import CHECKOV_ISOLATED_INSTALL_HINT
 from lintro.tools.core.version_checking import get_install_hints
 from tests.integration._tools import DEFAULT_TIMEOUT_SECONDS
 
-#: lintro's own default version-probe budget, from ``_get_version_timeout``.
-#: A literal on purpose: ``VERSION_CHECK_TIMEOUT`` is read from the
-#: ``LINTRO_VERSION_TIMEOUT`` env var at import time, so asserting against it
-#: would make this test fail wherever CI raises that variable.
-_PRODUCTION_VERSION_TIMEOUT: float = 30.0
-
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _TOOL_VERSIONS = _REPO_ROOT / "lintro" / "_tool_versions.py"
+_VERSION_CHECKING = _REPO_ROOT / "lintro" / "tools" / "core" / "version_checking.py"
+
+
+def _production_version_timeout() -> float:
+    """Read lintro's default version-probe budget from its source.
+
+    ``VERSION_CHECK_TIMEOUT`` is resolved from ``LINTRO_VERSION_TIMEOUT`` at
+    import time, so importing it would make this test track whatever CI
+    exports. The default literal inside ``_get_version_timeout`` is the value
+    the "never stricter than production" invariant is about, and reading it
+    from source keeps the floor from going stale when it changes.
+
+    Returns:
+        The default timeout in seconds, falling back to 30.0 when the literal
+        cannot be located.
+    """
+    source = _VERSION_CHECKING.read_text(encoding="utf-8")
+    match = re.search(r"default_timeout = ([0-9.]+)", source)
+    return float(match.group(1)) if match else 30.0
+
+
+#: lintro's own default version-probe budget, from ``_get_version_timeout``.
+_PRODUCTION_VERSION_TIMEOUT: float = _production_version_timeout()
 
 
 def _modern_bash() -> str | None:
@@ -82,6 +99,15 @@ def _checkov_install_block() -> str:
 requires_modern_bash = pytest.mark.skipif(
     _BASH is None,
     reason="install-tools.sh requires bash >= 4 (associative arrays)",
+)
+
+#: The checkov block probes for ``uv`` before the dry-run branch and, because
+#: ``--tools checkov`` names the tool explicitly, exits 1 when it is missing —
+#: by design (see ``test_missing_uv_does_not_abort_a_full_local_install``). Without uv
+#: the dry-run test would therefore fail rather than skip.
+requires_uv = pytest.mark.skipif(
+    shutil.which("uv") is None,
+    reason="`install-tools.sh --tools checkov` exits 1 when uv is absent",
 )
 
 
@@ -418,6 +444,7 @@ def test_app_image_bridges_checkov_until_the_next_tools_digest() -> None:
 
 
 @requires_modern_bash
+@requires_uv
 def test_dry_run_selects_checkov_and_installs_the_exact_pin() -> None:
     """``--tools checkov`` reaches the block and names the pinned version.
 

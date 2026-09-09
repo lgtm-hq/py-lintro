@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
@@ -388,3 +389,53 @@ def test_default_options_reach_the_built_command(
     assert_that(cmd).contains("--compact")
     # Defaults that are None must contribute no flag at all.
     assert_that(cmd).does_not_contain("--check", "--skip-check")
+
+
+_CONFIGURATION_DOCS = Path(__file__).resolve().parents[4] / "docs" / "configuration.md"
+
+
+def _documented_default(section: str, option: str) -> str:
+    """Return the ``Default`` cell the options table records for an option.
+
+    Args:
+        section: The ``#### Checkov Configuration`` section text.
+        option: Option name as it appears in the first column.
+
+    Returns:
+        The default cell, stripped of markdown code fencing.
+    """
+    row = re.search(
+        rf"^\|\s*`{option}`\s*\|[^|]*\|\s*([^|]*?)\s*\|",
+        section,
+        re.MULTILINE,
+    )
+    assert_that(row).described_as(f"{option} row").is_not_none()
+    return row.group(1).strip().strip("`")  # type: ignore[union-attr]
+
+
+def test_documented_option_defaults_match_the_definition(
+    checkov_plugin: CheckovPlugin,
+) -> None:
+    """``docs/configuration.md`` records the definition's actual defaults.
+
+    The completeness suite only asserts that the section heading exists, so a
+    later ``timeout`` bump or a ``compact`` flip would leave the published
+    table wrong with nothing failing. This pins the table to its source.
+
+    Args:
+        checkov_plugin: The plugin under test.
+    """
+    docs = _CONFIGURATION_DOCS.read_text(encoding="utf-8")
+    section = docs.split("#### Checkov Configuration", 1)[1].split("\n#### ", 1)[0]
+    defaults = checkov_plugin.definition.default_options
+
+    assert_that(_documented_default(section, "timeout")).is_equal_to(
+        str(defaults["timeout"]),
+    )
+    assert_that(_documented_default(section, "compact")).is_equal_to(
+        str(defaults["compact"]).lower(),
+    )
+    # Options with no default are documented as "-", not as a value.
+    for option in ("checks", "skip_checks"):
+        assert_that(defaults[option]).is_none()
+        assert_that(_documented_default(section, option)).is_equal_to("-")
