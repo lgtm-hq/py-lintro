@@ -154,10 +154,14 @@ jobs:
     # times; #1977's oscillated around 45-55 min and was killed at 50 twice).
     # 1800s is one chunk, not the whole serial run. A 14-chunk review can
     # still hit this job budget; incremental ``state.json`` checkpoints
-    # then let the next round resume (#2156). The coupling test only
-    # guarantees the per-chunk CLI timeout fires before a *single-chunk*
-    # job kill.
-    timeout-minutes: 75
+    # then let the next round resume (#2156), but a *rerun* of the same
+    # run does not resume its own prior attempt (#2506), so a diff whose
+    # serial review exceeds the budget is cancelled on every rerun. 120
+    # (was 75) after #2452's ~45-file review was cancelled at 75 twice on
+    # 2026-09-09 with its previous round completing in ~70. The coupling
+    # test only guarantees the per-chunk CLI timeout fires before a
+    # *single-chunk* job kill.
+    timeout-minutes: 120
     # Cursor shards are appended only when the dogfood provider is Cursor.
     # They stay out of the anthropic path so that job cannot reach Cursor
     # hosts. A rotated shard (e.g. repo43.cursor.sh) is named in the
