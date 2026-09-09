@@ -20,6 +20,7 @@ from lintro.cli_utils.commands.doctor import (
     _output_json,
     doctor_command,
 )
+from lintro.cli_utils.highlighting_check import HighlightingCheckResult
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.install_context import InstallContext, PackageManager
 from lintro.enums.install_outcome import InstallOutcome
@@ -1136,3 +1137,107 @@ def test_doctor_order_lines_are_empty_when_selection_fails() -> None:
         lines = doctor_order_lines()
 
     assert_that(lines).is_empty()
+
+
+# ── #2484 highlighting self-check ────────────────────────────────────
+
+
+def test_doctor_self_check_highlighting_reports_ok_and_skips_probes() -> None:
+    """The hidden build-check flag renders OK lines and exits 0 without probing.
+
+    The release pipeline runs this against the frozen binary, where no external
+    tool is installed, so the tool probe must never run (#2484).
+    """
+    result_ok = HighlightingCheckResult(
+        ok=True,
+        details=("diff -> DiffLexer",),
+        failures=(),
+    )
+    runner = CliRunner()
+
+    with (
+        patch(
+            "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+            return_value=result_ok,
+        ) as mock_check,
+        patch(
+            "lintro.cli_utils.commands.doctor.collect_tool_checks",
+        ) as mock_probe,
+    ):
+        result = runner.invoke(doctor_command, ["--self-check-highlighting"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("OK syntax highlighting diff -> DiffLexer")
+    assert_that(mock_check.call_count).is_equal_to(1)
+    assert_that(mock_probe.call_count).is_equal_to(0)
+
+
+def test_doctor_self_check_highlighting_fails_with_exit_one() -> None:
+    """A failed lexer lookup renders a FAIL line and exits non-zero."""
+    result_fail = HighlightingCheckResult(
+        ok=False,
+        details=(),
+        failures=("python fell back to TextLexer",),
+    )
+    runner = CliRunner()
+
+    with (
+        patch(
+            "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+            return_value=result_fail,
+        ),
+        patch(
+            "lintro.cli_utils.commands.doctor.collect_tool_checks",
+        ) as mock_probe,
+    ):
+        result = runner.invoke(doctor_command, ["--self-check-highlighting"])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains(
+        "FAIL syntax highlighting python fell back to TextLexer",
+    )
+    assert_that(mock_probe.call_count).is_equal_to(0)
+
+
+@pytest.mark.parametrize(
+    "conflicting_flag",
+    ["--json", "--report", "--ai-liveness"],
+)
+def test_doctor_self_check_highlighting_rejects_other_output_flags(
+    conflicting_flag: str,
+) -> None:
+    """Reporting and probe flags are rejected, not silently ignored.
+
+    Args:
+        conflicting_flag: The flag combined with ``--self-check-highlighting``.
+    """
+    runner = CliRunner()
+
+    with patch(
+        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+    ) as mock_check:
+        result = runner.invoke(
+            doctor_command,
+            ["--self-check-highlighting", conflicting_flag],
+        )
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("--self-check-highlighting cannot be combined")
+    assert_that(mock_check.call_count).is_equal_to(0)
+
+
+def test_doctor_self_check_highlighting_still_rejects_unknown_tools() -> None:
+    """``--tools`` is validated before the self-check short-circuits."""
+    runner = CliRunner()
+
+    with patch(
+        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+    ) as mock_check:
+        result = runner.invoke(
+            doctor_command,
+            ["--self-check-highlighting", "--tools", "definitely-not-a-tool"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("Unknown tools: definitely-not-a-tool")
+    assert_that(mock_check.call_count).is_equal_to(0)

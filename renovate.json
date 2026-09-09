@@ -219,6 +219,19 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
+      "description": "Interpreter the binary builds compile against; hoisted off the setup-python `python-version:` key because the Nuitka cache key has to carry it (#2484), which puts it outside Renovate's native reach",
+      "customType": "regex",
+      "managerFilePatterns": [
+        ".github/workflows/build-binary.yml"
+      ],
+      "matchStrings": [
+        "PYTHON_VERSION: '(?<currentValue>[0-9]+\\.[0-9]+)'"
+      ],
+      "datasourceTemplate": "python-version",
+      "depNameTemplate": "python",
+      "versioningTemplate": "python"
+    },
+    {
       "description": "Bundled Node.js runtime in the lintro-ai-tools image; the agent CLIs are Node apps and the lint image aliases node to bun (checksum fetched at build time, so only the version pins here)",
       "customType": "regex",
       "managerFilePatterns": [

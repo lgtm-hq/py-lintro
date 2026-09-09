@@ -440,8 +440,9 @@ def doctor_command(
 
     Raises:
         SystemExit: When missing or broken tools are detected.
-        click.UsageError: When --fix is combined with --report or --json,
-            or when an ``LINTRO_AI_*`` overlay fails validation.
+        click.UsageError: When --fix is combined with --report or --json, when
+            --self-check-highlighting is combined with --report, --json or
+            --ai-liveness, or when an ``LINTRO_AI_*`` overlay fails validation.
 
     Examples:
         lintro doctor
@@ -458,19 +459,14 @@ def doctor_command(
     # and an invocation destined to be rejected must not spend one first.
     if fix and (report or json_output):
         raise click.UsageError("--fix cannot be combined with --report or --json")
-
-    # #2484: build verification. It runs ahead of every probe - the release
-    # pipeline invokes it against the frozen binary, where no external tool is
-    # installed and a registry walk would only add noise - but after the
-    # flag-combination guard above, so an incoherent invocation is still
-    # rejected rather than short-circuited into a success.
-    if self_check_highlighting:
-        result = check_syntax_highlighting()
-        for line in result.details:
-            display_console.print(f"  [green]OK[/green] syntax highlighting {line}")
-        for failure in result.failures:
-            display_console.print(f"  [red]FAIL[/red] syntax highlighting {failure}")
-        raise SystemExit(0 if result.ok else 1)
+    # #2484: --self-check-highlighting is a hidden, single-purpose build check
+    # with one output shape. It honours none of the reporting or probe flags, so
+    # combining them is rejected rather than silently ignored.
+    if self_check_highlighting and (report or json_output or ai_liveness):
+        raise click.UsageError(
+            "--self-check-highlighting cannot be combined with --report, --json "
+            "or --ai-liveness",
+        )
 
     registry = ManifestRegistry.load()
     context = RuntimeContext.detect()
@@ -489,6 +485,19 @@ def doctor_command(
         )
         display_console.print(f"  [dim]Available: {available}[/dim]")
         raise SystemExit(1)
+
+    # #2484: build verification. It runs ahead of every tool probe - the release
+    # pipeline invokes it against the frozen binary, where no external tool is
+    # installed and probing them would only add noise - but after --tools has
+    # been validated, so an incoherent invocation is still rejected rather than
+    # short-circuited into a success.
+    if self_check_highlighting:
+        result = check_syntax_highlighting()
+        for line in result.details:
+            display_console.print(f"  [green]OK[/green] syntax highlighting {line}")
+        for failure in result.failures:
+            display_console.print(f"  [red]FAIL[/red] syntax highlighting {failure}")
+        raise SystemExit(0 if result.ok else 1)
 
     env_report = None
     if verbose or report or json_output:

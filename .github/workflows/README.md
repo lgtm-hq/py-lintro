@@ -209,8 +209,14 @@ build on a fresh tag with no such seed is expected, not a regression.
 - **Egress**: both jobs' harden-runner allow-lists carry `actions.githubusercontent.com`
   (the cache service) and `*.blob.core.windows.net` (the entry payloads) on top of the
   artifact endpoints.
-- **Budget**: the repo-wide cache limit is 10 GB and GitHub evicts least-recently-used
-  entries, so the per-run keys self-trim.
+- **Budget**: `CCACHE_MAXSIZE` is set to `1G` in the workflow env, so each persisted
+  tree stays small (ccache's own default is 5 GiB). That caps the size of one entry, not
+  the number of them: every run and attempt writes another immutable key, so a burst of
+  retries still adds entries. The repo-wide limit is 10 GB and GitHub evicts
+  least-recently-used entries when it is exceeded — which can evict the `main` seed.
+- **Expiry**: GitHub also deletes any cache entry not accessed for 7 days. If no run
+  restores the `main` seed within a week it disappears, and the next tag build is cold
+  again; re-dispatch `build-binary.yml` from `main` to write a fresh seed.
 
 ## Token patterns
 

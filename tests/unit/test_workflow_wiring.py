@@ -1852,53 +1852,6 @@ _UPLOAD_GATE_TRUE_OPERANDS = (
 )
 
 
-def _evaluate_boolean_tokens(tokens: list[str]) -> bool:
-    """Evaluate a ``True``/``False``/``&&``/``||``/parenthesis token list.
-
-    ``&&`` binds tighter than ``||``, matching GitHub Actions expressions.
-
-    Args:
-        tokens: Tokens to evaluate, consumed left to right.
-
-    Returns:
-        The value of the expression.
-    """
-    position = 0
-
-    def parse_atom() -> bool:
-        nonlocal position
-        symbol = tokens[position]
-        position += 1
-        if symbol == "(":
-            value = parse_or()
-            assert_that(tokens[position]).is_equal_to(")")
-            position += 1
-            return value
-        return symbol == "True"
-
-    def parse_and() -> bool:
-        nonlocal position
-        value = parse_atom()
-        while position < len(tokens) and tokens[position] == "&&":
-            position += 1
-            value = parse_atom() and value
-        return value
-
-    def parse_or() -> bool:
-        nonlocal position
-        value = parse_and()
-        while position < len(tokens) and tokens[position] == "||":
-            position += 1
-            value = parse_and() or value
-        return value
-
-    result = parse_or()
-    assert_that(position).described_as(f"unconsumed tokens in {tokens}").is_equal_to(
-        len(tokens),
-    )
-    return result
-
-
 def _evaluate_upload_gate(
     condition: str,
     *,
@@ -1907,9 +1860,12 @@ def _evaluate_upload_gate(
 ) -> bool:
     """Evaluate an upload-gate condition against one dispatch/call payload.
 
-    Only the token forms this workflow actually uses are understood; anything
-    else is left in the string and fails the tokenizer's completeness check, so
-    a rewrite into an unrecognised shape cannot pass silently.
+    The condition is reduced to boolean literals and ``and``/``or`` and then
+    handed to the same restricted-AST evaluator every other ``if:`` assertion
+    in this module uses, so there is one boolean grammar here rather than two.
+    Only the operand forms this workflow actually uses are understood; anything
+    else survives reduction and fails the completeness pre-pass, so a rewrite
+    into an unrecognised shape cannot pass silently.
 
     Args:
         condition: The raw ``if:`` expression.
@@ -1923,19 +1879,24 @@ def _evaluate_upload_gate(
     expr = _normalize_github_expr(condition)
     for operand in _UPLOAD_GATE_TRUE_OPERANDS:
         expr = expr.replace(operand, "True")
-    expr = expr.replace(
-        "inputs.release_tag != ''",
-        "True" if release_tag != "" else "False",
-    )
-    expr = expr.replace(
-        "inputs.upload_to_release == true",
-        "True" if upload_to_release == "true" else "False",
-    )
-    tokens = re.findall(r"\(|\)|&&|\|\||True|False", expr)
-    assert_that("".join(tokens)).described_as(
+    upload_requested = upload_to_release == "true"
+    # ``!input`` and the ``== false`` form are recognised so that an inverted
+    # rewrite reduces cleanly and fails on semantics, not on tokenisation.
+    for token, value in (
+        ("!inputs.upload_to_release", not upload_requested),
+        ("inputs.release_tag != ''", release_tag != ""),
+        ("inputs.release_tag == ''", release_tag == ""),
+        ("inputs.upload_to_release == true", upload_requested),
+        ("inputs.upload_to_release == false", not upload_requested),
+    ):
+        expr = expr.replace(token, repr(value))
+    expr = expr.replace("&&", " and ").replace("||", " or ")
+
+    residue = re.sub(r"\bTrue\b|\bFalse\b|\band\b|\bor\b|[()\s]", "", expr)
+    assert_that(residue).described_as(
         f"unrecognised operand in {condition!r} (reduced to {expr!r})",
-    ).is_equal_to(re.sub(r"\s+", "", expr))
-    return _evaluate_boolean_tokens(tokens)
+    ).is_empty()
+    return _eval_restricted_bool_expr(expr)
 
 
 def _assert_upload_gate_behaviour(condition: str, *, described_as: str) -> None:
@@ -1978,12 +1939,20 @@ def test_upload_gate_evaluator_rejects_a_conjunctive_gate() -> None:
         _assert_upload_gate_behaviour(conjunctive, described_as="conjunctive")
 
     # An inverted arm publishes on the plain dispatch this issue exists to stop.
+    # The evaluator understands ``== false``, so this sub-case must fail on the
+    # semantic assertion rather than on operand tokenisation.
     inverted = (
         "needs.get-release-info.outputs.release_tag != '' && "
         "(inputs.release_tag != '' || inputs.upload_to_release == false)"
     )
-    with pytest.raises(AssertionError):
+    assert_that(
+        _evaluate_upload_gate(inverted, release_tag="", upload_to_release="false"),
+    ).is_true()
+    with pytest.raises(AssertionError) as inverted_failure:
         _assert_upload_gate_behaviour(inverted, described_as="inverted")
+    assert_that(str(inverted_failure.value)).contains(
+        "inverted: plain dispatch must not publish",
+    )
 
 
 def test_build_binary_dispatch_uploads_are_opt_in() -> None:
@@ -2132,8 +2101,12 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
         ],
     ).contains(".github/workflows/docker-ci.yml")
 
-    for manager in matching:
+    for manager in uv_managers:
         assert_that(manager["packageNameTemplate"]).is_equal_to("astral-sh/uv")
+
+    # Every manager aimed at this file must actually match its text, not just
+    # the uv ones: a pattern that stops matching rots silently.
+    for manager in matching:
         for match_string in manager["matchStrings"]:
             # Renovate uses JS named groups, `(?<name>...)`; Python wants
             # `(?P<name>...)`.
@@ -2142,6 +2115,50 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
             assert_that(found).described_as(
                 f"matchString {match_string!r} does not match build-binary.yml",
             ).is_not_none()
+
+
+def test_renovate_manages_build_binary_python_pin() -> None:
+    """A Renovate customManager must match the build-binary PYTHON_VERSION line.
+
+    #2484 hoisted the interpreter pin off the ``python-version:`` key that
+    Renovate's native managers and a repo-wide bump sweep both find, because
+    the Nuitka cache key has to carry it. A pin site Renovate cannot see has
+    to be taught to it rather than left to drift behind
+    ``publish-pypi-on-tag.yml``.
+    """
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    workflow_text = (
+        _REPO_ROOT / ".github" / "workflows" / "build-binary.yml"
+    ).read_text(encoding="utf-8")
+
+    python_managers = [
+        manager
+        for manager in config["customManagers"]
+        if any(
+            "build-binary.yml" in pattern
+            for pattern in manager.get("managerFilePatterns", [])
+        )
+        and any(
+            "PYTHON_VERSION" in pattern for pattern in manager.get("matchStrings", [])
+        )
+    ]
+    assert_that(python_managers).described_as(
+        "no Renovate customManager targets the build-binary PYTHON_VERSION pin",
+    ).is_length(1)
+
+    manager = python_managers[0]
+    assert_that(manager["datasourceTemplate"]).is_equal_to("python-version")
+    assert_that(manager["depNameTemplate"]).is_equal_to("python")
+    for match_string in manager["matchStrings"]:
+        pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
+        found = re.search(pattern, workflow_text)
+        if found is None:
+            pytest.fail(
+                f"matchString {match_string!r} does not match build-binary.yml",
+            )
+        assert_that(found.group("currentValue")).is_equal_to(
+            _load_workflow(name=_BUILD_BINARY_WORKFLOW)["env"]["PYTHON_VERSION"],
+        )
 
 
 def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
@@ -5186,6 +5203,42 @@ def _effective_grant(
     return {"contents": _PERMISSION_LEVELS["read"]}
 
 
+def _callee_request_and_grant(
+    *,
+    job: dict[str, Any],
+    workflow: dict[str, Any],
+) -> tuple[dict[str, int], dict[str, int] | None]:
+    """Return what a called workflow's job requests, and what it ends up with.
+
+    :func:`_effective_grant` models a *caller* job, where an undeclared block
+    falls back to the repository's default ``GITHUB_TOKEN`` grant. A job in a
+    *called* workflow follows a different rule: with no ``permissions`` block
+    of its own (and none at its workflow level) it requests no additional
+    scope at all and simply inherits the calling job's grant, capped by it. If
+    neither side declares anything the repository default applies, which the
+    caller's own :func:`_effective_grant` already models — so the callee must
+    not re-assert that default as a request of its own, or a caller with an
+    explicit ``permissions: {}`` would look like a shortfall it is not.
+
+    Args:
+        job: The parsed job mapping from the called workflow.
+        workflow: The parsed called workflow that contains ``job``.
+
+    Returns:
+        ``(requested, grant)`` where ``requested`` is the scope set the callee
+        asks its caller for, and ``grant`` is the callee job's own effective
+        grant for checking nested calls — ``None`` when it inherits the
+        caller's grant unchanged.
+    """
+    job_level = _normalize_permissions(job.get("permissions"))
+    if job_level is not None:
+        return job_level, job_level
+    workflow_level = _normalize_permissions(workflow.get("permissions"))
+    if workflow_level is not None:
+        return workflow_level, workflow_level
+    return {}, None
+
+
 def _local_workflow_calls(
     *,
     workflow: dict[str, Any],
@@ -5240,7 +5293,12 @@ def _permission_shortfalls(
     for callee_job_id, callee_job in (callee.get("jobs") or {}).items():
         if not isinstance(callee_job, dict):
             continue
-        requested = _effective_grant(job=callee_job, workflow=callee)
+        requested, callee_grant = _callee_request_and_grant(
+            job=callee_job,
+            workflow=callee,
+        )
+        if callee_grant is None:
+            callee_grant = caller_grant
         for scope, level in requested.items():
             if level == 0:
                 continue
@@ -5260,7 +5318,7 @@ def _permission_shortfalls(
                 shortfalls.extend(
                     _permission_shortfalls(
                         caller_label=f"{callee_name}::{callee_job_id}",
-                        caller_grant=requested,
+                        caller_grant=callee_grant,
                         callee_name=nested_uses.removeprefix(
                             _LOCAL_WORKFLOW_CALL_PREFIX,
                         ),
@@ -5490,6 +5548,14 @@ def test_permission_shorthands_normalize_to_levels() -> None:
 # silently returns to the ~1500-file cold compile this exists to avoid.
 
 _CACHE_RUN_SUFFIX = "${{ github.run_id }}-${{ github.run_attempt }}"
+# Ingredients the cache key must carry, so a hit can only come from a run with
+# the same OS, architecture, interpreter and locked Nuitka.
+_CACHE_KEY_SEGMENTS = (
+    "runner.os",
+    "runner.arch",
+    "env.PYTHON_VERSION",
+    "steps.nuitka-version.outputs.nuitka-version",
+)
 _NUITKA_CACHE_DIR_EXPR = "${{ env.NUITKA_CACHE_DIR }}"
 
 
@@ -5524,6 +5590,12 @@ def test_nuitka_cache_save_key_matches_the_restore_key(job_id: str) -> None:
         restore["with"]["key"],
     )
     assert_that(restore["with"]["key"]).ends_with(f"-{_CACHE_RUN_SUFFIX}")
+    # The relational assertions above hold for any key string, including one
+    # reduced to the run suffix alone. Pin the ingredients the invalidation
+    # contract depends on: a cross-OS/arch hit or a stale entry after a Python
+    # or Nuitka bump would only show up as a slow, silently wrong compile.
+    for segment in _CACHE_KEY_SEGMENTS:
+        assert_that(restore["with"]["key"]).described_as(job_id).contains(segment)
 
 
 @pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
@@ -5582,6 +5654,10 @@ def test_nuitka_cache_steps_share_the_reuse_gating(job_id: str) -> None:
     )
     assert_that(_normalize_github_expr(version_step["if"])).is_equal_to(reuse_guard)
     assert_that(version_step["run"]).contains("scripts/ci/resolve-nuitka-version.py")
+    # The resolver exits 1 on a missing or unparseable uv.lock. Its output only
+    # seasons the cache key, so a failure must degrade to a cold cache rather
+    # than take the compile job down with it.
+    assert_that(version_step.get("continue-on-error")).described_as(job_id).is_true()
 
 
 @pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
@@ -5596,6 +5672,10 @@ def test_nuitka_cache_path_is_the_workflow_level_cache_dir(job_id: str) -> None:
     """
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     assert_that(workflow["env"]).contains_key("NUITKA_CACHE_DIR")
+    # ccache defaults to 5 GiB per tree; every run and attempt writes another
+    # immutable key, so an uncapped tree can push the repo past GitHub's 10 GB
+    # quota and evict the main-branch seed.
+    assert_that(str(workflow["env"]["CCACHE_MAXSIZE"])).is_equal_to("1G")
     restore, save = _cache_steps(workflow=workflow, job_id=job_id)
     assert_that(restore["with"]["path"]).described_as(job_id).is_equal_to(
         _NUITKA_CACHE_DIR_EXPR,

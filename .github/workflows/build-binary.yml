@@ -49,6 +49,11 @@ env:
   # (~/Library/Caches/Nuitka vs ~/.cache/Nuitka), so one path expression
   # serves the restore step, the build and the save step on both runners.
   NUITKA_CACHE_DIR: ${{ github.workspace }}/.nuitka-cache
+  # #2484: cap each persisted ccache tree. ccache's default max_size is 5 GiB
+  # and Nuitka passes this env through, so without it a handful of saved
+  # attempt keys can push the repository past GitHub's 10 GB quota and evict
+  # the main-branch seed.
+  CCACHE_MAXSIZE: '1G'
 
 jobs:
   get-release-info:
@@ -296,6 +301,13 @@ jobs:
       - name: Resolve Nuitka version
         id: nuitka-version
         if: steps.reuse.outputs.reuse != 'true'
+        # Best-effort: the output only seasons the cache key. A missing or
+        # unparseable uv.lock makes the resolver exit 1, and without this the
+        # whole compile job would fail over a cache-key ingredient (#2484).
+        # An empty output leaves the `nuitka` segment bare, which simply does
+        # not match any versioned key, so a resolver failure degrades to a
+        # cold cache instead of a wrong hit.
+        continue-on-error: true
         run: python3 scripts/ci/resolve-nuitka-version.py
 
       - name: Restore Nuitka compile cache
@@ -611,6 +623,13 @@ jobs:
       - name: Resolve Nuitka version
         id: nuitka-version
         if: steps.reuse.outputs.reuse != 'true'
+        # Best-effort: the output only seasons the cache key. A missing or
+        # unparseable uv.lock makes the resolver exit 1, and without this the
+        # whole compile job would fail over a cache-key ingredient (#2484).
+        # An empty output leaves the `nuitka` segment bare, which simply does
+        # not match any versioned key, so a resolver failure degrades to a
+        # cold cache instead of a wrong hit.
+        continue-on-error: true
         run: python3 scripts/ci/resolve-nuitka-version.py
 
       - name: Restore Nuitka compile cache
