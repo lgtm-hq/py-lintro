@@ -81,6 +81,6 @@ class CursorPlugin:
             api_key_env=config.api_key_env,
             max_tokens=config.max_tokens,
             base_url=config.api_base_url,
-            transport=config.transport or AITransport.CLI,
+            transport=config.transport or CURSOR_METADATA.default_transport,
             cursor_trust_workspace=config.cursor_trust_workspace,
         )
