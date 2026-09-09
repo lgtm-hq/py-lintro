@@ -188,8 +188,10 @@ default branch, nothing else. This workflow runs on tag refs, so the guaranteed 
 re-run or a later attempt of the _same_ tag run — the seven-attempt v0.148.1 case this
 exists for. Reuse across tags requires an entry written on `main`: dispatch
 `build-binary.yml` from `main` to seed one, and later tag runs restore it through
-`restore-keys`. A cold arm64 build on a fresh tag with no such seed is expected, not a
-regression.
+`restore-keys`. A plain dispatch is side-effect free — it builds, caches, and uploads
+nothing to any release (#2484); the `upload_to_release` dispatch input is the opt-in
+repair path that republishes the built binaries onto the latest release. A cold arm64
+build on a fresh tag with no such seed is expected, not a regression.
 
 - **Key**:
   `nuitka-<os>-<arch>-py<PYTHON_VERSION>-nuitka<locked version>-<run id>-<run attempt>`.
