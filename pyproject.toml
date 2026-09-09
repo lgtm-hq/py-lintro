@@ -499,6 +499,12 @@ exclude = [
 module = ["assertpy"]
 ignore_missing_imports = true
 
+# pygments ships no inline types and `types-Pygments` is not a dependency; the
+# binary's syntax-highlighting self-check (#2484) imports it lazily.
+[[tool.mypy.overrides]]
+module = ["pygments", "pygments.*"]
+ignore_missing_imports = true
+
 [[tool.mypy.overrides]]
 module = ["mcp", "mcp.*"]
 ignore_missing_imports = true

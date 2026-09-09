@@ -16,7 +16,6 @@ import click
 from rich.console import Console, Group, RenderableType
 from rich.markup import escape
 from rich.panel import Panel
-from rich.syntax import Syntax
 
 from lintro.ai.apply import apply_fixes, rollback_applied_paths
 from lintro.ai.display.shared import cost_str, print_code_panel, print_section_header
@@ -148,6 +147,11 @@ def _show_group_diffs(
         console: Rich Console instance.
         fixes: Suggestions to show diffs for.
     """
+    # Imported here rather than at module scope: `rich.syntax` is the binary's
+    # only route to pygments, and pygments now ships as bytecode (#2484), so
+    # nothing pays its import cost unless a user actually reviews a diff.
+    from rich.syntax import Syntax
+
     for fix in fixes:
         if not fix.diff or not fix.diff.strip():
             continue

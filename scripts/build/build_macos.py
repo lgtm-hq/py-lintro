@@ -44,6 +44,17 @@ INCLUDE_DATA_DIRS = [
     "lintro/assets=lintro/assets",
 ]
 
+# Nuitka user plugin that ships dynamically dispatched packages (pygments) as
+# bytecode instead of compiling them to C (#2484).
+BYTECODE_PLUGIN = Path(__file__).parent / "nuitka_bytecode_plugin.py"
+
+# Modules to keep out of the closure entirely. `httpx._main` is httpx's own
+# click-based CLI, pulled in only by `--include-package=httpx`; nothing in
+# lintro calls it, and it was one of the three routes to pygments.
+NOFOLLOW_MODULES = [
+    "httpx._main",
+]
+
 # Non-Python data files required at runtime (not included by --include-package)
 INCLUDE_DATA_FILES = [
     "lintro/tools/manifest.json=lintro/tools/manifest.json",
@@ -89,6 +100,15 @@ def build_nuitka_command(*, arch: str, verbose: bool = False) -> list[str]:
         cmd.append(f"--include-package={pkg}")
 
     cmd.append("--include-package-data=lintro")
+
+    # #2484: pygments contributed 321 of the ~1500 generated C units (260 of
+    # them individual language lexers) for one `rich.syntax` call site. The
+    # plugin ships it as bytecode the way Nuitka already ships `rich`;
+    # `--nofollow-import-to` drops httpx's own CLI, which nothing calls.
+    # `--include-package=httpx` stays: the library itself is used.
+    cmd.append(f"--user-plugin={BYTECODE_PLUGIN}")
+    for module in NOFOLLOW_MODULES:
+        cmd.append(f"--nofollow-import-to={module}")
 
     for data_dir in INCLUDE_DATA_DIRS:
         data_path = PROJECT_ROOT / data_dir.split("=")[0]

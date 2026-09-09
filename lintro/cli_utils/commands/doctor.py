@@ -32,6 +32,7 @@ from lintro.ai.doctor_checks import (
 )
 from lintro.ai.exceptions import AIConfigOverrideError
 from lintro.ai.interface import resolve_ai_config
+from lintro.cli_utils.highlighting_check import check_syntax_highlighting
 from lintro.cli_utils.install_output import (
     render_install_results,
     render_outcome_summary,
@@ -397,6 +398,17 @@ def _generate_markdown_report(
         "API call under transport: api."
     ),
 )
+@click.option(
+    "--self-check-highlighting",
+    "self_check_highlighting",
+    is_flag=True,
+    hidden=True,
+    help=(
+        "Build verification only (#2484): resolve a pygments lexer by name and "
+        "highlight a snippet with it, proving the bytecode-shipped lexers still "
+        "load in a frozen binary. Exits without running any tool probe."
+    ),
+)
 def doctor_command(
     json_output: bool,
     tools: str | None,
@@ -406,6 +418,7 @@ def doctor_command(
     fix: bool,
     check_all: bool,
     ai_liveness: bool,
+    self_check_highlighting: bool,
 ) -> None:
     """Check tool installation status and version compatibility.
 
@@ -422,6 +435,8 @@ def doctor_command(
         fix: Attempt to install missing tools.
         check_all: Check all tools regardless of project config.
         ai_liveness: Probe the configured AI credential with a real call.
+        self_check_highlighting: Run the syntax-highlighting build check and
+            exit, skipping every tool probe.
 
     Raises:
         SystemExit: When missing or broken tools are detected.
@@ -443,6 +458,19 @@ def doctor_command(
     # and an invocation destined to be rejected must not spend one first.
     if fix and (report or json_output):
         raise click.UsageError("--fix cannot be combined with --report or --json")
+
+    # #2484: build verification. It runs ahead of every probe - the release
+    # pipeline invokes it against the frozen binary, where no external tool is
+    # installed and a registry walk would only add noise - but after the
+    # flag-combination guard above, so an incoherent invocation is still
+    # rejected rather than short-circuited into a success.
+    if self_check_highlighting:
+        result = check_syntax_highlighting()
+        for line in result.details:
+            display_console.print(f"  [green]OK[/green] syntax highlighting {line}")
+        for failure in result.failures:
+            display_console.print(f"  [red]FAIL[/red] syntax highlighting {failure}")
+        raise SystemExit(0 if result.ok else 1)
 
     registry = ManifestRegistry.load()
     context = RuntimeContext.detect()

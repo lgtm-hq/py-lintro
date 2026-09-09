@@ -14,7 +14,8 @@ Verify a built lintro binary before packaging.
 
 Usage: verify_built_binary.sh <binary-path>
 
-Runs --version (required) and --help (non-fatal truncation) checks.
+Runs --version (required), the syntax-highlighting self-check (required)
+and --help (non-fatal truncation) checks.
 EOF
 	[[ "${1:-}" == "--help" || "${1:-}" == "-h" ]] && exit 0
 	exit 2
@@ -33,6 +34,12 @@ ls -lh "$(dirname "$BINARY")" || true
 # --version is the build gate: a binary that cannot report its version is not
 # a valid build.
 "$BINARY" --version
+
+# #2484: pygments ships as bytecode rather than compiled C, and its lexers are
+# resolved by name at runtime, so a packaging mistake there is invisible to
+# --version, --help and the tool-registry smoke test. This gate resolves a
+# lexer and highlights a snippet with it inside the built binary.
+"$BINARY" doctor --self-check-highlighting
 
 # --help stays non-fatal (it is diagnostic output only), but capture it before
 # truncating: piping straight into `head` under `set -o pipefail` turns head's

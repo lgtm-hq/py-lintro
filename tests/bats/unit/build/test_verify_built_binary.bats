@@ -41,6 +41,7 @@ teardown() {
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
+doctor) echo "OK syntax highlighting python: PythonLexer"; exit 0 ;;
 --help) echo "help"; exit 0 ;;
 *) exit 1 ;;
 esac
@@ -57,6 +58,7 @@ EOF
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
+doctor) echo "OK syntax highlighting python: PythonLexer"; exit 0 ;;
 *) echo "help exploded"; exit 4 ;;
 esac
 EOF
@@ -80,4 +82,39 @@ EOF
 	run "$SCRIPT" "$BINARY"
 	assert_failure
 	assert_equal "3" "$status"
+}
+
+@test "verify_built_binary.sh: runs the syntax-highlighting self-check" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+doctor) [[ "${2:-}" == "--self-check-highlighting" ]] || exit 9
+	echo "OK syntax highlighting python: PythonLexer"; exit 0 ;;
+--help) echo "help"; exit 0 ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_success
+	assert_output --partial "OK syntax highlighting python"
+}
+
+@test "verify_built_binary.sh: fails when the highlighting self-check fails" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+doctor) echo "FAIL syntax highlighting python: resolved the plain-text fallback lexer"
+	exit 1 ;;
+*) exit 0 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_failure
+	assert_output --partial "resolved the plain-text fallback lexer"
 }
