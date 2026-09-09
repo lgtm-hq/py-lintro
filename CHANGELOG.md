@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.8] - 2026-09-09
+
+### Changed
+
+- **tsc**: restore the `set_options` validation tests removed by #2427 (#2525) (a382c9c)
+
+### Fixed
+
+- **deps**: restore astro 7.2.9 in the docs site (#2526) (32b7115)
+
 ## [0.152.7] - 2026-09-09
 
 ### Changed
