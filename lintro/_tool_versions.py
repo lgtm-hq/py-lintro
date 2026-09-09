@@ -93,7 +93,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     # it against the pypi datasource (see renovate.json).
     ToolName.CHECKOV: "3.3.16",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
-    ToolName.CLIPPY: "1.98.0",
+    ToolName.CLIPPY: "1.98.1",
     # cppcheck ships no portable single binary, so both the tools image and the
     # app-image install-tools.sh bridge install Debian's package. This pin
     # therefore tracks the version in the python base image's Debian release
@@ -109,7 +109,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.GOLANGCI_LINT: "2.13.2",
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.5.1",
-    ToolName.RUSTC: "1.98.0",
+    ToolName.RUSTC: "1.98.1",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.RUSTFMT: "1.9.0",
     ToolName.SHELLCHECK: "0.11.0",

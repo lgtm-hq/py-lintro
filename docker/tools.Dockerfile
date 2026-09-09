@@ -22,9 +22,9 @@
 
 FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS tools
 
-ARG BUN_VERSION=1.4.0
-ARG UV_VERSION=0.12.10
-ARG GO_VERSION=1.27.0
+ARG BUN_VERSION=1.4.2
+ARG UV_VERSION=0.12.11
+ARG GO_VERSION=1.27.1
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"

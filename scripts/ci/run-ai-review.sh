@@ -30,9 +30,12 @@ set -euo pipefail
 # Default transport is `cli` (workflow fallback when LINTRO_AI_TRANSPORT is
 # unset). The credential depends on LINTRO_AI_PROVIDER (#1971): anthropic uses
 # CLAUDE_CODE_OAUTH_TOKEN (the `claude` CLI OAuth session, not ANTHROPIC_API_KEY
-# whose account has no balance — #1894); cursor uses CURSOR_API_KEY. Checking
-# the wrong variable would report "no credential" on a perfectly authenticated
-# run, and vice versa.
+# whose account has no balance — #1894), or ANTHROPIC_AUTH_TOKEN in gateway
+# mode (#2472, e.g. a z.ai GLM Coding Plan endpoint wired through
+# ANTHROPIC_BASE_URL); cursor uses CURSOR_API_KEY; openai uses the
+# ~/.codex/auth.json Codex subscription session (#2472). Checking the wrong
+# variable would report "no credential" on a perfectly authenticated run, and
+# vice versa.
 #
 # Trusted install: the workflow checks out the PR's BASE ref (main) before
 # invoking this script, so the lintro that runs with the provider credential is
@@ -52,9 +55,23 @@ set -euo pipefail
 # Environment:
 #   CLAUDE_CODE_OAUTH_TOKEN Claude Code OAuth token used by the `claude` CLI.
 #                           Required when LINTRO_AI_PROVIDER is anthropic
-#                           (the default). Empty => visible failure.
+#                           (the default), unless gateway mode supplies
+#                           ANTHROPIC_AUTH_TOKEN. Empty otherwise => visible
+#                           failure.
+#   ANTHROPIC_AUTH_TOKEN    Gateway auth token for the anthropic lane (#2472).
+#                           Satisfies the credential gate on its own; pair
+#                           with ANTHROPIC_BASE_URL (e.g. a z.ai GLM Coding
+#                           Plan endpoint) so the token is presented to the
+#                           gateway, not api.anthropic.com.
+#   ANTHROPIC_BASE_URL      Gateway endpoint forwarded to the `claude`
+#                           subprocess. Lintro never reads it; the CLI does.
 #   CURSOR_API_KEY          Cursor CLI key. Required when LINTRO_AI_PROVIDER
 #                           is cursor. Empty => visible failure.
+#   (openai)                No credential variable: the gate requires the
+#                           ~/.codex/auth.json subscription session the
+#                           workflow restores (or a local `codex login`
+#                           created). CODEX_API_KEY is deliberately not
+#                           accepted — it bills metered API credits.
 #   PR_NUMBER               Pull request number (alternative to the argument).
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
@@ -131,10 +148,32 @@ pr_number="${1:-${PR_NUMBER:-}}"
 # bash-3.2-safe (macOS system bash): `${var,,}` is bash 4+ only (#2025).
 provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-anthropic}" | tr '[:upper:]' '[:lower:]')"
 transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+# The credential depends on the provider (#1971/#2472). anthropic is satisfied
+# by the `claude` OAuth token, or in gateway mode (e.g. z.ai's GLM Coding
+# Plan, which the workflow wires via ANTHROPIC_BASE_URL) by
+# ANTHROPIC_AUTH_TOKEN; cursor by CURSOR_API_KEY; openai by the
+# ~/.codex/auth.json session the workflow restores (or a local `codex login`
+# created) — Codex has no token env var, and CODEX_API_KEY would bill metered
+# API credits instead of the subscription. Checking the wrong variable would
+# report "no credential" on a perfectly authenticated run, and vice versa.
 if [[ "$provider" == "cursor" ]]; then
 	credential="${CURSOR_API_KEY:-}"
+elif [[ "$provider" == "openai" ]]; then
+	credential=""
+	if [[ -f "${HOME:-}/.codex/auth.json" ]]; then
+		credential="codex-session"
+	fi
 else
 	credential="${CLAUDE_CODE_OAUTH_TOKEN:-}"
+	# Gateway mode needs BOTH halves, and the endpoint must be https:
+	# a token without ANTHROPIC_BASE_URL would be forwarded to the default
+	# api.anthropic.com endpoint, and a cleartext endpoint would carry the
+	# gateway credential in a header over http — either way the credential
+	# reaches an unintended destination, so the gate fails visibly (#2472).
+	if [[ -z "$credential" && -n "${ANTHROPIC_AUTH_TOKEN:-}" &&
+		"${ANTHROPIC_BASE_URL:-}" == https://* ]]; then
+		credential="anthropic-gateway"
+	fi
 fi
 if [[ -z "$credential" ]]; then
 	exec python3 "${script_dir}/classify_review_outcome.py" \
