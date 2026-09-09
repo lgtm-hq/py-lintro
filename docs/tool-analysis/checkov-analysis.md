@@ -13,10 +13,14 @@ vs SARIF), the scope decision, and the offline guarantees.
 
 ## Scope decision: Terraform only
 
-Two independent narrowings. The plugin pins `--framework terraform`, because checkov
-otherwise runs every framework it supports — including the secrets framework, over the
-same `.tf` files — and secrets are gitleaks' and trufflehog's surface in lintro. And its
-file matchers are deliberately narrow:
+Two independent narrowings. The plugin pins `--framework terraform,terraform_json`,
+because checkov otherwise runs every framework it supports — including the secrets
+framework, over the same `.tf` files — and secrets are gitleaks' and trufflehog's
+surface in lintro. Both Terraform frameworks are named because checkov routes HCL
+(`*.tf`) through `terraform` and Terraform's JSON syntax (`*.tf.json`) through a
+separate `terraform_json` runner; a pin naming only the former would evaluate zero
+policies against a claimed `.tf.json` file and still exit 0. And its file matchers are
+deliberately narrow:
 
 ```python
 file_patterns = ["*.tf", "*.tf.json"]
@@ -48,16 +52,18 @@ and Terraform modules. The plugin keeps every run offline:
 - **No `--bc-api-key` is ever passed** — enforced by construction: the command builder
   has no code path that adds an API key.
 
-Both flags are unconditional: no `--tool-options` value can turn them off, so no lintro
-option can talk a run into fetching policies or modules, and `--bc-api-key` has no code
-path at all.
+All three flags are unconditional: no `--tool-options` value can turn them off, so no
+lintro option can talk a run into fetching policies or modules or uploading a finding,
+and `--bc-api-key` has no code path at all.
 
 The one thing lintro does not control is the environment: checkov also reads
 `BC_API_KEY` / `PRISMA_API_URL` from the process environment, so a shell that already
 exports a platform key puts checkov in platform mode regardless of the argv lintro
-builds. That is the only route to a result upload, it is the operator's own credential,
-and it is also what populates the `severity` and `guideline` fields described below.
-Unset those variables if a run must stay offline.
+builds. That is the one remaining route to an outbound request; unset those variables if
+a run must make none. It does not buy enrichment: `--skip-download` short-circuits
+`bc_integration.get_platform_run_config()` before any run-config call, so the policy
+metadata that would fill `severity` and `guideline` is never fetched, keyed or not (see
+[Severity behavior](#severity-behavior)).
 
 ## Parser choice: native JSON, not SARIF
 
@@ -70,24 +76,26 @@ Terraform fixture (checkov 3.3.6, no platform API key) and compared:
 | -------------------- | --------------------------------------------- | ------------------------------------------------------------ |
 | Check ID             | `check_id` (e.g. `CKV_AWS_260`)               | `ruleId` (preserved)                                         |
 | Resource attribution | `resource` (`aws_security_group.allow_all`)   | **absent from `results[]`** — only prose in `rule.help.text` |
-| Severity             | `severity: null` (platform key required)      | **hard-coded `level: "error"` for every result**             |
-| Guideline / doc URL  | `guideline: null` (platform key required)     | rule has **no `helpUri`**                                    |
+| Severity             | `severity: null` (always, see below)          | **hard-coded `level: "error"` for every result**             |
+| Guideline / doc URL  | `guideline: null` (always, see below)         | rule has **no `helpUri`**                                    |
 | Fix metadata         | `fixed_definition` (present when applicable)  | **no `fixes[]`**                                             |
 | File / line          | `file_path` + `file_line_range` `[start,end]` | `uri` + `region.startLine/endLine`                           |
 
 ### Why SARIF is lossy here
 
-- **Fabricated severity.** Checkov severity is only populated with a platform API key.
-  In offline mode the JSON `severity` is an honest `null` (lintro falls back to its
-  default), whereas SARIF stamps **`error` on every finding**, over-stating severity
-  uniformly. This is a fidelity _loss_, not a gain.
+- **Fabricated severity.** Checkov severity comes from platform metadata that
+  `--skip-download` — passed on every lintro run — suppresses, so the JSON `severity` is
+  an honest `null` (lintro falls back to its default), whereas SARIF stamps **`error` on
+  every finding**, over-stating severity uniformly. This is a fidelity _loss_, not a
+  gain.
 - **Lost resource attribution.** The failed resource address — Checkov's most useful
   piece of enrichment — is a first-class `resource` field in JSON but is dropped from
   SARIF `results[]` (it survives only as free text inside the rule's `help.text`, which
   cannot be reliably parsed back into a field).
 - **No doc URLs.** Checkov SARIF omits `helpUri`, so a SARIF path yields no
-  documentation links; the native path synthesizes a stable policy-index URL and prefers
-  Checkov's own `guideline` URL when a platform key provides one.
+  documentation links; the native path synthesizes a stable policy-index URL and would
+  prefer checkov's own `guideline` URL if a report ever carried one (under lintro it
+  never does — see [Severity behavior](#severity-behavior)).
 
 Conclusion: the shared SARIF parser would be **lossy** for Checkov (fabricated severity,
 dropped resource attribution, no doc URLs). A **native JSON parser** is used, preserving
@@ -117,11 +125,14 @@ among the evaluation's SARIF-native candidates.
 
 ### Severity behavior
 
-Checkov's severity comes from platform metadata that `--skip-download` suppresses, so
-under lintro findings always have `severity = None` and normalize to lintro's default
-`WARNING`. The parser still reads the field, so if a report ever carries one the native
-`CRITICAL`/`HIGH`/`MEDIUM`/`LOW` values are honored through lintro's severity alias
-table (`CRITICAL`/`HIGH` → ERROR, `MEDIUM` → WARNING, `LOW` → INFO).
+Checkov's severity comes from platform metadata that `--skip-download` suppresses.
+`checkov/main.py` sets `bc_integration.skip_download = True` from that flag before
+calling `get_platform_run_config()`, which then returns immediately — so an operator's
+`BC_API_KEY` cannot restore the field either. Under lintro findings always have
+`severity = None` and normalize to lintro's default `WARNING`. The parser still reads
+the field, so if a report ever carries one the native `CRITICAL`/`HIGH`/`MEDIUM`/`LOW`
+values are honored through lintro's severity alias table (`CRITICAL`/`HIGH` → ERROR,
+`MEDIUM` → WARNING, `LOW` → INFO).
 
 ## Files checkov cannot parse
 
@@ -137,10 +148,14 @@ Checkov pulls a large dependency tree (boto3, cyclonedx, spdx-tools, rustworkx, 
 it is **not** a bundled lintro dependency. It is installed in an isolated environment:
 
 ```bash
-uv tool install checkov
+# Pinned to the version the manifest gate compares against:
+scripts/utils/install-tools.sh --local --tools checkov
 ```
 
-Never `pip install checkov` into lintro's own environment (see below).
+That runs `uv tool install checkov==<pin>`. A bare `uv tool install checkov` also
+isolates the tool correctly but installs whatever PyPI serves that day, which clears the
+`min_version` floor without giving the pin equality described below. Never
+`pip install checkov` into lintro's own environment (see below).
 
 The isolation is not merely a size preference. Checkov requires `packaging>=23.0,<24.0`
 while lintro requires `packaging>=25.0`, so the two cannot share a resolution at all:
@@ -177,5 +192,7 @@ CI. Opt out with `tools.checkov.enabled: false`, or skip policies with
 
 - **No autofix.** Checkov reports misconfigurations only; `fix()` raises
   `NotImplementedError`. Run `lintro check` to see issues.
-- **Severity/guideline require a platform key** (see above).
+- **Severity/guideline are always `null`** — `--skip-download` is unconditional and
+  suppresses the platform metadata that would carry them (see
+  [Severity behavior](#severity-behavior)).
 - **Terraform-scoped** by design (see [Scope decision](#scope-decision-terraform-only)).

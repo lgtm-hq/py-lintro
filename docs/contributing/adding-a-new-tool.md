@@ -316,6 +316,18 @@ Choose the path that matches the tool's distribution mechanism.
    installer uses `uv tool install checkov==<pin>`. Take this path for any PyPI tool
    that cannot share lintro's resolution.
 
+   A tool on this path lands as a _split tree_: `uv tool install` puts the shim in
+   `UV_TOOL_BIN_DIR` and the interpreter in `UV_TOOL_DIR` (default
+   `/root/.local/share/uv/tools`, unreadable to the image's non-root `lintro` user). So
+   Step 10 has extra work for it, beyond what the "npm/bun tools only" wording there
+   says: point `UV_TOOL_DIR` at a world-readable location under `/opt` (checkov uses
+   `/opt/uv-tools`, next to `/opt/semgrep-venv`), add that directory to the permission
+   block in **both** Dockerfiles, and add the tool to the non-root verification block —
+   root being able to run the shim says nothing about whether `lintro` can reach the
+   interpreter behind it. The checklist's "binary tools only" Renovate line applies to
+   this path too: the pin lives in `TOOL_VERSIONS`, so it needs a custom manager, with
+   `pypi` as the datasource rather than `github-releases`.
+
 3. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "pip"`
    and `install.package = "<pypi-package>"`, and **no `version` key**; the generator
    injects the version from `pyproject.toml`.

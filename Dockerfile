@@ -115,9 +115,10 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # group can execute the permission-sensitive toolchains under /opt/bun,
 # /opt/cargo and /opt/uv-tools. The CI manifest gate runs as root, so it would
 # not catch a non-root permission regression on these dirs — this stays as a
-# targeted smoke. checkov belongs here because it is the only tool whose shim
-# on PATH and whose interpreter live in different trees (/usr/local/bin and its
-# uv-tool venv), so root being able to run it says nothing about `lintro`.
+# targeted smoke. checkov belongs here because it joins semgrep as a tool whose
+# shim on PATH and whose interpreter live in different trees (/usr/local/bin and
+# its uv-tool venv under /opt/uv-tools), so root being able to run it says
+# nothing about `lintro`.
 RUN echo "Smoke-testing tools as non-root user..." && \
     gosu lintro prettier --version && \
     gosu lintro cargo clippy --version && \

@@ -3192,14 +3192,15 @@ RUN apt-get update && apt-get install -y \
 
 Checkov scans **Terraform** sources (`*.tf`, `*.tf.json`) for security and compliance
 misconfigurations. Dockerfiles are intentionally left to hadolint to avoid
-double-reporting the same file under two rule sets. Runs are offline by construction:
-`--skip-download` and `--download-external-modules False` are always passed and no
-`--bc-api-key` code path exists, so no lintro option can make checkov fetch policies or
-modules, or upload a finding. `--skip-download` is also what suppresses the platform
-metadata download, so severity and guideline URLs stay unpopulated in **every**
-lintro-driven run — a `BC_API_KEY` exported in the environment cannot restore them.
-Checkov does still read that variable itself, so unset it if a run must make no outbound
-request at all.
+double-reporting the same file under two rule sets. Lintro never opts checkov into the
+platform: `--skip-download`, `--download-external-modules False` and
+`--skip-results-upload` are always passed and there is no `--bc-api-key` code path, so
+no lintro option can make checkov fetch policies or modules, or upload a finding. A
+`BC_API_KEY` in the environment is the one remaining route to an outbound request —
+checkov reads that variable itself, so unset it when a run must be fully offline. It
+buys no enrichment either way: `--skip-download` suppresses the platform metadata
+download, so severity and guideline URLs stay unpopulated in **every** lintro-driven
+run, keyed or not.
 
 - Discovery: Terraform files (`*.tf`, `*.tf.json`)
 - Native config: `.checkov.yaml` / `.checkov.yml`
