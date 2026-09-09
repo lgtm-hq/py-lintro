@@ -112,6 +112,92 @@ def test_default_options_values(
     )
 
 
+# =============================================================================
+# Tests for TscPlugin.set_options method
+# =============================================================================
+
+
+@pytest.mark.parametrize(
+    ("option_name", "option_value"),
+    [
+        ("project", "tsconfig.json"),
+        ("project", "tsconfig.build.json"),
+        ("strict", True),
+        ("strict", False),
+        ("skip_lib_check", True),
+        ("skip_lib_check", False),
+        ("use_project_files", True),
+        ("use_project_files", False),
+    ],
+    ids=[
+        "project_default",
+        "project_custom",
+        "strict_true",
+        "strict_false",
+        "skip_lib_check_true",
+        "skip_lib_check_false",
+        "use_project_files_true",
+        "use_project_files_false",
+    ],
+)
+def test_set_options_valid(
+    tsc_plugin: TscPlugin,
+    option_name: str,
+    option_value: object,
+) -> None:
+    """Set valid options correctly.
+
+    Args:
+        tsc_plugin: The TscPlugin instance to test.
+        option_name: The name of the option to set.
+        option_value: The value to set for the option.
+    """
+    tsc_plugin.set_options(
+        **{option_name: option_value},  # type: ignore[arg-type]  # Dynamic kwargs
+    )
+    assert_that(tsc_plugin.options.get(option_name)).is_equal_to(option_value)
+
+
+@pytest.mark.parametrize(
+    ("option_name", "invalid_value", "error_match"),
+    [
+        ("project", 123, "project must be a string path"),
+        ("strict", "yes", "strict must be a boolean"),
+        ("skip_lib_check", "yes", "skip_lib_check must be a boolean"),
+        ("use_project_files", "yes", "use_project_files must be a boolean"),
+    ],
+    ids=[
+        "invalid_project_type",
+        "invalid_strict_type",
+        "invalid_skip_lib_check_type",
+        "invalid_use_project_files_type",
+    ],
+)
+def test_set_options_invalid_type(
+    tsc_plugin: TscPlugin,
+    option_name: str,
+    invalid_value: object,
+    error_match: str,
+) -> None:
+    """Raise ValueError for invalid option types.
+
+    Args:
+        tsc_plugin: The TscPlugin instance to test.
+        option_name: The name of the option being tested.
+        invalid_value: An invalid value for the option.
+        error_match: Pattern expected in the error message.
+    """
+    with pytest.raises(ValueError, match=error_match):
+        tsc_plugin.set_options(
+            **{option_name: invalid_value},  # type: ignore[arg-type]  # Intentional wrong type
+        )
+
+
+# =============================================================================
+# Tests for TscPlugin._get_tsc_command method
+# =============================================================================
+
+
 def test_get_tsc_command_with_tsc_available(
     tsc_plugin: TscPlugin,
     no_local_node_install: None,
