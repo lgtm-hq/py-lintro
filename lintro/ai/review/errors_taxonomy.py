@@ -71,14 +71,10 @@ class ErrorMatcher:
     Attributes:
         substrings: Lowercase needles matched against the lowercased error text.
         statuses: HTTP status codes that also indicate this kind.
-        patterns: Regular expressions matched against the lowercased error
-            text, for signatures a fixed needle cannot express (e.g. the
-            claude CLI's ``resets 9:40am (UTC)`` usage-window wording).
     """
 
     substrings: tuple[str, ...] = ()
     statuses: tuple[int, ...] = ()
-    patterns: tuple[re.Pattern[str], ...] = ()
 
     def matches(self, *, status: int | None, text: str) -> bool:
         """Return whether this matcher fires for the given status and text.
@@ -88,13 +84,11 @@ class ErrorMatcher:
             text: Lowercased error text to search.
 
         Returns:
-            True when any substring or pattern is present, or the status is
-            listed.
+            True when any substring is present or the status is listed.
         """
         text_ok = any(needle in text for needle in self.substrings)
-        pattern_ok = any(pattern.search(text) is not None for pattern in self.patterns)
         status_ok = status is not None and status in self.statuses
-        return text_ok or pattern_ok or status_ok
+        return text_ok or status_ok
 
 
 # Order in which kinds are tested. More specific/discriminating kinds are
@@ -114,8 +108,10 @@ _KIND_PRIORITY: tuple[ReviewErrorKind, ...] = (
 # The claude CLI reports an exhausted subscription usage window as
 # "You've hit your session limit · resets 9:40am (UTC)" while tagging the
 # same envelope ``"terminal_reason":"api_error"`` — which read as a provider
-# outage before #2470. The reset clock is both a signature and, for the error
-# sticky, the detail a reviewer needs.
+# outage before #2470. This pattern only *extracts* the reset clock for the
+# error sticky; it never classifies on its own, because "rate limit resets
+# 25s" is a rate limit, not an exhausted quota. The limit phrase below is the
+# discriminator.
 RESET_TIME_PATTERN: re.Pattern[str] = re.compile(
     r"resets\s+(?:at\s+)?"
     r"(?P<when>\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?(?:\s*\([^)\n]{1,24}\))?)",
@@ -137,7 +133,6 @@ PROVIDER_ERROR_SIGNATURES: dict[str, dict[ReviewErrorKind, ErrorMatcher]] = {
         # known reset time, not a depleted balance and not an outage (#2470).
         ReviewErrorKind.QUOTA_EXCEEDED: ErrorMatcher(
             substrings=_USAGE_WINDOW_SUBSTRINGS,
-            patterns=(RESET_TIME_PATTERN,),
         ),
         ReviewErrorKind.RATE_LIMITED: ErrorMatcher(
             substrings=("rate_limit_error", "rate limit"),

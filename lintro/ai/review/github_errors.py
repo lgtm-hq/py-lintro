@@ -176,7 +176,9 @@ def describe_kind(*, kind: ReviewErrorKind, cause_text: str = "") -> tuple[str, 
     cause text names a reset time (the claude CLI's exhausted usage window
     reports ``resets 9:40am (UTC)``) carries that time in the message, so the
     sticky says when the review can run again rather than only that a limit
-    was hit (#2470).
+    was hit (#2470). The clock is provider-controlled text, so it goes through
+    :func:`sanitize_comment_text` like every other provider-derived string on
+    this surface; the pattern itself bounds its length.
 
     Args:
         kind: Resolved canonical error kind.
@@ -189,7 +191,7 @@ def describe_kind(*, kind: ReviewErrorKind, cause_text: str = "") -> tuple[str, 
     if kind is ReviewErrorKind.QUOTA_EXCEEDED:
         match = RESET_TIME_PATTERN.search(cause_text or "")
         if match is not None:
-            reset_at = match.group("when").strip()
+            reset_at = sanitize_comment_text(match.group("when").strip())
             if reset_at:
                 message = f"{message}; resets at {reset_at}"
     return message, guidance

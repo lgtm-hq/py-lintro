@@ -245,3 +245,21 @@ def test_session_limit_without_reset_time_still_classifies_as_quota(
 
     assert_that(kind).is_equal_to(ReviewErrorKind.QUOTA_EXCEEDED)
     assert_that(message).does_not_contain("resets at")
+
+
+def test_rate_limit_with_a_reset_clock_is_not_quota(
+    transport: _FakeTransport,
+) -> None:
+    """A reset clock alone never classifies: the limit phrase is required."""
+    result = _completed(
+        returncode=1,
+        stdout="",
+        stderr="Error: rate limit exceeded; resets 25s",
+    )
+
+    with pytest.raises(AIProviderError) as excinfo:
+        transport.check_exit_code(result)
+
+    assert_that(
+        classify_provider_error(provider="anthropic", error=excinfo.value),
+    ).is_equal_to(ReviewErrorKind.RATE_LIMITED)
