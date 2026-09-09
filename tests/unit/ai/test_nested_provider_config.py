@@ -986,3 +986,76 @@ def test_configuration_docs_list_the_block_env_variable() -> None:
     text = (_REPO_ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
 
     assert_that(text).contains("LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>")
+
+
+def test_a_block_given_as_another_providers_model_is_rejected() -> None:
+    """A model instance stored under the wrong key fails instead of being ignored.
+
+    A ``ProviderConfig`` instance bypasses the per-provider validation, so
+    ``providers={cursor: AnthropicConfig(...)}`` used to be stored verbatim and
+    then dropped by ``cursor_settings()``, which returns Cursor's defaults for
+    anything that is not a ``CursorConfig``. Silently ignoring a block the user
+    wrote is worse than refusing it.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        AIConfig(
+            provider=AIProvider.CURSOR,
+            providers={AIProvider.CURSOR: AnthropicConfig()},
+        )
+
+    message = str(excinfo.value)
+    assert_that(message).contains("ai.providers.cursor")
+    assert_that(message).contains("CursorConfig")
+    assert_that(message).contains("AnthropicConfig")
+
+
+def test_a_malformed_providers_value_is_rejected_not_overwritten() -> None:
+    """A scalar ``ai.providers`` survives the legacy migration as an error.
+
+    The migration used to replace any non-mapping ``providers`` value with an
+    empty mapping before filling in the legacy key, so a malformed block was
+    accepted rather than reported.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        AIConfig.model_validate(
+            {
+                "provider": "cursor",
+                "providers": "cursor",
+                "cursor_trust_workspace": False,
+            },
+        )
+
+    assert_that(str(excinfo.value)).contains("ai.providers must be a mapping")
+
+
+def test_lintro_config_survives_rich_markup_in_an_override_value(
+    isolated_project: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A rejected override value containing markup does not break the report.
+
+    The failure line quotes the value the user set, so ``[/]`` would close a
+    tag the line never opened and Rich would raise ``MarkupError`` from the
+    one command a user runs to diagnose a bad config.
+
+    Args:
+        isolated_project: Empty project directory with the user tier isolated.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv(
+        f"{ENV_PROVIDER_BLOCK_PREFIX}CURSOR__TRUST_WORKSPACE",
+        "[/]",
+    )
+    (isolated_project / ".lintro-config.yaml").write_text(
+        yaml.safe_dump({"ai": {"provider": "cursor"}}),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+
+    result = CliRunner().invoke(cli, ["config"])
+
+    clear_config_cache()
+    assert_that(result.exit_code).is_equal_to(0)
+    output = " ".join(result.output.split())
+    assert_that(output).contains("[/]")
+    assert_that(output).contains("Tool Execution Order")

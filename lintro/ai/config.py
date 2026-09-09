@@ -437,7 +437,8 @@ class AIConfig(BaseModel):
             The input with ``providers`` normalized to block instances.
 
         Raises:
-            ValueError: If a block fails its provider's own validation. The
+            ValueError: If a block fails its provider's own validation, or is
+                given as a model instance belonging to another provider. The
                 message names the full ``ai.providers.<name>.<field>`` path so
                 the diagnostic matches the key the user wrote.
         """
@@ -461,9 +462,6 @@ class AIConfig(BaseModel):
 
         blocks: dict[Any, Any] = {}
         for name, value in raw_blocks.items():
-            if isinstance(value, ProviderConfig):
-                blocks[name] = value
-                continue
             try:
                 model = config_model_for(name)
             except AIProviderNotRegisteredError:
@@ -472,6 +470,14 @@ class AIConfig(BaseModel):
                         "Unknown AI provider block ignored: ai.providers.{}",
                         name,
                     )
+                continue
+            if isinstance(value, ProviderConfig):
+                if not isinstance(value, model):
+                    raise ValueError(
+                        f"ai.providers.{provider_label(name)} must be a "
+                        f"{model.__name__}, got {type(value).__name__}",
+                    )
+                blocks[name] = value
                 continue
             if value is None:
                 # ``cursor:`` with nothing under it is an empty YAML mapping,
