@@ -58,8 +58,12 @@ def print_ai_config(
     was the flat model's failure mode — a reader had to know which keys their
     provider actually reads.
 
-    Resolution runs with diagnostics off: this is a display of values the
-    execution path already reported on, and it must not repeat its warnings.
+    Resolution runs with diagnostics **on**, unlike the mid-run summaries: a
+    ``lintro config`` invocation runs no execution path afterwards, so if this
+    report suppressed the legacy-key deprecation the shim would be invisible
+    for the whole invocation — on the one command a user runs to inspect their
+    config. The warning is armed once per run, so the ``--json`` twin cannot
+    double it.
 
     Args:
         console: Rich console to print to.
@@ -74,7 +78,7 @@ def print_ai_config(
     from lintro.ai.resolved_ai_config import format_sourced_value
 
     try:
-        resolved = resolve_effective_ai_config(config.ai, diagnostics=False)
+        resolved = resolve_effective_ai_config(config.ai, diagnostics=True)
     except (AIConfigOverrideError, ValidationError) as exc:
         # A bad ``ai:`` block degrades this section to one line rather than
         # killing the report: ``lintro config`` is the command a user runs to
@@ -156,7 +160,8 @@ def ai_config_json(config: LintroConfig) -> dict[str, Any]:
 
     The same shape the rich section renders, so the two outputs cannot drift:
     the shared settings with provenance, only the selected provider's block,
-    and a count of the others.
+    and a count of the others. Resolution runs with diagnostics on for the
+    same reason the rich section does.
 
     Args:
         config: Loaded Lintro configuration.
@@ -173,7 +178,7 @@ def ai_config_json(config: LintroConfig) -> dict[str, Any]:
     from lintro.ai.provider_blocks import nested_source_key
 
     try:
-        resolved = resolve_effective_ai_config(config.ai, diagnostics=False)
+        resolved = resolve_effective_ai_config(config.ai, diagnostics=True)
     except (AIConfigOverrideError, ValidationError) as exc:
         return {"error": _describe_failure(exc)}
 
