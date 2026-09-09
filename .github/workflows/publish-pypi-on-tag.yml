@@ -19,7 +19,14 @@ name: Publish - PyPI Production
       - v*.*.*rc*
   workflow_dispatch:
 
-permissions: {}
+# actions: read is required by the chain: build-binary's jobs download this
+# run's own sha256 artifacts (#2435), and GitHub startup-rejects a reusable
+# chain whose nested jobs request a scope the top-level caller does not grant
+# (v0.152.1+ tags died as startup_failure). contents: write covers the
+# release/artifact writes further down the chain.
+permissions:
+  actions: read
+  contents: write
 
 concurrency:
   group: publish-pypi-${{ github.ref }}
