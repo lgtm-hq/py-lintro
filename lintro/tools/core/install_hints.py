@@ -28,9 +28,11 @@ SEMGREP_ISOLATED_INSTALL_HINT = (
 #: ``packaging>=25.0``, so it can never be pip-installed into the project
 #: environment; ``install-tools.sh`` puts it in its own ``uv tool`` venv (#422).
 CHECKOV_ISOLATED_INSTALL_HINT = (
-    "Install via: uv tool install checkov "
-    "(isolated venv; checkov pins packaging<24 and cannot share "
-    "lintro's environment)"
+    "Install via: uv tool install checkov, or "
+    "uv tool install --upgrade checkov when one is already installed "
+    "(a plain uv tool install no-ops on an existing tool and would leave a "
+    "below-minimum version in place). Isolated venv: checkov pins "
+    "packaging<24 and cannot share lintro's environment"
 )
 
 #: Tools whose install and upgrade guidance must always point at an isolated
@@ -43,6 +45,24 @@ ISOLATED_INSTALL_HINTS: dict[str, str] = {
     "semgrep": SEMGREP_ISOLATED_INSTALL_HINT,
     "checkov": CHECKOV_ISOLATED_INSTALL_HINT,
 }
+
+
+def isolated_install_hint(tool_name: str) -> str | None:
+    """Return the isolated-venv hint for a tool, if it has one.
+
+    Every install strategy that can be routed an isolated tool consults this
+    before its own ecosystem branch, so the mapping above stays the single
+    source of truth rather than being re-stated per strategy.
+
+    Args:
+        tool_name: Canonical lintro tool name.
+
+    Returns:
+        The isolated-venv install/upgrade hint, or None when the tool may be
+        installed into the ambient environment.
+    """
+    return ISOLATED_INSTALL_HINTS.get(tool_name)
+
 
 _MANUAL_HINT_PREFIXES = ("See ", "Install ", "Upgrade ")
 

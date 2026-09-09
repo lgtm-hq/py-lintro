@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from lintro.enums.install_context import PackageManager
-from lintro.tools.core.install_hints import ISOLATED_INSTALL_HINTS
+from lintro.tools.core.install_hints import isolated_install_hint
 from lintro.tools.core.install_strategies.base import InstallStrategy
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.install_strategies.package_names import (
@@ -60,7 +60,7 @@ class BinaryStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        isolated = ISOLATED_INSTALL_HINTS.get(tool_name)
+        isolated = isolated_install_hint(tool_name)
         if isolated is not None:
             return isolated
         pkg = ecosystem_package_name(tool_name, install_package)
@@ -89,7 +89,7 @@ class BinaryStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        isolated = ISOLATED_INSTALL_HINTS.get(tool_name)
+        isolated = isolated_install_hint(tool_name)
         if isolated is not None:
             return isolated
         pkg = ecosystem_package_name(tool_name, install_package)

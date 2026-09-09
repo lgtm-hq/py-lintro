@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from lintro.enums.install_context import InstallContext, PackageManager
-from lintro.tools.core.install_hints import SEMGREP_ISOLATED_INSTALL_HINT
+from lintro.tools.core.install_hints import isolated_install_hint
 from lintro.tools.core.install_strategies.base import InstallStrategy
 from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.install_strategies.package_names import (
@@ -68,8 +68,9 @@ class PipStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        if tool_name == "semgrep":
-            return _semgrep_isolated_hint()
+        isolated = isolated_install_hint(tool_name)
+        if isolated is not None:
+            return isolated
         pkg = ecosystem_package_name(tool_name, install_package)
         brew_pkg = BREW_FORMULA_NAMES.get(tool_name)
         if (
@@ -105,8 +106,9 @@ class PipStrategy(InstallStrategy):
         Returns:
             Shell command string.
         """
-        if tool_name == "semgrep":
-            return _semgrep_isolated_hint()
+        isolated = isolated_install_hint(tool_name)
+        if isolated is not None:
+            return isolated
         pkg = ecosystem_package_name(tool_name, install_package)
         brew_pkg = BREW_FORMULA_NAMES.get(tool_name)
         if (
@@ -121,15 +123,6 @@ class PipStrategy(InstallStrategy):
         if not (env.has(PackageManager.UV) or env.has(PackageManager.PIP)):
             return f"Upgrade {tool_name} via pip/uv (neither found in PATH)"
         return f"{_pip_cmd(env)} --upgrade '{pkg}>={tool_version}'"
-
-
-def _semgrep_isolated_hint() -> str:
-    """Return the isolated-venv install hint for semgrep (#2104).
-
-    Returns:
-        Manual install guidance that does not target the project venv.
-    """
-    return SEMGREP_ISOLATED_INSTALL_HINT
 
 
 def _pip_cmd(env: InstallEnvironment) -> str:

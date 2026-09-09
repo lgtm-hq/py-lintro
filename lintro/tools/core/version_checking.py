@@ -62,10 +62,7 @@ from lintro._tool_versions import (
 from lintro.enums.tool_name import ToolName
 from lintro.enums.update_channel import UpdateChannel
 from lintro.tools.core import update_channels as update_channel_ops
-from lintro.tools.core.install_hints import (
-    CHECKOV_ISOLATED_INSTALL_HINT,
-    SEMGREP_ISOLATED_INSTALL_HINT,
-)
+from lintro.tools.core.install_hints import ISOLATED_INSTALL_HINTS
 from lintro.tools.core.update_channels import VersionAdvisory
 
 # Module-level set to track logged warnings and prevent duplicates
@@ -241,9 +238,7 @@ def get_install_hints() -> dict[str, str]:
         "rustfmt": "Install via: rustup component add rustfmt (v{version}+)",
         "cargo_audit": "Install via: cargo install cargo-audit (v{version}+)",
         "cargo_deny": "Install via: cargo install cargo-deny (v{version}+)",
-        "checkov": CHECKOV_ISOLATED_INSTALL_HINT,
         "biome": "Install via: bun add -d @biomejs/biome@>={version}",
-        "semgrep": SEMGREP_ISOLATED_INSTALL_HINT,
         "gitleaks": (
             "Install via: https://github.com/gitleaks/gitleaks/releases (v{version}+)"
         ),
@@ -302,6 +297,11 @@ def get_install_hints() -> dict[str, str]:
             "or npm install -D vue-tsc@>={version}"
         ),
     }
+
+    # Tools that must live in their own venv carry one hint for every consumer
+    # (doctor's table here, and the install strategies): merged from the single
+    # registry rather than re-stated, so a third isolated tool needs one edit.
+    templates.update(ISOLATED_INSTALL_HINTS)
 
     versions = get_minimum_versions()
     hints: dict[str, str] = {}
