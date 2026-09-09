@@ -4736,3 +4736,139 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
     # Fail closed: a classifier that did not succeed still pings.
     assert_that(condition).contains("needs.classify-failure.result != 'success'")
+
+
+# --- Nuitka compile cache wiring (#2484) ----------------------------------
+#
+# The cache key expression is written out four times (a restore key, a
+# restore-keys prefix and a save key on each of the two compile jobs) because
+# neither `runner` nor `steps` is available in a job-level `env:` block, so it
+# cannot be hoisted into one variable. A restore key that drifts from its save
+# key is invisible: the build still succeeds, it just never hits the cache and
+# silently returns to the ~1500-file cold compile this exists to avoid.
+
+_CACHE_RUN_SUFFIX = "${{ github.run_id }}-${{ github.run_attempt }}"
+_NUITKA_CACHE_DIR_EXPR = "${{ env.NUITKA_CACHE_DIR }}"
+
+
+def _cache_steps(
+    *,
+    workflow: dict[str, Any],
+    job_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the restore and save cache steps of a compile job.
+
+    Args:
+        workflow: The parsed build-binary workflow.
+        job_id: Job to read (``build-macos`` or ``build-linux``).
+
+    Returns:
+        The ``(restore, save)`` step mappings.
+    """
+    by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
+    return by_name["Restore Nuitka compile cache"], by_name["Save Nuitka compile cache"]
+
+
+@pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
+def test_nuitka_cache_save_key_matches_the_restore_key(job_id: str) -> None:
+    """Save and restore use one and the same key expression.
+
+    Args:
+        job_id: The compile job under test.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    restore, save = _cache_steps(workflow=workflow, job_id=job_id)
+    assert_that(save["with"]["key"]).described_as(job_id).is_equal_to(
+        restore["with"]["key"],
+    )
+    assert_that(restore["with"]["key"]).ends_with(f"-{_CACHE_RUN_SUFFIX}")
+
+
+@pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
+def test_nuitka_cache_restore_keys_is_the_key_without_the_run_suffix(
+    job_id: str,
+) -> None:
+    """`restore-keys` is exactly the key minus the run id and attempt.
+
+    That prefix is what lets a run fall back to an earlier run's cache; any
+    other string silently restores nothing.
+
+    Args:
+        job_id: The compile job under test.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    restore, _ = _cache_steps(workflow=workflow, job_id=job_id)
+    # The key ends `<prefix>-<run id>-<run attempt>`; the prefix keeps the
+    # trailing dash so it cannot match a longer version string.
+    expected = restore["with"]["key"].removesuffix(_CACHE_RUN_SUFFIX)
+    restore_keys = [
+        line.strip()
+        for line in restore["with"]["restore-keys"].splitlines()
+        if line.strip()
+    ]
+    assert_that(restore_keys).described_as(job_id).is_equal_to([expected])
+
+
+@pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
+def test_nuitka_cache_steps_share_the_reuse_gating(job_id: str) -> None:
+    """Both cache steps are skipped on the #2435 reuse path.
+
+    The save step additionally runs under ``always()``, so an attempt killed
+    by the step timeout still hands its compiled objects to the next one.
+
+    Args:
+        job_id: The compile job under test.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    restore, save = _cache_steps(workflow=workflow, job_id=job_id)
+    reuse_guard = "steps.reuse.outputs.reuse != 'true'"
+    assert_that(_normalize_github_expr(restore["if"])).described_as(job_id).is_equal_to(
+        reuse_guard,
+    )
+    assert_that(_normalize_github_expr(save["if"])).described_as(job_id).is_equal_to(
+        f"always() && {reuse_guard}",
+    )
+    version_step = next(
+        step
+        for step in workflow["jobs"][job_id]["steps"]
+        if step.get("id") == "nuitka-version"
+    )
+    assert_that(_normalize_github_expr(version_step["if"])).is_equal_to(reuse_guard)
+    assert_that(version_step["run"]).contains("scripts/ci/resolve-nuitka-version.py")
+
+
+@pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
+def test_nuitka_cache_path_is_the_workflow_level_cache_dir(job_id: str) -> None:
+    """Both steps cache exactly the directory the build is told to write.
+
+    ``NUITKA_CACHE_DIR`` lives at workflow level so one expression serves the
+    macOS and Linux defaults, both cache steps and Nuitka itself.
+
+    Args:
+        job_id: The compile job under test.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    assert_that(workflow["env"]).contains_key("NUITKA_CACHE_DIR")
+    restore, save = _cache_steps(workflow=workflow, job_id=job_id)
+    assert_that(restore["with"]["path"]).described_as(job_id).is_equal_to(
+        _NUITKA_CACHE_DIR_EXPR,
+    )
+    assert_that(save["with"]["path"]).described_as(job_id).is_equal_to(
+        _NUITKA_CACHE_DIR_EXPR,
+    )
+
+
+def test_nuitka_cache_actions_are_sha_pinned_to_one_version() -> None:
+    """Both cache actions are SHA-pinned, to the same actions/cache commit."""
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    uses = set()
+    for job_id in ("build-macos", "build-linux"):
+        restore, save = _cache_steps(workflow=workflow, job_id=job_id)
+        uses.update({restore["uses"], save["uses"]})
+    shas = set()
+    for entry in uses:
+        action, _, sha = entry.partition("@")
+        assert_that(action).is_in("actions/cache/restore", "actions/cache/save")
+        assert_that(sha).matches(r"^[0-9a-f]{40}$")
+        shas.add(sha)
+    assert_that(shas).is_length(1)

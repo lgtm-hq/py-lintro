@@ -174,6 +174,42 @@ Consequences for operators:
   `softprops/action-gh-release`; their assets are regenerated cheaply, so the swap was
   not extended to them.
 
+## Nuitka compile cache
+
+Both compile jobs persist Nuitka's cache root (`NUITKA_CACHE_DIR`, pinned to
+`.nuitka-cache` in the workspace so one path serves macOS and Linux) with
+`actions/cache/restore` before `Build binary` and `actions/cache/save` after it (#2484).
+Without it every attempt was a cold build: the arm64 job logged `cache miss` for all
+~1500 generated C files, which is most of its 18-22 minute compile, even though between
+patch releases nearly all of those sources are byte-identical.
+
+**Scope matters.** A GitHub cache is readable from the ref that wrote it and from the
+default branch, nothing else. This workflow runs on tag refs, so the guaranteed win is a
+re-run or a later attempt of the _same_ tag run — the seven-attempt v0.148.1 case this
+exists for. Reuse across tags requires an entry written on `main`: dispatch
+`build-binary.yml` from `main` to seed one, and later tag runs restore it through
+`restore-keys`. A cold arm64 build on a fresh tag with no such seed is expected, not a
+regression.
+
+- **Key**:
+  `nuitka-<os>-<arch>-py<PYTHON_VERSION>-nuitka<locked version>-<run id>-<run attempt>`.
+  The locked Nuitka version comes from `uv.lock` via
+  `scripts/ci/resolve-nuitka-version.py`. `restore-keys` is the same string up to
+  `nuitka<version>-`, so a run restores the newest cache from any earlier run whose ref
+  is in scope (see above).
+- **Why the run suffix**: GitHub caches are immutable per key. A fixed key would upload
+  once and never again, so modules compiled after that first upload would miss forever.
+- **Invalidation**: none is needed for lintro's own code — ccache is content-addressed
+  on the preprocessed source, the compiler and the flags, so added, changed and removed
+  modules sort themselves out. A Python or Nuitka bump changes the key and starts clean.
+- **Saved on failure**: the save step is `if: always()`, so an attempt cancelled by the
+  40-minute step timeout still hands its compiled objects to the next attempt.
+- **Egress**: both jobs' harden-runner allow-lists carry `actions.githubusercontent.com`
+  (the cache service) and `*.blob.core.windows.net` (the entry payloads) on top of the
+  artifact endpoints.
+- **Budget**: the repo-wide cache limit is 10 GB and GitHub evicts least-recently-used
+  entries, so the per-run keys self-trim.
+
 ## Token patterns
 
 - **`secrets.GITHUB_TOKEN`** — CI, PR comments, artifacts

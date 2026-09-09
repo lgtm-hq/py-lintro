@@ -35,6 +35,14 @@ permissions: {}
 # continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
   UV_VERSION: '0.12.11'
+  # #2484: the binary builds' interpreter. Named here because the Nuitka
+  # compile cache key has to carry it — a Python bump regenerates every C
+  # source, so the previous ccache entries are all misses.
+  PYTHON_VERSION: '3.14'
+  # #2484: pin Nuitka's cache root instead of relying on the per-OS default
+  # (~/Library/Caches/Nuitka vs ~/.cache/Nuitka), so one path expression
+  # serves the restore step, the build and the save step on both runners.
+  NUITKA_CACHE_DIR: ${{ github.workspace }}/.nuitka-cache
 
 jobs:
   get-release-info:
@@ -102,7 +110,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.14'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
         id: setup-uv
@@ -175,6 +183,10 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
+          # #2484: the last two entries are actions/cache restore/save — the
+          # cache service is reached through the Actions endpoint, and the
+          # entries themselves are read from and written to Azure blob
+          # storage over a pre-signed URL.
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -190,6 +202,8 @@ jobs:
             nuitka.net:443
             pipelines.actions.githubusercontent.com:443
             results-receiver.actions.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -199,7 +213,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.14'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
         id: setup-uv
@@ -246,6 +260,38 @@ jobs:
           "sha256-$BUILD_ARCH"
           "dist/nuitka/lintro-macos-$BUILD_ARCH"
 
+      # #2484: persist Nuitka's compile cache (its bundled ccache tree plus the
+      # ccache download) across runs. A cold arm64 build compiles ~1500 C files
+      # and reports every one as a ccache miss, which is most of the 18-22
+      # minute compile; between patch releases nearly all of those sources are
+      # byte-identical. GitHub caches are immutable per key, so the key ends in
+      # the run id and attempt and the restore falls back through the shared
+      # prefix to the newest matching entry — a fixed key would freeze on the
+      # first upload and never pick up newly compiled modules. ccache is
+      # content-addressed on the preprocessed source, the compiler and the
+      # flags, so added, changed and removed modules need no invalidation
+      # logic; a Python or Nuitka bump changes the key and starts clean.
+      # Scope: GitHub caches are readable from the ref that wrote them and
+      # from the default branch. This workflow runs on tag refs, so the
+      # guaranteed win is a re-run or later attempt of the same tag run -
+      # the seven-attempt case this exists for. Tag-to-tag reuse needs a
+      # cache written on main: dispatch this workflow from main to seed one.
+      - name: Resolve Nuitka version
+        id: nuitka-version
+        if: steps.reuse.outputs.reuse != 'true'
+        run: python3 scripts/ci/resolve-nuitka-version.py
+
+      - name: Restore Nuitka compile cache
+        if: steps.reuse.outputs.reuse != 'true'
+        # yamllint disable rule:line-length
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ env.PYTHON_VERSION }}-nuitka${{ steps.nuitka-version.outputs.nuitka-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ env.PYTHON_VERSION }}-nuitka${{ steps.nuitka-version.outputs.nuitka-version }}-
+        # yamllint enable rule:line-length
+
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
         # #2435: this step also tees a baseline snapshot into its own log, the
@@ -273,6 +319,17 @@ jobs:
       - name: Stop memory sampler
         if: always()
         run: scripts/ci/memory-sampler.sh stop memory-sampler.log memory-sampler.pid
+
+      # Saved even when the build failed or was cancelled by the step timeout:
+      # the C files it did compile are the head start the next attempt needs.
+      - name: Save Nuitka compile cache
+        if: always() && steps.reuse.outputs.reuse != 'true'
+        # yamllint disable rule:line-length
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ env.PYTHON_VERSION }}-nuitka${{ steps.nuitka-version.outputs.nuitka-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+        # yamllint enable rule:line-length
 
       - name: Collect OOM evidence
         if: failure()
@@ -416,6 +473,10 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
+          # #2484: the last two entries are actions/cache restore/save — the
+          # cache service is reached through the Actions endpoint, and the
+          # entries themselves are read from and written to Azure blob
+          # storage over a pre-signed URL.
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -440,6 +501,8 @@ jobs:
             hosted-compute-request-orchestrator-prod-eus-01.githubapp.com:443
             hosted-compute-request-orchestrator-prod-eus-02.githubapp.com:443
             actions-results-receiver-production.githubapp.com:443
+            actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -449,7 +512,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.14'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
         id: setup-uv
@@ -488,6 +551,38 @@ jobs:
           "sha256-linux-$BUILD_ARCH"
           "dist/nuitka/lintro-linux-$BUILD_ARCH"
 
+      # #2484: persist Nuitka's compile cache (its bundled ccache tree plus the
+      # ccache download) across runs. A cold arm64 build compiles ~1500 C files
+      # and reports every one as a ccache miss, which is most of the 18-22
+      # minute compile; between patch releases nearly all of those sources are
+      # byte-identical. GitHub caches are immutable per key, so the key ends in
+      # the run id and attempt and the restore falls back through the shared
+      # prefix to the newest matching entry — a fixed key would freeze on the
+      # first upload and never pick up newly compiled modules. ccache is
+      # content-addressed on the preprocessed source, the compiler and the
+      # flags, so added, changed and removed modules need no invalidation
+      # logic; a Python or Nuitka bump changes the key and starts clean.
+      # Scope: GitHub caches are readable from the ref that wrote them and
+      # from the default branch. This workflow runs on tag refs, so the
+      # guaranteed win is a re-run or later attempt of the same tag run -
+      # the seven-attempt case this exists for. Tag-to-tag reuse needs a
+      # cache written on main: dispatch this workflow from main to seed one.
+      - name: Resolve Nuitka version
+        id: nuitka-version
+        if: steps.reuse.outputs.reuse != 'true'
+        run: python3 scripts/ci/resolve-nuitka-version.py
+
+      - name: Restore Nuitka compile cache
+        if: steps.reuse.outputs.reuse != 'true'
+        # yamllint disable rule:line-length
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ env.PYTHON_VERSION }}-nuitka${{ steps.nuitka-version.outputs.nuitka-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ env.PYTHON_VERSION }}-nuitka${{ steps.nuitka-version.outputs.nuitka-version }}-
+        # yamllint enable rule:line-length
+
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
         # #2435: this step also tees a baseline snapshot into its own log, the
@@ -511,6 +606,17 @@ jobs:
       - name: Stop memory sampler
         if: always()
         run: scripts/ci/memory-sampler.sh stop memory-sampler.log memory-sampler.pid
+
+      # Saved even when the build failed or was cancelled by the step timeout:
+      # the C files it did compile are the head start the next attempt needs.
+      - name: Save Nuitka compile cache
+        if: always() && steps.reuse.outputs.reuse != 'true'
+        # yamllint disable rule:line-length
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-py${{ env.PYTHON_VERSION }}-nuitka${{ steps.nuitka-version.outputs.nuitka-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+        # yamllint enable rule:line-length
 
       - name: Collect OOM evidence
         if: failure()
