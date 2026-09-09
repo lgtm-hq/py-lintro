@@ -24,6 +24,12 @@ name: Publish - Homebrew Tap
           - arm64
           - x86_64
           - universal
+      upload_to_release:
+        # yamllint disable-line rule:line-length
+        description: 'Upload built binaries onto the latest release (repair only; a plain dispatch just builds and seeds the Nuitka cache)'
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -134,8 +140,13 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        # Resolved tag is set for both workflow_call and workflow_dispatch.
-        if: needs.get-release-info.outputs.release_tag != ''
+        # Resolved tag is set for both workflow_call and workflow_dispatch, so
+        # a bare dispatch would otherwise republish onto the latest release
+        # (#2484). Publish on the workflow_call path, or on a dispatch that
+        # explicitly asked for a repair upload.
+        if: >-
+          needs.get-release-info.outputs.release_tag != '' &&
+          (inputs.release_tag != '' || inputs.upload_to_release == true)
         # yamllint disable-line rule:line-length
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
@@ -356,9 +367,12 @@ jobs:
         # which deletes the published asset before uploading its replacement.
         # Skipped entirely when the asset being uploaded is the one already
         # on the release.
+        # #2484: a bare dispatch (cache seeding) must not republish onto the
+        # latest release; only workflow_call or an explicit repair dispatch.
         if: >-
           needs.get-release-info.outputs.release_tag != '' &&
-          steps.reuse.outputs.reuse != 'true'
+          steps.reuse.outputs.reuse != 'true' &&
+          (inputs.release_tag != '' || inputs.upload_to_release == true)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
@@ -584,9 +598,12 @@ jobs:
       - name: Upload to release
         # Resolved tag is set for both workflow_call and workflow_dispatch.
         # #2435: see the macOS job — upload-then-swap, skipped on reuse.
+        # #2484: a bare dispatch (cache seeding) must not republish onto the
+        # latest release; only workflow_call or an explicit repair dispatch.
         if: >-
           needs.get-release-info.outputs.release_tag != '' &&
-          steps.reuse.outputs.reuse != 'true'
+          steps.reuse.outputs.reuse != 'true' &&
+          (inputs.release_tag != '' || inputs.upload_to_release == true)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
@@ -682,8 +699,11 @@ jobs:
           retention-days: 7
 
       - name: Upload to release
-        # Resolved tag is set for both workflow_call and workflow_dispatch.
-        if: needs.get-release-info.outputs.release_tag != ''
+        # Resolved tag is set for both workflow_call and workflow_dispatch; a
+        # bare dispatch must not republish onto the latest release (#2484).
+        if: >-
+          needs.get-release-info.outputs.release_tag != '' &&
+          (inputs.release_tag != '' || inputs.upload_to_release == true)
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
@@ -705,10 +725,12 @@ jobs:
     # keeps single-arch workflow_call runs from failing on a missing
     # checksum artifact.
     # Use resolved tag: workflow_dispatch has no release_tag input.
+    # #2484: a bare dispatch seeds the Nuitka cache and publishes nothing.
     if: >-
       inputs.arch == 'universal' &&
       needs.get-release-info.outputs.release_tag != '' &&
-      needs.get-release-info.outputs.is_prerelease == 'false'
+      needs.get-release-info.outputs.is_prerelease == 'false' &&
+      (inputs.release_tag != '' || inputs.upload_to_release == true)
 
     steps:
       - name: Harden Runner

@@ -1796,6 +1796,89 @@ def test_build_binary_pins_setup_uv_version() -> None:
         assert_that(version).contains("env.UV_VERSION")
 
 
+def test_build_binary_dispatch_uploads_are_opt_in() -> None:
+    """A plain ``workflow_dispatch`` must not republish release assets.
+
+    ``get-release-info`` resolves the latest published release when no
+    ``release_tag`` input is supplied, so before #2484 a cache-seeding
+    dispatch overwrote that release's binaries and man page. Every publishing
+    step and job must therefore also require the workflow_call path or the
+    explicit ``upload_to_release`` repair input.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    upload_input = dispatch_inputs["upload_to_release"]
+    assert_that(upload_input["type"]).is_equal_to("boolean")
+    assert_that(upload_input["default"]).is_false()
+    assert_that(upload_input["description"]).contains("repair")
+
+    upload_steps = [
+        (job_id, step)
+        for job_id, job in workflow["jobs"].items()
+        for step in job.get("steps") or []
+        if step.get("name") == "Upload to release"
+    ]
+    assert_that(upload_steps).is_not_empty()
+    for job_id, step in upload_steps:
+        condition = str(step.get("if", ""))
+        assert_that(condition).described_as(
+            f"{job_id}: Upload to release must be gated on upload_to_release",
+        ).contains("inputs.upload_to_release")
+        assert_that(condition).contains("inputs.release_tag != ''")
+
+    homebrew = str(workflow["jobs"]["homebrew-dispatch"].get("if", ""))
+    assert_that(homebrew).described_as(
+        "homebrew-dispatch publishes downstream and must honour the gate",
+    ).contains("inputs.upload_to_release")
+
+
+def test_build_binary_jobs_share_one_python_version() -> None:
+    """No job may hardcode ``python-version``; all use ``env.PYTHON_VERSION``.
+
+    The Nuitka cache key carries the interpreter version, so a job left on a
+    literal would silently build on a different Python than the one the cache
+    key names (#2484).
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    assert_that(str(workflow["env"]["PYTHON_VERSION"])).matches(r"^\d+\.\d+$")
+
+    versions = [
+        (job_id, str((step.get("with") or {}).get("python-version", "")))
+        for job_id, job in workflow["jobs"].items()
+        for step in job.get("steps") or []
+        if "python-version" in (step.get("with") or {})
+    ]
+    assert_that(versions).is_not_empty()
+    for job_id, version in versions:
+        assert_that(version).described_as(
+            f"{job_id} must reference env.PYTHON_VERSION, not a literal",
+        ).contains("env.PYTHON_VERSION")
+
+
+def test_verify_built_binary_uses_a_registered_doctor_flag() -> None:
+    """The build gate's hidden doctor flag must exist on the CLI command.
+
+    ``verify_built_binary.sh`` invokes the flag as a string literal, so a
+    rename in ``doctor.py`` would only surface at the next release build
+    (#2484).
+    """
+    from lintro.cli_utils.commands.doctor import doctor_command
+
+    script = (_REPO_ROOT / "scripts" / "build" / "verify_built_binary.sh").read_text(
+        encoding="utf-8",
+    )
+    invoked = re.findall(r"doctor (--[\w-]+)", script)
+    assert_that(invoked).is_not_empty()
+
+    declared = {
+        opt for param in doctor_command.params for opt in getattr(param, "opts", [])
+    }
+    for flag in invoked:
+        assert_that(declared).described_as(
+            f"verify_built_binary.sh invokes {flag}, which doctor does not declare",
+        ).contains(flag)
+
+
 def test_renovate_manages_build_binary_uv_pin() -> None:
     """A Renovate customManager must match the build-binary UV_VERSION line.
 
@@ -5074,11 +5157,15 @@ def _effective_grant(
     """Return the permissions a job actually holds.
 
     A job without its own ``permissions`` block inherits the workflow-level
-    block; with neither, the grant is empty. Most workflows here declare
-    ``permissions: {}`` at the top, so the empty grant is the usual outcome -
-    but not all of them do (``docker-build-publish.yml`` declares a top-level
-    ``contents: read``), which is exactly why the workflow-level block is
-    consulted rather than assumed empty.
+    block. Most workflows here declare ``permissions: {}`` at the top, so the
+    empty grant is the usual outcome - but not all of them do
+    (``docker-build-publish.yml`` declares a top-level ``contents: read``),
+    which is exactly why the workflow-level block is consulted rather than
+    assumed empty. When neither the job nor the workflow declares a block at
+    all, GitHub falls back to the default ``GITHUB_TOKEN`` grant, which this
+    repository's org/repo setting models as ``contents: read``; that default
+    is returned instead of an empty grant, while an explicit
+    ``permissions: {}`` stays empty.
 
     Args:
         job: The parsed job mapping.
@@ -5090,7 +5177,10 @@ def _effective_grant(
     job_level = _normalize_permissions(job.get("permissions"))
     if job_level is not None:
         return job_level
-    return _normalize_permissions(workflow.get("permissions")) or {}
+    workflow_level = _normalize_permissions(workflow.get("permissions"))
+    if workflow_level is not None:
+        return workflow_level
+    return {"contents": _PERMISSION_LEVELS["read"]}
 
 
 def _local_workflow_calls(
@@ -5354,6 +5444,23 @@ def test_permission_shortfalls_recurses_into_a_nested_local_call(
     assert_that(shortfalls).is_length(1)
     assert_that(shortfalls[0]).contains("middle.yml::relay")
     assert_that(shortfalls[0]).contains("requests packages=write")
+
+
+def test_missing_permissions_block_models_the_token_default() -> None:
+    """No block anywhere means GitHub's default grant, not an empty one."""
+    default_grant = _effective_grant(job={}, workflow={})
+    assert_that(_granted_level(default_grant, scope="contents")).is_equal_to(
+        _PERMISSION_LEVELS["read"],
+    )
+    assert_that(_granted_level(default_grant, scope="packages")).is_equal_to(0)
+
+    explicit_empty = _effective_grant(job={}, workflow={"permissions": {}})
+    assert_that(explicit_empty).is_equal_to({})
+    inherited = _effective_grant(
+        job={"permissions": {}},
+        workflow={"permissions": {"contents": "write"}},
+    )
+    assert_that(inherited).is_equal_to({})
 
 
 def test_permission_shorthands_normalize_to_levels() -> None:
