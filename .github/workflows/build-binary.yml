@@ -34,7 +34,7 @@ permissions: {}
 # two stay equal. Artifact URL lookup may still consult the manifest, so the
 # continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
-  UV_VERSION: '0.12.10'
+  UV_VERSION: '0.12.11'
 
 jobs:
   get-release-info:
@@ -394,6 +394,24 @@ jobs:
 
     steps:
       - name: Harden Runner
+        # GitHub's own hosted-runner control plane under githubapp.com: the
+        # hosted-compute-watchdog-prod-* and hosted-compute-request-
+        # orchestrator-prod-* shards (iad-01, iad-02, eus-01, eus-02 -- every
+        # shard observed in this repo's job logs) and the results receiver.
+        # The x64 job was reclaimed mid-run on 7 of 7 attempts for v0.147.7
+        # ("The runner has received a shutdown signal", 15-20 minutes in)
+        # while this list denied them, while the arm64 sibling -- same source,
+        # same runner class -- has never been observed dying that way (#1761,
+        # #2339). Exact hosts rather than the `*.githubapp.com:443` wildcard
+        # the docker-ci/ai-review jobs carry (#2353), by owner decision. If
+        # GitHub adds a shard the kills return; the trigger is the kill itself
+        # (a "shutdown signal" 15-20 minutes into a single matrix leg), not a
+        # named host -- a reclaimed runner does not reliably publish its
+        # harden-runner summary. The agreed procedure on that signal is an
+        # immediate issue and a next PR reverting this job to the wildcard
+        # (#2488 tracks narrowing the others). macOS legs are out of scope:
+        # never observed reclaimed, and harden-runner enforces differently
+        # there.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -413,6 +431,15 @@ jobs:
             nuitka.net:443
             pipelines.actions.githubusercontent.com:443
             results-receiver.actions.githubusercontent.com:443
+            hosted-compute-watchdog-prod-iad-01.githubapp.com:443
+            hosted-compute-watchdog-prod-iad-02.githubapp.com:443
+            hosted-compute-watchdog-prod-eus-01.githubapp.com:443
+            hosted-compute-watchdog-prod-eus-02.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-iad-01.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-iad-02.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-eus-01.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-eus-02.githubapp.com:443
+            actions-results-receiver-production.githubapp.com:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
