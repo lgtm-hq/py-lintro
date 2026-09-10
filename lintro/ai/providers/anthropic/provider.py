@@ -50,6 +50,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.rate_limit import retry_after_from_exception
 from lintro.ai.raw_response import (
     CLI_ENVELOPE_STAGE,
     describe_raw_response,
@@ -215,8 +216,11 @@ class AnthropicProvider(ApiStreamingProvider):
                 f"Anthropic authentication failed: {e}",
             ) from e
         except anthropic.RateLimitError as e:
+            # Carry the server's own Retry-After so with_retry waits the
+            # advertised window instead of guessing a backoff (#2506).
             raise AIRateLimitError(
                 f"Anthropic rate limit exceeded: {e}",
+                retry_after=retry_after_from_exception(e),
             ) from e
         except anthropic.AnthropicError as e:
             logger.debug(f"Anthropic API error: {e}")

@@ -48,6 +48,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_TIMEOUT,
 )
 from lintro.ai.providers.openai.metadata import OPENAI_CLI_BINARY, OPENAI_METADATA
+from lintro.ai.rate_limit import retry_after_from_exception
 from lintro.ai.raw_response import (
     CLI_ENVELOPE_STAGE,
     describe_raw_response,
@@ -271,8 +272,11 @@ class OpenAIProvider(ApiStreamingProvider):
                 f"OpenAI authentication failed: {e}",
             ) from e
         except openai.RateLimitError as e:
+            # Carry the server's own Retry-After so with_retry waits the
+            # advertised window instead of guessing a backoff (#2506).
             raise AIRateLimitError(
                 f"OpenAI rate limit exceeded: {e}",
+                retry_after=retry_after_from_exception(e),
             ) from e
         except openai.OpenAIError as e:
             logger.debug(f"OpenAI API error: {e}")
