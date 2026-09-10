@@ -82,8 +82,8 @@ The configuration system works in a specific order:
 
 5. **AI Tier** - AI-powered summaries and fix suggestions (opt-in)
    - `enabled`: Whether AI features are active (default: `false`)
-   - `provider`: AI provider to use (`anthropic`, `cursor` or `openai`) — required when
-     AI is enabled; there is no default
+   - `provider`: AI provider to use (`anthropic`, `cursor` or `openai`) — required once
+     `ai.lint` or `ai.review` is enabled; there is no default
    - Applied only when enabled and a valid API key is set
 
 ### Configuration Resolution Example
