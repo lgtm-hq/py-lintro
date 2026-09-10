@@ -340,3 +340,30 @@ def test_a_package_outside_the_repository_is_not_joined_to_one_inside(
     second = _package(tmp_path, "b")
 
     assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_a_member_that_is_its_own_repository_still_reaches_the_workspace(
+    tmp_path: Path,
+) -> None:
+    """A submodule member does not cut the walk short of the workspace root.
+
+    The member carries its own ``.git``, so its nearest repository is not the
+    workspace's; the shared outer repository is what bounds the walk.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace repository.
+    """
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["outer", "outer/a", "outer/b"]\n',
+    )
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    (outer / "Cargo.toml").write_text('[package]\nname = "outer"\n')
+    first = _package(outer, "a")
+    second = _package(outer, "b")
+    (first.parent.parent / ".git").mkdir()
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())

@@ -50,38 +50,70 @@ def _declares_workspace(manifest: Path) -> bool:
     return isinstance(data.get("workspace"), dict)
 
 
-def _repository_root(start: Path) -> Path | None:
-    """Return the nearest ancestor of ``start`` that holds ``.git``.
+def _repository_ancestors(start: Path) -> list[Path]:
+    """Collect every ancestor of ``start`` that holds ``.git``.
 
     Args:
         start: Directory to begin the upward walk at, inclusive.
 
     Returns:
-        The repository root owning ``start``, or ``None`` when the walk
-        reaches the filesystem root without finding one.
+        The repositories containing ``start``, nearest first. A nested
+        checkout or submodule contributes its own entry ahead of the outer
+        repository's.
     """
-    for candidate in [start, *start.parents]:
-        if (candidate / _REPOSITORY_MARKER).exists():
-            return candidate
-    return None
+    return [
+        candidate
+        for candidate in [start, *start.parents]
+        if (candidate / _REPOSITORY_MARKER).exists()
+    ]
 
 
-def _nearest_workspace_root(start: Path) -> Path | None:
+def _repository_boundary(roots: set[Path]) -> tuple[Path | None, bool]:
+    """Find the outermost repository that contains every root.
+
+    A workspace member may be a repository of its own — a submodule or a
+    nested checkout — so the boundary is the shallowest repository shared by
+    all of the roots rather than each root's nearest one.
+
+    Args:
+        roots: Package directories the walk has to stay inside of.
+
+    Returns:
+        A ``(boundary, split)`` pair. ``boundary`` is the shallowest
+        repository containing every root, or ``None`` when no repository
+        does. ``split`` is ``True`` when at least one root lives in a
+        repository that does not contain the others, which makes any manifest
+        above them all unrelated to the inputs.
+    """
+    chains = [_repository_ancestors(root) for root in roots]
+    shared: set[Path] = set(chains[0])
+    for chain in chains[1:]:
+        shared &= set(chain)
+    if shared:
+        return min(shared, key=lambda path: len(path.parts)), False
+    return None, any(chains)
+
+
+def _nearest_workspace_root(start: Path, boundary: Path | None) -> Path | None:
     """Walk upward from ``start`` to the first workspace manifest.
 
     Args:
         start: Directory to begin the upward walk at, inclusive.
+        boundary: Outermost repository the walk may reach, inclusive. Only
+            this directory ends the walk, so a nested repository between
+            ``start`` and ``boundary`` is walked through. ``None`` leaves the
+            walk unbounded, for inputs that live outside any repository.
 
     Returns:
         The directory owning the nearest ``Cargo.toml`` with a
-        ``[workspace]`` table, or ``None`` when the walk reaches a repository
-        boundary or the filesystem root without finding one.
+        ``[workspace]`` table, or ``None`` when the walk reaches the boundary
+        or the filesystem root without finding one.
     """
     for candidate in [start, *start.parents]:
         manifest = candidate / CARGO_MANIFEST
         if manifest.is_file() and _declares_workspace(manifest):
             return candidate
-        if (candidate / _REPOSITORY_MARKER).exists():
+        if candidate == boundary:
             break
     return None
 
@@ -121,10 +153,12 @@ def find_cargo_root(
     nested member set resolves to the workspace root rather than to one of its
     members. An ancestor manifest that declares only ``[package]`` is rejected:
     running Cargo there would act on that crate alone, not on the packages the
-    files belong to. The walk stops at a directory holding ``.git`` so it
-    cannot escape the repository, and paths whose nearest ``.git`` ancestors
-    differ — sibling repositories, or a repository mixed with a tree outside
-    one — resolve to nothing rather than to a manifest above them all.
+    files belong to. The walk stops at the outermost repository containing
+    every path, so it cannot escape into an unrelated manifest while still
+    crossing a member that is a repository of its own; paths that no single
+    repository contains — sibling repositories, or a repository mixed with a
+    tree outside one — resolve to nothing rather than to a manifest above
+    them all.
 
     Args:
         paths: File or directory paths to search upward from.
@@ -153,8 +187,8 @@ def find_cargo_root(
             )
         return None
 
-    repositories = {_repository_root(root) for root in unique_roots}
-    if len(repositories) > 1:
+    boundary, split = _repository_boundary(unique_roots)
+    if split:
         if tool_label is not None:
             logger.warning(
                 "Multiple Cargo roots found ({}) in different repositories; "
@@ -165,7 +199,7 @@ def find_cargo_root(
             )
         return None
 
-    workspace_root = _nearest_workspace_root(common)
+    workspace_root = _nearest_workspace_root(common, boundary)
     if workspace_root is not None:
         return workspace_root
 
