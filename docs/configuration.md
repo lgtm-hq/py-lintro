@@ -3434,6 +3434,7 @@ ai:
 | `lint`                  | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                             |
 | `review`                | bool   | `false`        | Enable the `lintro review` AI diff review                                                           |
 | `provider`              | string | none           | AI provider (`anthropic`, `cursor`, or `openai`); required when `ai.lint` or `ai.review` is enabled |
+| `transport`             | string | none           | Transport (`api` or `cli`); no default — `lintro doctor` flags it unset                             |
 | `model`                 | string | (default)      | Model override                                                                                      |
 | `api_key_env`           | string | (default)      | Custom env var for API key                                                                          |
 | `default_fix`           | bool   | `false`        | Always run `--fix` in check                                                                         |

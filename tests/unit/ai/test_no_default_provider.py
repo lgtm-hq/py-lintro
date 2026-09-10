@@ -93,21 +93,76 @@ def _scanned_modules() -> list[Path]:
     return [*ai_modules, *_cli_provider_modules()]
 
 
-def _is_provider_literal(node: ast.expr) -> bool:
+#: The enum's own name, before any module renames it on import.
+_PROVIDER_ENUM = "AIProvider"
+
+
+def _provider_enum_aliases(*, tree: ast.AST) -> frozenset[str]:
+    """Return every name *tree* binds to the provider enum.
+
+    A module is free to write ``from lintro.ai.provider_enum import
+    AIProvider as Provider``, and a matcher keyed on the literal spelling
+    would then see ``Provider.ANTHROPIC`` as an unrelated attribute. The
+    import statements are the authority on what the enum is called here.
+
+    Args:
+        tree: Parsed module.
+
+    Returns:
+        The enum's own name plus any alias bound by an ``import from``.
+    """
+    aliases = {_PROVIDER_ENUM}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        aliases.update(
+            alias.asname or alias.name
+            for alias in node.names
+            if alias.name == _PROVIDER_ENUM
+        )
+    return frozenset(aliases)
+
+
+def _is_provider_literal(
+    node: ast.expr,
+    *,
+    aliases: frozenset[str] = frozenset({_PROVIDER_ENUM}),
+) -> bool:
     """Report whether *node* names a concrete provider.
 
     Args:
         node: Expression appearing in a default-shaped position.
+        aliases: Names bound to the provider enum in the module under scan,
+            from :func:`_provider_enum_aliases`.
 
     Returns:
         True for ``"anthropic"``-style string constants and for
-        ``AIProvider.ANTHROPIC``-style enum member references.
+        ``AIProvider.ANTHROPIC``-style enum member references, under any name
+        the module imported the enum as.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value.lower() in _PROVIDER_NAMES
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-        return node.value.id == "AIProvider" and node.attr.lower() in _PROVIDER_NAMES
+        return node.value.id in aliases and node.attr.lower() in _PROVIDER_NAMES
     return False
+
+
+def _flagged_defaults(*, tree: ast.AST) -> list[tuple[int, str, ast.expr]]:
+    """Return the default-shaped bindings of *tree* that name a provider.
+
+    Args:
+        tree: Parsed module.
+
+    Returns:
+        The ``(line, shape, expression)`` triples whose expression is a
+        provider literal.
+    """
+    aliases = _provider_enum_aliases(tree=tree)
+    return [
+        (line, shape, value)
+        for line, shape, value in _default_shaped_values(tree)
+        if _is_provider_literal(value, aliases=aliases)
+    ]
 
 
 def _default_shaped_values(tree: ast.AST) -> list[tuple[int, str, ast.expr]]:
@@ -214,19 +269,39 @@ def _unset_name(*, test: ast.expr) -> str | None:
         test: The ``if`` statement's test expression.
 
     Returns:
-        The tested name, or None when the test is not an unset guard.
+        The printed target, or None when the test is not an unset guard.
     """
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
-        return test.operand.id if isinstance(test.operand, ast.Name) else None
+        return _printed_target(node=test.operand)
     if not isinstance(test, ast.Compare) or len(test.ops) != 1:
         return None
     if not isinstance(test.ops[0], ast.Is | ast.Eq):
         return None
-    if not isinstance(test.left, ast.Name):
+    left = _printed_target(node=test.left)
+    if left is None:
         return None
     comparator = test.comparators[0]
     is_none = isinstance(comparator, ast.Constant) and comparator.value is None
-    return test.left.id if is_none else None
+    return left if is_none else None
+
+
+def _printed_target(*, node: ast.expr) -> str | None:
+    """Return the printed form of a name or attribute, else None.
+
+    The guarded slot is as often a field as a local — ``if cfg.provider is
+    None: cfg.provider = "anthropic"`` is the same fallback as the bare-name
+    form — so targets are compared by their printed spelling rather than by
+    ``ast.Name.id``.
+
+    Args:
+        node: Expression used as an assignment target or an ``if`` test.
+
+    Returns:
+        ``ast.unparse`` of *node* for a Name or Attribute, else None.
+    """
+    if isinstance(node, ast.Name | ast.Attribute):
+        return ast.unparse(node)
+    return None
 
 
 def _unset_guard_defaults(*, node: ast.If) -> list[tuple[int, str, ast.expr]]:
@@ -238,8 +313,11 @@ def _unset_guard_defaults(*, node: ast.If) -> list[tuple[int, str, ast.expr]]:
         if provider is None:
             provider = "anthropic"
 
-    Only an assignment back to the *same* name the test guards counts, so an
-    unrelated binding inside a conditional is not read as a default.
+    The guarded slot may be a bare name or an attribute — ``cfg.provider`` is
+    as much a fallback as ``provider`` — so targets are matched by their
+    printed spelling. Only an assignment back to the *same* target the test
+    guards counts, so an unrelated binding inside a conditional is not read
+    as a default.
 
     Args:
         node: An ``if`` statement.
@@ -254,10 +332,8 @@ def _unset_guard_defaults(*, node: ast.If) -> list[tuple[int, str, ast.expr]]:
     for statement in node.body:
         if not isinstance(statement, ast.Assign):
             continue
-        targets = [
-            target for target in statement.targets if isinstance(target, ast.Name)
-        ]
-        if any(target.id == name for target in targets):
+        printed = [_printed_target(node=target) for target in statement.targets]
+        if name in printed:
             found.append((statement.lineno, "unset-guard fallback", statement.value))
     return found
 
@@ -302,9 +378,9 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
     Returns:
         ``(line, shape, expression)`` triples for ``Field(default=...)`` and
         pydantic's positional ``Field("openai")`` form, ``os.environ.get`` /
-        ``os.getenv`` / ``dict.setdefault`` two-argument lookups, three-argument
-        ``getattr`` and any
-        keyword literally named ``default``.
+        ``os.getenv`` / ``dict.pop`` / ``dict.setdefault`` two-argument
+        lookups, three-argument ``getattr`` and any keyword literally named
+        ``default``.
     """
     found: list[tuple[int, str, ast.expr]] = []
     for keyword in node.keywords:
@@ -326,6 +402,7 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
     is_get = isinstance(func, ast.Attribute) and func.attr in {
         "get",
         "getenv",
+        "pop",
         "setdefault",
     }
     is_getenv = isinstance(func, ast.Name) and func.id == "getenv"
@@ -348,8 +425,7 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
     tree = ast.parse(module.read_text(encoding="utf-8"), filename=str(module))
     violations = [
         f"{_relative(module)}:{line}: {shape} names a provider"
-        for line, shape, value in _default_shaped_values(tree)
-        if _is_provider_literal(value)
+        for line, shape, _ in _flagged_defaults(tree=tree)
     ]
     assert_that(violations).described_as(
         "a provider named in a default-shaped position is an implicit default; "
@@ -380,6 +456,12 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         'if provider == None:\n    provider = "openai"',
         'match provider:\n    case _:\n        provider = "anthropic"',
         'match provider:\n    case None:\n        provider = "cursor"',
+        'if cfg.provider is None:\n    cfg.provider = "anthropic"',
+        'provider = overrides.pop("provider", "cursor")',
+        (
+            "from lintro.ai.provider_enum import AIProvider as Provider\n"
+            "def build(provider=Provider.ANTHROPIC): ...\n"
+        ),
         'provider = "anthropic" if provider is None else provider',
         'provider = explicit or "cursor" or fallback',
     ],
@@ -404,6 +486,9 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "unset-guard-equals-none",
         "match-wildcard-arm",
         "match-none-arm",
+        "unset-guard-on-an-attribute",
+        "pop-fallback",
+        "aliased-enum-import",
         "conditional-fallback-in-body",
         "or-fallback-mid-chain",
     ],
@@ -417,11 +502,7 @@ def test_ratchet_catches_a_default_provider(source: str) -> None:
     Args:
         source: A one-line module that binds a provider as a default.
     """
-    flagged = [
-        shape
-        for _, shape, value in _default_shaped_values(ast.parse(source))
-        if _is_provider_literal(value)
-    ]
+    flagged = [shape for _, shape, _value in _flagged_defaults(tree=ast.parse(source))]
     assert_that(flagged).described_as(source).is_not_empty()
 
 
@@ -443,11 +524,7 @@ def test_ratchet_ignores_a_getattr_with_no_fallback(source: str) -> None:
     Args:
         source: A one-line module with a ``getattr`` that has no fallback.
     """
-    flagged = [
-        shape
-        for _, shape, value in _default_shaped_values(ast.parse(source))
-        if _is_provider_literal(value)
-    ]
+    flagged = [shape for _, shape, _value in _flagged_defaults(tree=ast.parse(source))]
     assert_that(flagged).described_as(source).is_empty()
 
 
@@ -471,11 +548,7 @@ def test_ratchet_ignores_dispatch_inside_conditionals(source: str) -> None:
         source: A one-line module whose provider name is dispatch, not a
             default.
     """
-    flagged = [
-        shape
-        for _, shape, value in _default_shaped_values(ast.parse(source))
-        if _is_provider_literal(value)
-    ]
+    flagged = [shape for _, shape, _value in _flagged_defaults(tree=ast.parse(source))]
     assert_that(flagged).described_as(source).is_empty()
 
 
@@ -491,11 +564,7 @@ def test_ratchet_ignores_provider_names_outside_defaults() -> None:
         'DEFAULT_TIMEOUTS = {"anthropic": 30, "cursor": 30, "openai": 30}\n'
         "def is_bare(provider): return provider is AIProvider.ANTHROPIC\n"
     )
-    flagged = [
-        shape
-        for _, shape, value in _default_shaped_values(ast.parse(source))
-        if _is_provider_literal(value)
-    ]
+    flagged = [shape for _, shape, _value in _flagged_defaults(tree=ast.parse(source))]
     assert_that(flagged).is_empty()
 
 

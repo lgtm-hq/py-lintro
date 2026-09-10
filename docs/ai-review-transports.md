@@ -70,13 +70,13 @@ ai:
 
 Providers are listed alphabetically; the order carries no recommendation.
 
-| Provider    | Transport | Credential                                            |
-| ----------- | --------- | ----------------------------------------------------- |
-| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                   |
-| `anthropic` | `cli`     | `CLAUDE_CODE_OAUTH_TOKEN` or a `claude` login session |
-| `cursor`    | `cli`     | `CURSOR_API_KEY` or an `agent login` session          |
-| `openai`    | `api`     | `OPENAI_API_KEY`                                      |
-| `openai`    | `cli`     | `CODEX_API_KEY` or a `codex login` session            |
+| Provider    | Transport | Credential                                                                                               |
+| ----------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| `anthropic` | `api`     | `ANTHROPIC_API_KEY`                                                                                      |
+| `anthropic` | `cli`     | `CLAUDE_CODE_OAUTH_TOKEN`, a `claude` login session, `ANTHROPIC_API_KEY`, or a configured `apiKeyHelper` |
+| `cursor`    | `cli`     | `CURSOR_API_KEY` or an `agent login` session                                                             |
+| `openai`    | `api`     | `OPENAI_API_KEY`                                                                                         |
+| `openai`    | `cli`     | `CODEX_API_KEY` or a `codex login` session                                                               |
 
 `cursor` serves no `api` transport, so it has no API row. `ai.api_key_env` renames the
 variable for the `api` transport. On the `cli` transport the binary reads whatever
