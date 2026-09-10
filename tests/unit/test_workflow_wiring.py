@@ -4128,6 +4128,50 @@ def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
 _AI_CONTRACT_WORKFLOW = "ai-contract-tests.yml"
 _AI_CONTRACT_TIER1_JOB = "tier1-flag-surface"
 _AI_CONTRACT_TIER1_CONTEXT = "🧾 AI CLI Flag Surface (Tier 1)"
+_AI_CONTRACT_TIER2_JOB = "tier2-invocation-smoke"
+_AI_REVIEW_WORKFLOW = "ai-review.yml"
+_AI_REVIEW_JOB = "ai-review"
+_AI_CONTRACT_GATE_ENV = "AI_CONTRACT_SECRETS_ALLOWED"
+#: The clause the dogfood review uses to select its anthropic lane. Tier 2
+#: has no provider variable, so its expressions carry the gate here instead.
+_DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE = (
+    "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+)
+#: Names of the CLI-behaviour flags the review pins for the agent binaries.
+#: Matched by shape rather than listed, so a fourth flag is mirrored without
+#: anyone remembering to extend a tuple.
+_CLI_BEHAVIOUR_NAME_RE = re.compile(r"^(LINTRO_CLI_|CLAUDE_CODE_|DISABLE_)")
+
+#: The ``secrets.X`` / ``vars.X`` names an expression reads. Tier 2 must read
+#: the same ones, whatever gating it wraps around them.
+_EXPRESSION_REFERENCE_RE = re.compile(r"\b(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*")
+
+#: Dogfood env the smoke deliberately does not mirror, each because Tier 2 does
+#: not do the thing it configures. Kept explicit: a *new* credential or
+#: variable in the review step is not on this list, so it fails the mirror test
+#: until someone either wires it into Tier 2 or records why it stays here.
+_DOGFOOD_ONLY_ENV = {
+    # `gh` fetches the PR diff for the review; Tier 2 fetches no diff.
+    "GH_TOKEN",
+    # The App token `--post` writes the review comment with; Tier 2 posts
+    # nothing.
+    "GITHUB_TOKEN",
+    # Review orchestration. The contract suite builds each provider itself and
+    # drives all three lanes in one run, so it has no provider to select, no
+    # master switch to flip and no transport to choose.
+    "LINTRO_AI_ENABLED",
+    "LINTRO_AI_PROVIDER",
+    "LINTRO_AI_TRANSPORT",
+    # A spend ceiling for a whole review; the smoke is one trivial prompt per
+    # lane.
+    "LINTRO_AI_MAX_COST_USD",
+    # Review-state artifact upload (#2173); the smoke persists nothing.
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RESULTS_URL",
+}
+#: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
+#: the dogfood job's per-provider egress expressions.
+_EGRESS_ENDPOINT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.*-]*:\d+")
 
 
 def _ai_contract_tier1_job() -> dict[str, Any]:
@@ -4173,6 +4217,225 @@ def test_ai_contract_tier1_is_required_check_safe() -> None:
         encoding="utf-8",
     )
     assert_that(readme).contains(_AI_CONTRACT_TIER1_CONTEXT)
+
+
+def _ai_contract_tier2_job() -> dict[str, Any]:
+    """Return the Tier 2 AI CLI invocation-smoke job definition.
+
+    Returns:
+        The ``tier2-invocation-smoke`` job mapping.
+    """
+    workflow = _load_workflow(name=_AI_CONTRACT_WORKFLOW)
+    return cast(dict[str, Any], workflow["jobs"][_AI_CONTRACT_TIER2_JOB])
+
+
+def _harden_runner_endpoints(*, job: dict[str, Any]) -> set[str]:
+    """Return the endpoints a job's harden-runner step allows.
+
+    Args:
+        job: The job mapping whose first ``step-security`` step is read.
+
+    Returns:
+        The set of ``host:port`` endpoints on the allowlist.
+    """
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/")
+    )
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    return set(str(harden["with"]["allowed-endpoints"]).split())
+
+
+def _dogfood_provider_egress() -> set[str]:
+    """Return every host the dogfood review's per-provider egress vars carry.
+
+    Derived from the ``AI_REVIEW_*_EGRESS`` job-level expressions rather than
+    from a literal list, so a new provider lane cannot be added to the review
+    without the Tier 2 assertion below noticing.
+
+    Returns:
+        The union of the per-provider ``host:port`` endpoints.
+    """
+    review = _load_workflow(name=_AI_REVIEW_WORKFLOW)
+    env = review["jobs"][_AI_REVIEW_JOB]["env"]
+    endpoints: set[str] = set()
+    for name, value in env.items():
+        if not str(name).endswith("_EGRESS"):
+            continue
+        endpoints.update(_EGRESS_ENDPOINT_RE.findall(str(value)))
+    return endpoints
+
+
+def _dogfood_review_step_env() -> dict[str, str]:
+    """Return the dogfood review step's env mapping.
+
+    Returns:
+        The env mapping of the step that runs ``run-ai-review.sh``.
+    """
+    review = _load_workflow(name=_AI_REVIEW_WORKFLOW)
+    step = next(
+        step
+        for step in review["jobs"][_AI_REVIEW_JOB]["steps"]
+        if "run-ai-review.sh" in str(step.get("run", ""))
+        and "--locate-prior-state" not in str(step.get("run", ""))
+    )
+    return {name: str(value) for name, value in step["env"].items()}
+
+
+def _mirrored_dogfood_env(env: dict[str, str]) -> dict[str, str]:
+    """Return the dogfood env Tier 2 has to carry too.
+
+    Derived by shape rather than listed: anything the review authenticates or
+    configures its agent binaries with — a secret, a repo variable, or one of
+    the CLI-behaviour flags — is something the smoke must mirror if it is to
+    prove the credential and the mode the review actually runs on. Everything
+    the review needs for work Tier 2 does not do is named in
+    :data:`_DOGFOOD_ONLY_ENV` with its reason.
+
+    Args:
+        env: The dogfood review step's env mapping.
+
+    Returns:
+        The subset of *env* Tier 2 must mirror, by name.
+    """
+    return {
+        name: value
+        for name, value in env.items()
+        if name not in _DOGFOOD_ONLY_ENV
+        and (
+            "secrets." in value
+            or "vars." in value
+            or _CLI_BEHAVIOUR_NAME_RE.match(name)
+        )
+    }
+
+
+def _tier2_expression_from_dogfood(expression: str) -> str:
+    """Rewrite a dogfood anthropic expression into its Tier 2 equivalent.
+
+    The dogfood review chooses between its anthropic configurations on a
+    provider variable Tier 2 does not have — Tier 2 always drives every lane —
+    so the provider clause is the one and only difference: Tier 2 puts its
+    trusted-event gate there instead. Everything else, in particular the
+    ``ZAI_BASE_URL`` selection between the subscription token and the gateway
+    token, must survive the rewrite untouched.
+
+    Args:
+        expression: The normalised dogfood expression.
+
+    Returns:
+        The normalised expression Tier 2 must carry for the same variable.
+    """
+    return expression.replace(
+        _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
+        f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
+    )
+
+
+def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> None:
+    """Tier 2 must reach every dogfood lane's hosts, with gated credentials.
+
+    Egress: the dogfood review allowlists provider hosts one lane at a time
+    because a single run picks one provider. Tier 2 drives all three lanes in
+    one job, so its allowlist must be a superset of that per-provider union —
+    otherwise a lane that authenticates for the review dies here on blocked
+    egress instead (#2481; the Codex subscription hosts are the case that
+    reddened every lane).
+
+    Secrets: Tier 2 runs on schedule / dispatch today, but the round-trip work
+    in #2515 adds a ``pull_request`` trigger. Every provider credential is
+    therefore routed through one gate expression that also demands a
+    same-repository head, so a fork PR resolves each secret to the empty
+    string rather than reading it.
+    """
+    job = _ai_contract_tier2_job()
+
+    dogfood = _dogfood_provider_egress()
+    assert_that(dogfood).described_as("dogfood per-provider egress").is_not_empty()
+    assert_that(_harden_runner_endpoints(job=job)).described_as(
+        "Tier 2 egress must cover every dogfood provider lane",
+    ).contains(*sorted(dogfood))
+
+    # Exact, not substring: an added `|| github.event_name == 'push'` would
+    # slip past independent contains() checks while widening what can read a
+    # provider credential.
+    gate = _normalize_github_expr(str(job["env"][_AI_CONTRACT_GATE_ENV]))
+    assert_that(gate).is_equal_to(
+        "${{ github.event_name == 'schedule'"
+        " || github.event_name == 'workflow_dispatch'"
+        f" || github.event.{_GITHUB_PULL_REQUEST_EVENT}"
+        ".head.repo.full_name == github.repository }}",
+    )
+
+    secret_env = {
+        f"{step.get('name')} / {name}": _normalize_github_expr(str(value))
+        for step in job["steps"]
+        for name, value in (step.get("env") or {}).items()
+        if "secrets." in str(value)
+    }
+    assert_that(secret_env).described_as(
+        "Tier 2 must inject provider secrets",
+    ).is_not_empty()
+    for where, expression in secret_env.items():
+        assert_that(expression).described_as(where).contains(
+            f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
+        )
+
+
+def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() -> None:
+    """Tier 2 must carry the review's credentials and CLI settings, unchanged.
+
+    A green Tier 2 is only evidence about the review if the two jobs drive the
+    binaries the same way. Three shapes of mirror are checked, all derived from
+    ai-review.yml rather than restated here, so a new dogfood env var fails
+    this test until Tier 2 mirrors it or :data:`_DOGFOOD_ONLY_ENV` records why
+    it should not:
+
+    * The anthropic credential expressions select between the subscription
+      token and the z.ai gateway on ``ZAI_BASE_URL`` (#2472 lane 2). Tier 2
+      repeats the whole selection with one substitution — dogfood picks on its
+      provider variable, Tier 2 (which always drives every lane) puts its
+      trusted-event gate in that position.
+    * The CLI-behaviour flags are plain literals — ``LINTRO_CLI_BARE: never``
+      decides whether the anthropic lane proves an OAuth session or an API key
+      — so they must match exactly.
+    * Everything else carrying a secret or a variable must at least name the
+      same one and ride the gate.
+    """
+    dogfood_env = _dogfood_review_step_env()
+    tier2_env = next(
+        step["env"]
+        for step in _ai_contract_tier2_job()["steps"]
+        if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+
+    mirrored = _mirrored_dogfood_env(dogfood_env)
+    assert_that(mirrored).described_as("derived dogfood mirror set").is_not_empty()
+
+    for name, dogfood_value in mirrored.items():
+        assert_that(tier2_env).described_as(
+            f"Tier 2 must mirror the dogfood env var {name}",
+        ).contains_key(name)
+        tier2_value = _normalize_github_expr(str(tier2_env[name]))
+        normalized = _normalize_github_expr(dogfood_value)
+
+        if _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE in normalized:
+            expected = _tier2_expression_from_dogfood(normalized)
+            # The rewrite must have found the provider clause; otherwise the
+            # comparison would silently assert dogfood equals itself.
+            assert_that(expected).described_as(name).does_not_contain(
+                _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
+            )
+            assert_that(tier2_value).described_as(name).is_equal_to(expected)
+        elif "${{" not in normalized:
+            assert_that(tier2_value).described_as(name).is_equal_to(normalized)
+        else:
+            for reference in _EXPRESSION_REFERENCE_RE.findall(normalized):
+                assert_that(tier2_value).described_as(name).contains(reference)
+            assert_that(tier2_value).described_as(name).contains(
+                f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
+            )
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

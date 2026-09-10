@@ -14,6 +14,7 @@ glance, and each of them has bitten this repo before:
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -33,6 +34,10 @@ DOCKERFILE = REPO_ROOT / "Dockerfile"
 
 TIER1_JOB = "tier1-flag-surface"
 TIER2_JOB = "tier2-invocation-smoke"
+
+#: Step id of the codex session restore — the one step allowed to fail without
+#: ending the job, so a corrupt secret costs the codex lane and not all three.
+CODEX_RESTORE_STEP_ID = "codex-session"
 
 
 @pytest.fixture
@@ -114,15 +119,47 @@ def test_tier2_waits_on_the_free_tier(workflow: Any) -> None:
 def test_neither_tier_swallows_its_own_failure(workflow: Any) -> None:
     """A contract gate with continue-on-error is not a gate.
 
+    The codex session restore is the single exception, asserted separately
+    below: it is setup for one lane, not a verdict about any of them.
+
     Args:
         workflow: The parsed workflow mapping.
     """
     for name, job in workflow["jobs"].items():
         assert_that(job).described_as(name).does_not_contain_key("continue-on-error")
         for step in job["steps"]:
+            if step.get("id") == CODEX_RESTORE_STEP_ID:
+                continue
             assert_that(step).described_as(
                 f"{name} / {step.get('name')}",
             ).does_not_contain_key("continue-on-error")
+
+
+def test_a_corrupt_codex_secret_costs_one_lane_not_three(workflow: Any) -> None:
+    """A failed session restore must not take the other two lanes with it.
+
+    ``restore-codex-session.sh`` exits 1 on a CODEX_AUTH_JSON that is not
+    base64 of a JSON object, and deletes the partial file. Without
+    continue-on-error that step failure ends the job before the smoke runs, so
+    a mistyped codex secret would also hide whether anthropic and cursor can
+    authenticate. With it, the run reaches the smoke with no session and the
+    codex lane fails there as unauthenticated — a red job either way, but one
+    that still reports the other two lanes.
+
+    Args:
+        workflow: The parsed workflow mapping.
+    """
+    steps = workflow["jobs"][TIER2_JOB]["steps"]
+    restore = next(step for step in steps if step.get("id") == CODEX_RESTORE_STEP_ID)
+    assert_that(restore["continue-on-error"]).is_true()
+    assert_that(str(restore["run"])).contains("restore-codex-session.sh")
+
+    # The verdict stays with the step that owns it: the smoke must still be
+    # able to redden the job.
+    smoke = next(
+        step for step in steps if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+    assert_that(smoke).does_not_contain_key("continue-on-error")
 
 
 def test_both_tiers_are_bounded_by_a_timeout(workflow: Any) -> None:
@@ -215,6 +252,330 @@ def test_runner_selects_the_tier_by_pytest_marker() -> None:
     assert_that(body).contains("LINTRO_CONTRACT_TIER2=1")
 
 
+#: Every variable the tier-2 branch forwards into the contract container, in
+#: the script's own order. Forwarded by name, so the value never appears in the
+#: argv — docker reads it from the caller's environment.
+FORWARDED_TIER2_ENV = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CODEX_API_KEY",
+    "CURSOR_API_KEY",
+    "LINTRO_AI_MODEL",
+    "LINTRO_CLI_BARE",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "DISABLE_AUTOUPDATER",
+)
+
+#: Where the restored Codex session is mounted, and the variable that names it.
+#: Deliberately outside the container's HOME (/tmp): codex refuses to create its
+#: PATH-alias helper binaries when CODEX_HOME sits under a temporary directory.
+CODEX_MOUNT_TARGET = "/opt/codex-home"
+
+#: Stand-in credential value. Distinctive so the argv assertions can prove the
+#: value never leaves the environment, and not a literal at a token-named dict
+#: key, which bandit reads as a hardcoded secret.
+CREDENTIAL_SENTINEL = "sentinel-value"
+
+
+def _runner_docker_args(*, env: dict[str, str]) -> list[str]:
+    """Return the docker argv the runner would build for this environment.
+
+    Uses the script's print-args hook rather than Docker, so the argv
+    construction — the codex mount and the credential forwarding loop, neither
+    of which is visible in a workflow diff — is exercised without a daemon, an
+    image pull, or a provider credential.
+
+    Args:
+        env: The environment the script runs under. ``PATH`` and the print
+            hook are added; nothing else leaks in from the test process.
+
+    Returns:
+        The docker argv, one element per line of output.
+    """
+    import os
+    import subprocess  # nosec B404 - runs the repo's own script with a fixed argv
+
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False, no user input
+        [str(RUNNER)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "LINTRO_CONTRACT_PRINT_DOCKER_ARGS": "1",
+            **env,
+        },
+    )
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    return result.stdout.splitlines()
+
+
+def test_runner_forwards_only_the_credentials_the_caller_actually_set() -> None:
+    """A credential must reach the container by name, and only when set.
+
+    Forwarding an unset variable with a default would hand the suite an empty
+    credential that looks present, which is exactly the silent pass the
+    contract tiers exist to prevent.
+    """
+    provided = ("CLAUDE_CODE_OAUTH_TOKEN", "CURSOR_API_KEY")
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(provided, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    assert_that(args).contains(*provided)
+    # By name only: the credential's value must not be written into the argv,
+    # which `ps` and any command echo would expose.
+    assert_that(args).does_not_contain(CREDENTIAL_SENTINEL)
+    for name in FORWARDED_TIER2_ENV:
+        if name in provided:
+            continue
+        assert_that(args).described_as(name).does_not_contain(name)
+
+
+def test_every_tier2_workflow_credential_is_forwarded_into_the_container(
+    workflow: Any,
+) -> None:
+    """A credential the workflow injects must actually reach the container.
+
+    The two halves live in different files: the workflow decides which
+    credentials Tier 2 gets, and the runner decides which variables cross into
+    the container. A credential added to the workflow but missed in the
+    forwarding loop is silently dropped — the suite then reports the lane as
+    unauthenticated with nothing pointing at the omission. Derive the names
+    from the workflow and prove the script forwards each one.
+
+    Args:
+        workflow: The parsed workflow mapping.
+    """
+    step = next(
+        step
+        for step in workflow["jobs"][TIER2_JOB]["steps"]
+        if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+    # `secrets.` catches the provider credentials; the gateway base URL is a
+    # repo variable rather than a secret but is just as load-bearing — without
+    # it the gateway token authenticates against the wrong host.
+    credentials = sorted(
+        name
+        for name, value in step["env"].items()
+        if "secrets." in str(value) or "vars." in str(value)
+    )
+
+    assert_that(credentials).described_as("tier-2 workflow credentials").is_not_empty()
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(credentials, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    assert_that(args).described_as("forwarded by the script").contains(*credentials)
+    assert_that(FORWARDED_TIER2_ENV).described_as(
+        "declared in the forwarding list",
+    ).contains(*credentials)
+
+
+def test_runner_forwards_every_declared_tier2_credential() -> None:
+    """The whole forwarding list is live, not just the two lanes under test."""
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(FORWARDED_TIER2_ENV, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    assert_that(args).contains(*FORWARDED_TIER2_ENV)
+
+
+def test_runner_forwards_no_credentials_on_the_free_tier() -> None:
+    """Tier 1 needs no credential, so none may reach the container."""
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "1",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(FORWARDED_TIER2_ENV, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    for name in FORWARDED_TIER2_ENV:
+        assert_that(args).described_as(name).does_not_contain(name)
+
+
+def _codex_session(root: Path) -> Path:
+    """Create a restored codex session under a stand-in home.
+
+    Args:
+        root: The stand-in home directory.
+
+    Returns:
+        The session directory holding an auth.json.
+    """
+    session = root / ".codex"
+    session.mkdir()
+    (session / "auth.json").write_text("{}", encoding="utf-8")
+    return session
+
+
+def test_runner_mounts_a_restored_codex_session_outside_the_container_home(
+    tmp_path: Path,
+) -> None:
+    """On a runner the restored session itself is mounted, named by CODEX_HOME.
+
+    Args:
+        tmp_path: Stand-in for the runner's restored session directory.
+    """
+    session = _codex_session(tmp_path)
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": str(tmp_path),
+            "GITHUB_ACTIONS": "true",
+        },
+    )
+
+    assert_that(args).contains(f"{session}:{CODEX_MOUNT_TARGET}")
+    assert_that(args).contains(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that(CODEX_MOUNT_TARGET.startswith("/tmp")).described_as(
+        "codex refuses a CODEX_HOME under the container's temporary HOME",
+    ).is_false()
+
+
+def test_runner_skips_the_codex_mount_without_a_restored_session(
+    tmp_path: Path,
+) -> None:
+    """An unrestored session must not be mounted as if it were there.
+
+    Args:
+        tmp_path: An empty stand-in home with no session in it.
+    """
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": str(tmp_path),
+        },
+    )
+
+    assert_that(args).does_not_contain(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that([arg for arg in args if CODEX_MOUNT_TARGET in arg]).is_empty()
+
+
+def test_runner_honours_an_explicit_codex_session_dir(tmp_path: Path) -> None:
+    """CODEX_SESSION_DIR overrides the default $HOME/.codex location.
+
+    Args:
+        tmp_path: Holds the override directory and an unused default home.
+    """
+    override = tmp_path / "elsewhere"
+    override.mkdir()
+    (override / "auth.json").write_text("{}", encoding="utf-8")
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            "CODEX_SESSION_DIR": str(override),
+        },
+    )
+
+    assert_that(args).contains(f"{override}:{CODEX_MOUNT_TARGET}")
+
+
+def test_runner_skips_the_mount_when_an_explicit_dir_holds_no_session(
+    tmp_path: Path,
+) -> None:
+    """An override is still gated on the session actually being there.
+
+    ``CODEX_SESSION_DIR`` names where to look, not a promise that the restore
+    succeeded; mounting an empty directory would hand codex a CODEX_HOME with
+    no auth.json and turn a missing credential into a confusing CLI error.
+
+    Args:
+        tmp_path: An existing but empty override directory.
+    """
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            "CODEX_SESSION_DIR": str(tmp_path),
+        },
+    )
+
+    assert_that(args).does_not_contain(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that([arg for arg in args if CODEX_MOUNT_TARGET in arg]).is_empty()
+
+
+def test_runner_never_mounts_a_session_on_the_free_tier(tmp_path: Path) -> None:
+    """Tier 1 runs help probes only, so a session must not reach it.
+
+    The mount lives inside the tier-2 branch. Tier 1 spends no quota and needs
+    no credential, and handing it one would widen what a cheap always-on gate
+    can touch.
+
+    Args:
+        tmp_path: Stand-in home holding a restored session.
+    """
+    _codex_session(tmp_path)
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "1",
+            "HOME": str(tmp_path),
+            "GITHUB_ACTIONS": "true",
+        },
+    )
+
+    assert_that(args).does_not_contain(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that([arg for arg in args if CODEX_MOUNT_TARGET in arg]).is_empty()
+
+
+def test_runner_copies_the_default_session_for_a_local_run(tmp_path: Path) -> None:
+    """Off a runner, the caller's own codex login must not be the mount source.
+
+    The container writes as root and codex may refresh the session in place, so
+    mounting a developer's real ``$HOME/.codex`` read-write could leave it
+    root-owned and their ``codex`` logged out. A local run gets a disposable
+    copy; the CI path (asserted above) is unchanged.
+
+    Args:
+        tmp_path: Stand-in home holding the developer's session.
+    """
+    session = _codex_session(tmp_path)
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": str(tmp_path),
+        },
+    )
+
+    mounts = [arg for arg in args if arg.endswith(f":{CODEX_MOUNT_TARGET}")]
+    assert_that(mounts).described_as("the session is still mounted").is_length(1)
+    assert_that(args).contains(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that(mounts[0]).described_as(
+        "a local run must not mount the caller's own session directory",
+    ).is_not_equal_to(f"{session}:{CODEX_MOUNT_TARGET}")
+
+
 def test_runner_help_exits_zero() -> None:
     """The runner documents itself without needing Docker."""
     import subprocess  # nosec B404 - runs the repo's own script with a fixed argv
@@ -249,3 +610,25 @@ def test_workflow_uses_pinned_actions(*, action: str) -> None:
     """
     assert_that(actions_used_in(WORKFLOW)).contains(action)
     assert_that(WORKFLOW.read_text(encoding="utf-8")).contains(action_pin(action))
+
+
+def test_forwarded_env_tuple_matches_the_script_forwarding_loop() -> None:
+    """The pinned tuple lists exactly the variables the runner forwards.
+
+    Derived from the script's own forwarding loop, so a variable added to or
+    dropped from the loop fails here instead of silently escaping the pins.
+    The loop is located by shape (a ``for`` over a list of upper-case names
+    ending in ``; do``), not by its variable name, so a rename or reflow
+    fails on the assertion rather than on the parse.
+    """
+    text = RUNNER.read_text(encoding="utf-8")
+    loops = re.findall(
+        r"for\s+\w+\s+in\s+((?:\s*\\?\s*[A-Z][A-Z0-9_]+)+)\s*;\s*do",
+        text,
+    )
+    assert_that(loops).described_as(
+        "forwarding loop in run-ai-contract-tests.sh",
+    ).is_not_empty()
+    forwarded = tuple(re.findall(r"[A-Z][A-Z0-9_]+", loops[0]))
+
+    assert_that(forwarded).is_equal_to(FORWARDED_TIER2_ENV)
