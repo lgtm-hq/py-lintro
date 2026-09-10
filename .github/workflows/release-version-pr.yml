@@ -13,6 +13,14 @@ run-name: >-
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      force:
+        description: >-
+          Open the version PR even when the last tag publish failed (use for
+          the first release after fixing the publish pipeline)
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -21,7 +29,58 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Publish gate (#2516). A broken tag publish used to mint one dead version
+  # per merge to main — eleven versions, v0.151.2 to v0.152.6, were burned that
+  # way while PyPI stayed on v0.151.1. This job reads the last version-tag run
+  # of publish-pypi-on-tag.yml and skips the version PR while it is red. The
+  # gate never fails: it reports green on its own errors (see the script's
+  # module docstring), so an API hiccup cannot freeze the release train.
+  publish-gate:
+    name: 🚦 Publish Gate
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read # read publish-pypi-on-tag.yml run conclusions
+    timeout-minutes: 5
+    outputs:
+      publish_green: ${{ steps.gate.outputs.publish_green }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          # The gate script itself talks to api.github.com only; the remaining
+          # hosts are what actions/checkout needs to fetch the script.
+          allowed-endpoints: >
+            api.github.com:443
+            github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+      - name: Checkout gate script
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/check-last-publish-green.py
+          sparse-checkout-cone-mode: false
+      - name: Check the last tag publish
+        id: gate
+        env:
+          # Read-only token: authenticates the Actions run listing.
+          GITHUB_TOKEN: ${{ github.token }}
+          # Resolved here so the conditional stays in the workflow expression
+          # rather than in inline shell; the script drops the empty word.
+          FORCE_FLAG: ${{ inputs.force && '--force' || '' }}
+        run: python3 scripts/ci/check-last-publish-green.py "${FORCE_FLAG}"
+
   version-pr:
+    needs: [publish-gate]
+    # Fail open on a missing verdict, not just on a green one. If the gate job
+    # itself dies (harden-runner, checkout, a runner loss) the output is empty,
+    # and gating on `== 'true'` would silently freeze every release until
+    # somebody noticed. The gate is a skip, not an error (#2516): only an
+    # explicit `false` — a publish that really did fail — stops the version PR.
+    if: always() && needs.publish-gate.outputs.publish_green != 'false'
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36 # v0.69.8
     with:

@@ -943,7 +943,7 @@ def test_workflow_forbids_head_ref_fetches() -> None:
 
 
 def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
-    """#2023 defaults ``ai.cursor_trust_workspace``; the CI patcher is gone."""
+    """#2023 defaults ``ai.providers.cursor.trust_workspace``; no CI patcher."""
     assert_that(
         (REPO_ROOT / "scripts" / "ci" / "enable_cursor_workspace_trust.py").exists(),
     ).is_false()

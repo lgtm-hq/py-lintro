@@ -1,1 +1,1 @@
-"""Tests for the OpenAI provider."""
+"""Tests for the OpenAI provider package."""

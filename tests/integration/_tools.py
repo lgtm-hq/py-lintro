@@ -51,6 +51,18 @@ DEFAULT_TIMEOUT_SECONDS = 10.0
 #: which may resolve and download the package before answering.
 LAUNCHER_TIMEOUT_SECONDS = 60.0
 
+#: Timeout for the ``checkov --version`` probe. Checkov is the heaviest Python
+#: import in the tool set (boto3, cyclonedx, spdx-tools, rustworkx), and every
+#: xdist worker runs this probe at collection time, so several interpreters
+#: start concurrently on a cold container filesystem. At the default budget
+#: three of four workers timed out while the fourth collected the module,
+#: which surfaces as an xdist "different tests were collected" error rather
+#: than an honest skip. It lives here, not in the integration module that
+#: uses it, so the unit test pinning the budget can import one definition
+#: instead of scraping a literal or importing a module whose ``pytestmark``
+#: would run the very probe under test.
+CHECKOV_PROBE_TIMEOUT: float = 60.0
+
 #: Sentinel floor accepting any version, for the handful of tools whose
 #: ``--version`` output does not describe the tool being gated.
 NO_MIN_VERSION = "0"

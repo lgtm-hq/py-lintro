@@ -234,6 +234,117 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     )
 
 
+def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
+    """The version PR waits on the publish gate (#2516).
+
+    A broken tag publish used to mint one dead version per merge to ``main``
+    (v0.151.2 through v0.152.6). The ``publish-gate`` job reads the last
+    version-tag publish run and the version-PR job runs only when it was
+    green; ``force`` is the manual override for the first release after a fix.
+    """
+    workflow = _load_workflow(name="release-version-pr.yml")
+    gate = workflow["jobs"]["publish-gate"]
+    version_pr = workflow["jobs"]["version-pr"]
+
+    assert_that(version_pr["needs"]).contains("publish-gate")
+    # Fail open on a *missing* verdict: if the gate job dies before its script
+    # writes the output, `== 'true'` would freeze every release. Only an
+    # explicit `false` stops the version PR.
+    assert_that(_normalize_github_expr(version_pr["if"])).is_equal_to(
+        "always() && needs.publish-gate.outputs.publish_green != 'false'",
+    )
+    # Read-only: the gate inspects run conclusions and touches nothing else.
+    assert_that(gate["permissions"]).is_equal_to({"actions": "read"})
+    assert_that(gate["outputs"]["publish_green"]).contains(
+        "steps.gate.outputs.publish_green",
+    )
+    gate_script = "scripts/ci/check-last-publish-green.py"
+    assert_that((_REPO_ROOT / gate_script).is_file()).is_true()
+    gate_steps = [
+        step for step in gate["steps"] if gate_script in str(step.get("run", ""))
+    ]
+    assert_that(gate_steps).is_length(1)
+
+    force_input = workflow["on"]["workflow_dispatch"]["inputs"]["force"]
+    assert_that(force_input["type"]).is_equal_to("boolean")
+    assert_that(force_input["default"]).is_false()
+
+    # The force decision stays in the workflow expression and reaches the
+    # script as one quoted word, so no conditional logic lives in inline
+    # shell and an unset input cannot smuggle a second argument through.
+    gate_step = gate_steps[0]
+    force_flag = _normalize_github_expr(str(gate_step["env"]["FORCE_FLAG"]))
+    assert_that(force_flag).is_equal_to(
+        "${{ inputs.force && '--force' || '' }}",
+    )
+    assert_that(_normalize_github_expr(str(gate_step["run"]))).is_equal_to(
+        f'python3 {gate_script} "${{FORCE_FLAG}}"',
+    )
+
+
+def _module_constant(*, script: Path, name: str) -> str:
+    """Return a module-level string constant from a standalone CI script.
+
+    The scripts are hyphenated and executable, so they are read as source
+    rather than imported.
+
+    Args:
+        script: Path to the script.
+        name: Name of the module-level constant.
+
+    Raises:
+        AssertionError: If the script defines no such constant.
+
+    Returns:
+        The constant's string value.
+    """
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                value = ast.literal_eval(node.value)
+                assert_that(value).is_instance_of(str)
+                return cast(str, value)
+    raise AssertionError(f"{name} not found in {script.name}")
+
+
+def test_release_helpers_name_the_real_publish_workflow_file() -> None:
+    """Both release helpers must name the live publish workflow file.
+
+    ``publish_green``/skew both hinge on a workflow *file name* passed to the
+    Actions API, which answers an empty run list for an unknown file rather
+    than erroring. Renaming the workflow would therefore turn both checks into
+    permanent, silent all-clears. Resolve the file from its ``name:`` so the
+    rename breaks a test instead.
+    """
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    matches = [
+        path.name
+        for path in _workflow_paths()
+        if _load_workflow(name=path.name).get("name") == "Publish - PyPI Production"
+    ]
+    assert_that(matches).described_as(
+        "exactly one workflow is named 'Publish - PyPI Production'",
+    ).is_length(1)
+    publish_workflow = matches[0]
+    assert_that((workflows_dir / publish_workflow).is_file()).is_true()
+
+    scripts_dir = _REPO_ROOT / "scripts" / "ci"
+    for script_name, constant in (
+        ("check-last-publish-green.py", "DEFAULT_WORKFLOW"),
+        ("check-release-version-skew.py", "DEFAULT_RELEASE_WORKFLOW"),
+    ):
+        value = _module_constant(
+            script=scripts_dir / script_name,
+            name=constant,
+        )
+        assert_that(value).described_as(
+            f"{script_name}:{constant} must name the publish workflow file",
+        ).is_equal_to(publish_workflow)
+
+
 def test_version_pr_finalizes_docs_via_dedicated_script() -> None:
     """Version-PR workflow finalizes CHANGELOG and SECURITY.md via a repo script."""
     version_pr = _load_workflow(name="release-version-pr.yml")
@@ -2496,6 +2607,21 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     assert_that(str(sweep_env.get("MIN_AGE_DAYS", ""))).contains(
         "inputs.sweep_min_age_days",
     )
+
+
+def test_publish_pypi_top_level_permissions_are_empty() -> None:
+    """The tag publisher grants no scopes at the top level (#2511).
+
+    Every job in ``publish-pypi-on-tag.yml`` declares its own ``permissions``
+    block, so a top-level grant is dead configuration that only widens the
+    default token. The ``actions: read`` that the reusable ``build-binary``
+    chain needs belongs on the ``homebrew-tap`` caller job (#2440).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    assert_that(publish["permissions"]).is_equal_to({})
+    homebrew = publish["jobs"]["homebrew-tap"]["permissions"]
+    assert_that(homebrew).contains_entry({"actions": "read"})
+    assert_that(homebrew).contains_entry({"contents": "write"})
 
 
 def test_publish_pypi_sbom_fails_on_high_severity() -> None:

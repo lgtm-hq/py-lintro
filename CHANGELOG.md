@@ -21,6 +21,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.0] - 2026-09-10
+
+### Added
+
+- **tools**: add checkov Infrastructure-as-Code security scanner (#1156) (0fd27db)
+
+### Changed
+
+- **ai**: prove fallback overlap structurally instead of by wall clock (#2540) (32ed58e)
+- **ai/config**: nest provider-specific settings under ai.providers (#2471) (711690a)
+- **ci**: derive pinned action SHAs in workflow tests from the workflow files (#2531)
+  (a711fb7)
+
+### Fixed
+
+- **ci**: restore permissions: {} on publish-pypi-on-tag (#2524) (98c720b)
+- **golangci-lint**: propagate `timed_out` through the merged fix result (#2541)
+  (1014ae7)
+- **release**: gate the version PR on the last tag publish being green (#2534) (ef0804e)
+
 ## [0.152.9] - 2026-09-09
 
 ### Changed

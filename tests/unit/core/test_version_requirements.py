@@ -99,6 +99,9 @@ def test_compare_versions(version1: str, version2: str, expected: int) -> None:
         ("typos", "typos-cli 1.49.0", "1.49.0"),
         # Spectral prints a bare semantic version.
         ("spectral", "6.16.1", "6.16.1"),
+        # checkov prints a bare version too, hence its place in
+        # TOOLS_WITH_SIMPLE_VERSION_PATTERN.
+        ("checkov", "3.3.16", "3.3.16"),
     ],
 )
 def test_extract_version_from_output(

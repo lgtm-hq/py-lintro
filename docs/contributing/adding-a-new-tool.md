@@ -305,6 +305,34 @@ Choose the path that matches the tool's distribution mechanism.
    `lintro_build/versions/generate.py` so the generator still reads the pin from
    `requirements-semgrep.txt`.
 
+   Checkov is the second exception and takes **Path A** instead, despite being a PyPI
+   distribution. It requires `packaging<24` while lintro requires `packaging>=25`, so
+   any pyproject entry makes `uv lock` unsatisfiable; and a `requirements-checkov.txt`
+   would be scanned and transitively resolved by this repository's own osv-scanner
+   dogfood, reporting advisories for a tree lintro never installs. Its pin therefore
+   lives in `TOOL_VERSIONS` with a pypi-datasource Renovate manager, its manifest entry
+   says `install.type = "binary"` (the manifest's label for "an executable
+   `install-tools.sh` puts on PATH", not a claim about upstream packaging), and the
+   installer uses `uv tool install checkov==<pin>`. Take this path for any PyPI tool
+   that cannot share lintro's resolution.
+
+   A tool on this path lands as a _split tree_: `uv tool install` puts the shim in
+   `UV_TOOL_BIN_DIR` and the interpreter in `UV_TOOL_DIR` (default
+   `/root/.local/share/uv/tools`, unreadable to the image's non-root `lintro` user). So
+   Step 10 has extra work for it, beyond what the "npm/bun tools only" wording there
+   says: point `UV_TOOL_DIR` at a world-readable location under `/opt` (checkov uses
+   `/opt/uv-tools`, next to `/opt/semgrep-venv`), and add that directory to the
+   `chgrp`/`chmod` block that enumerates the `/opt` tool directories in **both**
+   Dockerfiles. In `Dockerfile` that block is part of the `RUN` that also does
+   `useradd lintro`; in `docker/tools.Dockerfile` it is a standalone
+   `RUN chgrp -R tools /opt/...` after the `install-tools.sh --docker` step (that image
+   creates no `lintro` user). `/opt/semgrep-venv` is the worked example in both. Then
+   add the tool to the non-root verification block — root being able to run the shim
+   says nothing about whether `lintro` can reach the interpreter behind it. The
+   checklist's "binary tools only" Renovate line applies to this path too: the pin lives
+   in `TOOL_VERSIONS`, so it needs a custom manager, with `pypi` as the datasource
+   rather than `github-releases`.
+
 3. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "pip"`
    and `install.package = "<pypi-package>"`, and **no `version` key**; the generator
    injects the version from `pyproject.toml`.

@@ -96,6 +96,7 @@ This script installs:
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
   - Cppcheck (C/C++ static analysis)
+  - Checkov (Terraform Infrastructure-as-Code security scanner)
   - Clippy (Rust linter; requires Rust toolchain)
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
@@ -199,7 +200,7 @@ should_install() {
 # import-linter to lint-imports with an explicit alias branch.
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"checkov" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
 	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc" "typos"
@@ -1657,6 +1658,75 @@ main() {
 		fi
 	fi # pip-audit
 
+	# Install checkov (Terraform IaC security scanner) into its own venv.
+	# checkov pins `packaging>=23.0,<24.0` while lintro pins `packaging>=25.0`,
+	# so the two cannot share an environment: `uv pip install checkov` next to
+	# lintro either fails to resolve or silently downgrades packaging. `uv tool
+	# install` builds an isolated venv and drops only the console script on
+	# PATH. The version is the exact TOOL_VERSIONS pin, so the manifest-vs-image
+	# gate (which requires equality) stays satisfiable. A requirements file was
+	# rejected on purpose: osv-scanner resolves requirements*.txt transitively,
+	# so declaring checkov's tree here would fail this repo's own security gate.
+	if should_install "checkov"; then
+		echo -e "${BLUE}Installing checkov...${NC}"
+		CHECKOV_VERSION=$(get_tool_version "checkov") || exit 1
+		# UV_TOOL_DIR holds the venv the shim in BIN_DIR points into. In Docker
+		# the script runs as root but the container runs as `lintro`, so the
+		# default (/root/.local/share/uv/tools) would leave every non-root
+		# invocation with an unreadable interpreter behind a shim that is on
+		# PATH. Put it under /opt like semgrep's venv, world-readable.
+		if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+			CHECKOV_TOOL_DIR="/opt/uv-tools"
+		else
+			CHECKOV_TOOL_DIR="${UV_TOOL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/uv/tools}"
+		fi
+		# --force is deliberate: without it `uv tool install` reports an
+		# already-installed tool and leaves the old version in place, so a
+		# Renovate pin bump would never take effect and the manifest-vs-image
+		# equality gate would fail against a stale binary.
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would run uv tool install checkov==${CHECKOV_VERSION}"
+			log_info "[DRY-RUN] Would place the venv under ${CHECKOV_TOOL_DIR}"
+		elif ! command -v uv &>/dev/null; then
+			# Docker always ships uv, so its absence there is an image bug and
+			# must stop the build. Locally every other Python tool degrades to
+			# pip/brew when uv is missing, and aborting here would cancel the
+			# dozen install blocks that follow, so warn and move on: the
+			# verification loop still reports checkov as not found.
+			if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+				echo -e "${RED}✗ checkov needs uv, which the image must provide${NC}"
+				exit 1
+			fi
+			# A caller who named checkov asked for this tool specifically, so
+			# reporting success after skipping it would be a false contract.
+			# An unfiltered run only wanted "everything installable", so it
+			# warns and lets the ~15 later blocks finish.
+			if [ -n "$TOOL_FILTER" ]; then
+				echo -e "${RED}✗ checkov needs uv; install uv first${NC}"
+				exit 1
+			fi
+			echo -e "${YELLOW}⚠ Skipping checkov: uv is required for an isolated install${NC}"
+		elif UV_TOOL_DIR="$CHECKOV_TOOL_DIR" UV_TOOL_BIN_DIR="$BIN_DIR" \
+			uv tool install --force "checkov==${CHECKOV_VERSION}"; then
+			# Docker builds as root and runs as `lintro`, so the venv this
+			# install just created has to be world-traversable. Scoped to
+			# checkov's own venv: CHECKOV_TOOL_DIR is the shared uv tool root,
+			# and locally that is the user's own, holding venvs this installer
+			# never created. A failure here leaves an unusable image, so it is
+			# not swallowed.
+			if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+				chmod -R a+rX "$CHECKOV_TOOL_DIR/checkov" || {
+					echo -e "${RED}✗ Could not make the checkov venv world-readable${NC}"
+					exit 1
+				}
+			fi
+			echo -e "${GREEN}✓ checkov installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install checkov${NC}"
+			exit 1
+		fi
+	fi # checkov
+
 	# Install cppcheck (C/C++ static analysis) via system package manager.
 	# cppcheck ships no portable single binary; it is provided by Homebrew
 	# (macOS) and apt (Debian/Ubuntu). In Docker it is pre-installed via the
@@ -2152,6 +2222,7 @@ main() {
 		["black"]="Python formatting"
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
+		["checkov"]="Terraform Infrastructure-as-Code security scanning"
 		["clippy"]="Rust linting"
 		["cppcheck"]="C/C++ static analysis"
 		["dotenv-linter"]=".env file linting and fixing"
@@ -2195,7 +2266,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "checkov" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
