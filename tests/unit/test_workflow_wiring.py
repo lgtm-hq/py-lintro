@@ -4002,6 +4002,13 @@ def test_auto_rerun_matches_docker_hub_buildx_pull_timeout() -> None:
 _AI_CONTRACT_WORKFLOW = "ai-contract-tests.yml"
 _AI_CONTRACT_TIER1_JOB = "tier1-flag-surface"
 _AI_CONTRACT_TIER1_CONTEXT = "🧾 AI CLI Flag Surface (Tier 1)"
+_AI_CONTRACT_TIER2_JOB = "tier2-invocation-smoke"
+_AI_REVIEW_WORKFLOW = "ai-review.yml"
+_AI_REVIEW_JOB = "ai-review"
+_AI_CONTRACT_GATE_ENV = "AI_CONTRACT_SECRETS_ALLOWED"
+#: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
+#: the dogfood job's per-provider egress expressions.
+_EGRESS_ENDPOINT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.*-]*:\d+")
 
 
 def _ai_contract_tier1_job() -> dict[str, Any]:
@@ -4047,6 +4054,104 @@ def test_ai_contract_tier1_is_required_check_safe() -> None:
         encoding="utf-8",
     )
     assert_that(readme).contains(_AI_CONTRACT_TIER1_CONTEXT)
+
+
+def _ai_contract_tier2_job() -> dict[str, Any]:
+    """Return the Tier 2 AI CLI invocation-smoke job definition.
+
+    Returns:
+        The ``tier2-invocation-smoke`` job mapping.
+    """
+    workflow = _load_workflow(name=_AI_CONTRACT_WORKFLOW)
+    return cast(dict[str, Any], workflow["jobs"][_AI_CONTRACT_TIER2_JOB])
+
+
+def _harden_runner_endpoints(*, job: dict[str, Any]) -> set[str]:
+    """Return the endpoints a job's harden-runner step allows.
+
+    Args:
+        job: The job mapping whose first ``step-security`` step is read.
+
+    Returns:
+        The set of ``host:port`` endpoints on the allowlist.
+    """
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/")
+    )
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    return set(str(harden["with"]["allowed-endpoints"]).split())
+
+
+def _dogfood_provider_egress() -> set[str]:
+    """Return every host the dogfood review's per-provider egress vars carry.
+
+    Derived from the ``AI_REVIEW_*_EGRESS`` job-level expressions rather than
+    from a literal list, so a new provider lane cannot be added to the review
+    without the Tier 2 assertion below noticing.
+
+    Returns:
+        The union of the per-provider ``host:port`` endpoints.
+    """
+    review = _load_workflow(name=_AI_REVIEW_WORKFLOW)
+    env = review["jobs"][_AI_REVIEW_JOB]["env"]
+    endpoints: set[str] = set()
+    for name, value in env.items():
+        if not str(name).endswith("_EGRESS"):
+            continue
+        endpoints.update(_EGRESS_ENDPOINT_RE.findall(str(value)))
+    return endpoints
+
+
+def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> None:
+    """Tier 2 must reach every dogfood lane's hosts, with gated credentials.
+
+    Egress: the dogfood review allowlists provider hosts one lane at a time
+    because a single run picks one provider. Tier 2 drives all three lanes in
+    one job, so its allowlist must be a superset of that per-provider union —
+    otherwise a lane that authenticates for the review dies here on blocked
+    egress instead (#2481; the Codex subscription hosts are the case that
+    reddened every lane).
+
+    Secrets: Tier 2 runs on schedule / dispatch today, but the round-trip work
+    in #2515 adds a ``pull_request`` trigger. Every provider credential is
+    therefore routed through one gate expression that also demands a
+    same-repository head, so a fork PR resolves each secret to the empty
+    string rather than reading it.
+    """
+    job = _ai_contract_tier2_job()
+
+    dogfood = _dogfood_provider_egress()
+    assert_that(dogfood).described_as("dogfood per-provider egress").is_not_empty()
+    assert_that(_harden_runner_endpoints(job=job)).described_as(
+        "Tier 2 egress must cover every dogfood provider lane",
+    ).contains(*sorted(dogfood))
+
+    gate = _normalize_github_expr(str(job["env"][_AI_CONTRACT_GATE_ENV]))
+    for clause in (
+        "github.event_name == 'schedule'",
+        "github.event_name == 'workflow_dispatch'",
+        (
+            f"github.event.{_GITHUB_PULL_REQUEST_EVENT}"
+            ".head.repo.full_name == github.repository"
+        ),
+    ):
+        assert_that(gate).contains(clause)
+
+    secret_env = {
+        f"{step.get('name')} / {name}": _normalize_github_expr(str(value))
+        for step in job["steps"]
+        for name, value in (step.get("env") or {}).items()
+        if "secrets." in str(value)
+    }
+    assert_that(secret_env).described_as(
+        "Tier 2 must inject provider secrets",
+    ).is_not_empty()
+    for where, expression in secret_env.items():
+        assert_that(expression).described_as(where).contains(
+            f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
+        )
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

@@ -22,17 +22,30 @@ set -euo pipefail
 # here, so a binary that is missing inside the image fails the tier instead of
 # quietly reducing it to zero assertions.
 #
+# Tier 2 authenticates each lane with the credential the dogfood review uses
+# (#2481), so a green tier proves the credential the review will actually run
+# on: CLAUDE_CODE_OAUTH_TOKEN for anthropic, CURSOR_API_KEY for cursor, and for
+# openai the ChatGPT-plan session at $HOME/.codex/auth.json — restored on the
+# runner by scripts/ci/restore-codex-session.sh and bind-mounted in here, since
+# codex has no OAuth-token env var to forward.
+#
 # Usage:
 #   IMAGE=<ref> TIER=1 scripts/ci/run-ai-contract-tests.sh
-#   IMAGE=<ref> TIER=2 ANTHROPIC_API_KEY=<key> scripts/ci/run-ai-contract-tests.sh
+#   IMAGE=<ref> TIER=2 CLAUDE_CODE_OAUTH_TOKEN=<token> \
+#     scripts/ci/run-ai-contract-tests.sh
 #
 # Environment:
-#   IMAGE               Fully qualified lintro-ai-tools reference   (required)
-#   TIER                1 or 2                                      (required)
-#   ANTHROPIC_API_KEY   Forwarded for tier 2 (optional; absence is a
-#                       visible skip, never a silent pass)
-#   CODEX_API_KEY       Forwarded for tier 2 (optional)
-#   CURSOR_API_KEY      Forwarded for tier 2 (optional)
+#   IMAGE                     Fully qualified lintro-ai-tools ref  (required)
+#   TIER                      1 or 2                               (required)
+#   CLAUDE_CODE_OAUTH_TOKEN   Forwarded for tier 2 (optional; absence is a
+#                             visible skip, never a silent pass)
+#   ANTHROPIC_API_KEY         Forwarded for tier 2 (optional)
+#   CODEX_API_KEY             Forwarded for tier 2 (optional)
+#   CURSOR_API_KEY            Forwarded for tier 2 (optional)
+#   LINTRO_CLI_BARE           Forwarded for tier 2 (optional)
+#   CODEX_SESSION_DIR         Codex session directory to mount for tier 2
+#                             (default: $HOME/.codex; mounted only when it
+#                             holds an auth.json)
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -45,11 +58,14 @@ Tier 1: free flag-surface check (--version/--help only).
 Tier 2: real-invocation smoke; spends provider quota.
 
 Environment:
-  IMAGE               lintro-ai-tools image reference  (required)
-  TIER                1 or 2                           (required)
-  ANTHROPIC_API_KEY   Forwarded to tier 2              (optional)
-  CODEX_API_KEY       Forwarded to tier 2              (optional)
-  CURSOR_API_KEY      Forwarded to tier 2              (optional)
+  IMAGE                    lintro-ai-tools image reference  (required)
+  TIER                     1 or 2                           (required)
+  CLAUDE_CODE_OAUTH_TOKEN  Forwarded to tier 2              (optional)
+  ANTHROPIC_API_KEY        Forwarded to tier 2              (optional)
+  CODEX_API_KEY            Forwarded to tier 2              (optional)
+  CURSOR_API_KEY           Forwarded to tier 2              (optional)
+  LINTRO_CLI_BARE          Forwarded to tier 2              (optional)
+  CODEX_SESSION_DIR        Codex session dir to mount       (optional)
 EOF
 	exit 0
 fi
@@ -97,11 +113,33 @@ if [ "$TIER" = "2" ]; then
 	docker_args+=(--env LINTRO_CONTRACT_TIER2=1)
 	# Forwarded without defaults: an unset credential must reach the suite as
 	# unset so it reports a visible skip naming the missing link.
-	for secret in ANTHROPIC_API_KEY CODEX_API_KEY CURSOR_API_KEY; do
+	#
+	# CLAUDE_CODE_OAUTH_TOKEN is the anthropic lane's subscription credential
+	# (the same one the dogfood review carries); the two API keys stay
+	# forwardable for a local run. LINTRO_CLI_BARE lets the caller pin the
+	# CLI's auth mode, and the two claude flags keep its egress inside the
+	# job's allowlist and its pinned version pinned.
+	for secret in \
+		CLAUDE_CODE_OAUTH_TOKEN \
+		ANTHROPIC_API_KEY \
+		CODEX_API_KEY \
+		CURSOR_API_KEY \
+		LINTRO_CLI_BARE \
+		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC \
+		DISABLE_AUTOUPDATER; do
 		if [ -n "${!secret:-}" ]; then
 			docker_args+=(--env "${secret}")
 		fi
 	done
+	# The openai lane has no token env var: codex reads its ChatGPT-plan
+	# session from $HOME/.codex/auth.json, so the restored directory is
+	# bind-mounted at the container's HOME (/tmp, set above). Read-write
+	# because codex refreshes the session in place. Absent directory means an
+	# unrestored session, which the suite reports as an unauthenticated lane.
+	codex_session_dir="${CODEX_SESSION_DIR:-${HOME:-}/.codex}"
+	if [ -f "${codex_session_dir}/auth.json" ]; then
+		docker_args+=(--volume "${codex_session_dir}:/tmp/.codex")
+	fi
 fi
 
 echo "==> Tier ${TIER} contract tests in ${IMAGE}"
