@@ -37,7 +37,25 @@ _AI_PACKAGE = Path(__file__).resolve().parents[3] / "lintro" / "ai"
 #: CLI modules outside ``lintro/ai`` that declare a provider-selecting option;
 #: a click ``default="anthropic"`` creeping back there would bypass the
 #: package-level scan.
-_CLI_PROVIDER_MODULES = (_AI_PACKAGE.parent / "cli_utils" / "commands" / "review.py",)
+_CLI_PACKAGE = _AI_PACKAGE.parent / "cli_utils"
+
+
+def _cli_provider_modules() -> list[Path]:
+    """Return every CLI module that declares a provider-selecting option.
+
+    Discovered by scanning ``lintro/cli_utils`` for ``"--provider"`` rather
+    than listed by hand, so a new command that grows the option is covered
+    without editing this ratchet.
+
+    Returns:
+        Sorted paths of the CLI modules mentioning the ``--provider`` flag.
+    """
+    return sorted(
+        path
+        for path in _CLI_PACKAGE.rglob("*.py")
+        if '"--provider"' in path.read_text(encoding="utf-8")
+    )
+
 
 #: The whole allowlist: per-provider packages, where naming the vendor the
 #: package implements is inherent rather than a default.
@@ -72,7 +90,7 @@ def _scanned_modules() -> list[Path]:
         for path in sorted(_AI_PACKAGE.rglob("*.py"))
         if not any(_relative(path).startswith(root) for root in _PROVIDER_PACKAGE_ROOTS)
     ]
-    return [*ai_modules, *_CLI_PROVIDER_MODULES]
+    return [*ai_modules, *_cli_provider_modules()]
 
 
 def _is_provider_literal(node: ast.expr) -> bool:
@@ -191,7 +209,8 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
     Returns:
         ``(line, shape, expression)`` triples for ``Field(default=...)`` and
         pydantic's positional ``Field("openai")`` form, ``os.environ.get`` /
-        ``os.getenv`` two-argument lookups, three-argument ``getattr`` and any
+        ``os.getenv`` / ``dict.setdefault`` two-argument lookups, three-argument
+        ``getattr`` and any
         keyword literally named ``default``.
     """
     found: list[tuple[int, str, ast.expr]] = []
@@ -211,7 +230,11 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
         if len(node.args) >= 3:
             found.append((node.lineno, "lookup fallback", node.args[2]))
         return found
-    is_get = isinstance(func, ast.Attribute) and func.attr in {"get", "getenv"}
+    is_get = isinstance(func, ast.Attribute) and func.attr in {
+        "get",
+        "getenv",
+        "setdefault",
+    }
     is_getenv = isinstance(func, ast.Name) and func.id == "getenv"
     if (is_get or is_getenv) and len(node.args) >= 2:
         found.append((node.lineno, "lookup fallback", node.args[1]))
@@ -249,6 +272,7 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         'provider = config.provider or "cursor"',
         'provider = os.environ.get("LINTRO_AI_PROVIDER", "anthropic")',
         'provider = getattr(cfg, "provider", "anthropic")',
+        'provider = settings.setdefault("provider", "cursor")',
         'provider = Field(default="openai")',
         'provider = Field("openai")',
         'provider = pydantic.Field("openai")',
@@ -267,6 +291,7 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "or-fallback",
         "env-lookup-fallback",
         "getattr-fallback",
+        "setdefault-fallback",
         "pydantic-field-default",
         "pydantic-field-positional-default",
         "pydantic-qualified-field-positional-default",
@@ -378,3 +403,11 @@ def test_accepted_provider_helpers_agree_and_list_every_provider() -> None:
     names = accepted_provider_names()
     assert_that(names).is_equal_to(sorted(provider.value for provider in AIProvider))
     assert_that(accepted_provider_values()).is_equal_to(", ".join(names))
+
+
+def test_cli_provider_modules_are_discovered_not_listed() -> None:
+    """The review command is found by scanning, so a new command is covered too."""
+    discovered = {path.name for path in _cli_provider_modules()}
+
+    assert_that(discovered).contains("review.py")
+    assert_that(_cli_provider_modules()).is_not_empty()
