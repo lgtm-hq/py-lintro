@@ -160,14 +160,26 @@ jobs:
     # each attempt makes progress rather than re-reviewing the whole diff.
     timeout-minutes: 38
     # Repo-wide serialisation (#2506). The workflow-level group above is
-    # per-PR with cancel-in-progress, so a push supersedes its own review.
+    # per-PR with cancel-in-progress, so a push still supersedes its own
+    # PR's review; it keeps the default queue: single because a stale
+    # pending review of the same PR is exactly what should be replaced.
     # This fixed job-level group additionally admits one review job at a
     # time across the repo, and never cancels: a queued review waits for
     # the running one so concurrent PRs cannot pile onto the same provider
     # rate limit.
+    #
+    # queue: max is load-bearing, not decoration. The default queue: single
+    # keeps at most ONE pending run per group and cancels it when a third
+    # arrives, so a burst of pushes across PRs would silently drop the
+    # middle review — and AI Review is not in auto-rerun-on-infra-failure's
+    # workflow list, so nothing would rerun it. queue: max raises the depth
+    # to 100 pending runs, which is what "queued reviews wait, not cancel"
+    # requires. The cost is accepted by design: with the 38 min cap above, a
+    # deep queue can leave a review pending for hours before it starts.
     concurrency:
       group: ai-review-repo-wide
       cancel-in-progress: false
+      queue: max
     # Cursor shards are appended only when the dogfood provider is Cursor.
     # They stay out of the anthropic path so that job cannot reach Cursor
     # hosts. A rotated shard (e.g. repo43.cursor.sh) is named in the

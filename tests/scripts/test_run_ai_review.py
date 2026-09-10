@@ -638,13 +638,23 @@ def test_workflow_serializes_ai_review_repo_wide() -> None:
     review is exactly the case #2506 is trying to stop paying for. The
     job-level group is a fixed name with ``cancel-in-progress: false``:
     one review job at a time across the repo, and the queued ones wait.
+
+    ``queue: max`` is required there, not optional. The default
+    ``queue: single`` holds at most one pending run per group and cancels
+    it when a third arrives, so a burst of pushes across PRs would drop
+    the middle review - and ``AI Review`` is absent from
+    ``auto-rerun-on-infra-failure.yml``, so nothing reruns it. The
+    per-PR group must NOT carry it: there, replacing a stale pending
+    review of the same PR is the wanted behaviour.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     job_concurrency = loaded["jobs"]["ai-review"]["concurrency"]
     assert_that(job_concurrency["group"]).is_equal_to("ai-review-repo-wide")
     assert_that(job_concurrency["cancel-in-progress"]).is_false()
+    assert_that(job_concurrency["queue"]).is_equal_to("max")
     assert_that(job_concurrency["group"]).does_not_contain("${{")
+    assert_that(loaded["concurrency"]).does_not_contain_key("queue")
 
 
 def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
