@@ -11,12 +11,14 @@ class CoverageDegradationReason(StrEnum):
     No reason here stops the run: every chunk is still reviewed, so this is
     not the same condition as ``ReviewMetadata.partial`` (which means chunks
     went unreviewed). What is lost is *depth*, and it is lost at one of two
-    scopes. A **per-chunk** reason means one chunk's model call was told to
-    report at most N findings, so issues past that ceiling may exist in that
-    chunk and go unreported. A **whole-run** reason means an optional extra
-    sweep over the merged result ran short or not at all, so the issues only
-    that sweep could have caught may exist anywhere in the diff and go
-    unreported. A whole-run reason carries
+    scopes. A **per-chunk** reason means either that one chunk's model call was
+    told to report at most N findings, so issues past that ceiling may exist in
+    that chunk and go unreported, or that one of that chunk's optional deeper
+    (depth >= 2) passes failed, so the chunk keeps its main-pass result and
+    whatever the extra pass would have added is missing (#2395). A
+    **whole-run** reason means an optional extra sweep over the merged result
+    ran short or not at all, so the issues only that sweep could have caught
+    may exist anywhere in the diff and go unreported. A whole-run reason carries
     :data:`~lintro.ai.review.models.coverage_degradation.SYNTHESIS_CHUNK_INDEX`
     rather than a real chunk index, and a placeholder ``findings_cap`` that is
     never a real per-call ceiling. Recording the reason keeps either gap from
@@ -36,9 +38,17 @@ class CoverageDegradationReason(StrEnum):
             attempted but did not produce a usable answer. The chunk findings
             are unaffected and the run stays complete for them; only the
             cross-file sweep is missing.
+        GENERATED_QUESTIONS_FAILED: The depth-2 generated-questions call for
+            one chunk failed, so that chunk was reviewed against the static
+            checklist alone (#2395).
+        ADVERSARIAL_SWEEP_FAILED: The depth-3 adversarial sweep for one chunk
+            failed, so the chunk keeps its main-pass findings and whatever the
+            sweep would have added is missing (#2395).
     """
 
     FINDINGS_CAP_APPLIED = auto()
     OUTPUT_EXHAUSTION_RETRIED = auto()
     SYNTHESIS_TRUNCATED = auto()
     SYNTHESIS_FAILED = auto()
+    GENERATED_QUESTIONS_FAILED = auto()
+    ADVERSARIAL_SWEEP_FAILED = auto()
