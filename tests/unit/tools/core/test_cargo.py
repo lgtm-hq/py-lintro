@@ -83,11 +83,12 @@ def test_several_packages_resolve_to_their_workspace_root(tmp_path: Path) -> Non
     assert_that(resolved).is_equal_to(tmp_path.resolve())
 
 
-def test_several_packages_resolve_to_an_ancestor_package_too(tmp_path: Path) -> None:
-    """The ancestor only has to own a manifest, not declare a ``[workspace]``.
+def test_an_ancestor_package_without_a_workspace_is_rejected(tmp_path: Path) -> None:
+    """A parent ``[package]`` manifest is not a root for deeper packages.
 
-    The helper never reads the manifest, so a plain parent ``[package]`` is as
-    good a launch directory as an explicit workspace root.
+    Running Cargo from the parent would build the parent crate alone, so a
+    manifest that declares no ``[workspace]`` cannot stand in for the packages
+    the files actually belong to.
 
     Args:
         tmp_path: Temporary directory used as the parent package.
@@ -96,9 +97,7 @@ def test_several_packages_resolve_to_an_ancestor_package_too(tmp_path: Path) -> 
     first = _package(tmp_path, "a")
     second = _package(tmp_path, "b")
 
-    resolved = find_cargo_root([str(first), str(second)])
-
-    assert_that(resolved).is_equal_to(tmp_path.resolve())
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
 
 
 def test_several_packages_without_a_workspace_resolve_to_nothing(
@@ -149,3 +148,98 @@ def test_roots_on_different_drives_resolve_to_nothing(tmp_path: Path) -> None:
         resolved = find_cargo_root([str(first), str(second)], tool_label="rustfmt")
 
     assert_that(resolved).is_none()
+
+
+def test_nested_member_packages_resolve_to_the_outer_workspace_root(
+    tmp_path: Path,
+) -> None:
+    """A nested member set resolves to the workspace root, not the member.
+
+    The common ancestor of the two leaf packages is an intermediate
+    ``[package]`` manifest that is itself a workspace member, so the walk has
+    to continue upward until the ``[workspace]`` manifest is reached.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["outer"]\n')
+    outer = tmp_path / "outer"
+    outer.mkdir()
+    (outer / "Cargo.toml").write_text('[package]\nname = "outer"\n')
+    first = _package(outer, "a")
+    second = _package(outer, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_members_below_a_shared_subdirectory_reach_the_workspace_root(
+    tmp_path: Path,
+) -> None:
+    """A manifest-less common ancestor does not end the upward walk.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["crates/a", "crates/b"]\n',
+    )
+    crates = tmp_path / "crates"
+    crates.mkdir()
+    first = _package(crates, "a")
+    second = _package(crates, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_workspace_manifest_that_is_also_a_package_is_accepted(
+    tmp_path: Path,
+) -> None:
+    """A root manifest declaring both tables is still a workspace root.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "root"\n\n[workspace]\nmembers = ["a", "b"]\n',
+    )
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_malformed_ancestor_manifest_is_not_treated_as_a_workspace(
+    tmp_path: Path,
+) -> None:
+    """Unparseable TOML above the packages does not become the Cargo root.
+
+    Args:
+        tmp_path: Temporary directory holding the broken manifest.
+    """
+    (tmp_path / "Cargo.toml").write_text("[workspace\nmembers = broken\n")
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_the_upward_walk_stops_at_a_repository_boundary(tmp_path: Path) -> None:
+    """A workspace manifest outside the repository is not adopted.
+
+    Args:
+        tmp_path: Temporary directory holding the outer manifest.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["repo/a"]\n')
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    first = _package(repo, "a")
+    second = _package(repo, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()

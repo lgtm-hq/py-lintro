@@ -15,6 +15,7 @@ Example:
 from __future__ import annotations
 
 import os
+import tomllib
 from pathlib import Path
 
 from loguru import logger
@@ -23,6 +24,50 @@ __all__ = ["CARGO_MANIFEST", "find_cargo_root"]
 
 #: The manifest file that marks a Cargo package or workspace root.
 CARGO_MANIFEST: str = "Cargo.toml"
+
+#: Directory marker that ends the upward walk, so discovery cannot escape the
+#: repository into an unrelated manifest further up the filesystem.
+_REPOSITORY_MARKER: str = ".git"
+
+
+def _declares_workspace(manifest: Path) -> bool:
+    """Report whether a manifest declares a ``[workspace]`` table.
+
+    Args:
+        manifest: Path to a ``Cargo.toml`` file.
+
+    Returns:
+        ``True`` when the manifest parses and carries a top-level
+        ``workspace`` table, ``False`` otherwise (an unreadable or malformed
+        manifest is treated as "not a workspace" rather than raising).
+    """
+    try:
+        with manifest.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        logger.debug("Could not read Cargo manifest {}: {}", manifest, exc)
+        return False
+    return "workspace" in data
+
+
+def _nearest_workspace_root(start: Path) -> Path | None:
+    """Walk upward from ``start`` to the first workspace manifest.
+
+    Args:
+        start: Directory to begin the upward walk at, inclusive.
+
+    Returns:
+        The directory owning the nearest ``Cargo.toml`` with a
+        ``[workspace]`` table, or ``None`` when the walk reaches a repository
+        boundary or the filesystem root without finding one.
+    """
+    for candidate in [start, *start.parents]:
+        manifest = candidate / CARGO_MANIFEST
+        if manifest.is_file() and _declares_workspace(manifest):
+            return candidate
+        if (candidate / _REPOSITORY_MARKER).exists():
+            break
+    return None
 
 
 def _nearest_manifest_dirs(paths: list[str]) -> list[Path]:
@@ -54,10 +99,14 @@ def find_cargo_root(
     """Return the directory a Cargo command should run from.
 
     Each path is walked upward to the nearest ``Cargo.toml``. When the paths
-    resolve to a single package that package's directory is returned; when they
-    straddle several packages the common ancestor is used, but only if it owns
-    a ``Cargo.toml`` of its own. The manifest's contents are not read, so an
-    ancestor package works as well as an explicit ``[workspace]``.
+    resolve to a single package that package's directory is returned. When they
+    straddle several packages the walk continues upward from their common
+    ancestor until a manifest declaring a ``[workspace]`` table is found, so a
+    nested member set resolves to the workspace root rather than to one of its
+    members. An ancestor manifest that declares only ``[package]`` is rejected:
+    running Cargo there would act on that crate alone, not on the packages the
+    files belong to. The walk stops at a directory holding ``.git`` so it
+    cannot escape the repository.
 
     Args:
         paths: File or directory paths to search upward from.
@@ -86,8 +135,9 @@ def find_cargo_root(
             )
         return None
 
-    if (common / CARGO_MANIFEST).exists():
-        return common
+    workspace_root = _nearest_workspace_root(common)
+    if workspace_root is not None:
+        return workspace_root
 
     if tool_label is not None:
         logger.warning(
