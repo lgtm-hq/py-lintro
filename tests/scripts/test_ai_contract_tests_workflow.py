@@ -302,6 +302,51 @@ def test_runner_forwards_only_the_credentials_the_caller_actually_set() -> None:
         assert_that(args).described_as(name).does_not_contain(name)
 
 
+def test_every_tier2_workflow_credential_is_forwarded_into_the_container(
+    workflow: Any,
+) -> None:
+    """A credential the workflow injects must actually reach the container.
+
+    The two halves live in different files: the workflow decides which
+    credentials Tier 2 gets, and the runner decides which variables cross into
+    the container. A credential added to the workflow but missed in the
+    forwarding loop is silently dropped — the suite then reports the lane as
+    unauthenticated with nothing pointing at the omission. Derive the names
+    from the workflow and prove the script forwards each one.
+
+    Args:
+        workflow: The parsed workflow mapping.
+    """
+    step = next(
+        step
+        for step in workflow["jobs"][TIER2_JOB]["steps"]
+        if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+    # `secrets.` catches the provider credentials; the gateway base URL is a
+    # repo variable rather than a secret but is just as load-bearing — without
+    # it the gateway token authenticates against the wrong host.
+    credentials = sorted(
+        name
+        for name, value in step["env"].items()
+        if "secrets." in str(value) or "vars.ZAI_BASE_URL" in str(value)
+    )
+
+    assert_that(credentials).described_as("tier-2 workflow credentials").is_not_empty()
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(credentials, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    assert_that(args).described_as("forwarded by the script").contains(*credentials)
+    assert_that(FORWARDED_TIER2_ENV).described_as(
+        "declared in the forwarding list",
+    ).contains(*credentials)
+
+
 def test_runner_forwards_every_declared_tier2_credential() -> None:
     """The whole forwarding list is live, not just the two lanes under test."""
     args = _runner_docker_args(
