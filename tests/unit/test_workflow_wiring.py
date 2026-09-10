@@ -234,6 +234,38 @@ def test_release_workflows_use_paired_egress_presets() -> None:
     )
 
 
+def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
+    """The version PR waits on the publish gate (#2516).
+
+    A broken tag publish used to mint one dead version per merge to ``main``
+    (v0.151.2 through v0.152.6). The ``publish-gate`` job reads the last
+    version-tag publish run and the version-PR job runs only when it was
+    green; ``force`` is the manual override for the first release after a fix.
+    """
+    workflow = _load_workflow(name="release-version-pr.yml")
+    gate = workflow["jobs"]["publish-gate"]
+    version_pr = workflow["jobs"]["version-pr"]
+
+    assert_that(version_pr["needs"]).contains("publish-gate")
+    assert_that(_normalize_github_expr(version_pr["if"])).is_equal_to(
+        "needs.publish-gate.outputs.publish_green == 'true'",
+    )
+    # Read-only: the gate inspects run conclusions and touches nothing else.
+    assert_that(gate["permissions"]).is_equal_to({"actions": "read"})
+    assert_that(gate["outputs"]["publish_green"]).contains(
+        "steps.gate.outputs.publish_green",
+    )
+    gate_script = "scripts/ci/check-last-publish-green.py"
+    assert_that((_REPO_ROOT / gate_script).is_file()).is_true()
+    assert_that(
+        [step for step in gate["steps"] if gate_script in str(step.get("run", ""))],
+    ).is_length(1)
+
+    force_input = workflow["on"]["workflow_dispatch"]["inputs"]["force"]
+    assert_that(force_input["type"]).is_equal_to("boolean")
+    assert_that(force_input["default"]).is_false()
+
+
 def test_version_pr_finalizes_docs_via_dedicated_script() -> None:
     """Version-PR workflow finalizes CHANGELOG and SECURITY.md via a repo script."""
     version_pr = _load_workflow(name="release-version-pr.yml")
