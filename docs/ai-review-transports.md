@@ -79,11 +79,19 @@ Providers are listed alphabetically; the order carries no recommendation.
 | `openai`    | `cli`     | `CODEX_API_KEY` or a `codex login` session            |
 
 `cursor` serves no `api` transport, so it has no API row. `ai.api_key_env` renames the
-variable for the `api` transport, and for the `cli` transport it is honoured wherever
-the provider's auth probe declares `honors_api_key_env=True` — anthropic's and cursor's
-CLIs both do, because each reads its own API-key variable directly. openai's declares
-`honors_api_key_env=False`: the `codex` CLI always reads `CODEX_API_KEY`, never
-`OPENAI_API_KEY`, so renaming the variable cannot reach it.
+variable for the `api` transport. On the `cli` transport the binary reads whatever
+variable it is built to read, and `honors_api_key_env` on the provider's auth probe
+records only whether `lintro doctor` accepts the renamed variable as proof of a
+credential:
+
+- `cursor` declares `True` and means it — the `agent` CLI reads `CURSOR_API_KEY` itself.
+- `openai` declares `False`: the `codex` CLI always reads `CODEX_API_KEY`, never
+  `OPENAI_API_KEY`, so renaming cannot reach it.
+- `anthropic` declares `True`, but the `claude` binary reads only the literal
+  `ANTHROPIC_API_KEY` (`lintro/ai/providers/claude_auth.py`), and lintro does not
+  re-export a renamed variable into it. Doctor therefore reports OK for a credential the
+  CLI cannot see. That mismatch predates the provider refactor and is tracked by #2449;
+  until it lands, rename `ai.api_key_env` for anthropic's `api` transport only.
 
 | Variable / setting                                    | Transport | Role                                                   |
 | ----------------------------------------------------- | --------- | ------------------------------------------------------ |

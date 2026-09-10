@@ -101,6 +101,40 @@ def _rendered(*, error: AIError | ValueError) -> str:
     return " ".join(buf.getvalue().split())
 
 
+def _vendor_mentions(*, text: str) -> list[str]:
+    """Return the vendor names *text* mentions, in any casing.
+
+    The copy this guards is prose, so it may name a vendor title-cased
+    ("For Cursor:") or upper-cased inside an env-var identifier
+    ("CURSOR_API_KEY"). A case-sensitive check would pass on both, which is
+    exactly the wording #2143 removed, so the match is case-insensitive.
+
+    Args:
+        text: Rendered console output.
+
+    Returns:
+        Every provider value that appears in *text*, in enum order.
+    """
+    lowered = text.lower()
+    return [provider.value for provider in AIProvider if provider.value in lowered]
+
+
+def test_vendor_guard_catches_the_historical_copy() -> None:
+    """Assert the guard would have failed on the wording it replaced.
+
+    A neutrality check nobody has seen fail may be matching nothing, so the
+    pre-#2143 strings are pinned as fixtures: both the title-cased prose and
+    the upper-cased env identifiers must be reported.
+    """
+    assert_that(
+        _vendor_mentions(text="For Cursor: set CURSOR_API_KEY"),
+    ).is_equal_to(["cursor"])
+    assert_that(
+        _vendor_mentions(text="For Anthropic/OpenAI: set ANTHROPIC_API_KEY"),
+    ).contains("anthropic", "openai")
+    assert_that(_vendor_mentions(text="set the API-key variable")).is_empty()
+
+
 def test_auth_hints_name_no_provider() -> None:
     """The auth hints point at the configured provider, never at a vendor.
 
@@ -114,9 +148,7 @@ def test_auth_hints_name_no_provider() -> None:
 
     assert_that(output).contains("authentication")
     assert_that(output).contains("API-key variable your provider declares")
-    assert_that(output).does_not_contain(
-        *(provider.value for provider in AIProvider),
-    )
+    assert_that(_vendor_mentions(text=output)).is_empty()
 
 
 def test_slow_review_hint_names_no_provider() -> None:
@@ -137,6 +169,4 @@ def test_slow_review_hint_names_no_provider() -> None:
     )
 
     assert_that(output).contains("transport: api")
-    assert_that(output).does_not_contain(
-        *(provider.value for provider in AIProvider),
-    )
+    assert_that(_vendor_mentions(text=output)).is_empty()
