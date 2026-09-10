@@ -22,6 +22,11 @@ BREW_FORMULA_NAMES: dict[str, str] = {
     # Binary tools
     "actionlint": "actionlint",
     "buf": "buf",
+    # Registered because every binary tool must be, not as an endorsement:
+    # checkov is in ISOLATED_INSTALL_HINTS, so BinaryStrategy returns the
+    # isolated-venv hint before it ever reaches brew, and Homebrew's formula
+    # lags the pin. Do not resurrect `brew install checkov` from this entry.
+    "checkov": "checkov",
     "cppcheck": "cppcheck",
     "dotenv_linter": "dotenv-linter",
     "gitleaks": "gitleaks",

@@ -108,7 +108,8 @@
     {
       "description": "Binary pins in _tool_versions.py install only when the tools image rebuilds; do not automerge versions-only (#2220)",
       "matchPackageNames": [
-        "golangci/golangci-lint"
+        "golangci/golangci-lint",
+        "checkov"
       ],
       "automerge": false
     },
@@ -303,6 +304,18 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "rhysd/actionlint",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update checkov version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.CHECKOV:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "pypi",
+      "packageNameTemplate": "checkov"
     },
     {
       "description": "Update gitleaks version in _tool_versions.py",

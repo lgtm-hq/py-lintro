@@ -6,9 +6,11 @@ Version sources (in priority order):
        written by ``scripts/ci/generate-tool-versions.py`` from the canonical
        ``package.json``, ``pyproject.toml``, and ``requirements-semgrep.txt``
        sources.
-    3. ``TOOL_VERSIONS`` below — non-npm/non-pypi tools (binaries, cargo,
-       rustup), mostly updated by Renovate via custom regex managers. See
-       "Adding a new tool" for the entries that deliberately have none.
+    3. ``TOOL_VERSIONS`` below — tools installed as standalone executables by
+       ``install-tools.sh`` (binaries, cargo, rustup, and the one pypi
+       distribution that cannot share lintro's resolution, checkov), mostly
+       updated by Renovate via custom regex managers. See "Adding a new tool"
+       for the entries that deliberately have none.
 
 Single-source-of-truth structure:
 
@@ -33,8 +35,12 @@ Adding a new tool:
     - npm or pypi: add a ToolName, edit ``lintro/_tool_packages.py``, pin in
       package.json or pyproject.toml, run the generator.
     - Other (binary/cargo/rustup): add to ``TOOL_VERSIONS`` below and add a
-      Renovate ``customManager`` entry. Two kinds of entry are deliberately
-      unmanaged, so do not add managers for them:
+      Renovate ``customManager`` entry. ``binary`` here means "a self-contained
+      executable that lands on PATH via ``install-tools.sh``", whatever
+      ecosystem ships it — cppcheck arrives from apt and checkov from
+      ``uv tool install``. What the type excludes is a package that shares
+      lintro's own resolution; those are the npm/pypi seeds above. Two kinds of
+      entry are deliberately unmanaged, so do not add managers for them:
         - rustfmt and clippy, bundled with ``ToolName.RUSTC`` — bump their
           records only alongside rustc (#2205).
         - cppcheck, installed from Debian's package because upstream ships no
@@ -65,16 +71,27 @@ _logger = logging.getLogger(__name__)
 # Manifest path (preferred source of truth for tool versions)
 _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 
-# Non-npm/non-pypi external tools — updated by Renovate via custom regex
-# managers, except rustfmt/clippy which record what the rustc toolchain
-# ships (bump only alongside ToolName.RUSTC; see #2205). Tools managed via
-# npm or pypi live in ``_tool_packages.py`` (seeds) and
+# External tools installed as standalone executables by install-tools.sh —
+# updated by Renovate via custom regex managers, except rustfmt/clippy which
+# record what the rustc toolchain ships (bump only alongside ToolName.RUSTC;
+# see #2205). Mostly non-npm/non-pypi, but checkov is here too: it is a pypi
+# distribution that cannot share lintro's resolution, so it is installed into
+# its own venv rather than seeded in ``_tool_packages.py``. Tools that *do*
+# share the resolution live in ``_tool_packages.py`` (seeds) and
 # ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
     ToolName.BUF: "1.72.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
+    # checkov is a pypi distribution but deliberately not a pypi *seed*: it
+    # requires ``packaging>=23,<24`` while lintro requires ``packaging>=25``,
+    # so a pyproject pin makes ``uv lock`` unsatisfiable, and a
+    # requirements-file pin would publish checkov's transitive tree into this
+    # repo's own osv-scanner dogfood. install-tools.sh installs this exact pin
+    # with ``uv tool install`` into an isolated venv instead. Renovate tracks
+    # it against the pypi datasource (see renovate.json).
+    ToolName.CHECKOV: "3.3.16",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.CLIPPY: "1.98.1",
     # cppcheck ships no portable single binary, so both the tools image and the

@@ -69,8 +69,8 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 # New binaries land in docker/tools.Dockerfile, but this app image still
 # FROMs a digest-pinned tools image that will not contain them until the
 # next published digest. Bridge typos, spectral, buf, import-linter, pylint,
-# cppcheck and rubocop here so dogfood and the manifest-vs-image gate actually
-# run them instead of failing with binary_missing. No-op once the digest
+# cppcheck, checkov and rubocop here so dogfood and the manifest-vs-image
+# gate run them instead of failing with binary_missing. No-op once the digest
 # already has them on PATH. rubocop is a Ruby gem, so the ruby runtime the
 # pinned digest predates has to come along with it.
 # hadolint ignore=DL3008
@@ -79,7 +79,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     (command -v gem >/dev/null || (apt-get update && \
     apt-get install -y --no-install-recommends ruby ruby-dev)) && \
     chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,rubocop && \
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov,rubocop && \
     rm -rf /var/lib/apt/lists/*
 
 # hadolint ignore=DL3008
@@ -94,10 +94,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 RUN getent group tools >/dev/null || groupadd -r tools && \
     id -u lintro >/dev/null 2>&1 || useradd -m -G tools lintro && \
-    mkdir -p /code && \
-    chgrp -R tools /opt/semgrep-venv && \
-    chmod -R g+rwX /opt/semgrep-venv && \
-    chmod -R a+rX /opt/semgrep-venv && \
+    mkdir -p /code /opt/uv-tools && \
+    chgrp -R tools /opt/semgrep-venv /opt/uv-tools && \
+    chmod -R g+rwX /opt/semgrep-venv /opt/uv-tools && \
+    chmod -R a+rX /opt/semgrep-venv /opt/uv-tools && \
     chown -R lintro:lintro /app /code
 
 # Minimal cross-ecosystem smoke check. Comprehensive manifest-vs-image tool
@@ -118,13 +118,18 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD ["/app/.venv/bin/python", "-m", "lintro", "--version"]
 
 # Minimal non-root smoke: confirm the gosu privilege drop works and the tools
-# group can execute the permission-sensitive toolchains under /opt/bun and
-# /opt/cargo. The CI manifest gate runs as root, so it would not catch a
-# non-root permission regression on these dirs — this stays as a targeted smoke.
+# group can execute the permission-sensitive toolchains under /opt/bun,
+# /opt/cargo and /opt/uv-tools. The CI manifest gate runs as root, so it would
+# not catch a non-root permission regression on these dirs — this stays as a
+# targeted smoke. checkov belongs here because it joins semgrep as a tool whose
+# shim on PATH and whose interpreter live in different trees (/usr/local/bin and
+# its uv-tool venv under /opt/uv-tools), so root being able to run it says
+# nothing about `lintro`.
 RUN echo "Smoke-testing tools as non-root user..." && \
     gosu lintro prettier --version && \
     gosu lintro cargo clippy --version && \
     gosu lintro semgrep --version && \
+    gosu lintro checkov --version && \
     echo "Non-root tool smoke check passed."
 
 # No USER directive: the container starts as root so entrypoint.sh can detect
