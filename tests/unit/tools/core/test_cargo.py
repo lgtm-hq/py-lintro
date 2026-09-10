@@ -163,7 +163,9 @@ def test_nested_member_packages_resolve_to_the_outer_workspace_root(
     Args:
         tmp_path: Temporary directory used as the workspace root.
     """
-    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["outer"]\n')
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["outer", "outer/a", "outer/b"]\n',
+    )
     outer = tmp_path / "outer"
     outer.mkdir()
     (outer / "Cargo.toml").write_text('[package]\nname = "outer"\n')
@@ -297,4 +299,44 @@ def test_a_workspace_root_that_also_holds_git_is_adopted(tmp_path: Path) -> None
     first = _package(tmp_path, "a")
     second = _package(tmp_path, "b")
 
-    assert_that(find_cargo_root([str(first), str(second)])).is_equal_to(tmp_path)
+    assert_that(find_cargo_root([str(first), str(second)])).is_equal_to(
+        tmp_path.resolve(),
+    )
+
+
+def test_packages_in_sibling_repositories_resolve_to_nothing(tmp_path: Path) -> None:
+    """A workspace manifest above two repositories is unrelated to both.
+
+    Args:
+        tmp_path: Temporary directory holding both repositories.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["one/a"]\n')
+    first_repo = tmp_path / "one"
+    second_repo = tmp_path / "two"
+    for repo in (first_repo, second_repo):
+        repo.mkdir()
+        (repo / ".git").mkdir()
+    first = _package(first_repo, "a")
+    second = _package(second_repo, "b")
+
+    resolved = find_cargo_root([str(first), str(second)], tool_label="rustfmt")
+
+    assert_that(resolved).is_none()
+
+
+def test_a_package_outside_the_repository_is_not_joined_to_one_inside(
+    tmp_path: Path,
+) -> None:
+    """A repository crate and an unversioned crate share no Cargo root.
+
+    Args:
+        tmp_path: Temporary directory holding both crates.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["repo/a", "b"]\n')
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    first = _package(repo, "a")
+    second = _package(tmp_path, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()

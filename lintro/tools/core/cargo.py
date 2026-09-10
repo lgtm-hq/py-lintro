@@ -50,6 +50,22 @@ def _declares_workspace(manifest: Path) -> bool:
     return isinstance(data.get("workspace"), dict)
 
 
+def _repository_root(start: Path) -> Path | None:
+    """Return the nearest ancestor of ``start`` that holds ``.git``.
+
+    Args:
+        start: Directory to begin the upward walk at, inclusive.
+
+    Returns:
+        The repository root owning ``start``, or ``None`` when the walk
+        reaches the filesystem root without finding one.
+    """
+    for candidate in [start, *start.parents]:
+        if (candidate / _REPOSITORY_MARKER).exists():
+            return candidate
+    return None
+
+
 def _nearest_workspace_root(start: Path) -> Path | None:
     """Walk upward from ``start`` to the first workspace manifest.
 
@@ -106,7 +122,9 @@ def find_cargo_root(
     members. An ancestor manifest that declares only ``[package]`` is rejected:
     running Cargo there would act on that crate alone, not on the packages the
     files belong to. The walk stops at a directory holding ``.git`` so it
-    cannot escape the repository.
+    cannot escape the repository, and paths whose nearest ``.git`` ancestors
+    differ — sibling repositories, or a repository mixed with a tree outside
+    one — resolve to nothing rather than to a manifest above them all.
 
     Args:
         paths: File or directory paths to search upward from.
@@ -131,6 +149,18 @@ def find_cargo_root(
             logger.warning(
                 "Multiple Cargo roots found on different drives; cannot determine "
                 "common workspace root. Skipping {}.",
+                tool_label,
+            )
+        return None
+
+    repositories = {_repository_root(root) for root in unique_roots}
+    if len(repositories) > 1:
+        if tool_label is not None:
+            logger.warning(
+                "Multiple Cargo roots found ({}) in different repositories; "
+                "any workspace manifest above them all is unrelated. Skipping "
+                "{}.",
+                ", ".join(str(root) for root in sorted(unique_roots)),
                 tool_label,
             )
         return None
