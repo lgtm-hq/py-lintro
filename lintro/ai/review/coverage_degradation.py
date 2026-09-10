@@ -19,11 +19,30 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COVERAGE_LIMITED_HEADLINE",
+    "PARTIAL_REVIEW_LABEL",
     "describe_coverage_degradations",
 ]
 
 #: Short label reused as the bold lead-in on the posted GitHub surfaces.
 COVERAGE_LIMITED_HEADLINE = "Coverage limited — not a guaranteed full finding set"
+
+#: What a degraded run is called in the *header* of each posted surface
+#: (#2395). The warning below it explains why; the header exists so a reader
+#: who never scrolls past the first line still learns the review is partial,
+#: and so it matches the ``degraded`` outcome the CI check reports.
+PARTIAL_REVIEW_LABEL = "Partial review"
+
+#: How each depth >= 2 pass failure is named in the sentence (#2395). These
+#: are per-chunk reasons that carry no per-call ceiling, so they get their own
+#: clause rather than joining the cap wording.
+_DEPTH_PASS_CLAUSES: dict[CoverageDegradationReason, str] = {
+    CoverageDegradationReason.GENERATED_QUESTIONS_FAILED: (
+        "the depth-2 generated-questions pass failed"
+    ),
+    CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED: (
+        "the depth-3 adversarial sweep failed"
+    ),
+}
 
 
 def _plural(*, count: int, noun: str) -> str:
@@ -98,6 +117,14 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
             "provider output limit",
         )
 
+    for reason, wording in _DEPTH_PASS_CLAUSES.items():
+        chunks = {item.chunk_index for item in degradations if item.reason is reason}
+        if chunks:
+            clauses.append(
+                f"{len(chunks)} {_plural(count=len(chunks), noun='chunk')} kept "
+                f"only the main pass after {wording}",
+            )
+
     reasons = {item.reason for item in degradations}
     if CoverageDegradationReason.SYNTHESIS_TRUNCATED in reasons:
         clauses.append(
@@ -112,6 +139,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
         CoverageDegradationReason.SYNTHESIS_TRUNCATED,
         CoverageDegradationReason.SYNTHESIS_FAILED,
+        *_DEPTH_PASS_CLAUSES,
     }
     other = sorted(
         {str(item.reason) for item in degradations if item.reason not in known},

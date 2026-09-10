@@ -19,14 +19,7 @@ name: Publish - PyPI Production
       - v*.*.*rc*
   workflow_dispatch:
 
-# actions: read is required by the chain: build-binary's jobs download this
-# run's own sha256 artifacts (#2435), and GitHub startup-rejects a reusable
-# chain whose nested jobs request a scope the top-level caller does not grant
-# (v0.152.1+ tags died as startup_failure). contents: write covers the
-# release/artifact writes further down the chain.
-permissions:
-  actions: read
-  contents: write
+permissions: {}
 
 concurrency:
   group: publish-pypi-${{ github.ref }}
@@ -236,9 +229,10 @@ jobs:
       # updates are dispatched to the tap (repository_dispatch), not pushed
       # from here — this token has no write access to lgtm-hq/homebrew-tap.
       contents: write
-      # read: build-binary.yml's build jobs list and download this run's sha256
-      # artifacts (#2440). A called workflow may not request more than its
-      # caller's job grants; omitting this fails the whole run at startup.
+      # read: build-binary.yml's build jobs list and download this run's own
+      # sha256 artifacts (#2440, #2435). A called workflow may not request
+      # more than its caller's job grants, so omitting this fails the whole
+      # run at startup (v0.152.1+ tags died as startup_failure).
       actions: read
     with:
       release_tag: ${{ github.ref_name }}

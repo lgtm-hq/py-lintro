@@ -80,6 +80,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "tools/bandit": ("bandit", "python"),
     "tools/black": ("black", "python"),
     "tools/cargo-deny": ("cargo-deny", "rust"),
+    "tools/checkov": ("checkov", "security"),
     "tools/clippy": ("clippy", "rust"),
     "tools/cppcheck": ("cppcheck", "c-cpp"),
     "tools/golangci-lint": ("golangci-lint", "go"),

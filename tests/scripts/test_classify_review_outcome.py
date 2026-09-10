@@ -1343,3 +1343,263 @@ def test_a_clean_skip_says_nothing_about_p1s(classifier: ModuleType) -> None:
 
     assert_that(report.exit_code).is_equal_to(0)
     assert_that(report.headline).does_not_contain("open P1")
+
+
+def _degraded_envelope(
+    *,
+    reasons: tuple[str, ...] = ("adversarial_sweep_failed",),
+    complete: bool = False,
+    findings: list[dict[str, object]] | None = None,
+) -> str:
+    """Return a finished review envelope on the finding-depth axis (#2395).
+
+    Args:
+        reasons: Coverage-degradation reasons the run recorded.
+        complete: Value of ``findings_coverage_complete``.
+        findings: Findings to embed, or ``None`` for none.
+
+    Returns:
+        Captured-output text containing the review JSON envelope.
+    """
+    return json.dumps(
+        {
+            "readiness_verdict": "ready",
+            "findings": findings or [],
+            "findings_coverage_complete": complete,
+            "coverage_degradations": [
+                {"reason": reason, "chunk_index": index, "findings_cap": 0}
+                for index, reason in enumerate(reasons)
+            ],
+        },
+    )
+
+
+def test_degraded_finding_depth_reddens_the_check(classifier: ModuleType) -> None:
+    """``findings_coverage_complete: false`` must not read as a clean pass.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_degraded_envelope())
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.DEGRADED)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.headline).contains("partial review")
+    assert_that(report.detail).contains("adversarial_sweep_failed")
+
+
+def test_a_complete_review_envelope_stays_green(classifier: ModuleType) -> None:
+    """The same envelope with complete depth keeps the REVIEWED outcome.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_degraded_envelope(complete=True))
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.exit_code).is_equal_to(0)
+
+
+def test_degraded_outcome_still_counts_as_a_produced_review(
+    classifier: ModuleType,
+) -> None:
+    """A degraded round posted its findings, so it is never "not reviewed".
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_degraded_envelope())
+
+    assert_that(report.outcome.produced_review).is_true()
+    assert_that(report.outcome.review_unavailable).is_false()
+    assert_that(report.outcome.partial_review).is_true()
+    assert_that(report.headline).does_not_contain("nothing was reviewed")
+
+
+def test_degraded_envelope_names_every_recorded_reason(
+    classifier: ModuleType,
+) -> None:
+    """Each distinct reason reaches the detail line, not just the first.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=_degraded_envelope(
+            reasons=("findings_cap_applied", "generated_questions_failed"),
+        ),
+    )
+
+    assert_that(report.detail).contains("findings_cap_applied")
+    assert_that(report.detail).contains("generated_questions_failed")
+
+
+def test_incomplete_coverage_wins_over_degraded_depth(
+    classifier: ModuleType,
+) -> None:
+    """Unreviewed files are the actionable news when both axes are limited.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    payload = json.loads(_incomplete_envelope())
+    payload["findings_coverage_complete"] = False
+    payload["coverage_degradations"] = [
+        {"reason": "adversarial_sweep_failed", "chunk_index": 0, "findings_cap": 0},
+    ]
+
+    report = classifier.classify(status=0, output=json.dumps(payload))
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
+    assert_that(report.exit_code).is_equal_to(1)
+
+
+def test_a_hard_failure_is_not_masked_by_a_degraded_envelope(
+    classifier: ModuleType,
+) -> None:
+    """At status 2 the failure is the news, exactly as for a converged skip.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=classifier.REVIEW_STATUS_ERROR,
+        output=_degraded_envelope(),
+    )
+
+    assert_that(report.outcome).is_not_equal_to(classifier.ReviewOutcome.DEGRADED)
+    assert_that(report.exit_code).is_equal_to(1)
+
+
+def test_degraded_run_annotates_as_a_warning(
+    classifier: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The job emits ``::warning`` and exits 1 without the outage copy.
+
+    Args:
+        classifier: The loaded classifier module.
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Captured stdout/stderr.
+    """
+    output_file = tmp_path / "review.log"
+    output_file.write_text(_degraded_envelope(), encoding="utf-8")
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+
+    code = classifier.main(
+        argv=["--status", "0", "--output-file", str(output_file), "--transport", "cli"],
+    )
+    out = capsys.readouterr().out
+
+    assert_that(code).is_equal_to(1)
+    assert_that(out).contains("::warning")
+    assert_that(out).does_not_contain("::error")
+    summary = summary_file.read_text(encoding="utf-8")
+    assert_that(summary).contains("⚠️")
+    assert_that(summary).contains("not at full depth")
+    # The review reached the PR: never the fall-back-to-CodeRabbit copy.
+    assert_that(summary).does_not_contain("CodeRabbit")
+
+
+def test_a_degraded_round_still_names_its_p1_findings(
+    classifier: ModuleType,
+) -> None:
+    """Being red on depth must not cost the reader the P1 news.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_degraded_envelope(
+            findings=[{"severity": "P1", "title": "bug"}],
+        ),
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.DEGRADED)
+    assert_that(report.headline).contains("partial review — P1 findings posted")
+    assert_that(report.headline).contains("not a guaranteed full finding set")
+    assert_that(report.exit_code).is_equal_to(1)
+
+
+def test_a_degraded_round_without_findings_says_so(
+    classifier: ModuleType,
+) -> None:
+    """The clean variant reports "no P1 findings", not silence.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_degraded_envelope())
+
+    assert_that(report.headline).contains("partial review — no P1 findings")
+    assert_that(report.headline).does_not_contain("P1 findings posted")
+
+
+def test_a_degraded_round_reports_an_inline_post_failure(
+    classifier: ModuleType,
+) -> None:
+    """A degraded round must not claim inline posting that GitHub refused.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    finding = ReviewFinding(
+        severity=Severity.P1,
+        category="logic-bug",
+        file="src/a.py",
+        line=1,
+        title="Off by one",
+        description="The loop stops early.",
+        cause="",
+        fix="",
+        confidence="high",
+    )
+    failure = InlinePostFailure(
+        reason=format_inline_post_cause(
+            kind=InlinePostFailureKind.RATE_LIMITED,
+            status=429,
+        ),
+        findings=(finding,),
+        kind=InlinePostFailureKind.RATE_LIMITED,
+        status=429,
+    )
+    output = (
+        f"{_degraded_envelope(findings=[{'severity': 'P1', 'title': 'bug'}])}\n"
+        f"{render_inline_post_failure_json(failure=failure)}\n"
+    )
+
+    report = classifier.classify(status=1, output=output)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.DEGRADED)
+    assert_that(report.headline).contains("sticky comment only (rate_limited)")
+    assert_that(report.headline).does_not_contain("P1 findings posted")
+    assert_that(report.detail).contains("HTTP 429")
+    assert_that(report.detail).contains("adversarial_sweep_failed")
+
+
+def test_degraded_and_reviewed_share_one_findings_vocabulary(
+    classifier: ModuleType,
+) -> None:
+    """The two reports cannot drift on how they describe the findings.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    findings: list[dict[str, object]] = [{"severity": "P1", "title": "bug"}]
+    reviewed = classifier.classify(
+        status=1,
+        output=_degraded_envelope(complete=True, findings=findings),
+    )
+    degraded = classifier.classify(
+        status=1,
+        output=_degraded_envelope(findings=findings),
+    )
+
+    news = reviewed.headline.split("reviewed — ", 1)[1]
+    assert_that(degraded.headline).contains(news)

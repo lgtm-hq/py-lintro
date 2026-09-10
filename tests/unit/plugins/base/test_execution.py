@@ -15,6 +15,8 @@ from lintro.plugins.base import (
     DEFAULT_TIMEOUT,
     ExecutionContext,
 )
+from lintro.utils.path_filtering import walk_files_with_excludes
+from lintro.utils.project_detection import _VENDOR_SKIP_DIRS, _iter_project_files
 
 from .conftest import NoFixPlugin
 
@@ -701,6 +703,10 @@ def test_get_executable_command_unknown_tool(fake_tool_plugin: FakeToolPlugin) -
         pytest.param(".git", id="git_directory"),
         pytest.param("__pycache__", id="pycache_directory"),
         pytest.param("*.pyc", id="pyc_files"),
+        # `terraform init` vendors provider plugins and remote modules under
+        # .terraform. Dropping it would hand third-party .tf downloads to
+        # checkov, reporting findings nobody in the repository can fix.
+        pytest.param(".terraform", id="terraform_vendor_directory"),
     ],
 )
 def test_default_exclude_patterns_contains_expected_patterns(pattern: str) -> None:
@@ -715,6 +721,44 @@ def test_default_exclude_patterns_contains_expected_patterns(pattern: str) -> No
 def test_default_exclude_patterns_is_not_empty() -> None:
     """Verify DEFAULT_EXCLUDE_PATTERNS is not empty."""
     assert_that(DEFAULT_EXCLUDE_PATTERNS).is_not_empty()
+
+
+def test_vendored_terraform_is_pruned_by_discovery_and_detection(
+    tmp_path: Path,
+) -> None:
+    """Neither walk reaches a ``.terraform`` download; both must prune it.
+
+    Detection decides whether an IaC tool is selected at all, discovery
+    decides which files reach its argv, so a vendored ``terraform init``
+    download is only kept away from checkov when both walks skip it. Asserted
+    by running the walks rather than by comparing the two constants: a
+    refactor that stopped consulting either set would leave a membership
+    assertion green while vendored ``.tf`` files reached the scanner.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    vendored = tmp_path / ".terraform" / "modules" / "x"
+    vendored.mkdir(parents=True)
+    (vendored / "vendored.tf").write_text('resource "aws_s3_bucket" "v" {}\n')
+    own = tmp_path / "main.tf"
+    own.write_text('output "noop" {\n  value = "ok"\n}\n')
+
+    discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*.tf"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    detected = [str(path) for path in _iter_project_files(tmp_path)]
+
+    assert_that(discovered).is_length(1)
+    assert_that(discovered[0]).ends_with("main.tf")
+    assert_that([path for path in detected if "vendored.tf" in path]).is_empty()
+    assert_that([path for path in detected if path.endswith("main.tf")]).is_length(1)
+    # Fast tripwires alongside the behavioural assertions above: these name the
+    # exact entry a future edit would have to remove.
+    assert_that(DEFAULT_EXCLUDE_PATTERNS).contains(".terraform")
+    assert_that(_VENDOR_SKIP_DIRS).contains(".terraform")
 
 
 # =============================================================================

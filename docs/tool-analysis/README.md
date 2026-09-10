@@ -56,6 +56,17 @@ implementations with the core tools themselves.
 - ⚠️ **Limited**: No auto-fix, limited CLI pass-through, single-process execution
 - 🚀 **Enhanced**: Central line-length injection, normalized issues, safe version checks
 
+### [Checkov Analysis](./checkov-analysis.md)
+
+**Terraform Infrastructure-as-Code Security Scanner**
+
+- ✅ **Preserved**: Check ID, resource attribution, line range, honest null severity
+- ⚠️ **Limited**: Check-only, Terraform-scoped; severity always null (`--skip-download`
+  suppresses the platform metadata that carries it)
+- 🚀 **Notes**: Native JSON parser (SARIF is lossy for checkov); lintro's argv never
+  opts checkov into the platform, though a `BC_API_KEY` in the environment still puts it
+  in platform mode
+
 ### [Cppcheck Analysis](./cppcheck-analysis.md)
 
 **C/C++ Static Analyzer**
