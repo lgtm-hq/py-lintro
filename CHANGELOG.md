@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.5] - 2026-09-10
+
+### Fixed
+
+- **ci**: resume AI review reruns, cap the job at 38 minutes, serialise it, and honour
+  Retry-After (#2547) (83f2bcc)
+
 ## [0.153.4] - 2026-09-10
 
 ### Fixed
