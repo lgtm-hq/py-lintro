@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.3] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: degrade to the main pass when a deeper `call_ai` pass fails (#2545)
+  (664fdb5)
+
 ## [0.153.2] - 2026-09-10
 
 ### Fixed
