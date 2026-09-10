@@ -3351,7 +3351,9 @@ ai:
 
 ### Config Defaults for Flags
 
-Set `default_fix` to avoid typing the flag every time:
+Set `default_fix` to avoid typing the flag every time. This is a partial overlay showing
+only the flag defaults — `ai.provider` and `ai.transport` are still required whenever AI
+is enabled, so merge it with the complete example in [Quick Setup](#quick-setup):
 
 ```yaml
 ai:

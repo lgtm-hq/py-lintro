@@ -106,8 +106,11 @@ def _default_shaped_values(tree: ast.AST) -> list[tuple[int, str, ast.expr]]:
                 if value is not None
             )
         elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
-            found.append((node.lineno, "`or` fallback", node.values[-1]))
+            found.extend(
+                (value.lineno, "`or` fallback", value) for value in node.values
+            )
         elif isinstance(node, ast.IfExp):
+            found.append((node.lineno, "conditional fallback", node.body))
             found.append((node.lineno, "conditional fallback", node.orelse))
         elif isinstance(node, ast.Call):
             found.extend(_call_defaults(node=node))
@@ -133,7 +136,8 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
         node: Call expression.
 
     Returns:
-        ``(line, shape, expression)`` triples for ``Field(default=...)``,
+        ``(line, shape, expression)`` triples for ``Field(default=...)`` and
+        pydantic's positional ``Field("openai")`` form,
         ``getattr``/``os.environ.get``-style two-argument lookups and any
         keyword literally named ``default``.
     """
@@ -142,6 +146,11 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
         if keyword.arg is not None and keyword.arg.lower().startswith("default"):
             found.append((node.lineno, f"`{keyword.arg}=` argument", keyword.value))
     func = node.func
+    is_field = (isinstance(func, ast.Name) and func.id == "Field") or (
+        isinstance(func, ast.Attribute) and func.attr == "Field"
+    )
+    if is_field and node.args:
+        found.append((node.lineno, "positional `Field()` default", node.args[0]))
     is_get = isinstance(func, ast.Attribute) and func.attr in {"get", "getenv"}
     is_getattr = isinstance(func, ast.Name) and func.id in {"getattr", "getenv"}
     if (is_get or is_getattr) and len(node.args) >= 2:
@@ -180,8 +189,12 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         'provider = config.provider or "cursor"',
         'provider = os.environ.get("LINTRO_AI_PROVIDER", "anthropic")',
         'provider = Field(default="openai")',
+        'provider = Field("openai")',
+        'provider = pydantic.Field("openai")',
         'DEFAULT_PROVIDER = "cursor"',
         'provider = explicit if explicit else "anthropic"',
+        'provider = "anthropic" if provider is None else provider',
+        'provider = explicit or "cursor" or fallback',
     ],
     ids=[
         "parameter-default",
@@ -189,8 +202,12 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "or-fallback",
         "env-lookup-fallback",
         "pydantic-field-default",
+        "pydantic-field-positional-default",
+        "pydantic-qualified-field-positional-default",
         "default-constant",
         "conditional-fallback",
+        "conditional-fallback-in-body",
+        "or-fallback-mid-chain",
     ],
 )
 def test_ratchet_catches_a_default_provider(source: str) -> None:

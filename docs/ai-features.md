@@ -792,7 +792,8 @@ ai:
   provider: anthropic # "anthropic" | "cursor" | "openai"; no default
   transport: api # "api" (SDK) or "cli" (local agent binary); no default
   # Omit `model` and `api_key_env` to take the chosen provider's defaults
-  # (`lintro doctor` prints the pair in effect); set them only to override.
+  # (`lintro doctor` prints the API-key variable in effect, `lintro status` the
+  # model); set them only to override.
 ```
 
 ### Feature Toggles
