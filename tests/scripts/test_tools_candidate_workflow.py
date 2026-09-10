@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess  # nosec B404 - fixed argv runs the repository script under test
 import sys
 from datetime import UTC, datetime, timedelta
@@ -1333,3 +1334,50 @@ def test_promotion_exports_empty_candidate_fields_without_a_tag(
     assert_that(lines).contains("action=publish")
     assert_that(lines).contains("candidate-sha=")
     assert_that(lines).contains("candidate-pr=")
+
+
+def test_candidate_outputs_and_guard_env_stay_in_lockstep() -> None:
+    """The resolver, the workflow and the guard must agree on every name.
+
+    Three files have to line up for the staleness guard to see anything:
+    ``promote-tools-candidate.py`` writes step outputs, the promote workflow
+    forwards them as env, and ``check-tools-manifest-staleness.sh`` reads that
+    env. A rename in any one of them silently disables the guard, so all three
+    sets are read from source and compared here (#2497).
+    """
+    resolver_source = (
+        _REPO_ROOT / "scripts" / "ci" / "promote-tools-candidate.py"
+    ).read_text(encoding="utf-8")
+    written_keys = set(
+        re.findall(r'output_file\.write\(f?"([a-z-]+)=', resolver_source),
+    )
+    assert_that(written_keys).contains("candidate-sha", "candidate-pr")
+
+    workflow = _load_workflow("docker-tools-promote.yml")
+    resolve_outputs = workflow["jobs"]["resolve"]["outputs"]
+    # Every job output must come from a key the resolver actually writes.
+    for name, expression in resolve_outputs.items():
+        referenced = re.findall(r"steps\.candidate\.outputs\.([a-z-]+)", expression)
+        assert_that(referenced).described_as(name).is_length(1)
+        assert_that(written_keys).described_as(name).contains(referenced[0])
+
+    promote_step = next(
+        step
+        for step in workflow["jobs"]["promote"]["steps"]
+        if "scripts/ci/promote-ci-docker-images.sh" in str(step.get("run", ""))
+    )
+    env = promote_step["env"]
+    # Every needs.resolve reference must be an output the resolve job exports.
+    for value in env.values():
+        for referenced in re.findall(
+            r"needs\.resolve\.outputs\.([a-z-]+)",
+            str(value),
+        ):
+            assert_that(resolve_outputs).contains_key(referenced)
+
+    guard_source = (
+        _REPO_ROOT / "scripts" / "ci" / "check-tools-manifest-staleness.sh"
+    ).read_text(encoding="utf-8")
+    for name in ("CANDIDATE_SHA", "CANDIDATE_PR", "MAIN_SHA", "FORCE_PUBLISH"):
+        assert_that(env).contains_key(name)
+        assert_that(guard_source).described_as(name).contains(f"${{{name}:-}}")

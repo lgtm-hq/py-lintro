@@ -42,6 +42,15 @@ STUB
 	git commit --quiet -m 'bump ruff'
 	CANDIDATE_FULL="$(git rev-parse HEAD)"
 	CANDIDATE_ABBREV="${CANDIDATE_FULL:0:12}"
+
+	# push-digest commits the built image's digest on top of the branch, so
+	# the PR head is a descendant of the commit the candidate tag names, not
+	# that commit itself. The guard has to resolve the abbreviation out of
+	# the objects the PR-head fetch brings in.
+	printf 'FROM ghcr.io/lgtm-hq/lintro-tools@sha256:deadbeef\n' >Dockerfile
+	git add -A
+	git commit --quiet -m 'chore(deps): pin tools candidate digest'
+	CANDIDATE_HEAD="$(git rev-parse HEAD)"
 	git checkout --quiet main
 	printf 'RUFF = "0.2.0"\n' >lintro/_tool_versions.py
 	git add -A

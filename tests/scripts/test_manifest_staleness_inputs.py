@@ -22,6 +22,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _GUARD_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "check-tools-manifest-staleness.sh"
 _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 _GENERATE_SCRIPT = "scripts/ci/generate-tool-versions.py"
+# Repository scripts the recipe runs, in a RUN line, by path.
+_INVOKED_SCRIPT_RE = re.compile(r"(?:/app/)?(scripts/[\w./-]+\.(?:sh|py))")
 
 # GeneratorPaths fields that name a file the generator *reads*. Everything the
 # generator writes is derived, so it is deliberately out of the guard's set.
@@ -43,6 +45,10 @@ _GUARD_ONLY_PATHS = frozenset(
         "docker/tools.Dockerfile",
         "lintro_build/",
         _GENERATE_SCRIPT,
+        "scripts/ci/generate-builtin-tool-index.py",
+        "scripts/utils/install-tools.sh",
+        "scripts/utils/install-semgrep.sh",
+        "scripts/utils/utils.sh",
     },
 )
 
@@ -104,8 +110,12 @@ def test_guard_paths_exist_in_the_repository() -> None:
         assert_that((_REPO_ROOT / path).exists()).described_as(path).is_true()
 
 
-def _render_step_copy_sources(dockerfile: Path = _TOOLS_DOCKERFILE) -> list[str]:
-    """Return the paths *dockerfile* copies in before rendering the manifest.
+def _image_copy_sources(dockerfile: Path = _TOOLS_DOCKERFILE) -> list[str]:
+    """Return every repository path *dockerfile* copies into the image.
+
+    All COPY lines are read, not only the ones preceding the render step: the
+    installers the recipe runs afterwards decide what actually lands in the
+    image, so a COPY added for them has to be watched too.
 
     Flags are skipped so a ``COPY --chmod=0755 src dst`` is parsed like any
     other; ``COPY --from=<stage>`` is dropped entirely because its sources
@@ -115,27 +125,48 @@ def _render_step_copy_sources(dockerfile: Path = _TOOLS_DOCKERFILE) -> list[str]
         dockerfile: Dockerfile to parse (the tools image recipe by default).
 
     Returns:
-        Repository-relative COPY sources preceding the ``RUN`` that invokes
-        the version generator.
+        Repository-relative COPY sources, in file order.
     """
     sources: list[str] = []
     for line in dockerfile.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
-        if stripped.startswith("COPY "):
-            parts = stripped.split()[1:]
-            flags = [part for part in parts if part.startswith("--")]
-            if any(flag.startswith("--from=") for flag in flags):
-                continue
-            operands = [part for part in parts if not part.startswith("--")]
-            # The last operand is the destination inside the image.
-            sources.extend(operands[:-1])
-        elif _GENERATE_SCRIPT in stripped:
-            break
+        if not stripped.startswith("COPY "):
+            continue
+        parts = stripped.split()[1:]
+        if any(part.startswith("--from=") for part in parts):
+            continue
+        operands = [part for part in parts if not part.startswith("--")]
+        # The last operand is the destination inside the image.
+        sources.extend(operands[:-1])
     assert_that(sources).is_not_empty()
     return sources
 
 
-def test_guard_covers_every_path_the_render_step_copies() -> None:
+def _invoked_repository_scripts(dockerfile: Path = _TOOLS_DOCKERFILE) -> set[str]:
+    """Return the repository scripts *dockerfile* runs during the build.
+
+    Args:
+        dockerfile: Dockerfile to parse (the tools image recipe by default).
+
+    Returns:
+        Repository-relative paths of scripts named in ``RUN`` lines.
+    """
+    text = dockerfile.read_text(encoding="utf-8")
+    run_lines = [
+        line
+        for line in text.splitlines()
+        if not line.strip().startswith(("#", "COPY ", "FROM "))
+    ]
+    found = {
+        match.group(1)
+        for line in run_lines
+        for match in _INVOKED_SCRIPT_RE.finditer(line)
+    }
+    assert_that(found).is_not_empty()
+    return found
+
+
+def test_guard_covers_every_path_the_image_copies() -> None:
     """Everything the image re-renders the manifest from must be represented.
 
     The build copies these paths in and runs the generator, and the gates
@@ -147,13 +178,25 @@ def test_guard_covers_every_path_the_render_step_copies() -> None:
     watched underneath fails here.
     """
     watched = _guard_paths()
-    for source in _render_step_copy_sources():
+    for source in _image_copy_sources():
         prefix = source if source.endswith("/") else f"{source}/"
         covered = any(
             path == source or path.startswith(prefix) or source.startswith(path)
             for path in watched
         )
         assert_that(covered).described_as(f"{source} is unwatched").is_true()
+
+
+def test_guard_watches_every_script_the_recipe_runs() -> None:
+    """Every repository script the image build executes must be watched.
+
+    ``scripts/`` is copied wholesale, so directory coverage alone would let a
+    new installer or generator slip in unwatched. The scripts the recipe
+    actually invokes are the ones that shape the image.
+    """
+    watched = _guard_paths()
+    for script in sorted(_invoked_repository_scripts()):
+        assert_that(watched).described_as(f"{script} is unwatched").contains(script)
 
 
 def test_copy_parser_reads_flagged_and_multi_source_copies(tmp_path: Path) -> None:
@@ -174,6 +217,35 @@ def test_copy_parser_reads_flagged_and_multi_source_copies(tmp_path: Path) -> No
         encoding="utf-8",
     )
 
-    assert_that(_render_step_copy_sources(dockerfile)).is_equal_to(
-        ["lintro/", "scripts/", "package.json", "pyproject.toml"],
+    assert_that(_image_copy_sources(dockerfile)).is_equal_to(
+        # The COPY after the generate RUN counts too: installers run later.
+        ["lintro/", "scripts/", "package.json", "pyproject.toml", "after/"],
+    )
+
+
+def test_invoked_script_parser_finds_installers_and_generators(
+    tmp_path: Path,
+) -> None:
+    """RUN lines naming a repository script must be picked up.
+
+    Args:
+        tmp_path: Temporary directory holding the fixture Dockerfile.
+    """
+    dockerfile = tmp_path / "tools.Dockerfile"
+    dockerfile.write_text(
+        "FROM debian\n"
+        "COPY scripts/ /app/scripts/\n"
+        f"RUN python3 {_GENERATE_SCRIPT} && \\\n"
+        "    python3 scripts/ci/generate-builtin-tool-index.py\n"
+        "RUN /app/scripts/utils/install-tools.sh --docker\n"
+        "# RUN scripts/utils/commented-out.sh\n",
+        encoding="utf-8",
+    )
+
+    assert_that(_invoked_repository_scripts(dockerfile)).is_equal_to(
+        {
+            _GENERATE_SCRIPT,
+            "scripts/ci/generate-builtin-tool-index.py",
+            "scripts/utils/install-tools.sh",
+        },
     )

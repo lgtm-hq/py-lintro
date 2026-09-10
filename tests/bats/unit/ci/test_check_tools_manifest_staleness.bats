@@ -20,7 +20,8 @@ setup() {
 
 	SEED="${BATS_TEST_TMPDIR}/seed"
 	mkdir -p "${SEED}/lintro/tools" "${SEED}/docker" \
-		"${SEED}/lintro_build/versions" "${SEED}/scripts/ci"
+		"${SEED}/lintro_build/versions" "${SEED}/scripts/ci" \
+		"${SEED}/scripts/utils"
 	cd "${SEED}" || return 1
 	git init --quiet --initial-branch=main .
 	git config user.email 'test@example.com'
@@ -34,6 +35,7 @@ setup() {
 	printf 'SEED = {}\n' >lintro/_tool_packages.py
 	printf 'MANIFEST = "lintro/tools/manifest.json"\n' >lintro_build/versions/paths.py
 	printf 'print("generate")\n' >scripts/ci/generate-tool-versions.py
+	printf 'echo install\n' >scripts/utils/install-tools.sh
 	printf 'unrelated\n' >README.md
 	git add -A
 	git commit --quiet -m 'base'
@@ -47,6 +49,15 @@ setup() {
 	git commit --quiet -m 'bump ruff'
 	CANDIDATE_FULL="$(git rev-parse HEAD)"
 	CANDIDATE_ABBREV="${CANDIDATE_FULL:0:12}"
+
+	# push-digest commits the built image's digest on top of the branch, so
+	# the PR head is a descendant of the commit the candidate tag names, not
+	# that commit itself. The guard has to resolve the abbreviation out of
+	# the objects the PR-head fetch brings in.
+	printf 'FROM ghcr.io/lgtm-hq/lintro-tools@sha256:deadbeef\n' >Dockerfile
+	git add -A
+	git commit --quiet -m 'chore(deps): pin tools candidate digest'
+	CANDIDATE_HEAD="$(git rev-parse HEAD)"
 
 	# main receives the same content (a squash merge of the candidate branch).
 	git checkout --quiet main
@@ -223,6 +234,33 @@ run_guard() {
 	assert_failure
 	assert_equal "2" "$status"
 	assert_output --partial "not inside a git repository"
+}
+
+@test "the abbreviation resolves as an ancestor of the PR head" {
+	# The PR head is the digest-pin commit, one past the build commit.
+	[ "$CANDIDATE_HEAD" != "$CANDIDATE_FULL" ]
+
+	run run_guard env
+	assert_success
+	assert_output --partial "match candidate commit ${CANDIDATE_FULL}"
+
+	# The fetch landed the descendant; the abbreviation was resolved from
+	# the objects it brought in.
+	run git rev-parse refs/lintro/tools-candidate
+	assert_success
+	assert_output "$CANDIDATE_HEAD"
+}
+
+@test "refuses when only the installer changed on main" {
+	# install-tools.sh --docker decides what actually lands in the image.
+	printf 'echo install  # now installs more\n' >scripts/utils/install-tools.sh
+	git add -A
+	git commit --quiet -m 'feat(tools): install another binary'
+
+	run run_guard env
+	assert_failure
+	assert_output --partial "refusing to promote: main has newer tool manifest commits"
+	assert_output --partial "scripts/utils/install-tools.sh"
 }
 
 @test "refusal is written to the step summary" {

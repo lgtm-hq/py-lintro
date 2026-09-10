@@ -94,6 +94,11 @@ fi
 # build, and the gates re-render with main's code, so a generator change
 # alone can move the rendered manifest out from under a candidate.
 #
+# So do the installers the recipe runs: install-tools.sh --docker (with the
+# install-semgrep.sh and utils.sh it pulls in) decides which binaries and
+# versions actually land in the image, so a candidate built from an older
+# installer can miss what main's manifest now expects.
+#
 # tests/scripts/test_manifest_staleness_inputs.py fails if this list and the
 # generator's declared inputs drift apart.
 DEFAULT_MANIFEST_PATHS='
@@ -105,6 +110,10 @@ pyproject.toml
 requirements-semgrep.txt
 lintro_build/
 scripts/ci/generate-tool-versions.py
+scripts/ci/generate-builtin-tool-index.py
+scripts/utils/install-tools.sh
+scripts/utils/install-semgrep.sh
+scripts/utils/utils.sh
 docker/tools.Dockerfile
 '
 
