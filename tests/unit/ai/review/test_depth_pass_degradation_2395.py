@@ -279,6 +279,64 @@ async def test_degraded_sweep_warns_on_every_surface(
     assert_that(note).contains("Every chunk was reviewed")
 
 
+async def test_both_depth_passes_failing_still_keeps_the_main_pass(
+    tmp_path: Path,
+) -> None:
+    """Losing depth 2 *and* depth 3 costs depth, never the chunk (#2395).
+
+    The two passes are guarded independently, so a chunk that loses both must
+    still deliver its main-pass findings and record one degradation per lost
+    pass rather than collapsing them into a single "something failed" note.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    calls: list[int] = []
+
+    async def _call(**_kwargs: object) -> AIResponse:
+        """Answer only the main pass; fail the depth-2 and depth-3 calls.
+
+        Args:
+            **_kwargs: Provider-call keywords the seam ignores.
+
+        Returns:
+            The scripted main-pass response.
+
+        Raises:
+            AIProviderError: On the first and third calls.
+        """
+        calls.append(1)
+        if len(calls) == 2:
+            return _main_pass_response()
+        raise AIProviderError(_TIMEOUT_TEXT)
+
+    result = await _run(
+        tmp_path=tmp_path,
+        depth=3,
+        call_ai=AsyncMock(side_effect=_call),
+    )
+
+    assert_that([finding.title for finding in result.findings]).is_equal_to(
+        ["Main-pass finding"],
+    )
+    assert_that(result.metadata.partial).is_false()
+    assert_that(
+        [item.reason for item in result.metadata.coverage_degradations],
+    ).is_equal_to(
+        [
+            CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
+            CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
+        ],
+    )
+
+    note = describe_coverage_degradations(metadata=result.metadata)
+
+    assert_that(note).contains("the depth-2 generated-questions pass failed")
+    assert_that(note).contains("the depth-3 adversarial sweep failed")
+    # One chunk lost both passes: the clauses must not double-count it.
+    assert_that(note).does_not_contain("2 chunks")
+
+
 async def test_generated_questions_failure_still_runs_the_main_pass(
     tmp_path: Path,
 ) -> None:

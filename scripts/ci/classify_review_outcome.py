@@ -396,6 +396,12 @@ def _degraded_report(
     ``findings_coverage_complete == false`` means the finding set is not a
     guaranteed full one, so the check must not read as a clean pass (#2395).
 
+    Being red must not cost the reader anything a green round would have
+    told them, so the headline carries the same findings news
+    :func:`_reviewed_report` renders -- the P1 count, or the inline-post
+    failure that sent the findings to the sticky comment alone -- and the
+    detail carries that failure's reason alongside the degradation reasons.
+
     Nothing is reported at :data:`REVIEW_STATUS_ERROR`, for the same reason
     the converged branch stands down there: something broke after the
     envelope was printed, and that failure is the news.
@@ -406,8 +412,8 @@ def _degraded_report(
         transport: Active transport named on the headline.
 
     Returns:
-        Report that reddens the check and names every recorded reason, or
-        ``None`` when the run's finding depth was complete.
+        Report that reddens the check, names the findings news and every
+        recorded reason, or ``None`` when the finding depth was complete.
     """
     if status == REVIEW_STATUS_ERROR:
         return None
@@ -416,16 +422,27 @@ def _degraded_report(
         return None
     reasons = [str(reason) for reason in degraded.get("reasons") or []]
     named = ", ".join(reasons) if reasons else "reason not recorded"
+    inline_failure = _parse_inline_post_failure(text=output)
+    news = _findings_news(
+        findings=bool(degraded.get("has_p1_findings")),
+        inline_failure=inline_failure,
+    )
+    detail = f"Coverage degradations: {named}."
+    inline_reason = (
+        str(inline_failure.get("reason") or "") if inline_failure is not None else ""
+    )
+    if inline_reason:
+        detail = f"{detail} {inline_reason}"
     return OutcomeReport(
         outcome=ReviewOutcome.DEGRADED,
         headline=_with_transport(
             transport=transport,
             headline=(
-                "partial review — finding depth was limited; "
+                f"partial review — {news}; finding depth was limited, "
                 "not a guaranteed full finding set"
             ),
         ),
-        detail=f"Coverage degradations: {named}.",
+        detail=detail,
         exit_code=1,
         transport=transport,
     )
@@ -651,6 +668,32 @@ def _incomplete_report(
     )
 
 
+def _findings_news(
+    *,
+    findings: bool,
+    inline_failure: Mapping[str, Any] | None,
+) -> str:
+    """Describe what happened to this round's findings.
+
+    Shared by :func:`_reviewed_report` and :func:`_degraded_report` so a
+    degraded round reports the same findings news as a full one; without it
+    the depth-axis headline silently dropped the P1 count and the
+    inline-post failure a complete review would have named (#2395).
+
+    Args:
+        findings: True when the review posted P1 findings.
+        inline_failure: Inline-post failure envelope, or ``None`` when the
+            inline comments went up normally.
+
+    Returns:
+        A fragment naming where the findings went, or whether there were any.
+    """
+    if inline_failure is not None:
+        kind = str(inline_failure.get("kind") or "unknown")
+        return f"findings posted to the sticky comment only ({kind})"
+    return "P1 findings posted" if findings else "no P1 findings"
+
+
 def _reviewed_report(
     *,
     findings: bool,
@@ -673,16 +716,10 @@ def _reviewed_report(
     Returns:
         Green report; the review itself produced a result.
     """
-    if inline_failure is not None:
-        kind = str(inline_failure.get("kind") or "unknown")
-        headline = f"reviewed — findings posted to the sticky comment only ({kind})"
-    elif findings:
-        headline = "reviewed — P1 findings posted"
-    else:
-        headline = "reviewed — no P1 findings"
+    news = _findings_news(findings=findings, inline_failure=inline_failure)
     return OutcomeReport(
         outcome=ReviewOutcome.REVIEWED,
-        headline=_with_transport(transport=transport, headline=headline),
+        headline=_with_transport(transport=transport, headline=f"reviewed — {news}"),
         detail=(
             str(inline_failure.get("reason") or "")
             if inline_failure is not None
