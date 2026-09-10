@@ -6,9 +6,11 @@ from __future__ import annotations
 
 import http.client
 import importlib.util
+import io
 import json
 import sys
 import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -423,6 +425,71 @@ def test_missing_workflow_runs_key_fails_open(
     assert_that(result.output).contains("publish_green=true")
     assert_that(result.summary).contains("workflow_runs missing")
     assert_that(result.summary).contains("could not be evaluated")
+
+
+def test_fail_open_emits_a_workflow_warning_annotation(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A verdict-less fail-open annotates the run, not just the summary."""
+    degraded = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        error=urllib.error.URLError("connection refused"),
+    )
+    healthy = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[_run_payload(head_branch="v0.152.7")],
+    )
+
+    assert_that(degraded.stdout).contains("::warning title=Publish gate::")
+    assert_that(degraded.stdout).contains("failed open")
+    assert_that(degraded.stdout).contains("publish-pypi-on-tag.yml")
+    # A gate that did reach a verdict must not cry wolf.
+    assert_that(healthy.stdout).does_not_contain("::warning")
+
+
+def test_fetch_text_refuses_non_https_urls(module: Any) -> None:
+    """The fetcher may not be pointed at file:// or plain HTTP."""
+    assert_that(module.fetch_text).raises(ValueError).when_called_with(
+        url="http://api.github.com/repos/lgtm-hq/py-lintro",
+    )
+    assert_that(module.fetch_text).raises(ValueError).when_called_with(
+        url="file:///etc/passwd",
+    )
+
+
+def test_fetch_text_sends_the_token_only_to_the_github_api(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The bearer token is attached for api.github.com and nowhere else."""
+    seen: list[urllib.request.Request] = []
+
+    def _urlopen(
+        request: urllib.request.Request,
+        timeout: int | None = None,
+    ) -> io.BytesIO:
+        seen.append(request)
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setenv("GH_TOKEN", "s3cret")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
+
+    module.fetch_text(url="https://api.github.com/repos/lgtm-hq/py-lintro")
+    module.fetch_text(url="https://raw.githubusercontent.com/lgtm-hq/py-lintro/main/x")
+
+    assert_that(seen).is_length(2)
+    assert_that(seen[0].get_header("Authorization")).is_equal_to("Bearer s3cret")
+    assert_that(seen[1].get_header("Authorization")).is_none()
 
 
 def test_version_tag_recognition(module: Any) -> None:

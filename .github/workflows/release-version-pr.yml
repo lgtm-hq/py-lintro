@@ -75,7 +75,12 @@ jobs:
 
   version-pr:
     needs: [publish-gate]
-    if: needs.publish-gate.outputs.publish_green == 'true'
+    # Fail open on a missing verdict, not just on a green one. If the gate job
+    # itself dies (harden-runner, checkout, a runner loss) the output is empty,
+    # and gating on `== 'true'` would silently freeze every release until
+    # somebody noticed. The gate is a skip, not an error (#2516): only an
+    # explicit `false` — a publish that really did fail — stops the version PR.
+    if: always() && needs.publish-gate.outputs.publish_green != 'false'
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36 # v0.69.8
     with:

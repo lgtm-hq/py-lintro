@@ -100,10 +100,14 @@ class GateVerdict:
         green: Whether the version PR may proceed.
         summary: Markdown line explaining the verdict, written to the job
             summary and to stdout.
+        warning: Text of a ``::warning::`` workflow command to emit, set when
+            the gate failed open without reaching a verdict. A summary line
+            alone is easy to miss; the annotation surfaces on the run itself.
     """
 
     green: bool
     summary: str
+    warning: str | None = None
 
 
 def fetch_text(*, url: str, timeout: int = DEFAULT_TIMEOUT_SECONDS) -> str:
@@ -261,6 +265,11 @@ def evaluate(
                 "proceeds (the gate never fails the release train on its own "
                 "errors)."
             ),
+            warning=(
+                f"The last {workflow} tag run could not be read ({detail}); "
+                "the publish gate failed open and the version PR proceeds "
+                "unchecked."
+            ),
         )
     completed = [run for run in runs if str(run.get("status", "")) == _COMPLETED]
     if not completed:
@@ -378,6 +387,11 @@ def main(argv: list[str] | None = None) -> int:
         force=args.force,
     )
     print(verdict.summary)
+    if verdict.warning:
+        # A job-summary paragraph is easy to scroll past; an annotation shows
+        # on the run itself, so a gate that never reached a verdict is visible
+        # without opening the summary.
+        print(f"::warning title=Publish gate::{verdict.warning}")
     _write_summary(text=verdict.summary)
     _write_output(green=verdict.green)
     return EXIT_OK

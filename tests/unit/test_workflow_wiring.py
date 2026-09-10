@@ -247,8 +247,11 @@ def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
     version_pr = workflow["jobs"]["version-pr"]
 
     assert_that(version_pr["needs"]).contains("publish-gate")
+    # Fail open on a *missing* verdict: if the gate job dies before its script
+    # writes the output, `== 'true'` would freeze every release. Only an
+    # explicit `false` stops the version PR.
     assert_that(_normalize_github_expr(version_pr["if"])).is_equal_to(
-        "needs.publish-gate.outputs.publish_green == 'true'",
+        "always() && needs.publish-gate.outputs.publish_green != 'false'",
     )
     # Read-only: the gate inspects run conclusions and touches nothing else.
     assert_that(gate["permissions"]).is_equal_to({"actions": "read"})
@@ -277,6 +280,69 @@ def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
     assert_that(_normalize_github_expr(str(gate_step["run"]))).is_equal_to(
         f'python3 {gate_script} "${{FORCE_FLAG}}"',
     )
+
+
+def _module_constant(*, script: Path, name: str) -> str:
+    """Return a module-level string constant from a standalone CI script.
+
+    The scripts are hyphenated and executable, so they are read as source
+    rather than imported.
+
+    Args:
+        script: Path to the script.
+        name: Name of the module-level constant.
+
+    Raises:
+        AssertionError: If the script defines no such constant.
+
+    Returns:
+        The constant's string value.
+    """
+    tree = ast.parse(script.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == name:
+                value = ast.literal_eval(node.value)
+                assert_that(value).is_instance_of(str)
+                return cast(str, value)
+    raise AssertionError(f"{name} not found in {script.name}")
+
+
+def test_release_helpers_name_the_real_publish_workflow_file() -> None:
+    """Both release helpers must name the live publish workflow file.
+
+    ``publish_green``/skew both hinge on a workflow *file name* passed to the
+    Actions API, which answers an empty run list for an unknown file rather
+    than erroring. Renaming the workflow would therefore turn both checks into
+    permanent, silent all-clears. Resolve the file from its ``name:`` so the
+    rename breaks a test instead.
+    """
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    matches = [
+        path.name
+        for path in _workflow_paths()
+        if _load_workflow(name=path.name).get("name") == "Publish - PyPI Production"
+    ]
+    assert_that(matches).described_as(
+        "exactly one workflow is named 'Publish - PyPI Production'",
+    ).is_length(1)
+    publish_workflow = matches[0]
+    assert_that((workflows_dir / publish_workflow).is_file()).is_true()
+
+    scripts_dir = _REPO_ROOT / "scripts" / "ci"
+    for script_name, constant in (
+        ("check-last-publish-green.py", "DEFAULT_WORKFLOW"),
+        ("check-release-version-skew.py", "DEFAULT_RELEASE_WORKFLOW"),
+    ):
+        value = _module_constant(
+            script=scripts_dir / script_name,
+            name=constant,
+        )
+        assert_that(value).described_as(
+            f"{script_name}:{constant} must name the publish workflow file",
+        ).is_equal_to(publish_workflow)
 
 
 def test_version_pr_finalizes_docs_via_dedicated_script() -> None:
