@@ -872,9 +872,11 @@ ai:
   max_retries: 2
 
   # Retries for HTTP 429 (rate limit) only; other transient failures keep
-  # max_retries. When the provider sends Retry-After, lintro waits exactly
-  # that long instead of its backoff. Exhausting this budget fails with a
-  # message naming the rate limit and asking for a rerun.
+  # max_retries. When the provider sends Retry-After, lintro waits that long
+  # instead of its backoff, up to a fixed, non-configurable 300 second cap.
+  # A Retry-After above 300 seconds, or one that is malformed or already in
+  # the past, falls back to the exponential backoff. Exhausting this budget
+  # fails with a message naming the rate limit and asking for a rerun.
   # (int 0–20, default: 6)
   rate_limit_max_retries: 6
 

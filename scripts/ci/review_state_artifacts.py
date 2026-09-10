@@ -653,10 +653,14 @@ def fetch_run(
         run_id: Actions run id.
         gh_api: Injectable GitHub API caller.
 
+    Transient ``gh api`` failures are retried like every other read in
+    this module: rejecting the current run after one timeout would send
+    a rerun back to older state it has already superseded.
+
     Returns:
         The parsed run, or ``None`` when the call or the payload fails.
     """
-    payload = gh_api(f"repos/{repo}/actions/runs/{run_id}")
+    payload = _call_with_retry(f"repos/{repo}/actions/runs/{run_id}", gh_api)
     if not isinstance(payload, Mapping):
         return None
     return parse_workflow_run(payload)

@@ -1600,6 +1600,9 @@ def test_workflow_locates_prior_state_via_existing_script() -> None:
     assert_that(env["PR_NUMBER"]).is_equal_to("${{ github.event.number }}")
     assert_that(env["GITHUB_REPOSITORY"]).is_equal_to("${{ github.repository }}")
     assert_that(env["GITHUB_RUN_ID"]).is_equal_to("${{ github.run_id }}")
+    # A rerun keeps run_id and bumps run_attempt; the locator needs both to
+    # resume this run's own cancelled attempt (#2506).
+    assert_that(env["GITHUB_RUN_ATTEMPT"]).is_equal_to("${{ github.run_attempt }}")
     assert_that(env["GH_TOKEN"]).is_equal_to("${{ secrets.GITHUB_TOKEN }}")
     for credential_env in PROVIDER_CREDENTIAL_ENVS:
         assert_that(env).does_not_contain_key(credential_env)

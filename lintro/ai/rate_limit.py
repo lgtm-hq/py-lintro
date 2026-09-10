@@ -12,6 +12,7 @@ header degrades to ``None``, which leaves the caller on its own backoff.
 
 from __future__ import annotations
 
+import math
 import time
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -39,9 +40,9 @@ def parse_retry_after(
             HTTP-date. Defaults to the current time.
 
     Returns:
-        A non-negative delay in seconds capped at
+        A non-negative, finite delay in seconds capped at
         :data:`MAX_RETRY_AFTER_SECONDS`, or ``None`` when the value is
-        absent, malformed, or already in the past.
+        absent, malformed, non-finite, or already in the past.
     """
     if raw is None:
         return None
@@ -51,7 +52,10 @@ def parse_retry_after(
     seconds = _parse_delta_seconds(text)
     if seconds is None:
         seconds = _parse_http_date_delta(text, now_timestamp=now_timestamp)
-    if seconds is None or seconds < 0:
+    # ``float()`` accepts "nan" and "inf", which RFC 9110 delta-seconds
+    # never are. ``nan`` evades the negative test and survives ``min``,
+    # and ``asyncio.sleep(nan)`` raises rather than backing off.
+    if seconds is None or not math.isfinite(seconds) or seconds < 0:
         return None
     return min(seconds, MAX_RETRY_AFTER_SECONDS)
 

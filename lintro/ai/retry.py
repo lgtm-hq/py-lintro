@@ -130,7 +130,9 @@ def with_retry(
 
     ``AIRateLimitError`` (HTTP 429) is handled apart from the other
     transient failures (#2506): it gets ``rate_limit_max_retries``
-    attempts rather than ``max_retries``, and when the provider sent a
+    attempts rather than ``max_retries``, counted on its own counter so
+    neither budget can be spent by the other error type, and when the
+    provider sent a
     ``Retry-After`` header the wait is exactly that value — unjittered,
     because the server named the instant its bucket refills. Exhausting
     the 429 budget raises an ``AIRateLimitError`` whose message names the
@@ -183,48 +185,51 @@ def with_retry(
 
         @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
-            """Await the wrapped call, retrying transient failures."""
-            last_exception: Exception | None = None
-            ceiling = max(max_retries, rate_limit_max_retries)
-            for attempt in range(ceiling + 1):
+            """Await the wrapped call, retrying transient failures.
+
+            The two budgets are counted separately: a run of 5xx errors
+            must not eat the 429 allowance, and one 429 must not spend
+            the transient-failure allowance. Every branch returns,
+            raises, or sleeps and increments exactly one counter, and
+            both counters are bounded, so the loop always terminates.
+            """
+            rate_limit_retries = 0
+            transient_retries = 0
+            while True:
                 try:
                     return await func(*args, **kwargs)
                 except AIAuthenticationError:
                     raise  # Never retry auth errors
                 except AIRateLimitError as e:
-                    last_exception = e
-                    budget = rate_limit_max_retries
-                    if attempt >= budget:
+                    if rate_limit_retries >= rate_limit_max_retries:
                         raise AIRateLimitError(
-                            RATE_LIMIT_EXHAUSTED_HINT.format(retries=budget)
+                            RATE_LIMIT_EXHAUSTED_HINT.format(
+                                retries=rate_limit_max_retries,
+                            )
                             + f" Last provider error: {e}",
                             retry_after=e.retry_after,
                         ) from e
                     await _sleep_before_retry(
                         error=e,
-                        attempt=attempt,
-                        budget=budget,
+                        attempt=rate_limit_retries,
+                        budget=rate_limit_max_retries,
                         base_delay=base_delay,
                         max_delay=max_delay,
                         backoff_factor=backoff_factor,
                     )
+                    rate_limit_retries += 1
                 except AIProviderError as e:
-                    last_exception = e
-                    budget = max_retries
-                    if attempt >= budget:
+                    if transient_retries >= max_retries:
                         raise
                     await _sleep_before_retry(
                         error=e,
-                        attempt=attempt,
-                        budget=budget,
+                        attempt=transient_retries,
+                        budget=max_retries,
                         base_delay=base_delay,
                         max_delay=max_delay,
                         backoff_factor=backoff_factor,
                     )
-            assert (
-                last_exception is not None
-            ), "Retry loop exhausted without capturing an exception"
-            raise last_exception
+                    transient_retries += 1
 
         return wrapper
 

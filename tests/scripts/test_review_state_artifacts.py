@@ -10,6 +10,7 @@ import re
 import sys
 import time
 import zipfile
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
@@ -1205,7 +1206,7 @@ def _own_attempt_gh_api(
     current_run_artifacts: list[dict[str, Any]],
     run_event: str = "pull_request_target",
     run_prs: list[dict[str, int]] | None = None,
-) -> Any:
+) -> Callable[[str], dict[str, Any]]:
     """Build a ``gh api`` fake for the rerun-resume tests (#2506).
 
     Run 500 is the current run; run 200 is an older completed run that
@@ -1414,3 +1415,54 @@ def test_state_artifact_attempt_parses_the_generated_name(
     assert_that(artifacts.state_artifact_attempt(name, pr_number=1)).is_none()
     legacy = "lintro-review-state-pr-15-inline"
     assert_that(artifacts.state_artifact_attempt(legacy, pr_number=15)).is_none()
+
+
+def test_rerun_resume_retries_a_failed_current_run_lookup(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One transient ``gh api`` failure must not reject the current run.
+
+    Without the retry the locator would fall back to run 200 — older
+    state this attempt has already superseded.
+
+    Args:
+        artifacts: The loaded helper module.
+        monkeypatch: Fixture used to neutralize the retry sleep.
+    """
+    monkeypatch.setattr(artifacts, "_retry_sleep", lambda _seconds: None)
+    inner = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": False,
+            },
+        ],
+    )
+    run_lookups = 0
+
+    def gh_api(path: str) -> dict[str, Any] | None:
+        """Fail the first current-run lookup, then delegate.
+
+        Args:
+            path: REST path requested by the locator.
+
+        Returns:
+            The payload, or ``None`` on the first run lookup.
+        """
+        nonlocal run_lookups
+        if path == "repos/lgtm-hq/py-lintro/actions/runs/500":
+            run_lookups += 1
+            if run_lookups == 1:
+                return None
+        return inner(path)
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(500)
+    assert_that(run_lookups).is_equal_to(2)

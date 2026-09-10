@@ -25,6 +25,9 @@ from lintro.ai.rate_limit import (
         ("", None),
         ("soon", None),
         ("-5", None),
+        ("nan", None),
+        ("inf", None),
+        ("-inf", None),
     ],
 )
 def test_parse_retry_after_reads_delta_seconds(
@@ -38,6 +41,17 @@ def test_parse_retry_after_reads_delta_seconds(
         expected: Expected parsed delay.
     """
     assert_that(parse_retry_after(raw)).is_equal_to(expected)
+
+
+def test_non_finite_values_never_reach_the_sleep_call() -> None:
+    """``float()`` accepts nan/inf; RFC 9110 delta-seconds never are.
+
+    ``nan`` in particular evades a plain ``< 0`` test and survives
+    ``min``, so it would reach ``asyncio.sleep`` and raise instead of
+    falling back to the exponential backoff.
+    """
+    for raw in ("nan", "NaN", "inf", "Infinity", "-inf"):
+        assert_that(parse_retry_after(raw)).described_as(raw).is_none()
 
 
 def test_parse_retry_after_reads_an_http_date() -> None:
