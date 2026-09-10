@@ -86,6 +86,18 @@ workflow resolves the Renovate-pinned codex version, installs it and decodes the
 into the session file before the review step; with the secret unset the run fails
 visibly at the credential gate.
 
+On that lane lintro sends **no** `--model` unless one is configured (#2537). The two
+codex credentials do not accept the same models: an API key reaches the OpenAI API
+catalogue and still gets the provider default (`gpt-4o`), while a ChatGPT-plan session
+reaches only that plan's models and rejects an API-catalogue name outright — the whole
+call fails with
+`The 'gpt-4o' model is not supported when using Codex with a ChatGPT account`. The plan
+catalogue is per-account and renames often, so lintro defers to codex's own default
+rather than pinning a slug that would break on the next rename. Set `ai.model` (or
+`LINTRO_AI_MODEL`) to override; an explicit model is always honoured. The credential is
+detected from `$CODEX_HOME/auth.json` — `CODEX_HOME`, not `$HOME`, because CI restores
+the session outside the home directory.
+
 ## Reported numbers
 
 Per-run sticky state records `transport`, `auth_mode`, and `cost_basis` (`billed` /
