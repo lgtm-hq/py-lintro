@@ -1162,6 +1162,7 @@ def test_doctor_self_check_highlighting_reports_ok_and_skips_probes() -> None:
         ) as mock_check,
         patch(
             "lintro.cli_utils.commands.doctor.collect_tool_checks",
+            return_value=[],
         ) as mock_probe,
     ):
         result = runner.invoke(doctor_command, ["--self-check-highlighting"])
@@ -1170,6 +1171,11 @@ def test_doctor_self_check_highlighting_reports_ok_and_skips_probes() -> None:
     assert_that(result.output).contains("OK syntax highlighting diff -> DiffLexer")
     assert_that(mock_check.call_count).is_equal_to(1)
     assert_that(mock_probe.call_count).is_equal_to(0)
+    # A call-count of zero only pins the probe helper. Pin the user-visible
+    # outcome too: none of the tool table or summary rendering may reach the
+    # terminal, whatever route a regression takes to produce it.
+    assert_that(result.output).does_not_contain("Lintro Doctor")
+    assert_that(result.output).does_not_contain("Summary:")
 
 
 def test_doctor_self_check_highlighting_fails_with_exit_one() -> None:
@@ -1188,6 +1194,7 @@ def test_doctor_self_check_highlighting_fails_with_exit_one() -> None:
         ),
         patch(
             "lintro.cli_utils.commands.doctor.collect_tool_checks",
+            return_value=[],
         ) as mock_probe,
     ):
         result = runner.invoke(doctor_command, ["--self-check-highlighting"])
@@ -1197,16 +1204,22 @@ def test_doctor_self_check_highlighting_fails_with_exit_one() -> None:
         "FAIL syntax highlighting python fell back to TextLexer",
     )
     assert_that(mock_probe.call_count).is_equal_to(0)
+    assert_that(result.output).does_not_contain("Lintro Doctor")
+    assert_that(result.output).does_not_contain("Summary:")
 
 
 @pytest.mark.parametrize(
     "conflicting_flag",
-    ["--json", "--report", "--ai-liveness"],
+    ["--json", "--report", "--ai-liveness", "--fix"],
 )
 def test_doctor_self_check_highlighting_rejects_other_output_flags(
     conflicting_flag: str,
 ) -> None:
-    """Reporting and probe flags are rejected, not silently ignored.
+    """Reporting, probe and repair flags are rejected, not silently ignored.
+
+    ``--fix`` matters most: the self-check branch exits before ``_run_fix``,
+    so a combined invocation would install nothing and still report success
+    (#2484).
 
     Args:
         conflicting_flag: The flag combined with ``--self-check-highlighting``.
@@ -1224,6 +1237,59 @@ def test_doctor_self_check_highlighting_rejects_other_output_flags(
     assert_that(result.exit_code).is_equal_to(2)
     assert_that(result.output).contains("--self-check-highlighting cannot be combined")
     assert_that(mock_check.call_count).is_equal_to(0)
+
+
+def test_doctor_self_check_highlighting_fails_closed_on_stray_failures() -> None:
+    """A result claiming ``ok`` while carrying failures still exits non-zero.
+
+    ``check_syntax_highlighting`` derives ``ok`` from ``failures``, so the two
+    agree today. This is a release gate run against the frozen binary, so the
+    exit code is pinned to fail closed: a future result type that lets the two
+    fields disagree must not turn a recorded failure into a green build
+    (#2484).
+    """
+    inconsistent = HighlightingCheckResult(
+        ok=True,
+        details=("diff -> DiffLexer",),
+        failures=("python fell back to TextLexer",),
+    )
+    runner = CliRunner()
+
+    with patch(
+        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+        return_value=inconsistent,
+    ):
+        result = runner.invoke(doctor_command, ["--self-check-highlighting"])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains(
+        "FAIL syntax highlighting python fell back to TextLexer",
+    )
+
+
+def test_doctor_self_check_highlighting_escapes_rich_markup() -> None:
+    """Bracketed lexer or exception text is printed literally, not as markup.
+
+    Failure lines interpolate ``repr()``d exception text, which routinely
+    contains square brackets; unescaped, Rich would swallow them as console
+    markup tags and the build gate's diagnostic would lose the detail that
+    explains it.
+    """
+    bracketed = HighlightingCheckResult(
+        ok=False,
+        details=(),
+        failures=("[not-a-tag] boom",),
+    )
+    runner = CliRunner()
+
+    with patch(
+        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+        return_value=bracketed,
+    ):
+        result = runner.invoke(doctor_command, ["--self-check-highlighting"])
+
+    assert_that(result.exit_code).is_equal_to(1)
+    assert_that(result.output).contains("FAIL syntax highlighting [not-a-tag] boom")
 
 
 def test_doctor_self_check_highlighting_still_rejects_unknown_tools() -> None:

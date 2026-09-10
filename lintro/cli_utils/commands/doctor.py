@@ -23,6 +23,7 @@ from functools import partial
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.text import Text
 
 from lintro.ai.doctor_checks import (
@@ -438,11 +439,18 @@ def doctor_command(
         self_check_highlighting: Run the syntax-highlighting build check and
             exit, skipping every tool probe.
 
+    ``--self-check-highlighting`` rejects every flag that would change what it
+    prints or what it probes: ``--report``, ``--json``, ``--ai-liveness`` and
+    ``--fix``. ``--tools`` is still validated (an unknown name exits 1) and
+    ``--verbose``/``--all`` are accepted, but all three are then ignored: the
+    self-check has one output shape and probes no tool.
+
     Raises:
         SystemExit: When missing or broken tools are detected.
         click.UsageError: When --fix is combined with --report or --json, when
-            --self-check-highlighting is combined with --report, --json or
-            --ai-liveness, or when an ``LINTRO_AI_*`` overlay fails validation.
+            --self-check-highlighting is combined with --report, --json,
+            --ai-liveness or --fix, or when an ``LINTRO_AI_*`` overlay fails
+            validation.
 
     Examples:
         lintro doctor
@@ -460,12 +468,15 @@ def doctor_command(
     if fix and (report or json_output):
         raise click.UsageError("--fix cannot be combined with --report or --json")
     # #2484: --self-check-highlighting is a hidden, single-purpose build check
-    # with one output shape. It honours none of the reporting or probe flags, so
-    # combining them is rejected rather than silently ignored.
-    if self_check_highlighting and (report or json_output or ai_liveness):
+    # with one output shape. It honours none of the reporting, probe or repair
+    # flags, so combining them is rejected rather than silently ignored. --fix
+    # in particular exits through the self-check branch below without ever
+    # reaching _run_fix, so a combined invocation would install nothing and
+    # still report success.
+    if self_check_highlighting and (report or json_output or ai_liveness or fix):
         raise click.UsageError(
-            "--self-check-highlighting cannot be combined with --report, --json "
-            "or --ai-liveness",
+            "--self-check-highlighting cannot be combined with --report, --json, "
+            "--ai-liveness or --fix",
         )
 
     registry = ManifestRegistry.load()
@@ -493,11 +504,20 @@ def doctor_command(
     # short-circuited into a success.
     if self_check_highlighting:
         result = check_syntax_highlighting()
+        # The detail and failure lines carry lexer names and repr()d exception
+        # text, either of which can contain square brackets that Rich would
+        # otherwise read as console markup.
         for line in result.details:
-            display_console.print(f"  [green]OK[/green] syntax highlighting {line}")
+            display_console.print(
+                f"  [green]OK[/green] syntax highlighting {escape(line)}",
+            )
         for failure in result.failures:
-            display_console.print(f"  [red]FAIL[/red] syntax highlighting {failure}")
-        raise SystemExit(0 if result.ok else 1)
+            display_console.print(
+                f"  [red]FAIL[/red] syntax highlighting {escape(failure)}",
+            )
+        # A release gate fails closed: any recorded failure exits 1 even if the
+        # result claims ``ok``, so the two fields cannot disagree in our favour.
+        raise SystemExit(0 if result.ok and not result.failures else 1)
 
     env_report = None
     if verbose or report or json_output:
