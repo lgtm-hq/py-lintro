@@ -1800,8 +1800,11 @@ def test_build_binary_pins_setup_uv_version() -> None:
 # Every publishing step and job carries the same opt-in disjunction. Asserting
 # it by substring lets an inverted or conjunctive rewrite through, so the tests
 # below pin the literal disjunct *and* evaluate the whole condition against the
-# three payloads that matter. build-binary.yml is read from the tag, so a
-# regression here passes every PR and only shows up at the release.
+# three payloads that matter. These tests read the working tree, so a gate
+# regression reddens the PR that introduces it - which is the point, because
+# the gate's runtime behaviour is only exercised on a tag run or a manual
+# dispatch. Neither happens on a PR, so this file is the only place a broken
+# gate can be caught before it reaches a published release.
 
 _UPLOAD_OPT_IN_DISJUNCTION = (
     "(inputs.release_tag != '' || inputs.upload_to_release == true)"
@@ -2033,8 +2036,12 @@ def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
     binaries are rebuilt and its dispatch default is ``arm64``, so a repair
     left on the default never produces the macOS x86_64 asset, never runs
     ``create-universal-binary`` and never re-pings the tap - both jobs are
-    gated on ``inputs.arch == 'universal'``. The README has to name both
-    inputs, so pin that here rather than trusting prose to stay complete.
+    gated on ``inputs.arch == 'universal'``. The dispatch ref matters just as
+    much and is not an input at all: the workflow builds the ref it was
+    dispatched from while ``get-release-info`` resolves the latest published
+    release either way, so a repair run from ``main`` publishes main-HEAD onto
+    a shipped release. The README has to name both inputs and the ref, so pin
+    that here rather than trusting prose to stay complete.
     """
     readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
         encoding="utf-8",
@@ -2050,7 +2057,9 @@ def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
     assert_that(repair).described_as(
         "the repair bullet must name both inputs a full repair needs",
     ).is_not_empty()
-    for token in ("upload_to_release", "arch", "universal", "arm64"):
+    # "ref" and "tag" carry the dispatch-ref prerequisite, which is not an
+    # input and so has no workflow-side assertion to anchor it.
+    for token in ("upload_to_release", "arch", "universal", "arm64", "ref", "tag"):
         assert_that(repair).described_as(
             f"the repair path must mention {token}",
         ).contains(token)

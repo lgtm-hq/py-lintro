@@ -187,10 +187,17 @@ step and the `homebrew-dispatch` job are now gated on
 - **Plain dispatch** (leave `upload_to_release` off): builds, verifies and uploads run
   artifacts only. Nothing on any release is touched. This is the safe way to test a
   build from a branch.
-- **Repair dispatch** (`upload_to_release: true` **and** `arch: universal`): republishes
-  the built binaries onto the release `get-release-info` resolves. Use it only to
-  restore assets a broken run left behind; download the artifacts from the tag run first
-  if you want to compare checksums.
+- **Repair dispatch** (`upload_to_release: true`, `arch: universal`, **run from the
+  release tag**): republishes the built binaries onto the release `get-release-info`
+  resolves. Use it only to restore assets a broken run left behind; download the
+  artifacts from the tag run first if you want to compare checksums.
+  - **Select the release tag as the dispatch ref** ("Use workflow from" in the UI, or
+    `gh workflow run build-binary.yml --ref <tag> ...`). The workflow checks out the ref
+    it was dispatched from, but `get-release-info` resolves the _latest published
+    release_ regardless — so a repair dispatched from `main` compiles main-HEAD and
+    publishes it onto a shipped release under that release's asset names, which is the
+    same corruption #2484 is about, just with the gate honoured. The ref and the release
+    being repaired have to be the same tag.
   - **`arch` decides what gets rebuilt, and its dispatch default is `arm64`, not
     `universal`.** A repair left on the default rebuilds only the macOS arm64 binary
     (both Linux arches build unconditionally); the macOS x86_64 asset is never produced,

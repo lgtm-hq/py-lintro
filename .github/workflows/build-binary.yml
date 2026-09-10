@@ -26,7 +26,7 @@ name: Publish - Homebrew Tap
           - universal
       upload_to_release:
         # yamllint disable-line rule:line-length
-        description: 'Repair path: republish the built binaries onto the latest release. Needs arch=universal to restore every asset and re-ping the tap. Leave off - a plain dispatch only builds and uploads run artifacts.'
+        description: 'Repair path: republish the built binaries onto the latest release. Dispatch from the release tag, with arch=universal, or you publish this ref onto that release. Leave off - a plain dispatch only builds and uploads run artifacts.'
         required: false
         default: false
         type: boolean
