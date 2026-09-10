@@ -108,6 +108,7 @@ async def call_ai(
 
     call_with_retry = with_retry(
         max_retries=ai_config.max_retries,
+        rate_limit_max_retries=ai_config.rate_limit_max_retries,
         base_delay=ai_config.retry_base_delay,
         max_delay=ai_config.retry_max_delay,
         backoff_factor=ai_config.retry_backoff_factor,
