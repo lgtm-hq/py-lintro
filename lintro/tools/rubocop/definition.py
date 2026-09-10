@@ -42,12 +42,36 @@ from lintro.tools.core.option_validators import (
 
 # Constants for RuboCop configuration
 RUBOCOP_DEFAULT_TIMEOUT: int = 60
+#: Mirrors RuboCop's own default ``AllCops/Include`` list so lintro hands it
+#: the same file set it would inspect when run directly — extensionless Ruby
+#: DSL files included. ``*.ru`` covers ``config.ru``.
 RUBOCOP_FILE_PATTERNS: list[str] = [
     "*.rb",
     "*.rake",
     "*.gemspec",
+    "*.ru",
+    "*.thor",
+    "Appraisals",
+    "Berksfile",
+    "Brewfile",
+    "Buildfile",
+    "Capfile",
+    "Cheffile",
+    "Dangerfile",
+    "Deliverfile",
+    "Fastfile",
     "Gemfile",
+    "Guardfile",
+    "Jarfile",
+    "Mavenfile",
+    "Podfile",
+    "Puppetfile",
     "Rakefile",
+    "Snapfile",
+    "Steepfile",
+    "Thorfile",
+    "Vagabondfile",
+    "Vagrantfile",
 ]
 
 #: RuboCop exits 1 to report offenses, which the JSON report accounts for, so
@@ -60,6 +84,38 @@ _CHECK_POLICY: BatchCheckPolicy = BatchCheckPolicy(
     output=BatchOutput.ON_EXIT_FAILURE_WITHOUT_ISSUES,
     report_cwd=True,
 )
+
+
+#: Departments RuboCop itself ships. Their cops are documented on the core
+#: docs sub-site (``docs.rubocop.org/rubocop/``).
+_CORE_DEPARTMENTS: frozenset[str] = frozenset(
+    {
+        "Bundler",
+        "Gemspec",
+        "Layout",
+        "Lint",
+        "Metrics",
+        "Migration",
+        "Naming",
+        "Security",
+        "Style",
+    },
+)
+
+#: Extension departments that publish their cops on their own docs sub-site.
+#: The value is the sub-site slug, which is the gem name and does not always
+#: match the department (``FactoryBot`` ships as ``rubocop-factory_bot``).
+#: An extension outside this table gets no URL rather than a core-site link
+#: that would 404.
+_EXTENSION_DOC_PROJECTS: dict[str, str] = {
+    "Capybara": "rubocop-capybara",
+    "FactoryBot": "rubocop-factory_bot",
+    "Minitest": "rubocop-minitest",
+    "Performance": "rubocop-performance",
+    "RSpec": "rubocop-rspec",
+    "Rails": "rubocop-rails",
+    "ThreadSafety": "rubocop-thread_safety",
+}
 
 
 @register_tool
@@ -125,24 +181,38 @@ class RubocopPlugin(BaseToolPlugin):
     def doc_url(self, code: str) -> str | None:
         """Return the RuboCop documentation URL for a cop.
 
-        RuboCop cop docs live at
-        ``https://docs.rubocop.org/rubocop/cops_<department>.html`` with an
-        anchor derived from the lower-cased cop name (department + cop, no
-        slash). For example ``Layout/SpaceInsideParens`` resolves to
-        ``cops_layout.html#layoutspaceinsideparens``.
+        Cop docs live at ``https://docs.rubocop.org/<project>/cops_
+        <department>.html`` with an anchor derived from the lower-cased cop
+        name (department + cop, no slash). ``<project>`` is ``rubocop`` for a
+        core department and the extension gem's name for an extension one, so
+        ``Layout/SpaceInsideParens`` resolves to
+        ``rubocop/cops_layout.html#layoutspaceinsideparens`` while
+        ``Rails/TimeZone`` resolves to
+        ``rubocop-rails/cops_rails.html#railstimezone``.
 
         Args:
             code: Cop name (e.g., "Layout/SpaceInsideParens").
 
         Returns:
             URL to the cop documentation, or None when the code has no
-            department prefix.
+            department prefix or names an extension whose docs sub-site is not
+            known — a core-site link for such a cop would 404.
         """
         if not code or "/" not in code:
             return None
         department, cop = code.split("/", 1)
+        if department in _CORE_DEPARTMENTS:
+            project = "rubocop"
+        else:
+            extension_project = _EXTENSION_DOC_PROJECTS.get(department)
+            if extension_project is None:
+                return None
+            project = extension_project
         anchor = f"{department}{cop}".replace("/", "").lower()
-        base = DocUrlTemplate.RUBOCOP.format(department=department.lower())
+        base = DocUrlTemplate.RUBOCOP.format(
+            project=project,
+            department=department.lower(),
+        )
         return f"{base}#{anchor}"
 
     def _build_check_command(self, rel_files: list[str]) -> list[str]:
@@ -207,6 +277,19 @@ class RubocopPlugin(BaseToolPlugin):
             cwd=ctx.cwd,
         )
 
+    @staticmethod
+    def _error_text(result: SubprocessResult, *, fallback: str) -> str:
+        """Pick the most informative diagnostic text from a failed run.
+
+        Args:
+            result: The finished subprocess result.
+            fallback: Text to use when both streams are empty.
+
+        Returns:
+            The stderr notice, else the raw stdout, else ``fallback``.
+        """
+        return result.stderr.strip() or result.stdout.strip() or fallback
+
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check Ruby files with RuboCop.
 
@@ -241,9 +324,10 @@ class RubocopPlugin(BaseToolPlugin):
             exit_success=result.success,
             # Surface the diagnostic streams only; the JSON report is already
             # represented by the parsed issues.
-            output=result.stderr.strip()
-            or result.stdout.strip()
-            or "RuboCop exited with an error and no results.",
+            output=self._error_text(
+                result,
+                fallback="RuboCop exited with an error and no results.",
+            ),
             issues=issues,
             policy=_CHECK_POLICY,
             cwd=ctx.cwd,
@@ -284,6 +368,18 @@ class RubocopPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         initial_issues = parse_rubocop_output(output=initial_result.stdout)
+        # A non-zero exit with nothing parsed is a config/runtime error, not a
+        # clean file: autocorrecting on top of it would rewrite sources RuboCop
+        # never managed to inspect.
+        if not initial_result.success and not initial_issues:
+            return self._fix_failure_result(
+                output=self._error_text(
+                    initial_result,
+                    fallback="RuboCop check exited with an error.",
+                ),
+                initial_issues=[],
+                cwd=ctx.cwd,
+            )
 
         fix_cmd = self._build_fix_command(ctx.rel_files)
         logger.debug(f"[RubocopPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
@@ -306,10 +402,9 @@ class RubocopPlugin(BaseToolPlugin):
             output=fix_result.stdout,
         ):
             return self._fix_failure_result(
-                output=(
-                    fix_result.stderr.strip()
-                    or fix_result.stdout.strip()
-                    or "RuboCop autocorrect exited with an error."
+                output=self._error_text(
+                    fix_result,
+                    fallback="RuboCop autocorrect exited with an error.",
                 ),
                 initial_issues=initial_issues,
                 cwd=ctx.cwd,
@@ -326,6 +421,17 @@ class RubocopPlugin(BaseToolPlugin):
                 cwd=ctx.cwd,
             )
         remaining_issues = parse_rubocop_output(output=remaining_result.stdout)
+        # Same fail-closed rule for the verification run: an unparseable
+        # failure is not proof that every offense was corrected.
+        if not remaining_result.success and not remaining_issues:
+            return self._fix_failure_result(
+                output=self._error_text(
+                    remaining_result,
+                    fallback="RuboCop verification exited with an error.",
+                ),
+                initial_issues=initial_issues,
+                cwd=ctx.cwd,
+            )
         return self._fix_success_result(
             initial_issues=initial_issues,
             remaining_issues=remaining_issues,

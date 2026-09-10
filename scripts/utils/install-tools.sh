@@ -1661,12 +1661,31 @@ main() {
 		# Install rubocop (Ruby linter/formatter) as a Ruby gem.
 		echo -e "${BLUE}Installing rubocop...${NC}"
 		RUBOCOP_VERSION=$(get_tool_version "rubocop") || exit 1
+		# --bindir alone only picks the executable directory; the default gem
+		# home is root-owned, so a non-root --local run also needs
+		# --user-install to have a writable gem home. Docker runs as root with
+		# ruby installed by the image, so it keeps the system gem home.
+		RUBOCOP_GEM_ARGS=(install rubocop --version "${RUBOCOP_VERSION}" --no-document --bindir "$BIN_DIR")
+		rubocop_is_docker=0
+		if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+			rubocop_is_docker=1
+		else
+			RUBOCOP_GEM_ARGS+=(--user-install)
+		fi
 		if [ $DRY_RUN -eq 1 ]; then
 			log_info "[DRY-RUN] Would install rubocop v${RUBOCOP_VERSION}"
 		elif ! command -v gem &>/dev/null; then
-			echo -e "${RED}✗ 'gem' (Ruby) not found; cannot install rubocop${NC}"
-			exit 1
-		elif gem install rubocop --version "${RUBOCOP_VERSION}" --no-document --bindir "$BIN_DIR"; then
+			# Ruby is not a lintro prerequisite. In Docker the image installs
+			# it, so a missing gem there is a real image bug; locally it just
+			# means this machine has no Ruby, which must not abort the install
+			# of every remaining tool.
+			if [ "$rubocop_is_docker" -eq 1 ]; then
+				echo -e "${RED}✗ 'gem' (Ruby) not found; cannot install rubocop${NC}"
+				exit 1
+			fi
+			echo -e "${YELLOW}⚠ 'gem' (Ruby) not found; skipping rubocop${NC}"
+			echo -e "${YELLOW}  Install Ruby, then re-run with --tools rubocop${NC}"
+		elif gem "${RUBOCOP_GEM_ARGS[@]}"; then
 			echo -e "${GREEN}✓ rubocop installed successfully${NC}"
 		else
 			echo -e "${RED}✗ Failed to install rubocop${NC}"

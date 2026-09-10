@@ -99,3 +99,53 @@ def test_doc_url_none_for_department_less_code(rubocop_plugin: RubocopPlugin) ->
     """
     assert_that(rubocop_plugin.doc_url("CustomCop")).is_none()
     assert_that(rubocop_plugin.doc_url("")).is_none()
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        (
+            "Rails/TimeZone",
+            "https://docs.rubocop.org/rubocop-rails/cops_rails.html#railstimezone",
+        ),
+        (
+            "RSpec/ExampleLength",
+            "https://docs.rubocop.org/rubocop-rspec/"
+            "cops_rspec.html#rspecexamplelength",
+        ),
+        (
+            "Performance/Detect",
+            "https://docs.rubocop.org/rubocop-performance/"
+            "cops_performance.html#performancedetect",
+        ),
+        (
+            "FactoryBot/AttributeDefinedStatically",
+            "https://docs.rubocop.org/rubocop-factory_bot/"
+            "cops_factorybot.html#factorybotattributedefinedstatically",
+        ),
+    ],
+)
+def test_doc_url_routes_extension_cops_to_their_own_site(
+    rubocop_plugin: RubocopPlugin,
+    code: str,
+    expected: str,
+) -> None:
+    """Extension departments link to their gem's docs sub-site, not the core one.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        code: The cop name.
+        expected: The full expected URL.
+    """
+    assert_that(rubocop_plugin.doc_url(code)).is_equal_to(expected)
+
+
+def test_doc_url_none_for_unknown_extension_department(
+    rubocop_plugin: RubocopPlugin,
+) -> None:
+    """An unmapped extension gets no URL rather than a 404 on the core site.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+    """
+    assert_that(rubocop_plugin.doc_url("Sorbet/FalseSigil")).is_none()

@@ -2801,10 +2801,15 @@ defaults when no `.rubocop.yml` is present.
 ```bash
 # RubyGems (any platform)
 gem install rubocop
-
-# Bundler (project-local)
-bundle add rubocop --group development
 ```
+
+> **Lintro runs the `rubocop` executable it finds on `PATH`, never
+> `bundle exec rubocop`.** A Bundler-only install (`bundle add rubocop`) is therefore
+> invisible to lintro, and extension gems a project loads through `require:` in
+> `.rubocop.yml` (rubocop-rails, rubocop-rspec, …) must also be installed so the PATH
+> copy can load them — for example `gem install rubocop-rails`. Cops from a gem RuboCop
+> cannot load make the run fail rather than silently skip, and lintro surfaces that
+> error.
 
 **File:** `.rubocop.yml` (or `.rubocop.yaml`)
 
@@ -2841,6 +2846,12 @@ lintro format --tools rubocop --tool-options "rubocop:unsafe_fixes=True"
 RuboCop's per-cop configuration (which cops are enabled, their styles, exclusions) is
 driven by its native `.rubocop.yml` rather than lintro `--tool-options`, so existing
 Ruby project conventions are respected automatically.
+
+**Files inspected:** lintro hands RuboCop the files matching RuboCop's own default
+`AllCops/Include` list — `*.rb`, `*.rake`, `*.gemspec`, `*.ru` (so `config.ru` is
+covered), `*.thor`, and the extensionless Ruby DSL files (`Gemfile`, `Rakefile`,
+`Capfile`, `Guardfile`, `Podfile`, `Puppetfile`, `Vagrantfile`, and friends). Narrowing
+that set is `.rubocop.yml`'s `AllCops/Exclude`, as it would be for RuboCop run directly.
 
 ### Shell Tools
 

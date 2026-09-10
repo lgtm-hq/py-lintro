@@ -46,7 +46,9 @@ class DocUrlTemplate(StrEnum):
         "https://pylint.readthedocs.io/en/stable/user_guide/messages/"
         "messages_overview.html"
     )
-    RUBOCOP = "https://docs.rubocop.org/rubocop/cops_{department}.html"
+    # ``project`` is the docs sub-site: "rubocop" for a core department,
+    # "rubocop-rails" and friends for an extension gem's cops.
+    RUBOCOP = "https://docs.rubocop.org/{project}/cops_{department}.html"
     RUFF = "https://docs.astral.sh/ruff/rules/{code}/"
     SEMGREP = "https://semgrep.dev/r/{code}"
     SHELLCHECK = "https://www.shellcheck.net/wiki/{code}"

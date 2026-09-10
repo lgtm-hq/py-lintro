@@ -8,6 +8,33 @@ from lintro.tools.core.install_strategies.environment import InstallEnvironment
 from lintro.tools.core.install_strategies.package_names import ecosystem_package_name
 from lintro.tools.core.install_strategies.registry import register_strategy
 
+#: Where a gem's executables must land. RubyGems' own default bindir varies
+#: with the Ruby install and is frequently off PATH, and
+#: ``ToolInstaller._install_destination_dir`` falls back to this directory when
+#: probing an installed binary — so the hint pins it explicitly, the same way
+#: ``scripts/utils/install-tools.sh`` passes ``--bindir "$BIN_DIR"``.
+GEM_BIN_DIR: str = "~/.local/bin"
+
+
+def _gem_install_command(package: str, version: str) -> str:
+    """Build the pinned ``gem install`` command lintro recommends.
+
+    ``--user-install`` is required because the default gem home is
+    root-owned on most systems, and ``--bindir`` keeps the executable where
+    lintro looks for it afterwards.
+
+    Args:
+        package: Gem to install.
+        version: Exact version to pin.
+
+    Returns:
+        Shell command string.
+    """
+    return (
+        f"gem install {package} --version {version} "
+        f"--no-document --user-install --bindir {GEM_BIN_DIR}"
+    )
+
 
 class GemStrategy(InstallStrategy):
     """Install strategy for Ruby gems installed via ``gem``."""
@@ -70,7 +97,7 @@ class GemStrategy(InstallStrategy):
             Shell command string.
         """
         pkg = ecosystem_package_name(tool_name, install_package)
-        return f"gem install {pkg} --version {tool_version} --no-document"
+        return _gem_install_command(pkg, tool_version)
 
     def upgrade_hint(
         self,
@@ -96,7 +123,7 @@ class GemStrategy(InstallStrategy):
             Shell command string.
         """
         pkg = ecosystem_package_name(tool_name, install_package)
-        return f"gem install {pkg} --version {tool_version} --no-document"
+        return _gem_install_command(pkg, tool_version)
 
 
 register_strategy(GemStrategy())

@@ -28,8 +28,10 @@ RuboCop emits rich JSON via ``--format json``. The schema is::
 
 The JSON form is preferred over SARIF because RuboCop bundles no SARIF
 formatter, and its native ``correctable`` flag (distinct from ``corrected``)
-has no lossless SARIF representation — SARIF only models fix *presence* as a
-boolean ``fixes[]`` array. See ``docs/design/sarif-ingestion-evaluation.md``.
+has no lossless SARIF representation: SARIF models a fix as a structured
+``result.fixes[]`` entry carrying ``artifactChanges``/``replacements``, with no
+field separating "correctable" from "already corrected" — both collapse into
+"``fixes[]`` is non-empty". See ``docs/design/sarif-ingestion-evaluation.md``.
 """
 
 from __future__ import annotations

@@ -232,3 +232,138 @@ def test_fix_autocorrect_crash_surfaces_error(
     assert_that(result.success).is_false()
     assert_that(result.output).contains("undefined cop")
     assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def test_fix_bails_out_when_the_initial_check_crashes(
+    rubocop_plugin: RubocopPlugin,
+    tmp_path: Path,
+) -> None:
+    """A crashed pre-fix check stops the run before autocorrect touches files.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        tmp_path: Temporary directory fixture.
+    """
+    crash = SubprocessResult(
+        returncode=2,
+        stdout="",
+        stderr="Error: .rubocop.yml is invalid",
+        output="Error: .rubocop.yml is invalid",
+    )
+    with (
+        patch.object(rubocop_plugin, "_prepare_execution") as mock_prep,
+        patch.object(
+            rubocop_plugin,
+            "_run_subprocess_result",
+            side_effect=[crash],
+        ) as mock_run,
+    ):
+        mock_prep.return_value = make_ctx(tmp_path, ["app.rb"])
+        result = rubocop_plugin.fix(["app.rb"], {})
+
+    # Exactly one invocation: no autocorrect ran on an uninspected tree.
+    assert_that(mock_run.call_count).is_equal_to(1)
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains(".rubocop.yml is invalid")
+    assert_that(result.initial_issues_count).is_equal_to(0)
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def test_fix_does_not_claim_success_when_the_recheck_crashes(
+    rubocop_plugin: RubocopPlugin,
+    tmp_path: Path,
+) -> None:
+    """A crashed verification run is not proof that every offense was fixed.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        tmp_path: Temporary directory fixture.
+    """
+    initial = make_result(rubocop_json([offense()]), returncode=1)
+    fixed = make_result(rubocop_json([]), returncode=0)
+    crash = SubprocessResult(
+        returncode=2,
+        stdout="",
+        stderr="Error: cop registry corrupted",
+        output="Error: cop registry corrupted",
+    )
+    with (
+        patch.object(rubocop_plugin, "_prepare_execution") as mock_prep,
+        patch.object(
+            rubocop_plugin,
+            "_run_subprocess_result",
+            side_effect=[initial, fixed, crash],
+        ),
+    ):
+        mock_prep.return_value = make_ctx(tmp_path, ["app.rb"])
+        result = rubocop_plugin.fix(["app.rb"], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("cop registry corrupted")
+    assert_that(result.fixed_issues_count).is_equal_to(0)
+    assert_that(result.remaining_issues_count).is_equal_to(1)
+
+
+def test_check_requests_json_and_passes_the_prepared_files(
+    rubocop_plugin: RubocopPlugin,
+    tmp_path: Path,
+) -> None:
+    """Check invokes rubocop with JSON output and the discovered files.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        tmp_path: Temporary directory fixture.
+    """
+    with (
+        patch.object(rubocop_plugin, "_prepare_execution") as mock_prep,
+        patch.object(
+            rubocop_plugin,
+            "_run_subprocess_result",
+            return_value=make_result(rubocop_json([]), returncode=0),
+        ) as mock_run,
+    ):
+        mock_prep.return_value = make_ctx(tmp_path, ["app.rb", "lib/b.rb"])
+        result = rubocop_plugin.check(["app.rb"], {})
+
+    cmd = mock_run.call_args.kwargs["cmd"]
+    assert_that(cmd).contains("--format", "json", "app.rb", "lib/b.rb")
+    assert_that(cmd).does_not_contain("--autocorrect", "--autocorrect-all")
+    # The JSON that argv asks for is what the run reports on.
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+
+
+def test_unsafe_fixes_option_reaches_the_fix_argv(
+    rubocop_plugin: RubocopPlugin,
+    tmp_path: Path,
+) -> None:
+    """set_options(unsafe_fixes=True) changes the argv fix() actually runs.
+
+    Args:
+        rubocop_plugin: The plugin under test.
+        tmp_path: Temporary directory fixture.
+    """
+    rubocop_plugin.set_options(unsafe_fixes=True)
+    clean = make_result(rubocop_json([]), returncode=0)
+    with (
+        patch.object(rubocop_plugin, "_prepare_execution") as mock_prep,
+        patch.object(
+            rubocop_plugin,
+            "_run_subprocess_result",
+            side_effect=[
+                make_result(rubocop_json([offense()]), returncode=1),
+                clean,
+                clean,
+            ],
+        ) as mock_run,
+    ):
+        mock_prep.return_value = make_ctx(tmp_path, ["app.rb"])
+        result = rubocop_plugin.fix(["app.rb"], {})
+
+    fix_cmd = mock_run.call_args_list[1].kwargs["cmd"]
+    assert_that(fix_cmd).contains("--autocorrect-all")
+    assert_that(fix_cmd).does_not_contain("--autocorrect")
+    # The unsafe pass still scores normally: one offense in, none left.
+    assert_that(result.success).is_true()
+    assert_that(result.fixed_issues_count).is_equal_to(1)
+    assert_that(result.remaining_issues_count).is_equal_to(0)

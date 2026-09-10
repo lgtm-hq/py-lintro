@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from assertpy import assert_that
 
 from lintro.enums.install_context import InstallContext, PackageManager
@@ -10,6 +12,7 @@ from lintro.tools.core.install_strategies import (
     get_strategy,
     strategy_registry,
 )
+from lintro.tools.core.install_strategies.gem_strategy import GEM_BIN_DIR
 from lintro.tools.core.install_strategies.package_names import BREW_FORMULA_NAMES
 
 PM = PackageManager
@@ -63,11 +66,18 @@ def test_install_environment_has_false() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_registry_contains_all_five() -> None:
-    """Strategy registry has entries for pip, npm, binary, cargo, and rustup."""
+def test_registry_contains_every_install_type() -> None:
+    """Registry has entries for pip, npm, binary, cargo, gem, and rustup."""
     registry = strategy_registry()
 
-    assert_that(registry).contains_key("pip", "npm", "binary", "cargo", "rustup")
+    assert_that(registry).contains_key(
+        "pip",
+        "npm",
+        "binary",
+        "cargo",
+        "gem",
+        "rustup",
+    )
 
 
 def test_get_strategy_pip() -> None:
@@ -526,6 +536,92 @@ def test_cargo_check_prerequisites_not_met() -> None:
     result = strategy.check_prerequisites(env, "cargo-audit")
 
     assert_that(result).is_equal_to("cargo not available (install Rust first)")
+
+
+# ---------------------------------------------------------------------------
+# GemStrategy
+# ---------------------------------------------------------------------------
+
+
+def test_gem_install_hint_pins_version_and_bindir() -> None:
+    """The gem hint pins the version and the bindir lintro probes."""
+    env = _make_env(managers=frozenset({PM.GEM}))
+    strategy = get_strategy("gem")
+    assert_that(strategy).is_not_none()
+    # narrow Optional for mypy — assertpy does not perform type narrowing
+    assert strategy is not None  # narrow type for mypy
+
+    result = strategy.install_hint(env, "rubocop", "1.88.1", "rubocop", None)
+
+    assert_that(result).is_equal_to(
+        "gem install rubocop --version 1.88.1 --no-document "
+        "--user-install --bindir ~/.local/bin",
+    )
+
+
+def test_gem_upgrade_hint_matches_the_pinned_install() -> None:
+    """RubyGems installs side by side, so upgrading is the pinned install."""
+    env = _make_env(managers=frozenset({PM.GEM}))
+    strategy = get_strategy("gem")
+    assert_that(strategy).is_not_none()
+    # narrow Optional for mypy — assertpy does not perform type narrowing
+    assert strategy is not None  # narrow type for mypy
+
+    assert_that(
+        strategy.upgrade_hint(env, "rubocop", "1.88.1", "rubocop", None),
+    ).is_equal_to(
+        strategy.install_hint(env, "rubocop", "1.88.1", "rubocop", None),
+    )
+
+
+def test_gem_bindir_matches_the_installer_probe_directory() -> None:
+    """The hinted bindir is where ToolInstaller looks for the binary.
+
+    ``ToolInstaller._install_destination_dir`` has no gem branch: it falls
+    through to ``~/.local/bin``. Pinning the same directory in the hint is what
+    keeps a successful install from being reported as undiscoverable.
+    """
+    env = _make_env(managers=frozenset({PM.GEM}))
+    strategy = get_strategy("gem")
+    assert strategy is not None  # narrow type for mypy
+
+    hint = strategy.install_hint(env, "rubocop", "1.88.1", "rubocop", None)
+
+    assert_that(Path(GEM_BIN_DIR).expanduser()).is_equal_to(
+        Path.home() / ".local" / "bin",
+    )
+    assert_that(hint).contains(f"--bindir {GEM_BIN_DIR}")
+
+
+def test_gem_check_prerequisites_met() -> None:
+    """Return None when gem is available."""
+    env = _make_env(managers=frozenset({PM.GEM}))
+    strategy = get_strategy("gem")
+    assert strategy is not None  # narrow type for mypy
+
+    assert_that(strategy.check_prerequisites(env, "rubocop")).is_none()
+
+
+def test_gem_check_prerequisites_not_met() -> None:
+    """Return a skip reason when gem is not available."""
+    env = _make_env(managers=frozenset())
+    strategy = get_strategy("gem")
+    assert strategy is not None  # narrow type for mypy
+
+    assert_that(strategy.check_prerequisites(env, "rubocop")).is_equal_to(
+        "gem not available (install Ruby first)",
+    )
+
+
+def test_gem_is_available_follows_the_environment() -> None:
+    """``is_available`` mirrors whether the RubyGems CLI was detected."""
+    strategy = get_strategy("gem")
+    assert strategy is not None  # narrow type for mypy
+
+    assert_that(
+        strategy.is_available(_make_env(managers=frozenset({PM.GEM}))),
+    ).is_true()
+    assert_that(strategy.is_available(_make_env(managers=frozenset()))).is_false()
 
 
 # ---------------------------------------------------------------------------

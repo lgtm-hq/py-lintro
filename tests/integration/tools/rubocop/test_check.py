@@ -35,9 +35,20 @@ def test_check_file_with_violations(
 
     assert_that(result).is_not_none()
     assert_that(result.name).is_equal_to("rubocop")
+    assert_that(result.skipped).is_false()
+    assert_that(result.success).is_false()
     assert_that(result.issues_count).is_greater_than(0)
-    codes = [getattr(issue, "code", "") for issue in (result.issues or [])]
-    assert_that(any("/" in code for code in codes)).is_true()
+    codes = {getattr(issue, "code", "") for issue in (result.issues or [])}
+    # Cops the fixture provokes by construction: an unused local, a
+    # double-quoted string with no interpolation, and inconsistent indentation.
+    assert_that(codes).contains(
+        "Lint/UselessAssignment",
+        "Style/StringLiterals",
+        "Layout/IndentationWidth",
+    )
+    assert_that(
+        {issue.file for issue in (result.issues or [])},
+    ).is_length(1)
 
 
 def test_check_clean_file(
@@ -74,4 +85,5 @@ def test_check_empty_directory(
 
     assert_that(result).is_not_none()
     assert_that(result.name).is_equal_to("rubocop")
+    assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)

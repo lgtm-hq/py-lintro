@@ -38,12 +38,19 @@ distinguishes two per-offense booleans:
 - `correctable` — whether a cop _can_ autocorrect the offense.
 - `corrected` — whether the offense _was_ autocorrected in this run.
 
-SARIF only models fix **presence** as a `result.fixes[]` array (a single boolean signal
-in practice). It cannot represent "correctable but not yet corrected", which is exactly
-the signal that drives Lintro's `fixable` flag. The native JSON also gives precise
-ranges (`start_line`/`start_column`/`last_line`/`last_column`), the fully-qualified cop
-name (department + cop), and RuboCop's six-level severity taxonomy — all preserved
-losslessly by the native parser.
+SARIF's `result.fixes[]` is not a boolean: each entry is a structured `fix` object whose
+`artifactChanges[]` carry `replacements[]` describing the exact byte regions to rewrite.
+That is strictly _more_ than RuboCop reports — and it is the wrong axis. A SARIF result
+either proposes a concrete edit or proposes nothing; there is no field distinguishing "a
+fix exists and was already applied in this run" from "a fix exists and was not applied",
+so both of RuboCop's booleans collapse into "fixes[] is non-empty". Emitting fixes at
+all would additionally require RuboCop to compute every replacement region up front,
+which `--format json` does not do. Neither `correctable` nor `corrected` survives the
+mapping, and `correctable` is exactly the signal that drives Lintro's `fixable` flag.
+The native JSON also gives precise ranges
+(`start_line`/`start_column`/`last_line`/`last_column`), the fully-qualified cop name
+(department + cop), and RuboCop's six-level severity taxonomy — all preserved losslessly
+by the native parser.
 
 ## Lintro Implementation Analysis
 
