@@ -646,6 +646,13 @@ def test_workflow_serializes_ai_review_repo_wide() -> None:
     ``auto-rerun-on-infra-failure.yml``, so nothing reruns it. The
     per-PR group must NOT carry it: there, replacing a stale pending
     review of the same PR is the wanted behaviour.
+
+    Both levels are asserted because both apply. A job-level group does
+    not opt its job out of the workflow-level one: the workflow-level
+    group cancels the *run* (GitHub cancels "a workflow run, including
+    all jobs and steps"), while the job-level group only gates when the
+    *job* starts and whether a competitor in its own group cancels it.
+    No GitHub documentation makes a job carrying its own group exempt.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 

@@ -168,6 +168,21 @@ jobs:
     # the running one so concurrent PRs cannot pile onto the same provider
     # rate limit.
     #
+    # The two levels stack; the job-level group does NOT opt this job out
+    # of the workflow-level one. They govern different objects: a
+    # workflow-level group cancels the RUN, and "cancel a workflow run,
+    # including all jobs and steps" is what GitHub's cancellation docs
+    # promise, while a job-level group only decides when this JOB may
+    # start and whether a competitor *in its own group* cancels it.
+    # Nothing in the workflow-syntax reference or the concurrency guide
+    # says a job carrying its own group is exempt from its workflow's
+    # group ("most specific wins" there is about `defaults`, not
+    # `concurrency`). Observed here too: docker-ci.yml's `publish` job
+    # declares group publish-<ref> with cancel-in-progress: false and is
+    # still cancelled when a newer push supersedes its run. ai-review has
+    # exactly one job, so a superseded run has nothing left to keep
+    # running regardless.
+    #
     # queue: max is load-bearing, not decoration. The default queue: single
     # keeps at most ONE pending run per group and cancels it when a third
     # arrives, so a burst of pushes across PRs would silently drop the
