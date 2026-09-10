@@ -47,7 +47,7 @@ def _declares_workspace(manifest: Path) -> bool:
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         logger.debug("Could not read Cargo manifest {}: {}", manifest, exc)
         return False
-    return "workspace" in data
+    return isinstance(data.get("workspace"), dict)
 
 
 def _nearest_workspace_root(start: Path) -> Path | None:

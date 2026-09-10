@@ -268,3 +268,33 @@ def test_a_non_utf8_ancestor_manifest_is_not_a_workspace(tmp_path: Path) -> None
     second = _package(tmp_path, "b")
 
     assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_a_scalar_workspace_key_is_not_a_workspace(tmp_path: Path) -> None:
+    """Only a ``[workspace]`` table declares a workspace, not a scalar key.
+
+    Args:
+        tmp_path: Temporary directory holding the manifests.
+    """
+    (tmp_path / "Cargo.toml").write_text('workspace = "value"\n[package]\nname = "x"\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_a_workspace_root_that_also_holds_git_is_adopted(tmp_path: Path) -> None:
+    """The manifest check runs before the repository-boundary check.
+
+    Every real repository keeps ``.git`` next to the workspace manifest, so
+    the walk must adopt that directory rather than stop at it.
+
+    Args:
+        tmp_path: Temporary directory holding the workspace.
+    """
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["a", "b"]\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_equal_to(tmp_path)
