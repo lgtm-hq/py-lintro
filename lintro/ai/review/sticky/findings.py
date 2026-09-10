@@ -65,6 +65,10 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
         if record.status is FindingStatus.RESOLVED
         and record.resolved_round == round_number
     ]
+    # The heading counts what the round actually fixed, not what survived
+    # pruning (#2418): a pruned count reads as the round having fixed fewer
+    # things, and the rows that went are marked below the table instead.
+    fixed_total = len(fixed_now)
     if limits.resolved is not None:
         fixed_now = fixed_now[: limits.resolved]
     coverage_label = _findings_coverage_label(result=result, verdict=verdict)
@@ -75,13 +79,18 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
     )
     heading = (
         f"### Findings · Round {round_number}{sha_bit} · {coverage_label} · "
-        f"{open_count} open · {len(fixed_now)} fixed this round"
+        f"{open_count} open · {fixed_total} fixed this round"
     )
     note = format_convergence_note(trajectory=score_trajectory(runs=tuple(runs)))
+    markers = _pruning_markers(
+        dropped_open=open_count - len(open_records),
+        dropped_fixed=fixed_total - len(fixed_now),
+    )
     if not open_records and not fixed_now:
         empty = [heading, "", "✅ Nothing open."]
         if note:
             empty.extend(["", note])
+        empty.extend(markers)
         return "\n".join(empty)
     lines = [heading]
     if note:
@@ -109,18 +118,46 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
             f"| `{_location(record=record)}` "
             f"| round {record.since_round} |",
         )
-    dropped = open_count - len(open_records)
-    if dropped > 0:
-        lines.extend(
+    lines.extend(markers)
+    return "\n".join(lines)
+
+
+def _pruning_markers(*, dropped_open: int, dropped_fixed: int) -> list[str]:
+    """Return the markers naming rows the size budget dropped from the table.
+
+    Nothing leaves the Δ table silently: both the open rows pruned by
+    ``limits.open`` and the fixed rows pruned by ``limits.resolved`` say so
+    (#2418).
+
+    Args:
+        dropped_open: Open findings not rendered.
+        dropped_fixed: Findings fixed this round that were not rendered.
+
+    Returns:
+        list[str]: Markdown lines to append after the table, empty when
+        nothing was dropped.
+    """
+    markers: list[str] = []
+    if dropped_open > 0:
+        markers.extend(
             [
                 "",
-                f"> ✂️ **{dropped} more open "
-                f"{_plural(count=dropped, noun='finding')} not listed** to fit "
+                f"> ✂️ **{dropped_open} more open "
+                f"{_plural(count=dropped_open, noun='finding')} not listed** to fit "
                 "GitHub's size limit — see the inline comments and the workflow "
                 "run log.",
             ],
         )
-    return "\n".join(lines)
+    if dropped_fixed > 0:
+        markers.extend(
+            [
+                "",
+                f"> ✂️ **{dropped_fixed} more fixed "
+                f"{_plural(count=dropped_fixed, noun='finding')} not listed** to "
+                "fit GitHub's size limit — see the workflow run log.",
+            ],
+        )
+    return markers
 
 
 def _findings_coverage_label(
