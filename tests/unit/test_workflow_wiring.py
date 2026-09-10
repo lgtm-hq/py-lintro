@@ -5292,7 +5292,7 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
 # does not grant, and it refuses it before any job starts: the run reports
 # `startup_failure` with no jobs and no logs. #2440 added `actions: read` to
 # build-binary.yml's compile jobs without adding it to the `homebrew-tap` job
-# that calls them, and every tag from v0.151.2 through v0.152.2 died that way.
+# that calls them, and every tag from v0.151.2 through v0.152.6 died that way.
 # Nothing caught it because the only caller is the tag pipeline, which never
 # runs on a PR or on main, and a `workflow_dispatch` of the callee uses its own
 # token so the mismatch does not apply.
