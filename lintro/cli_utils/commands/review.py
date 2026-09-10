@@ -152,6 +152,8 @@ class ReviewCommandOptions:
         model_override: ``--model`` value, or None.
         review_override: ``--review/--no-review`` value, or None.
         max_cost_usd_override: ``--max-cost-usd`` value, or None.
+        provider_options: ``--provider-option name=value`` values, in the
+            order given. Empty when the flag was not passed.
         force_full: Whether ``--full`` was passed.
         list_agents: Whether ``--list-agents`` was passed.
         advisory_tools: ``--advisory-tools`` value, or None.
@@ -179,6 +181,7 @@ class ReviewCommandOptions:
     model_override: str | None = None
     review_override: bool | None = None
     max_cost_usd_override: str | None = None
+    provider_options: tuple[str, ...] = ()
     force_full: bool = False
     list_agents: bool = False
     advisory_tools: str | None = None
@@ -543,6 +546,17 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
     ),
 )
 @click.option(
+    "--provider-option",
+    "provider_options",
+    multiple=True,
+    metavar="NAME=VALUE",
+    help=(
+        "Override one ai.providers.<provider>.<field> setting for this "
+        "invocation, for whichever provider the run resolves to. Repeatable. "
+        "e.g. `--provider-option trust_workspace=false`."
+    ),
+)
+@click.option(
     "--full",
     "force_full",
     is_flag=True,
@@ -745,10 +759,43 @@ def _resolve_ai(
                 transport=options.transport,
                 review=options.review_override,
                 max_cost_usd=options.max_cost_usd_override,
+                provider_options=_parse_provider_options(
+                    values=options.provider_options,
+                ),
             ),
         )
     except AIConfigOverrideError as exc:
         raise click.UsageError(str(exc)) from exc
+
+
+def _parse_provider_options(*, values: tuple[str, ...]) -> dict[str, str]:
+    """Split ``--provider-option NAME=VALUE`` flags into a mapping.
+
+    Only the shape is checked here. Whether the name is a setting the selected
+    provider declares, and whether the value is one it accepts, is decided by
+    the resolver against that provider's own block model, so this command
+    holds no per-vendor knowledge (#2309).
+
+    Args:
+        values: Raw flag values in the order they were passed. A repeated name
+            keeps the last value, matching every other repeatable override.
+
+    Returns:
+        Field name to raw value, empty when the flag was not passed.
+
+    Raises:
+        click.UsageError: If a value is not ``name=value`` or has an empty
+            name.
+    """
+    parsed: dict[str, str] = {}
+    for value in values:
+        name, separator, raw = value.partition("=")
+        if not separator or not name.strip():
+            raise click.UsageError(
+                f"--provider-option {value!r} is not NAME=VALUE",
+            )
+        parsed[name.strip()] = raw
+    return parsed
 
 
 def _resolve_targets(*, options: ReviewCommandOptions) -> _ReviewTargets:
@@ -1342,6 +1389,7 @@ def _cli_overrides(*, options: ReviewCommandOptions) -> list[str]:
         overrides.append("--review" if options.review_override else "--no-review")
     if options.max_cost_usd_override is not None:
         overrides.append(f"--max-cost-usd {options.max_cost_usd_override}")
+    overrides.extend(f"--provider-option {value}" for value in options.provider_options)
     if options.timeout is not None:
         overrides.append(f"--timeout {options.timeout:g}")
     if options.context_window is not None:

@@ -1,9 +1,15 @@
 """Env-var and CLI-flag overlays for AI configuration (#1970, #2024, #2153).
 
-Exactly six environment variables map onto six ``ai:`` fields. Invalid
+Exactly six environment variables map onto six shared ``ai:`` fields. Invalid
 values fail at resolution with a calm diagnostic naming the variable (or
 flag) and the accepted values — they never fall through to the config
 default.
+
+Provider-specific fields live under ``ai.providers.<name>`` (#2309) and are
+overlaid on the same layers by the same functions here, so there is one
+override path and not two: ``LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`` on the
+env layer and ``--provider-option <field>=<value>`` on the flag layer, both
+carrying provenance under the ``providers.<name>.<field>`` key.
 """
 
 from __future__ import annotations
@@ -11,6 +17,7 @@ from __future__ import annotations
 import math
 import os
 from collections.abc import Mapping
+from enum import Enum
 from typing import Any
 
 from pydantic import ValidationError
@@ -19,11 +26,14 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.exceptions import AIConfigOverrideError
-from lintro.ai.provider_enum import accepted_provider_values
+from lintro.ai.provider_blocks import nested_source_key
+from lintro.ai.provider_config import ProviderConfig
+from lintro.ai.provider_enum import AIProvider, accepted_provider_values
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
 __all__ = [
     "ENV_ENABLED",
+    "ENV_PROVIDER_BLOCK_PREFIX",
     "ENV_MAX_COST_USD",
     "ENV_MODEL",
     "ENV_PROVIDER",
@@ -33,6 +43,7 @@ __all__ = [
     "apply_cli_overrides",
     "apply_env_overrides",
     "read_env_overrides",
+    "read_provider_block_env_overrides",
 ]
 
 ENV_PROVIDER = "LINTRO_AI_PROVIDER"
@@ -41,6 +52,18 @@ ENV_TRANSPORT = "LINTRO_AI_TRANSPORT"
 ENV_ENABLED = "LINTRO_AI_ENABLED"
 ENV_REVIEW = "LINTRO_AI_REVIEW"
 ENV_MAX_COST_USD = "LINTRO_AI_MAX_COST_USD"
+
+#: Prefix of the per-provider block overrides: the remainder is the provider
+#: name and the field name, upper-cased and joined by a double underscore
+#: (``LINTRO_AI_PROVIDERS__CURSOR__TRUST_WORKSPACE``). Double underscore
+#: because provider and field names may each contain a single one.
+ENV_PROVIDER_BLOCK_PREFIX = "LINTRO_AI_PROVIDERS__"
+
+#: Separator between the provider and field segments of a block override.
+_ENV_BLOCK_SEPARATOR = "__"
+
+#: Flag spelling of a per-provider block override, for error text.
+_PROVIDER_OPTION_FLAG = "--provider-option"
 
 OVERRIDE_FIELDS: tuple[str, ...] = (
     "provider",
@@ -116,11 +139,160 @@ def read_env_overrides() -> dict[str, Any]:
     return overlay
 
 
+def read_provider_block_env_overrides() -> dict[AIProvider, dict[str, Any]]:
+    """Read every ``LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`` override.
+
+    Values are parsed by the field's own model, so a bad spelling fails here
+    with the variable named rather than reaching the config as a string.
+
+    Returns:
+        Parsed field values keyed by provider, empty when no such variable is
+        set.
+
+    Raises:
+        AIConfigOverrideError: If a variable names an unknown provider, an
+            unknown field of a known provider, or carries a value that
+            provider's block model rejects.
+    """
+    from lintro.ai.exceptions import AIProviderNotRegisteredError
+    from lintro.ai.registry import config_model_for
+
+    overrides: dict[AIProvider, dict[str, Any]] = {}
+    for name in sorted(os.environ):
+        if not name.startswith(ENV_PROVIDER_BLOCK_PREFIX):
+            continue
+        raw = _env_text(name)
+        if raw is None:
+            continue
+        remainder = name[len(ENV_PROVIDER_BLOCK_PREFIX) :]
+        provider_token, separator, field_token = remainder.partition(
+            _ENV_BLOCK_SEPARATOR,
+        )
+        if not separator or not field_token:
+            raise AIConfigOverrideError(
+                f"{name} is not a provider block override; the shape is "
+                f"{ENV_PROVIDER_BLOCK_PREFIX}<PROVIDER>__<FIELD>",
+            )
+        try:
+            model = config_model_for(provider_token.lower())
+        except (AIProviderNotRegisteredError, ValueError) as exc:
+            raise AIConfigOverrideError(
+                f"{name} names provider {provider_token.lower()!r}, which is "
+                f"not one of: {accepted_provider_values()}",
+            ) from exc
+        field = field_token.lower()
+        if field not in model.model_fields:
+            raise AIConfigOverrideError(
+                f"{name}: {provider_token.lower()} has no setting {field!r}; "
+                f"accepted: {_accepted_block_fields(model)}",
+            )
+        provider = AIProvider(provider_token.lower())
+        overrides.setdefault(provider, {})[field] = _parse_block_value(
+            model=model,
+            field=field,
+            raw=raw,
+            name=name,
+        )
+    return overrides
+
+
+def _accepted_block_fields(model: type[ProviderConfig]) -> str:
+    """List a provider block's settable fields for an error message.
+
+    Args:
+        model: The provider's block model.
+
+    Returns:
+        Comma-separated field names, or a note that the block takes none.
+    """
+    fields = ", ".join(sorted(model.model_fields))
+    return fields or "(this provider takes no block settings)"
+
+
+def _parse_block_value(
+    *,
+    model: type[ProviderConfig],
+    field: str,
+    raw: object,
+    name: str,
+) -> Any:
+    """Coerce one raw override value through the block model's own validation.
+
+    Args:
+        model: The provider's block model.
+        field: Field being overridden.
+        raw: Raw env or flag value.
+        name: Variable or flag spelling, for the error message.
+
+    Returns:
+        The validated value.
+
+    Raises:
+        AIConfigOverrideError: If the block model rejects *raw*.
+    """
+    try:
+        return getattr(model.model_validate({field: raw}), field)
+    except ValidationError as exc:
+        accepted = _accepted_block_value_hint(model=model, field=field)
+        suffix = f" is not one of: {accepted}" if accepted else " is not valid"
+        raise AIConfigOverrideError(f"{name}={raw!r}{suffix}") from exc
+
+
+def _accepted_block_value_hint(
+    *,
+    model: type[ProviderConfig],
+    field: str,
+) -> str:
+    """Return the accepted spellings for one block field, when enumerable.
+
+    Args:
+        model: The provider's block model.
+        field: Field name.
+
+    Returns:
+        Comma-separated accepted values, or empty for free-form fields.
+    """
+    annotation = model.model_fields[field].annotation
+    if annotation is bool:
+        return _ENABLED_ACCEPTED
+    if isinstance(annotation, type) and issubclass(annotation, Enum):
+        return ", ".join(str(member.value) for member in annotation)
+    return ""
+
+
+def _merge_provider_blocks(
+    *,
+    config: AIConfig,
+    blocks: Mapping[AIProvider, Mapping[str, Any]],
+) -> dict[AIProvider, ProviderConfig]:
+    """Layer field overrides onto the config's existing provider blocks.
+
+    An overlay sets one field; the rest of that provider's block keeps the
+    value the project config (or the model default) gave it.
+
+    Args:
+        config: Config the overlay sits on top of.
+        blocks: Field values to apply, keyed by provider.
+
+    Returns:
+        The full ``providers`` mapping to hand back to validation.
+    """
+    merged = dict(config.providers)
+    for provider, fields in blocks.items():
+        merged[provider] = config.provider_settings(provider).model_copy(
+            update=dict(fields),
+        )
+    return merged
+
+
 def apply_env_overrides(
     config: AIConfig,
     sources: dict[str, ConfigSource],
 ) -> tuple[AIConfig, dict[str, ConfigSource]]:
     """Overlay environment values onto a parsed config.
+
+    Both layers are read here: the six flat ``LINTRO_AI_*`` variables and the
+    ``LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`` block overrides (#2309).
 
     Args:
         config: Config built from the project ``ai:`` mapping.
@@ -130,15 +302,27 @@ def apply_env_overrides(
         The overlaid config and updated sources.
     """
     overlay = read_env_overrides()
-    if not overlay:
+    blocks = read_provider_block_env_overrides()
+    if not overlay and not blocks:
         return config, sources
+    flat_fields = tuple(overlay)
+    if blocks:
+        overlay["providers"] = _merge_provider_blocks(
+            config=config,
+            blocks=blocks,
+        )
     updated = _apply_overlay(
         config=config,
         overlay=overlay,
         names=_ENV_BY_FIELD,
     )
-    for field in overlay:
+    for field in flat_fields:
         sources[field] = ConfigSource.ENV
+    for provider, fields in blocks.items():
+        for field in fields:
+            sources[nested_source_key(provider=provider, field=field)] = (
+                ConfigSource.ENV
+            )
     return updated, sources
 
 
@@ -150,6 +334,7 @@ def apply_cli_overrides(
     transport: str | None = None,
     review: bool | None = None,
     max_cost_usd: float | str | None = None,
+    provider_options: Mapping[str, str] | None = None,
 ) -> ResolvedAIConfig:
     """Apply ``lintro review`` CLI flags on top of a resolved config.
 
@@ -169,6 +354,14 @@ def apply_cli_overrides(
         transport: ``--transport`` value, or None when unset.
         review: ``--review/--no-review`` value, or None when unset.
         max_cost_usd: ``--max-cost-usd`` value, or None/blank when unset.
+        provider_options: ``--provider-option name=value`` pairs for the
+            effective provider's ``ai.providers.<name>`` block, or None when
+            none were passed.
+
+    ``AIConfigOverrideError`` propagates from
+    :func:`_resolve_provider_option_flags` when *provider_options* is
+    non-empty while no provider is selected, names a field the provider's
+    block model does not declare, or carries a value it rejects.
 
     Returns:
         A new resolved config when any flag is set; *resolved* otherwise.
@@ -187,17 +380,97 @@ def apply_cli_overrides(
             max_cost_usd,
             name=_FLAG_BY_FIELD["max_cost_usd"],
         )
-    if not overlay:
+    blocks = _resolve_provider_option_flags(
+        config=resolved.config,
+        provider_overlay=overlay.get("provider"),
+        provider_options=provider_options,
+    )
+    if not overlay and not blocks:
         return resolved
+    flat_fields = tuple(overlay)
+    if blocks:
+        overlay["providers"] = _merge_provider_blocks(
+            config=resolved.config,
+            blocks=blocks,
+        )
     updated = _apply_overlay(
         config=resolved.config,
         overlay=overlay,
         names=_FLAG_BY_FIELD,
     )
     sources = dict(resolved.sources)
-    for field in overlay:
+    for field in flat_fields:
         sources[field] = ConfigSource.FLAG
+    for provider, fields in blocks.items():
+        for field in fields:
+            sources[nested_source_key(provider=provider, field=field)] = (
+                ConfigSource.FLAG
+            )
     return ResolvedAIConfig(config=updated, sources=sources)
+
+
+def _resolve_provider_option_flags(
+    *,
+    config: AIConfig,
+    provider_overlay: object,
+    provider_options: Mapping[str, str] | None,
+) -> dict[AIProvider, dict[str, Any]]:
+    """Bind ``--provider-option`` pairs to the effective provider's block.
+
+    The flags apply to whichever provider this invocation actually uses, so a
+    ``--provider`` flag in the same overlay is honoured before the config
+    value: ``--provider cursor --provider-option trust_workspace=false`` means
+    what it reads as.
+
+    Args:
+        config: Config after the project and env layers.
+        provider_overlay: ``--provider`` value in this same overlay, if any.
+        provider_options: ``name=value`` pairs, or None when none were passed.
+
+    Returns:
+        Parsed field values keyed by the effective provider, empty when no
+        option flags were passed.
+
+    Raises:
+        AIConfigOverrideError: If no provider is selected, the provider is
+            unknown, a field is not declared by that provider's block model,
+            or a value is rejected by it.
+    """
+    if not provider_options:
+        return {}
+    from lintro.ai.exceptions import AIProviderNotRegisteredError
+    from lintro.ai.registry import config_model_for
+
+    raw_provider = provider_overlay if provider_overlay is not None else config.provider
+    if raw_provider is None:
+        raise AIConfigOverrideError(
+            f"{_PROVIDER_OPTION_FLAG} needs a provider; set ai.provider, "
+            f"{ENV_PROVIDER}, or --provider first",
+        )
+    try:
+        provider = AIProvider(str(raw_provider))
+        model = config_model_for(provider)
+    except (AIProviderNotRegisteredError, ValueError) as exc:
+        raise AIConfigOverrideError(
+            f"{_PROVIDER_OPTION_FLAG} names provider {str(raw_provider)!r}, "
+            f"which is not one of: {accepted_provider_values()}",
+        ) from exc
+
+    parsed: dict[str, Any] = {}
+    for field, raw in provider_options.items():
+        key = field.strip().lower().replace("-", "_")
+        if key not in model.model_fields:
+            raise AIConfigOverrideError(
+                f"{_PROVIDER_OPTION_FLAG} {field}=...: {provider.value} has no "
+                f"setting {key!r}; accepted: {_accepted_block_fields(model)}",
+            )
+        parsed[key] = _parse_block_value(
+            model=model,
+            field=key,
+            raw=raw,
+            name=f"{_PROVIDER_OPTION_FLAG} {key}",
+        )
+    return {provider: parsed}
 
 
 def _env_text(name: str) -> str | None:

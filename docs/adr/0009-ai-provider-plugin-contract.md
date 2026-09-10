@@ -40,11 +40,20 @@ Lintro defines an in-tree provider plugin contract in `lintro/ai/providers/proto
 and an in-tree registry in `lintro/ai/providers/registry.py`.
 
 **1. `ProviderPlugin` is the seam.** A plugin exposes `name: AIProvider`,
-`transports: frozenset[AITransport]`, `metadata: ProviderMetadata`, and
-`build(config: AIConfig) -> BaseAIProvider`. The plugin reads the fields it needs off
-the effective config, so the caller never assembles a per-vendor keyword list — the
-per-provider `if`/`elif` in `get_provider` disappears into the plugin that owns those
-knobs.
+`transports: frozenset[AITransport]`, `metadata: ProviderMetadata`,
+`config_model: type[ProviderConfig]`, and `build(config: AIConfig) -> BaseAIProvider`.
+The plugin reads the fields it needs off the effective config, so the caller never
+assembles a per-vendor keyword list — the per-provider `if`/`elif` in `get_provider`
+disappears into the plugin that owns those knobs.
+
+`config_model` was added by [#2309](https://github.com/lgtm-hq/py-lintro/issues/2309)
+(phase 4). It is the pydantic model for that vendor's `ai.providers.<name>` block,
+declared in the provider package next to its metadata. It applies the same single-source
+rule to _settings_ that `ProviderMetadata` applies to _facts_: a knob only one vendor
+understands is declared by that vendor, so `AIConfig` keeps only fields the shared
+pipeline or two or more providers actually read, and no central table maps a key to the
+vendor that owns it. A provider with no vendor-specific knob returns an empty subclass
+rather than `None`, so callers never branch on absence.
 
 **2. Lifecycle is inherited, not redeclared.** `build` returns a `BaseAIProvider`, which
 already carries `aclose`/`close` and the capability probes added for
@@ -75,8 +84,9 @@ restates, for the provider seam, the invariants ADR-0008 records for review.
 **6. Nothing is migrated by the phase that introduces this contract.** The protocol, the
 registry and this ADR land alone. `get_provider` keeps its class map until the migration
 phase ([#2307](https://github.com/lgtm-hq/py-lintro/issues/2307)) moves Anthropic,
-OpenAI and Cursor behind registration and deletes it. Until then the registry is empty
-at runtime and exercised only by tests.
+OpenAI and Cursor behind registration and deletes it. That migration has since landed:
+every in-tree provider registers a plugin, and #2309 added `config_model` to the
+contract, so the registry is populated at runtime and is the only lookup path.
 
 ### Non-goals
 
@@ -125,6 +135,9 @@ goal of this one.
 
 - Epic [#1999](https://github.com/lgtm-hq/py-lintro/issues/1999) — provider plugin model
 - [#2306](https://github.com/lgtm-hq/py-lintro/issues/2306) — this contract and ADR
+- [#2309](https://github.com/lgtm-hq/py-lintro/issues/2309) — `config_model` and the
+  `ai.providers.<name>` block (`lintro/ai/provider_config.py`,
+  `lintro/ai/provider_blocks.py`)
 - Roadmap [#2288](https://github.com/lgtm-hq/py-lintro/issues/2288), row A.8
 - `lintro/ai/providers/protocol.py`, `lintro/ai/providers/registry.py`
 - `lintro/ai/providers/__init__.py` (`get_provider`), `lintro/ai/registry.py`,

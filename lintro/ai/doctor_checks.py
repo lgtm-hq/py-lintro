@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 from dataclasses import dataclass
+from enum import Enum
 
 from lintro.ai.availability import (
     is_provider_available,
@@ -12,6 +13,7 @@ from lintro.ai.availability import (
     provider_cli_binary,
 )
 from lintro.ai.config import AIConfig
+from lintro.ai.config_overrides import ENV_PROVIDER_BLOCK_PREFIX
 from lintro.ai.enums import AITransport
 from lintro.ai.liveness import LivenessState, check_liveness_sync
 from lintro.ai.paths import resolve_workspace_root
@@ -156,6 +158,10 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
     if config.provider is None or config.transport is None:
         return results
 
+    block_result = _check_provider_block(config=config)
+    if block_result is not None:
+        results.append(block_result)
+
     metadata = metadata_for(config.provider)
     if not metadata.supports(config.transport):
         only = metadata.default_transport.value
@@ -249,6 +255,60 @@ def check_ai_configuration(config: AIConfig) -> list[AICheckResult]:
         )
 
     return results
+
+
+def _check_provider_block(*, config: AIConfig) -> AICheckResult | None:
+    """Report the selected provider's ``ai.providers.<name>`` settings.
+
+    Only the chosen provider's block is reported, and only when it differs
+    from that provider's defaults: doctor exists to explain a surprising
+    environment, and echoing every vendor's defaults back is noise (#2309).
+
+    Args:
+        config: Effective AI configuration, with a provider selected.
+
+    Returns:
+        A check naming the non-default settings, or None when the selected
+        provider's block is entirely at its defaults.
+    """
+    provider = config.provider
+    if provider is None:
+        return None
+    settings = config.provider_settings(provider)
+    defaults = type(settings)()
+    changed = {
+        name: getattr(settings, name)
+        for name in type(settings).model_fields
+        if getattr(settings, name) != getattr(defaults, name)
+    }
+    if not changed:
+        return None
+    rendered = ", ".join(
+        f"{name}={_render_setting(value)}" for name, value in sorted(changed.items())
+    )
+    return AICheckResult(
+        name=f"ai.providers.{provider.value}",
+        status=ToolStatus.OK,
+        message=f"{provider.value} provider settings: {rendered}",
+        hint=(
+            f"Set under `ai.providers.{provider.value}` in config, "
+            f"{ENV_PROVIDER_BLOCK_PREFIX}{provider.value.upper()}__<FIELD>, "
+            f"or --provider-option"
+        ),
+    )
+
+
+def _render_setting(value: object) -> str:
+    """Render one provider-block value for a doctor line.
+
+    Args:
+        value: The effective setting value.
+
+    Returns:
+        The enum's own spelling for enums, ``str(value)`` otherwise, so a
+        doctor line shows what a user would write in the config file.
+    """
+    return str(value.value) if isinstance(value, Enum) else str(value)
 
 
 def _pairing_hint(*, metadata: ProviderMetadata) -> str:

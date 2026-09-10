@@ -7,6 +7,10 @@ in the precedence ADR-0006 records (``flag > env > project > default``) and
 returns a :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig` carrying
 both the validated config and per-field provenance.
 
+Provider-specific settings (``ai.providers.<name>.<field>``, #2309) are
+resolved by this same function on the same layers, so nothing anywhere reads a
+vendor knob off a second path.
+
 Every AI surface — ``check``/``fmt`` lint enhancement, ``lintro review``,
 ``lintro doctor``, the pre-execution status rows, MCP, and the advisory
 tools — consumes that value. None of them re-parse the raw mapping and none
@@ -26,7 +30,8 @@ resolver.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from lintro.ai.config import AIConfig
@@ -42,10 +47,11 @@ __all__ = [
 
 @dataclass(frozen=True, slots=True)
 class AICliOverrides:
-    """Per-invocation CLI overrides for the five overridable ``ai:`` fields.
+    """Per-invocation CLI overrides for the overridable ``ai:`` settings.
 
-    Every field is ``None`` when its flag was not passed, which is what keeps
-    "omitted" distinguishable from "set to the default". There is no
+    Every field is ``None`` when its flag was not passed (empty for the
+    repeatable ``provider_options``), which is what keeps "omitted"
+    distinguishable from "set to the default". There is no
     ``enabled`` flag: the master switch comes from config or
     ``LINTRO_AI_ENABLED`` only.
 
@@ -57,6 +63,11 @@ class AICliOverrides:
         review: ``--review/--no-review`` value, or None when unset.
         max_cost_usd: ``--max-cost-usd`` value (``uncapped`` lifts the
             ceiling), or None when unset.
+        provider_options: ``--provider-option name=value`` pairs, applied to
+            the effective provider's ``ai.providers.<name>`` block (#2309).
+            Empty when the flag was not passed. Frozen as a
+            :class:`~types.MappingProxyType` so the shared
+            :data:`NO_CLI_OVERRIDES` value cannot be mutated by a caller.
     """
 
     provider: str | None = None
@@ -64,6 +75,9 @@ class AICliOverrides:
     transport: str | None = None
     review: bool | None = None
     max_cost_usd: float | str | None = None
+    provider_options: Mapping[str, str] = field(
+        default_factory=lambda: MappingProxyType({}),
+    )
 
 
 #: Shared "no flags were passed" value, so surfaces without CLI overrides do
@@ -113,4 +127,5 @@ def resolve_effective_ai_config(
         transport=cli_overrides.transport,
         review=cli_overrides.review,
         max_cost_usd=cli_overrides.max_cost_usd,
+        provider_options=cli_overrides.provider_options,
     )

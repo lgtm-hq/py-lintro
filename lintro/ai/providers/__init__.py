@@ -45,9 +45,9 @@ def get_provider(
     Resolution is registry-driven: the provider name is validated against
     :class:`~lintro.ai.provider_enum.AIProvider`, the in-tree plugins are
     loaded, and the plugin registered under that name builds the provider from
-    *config*. Provider-specific knobs (``cli_bare``, ``cursor_trust_workspace``)
-    are read by the plugin that owns them, so no per-vendor keyword list is
-    assembled here.
+    *config*. Provider-specific knobs live on that provider's own
+    ``ai.providers.<name>`` block (#2309) and are read by the plugin that owns
+    them, so no per-vendor keyword list is assembled here.
 
     Args:
         config: AI configuration specifying provider, model, and API key.

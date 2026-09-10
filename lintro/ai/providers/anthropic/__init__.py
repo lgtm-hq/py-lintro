@@ -10,11 +10,12 @@ reach :class:`~lintro.ai.providers.anthropic.provider.AnthropicProvider`.
 
 from __future__ import annotations
 
+from lintro.ai.providers.anthropic.config import AnthropicConfig
 from lintro.ai.providers.anthropic.metadata import ANTHROPIC_METADATA
 from lintro.ai.providers.anthropic.plugin import AnthropicPlugin
 from lintro.ai.providers.registry import register_provider
 
-__all__ = ["ANTHROPIC_METADATA", "PLUGIN", "AnthropicPlugin"]
+__all__ = ["ANTHROPIC_METADATA", "PLUGIN", "AnthropicConfig", "AnthropicPlugin"]
 
 #: The registered plugin instance. ``register_provider`` returns what it was
 #: given, so this both registers and names the singleton discovery re-reads

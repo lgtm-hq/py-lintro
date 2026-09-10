@@ -22,10 +22,10 @@ and lintro has no default provider. The full `(provider, transport)` matrix is b
 `docs/ai-features.md` also covers Claude's settings-file `apiKeyHelper` as a reachable
 API credential.
 
-**Bare-billing exception:** under `cli` with Anthropic, when `ai.cli_bare` resolves to
-sending `--bare` (`auto` with a reachable `ANTHROPIC_API_KEY`, or `always`, #1859), the
-call bills the API key — the run records `auth_mode=api_key` and `cost_basis=estimated`
-instead of the subscription column above.
+**Bare-billing exception:** under `cli` with Anthropic, when
+`ai.providers.anthropic.cli_bare` resolves to sending `--bare` (`auto` with a reachable
+`ANTHROPIC_API_KEY`, or `always`, #1859), the call bills the API key — the run records
+`auth_mode=api_key` and `cost_basis=estimated` instead of the subscription column above.
 
 **Advisory means estimate-based, not unenforced:** the CLI advisory cap still stops the
 run (finalizing a partial review) when _locally estimated_ cost reaches it. It is
@@ -87,7 +87,7 @@ CLIs both do, because each reads its own API-key variable directly. openai's dec
 
 | Variable / setting                | Transport       | Role                                                   |
 | --------------------------------- | --------------- | ------------------------------------------------------ |
-| `ai.cli_bare` / `LINTRO_CLI_BARE` | cli (anthropic) | `auto` / `always` / `never` — whether to pass `--bare` |
+| `ai.providers.anthropic.cli_bare` / `LINTRO_CLI_BARE` | cli | `auto` / `always` / `never` — whether to pass `--bare` |
 
 `--bare` disables OAuth session login and authenticates only against an API key
 (#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out

@@ -11,6 +11,7 @@ from assertpy import assert_that
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIProviderNotRegisteredError
+from lintro.ai.provider_config import ProviderConfig
 from lintro.ai.provider_enum import (
     accepted_provider_values,
     provider_required_error,
@@ -74,6 +75,15 @@ class _FakeAnthropicPlugin:
             sdk_package="fake-sdk",
             pricing={"fake-model": ModelPricing(1.0, 2.0)},
         )
+
+    @property
+    def config_model(self) -> type[ProviderConfig]:
+        """Return the model for this fake's ``ai.providers`` block.
+
+        Returns:
+            The base :class:`ProviderConfig`; the fake declares no settings.
+        """
+        return ProviderConfig
 
     def build(self, config: AIConfig) -> BaseAIProvider:
         """Refuse to build; no test in this module constructs a provider.
