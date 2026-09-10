@@ -47,6 +47,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.providers.openai.codex_auth import uses_subscription_session
 from lintro.ai.providers.openai.metadata import OPENAI_CLI_BINARY, OPENAI_METADATA
 from lintro.ai.rate_limit import retry_after_from_exception
 from lintro.ai.raw_response import (
@@ -65,6 +66,12 @@ except ImportError:
     pass
 
 DEFAULT_MODEL = OPENAI_METADATA.default_model
+
+#: Attributed to a response whose model lintro deliberately did not choose
+#: (#2537). Not a slug: under a subscription session codex picks from its own
+#: plan catalogue and reports no model back in its JSONL, so naming a real model
+#: here would be a guess presented as fact — and the run is unpriceable anyway.
+CODEX_SESSION_DEFAULT_MODEL = "codex-session-default"
 DEFAULT_API_KEY_ENV = OPENAI_METADATA.default_api_key_env
 _CODEX_BIN = OPENAI_CLI_BINARY
 
@@ -167,7 +174,35 @@ class _CodexCliTransport(CliTransport):
         self._model = model
 
     def parse_stdout(self, stdout: str) -> AIResponse:
-        """Parse JSONL stdout and extract the final agent message."""
+        """Parse JSONL stdout, attributing the response to the default model.
+
+        Args:
+            stdout: Raw stdout from the CLI.
+
+        Returns:
+            AIResponse: The parsed response.
+        """
+        return self.parse_stdout_as(stdout, model=self._model)
+
+    def parse_stdout_as(self, stdout: str, *, model: str) -> AIResponse:
+        """Parse JSONL stdout and extract the final agent message.
+
+        The model is passed in rather than read from the transport because it
+        is resolved per call: codex reports no model of its own in its JSONL
+        (only thread/turn/item events), and under a subscription session lintro
+        may have deferred the choice to the binary entirely (#2537).
+
+        Args:
+            stdout: Raw stdout from the CLI.
+            model: Model name to attribute the response and its cost to.
+
+        Returns:
+            AIResponse: The parsed response.
+
+        Raises:
+            AIProviderError: When codex reports an error event, or its output
+                is neither JSONL nor a recoverable prose envelope.
+        """
         final_text = ""
         input_tokens = 0
         output_tokens = 0
@@ -231,21 +266,21 @@ class _CodexCliTransport(CliTransport):
                 # findings. The review layer extracts embedded JSON itself.
                 return AIResponse(
                     content=recovered,
-                    model=self._model,
+                    model=model,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                     cost_estimate=estimate_cost(
-                        self._model,
+                        model,
                         input_tokens,
                         output_tokens,
                     ),
                     provider=AIProvider.OPENAI,
                 )
 
-        cost = estimate_cost(self._model, input_tokens, output_tokens)
+        cost = estimate_cost(model, input_tokens, output_tokens)
         return AIResponse(
             content=self.substitute_parsed_json(final_text),
-            model=self._model,
+            model=model,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_estimate=cost,
@@ -334,6 +369,11 @@ class OpenAIProvider(ApiStreamingProvider):
                 binary_path=codex_path,
                 model=self._model,
             )
+            # The base class folds an unset model into the API-catalogue
+            # default, which is exactly the distinction the CLI needs to keep:
+            # under a subscription session an unset model must defer to codex,
+            # while an explicit one is always honoured (#2537).
+            self._configured_model = model
             return
 
         super().__init__(
@@ -405,6 +445,29 @@ class OpenAIProvider(ApiStreamingProvider):
         """
         await super().aclose()
 
+    def _resolve_cli_model(self, model: str | None) -> str | None:
+        """Return the model to send to ``codex``, or None to let it choose.
+
+        An explicit model always wins — per call first, then the configured
+        ``ai.model``. With neither, the credential decides: an API key reaches
+        the API catalogue and keeps the historical default, while a ChatGPT-plan
+        session reaches only that plan's models and would fail outright on an
+        API-catalogue name, so the choice is deferred to codex unless the
+        provider's metadata names a subscription default (#2537).
+
+        Args:
+            model: Per-call model override, if any.
+
+        Returns:
+            The model to pass as ``--model``, or None to omit the flag.
+        """
+        explicit = model or self._configured_model
+        if explicit:
+            return explicit
+        if uses_subscription_session():
+            return OPENAI_METADATA.cli_default_model
+        return DEFAULT_MODEL
+
     async def _complete_cli(
         self,
         prompt: str,
@@ -417,16 +480,16 @@ class OpenAIProvider(ApiStreamingProvider):
         if self._cli is None:
             raise AINotAvailableError("Codex CLI transport is not initialized")
 
-        effective_model = model or self._model
+        effective_model = self._resolve_cli_model(model)
         cmd = [
             self._cli._binary_path,
             "exec",
             "--json",
             "--sandbox",
             "read-only",
-            "--model",
-            effective_model,
         ]
+        if effective_model is not None:
+            cmd += ["--model", effective_model]
         candidates: list[OptionalArg] = []
         schema_path: str | None = None
         schema_fd = -1
@@ -458,7 +521,9 @@ class OpenAIProvider(ApiStreamingProvider):
             cmd.append("-")
 
             logger.debug(
-                f"Codex CLI request: model={effective_model}, prompt_len={len(prompt)}",
+                f"Codex CLI request: model="
+                f"{effective_model or CODEX_SESSION_DEFAULT_MODEL}, "
+                f"prompt_len={len(prompt)}",
             )
 
             result = await self._cli.run_guarded(
@@ -473,7 +538,10 @@ class OpenAIProvider(ApiStreamingProvider):
                 auth_patterns=("authentication", "login", "not authenticated"),
                 auth_hint="Run 'codex login' or set CODEX_API_KEY.",
             )
-            return self._cli.parse_stdout(result.stdout)
+            return self._cli.parse_stdout_as(
+                result.stdout,
+                model=effective_model or CODEX_SESSION_DEFAULT_MODEL,
+            )
         finally:
             if schema_path is not None:
                 with contextlib.suppress(OSError):

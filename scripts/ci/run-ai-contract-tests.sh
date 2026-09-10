@@ -22,17 +22,40 @@ set -euo pipefail
 # here, so a binary that is missing inside the image fails the tier instead of
 # quietly reducing it to zero assertions.
 #
+# Tier 2 authenticates each lane with the credential the dogfood review uses
+# (#2481), so a green tier proves the credential the review will actually run
+# on: CLAUDE_CODE_OAUTH_TOKEN for anthropic, CURSOR_API_KEY for cursor, and for
+# openai the ChatGPT-plan session at $HOME/.codex/auth.json — restored on the
+# runner by scripts/ci/restore-codex-session.sh and bind-mounted in here, since
+# codex has no OAuth-token env var to forward.
+#
 # Usage:
 #   IMAGE=<ref> TIER=1 scripts/ci/run-ai-contract-tests.sh
-#   IMAGE=<ref> TIER=2 ANTHROPIC_API_KEY=<key> scripts/ci/run-ai-contract-tests.sh
+#   IMAGE=<ref> TIER=2 CLAUDE_CODE_OAUTH_TOKEN=<token> \
+#     scripts/ci/run-ai-contract-tests.sh
 #
 # Environment:
-#   IMAGE               Fully qualified lintro-ai-tools reference   (required)
-#   TIER                1 or 2                                      (required)
-#   ANTHROPIC_API_KEY   Forwarded for tier 2 (optional; absence is a
-#                       visible skip, never a silent pass)
-#   CODEX_API_KEY       Forwarded for tier 2 (optional)
-#   CURSOR_API_KEY      Forwarded for tier 2 (optional)
+#   IMAGE                     Fully qualified lintro-ai-tools ref  (required)
+#   TIER                      1 or 2                               (required)
+#   CLAUDE_CODE_OAUTH_TOKEN   Forwarded for tier 2 (optional; absence is a
+#                             visible skip, never a silent pass)
+#   ANTHROPIC_BASE_URL        Forwarded for tier 2 (optional; gateway lane)
+#   ANTHROPIC_AUTH_TOKEN      Forwarded for tier 2 (optional; gateway lane)
+#   ANTHROPIC_API_KEY         Forwarded for tier 2 (optional)
+#   CODEX_API_KEY             Forwarded for tier 2 (optional)
+#   CURSOR_API_KEY            Forwarded for tier 2 (optional)
+#   LINTRO_AI_MODEL           Forwarded for tier 2 (optional; mirrors the
+#                             dogfood review's model overlay)
+#   LINTRO_CLI_BARE           Forwarded for tier 2 (optional)
+#   CODEX_SESSION_DIR         Codex session directory mounted as CODEX_HOME
+#                             (default: $HOME/.codex; mounted only when it
+#                             holds an auth.json. Off a runner the default is
+#                             copied to a temp dir first, so a container-side
+#                             session refresh cannot touch the caller's own
+#                             codex login; an explicit value is mounted as-is)
+#   LINTRO_CONTRACT_PRINT_DOCKER_ARGS
+#                             Print the docker argv and exit 0 without
+#                             running anything (test hook)
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -45,11 +68,19 @@ Tier 1: free flag-surface check (--version/--help only).
 Tier 2: real-invocation smoke; spends provider quota.
 
 Environment:
-  IMAGE               lintro-ai-tools image reference  (required)
-  TIER                1 or 2                           (required)
-  ANTHROPIC_API_KEY   Forwarded to tier 2              (optional)
-  CODEX_API_KEY       Forwarded to tier 2              (optional)
-  CURSOR_API_KEY      Forwarded to tier 2              (optional)
+  IMAGE                    lintro-ai-tools image reference  (required)
+  TIER                     1 or 2                           (required)
+  CLAUDE_CODE_OAUTH_TOKEN  Forwarded to tier 2              (optional)
+  ANTHROPIC_BASE_URL       Forwarded to tier 2              (optional)
+  ANTHROPIC_AUTH_TOKEN     Forwarded to tier 2              (optional)
+  ANTHROPIC_API_KEY        Forwarded to tier 2              (optional)
+  CODEX_API_KEY            Forwarded to tier 2              (optional)
+  CURSOR_API_KEY           Forwarded to tier 2              (optional)
+  LINTRO_AI_MODEL          Forwarded to tier 2              (optional)
+  LINTRO_CLI_BARE          Forwarded to tier 2              (optional)
+  CODEX_SESSION_DIR        Codex session dir to mount       (optional)
+  LINTRO_CONTRACT_PRINT_DOCKER_ARGS
+                           Print the docker argv and exit    (test hook)
 EOF
 	exit 0
 fi
@@ -97,11 +128,72 @@ if [ "$TIER" = "2" ]; then
 	docker_args+=(--env LINTRO_CONTRACT_TIER2=1)
 	# Forwarded without defaults: an unset credential must reach the suite as
 	# unset so it reports a visible skip naming the missing link.
-	for secret in ANTHROPIC_API_KEY CODEX_API_KEY CURSOR_API_KEY; do
+	#
+	# CLAUDE_CODE_OAUTH_TOKEN is the anthropic lane's subscription credential
+	# (the same one the dogfood review carries); ANTHROPIC_BASE_URL and
+	# ANTHROPIC_AUTH_TOKEN are its gateway configuration, mutually exclusive
+	# with the token by construction in the caller. The two API keys stay
+	# forwardable for a local run. LINTRO_CLI_BARE lets the caller pin the
+	# CLI's auth mode, and the two claude flags keep its egress inside the
+	# job's allowlist and its pinned version pinned.
+	for secret in \
+		CLAUDE_CODE_OAUTH_TOKEN \
+		ANTHROPIC_BASE_URL \
+		ANTHROPIC_AUTH_TOKEN \
+		ANTHROPIC_API_KEY \
+		CODEX_API_KEY \
+		CURSOR_API_KEY \
+		LINTRO_AI_MODEL \
+		LINTRO_CLI_BARE \
+		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC \
+		DISABLE_AUTOUPDATER; do
 		if [ -n "${!secret:-}" ]; then
 			docker_args+=(--env "${secret}")
 		fi
 	done
+	# The openai lane has no token env var: codex reads its ChatGPT-plan
+	# session from its CODEX_HOME, so the restored directory is bind-mounted
+	# in and named explicitly. Read-write, because codex refreshes the session
+	# in place. The mount point is deliberately NOT under the container's HOME
+	# (/tmp, set above): codex refuses to create its PATH-alias helper binaries
+	# when CODEX_HOME sits under a temporary directory and exits 1 with
+	# "Refusing to create helper binaries under temporary dir" — an
+	# authenticated session that still fails the lane. An absent directory
+	# means an unrestored session, which the suite reports as an
+	# unauthenticated lane rather than a pass.
+	codex_session_dir="${CODEX_SESSION_DIR:-${HOME:-}/.codex}"
+	if [ -f "${codex_session_dir}/auth.json" ]; then
+		# Off a runner, the default source is the developer's own codex
+		# login. The container writes as root and codex may refresh the
+		# session in place, so an unlucky local run could leave the caller's
+		# real auth.json root-owned and their `codex` logged out. A local run
+		# therefore mounts a disposable copy. CI keeps mounting the restored
+		# directory itself: the runner is ephemeral, the session was written
+		# for this job alone, and a copy would only add a step that can fail.
+		# An explicit CODEX_SESSION_DIR is taken at face value in both — the
+		# caller named the directory they meant.
+		if [ -z "${CODEX_SESSION_DIR:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
+			codex_session_copy="$(mktemp -d)"
+			trap 'rm -rf "${codex_session_copy}"' EXIT
+			chmod 700 "${codex_session_copy}"
+			cp -R "${codex_session_dir}/." "${codex_session_copy}/"
+			codex_session_dir="${codex_session_copy}"
+		fi
+		docker_args+=(
+			--volume "${codex_session_dir}:/opt/codex-home"
+			--env "CODEX_HOME=/opt/codex-home"
+		)
+	fi
+fi
+
+# Print-args mode: emit the docker argv, one word per line, and stop before
+# spending a pull or any provider quota. This exists so the argv construction
+# above — the codex mount and the credential forwarding loop, both of which are
+# invisible in a workflow diff — is testable without Docker or a credential
+# (tests/scripts/test_ai_contract_tests_workflow.py).
+if [ -n "${LINTRO_CONTRACT_PRINT_DOCKER_ARGS:-}" ]; then
+	printf '%s\n' "${docker_args[@]}" "$IMAGE"
+	exit 0
 fi
 
 echo "==> Tier ${TIER} contract tests in ${IMAGE}"
