@@ -1101,6 +1101,26 @@ def test_a_malformed_providers_value_is_rejected_not_overwritten() -> None:
     assert_that(str(excinfo.value)).contains("ai.providers must be a mapping")
 
 
+def test_a_malformed_inner_block_is_rejected_during_legacy_migration() -> None:
+    """A scalar inner block is reported, not replaced, when a legacy key is set.
+
+    Without a legacy key the same input is rejected by validation; the
+    migration must not turn it into an empty block plus the migrated field.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        AIConfig.model_validate(
+            {
+                "provider": "cursor",
+                "providers": {"cursor": 5},
+                "cursor_trust_workspace": False,
+            },
+        )
+
+    assert_that(str(excinfo.value)).contains(
+        "ai.providers.cursor must be a mapping",
+    )
+
+
 def test_lintro_config_survives_rich_markup_in_an_override_value(
     isolated_project: Path,
     monkeypatch: pytest.MonkeyPatch,

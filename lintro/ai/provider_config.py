@@ -153,6 +153,17 @@ def migrate_legacy_provider_keys(
         value = migrated.pop(legacy)
         key = provider.value
         block_raw = providers.get(key, providers.get(provider))
+        if block_raw is not None and not isinstance(
+            block_raw,
+            (Mapping, ProviderConfig),
+        ):
+            # Same rule as the top-level guard: replacing a malformed inner
+            # block with ``{}`` plus the migrated field would accept a value
+            # the non-legacy path reports.
+            raise ValueError(
+                f"ai.providers.{key} must be a mapping of settings, got "
+                f"{type(block_raw).__name__}",
+            )
         block = dict(block_raw) if isinstance(block_raw, Mapping) else {}
         if isinstance(block_raw, ProviderConfig):
             block = block_raw.model_dump()

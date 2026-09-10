@@ -28,6 +28,7 @@ from lintro.ai.config_overrides import (
 from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.claude_auth import BARE_MODE_ENV
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.parsers.base_issue import BaseIssue
@@ -430,7 +431,7 @@ def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
         ENV_PROVIDER,
         ENV_REVIEW,
         ENV_TRANSPORT,
-        "LINTRO_CLI_BARE",
+        BARE_MODE_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
 
