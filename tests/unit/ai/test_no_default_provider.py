@@ -136,6 +136,10 @@ def _default_shaped_values(tree: ast.AST) -> list[tuple[int, str, ast.expr]]:
         elif isinstance(node, ast.IfExp):
             found.append((node.lineno, "conditional fallback", node.body))
             found.append((node.lineno, "conditional fallback", node.orelse))
+        elif isinstance(node, ast.If):
+            found.extend(_unset_guard_defaults(node=node))
+        elif isinstance(node, ast.Match):
+            found.extend(_match_arm_defaults(node=node))
         elif isinstance(node, ast.Call):
             found.extend(_call_defaults(node=node))
         elif isinstance(node, ast.Assign):
@@ -197,6 +201,95 @@ def _unpack_containers(*, value: ast.expr) -> list[ast.expr]:
         return found
     for member in members:
         found.extend(_unpack_containers(value=member))
+    return found
+
+
+def _unset_name(*, test: ast.expr) -> str | None:
+    """Return the name an ``if`` tests for being unset, when it does.
+
+    Recognises the three ways the imperative fallback is written:
+    ``if provider is None``, ``if provider == None`` and ``if not provider``.
+
+    Args:
+        test: The ``if`` statement's test expression.
+
+    Returns:
+        The tested name, or None when the test is not an unset guard.
+    """
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        return test.operand.id if isinstance(test.operand, ast.Name) else None
+    if not isinstance(test, ast.Compare) or len(test.ops) != 1:
+        return None
+    if not isinstance(test.ops[0], ast.Is | ast.Eq):
+        return None
+    if not isinstance(test.left, ast.Name):
+        return None
+    comparator = test.comparators[0]
+    is_none = isinstance(comparator, ast.Constant) and comparator.value is None
+    return test.left.id if is_none else None
+
+
+def _unset_guard_defaults(*, node: ast.If) -> list[tuple[int, str, ast.expr]]:
+    """Collect the imperative form of a conditional fallback.
+
+    ``ast.IfExp`` covers ``x = "anthropic" if x is None else x``; this covers
+    the statement it desugars from::
+
+        if provider is None:
+            provider = "anthropic"
+
+    Only an assignment back to the *same* name the test guards counts, so an
+    unrelated binding inside a conditional is not read as a default.
+
+    Args:
+        node: An ``if`` statement.
+
+    Returns:
+        ``(line, shape, expression)`` triples for the guarded assignments.
+    """
+    name = _unset_name(test=node.test)
+    if name is None:
+        return []
+    found: list[tuple[int, str, ast.expr]] = []
+    for statement in node.body:
+        if not isinstance(statement, ast.Assign):
+            continue
+        targets = [
+            target for target in statement.targets if isinstance(target, ast.Name)
+        ]
+        if any(target.id == name for target in targets):
+            found.append((statement.lineno, "unset-guard fallback", statement.value))
+    return found
+
+
+def _match_arm_defaults(*, node: ast.Match) -> list[tuple[int, str, ast.expr]]:
+    """Collect values assigned by a ``match`` statement's catch-all arm.
+
+    Only the wildcard ``case _:`` and ``case None:`` arms are inspected. Those
+    are the default-shaped positions; a arm matching a concrete provider is
+    per-provider dispatch, and reading its body would flag every branch of a
+    dispatch table.
+
+    Args:
+        node: A ``match`` statement.
+
+    Returns:
+        ``(line, shape, expression)`` triples for the catch-all assignments.
+    """
+    found: list[tuple[int, str, ast.expr]] = []
+    for case in node.cases:
+        pattern = case.pattern
+        is_wildcard = isinstance(pattern, ast.MatchAs) and pattern.pattern is None
+        is_none = isinstance(pattern, ast.MatchSingleton) and pattern.value is None
+        if not (is_wildcard or is_none) or case.guard is not None:
+            continue
+        for statement in case.body:
+            if not isinstance(statement, ast.Assign | ast.AnnAssign):
+                continue
+            value = statement.value
+            if value is None:
+                continue
+            found.append((statement.lineno, "match fallback", value))
     return found
 
 
@@ -282,6 +375,11 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         'DEFAULTS["provider"] = "anthropic"',
         'DEFAULT_PROVIDER: str = "cursor"',
         'provider = explicit if explicit else "anthropic"',
+        'if provider is None:\n    provider = "anthropic"',
+        'if not provider:\n    provider = "cursor"',
+        'if provider == None:\n    provider = "openai"',
+        'match provider:\n    case _:\n        provider = "anthropic"',
+        'match provider:\n    case None:\n        provider = "cursor"',
         'provider = "anthropic" if provider is None else provider',
         'provider = explicit or "cursor" or fallback',
     ],
@@ -301,6 +399,11 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "default-constant-via-a-subscript-target",
         "annotated-default-constant",
         "conditional-fallback",
+        "unset-guard-is-none",
+        "unset-guard-falsy",
+        "unset-guard-equals-none",
+        "match-wildcard-arm",
+        "match-none-arm",
         "conditional-fallback-in-body",
         "or-fallback-mid-chain",
     ],
@@ -339,6 +442,34 @@ def test_ratchet_ignores_a_getattr_with_no_fallback(source: str) -> None:
 
     Args:
         source: A one-line module with a ``getattr`` that has no fallback.
+    """
+    flagged = [
+        shape
+        for _, shape, value in _default_shaped_values(ast.parse(source))
+        if _is_provider_literal(value)
+    ]
+    assert_that(flagged).described_as(source).is_empty()
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'match provider:\n    case "anthropic":\n        binary = "anthropic"',
+        'if provider is None:\n    transport = "anthropic"',
+    ],
+    ids=["match-arm-for-a-concrete-provider", "unset-guard-binding-another-name"],
+)
+def test_ratchet_ignores_dispatch_inside_conditionals(source: str) -> None:
+    """Assert per-provider dispatch is not read as a fallback.
+
+    Only a catch-all ``match`` arm and an assignment back to the guarded name
+    are defaults. Reading every arm of a dispatch table, or every binding
+    under any conditional, would flag the code that exists precisely because
+    lintro treats the providers as equals.
+
+    Args:
+        source: A one-line module whose provider name is dispatch, not a
+            default.
     """
     flagged = [
         shape
