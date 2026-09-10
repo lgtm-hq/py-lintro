@@ -65,7 +65,10 @@ comments so Renovate can track digest updates. Policy is enforced by
 ## Release
 
 - **release-version-pr.yml** — Opens version bump PR via
-  `reusable-release-version-pr.yml` (Python ecosystem, auto-merge, max minor)
+  `reusable-release-version-pr.yml` (Python ecosystem, auto-merge, max minor). The
+  `publish-gate` job runs `scripts/ci/check-last-publish-green.py` first and skips the
+  version PR while the last version-tag publish is red, so a broken publish stops
+  burning a version per merge (#2516); dispatch with `force: true` to override.
 - **release-auto-tag.yml** — Creates tags on release commits via
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
