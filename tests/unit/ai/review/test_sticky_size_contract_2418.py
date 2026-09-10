@@ -11,12 +11,14 @@ over-budget board.
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_constants import MAX_COMMENT_CHARS, PRIMARY_SOFT_LIMIT
 from lintro.ai.review.github_contract import TRUNCATION_NOTICE, RenderLimits
+from lintro.ai.review.github_render import Section
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -31,6 +33,7 @@ from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.sticky import build_sticky_bodies
+from lintro.ai.review.sticky.body import round_sections
 from lintro.ai.review.sticky.findings import _findings_round_section
 
 #: Open findings on the over-budget board. Enough that the un-pruned render
@@ -187,3 +190,58 @@ def test_findings_heading_is_unmarked_when_nothing_is_pruned() -> None:
 
     assert_that(section).contains("3 fixed this round")
     assert_that(section).does_not_contain("not listed**")
+
+
+def test_archived_fit_does_not_iterate_the_history_stage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The archived fit skips a pruning stage that cannot shrink anything.
+
+    An archived body renders the history fold as a fixed link to the archive
+    comment, so ``limits.history`` changes nothing about its length. Reporting
+    the real prior-run count would make ``fit_body`` re-render the same
+    over-budget body once per stored run before reaching the stages that can
+    shrink it.
+    """
+    seen: list[int | None] = []
+
+    def recording_round_sections(
+        *,
+        plan: StickyPlan,
+        limits: RenderLimits,
+        archive_history: bool = False,
+    ) -> list[Section]:
+        """Record the history limit of each archived render.
+
+        Args:
+            plan: Resolved inputs for the body being rendered.
+            limits: Per-section render limits to apply.
+            archive_history: When True, history expanders become a link.
+
+        Returns:
+            list[Section]: The sections the real renderer produces.
+        """
+        if archive_history:
+            seen.append(limits.history)
+        return round_sections(
+            plan=plan,
+            limits=limits,
+            archive_history=archive_history,
+        )
+
+    monkeypatch.setattr(
+        "lintro.ai.review.sticky.assembly.round_sections",
+        recording_round_sections,
+    )
+    primary, archive = build_sticky_bodies(
+        request=StickyRequest(
+            result=_oversized_result(),
+            prior_state=ReviewState(runs=_prior_runs()),
+            head_sha="fffffff",
+        ),
+    )
+
+    assert_that(archive).is_not_none()
+    assert_that(primary).contains("Per-round expanders live on the archive comment")
+    assert_that(seen).is_not_empty()
+    assert_that([limit for limit in seen if limit is not None]).is_empty()

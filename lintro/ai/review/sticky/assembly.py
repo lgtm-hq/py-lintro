@@ -249,7 +249,16 @@ def build_sticky_bodies(*, request: StickyRequest) -> tuple[str, str | None]:
         # (#2418): pruning history, then resolved, then open findings, each
         # with a visible marker. Tail-capping it here instead would drop rows
         # off the bottom with nothing saying they were dropped.
-        primary = fit_body(assemble=render_archived, counts=counts)
+        #
+        # It reports no history rows because it has none to prune: the fold is
+        # already a fixed link to the archive comment, so ``limits.history``
+        # changes nothing. Left at the real count, ``fit_body`` would re-render
+        # the same over-budget body once per stored run before reaching the
+        # resolved and open stages that can actually shrink it.
+        primary = fit_body(
+            assemble=render_archived,
+            counts=replace(counts, history_rows=0),
+        )
         archive = _archive_body(runs=outcome.runs, records=outcome.match.records)
     return primary, archive
 
