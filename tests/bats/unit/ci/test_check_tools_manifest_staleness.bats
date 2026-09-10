@@ -27,6 +27,10 @@ setup() {
 	printf 'RUFF = "0.1.0"\n' >lintro/_tool_versions.py
 	printf '{}\n' >lintro/tools/manifest.src.json
 	printf 'FROM debian\n' >docker/tools.Dockerfile
+	printf '{"devDependencies": {"prettier": "3.0.0"}}\n' >package.json
+	printf '[project]\nname = "lintro"\n' >pyproject.toml
+	printf 'semgrep==1.0.0\n' >requirements-semgrep.txt
+	printf 'SEED = {}\n' >lintro/_tool_packages.py
 	printf 'unrelated\n' >README.md
 	git add -A
 	git commit --quiet -m 'base'
@@ -104,6 +108,32 @@ run_guard() {
 	assert_output --partial "$newer"
 	assert_output --partial "rebuild from main with force_publish=true"
 	assert_output --partial "lintro/_tool_versions.py"
+}
+
+@test "refuses when main has a newer npm pin the rendered manifest reads" {
+	# package.json is not a seed file, but manifest.json's npm versions are
+	# generated from it, so a candidate built before this lands is stale.
+	printf '{"devDependencies": {"prettier": "3.1.0"}}\n' >package.json
+	git add -A
+	git commit --quiet -m 'chore(deps): bump prettier'
+	newer="$(git rev-parse HEAD)"
+
+	run run_guard env
+	assert_failure
+	assert_output --partial "refusing to promote: main has newer tool manifest commits"
+	assert_output --partial "$newer"
+	assert_output --partial "package.json"
+}
+
+@test "refuses when main has a newer semgrep pin" {
+	printf 'semgrep==1.1.0\n' >requirements-semgrep.txt
+	git add -A
+	git commit --quiet -m 'chore(deps): bump semgrep'
+
+	run run_guard env
+	assert_failure
+	assert_output --partial "refusing to promote"
+	assert_output --partial "requirements-semgrep.txt"
 }
 
 @test "refusal is written to the step summary" {

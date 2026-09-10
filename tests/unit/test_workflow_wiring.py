@@ -4762,6 +4762,11 @@ def test_tools_promote_passes_manifest_staleness_shas() -> None:
     assert_that(env["CANDIDATE_SHA"]).contains("needs.resolve.outputs.candidate-sha")
     assert_that(env["CANDIDATE_PR"]).contains("needs.resolve.outputs.candidate-pr")
     assert_that(env["MAIN_SHA"]).contains("github.sha")
+    # The guard's escape hatch has to be reachable: the refusal message tells
+    # operators to force the promote, so a dispatch must be able to set it.
+    assert_that(env["FORCE_PUBLISH"]).contains("inputs.force_publish")
+    dispatch = workflow["on"]["workflow_dispatch"]
+    assert_that(dispatch["inputs"]).contains_key("force_publish")
 
     promote_script = (
         _REPO_ROOT / "scripts" / "ci" / "promote-ci-docker-images.sh"

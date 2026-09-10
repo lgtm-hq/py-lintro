@@ -73,14 +73,23 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	exit 0
 fi
 
-# Manifest inputs the image-vs-manifest gate compares: the pinned tool
-# versions and the hand-authored manifest source it renders
-# lintro/tools/manifest.json from, the package map behind those tools, and the
-# Dockerfile that bakes them into the image.
+# Every committed input the rendered lintro/tools/manifest.json depends on --
+# the manifest the image-vs-manifest gate (verify-image-manifest-tools.sh)
+# compares the image against -- plus the Dockerfile that bakes those tools
+# into the image. manifest.json itself is a generated output and is not
+# committed, so its inputs are what the guard has to watch: the generator
+# reads them all (see lintro_build/versions/paths.py GeneratorPaths and
+# generate.py REQUIREMENTS_PYPI_SOURCES).
+#
+# tests/scripts/test_manifest_staleness_inputs.py fails if this list and the
+# generator's declared inputs drift apart.
 DEFAULT_MANIFEST_PATHS='
+lintro/_tool_packages.py
 lintro/_tool_versions.py
 lintro/tools/manifest.src.json
-lintro/_tool_packages.py
+package.json
+pyproject.toml
+requirements-semgrep.txt
 docker/tools.Dockerfile
 '
 
@@ -163,7 +172,7 @@ if ! candidate_full="$(resolve_commit "$candidate_sha")"; then
 	fi
 	candidate_full="$(resolve_commit "$candidate_sha")" || case $? in
 	2)
-		fail_closed "refusing to promote: candidate commit ${candidate_sha} is an ambiguous abbreviation in this checkout; rebuild from main with force_publish=true"
+		fail_closed "refusing to promote: candidate commit ${candidate_sha} is an ambiguous abbreviation in this checkout; rebuild from main with force_publish=true (docker-tools-publish.yml)"
 		;;
 	*)
 		fail_closed "refusing to promote: candidate commit ${candidate_sha} is not available in this checkout${candidate_pr:+ (fetched refs/pull/${candidate_pr}/head)}; rebuild from main with force_publish=true"
@@ -175,11 +184,11 @@ fi
 # fetched PR head are independent inputs: assert they agree rather than
 # comparing manifests against some other commit.
 if [[ "$candidate_full" != "$candidate_sha"* ]]; then
-	fail_closed "refusing to promote: candidate commit ${candidate_sha} resolved to ${candidate_full}; rebuild from main with force_publish=true"
+	fail_closed "refusing to promote: candidate commit ${candidate_sha} resolved to ${candidate_full}; rebuild from main with force_publish=true (docker-tools-publish.yml)"
 fi
 
 if ! main_full="$(resolve_commit "$main_sha")"; then
-	fail_closed "refusing to promote: main commit ${main_sha} is not available in this checkout; rebuild from main with force_publish=true"
+	fail_closed "refusing to promote: main commit ${main_sha} is not available in this checkout; rebuild from main with force_publish=true (docker-tools-publish.yml)"
 fi
 
 changed_paths="$(git diff --name-only "$candidate_full" "$main_full" -- "${manifest_paths[@]}")"
@@ -193,12 +202,12 @@ commits="$(git log --format=%H "${candidate_full}..${main_full}" -- "${manifest_
 commits="${commits% }"
 
 if [[ -n "$commits" ]]; then
-	message="refusing to promote: main has newer tool manifest commits ${commits}; rebuild from main with force_publish=true"
+	message="refusing to promote: main has newer tool manifest commits ${commits}; rebuild from main with force_publish=true (docker-tools-publish.yml), or dispatch docker-tools-promote.yml with force_publish=true to promote anyway"
 else
 	# No manifest-touching commit sits between the two, yet the content
 	# differs: the candidate branch itself diverged (an amended or rebased
 	# manifest change that never landed on main in that form).
-	message="refusing to promote: tool manifest inputs differ between candidate commit ${candidate_full} and main ${main_full}, but no manifest-touching commit lies between them (candidate-side divergence); rebuild from main with force_publish=true"
+	message="refusing to promote: tool manifest inputs differ between candidate commit ${candidate_full} and main ${main_full}, but no manifest-touching commit lies between them (candidate-side divergence); rebuild from main with force_publish=true (docker-tools-publish.yml), or dispatch docker-tools-promote.yml with force_publish=true to promote anyway"
 fi
 
 echo "$message" >&2

@@ -311,7 +311,9 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     )
     assert "reusable-docker.yml@" in fallback["uses"]
     assert resolve["permissions"]["packages"] == "read"
-    assert "workflow_dispatch" not in trigger
+    # The one dispatch entry point is the staleness guard's escape hatch
+    # (#2497); nothing else may be driven by hand.
+    assert set(trigger["workflow_dispatch"]["inputs"]) == {"force_publish"}
     assert resolve["if"] == "github.ref == 'refs/heads/main'"
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
@@ -1255,3 +1257,79 @@ def test_merged_pr_prefers_the_merged_renovate_pull_request(
 
     assert resolved is not None
     assert_that(resolved["number"]).is_equal_to(11)
+
+
+def test_promotion_exports_candidate_sha_and_pr(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolver must export both halves of the candidate tag (#2497).
+
+    The promote step feeds ``candidate-sha`` and ``candidate-pr`` to the
+    manifest staleness guard: the abbreviated SHA is what gets compared with
+    main, and the PR number is how ``refs/pull/<n>/head`` is fetched so that
+    abbreviation resolves.
+
+    Args:
+        promotion_module: Loaded ``promote-tools-candidate.py`` module.
+        tmp_path: Temporary directory for the fake ``GITHUB_OUTPUT`` file.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    tag = "tools-candidate-pr4321-0123456789ab"
+    output = tmp_path / "github_output"
+    output.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "f" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setattr(
+        promotion_module,
+        "resolve_main_action",
+        lambda **_kwargs: ("promote", tag),
+    )
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert_that(lines).contains("action=promote")
+    assert_that(lines).contains(f"candidate-tag={tag}")
+    assert_that(lines).contains("candidate-sha=0123456789ab")
+    assert_that(lines).contains("candidate-pr=4321")
+
+
+def test_promotion_exports_empty_candidate_fields_without_a_tag(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A publish/skip classification must still write the keys, empty.
+
+    Downstream ``needs.resolve.outputs`` references would otherwise read a
+    missing key, so the fields are always written.
+
+    Args:
+        promotion_module: Loaded ``promote-tools-candidate.py`` module.
+        tmp_path: Temporary directory for the fake ``GITHUB_OUTPUT`` file.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    output = tmp_path / "github_output"
+    output.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "f" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setattr(
+        promotion_module,
+        "resolve_main_action",
+        lambda **_kwargs: ("publish", None),
+    )
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert_that(lines).contains("action=publish")
+    assert_that(lines).contains("candidate-sha=")
+    assert_that(lines).contains("candidate-pr=")
