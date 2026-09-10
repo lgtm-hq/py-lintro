@@ -231,12 +231,17 @@ jobs:
           # binary this tier exists to verify.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
-          # The dogfood review's model overlay (#2471/#1971), mirrored so a
-          # `gh variable set LINTRO_AI_MODEL` experiment reaches both jobs and
-          # Tier 2 exercises the model the review will actually run on rather
-          # than only each provider's default. Empty when the variable is
-          # unset, which is the default and leaves every lane on the default
-          # the provider resolves for its credential (#2537).
+          # The dogfood review's model overlay (#2471/#1971), mirrored for
+          # parity so the two jobs read the same variable. One value reaches
+          # every lane: the review runs one provider per run, Tier 2 runs all
+          # three in one job, and there is no per-lane split here because the
+          # container gets a single environment for the whole pytest run. A
+          # provider-specific slug therefore reddens the lanes it does not
+          # belong to — set it only while experimenting with the provider it
+          # names, and expect the other two to fail; otherwise leave it unset.
+          # Unset is the default and the normal state: each lane then resolves
+          # its own default, which for codex means deferring to the CLI under
+          # a subscription session (#2537).
           # yamllint disable-line rule:line-length
           LINTRO_AI_MODEL: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.LINTRO_AI_MODEL || '' }}
           # cursor: the same API key the dogfood cursor lane uses.

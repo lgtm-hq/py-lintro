@@ -278,11 +278,36 @@ def test_a_missing_session_file_is_not_a_subscription() -> None:
     assert_that(uses_subscription_session()).is_false()
 
 
-def test_an_unreadable_session_file_is_not_a_subscription() -> None:
-    """Malformed JSON must fall back rather than raise into the review."""
+def test_a_session_file_that_is_not_json_is_not_a_subscription() -> None:
+    """The decode branch must fall back rather than raise into the review."""
     auth_file = codex_auth_file()
     auth_file.parent.mkdir(parents=True, exist_ok=True)
     auth_file.write_text("not json", encoding="utf-8")
+
+    assert_that(uses_subscription_session()).is_false()
+
+
+def test_a_session_file_that_cannot_be_read_is_not_a_subscription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An OSError on read must fall back, not abort the review.
+
+    The file existing says nothing about it being readable — a session copied
+    with the wrong owner, or a home mounted without permission, raises here.
+    That must degrade to the API-catalogue default like every other unusable
+    session, not surface as a PermissionError mid-review.
+
+    Args:
+        monkeypatch: Patcher for the read that raises.
+    """
+    auth_file = codex_auth_file()
+    auth_file.parent.mkdir(parents=True, exist_ok=True)
+    auth_file.write_text(json.dumps({"auth_mode": "chatgpt"}), encoding="utf-8")
+
+    def _raise(*args: object, **kwargs: object) -> str:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(Path, "read_text", _raise)
 
     assert_that(uses_subscription_session()).is_false()
 
