@@ -31,6 +31,13 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     "dist",
     "build",
     "*.egg-info",
+    # `terraform init` vendors provider plugins and remote modules here. Their
+    # .tf files are third-party downloads, so handing them to an IaC scanner
+    # reports findings nobody in this repository can fix. Detection prunes the
+    # directory too (lintro/utils/project_detection.py); both are needed,
+    # because pruning detection only decides whether the tool is selected.
+    # `.terragrunt-cache` is already covered by the `*cache*` entry above.
+    ".terraform",
 ]
 
 

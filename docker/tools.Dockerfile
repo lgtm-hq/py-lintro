@@ -136,7 +136,7 @@ RUN python3 scripts/ci/generate-tool-versions.py && \
     python3 scripts/ci/generate-builtin-tool-index.py
 
 RUN groupadd -r tools && \
-    mkdir -p /opt/bun /opt/cargo /opt/rustup
+    mkdir -p /opt/bun /opt/cargo /opt/rustup /opt/uv-tools
 
 # Keep rustup's bundled HTML doc trees (rust-docs component) out of the
 # image: generated Rust API docs have no runtime use here, they add tens of
@@ -154,9 +154,9 @@ RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     /app/scripts/utils/install-tools.sh --docker && \
     rm -rf /opt/rustup/toolchains/*/share/doc
 
-RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv && \
-    chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv && \
-    chmod -R a+rX /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv
+RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv /opt/uv-tools && \
+    chmod -R g+rwX /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv /opt/uv-tools && \
+    chmod -R a+rX /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv /opt/uv-tools
 
 RUN echo "=== Verifying all tools ===" && \
     bun --version && uv --version && go version && \
@@ -164,7 +164,7 @@ RUN echo "=== Verifying all tools ===" && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
     black --version && buf --version && commitlint --version && \
-    cppcheck --version && gitleaks version && \
+    cppcheck --version && checkov --version && gitleaks version && \
     golangci-lint version && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
