@@ -11,6 +11,29 @@ setup() {
 	WORKDIR="${BATS_TEST_TMPDIR}/work"
 	mkdir -p "${WORKDIR}/dist/nuitka"
 	BINARY="${WORKDIR}/dist/nuitka/lintro"
+	# The verify step drives the pty review through `python3`; stub it so the
+	# cases below exercise the shell branches against a stub binary (#2514).
+	STUB_BIN="${BATS_TEST_TMPDIR}/stub-bin"
+	mkdir -p "$STUB_BIN"
+	stub_review_driver 0 "OK interactive review: pygments-highlighted diff"
+	PATH="${STUB_BIN}:${PATH}"
+	export PATH
+}
+
+# Write a fake `python3` standing in for drive_interactive_review.py.
+#
+# Args:
+#   $1: exit status the driver should report.
+#   $2: line the driver should print.
+stub_review_driver() {
+	cat >"${STUB_BIN}/python3" <<EOF
+#!/usr/bin/env bash
+case "\${1:-}" in
+*drive_interactive_review.py) echo "$2"; exit $1 ;;
+*) exit 0 ;;
+esac
+EOF
+	chmod +x "${STUB_BIN}/python3"
 }
 
 teardown() {
@@ -41,6 +64,7 @@ teardown() {
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) exit 0 ;;
 --help) echo "help"; exit 0 ;;
 *) exit 1 ;;
 esac
@@ -57,6 +81,7 @@ EOF
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) exit 0 ;;
 *) echo "help exploded"; exit 4 ;;
 esac
 EOF
@@ -80,4 +105,90 @@ EOF
 	run "$SCRIPT" "$BINARY"
 	assert_failure
 	assert_equal "3" "$status"
+}
+
+@test "verify_built_binary.sh: runs the interactive review driver" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) exit 0 ;;
+--help) echo "help"; exit 0 ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_success
+	assert_output --partial "OK interactive review"
+}
+
+@test "verify_built_binary.sh: fails when the review renders no pygments diff" {
+	stub_review_driver 1 "FAIL interactive review: the diff rendered without pygments highlighting"
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) exit 0 ;;
+*) exit 0 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_failure
+	assert_output --partial "without pygments highlighting"
+}
+
+@test "verify_built_binary.sh: accepts an MCP server that exits at EOF" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) exit 0 ;;
+--help) echo "help"; exit 0 ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_success
+	assert_output --partial "MCP server started and exited at EOF"
+}
+
+@test "verify_built_binary.sh: accepts the documented missing-MCP-extra error" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) echo "Error: MCP server requires lintro[mcp]. Install with: uv pip install 'lintro[mcp]'"
+	exit 2 ;;
+--help) echo "help"; exit 0 ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_success
+	assert_output --partial "optional SDK not bundled"
+}
+
+@test "verify_built_binary.sh: fails when the MCP server crashes" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) echo "Traceback (most recent call last): ImportError" >&2; exit 1 ;;
+--help) echo "help"; exit 0 ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_failure
+	assert_output --partial "MCP server start-and-exit failed"
 }
