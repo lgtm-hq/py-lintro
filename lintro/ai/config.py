@@ -470,7 +470,9 @@ class AIConfig(BaseModel):
         for name, value in raw_blocks.items():
             try:
                 model = config_model_for(name)
-            except AIProviderNotRegisteredError:
+            except (AIProviderNotRegisteredError, ValueError):
+                # Same pair the env-override path catches: a non-member name
+                # may surface as a bare ValueError from the enum lookup.
                 if not _SUPPRESS_DIAGNOSTICS.get():
                     logger.warning(
                         "Unknown AI provider block ignored: ai.providers.{}",

@@ -32,6 +32,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.config_overrides import (
     _ENABLED_ACCEPTED,
     ENV_PROVIDER_BLOCK_PREFIX,
+    read_provider_block_env_overrides,
 )
 from lintro.ai.doctor_checks import check_ai_configuration
 from lintro.ai.effective_config import AICliOverrides, resolve_effective_ai_config
@@ -485,6 +486,42 @@ def test_env_override_names_an_unknown_provider(
         resolve_effective_ai_config({})
 
     assert_that(str(excinfo.value)).contains("llamatron")
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    ["CURSOR", "TRUST_WORKSPACE", "CURSOR__", "__TRUST_WORKSPACE"],
+    ids=["provider-only", "field-only", "trailing-separator", "leading-separator"],
+)
+def test_env_override_rejects_a_malformed_name(
+    monkeypatch: pytest.MonkeyPatch,
+    suffix: str,
+) -> None:
+    """A block variable that is not ``<PROVIDER>__<FIELD>`` is an error.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        suffix: The malformed remainder after the block prefix.
+    """
+    monkeypatch.setenv(f"{ENV_PROVIDER_BLOCK_PREFIX}{suffix}", "true")
+
+    with pytest.raises(AIConfigOverrideError) as excinfo:
+        resolve_effective_ai_config({})
+
+    assert_that(str(excinfo.value)).contains(f"{ENV_PROVIDER_BLOCK_PREFIX}{suffix}")
+
+
+def test_env_override_with_an_empty_value_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A whitespace-only block variable is treated as unset, not as an error.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv(f"{ENV_PROVIDER_BLOCK_PREFIX}CURSOR__TRUST_WORKSPACE", "  ")
+
+    assert_that(read_provider_block_env_overrides()).is_equal_to({})
 
 
 def test_env_override_rejects_a_bad_value(
