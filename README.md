@@ -366,7 +366,7 @@ interactive fix suggestions. AI features are **BYO (Bring Your Own) API key** �
 enabled by default.
 
 - **Providers:** Anthropic, Cursor, OpenAI — peers, listed alphabetically; `ai.provider`
-  is required and has no default
+  has no default and is required once `ai.lint` or `ai.review` is enabled
 - **AI Summary** — high-level assessment with pattern analysis (1 API call per run)
 - **Interactive Fix Suggestions** — AI-generated code diffs with risk classification
 - **Post-fix Summary** — contextualizes what was fixed and what remains
