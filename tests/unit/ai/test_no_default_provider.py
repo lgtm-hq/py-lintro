@@ -34,6 +34,11 @@ from lintro.ai.provider_enum import (
 
 _AI_PACKAGE = Path(__file__).resolve().parents[3] / "lintro" / "ai"
 
+#: CLI modules outside ``lintro/ai`` that declare a provider-selecting option;
+#: a click ``default="anthropic"`` creeping back there would bypass the
+#: package-level scan.
+_CLI_PROVIDER_MODULES = (_AI_PACKAGE.parent / "cli_utils" / "commands" / "review.py",)
+
 #: The whole allowlist: per-provider packages, where naming the vendor the
 #: package implements is inherent rather than a default.
 _PROVIDER_PACKAGE_ROOTS = frozenset(
@@ -56,17 +61,18 @@ def _relative(path: Path) -> str:
 
 
 def _scanned_modules() -> list[Path]:
-    """Return the ``lintro/ai`` modules subject to the ratchet.
+    """Return the modules subject to the ratchet.
 
     Returns:
         Every Python module under ``lintro/ai`` except the per-provider
-        packages.
+        packages, plus the CLI modules that declare a provider option.
     """
-    return [
+    ai_modules = [
         path
         for path in sorted(_AI_PACKAGE.rglob("*.py"))
         if not any(_relative(path).startswith(root) for root in _PROVIDER_PACKAGE_ROOTS)
     ]
+    return [*ai_modules, *_CLI_PROVIDER_MODULES]
 
 
 def _is_provider_literal(node: ast.expr) -> bool:
