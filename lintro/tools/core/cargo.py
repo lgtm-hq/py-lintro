@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -30,24 +31,91 @@ CARGO_MANIFEST: str = "Cargo.toml"
 _REPOSITORY_MARKER: str = ".git"
 
 
-def _declares_workspace(manifest: Path) -> bool:
-    """Report whether a manifest declares a ``[workspace]`` table.
+def _read_manifest(manifest: Path) -> dict[str, Any] | None:
+    """Parse a ``Cargo.toml`` file.
 
     Args:
         manifest: Path to a ``Cargo.toml`` file.
 
     Returns:
-        ``True`` when the manifest parses and carries a top-level
-        ``workspace`` table, ``False`` otherwise (an unreadable or malformed
-        manifest is treated as "not a workspace" rather than raising).
+        The parsed manifest, or ``None`` when it cannot be read or parsed. An
+        unreadable or malformed manifest is treated as "not a workspace"
+        rather than raising.
     """
     try:
         with manifest.open("rb") as handle:
-            data = tomllib.load(handle)
+            return tomllib.load(handle)
     except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         logger.debug("Could not read Cargo manifest {}: {}", manifest, exc)
+        return None
+
+
+def _resolve_patterns(base: Path, patterns: Any) -> set[Path]:
+    """Resolve ``members`` or ``exclude`` entries to directories.
+
+    Args:
+        base: Directory owning the manifest the patterns came from.
+        patterns: The raw TOML value, expected to be a list of relative path
+            strings. Anything else contributes nothing.
+
+    Returns:
+        The directories the patterns name. Entries holding a glob character
+        are expanded against ``base``; the rest are joined onto it.
+    """
+    resolved: set[Path] = set()
+    if not isinstance(patterns, list):
+        return resolved
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            continue
+        cleaned = pattern.strip("/")
+        if not cleaned:
+            continue
+        if any(character in cleaned for character in "*?["):
+            resolved.update(match for match in base.glob(cleaned) if match.is_dir())
+        else:
+            resolved.add(base / cleaned)
+    return {path.resolve() for path in resolved}
+
+
+def _is_within(path: Path, directory: Path) -> bool:
+    """Report whether ``path`` is ``directory`` or sits below it.
+
+    Args:
+        path: Directory to test.
+        directory: Directory that may contain ``path``.
+
+    Returns:
+        ``True`` when ``path`` is inside ``directory``, inclusive.
+    """
+    return path == directory or directory in path.parents
+
+
+def _workspace_owns(manifest_dir: Path, data: dict[str, Any], roots: set[Path]) -> bool:
+    """Report whether a workspace manifest owns every package root.
+
+    Args:
+        manifest_dir: Directory owning the manifest.
+        data: The parsed manifest.
+        roots: Package directories the Cargo command has to cover.
+
+    Returns:
+        ``True`` when ``data`` declares a ``[workspace]`` table whose members
+        include every root — directly, through a glob, or as the manifest's
+        own ``[package]`` — and no root falls under ``workspace.exclude``.
+    """
+    workspace = data.get("workspace")
+    if not isinstance(workspace, dict):
         return False
-    return isinstance(data.get("workspace"), dict)
+    members = _resolve_patterns(manifest_dir, workspace.get("members"))
+    if "package" in data:
+        members.add(manifest_dir)
+    excluded = _resolve_patterns(manifest_dir, workspace.get("exclude"))
+    return all(
+        root in members
+        and not any(_is_within(root, directory) for directory in excluded)
+        for root in roots
+    )
 
 
 def _repository_ancestors(start: Path) -> list[Path]:
@@ -94,8 +162,16 @@ def _repository_boundary(roots: set[Path]) -> tuple[Path | None, bool]:
     return None, any(chains)
 
 
-def _nearest_workspace_root(start: Path, boundary: Path | None) -> Path | None:
-    """Walk upward from ``start`` to the first workspace manifest.
+def _nearest_workspace_root(
+    start: Path,
+    boundary: Path | None,
+    roots: set[Path],
+) -> Path | None:
+    """Walk upward from ``start`` to the workspace that owns every root.
+
+    A workspace that does not list all of the roots — because they sit in an
+    excluded subtree, or belong to a workspace of their own — does not end
+    the walk: an outer workspace may still own them.
 
     Args:
         start: Directory to begin the upward walk at, inclusive.
@@ -103,16 +179,19 @@ def _nearest_workspace_root(start: Path, boundary: Path | None) -> Path | None:
             this directory ends the walk, so a nested repository between
             ``start`` and ``boundary`` is walked through. ``None`` leaves the
             walk unbounded, for inputs that live outside any repository.
+        roots: Package directories the workspace has to own.
 
     Returns:
-        The directory owning the nearest ``Cargo.toml`` with a
-        ``[workspace]`` table, or ``None`` when the walk reaches the boundary
-        or the filesystem root without finding one.
+        The directory owning the nearest ``Cargo.toml`` whose ``[workspace]``
+        table covers every root, or ``None`` when the walk reaches the
+        boundary or the filesystem root without finding one.
     """
     for candidate in [start, *start.parents]:
         manifest = candidate / CARGO_MANIFEST
-        if manifest.is_file() and _declares_workspace(manifest):
-            return candidate
+        if manifest.is_file():
+            data = _read_manifest(manifest)
+            if data is not None and _workspace_owns(candidate, data, roots):
+                return candidate
         if candidate == boundary:
             break
     return None
@@ -149,11 +228,12 @@ def find_cargo_root(
     Each path is walked upward to the nearest ``Cargo.toml``. When the paths
     resolve to a single package that package's directory is returned. When they
     straddle several packages the walk continues upward from their common
-    ancestor until a manifest declaring a ``[workspace]`` table is found, so a
-    nested member set resolves to the workspace root rather than to one of its
-    members. An ancestor manifest that declares only ``[package]`` is rejected:
-    running Cargo there would act on that crate alone, not on the packages the
-    files belong to. The walk stops at the outermost repository containing
+    ancestor until a ``[workspace]`` manifest whose members cover every one of
+    those packages is found, so a nested member set resolves to the workspace
+    root rather than to one of its members. An ancestor manifest that declares
+    only ``[package]`` is rejected — running Cargo there would act on that
+    crate alone — and so is a workspace that excludes the packages or never
+    lists them. The walk stops at the outermost repository containing
     every path, so it cannot escape into an unrelated manifest while still
     crossing a member that is a repository of its own; paths that no single
     repository contains — sibling repositories, or a repository mixed with a
@@ -199,7 +279,7 @@ def find_cargo_root(
             )
         return None
 
-    workspace_root = _nearest_workspace_root(common, boundary)
+    workspace_root = _nearest_workspace_root(common, boundary, unique_roots)
     if workspace_root is not None:
         return workspace_root
 

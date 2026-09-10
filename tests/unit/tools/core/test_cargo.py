@@ -367,3 +367,81 @@ def test_a_member_that_is_its_own_repository_still_reaches_the_workspace(
     resolved = find_cargo_root([str(first), str(second)])
 
     assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_an_excluded_subtree_is_not_owned_by_the_workspace(tmp_path: Path) -> None:
+    """A workspace that excludes the packages is not their Cargo root.
+
+    Args:
+        tmp_path: Temporary directory holding the workspace.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["one"]\nexclude = ["two/"]\n',
+    )
+    _package(tmp_path, "one")
+    outside = tmp_path / "two"
+    outside.mkdir()
+    first = _package(outside, "a")
+    second = _package(outside, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_members_matched_by_a_glob_are_owned(tmp_path: Path) -> None:
+    """``members`` entries are globs, so ``crates/*`` covers each crate.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["crates/*"]\n')
+    crates = tmp_path / "crates"
+    crates.mkdir()
+    first = _package(crates, "a")
+    second = _package(crates, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_the_root_package_counts_as_a_member_of_its_own_workspace(
+    tmp_path: Path,
+) -> None:
+    """A manifest with both tables owns its own directory as well.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "root"\n\n[workspace]\nmembers = ["a"]\n',
+    )
+    source = tmp_path / "src"
+    source.mkdir()
+    root_lib = source / "lib.rs"
+    root_lib.write_text("pub fn f() {}\n")
+    member = _package(tmp_path, "a")
+
+    resolved = find_cargo_root([str(root_lib), str(member)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_workspace_that_lists_other_members_is_walked_past(tmp_path: Path) -> None:
+    """The walk continues when the nearest workspace does not own the roots.
+
+    Args:
+        tmp_path: Temporary directory used as the outer workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["inner/a", "inner/b"]\n',
+    )
+    inner = tmp_path / "inner"
+    inner.mkdir()
+    (inner / "Cargo.toml").write_text('[workspace]\nmembers = ["x"]\n')
+    _package(inner, "x")
+    first = _package(inner, "a")
+    second = _package(inner, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
