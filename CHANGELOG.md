@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.2] - 2026-09-10
+
+### Fixed
+
+- **ci**: wire Tier 2 AI CLI smoke auth and egress like the dogfood review job (#2536)
+  (de2407e)
+
 ## [0.153.1] - 2026-09-10
 
 ### Changed
