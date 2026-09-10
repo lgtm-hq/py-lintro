@@ -629,6 +629,41 @@ def test_workflow_concurrency_keys_on_the_pr_number() -> None:
     assert_that(concurrency["cancel-in-progress"]).is_true()
 
 
+def test_workflow_serializes_ai_review_repo_wide() -> None:
+    """A second, repo-wide group queues reviews instead of cancelling them.
+
+    The workflow-level group is per-PR with ``cancel-in-progress``, so a
+    push supersedes its own review. That alone lets every open PR review
+    at once and pile onto the same provider rate limit, and a cancelled
+    review is exactly the case #2506 is trying to stop paying for. The
+    job-level group is a fixed name with ``cancel-in-progress: false``:
+    one review job at a time across the repo, and the queued ones wait.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    job_concurrency = loaded["jobs"]["ai-review"]["concurrency"]
+    assert_that(job_concurrency["group"]).is_equal_to("ai-review-repo-wide")
+    assert_that(job_concurrency["cancel-in-progress"]).is_false()
+    assert_that(job_concurrency["group"]).does_not_contain("${{")
+
+
+def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
+    """The job budget is pinned at 38 minutes (#2506).
+
+    38 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
+    allows with the 1800 s per-chunk CLI timeout: ceil(1800 / 60) + 7 min setup
+    + 1 min posting margin. Measured review durations over the last 40 runs are
+    median 10 to 14 min and p75 21 min, so the ceiling is not what a healthy
+    review needs — it bounds the tail. The long tail that previously argued for
+    120 was reruns restarting from scratch, which #2506 fixed by resuming the
+    run's own prior attempt. Raising this number is a decision about the CLI
+    timeout, not about this line: bump both together.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(38)
+
+
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
     """The pull_request_target trigger carries no ``paths`` filter (#1902).
 
