@@ -5816,12 +5816,23 @@ def test_security_md_permission_rows_match_the_workflows(
         ).contains_key(name)
         workflow = parsed_workflows[name]
 
+        # An absent block and an explicit `permissions: {}` are different
+        # things: the first inherits GitHub's default token grant, the second
+        # grants nothing. The table can only describe the second, so a missing
+        # block is a workflow defect rather than a documentation mismatch.
+        assert_that("permissions" in workflow).described_as(
+            f"{name}: no workflow-level permissions block. Declare "
+            "`permissions: {}` and escalate per job, as the other "
+            "workflows in this table do.",
+        ).is_true()
+        declared_top = workflow["permissions"] or {}
+
         documented_top = {} if "`{}`" in top_claim else _documented_scopes(top_claim)
         if "`{}`" not in top_claim:
             assert_that(documented_top).described_as(
                 f"{name}: unparseable workflow-level claim {top_claim!r}",
             ).is_not_empty()
-        assert_that(workflow.get("permissions") or {}).described_as(
+        assert_that(declared_top).described_as(
             f"{name}: SECURITY.md documents workflow-level {documented_top}",
         ).is_equal_to(documented_top)
 
@@ -6110,6 +6121,60 @@ def _cache_steps(
     """
     by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
     return by_name["Restore Nuitka compile cache"], by_name["Save Nuitka compile cache"]
+
+
+@pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
+def test_nuitka_cache_steps_run_in_the_only_order_that_caches(job_id: str) -> None:
+    """Resolve, restore, build, save -- in that order, or the cache does nothing.
+
+    Every one of these steps is individually correct no matter where it sits,
+    and three of the four reorderings fail silently rather than loudly: a
+    restore after ``Build binary`` warms nothing, a save before it stores a
+    cold tree over a warm entry, and a resolve after the restore leaves the
+    Nuitka segment of the key empty because the step output is not set yet.
+    The build still goes green in all three cases and simply takes the full
+    ~20 minutes, which is the regression this whole change exists to remove,
+    so the order is pinned by index rather than left to review (#2514).
+
+    Args:
+        job_id: The compile job under test.
+    """
+    steps = _load_workflow(name=_BUILD_BINARY_WORKFLOW)["jobs"][job_id]["steps"]
+    positions: dict[str, int] = {}
+    for index, step in enumerate(steps):
+        name = str(step.get("name", ""))
+        if name in {
+            "Resolve Nuitka version",
+            "Restore Nuitka compile cache",
+            "Build binary",
+            "Save Nuitka compile cache",
+        }:
+            assert_that(positions).described_as(
+                f"{job_id}: {name!r} appears more than once",
+            ).does_not_contain_key(name)
+            positions[name] = index
+
+    ordered = (
+        "Resolve Nuitka version",
+        "Restore Nuitka compile cache",
+        "Build binary",
+        "Save Nuitka compile cache",
+    )
+    for name in ordered:
+        assert_that(positions).described_as(
+            f"{job_id}: no {name!r} step",
+        ).contains_key(name)
+    assert_that([positions[name] for name in ordered]).described_as(
+        f"{job_id}: cache steps out of order ({positions})",
+    ).is_equal_to(sorted(positions[name] for name in ordered))
+
+    # The resolve step is what the key reads back, so its id has to be the one
+    # the key names; a reorder that kept the names but renamed the id would
+    # satisfy the index check above and still empty the Nuitka segment.
+    resolve = steps[positions["Resolve Nuitka version"]]
+    assert_that(str(resolve.get("id"))).described_as(job_id).is_equal_to(
+        "nuitka-version",
+    )
 
 
 @pytest.mark.parametrize("job_id", ["build-macos", "build-linux"])
