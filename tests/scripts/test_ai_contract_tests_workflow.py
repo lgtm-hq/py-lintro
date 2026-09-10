@@ -617,10 +617,18 @@ def test_forwarded_env_tuple_matches_the_script_forwarding_loop() -> None:
 
     Derived from the script's own forwarding loop, so a variable added to or
     dropped from the loop fails here instead of silently escaping the pins.
+    The loop is located by shape (a ``for`` over a list of upper-case names
+    ending in ``; do``), not by its variable name, so a rename or reflow
+    fails on the assertion rather than on the parse.
     """
     text = RUNNER.read_text(encoding="utf-8")
-    start = text.index("for secret in")
-    block = text[start : text.index("; do", start)]
-    forwarded = tuple(re.findall(r"\b([A-Z][A-Z0-9_]+)\b", block.split("in", 1)[1]))
+    loops = re.findall(
+        r"for\s+\w+\s+in\s+((?:\s*\\?\s*[A-Z][A-Z0-9_]+)+)\s*;\s*do",
+        text,
+    )
+    assert_that(loops).described_as(
+        "forwarding loop in run-ai-contract-tests.sh"
+    ).is_not_empty()
+    forwarded = tuple(re.findall(r"[A-Z][A-Z0-9_]+", loops[0]))
 
     assert_that(forwarded).is_equal_to(FORWARDED_TIER2_ENV)
