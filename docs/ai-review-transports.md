@@ -85,9 +85,9 @@ CLIs both do, because each reads its own API-key variable directly. openai's dec
 `honors_api_key_env=False`: the `codex` CLI always reads `CODEX_API_KEY`, never
 `OPENAI_API_KEY`, so renaming the variable cannot reach it.
 
-| Variable / setting                | Transport       | Role                                                   |
-| --------------------------------- | --------------- | ------------------------------------------------------ |
-| `ai.providers.anthropic.cli_bare` / `LINTRO_CLI_BARE` | cli | `auto` / `always` / `never` — whether to pass `--bare` |
+| Variable / setting                                    | Transport | Role                                                   |
+| ----------------------------------------------------- | --------- | ------------------------------------------------------ |
+| `ai.providers.anthropic.cli_bare` / `LINTRO_CLI_BARE` | cli       | `auto` / `always` / `never` — whether to pass `--bare` |
 
 `--bare` disables OAuth session login and authenticates only against an API key
 (#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out
