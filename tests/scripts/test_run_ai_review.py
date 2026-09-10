@@ -22,6 +22,7 @@ from click.testing import CliRunner
 
 from lintro.ai import transport
 from lintro.cli import cli
+from tests.scripts._action_pins import action_pin, actions_used_in
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_SCRIPT = REPO_ROOT / "scripts" / "ci" / "enable_review_config.py"
@@ -46,7 +47,24 @@ _OPENAI_EGRESS_HOSTS = (
     "chatgpt.com:443",
 )
 _ZAI_EGRESS_HOSTS = ("api.z.ai:443",)
-_PINNED_CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+#: Derived from the workflow files (#2432) so a Renovate action bump cannot
+#: fail these tests on its own: Renovate rewrites `uses:` refs and cannot see
+#: a literal in a test module.
+
+
+def _pinned_checkout() -> str:
+    """Return the repo-wide ``actions/checkout`` pin, resolved lazily.
+
+    Resolving at call time keeps the repo-wide pin scan out of module import,
+    so a pin regression fails the tests that assert it instead of erroring the
+    whole module at collection.
+
+    Returns:
+        str: The ``actions/checkout@<sha>`` reference every workflow uses.
+    """
+    return action_pin("actions/checkout")
+
+
 _HEAD_REF_RE = re.compile(
     r"github\.event\.pull_request\.head\.(?:sha|ref|name)\b"
     r"|github\.(?:head_ref|sha|ref_name|ref)\b",
@@ -745,13 +763,13 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
 @pytest.mark.parametrize(
     ("uses", "expected"),
     [
-        (_PINNED_CHECKOUT, True),
+        ("pin:actions/checkout", True),
         ("evil/checkout@deadbeef", True),
         ("acme/checkout-action@1", True),
         ("acme/pr-checkout@1", True),
         ("acme/pr-checkout-action@1", True),
-        ("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", False),
-        ("astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d", False),
+        ("pin:actions/setup-node", False),
+        ("pin:astral-sh/setup-uv", False),
     ],
     ids=[
         "pinned-actions-checkout",
@@ -770,6 +788,8 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
         uses: A workflow ``uses`` pin.
         expected: Whether the pin is checkout-like.
     """
+    if uses.startswith("pin:"):
+        uses = action_pin(uses.removeprefix("pin:"))
     assert_that(_is_checkout_like_action(uses)).is_equal_to(expected)
 
 
@@ -888,7 +908,7 @@ def test_workflow_forbids_head_ref_fetches() -> None:
         if isinstance(uses, str) and _is_checkout_like_action(uses):
             pin = uses.split("#", 1)[0].strip()
             checkout_uses.append(pin)
-            assert_that(pin).is_equal_to(_PINNED_CHECKOUT)
+            assert_that(pin).is_equal_to(_pinned_checkout())
 
         with_block = step.get("with") or {}
         ref = str(with_block.get("ref", ""))
@@ -919,7 +939,7 @@ def test_workflow_forbids_head_ref_fetches() -> None:
             f"step {step.get('name')!r} must not use pull_request.head sha/ref",
         ).is_none()
 
-    assert_that(checkout_uses).is_equal_to([_PINNED_CHECKOUT])
+    assert_that(checkout_uses).is_equal_to([_pinned_checkout()])
 
 
 def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
@@ -1057,27 +1077,31 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
 
 
 @pytest.mark.parametrize(
-    "action_ref",
+    "action",
     [
-        "step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1",
-        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-        "astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d",
-        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
-        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-        "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-        "actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3",
+        "step-security/harden-runner",
+        "actions/checkout",
+        "astral-sh/setup-uv",
+        "actions/setup-node",
+        "actions/create-github-app-token",
+        "actions/download-artifact",
+        "actions/upload-artifact",
+        "actions/github-script",
     ],
 )
-def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
-    """Third-party actions are pinned to full commit SHAs.
+def test_workflow_uses_pinned_actions(*, action: str) -> None:
+    """The reviewed workflow keeps using each action it depends on.
+
+    Membership of the action is the assertion; the SHA it resolves to is
+    derived from the workflow files (#2432), and its shape -- a 40-hex commit
+    with a ``# vX.Y.Z`` comment, identical across every workflow -- is enforced
+    by ``pinned_action_shas`` in ``tests/scripts/test_action_pins.py``.
 
     Args:
-        action_ref: The ``owner/repo@sha`` reference expected in the workflow.
+        action: The ``owner/repo`` identifier expected in the workflow.
     """
-    content = WORKFLOW.read_text(encoding="utf-8")
-
-    assert_that(content).contains(action_ref)
+    assert_that(actions_used_in(WORKFLOW)).contains(action)
+    assert_that(WORKFLOW.read_text(encoding="utf-8")).contains(action_pin(action))
 
 
 def test_workflow_mints_lintro_review_app_token_for_posting() -> None:
@@ -1099,7 +1123,7 @@ def test_workflow_mints_lintro_review_app_token_for_posting() -> None:
     mint = mint_steps[0]
     assert_that(mint["id"]).is_equal_to("lintro-review-app")
     assert_that(mint["uses"]).is_equal_to(
-        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        action_pin("actions/create-github-app-token"),
     )
     mint_with = mint["with"]
     assert_that(mint_with["app-id"]).is_equal_to(
