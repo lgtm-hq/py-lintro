@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.core.cargo import find_cargo_root
+from lintro.tools.core.cargo import cargo_package_args, find_cargo_root
 
 
 def _package(root: Path, name: str) -> Path:
@@ -239,14 +239,18 @@ def test_the_upward_walk_stops_at_a_repository_boundary(
 ) -> None:
     """A workspace manifest outside the repository is not adopted.
 
-    Worktrees and submodules represent ``.git`` as a file, so both marker
-    shapes must stop the walk.
+    The outer manifest lists both packages, so it would be adopted on
+    membership alone; only the repository boundary keeps it out. Worktrees
+    and submodules represent ``.git`` as a file, so both marker shapes must
+    stop the walk.
 
     Args:
         tmp_path: Temporary directory holding the outer manifest.
         marker_is_file: Whether ``.git`` is a file (worktree) or a directory.
     """
-    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["repo/a"]\n')
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["repo/a", "repo/b"]\n',
+    )
     repo = tmp_path / "repo"
     repo.mkdir()
     if marker_is_file:
@@ -445,3 +449,153 @@ def test_a_workspace_that_lists_other_members_is_walked_past(tmp_path: Path) -> 
     resolved = find_cargo_root([str(first), str(second)])
 
     assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_path_dependency_inside_the_workspace_is_a_member(tmp_path: Path) -> None:
+    """Cargo makes an in-workspace path dependency a member, so lintro does.
+
+    The manifest carries no ``members`` key at all; the crate is reachable
+    only as a ``path`` dependency of the root package.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "root"\n\n[workspace]\n\n'
+        '[dependencies]\nhelper = { path = "helper" }\n',
+    )
+    source = tmp_path / "src"
+    source.mkdir()
+    root_lib = source / "lib.rs"
+    root_lib.write_text("pub fn f() {}\n")
+    helper = _package(tmp_path, "helper")
+
+    resolved = find_cargo_root([str(root_lib), str(helper)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_dev_dependency_path_is_followed_transitively(tmp_path: Path) -> None:
+    """Every dependency table counts, and the walk follows them onward.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["a"]\n',
+    )
+    first = _package(tmp_path, "a")
+    (tmp_path / "a" / "Cargo.toml").write_text(
+        '[package]\nname = "a"\n\n[dev-dependencies]\nb = { path = "../b" }\n',
+    )
+    second = _package(tmp_path, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_path_dependency_outside_the_workspace_is_not_followed(
+    tmp_path: Path,
+) -> None:
+    """A dependency outside the workspace directory does not carry members in.
+
+    The outside crate depends back on ``ws/b``, so following it would make
+    ``b`` a member of ``ws`` even though cargo would not.
+
+    Args:
+        tmp_path: Temporary directory holding the workspace and the outsider.
+    """
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "Cargo.toml").write_text(
+        '[package]\nname = "root"\n\n[workspace]\nmembers = ["a"]\n\n'
+        '[dependencies]\noutside = { path = "../outside" }\n',
+    )
+    first = _package(workspace, "a")
+    second = _package(workspace, "b")
+    outside = _package(tmp_path, "outside")
+    (outside.parent.parent / "Cargo.toml").write_text(
+        '[package]\nname = "outside"\n\n[dependencies]\nb = { path = "../ws/b" }\n',
+    )
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_an_excluded_path_dependency_is_not_a_member(tmp_path: Path) -> None:
+    """``exclude`` wins over reachability through a path dependency.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "root"\n\n[workspace]\nmembers = ["a"]\n'
+        'exclude = ["vendored"]\n\n'
+        '[build-dependencies]\nv = { path = "vendored" }\n',
+    )
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "vendored")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_an_unexpandable_member_pattern_matches_nothing(tmp_path: Path) -> None:
+    """A pattern the platform cannot expand is not an error.
+
+    ``..`` in a glob is rejected outright by some Python versions and simply
+    matches nothing on others; either way the workspace owns no members.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["../shared/*"]\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_package_args_name_each_input_package(tmp_path: Path) -> None:
+    """A workspace root is given an explicit package selection.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["a", "b"]\ndefault-members = ["a"]\n',
+    )
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    args = cargo_package_args([str(first), str(second)], tmp_path.resolve())
+
+    assert_that(args).is_equal_to(["-p", "a", "-p", "b"])
+
+
+def test_package_args_are_empty_for_a_single_package(tmp_path: Path) -> None:
+    """A plain package root needs no selection.
+
+    Args:
+        tmp_path: Temporary directory holding the package.
+    """
+    lib = _package(tmp_path, "demo")
+
+    args = cargo_package_args([str(lib)], (tmp_path / "demo").resolve())
+
+    assert_that(args).is_empty()
+
+
+def test_package_args_fall_back_to_the_whole_workspace(tmp_path: Path) -> None:
+    """An unreadable package name widens the selection instead of dropping it.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["a", "b"]\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+    (tmp_path / "b" / "Cargo.toml").write_text('[package]\nedition = "2021"\n')
+
+    args = cargo_package_args([str(first), str(second)], tmp_path.resolve())
+
+    assert_that(args).is_equal_to(["--workspace"])

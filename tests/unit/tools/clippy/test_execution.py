@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -212,3 +214,94 @@ def test_fix_counts_initial_and_remaining(
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(0)
+
+
+def _cargo_workspace(tmp_path: Path) -> tuple[Path, Path]:
+    """Create a two-member workspace with ``default-members`` set.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        The ``lib.rs`` of each member, in ``members`` order.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["a", "b"]\ndefault-members = ["a"]\n',
+    )
+    sources: list[Path] = []
+    for name in ("a", "b"):
+        source = tmp_path / name / "src"
+        source.mkdir(parents=True)
+        (tmp_path / name / "Cargo.toml").write_text(f'[package]\nname = "{name}"\n')
+        lib = source / "lib.rs"
+        lib.write_text("pub fn f() {}\n")
+        sources.append(lib)
+    return sources[0], sources[1]
+
+
+def _recording_run(
+    recorded: list[list[str]],
+) -> Callable[..., tuple[bool, str]]:
+    """Build a ``_run_subprocess`` stand-in that records each argv.
+
+    Args:
+        recorded: List the stand-in appends every argv to.
+
+    Returns:
+        A callable with the same clean-run result for every invocation.
+    """
+
+    def _run(*args: Any, **kwargs: Any) -> tuple[bool, str]:
+        cmd: list[str] = kwargs["cmd"] if "cmd" in kwargs else args[0]
+        recorded.append(list(cmd))
+        return (True, "")
+
+    return _run
+
+
+def test_check_names_each_touched_package_in_a_workspace(
+    clippy_plugin: ClippyPlugin,
+    tmp_path: Path,
+) -> None:
+    """Without ``-p`` the run would honour ``default-members`` and miss ``b``.
+
+    Args:
+        clippy_plugin: The ClippyPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    first, second = _cargo_workspace(tmp_path)
+    recorded: list[list[str]] = []
+
+    with patch.object(
+        clippy_plugin,
+        "_run_subprocess",
+        side_effect=_recording_run(recorded),
+    ):
+        clippy_plugin.check([str(first), str(second)], {})
+
+    assert_that(recorded[0][:6]).is_equal_to(["cargo", "clippy", "-p", "a", "-p", "b"])
+
+
+def test_fix_names_each_touched_package_in_a_workspace(
+    clippy_plugin: ClippyPlugin,
+    tmp_path: Path,
+) -> None:
+    """The fix run carries the same selection as the check run.
+
+    Args:
+        clippy_plugin: The ClippyPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    first, second = _cargo_workspace(tmp_path)
+    recorded: list[list[str]] = []
+
+    with patch.object(
+        clippy_plugin,
+        "_run_subprocess",
+        side_effect=_recording_run(recorded),
+    ):
+        clippy_plugin.fix([str(first), str(second)], {})
+
+    selections = [argv[2:6] for argv in recorded]
+    assert_that(selections).is_not_empty()
+    assert_that(selections).contains_only(["-p", "a", "-p", "b"])

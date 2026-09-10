@@ -21,7 +21,7 @@ from typing import Any
 
 from loguru import logger
 
-__all__ = ["CARGO_MANIFEST", "find_cargo_root"]
+__all__ = ["CARGO_MANIFEST", "cargo_package_args", "find_cargo_root"]
 
 #: The manifest file that marks a Cargo package or workspace root.
 CARGO_MANIFEST: str = "Cargo.toml"
@@ -29,6 +29,13 @@ CARGO_MANIFEST: str = "Cargo.toml"
 #: Directory marker that ends the upward walk, so discovery cannot escape the
 #: repository into an unrelated manifest further up the filesystem.
 _REPOSITORY_MARKER: str = ".git"
+
+#: Manifest tables whose entries may carry a ``path`` dependency.
+_DEPENDENCY_TABLES: tuple[str, ...] = (
+    "dependencies",
+    "dev-dependencies",
+    "build-dependencies",
+)
 
 
 def _read_manifest(manifest: Path) -> dict[str, Any] | None:
@@ -60,7 +67,9 @@ def _resolve_patterns(base: Path, patterns: Any) -> set[Path]:
 
     Returns:
         The directories the patterns name. Entries holding a glob character
-        are expanded against ``base``; the rest are joined onto it.
+        are expanded against ``base``; the rest are joined onto it. A pattern
+        the platform cannot expand — one escaping ``base`` with ``..``, say —
+        contributes no matches instead of raising.
     """
     resolved: set[Path] = set()
     if not isinstance(patterns, list):
@@ -72,7 +81,12 @@ def _resolve_patterns(base: Path, patterns: Any) -> set[Path]:
         if not cleaned:
             continue
         if any(character in cleaned for character in "*?["):
-            resolved.update(match for match in base.glob(cleaned) if match.is_dir())
+            try:
+                matches = list(base.glob(cleaned))
+            except (ValueError, OSError, NotImplementedError) as exc:
+                logger.debug("Unusable Cargo member pattern {!r}: {}", pattern, exc)
+                continue
+            resolved.update(match for match in matches if match.is_dir())
         else:
             resolved.add(base / cleaned)
     return {path.resolve() for path in resolved}
@@ -91,6 +105,74 @@ def _is_within(path: Path, directory: Path) -> bool:
     return path == directory or directory in path.parents
 
 
+def _path_dependencies(manifest_dir: Path, data: dict[str, Any]) -> set[Path]:
+    """Collect the directories a manifest's ``path`` dependencies point at.
+
+    Args:
+        manifest_dir: Directory owning the manifest.
+        data: The parsed manifest.
+
+    Returns:
+        The resolved directories named by ``path`` entries in the plain and
+        target-specific dependency tables.
+    """
+    tables: list[Any] = [data.get(name) for name in _DEPENDENCY_TABLES]
+    targets = data.get("target")
+    if isinstance(targets, dict):
+        for target in targets.values():
+            if isinstance(target, dict):
+                tables.extend(target.get(name) for name in _DEPENDENCY_TABLES)
+    directories: set[Path] = set()
+    for table in tables:
+        if not isinstance(table, dict):
+            continue
+        for spec in table.values():
+            location = spec.get("path") if isinstance(spec, dict) else None
+            if isinstance(location, str) and location:
+                directories.add((manifest_dir / location).resolve())
+    return directories
+
+
+def _with_path_dependencies(
+    workspace_dir: Path,
+    seeds: set[Path],
+    excluded: set[Path],
+) -> set[Path]:
+    """Grow a member set by following its ``path`` dependencies.
+
+    Cargo makes a path dependency that resides inside the workspace directory
+    a member of that workspace, so the walk follows those edges transitively.
+    A dependency outside the workspace, under ``exclude``, or without a
+    manifest of its own is not a member and is not followed.
+
+    Args:
+        workspace_dir: Directory owning the workspace manifest.
+        seeds: Members named by the manifest itself.
+        excluded: Directories the workspace excludes.
+
+    Returns:
+        The seeds plus every package reachable from them. The visited set
+        bounds the walk, so a dependency cycle terminates.
+    """
+    members = set(seeds)
+    pending = list(seeds)
+    while pending:
+        current = pending.pop()
+        data = _read_manifest(current / CARGO_MANIFEST)
+        if data is None:
+            continue
+        for dependency in _path_dependencies(current, data):
+            if dependency in members or not _is_within(dependency, workspace_dir):
+                continue
+            if any(_is_within(dependency, directory) for directory in excluded):
+                continue
+            if not (dependency / CARGO_MANIFEST).is_file():
+                continue
+            members.add(dependency)
+            pending.append(dependency)
+    return members
+
+
 def _workspace_owns(manifest_dir: Path, data: dict[str, Any], roots: set[Path]) -> bool:
     """Report whether a workspace manifest owns every package root.
 
@@ -101,8 +183,9 @@ def _workspace_owns(manifest_dir: Path, data: dict[str, Any], roots: set[Path]) 
 
     Returns:
         ``True`` when ``data`` declares a ``[workspace]`` table whose members
-        include every root — directly, through a glob, or as the manifest's
-        own ``[package]`` — and no root falls under ``workspace.exclude``.
+        include every root — directly, through a glob, as the manifest's own
+        ``[package]``, or as a ``path`` dependency inside the workspace — and
+        no root falls under ``workspace.exclude``.
     """
     workspace = data.get("workspace")
     if not isinstance(workspace, dict):
@@ -111,6 +194,7 @@ def _workspace_owns(manifest_dir: Path, data: dict[str, Any], roots: set[Path]) 
     if "package" in data:
         members.add(manifest_dir)
     excluded = _resolve_patterns(manifest_dir, workspace.get("exclude"))
+    members = _with_path_dependencies(manifest_dir, members, excluded)
     return all(
         root in members
         and not any(_is_within(root, directory) for directory in excluded)
@@ -292,3 +376,37 @@ def find_cargo_root(
             tool_label,
         )
     return None
+
+
+def cargo_package_args(paths: list[str], cargo_root: Path) -> list[str]:
+    """Return the package-selection arguments for a Cargo command.
+
+    ``cargo clippy`` run at a workspace root without a selection lints
+    ``workspace.default-members`` when that key is set, so a touched crate
+    outside the default set would report clean. Naming the input packages
+    keeps the command honest.
+
+    Args:
+        paths: The file or directory paths the tool was handed.
+        cargo_root: The directory the command will run from.
+
+    Returns:
+        ``["-p", name, ...]`` for the packages the paths belong to, or
+        ``["--workspace"]`` when a name cannot be read. Empty when the root
+        is a single package, which needs no selection.
+    """
+    data = _read_manifest(cargo_root / CARGO_MANIFEST)
+    if data is None or not isinstance(data.get("workspace"), dict):
+        return []
+    names: list[str] = []
+    for root in dict.fromkeys(_nearest_manifest_dirs(paths)):
+        manifest = _read_manifest(root / CARGO_MANIFEST) or {}
+        package = manifest.get("package")
+        name = package.get("name") if isinstance(package, dict) else None
+        if not isinstance(name, str) or not name:
+            return ["--workspace"]
+        if name not in names:
+            names.append(name)
+    if not names:
+        return ["--workspace"]
+    return [argument for name in names for argument in ("-p", name)]
