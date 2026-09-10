@@ -165,7 +165,8 @@ jobs:
         # (#2472): decode CODEX_AUTH_JSON into $HOME/.codex/auth.json. Codex
         # has no OAuth-token env var, and CODEX_API_KEY would bill metered API
         # credits instead of the ChatGPT-plan subscription. The runner script
-        # mounts that directory into the contract container. Injected after
+        # mounts that directory into the contract container as CODEX_HOME.
+        # Injected after
         # the checkout, like dogfood does. An unset secret warns and exits 0 —
         # the tier then reports an unauthenticated codex lane, never a pass.
         env:

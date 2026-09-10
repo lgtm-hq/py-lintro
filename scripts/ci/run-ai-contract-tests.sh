@@ -43,7 +43,7 @@ set -euo pipefail
 #   CODEX_API_KEY             Forwarded for tier 2 (optional)
 #   CURSOR_API_KEY            Forwarded for tier 2 (optional)
 #   LINTRO_CLI_BARE           Forwarded for tier 2 (optional)
-#   CODEX_SESSION_DIR         Codex session directory to mount for tier 2
+#   CODEX_SESSION_DIR         Codex session directory mounted as CODEX_HOME
 #                             (default: $HOME/.codex; mounted only when it
 #                             holds an auth.json)
 
@@ -132,13 +132,21 @@ if [ "$TIER" = "2" ]; then
 		fi
 	done
 	# The openai lane has no token env var: codex reads its ChatGPT-plan
-	# session from $HOME/.codex/auth.json, so the restored directory is
-	# bind-mounted at the container's HOME (/tmp, set above). Read-write
-	# because codex refreshes the session in place. Absent directory means an
-	# unrestored session, which the suite reports as an unauthenticated lane.
+	# session from its CODEX_HOME, so the restored directory is bind-mounted
+	# in and named explicitly. Read-write, because codex refreshes the session
+	# in place. The mount point is deliberately NOT under the container's HOME
+	# (/tmp, set above): codex refuses to create its PATH-alias helper binaries
+	# when CODEX_HOME sits under a temporary directory and exits 1 with
+	# "Refusing to create helper binaries under temporary dir" — an
+	# authenticated session that still fails the lane. An absent directory
+	# means an unrestored session, which the suite reports as an
+	# unauthenticated lane rather than a pass.
 	codex_session_dir="${CODEX_SESSION_DIR:-${HOME:-}/.codex}"
 	if [ -f "${codex_session_dir}/auth.json" ]; then
-		docker_args+=(--volume "${codex_session_dir}:/tmp/.codex")
+		docker_args+=(
+			--volume "${codex_session_dir}:/opt/codex-home"
+			--env "CODEX_HOME=/opt/codex-home"
+		)
 	fi
 fi
 
