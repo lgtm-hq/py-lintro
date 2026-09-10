@@ -6,3 +6,11 @@ paths:
     ignore:
       # actionlint v1.7.12 predates GitHub's supported concurrency.queue key.
       - 'unexpected key "queue" for "concurrency" section'
+  .github/workflows/ai-review.yml:
+    ignore:
+      # Same gap as docker-ci.yml above (#2241 / #2254): the AI Review job
+      # needs concurrency.queue: max so a burst of pushes across PRs cannot
+      # cancel the one pending review the default queue: single allows
+      # (#2506). Upstream rhysd/actionlint#657 is open and the PR adding the
+      # key, #661, was closed unmerged, so the schema still rejects it.
+      - 'unexpected key "queue" for "concurrency" section'

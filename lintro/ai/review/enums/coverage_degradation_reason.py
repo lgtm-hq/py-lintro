@@ -25,9 +25,11 @@ class CoverageDegradationReason(StrEnum):
     being silent.
 
     Attributes:
-        FINDINGS_CAP_APPLIED: The CLI per-call findings ceiling
-            (``ai.cli_max_findings_per_call``) was written into the chunk
-            prompt.
+        FINDINGS_CAP_APPLIED: A chunk's answer reached the CLI per-call
+            findings ceiling (``ai.cli_max_findings_per_call``), so the model
+            was told to stop there and summarize the overflow. Recorded on the
+            parsed finding count, never on the mere presence of a configured
+            ceiling (#2283).
         OUTPUT_EXHAUSTION_RETRIED: The chunk call exhausted the provider's
             output-token ceiling and was retried once with a tighter findings
             cap, so that chunk was reviewed under a stricter budget still.

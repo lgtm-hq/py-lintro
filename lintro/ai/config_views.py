@@ -36,6 +36,7 @@ class AIProviderConfig:
     fallback_models: tuple[str, ...]
     max_tokens: int
     max_retries: int
+    rate_limit_max_retries: int
     api_timeout: float
     retry_base_delay: float
     retry_max_delay: float
