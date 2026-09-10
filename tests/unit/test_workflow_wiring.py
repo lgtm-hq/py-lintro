@@ -4006,6 +4006,17 @@ _AI_CONTRACT_TIER2_JOB = "tier2-invocation-smoke"
 _AI_REVIEW_WORKFLOW = "ai-review.yml"
 _AI_REVIEW_JOB = "ai-review"
 _AI_CONTRACT_GATE_ENV = "AI_CONTRACT_SECRETS_ALLOWED"
+#: The clause the dogfood review uses to select its anthropic lane. Tier 2
+#: has no provider variable, so its expressions carry the gate here instead.
+_DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE = (
+    "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+)
+#: Anthropic env vars whose Tier 2 expression is derived from the review's.
+_ANTHROPIC_CREDENTIAL_ENV = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+)
 #: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
 #: the dogfood job's per-provider egress expressions.
 _EGRESS_ENDPOINT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.*-]*:\d+")
@@ -4104,6 +4115,44 @@ def _dogfood_provider_egress() -> set[str]:
     return endpoints
 
 
+def _dogfood_review_step_env() -> dict[str, str]:
+    """Return the dogfood review step's env mapping.
+
+    Returns:
+        The env mapping of the step that runs ``run-ai-review.sh``.
+    """
+    review = _load_workflow(name=_AI_REVIEW_WORKFLOW)
+    step = next(
+        step
+        for step in review["jobs"][_AI_REVIEW_JOB]["steps"]
+        if "run-ai-review.sh" in str(step.get("run", ""))
+        and "--locate-prior-state" not in str(step.get("run", ""))
+    )
+    return {name: str(value) for name, value in step["env"].items()}
+
+
+def _tier2_expression_from_dogfood(expression: str) -> str:
+    """Rewrite a dogfood anthropic expression into its Tier 2 equivalent.
+
+    The dogfood review chooses between its anthropic configurations on a
+    provider variable Tier 2 does not have — Tier 2 always drives every lane —
+    so the provider clause is the one and only difference: Tier 2 puts its
+    trusted-event gate there instead. Everything else, in particular the
+    ``ZAI_BASE_URL`` selection between the subscription token and the gateway
+    token, must survive the rewrite untouched.
+
+    Args:
+        expression: The normalised dogfood expression.
+
+    Returns:
+        The normalised expression Tier 2 must carry for the same variable.
+    """
+    return expression.replace(
+        _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
+        f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
+    )
+
+
 def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> None:
     """Tier 2 must reach every dogfood lane's hosts, with gated credentials.
 
@@ -4128,16 +4177,16 @@ def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> Non
         "Tier 2 egress must cover every dogfood provider lane",
     ).contains(*sorted(dogfood))
 
+    # Exact, not substring: an added `|| github.event_name == 'push'` would
+    # slip past independent contains() checks while widening what can read a
+    # provider credential.
     gate = _normalize_github_expr(str(job["env"][_AI_CONTRACT_GATE_ENV]))
-    for clause in (
-        "github.event_name == 'schedule'",
-        "github.event_name == 'workflow_dispatch'",
-        (
-            f"github.event.{_GITHUB_PULL_REQUEST_EVENT}"
-            ".head.repo.full_name == github.repository"
-        ),
-    ):
-        assert_that(gate).contains(clause)
+    assert_that(gate).is_equal_to(
+        "${{ github.event_name == 'schedule'"
+        " || github.event_name == 'workflow_dispatch'"
+        f" || github.event.{_GITHUB_PULL_REQUEST_EVENT}"
+        ".head.repo.full_name == github.repository }}",
+    )
 
     secret_env = {
         f"{step.get('name')} / {name}": _normalize_github_expr(str(value))
@@ -4152,6 +4201,45 @@ def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> Non
         assert_that(expression).described_as(where).contains(
             f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
         )
+
+
+def test_ai_contract_tier2_mirrors_the_dogfood_anthropic_credential_choice() -> None:
+    """Tier 2's anthropic lane must pick its credential exactly as dogfood does.
+
+    The review has two anthropic configurations and selects between them on
+    ``ZAI_BASE_URL``: empty means the subscription OAuth token against
+    api.anthropic.com, set means the z.ai gateway with ``ZAI_AUTH_TOKEN``
+    instead (#2472 lane 2). A Tier 2 that only ever forwarded the OAuth token
+    would prove a credential the review is not using whenever the gateway is
+    switched on, which is the same false confidence #2481 exists to remove.
+
+    Both expressions are read from the workflows, so the assertion is that the
+    two stay identical modulo the one documented difference — dogfood selects
+    on its provider variable, Tier 2 (which drives every lane, always) puts
+    its trusted-event gate in that position.
+    """
+    dogfood_env = _dogfood_review_step_env()
+    tier2_env = next(
+        step["env"]
+        for step in _ai_contract_tier2_job()["steps"]
+        if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+
+    for name in _ANTHROPIC_CREDENTIAL_ENV:
+        assert_that(dogfood_env).described_as("dogfood anthropic env").contains_key(
+            name,
+        )
+        expected = _tier2_expression_from_dogfood(
+            _normalize_github_expr(dogfood_env[name]),
+        )
+        # The rewrite must have found the provider clause; otherwise the
+        # comparison below would silently assert dogfood equals itself.
+        assert_that(expected).described_as(name).does_not_contain(
+            _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
+        )
+        assert_that(_normalize_github_expr(str(tier2_env[name]))).described_as(
+            name,
+        ).is_equal_to(expected)
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

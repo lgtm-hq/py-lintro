@@ -39,6 +39,8 @@ set -euo pipefail
 #   TIER                      1 or 2                               (required)
 #   CLAUDE_CODE_OAUTH_TOKEN   Forwarded for tier 2 (optional; absence is a
 #                             visible skip, never a silent pass)
+#   ANTHROPIC_BASE_URL        Forwarded for tier 2 (optional; gateway lane)
+#   ANTHROPIC_AUTH_TOKEN      Forwarded for tier 2 (optional; gateway lane)
 #   ANTHROPIC_API_KEY         Forwarded for tier 2 (optional)
 #   CODEX_API_KEY             Forwarded for tier 2 (optional)
 #   CURSOR_API_KEY            Forwarded for tier 2 (optional)
@@ -46,6 +48,9 @@ set -euo pipefail
 #   CODEX_SESSION_DIR         Codex session directory mounted as CODEX_HOME
 #                             (default: $HOME/.codex; mounted only when it
 #                             holds an auth.json)
+#   LINTRO_CONTRACT_PRINT_DOCKER_ARGS
+#                             Print the docker argv and exit 0 without
+#                             running anything (test hook)
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -61,11 +66,15 @@ Environment:
   IMAGE                    lintro-ai-tools image reference  (required)
   TIER                     1 or 2                           (required)
   CLAUDE_CODE_OAUTH_TOKEN  Forwarded to tier 2              (optional)
+  ANTHROPIC_BASE_URL       Forwarded to tier 2              (optional)
+  ANTHROPIC_AUTH_TOKEN     Forwarded to tier 2              (optional)
   ANTHROPIC_API_KEY        Forwarded to tier 2              (optional)
   CODEX_API_KEY            Forwarded to tier 2              (optional)
   CURSOR_API_KEY           Forwarded to tier 2              (optional)
   LINTRO_CLI_BARE          Forwarded to tier 2              (optional)
   CODEX_SESSION_DIR        Codex session dir to mount       (optional)
+  LINTRO_CONTRACT_PRINT_DOCKER_ARGS
+                           Print the docker argv and exit    (test hook)
 EOF
 	exit 0
 fi
@@ -115,12 +124,16 @@ if [ "$TIER" = "2" ]; then
 	# unset so it reports a visible skip naming the missing link.
 	#
 	# CLAUDE_CODE_OAUTH_TOKEN is the anthropic lane's subscription credential
-	# (the same one the dogfood review carries); the two API keys stay
+	# (the same one the dogfood review carries); ANTHROPIC_BASE_URL and
+	# ANTHROPIC_AUTH_TOKEN are its gateway configuration, mutually exclusive
+	# with the token by construction in the caller. The two API keys stay
 	# forwardable for a local run. LINTRO_CLI_BARE lets the caller pin the
 	# CLI's auth mode, and the two claude flags keep its egress inside the
 	# job's allowlist and its pinned version pinned.
 	for secret in \
 		CLAUDE_CODE_OAUTH_TOKEN \
+		ANTHROPIC_BASE_URL \
+		ANTHROPIC_AUTH_TOKEN \
 		ANTHROPIC_API_KEY \
 		CODEX_API_KEY \
 		CURSOR_API_KEY \
@@ -148,6 +161,16 @@ if [ "$TIER" = "2" ]; then
 			--env "CODEX_HOME=/opt/codex-home"
 		)
 	fi
+fi
+
+# Print-args mode: emit the docker argv, one word per line, and stop before
+# spending a pull or any provider quota. This exists so the argv construction
+# above — the codex mount and the credential forwarding loop, both of which are
+# invisible in a workflow diff — is testable without Docker or a credential
+# (tests/scripts/test_ai_contract_tests_workflow.py).
+if [ -n "${LINTRO_CONTRACT_PRINT_DOCKER_ARGS:-}" ]; then
+	printf '%s\n' "${docker_args[@]}" "$IMAGE"
+	exit 0
 fi
 
 echo "==> Tier ${TIER} contract tests in ${IMAGE}"

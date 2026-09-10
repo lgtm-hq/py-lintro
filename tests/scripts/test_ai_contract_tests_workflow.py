@@ -215,6 +215,191 @@ def test_runner_selects_the_tier_by_pytest_marker() -> None:
     assert_that(body).contains("LINTRO_CONTRACT_TIER2=1")
 
 
+#: Every variable the tier-2 branch forwards into the contract container, in
+#: the script's own order. Forwarded by name, so the value never appears in the
+#: argv — docker reads it from the caller's environment.
+FORWARDED_TIER2_ENV = (
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
+    "ANTHROPIC_API_KEY",
+    "CODEX_API_KEY",
+    "CURSOR_API_KEY",
+    "LINTRO_CLI_BARE",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "DISABLE_AUTOUPDATER",
+)
+
+#: Where the restored Codex session is mounted, and the variable that names it.
+#: Deliberately outside the container's HOME (/tmp): codex refuses to create its
+#: PATH-alias helper binaries when CODEX_HOME sits under a temporary directory.
+CODEX_MOUNT_TARGET = "/opt/codex-home"
+
+#: Stand-in credential value. Distinctive so the argv assertions can prove the
+#: value never leaves the environment, and not a literal at a token-named dict
+#: key, which bandit reads as a hardcoded secret.
+CREDENTIAL_SENTINEL = "sentinel-value"
+
+
+def _runner_docker_args(*, env: dict[str, str]) -> list[str]:
+    """Return the docker argv the runner would build for this environment.
+
+    Uses the script's print-args hook rather than Docker, so the argv
+    construction — the codex mount and the credential forwarding loop, neither
+    of which is visible in a workflow diff — is exercised without a daemon, an
+    image pull, or a provider credential.
+
+    Args:
+        env: The environment the script runs under. ``PATH`` and the print
+            hook are added; nothing else leaks in from the test process.
+
+    Returns:
+        The docker argv, one element per line of output.
+    """
+    import os
+    import subprocess  # nosec B404 - runs the repo's own script with a fixed argv
+
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False, no user input
+        [str(RUNNER)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": os.environ.get("PATH", ""),
+            "LINTRO_CONTRACT_PRINT_DOCKER_ARGS": "1",
+            **env,
+        },
+    )
+
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+    return result.stdout.splitlines()
+
+
+def test_runner_forwards_only_the_credentials_the_caller_actually_set() -> None:
+    """A credential must reach the container by name, and only when set.
+
+    Forwarding an unset variable with a default would hand the suite an empty
+    credential that looks present, which is exactly the silent pass the
+    contract tiers exist to prevent.
+    """
+    provided = ("CLAUDE_CODE_OAUTH_TOKEN", "CURSOR_API_KEY")
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(provided, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    assert_that(args).contains(*provided)
+    # By name only: the credential's value must not be written into the argv,
+    # which `ps` and any command echo would expose.
+    assert_that(args).does_not_contain(CREDENTIAL_SENTINEL)
+    for name in FORWARDED_TIER2_ENV:
+        if name in provided:
+            continue
+        assert_that(args).described_as(name).does_not_contain(name)
+
+
+def test_runner_forwards_every_declared_tier2_credential() -> None:
+    """The whole forwarding list is live, not just the two lanes under test."""
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(FORWARDED_TIER2_ENV, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    assert_that(args).contains(*FORWARDED_TIER2_ENV)
+
+
+def test_runner_forwards_no_credentials_on_the_free_tier() -> None:
+    """Tier 1 needs no credential, so none may reach the container."""
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "1",
+            "HOME": "/nonexistent",
+            **dict.fromkeys(FORWARDED_TIER2_ENV, CREDENTIAL_SENTINEL),
+        },
+    )
+
+    for name in FORWARDED_TIER2_ENV:
+        assert_that(args).described_as(name).does_not_contain(name)
+
+
+def test_runner_mounts_a_restored_codex_session_outside_the_container_home(
+    tmp_path: Path,
+) -> None:
+    """The codex lane's session is bind-mounted and named by CODEX_HOME.
+
+    Args:
+        tmp_path: Stand-in for the runner's restored session directory.
+    """
+    session = tmp_path / ".codex"
+    session.mkdir()
+    (session / "auth.json").write_text("{}", encoding="utf-8")
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": str(tmp_path),
+        },
+    )
+
+    assert_that(args).contains(f"{session}:{CODEX_MOUNT_TARGET}")
+    assert_that(args).contains(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that(CODEX_MOUNT_TARGET.startswith("/tmp")).described_as(
+        "codex refuses a CODEX_HOME under the container's temporary HOME",
+    ).is_false()
+
+
+def test_runner_skips_the_codex_mount_without_a_restored_session(
+    tmp_path: Path,
+) -> None:
+    """An unrestored session must not be mounted as if it were there.
+
+    Args:
+        tmp_path: An empty stand-in home with no session in it.
+    """
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": str(tmp_path),
+        },
+    )
+
+    assert_that(args).does_not_contain(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that([arg for arg in args if CODEX_MOUNT_TARGET in arg]).is_empty()
+
+
+def test_runner_honours_an_explicit_codex_session_dir(tmp_path: Path) -> None:
+    """CODEX_SESSION_DIR overrides the default $HOME/.codex location.
+
+    Args:
+        tmp_path: Holds the override directory and an unused default home.
+    """
+    override = tmp_path / "elsewhere"
+    override.mkdir()
+    (override / "auth.json").write_text("{}", encoding="utf-8")
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            "CODEX_SESSION_DIR": str(override),
+        },
+    )
+
+    assert_that(args).contains(f"{override}:{CODEX_MOUNT_TARGET}")
+
+
 def test_runner_help_exits_zero() -> None:
     """The runner documents itself without needing Docker."""
     import subprocess  # nosec B404 - runs the repo's own script with a fixed argv

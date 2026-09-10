@@ -188,8 +188,24 @@ jobs:
           # that account's balance is depleted, and its mere presence would
           # flip the CLI to bare (API-key) mode. LINTRO_CLI_BARE=never pins
           # the decision regardless (#1838/#1859).
+          #
+          # The dogfood review has two anthropic configurations and picks
+          # between them on ZAI_BASE_URL (#2472 lane 2): with the variable
+          # empty the pinned `claude` binary talks to api.anthropic.com on the
+          # subscription token; with it set, the same binary is pointed at the
+          # z.ai gateway and authenticated with ZAI_AUTH_TOKEN instead. The
+          # three expressions below are the dogfood ones with the provider
+          # selection swapped for this job's gate — Tier 2 has no provider
+          # variable, it always drives all three lanes — so whichever
+          # configuration the review is in, Tier 2 proves that credential and
+          # never both at once. tests/unit/test_workflow_wiring.py derives
+          # them from ai-review.yml and fails if the two drift.
           # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          # yamllint disable-line rule:line-length
+          ANTHROPIC_BASE_URL: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL || '' }}
+          # yamllint disable-line rule:line-length
+          ANTHROPIC_AUTH_TOKEN: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}
           LINTRO_CLI_BARE: 'never'
           # Keep the claude CLI's egress to api.anthropic.com only, and keep
           # the image's pinned CLI pinned — an autoupdate would swap the very
