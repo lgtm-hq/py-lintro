@@ -538,7 +538,7 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        response, _elapsed, _degradations = await invoke_chunk_review(
+        call = await invoke_chunk_review(
             request=ChunkReviewRequest(
                 chunk=chunk,
                 context=context,
@@ -562,4 +562,4 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
     assert_that(calls).is_length(2)
     assert_that(calls[0]).contains(f"**{CLI_MAX_FINDINGS_PER_CALL}**")
     assert_that(calls[1]).contains(f"**{CLI_FINDINGS_RETRY_CAP}**")
-    assert_that(response.content).contains("Adds a constant")
+    assert_that(call.response.content).contains("Adds a constant")
