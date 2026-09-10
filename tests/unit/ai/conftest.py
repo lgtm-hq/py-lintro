@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess  # nosec B404 - only CompletedProcess objects are constructed here
 import threading
 from collections.abc import Iterator
@@ -15,12 +16,96 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lintro.ai.config import AIConfig
+from lintro.ai.config_overrides import (
+    ENV_ENABLED,
+    ENV_MAX_COST_USD,
+    ENV_MODEL,
+    ENV_PROVIDER,
+    ENV_PROVIDER_BLOCK_PREFIX,
+    ENV_REVIEW,
+    ENV_TRANSPORT,
+)
 from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
+from lintro.ai.providers.claude_auth import BARE_MODE_ENV
 from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.console.logger import ThreadSafeConsoleLogger
+
+
+class RecordingConsoleLogger(ThreadSafeConsoleLogger):
+    """Console logger that records its output instead of printing it.
+
+    Subclasses the real :class:`ThreadSafeConsoleLogger` so it satisfies the
+    type production code annotates, then overrides the sinks that reach a
+    terminal. Every other logger method keeps its real implementation. Tests
+    use this instead of a mock so they assert on visible output rather than on
+    how a collaborator was called (#2315).
+
+    The transcripts are split, so ``lines`` is **not** everything a user would
+    have seen: :meth:`warning` records to ``warnings`` only and never routes
+    through ``console_output``, unlike production, which formats a
+    ``WARNING:`` line and prints it. Assert on ``warnings`` for warning text
+    and on ``lines``/``text`` for the rest.
+
+    Attributes:
+        lines: Every message passed to :meth:`console_output` or :meth:`error`,
+            in order. Excludes warnings.
+        warnings: Every message passed to :meth:`warning`, in order.
+    """
+
+    lines: list[str]
+    warnings: list[str]
+
+    def __init__(self) -> None:
+        """Start with empty console and warning transcripts."""
+        super().__init__()
+        self.lines = []
+        self.warnings = []
+
+    def console_output(self, text: str, color: str | None = None) -> None:
+        """Record one console line instead of printing it.
+
+        Args:
+            text: Text the production code wants on the console.
+            color: Colour the production code asked for, ignored here.
+        """
+        self.lines.append(text)
+
+    def error(self, message: str, *_args: Any, **_kwargs: Any) -> None:
+        """Record one error instead of printing it.
+
+        The real implementation writes to the terminal directly rather than
+        routing through :meth:`console_output`, so it needs its own override
+        or the text would escape the transcript (#2315).
+
+        Args:
+            message: Error text the production code emitted.
+            *_args: Ignored positional extras.
+            **_kwargs: Ignored keyword extras.
+        """
+        self.lines.append(f"ERROR: {message}")
+
+    def warning(self, message: str, **_kwargs: Any) -> None:
+        """Record one warning instead of printing and logging it.
+
+        Args:
+            message: Warning text the production code emitted.
+            **_kwargs: Ignored loguru formatting extras.
+        """
+        self.warnings.append(message)
+
+    @property
+    def text(self) -> str:
+        """Return every recorded console line joined by newlines.
+
+        Returns:
+            str: The console transcript this logger captured, excluding
+            warnings (those live in ``warnings``).
+        """
+        return "\n".join(self.lines)
 
 
 def completed_process(
@@ -312,6 +397,43 @@ class MockIssue(BaseIssue):
     code: str = ""
     severity: str = ""
     fixable: bool = False
+
+
+@pytest.fixture(autouse=True)
+def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset every env override that would skew an AI-suite assertion.
+
+    All three layers a config parse reads from the environment are cleared,
+    because one exported in the developer's shell outranks the project file
+    and silently changes what an assertion observes (#2309):
+
+    - every ``LINTRO_AI_PROVIDERS__*`` block override;
+    - the flat ``LINTRO_AI_*`` overrides, of which ``LINTRO_AI_PROVIDER`` is
+      the one that most skews this suite: it resolves a provider for tests
+      that assert on there being none, and displaces the project's provider
+      in the ``lintro config`` tests;
+    - ``LINTRO_CLI_BARE``, which supersedes the resolved ``cli_bare`` inside
+      ``should_send_bare()``, so an exported ``never`` would drop ``--bare``
+      from the CLI completion tests.
+
+    A test that wants one of these sets it with ``monkeypatch.setenv`` in its
+    own body, which runs after this fixture and is undone before it.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    for name in [n for n in os.environ if n.startswith(ENV_PROVIDER_BLOCK_PREFIX)]:
+        monkeypatch.delenv(name, raising=False)
+    for name in (
+        ENV_ENABLED,
+        ENV_MAX_COST_USD,
+        ENV_MODEL,
+        ENV_PROVIDER,
+        ENV_REVIEW,
+        ENV_TRANSPORT,
+        BARE_MODE_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture

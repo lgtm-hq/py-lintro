@@ -12,6 +12,7 @@ from assertpy import assert_that
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 from lintro.utils.tool_executor import _write_artifacts
+from tests.unit.ai.conftest import RecordingConsoleLogger
 
 
 def _make_config(*, artifacts: list[str] | None = None) -> MagicMock:
@@ -21,14 +22,19 @@ def _make_config(*, artifacts: list[str] | None = None) -> MagicMock:
     return cfg
 
 
-def _make_logger() -> MagicMock:
-    return MagicMock()
+def _make_logger() -> RecordingConsoleLogger:
+    """Build a console logger that records the lines written through it.
+
+    Returns:
+        RecordingConsoleLogger: The recorder.
+    """
+    return RecordingConsoleLogger()
 
 
 def _call_write(
     results: list[ToolResult],
     config: MagicMock,
-    logger: MagicMock,
+    logger: RecordingConsoleLogger,
 ) -> None:
     _write_artifacts(
         results,
@@ -164,9 +170,8 @@ def test_unknown_artifact_format_warns(
     results = [ToolResult(name="ruff", success=True, issues_count=0)]
     _call_write(results, _make_config(artifacts=["xlsx"]), logger)
 
-    logger.console_output.assert_called_once()
-    call_arg = logger.console_output.call_args[0][0]
-    assert_that(call_arg).contains("Unknown artifact format")
+    assert_that(logger.lines).is_length(1)
+    assert_that(logger.lines[0]).contains("Unknown artifact format")
 
 
 def test_artifact_logs_warning_on_write_failure(
@@ -187,7 +192,7 @@ def test_artifact_logs_warning_on_write_failure(
 
     # Both GHA auto-emitted artifacts (SARIF and JSON) fail to write, and each
     # reports its own warning rather than aborting the run.
-    warnings = [call.args[0] for call in logger.console_output.call_args_list]
+    warnings = logger.lines
     assert_that(warnings).is_length(2)
     assert_that(any("sarif artifact" in warning for warning in warnings)).is_true()
     assert_that(any("json artifact" in warning for warning in warnings)).is_true()

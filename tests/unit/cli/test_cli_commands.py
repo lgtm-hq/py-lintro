@@ -22,17 +22,16 @@ SUBCOMMANDS: tuple[str, ...] = (
     "licenses",
     "list-tools",
     "review",
-    "setup",
     "test",
     "versions",
+    "watch",
 )
 
 # Human-facing summary phrases that must survive Click's \\f truncation.
 SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
-    "badge": "Generate a shields.io markdown badge for the project health score.",
+    "badge": "Generate a shields.io markdown badge for the project's issue counts.",
     "check": "Check files for issues using the specified tools.",
     "completions": "Print a shell completion script for bash, zsh, or fish.",
-    "config": "Display Lintro configuration status.",
     "doctor": "Check tool installation status and version compatibility.",
     "format": "Format code using configured formatting tools.",
     "init": "Initialize Lintro configuration for your project.",
@@ -40,9 +39,9 @@ SUBCOMMAND_SUMMARY_PHRASES: dict[str, str] = {
     "licenses": "Check dependency licenses for policy compliance.",
     "list-tools": "List all available tools and their configurations.",
     "review": "Run AI-powered diff-based code review, plus advisory AI finders.",
-    "setup": "Set up lintro for your project.",
     "test": "Run tests using pytest.",
     "versions": "Display version information for all supported tools.",
+    "watch": "Watch paths and continuously lint files as they change.",
 }
 
 _DOCSTRING_SECTION_RE = re.compile(
@@ -63,6 +62,8 @@ def test_cli_lists_commands_and_aliases() -> None:
     assert_that(result.output).contains("chk")
     assert_that(result.output).contains("fmt")
     assert_that(result.output).contains("ls")
+    assert_that(result.output).contains("watch")
+    assert_that(result.output).contains("w")
 
 
 @pytest.mark.parametrize("subcommand", SUBCOMMANDS)
@@ -98,3 +99,20 @@ def test_subcommand_help_shows_summary_and_options(
     assert_that(result.output).contains("Usage:")
     assert_that(result.output).contains("--help")
     assert_that(result.output).contains(summary)
+
+
+def test_config_help_lists_subcommands() -> None:
+    """``lintro config --help`` must list the real subcommands, not a copied blurb.
+
+    The group docstring is truncated at form-feed for Click; this checks the
+    behavior users see (show / validate / init) rather than echoing the
+    source docstring.
+    """
+    runner = CliRunner()
+    result = runner.invoke(cli, ["config", "--help"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains("Usage:")
+    assert_that(result.output).contains("show")
+    assert_that(result.output).contains("validate")
+    assert_that(result.output).contains("init")

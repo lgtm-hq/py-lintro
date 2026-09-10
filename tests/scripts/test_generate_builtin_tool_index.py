@@ -6,10 +6,11 @@ import importlib.util
 import subprocess  # nosec B404 - subprocess drives the generator script under test; invocations use shell=False
 import sys
 from pathlib import Path
-from types import ModuleType
 
 import pytest
 from assertpy import assert_that
+
+from lintro_build import builtin_index
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "ci" / "generate-builtin-tool-index.py"
@@ -18,41 +19,25 @@ SCRIPT_PATH = REPO_ROOT / "scripts" / "ci" / "generate-builtin-tool-index.py"
 SUBPROCESS_TIMEOUT_SECONDS = 120
 
 
-@pytest.fixture(scope="module")
-def gen() -> ModuleType:
-    """Import the hyphen-named generator script as a module.
-
-    Returns:
-        The imported generator module.
-    """
-    spec = importlib.util.spec_from_file_location(
-        "generate_builtin_tool_index",
-        SCRIPT_PATH,
-    )
-    if spec is None or spec.loader is None:
-        pytest.fail(f"could not load generator script at {SCRIPT_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["generate_builtin_tool_index"] = module
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_collect_module_names_skips_private_modules(
-    gen: ModuleType,
-    tmp_path: Path,
-) -> None:
-    """Private and dunder modules stay out of the index.
+def _make_package(*, root: Path, name: str, modules: dict[str, str]) -> Path:
+    """Create a per-tool package directory under ``root``.
 
     Args:
-        gen: Imported generator module.
-        tmp_path: Pytest-provided temporary directory.
+        root: Directory standing in for ``lintro/tools``.
+        name: Package name.
+        modules: Mapping of module file name to source text. ``__init__.py`` is
+            created automatically when absent.
+
+    Returns:
+        The created package directory.
     """
-    for name in ("ruff.py", "black.py", "_shared.py", "__init__.py", "notes.txt"):
-        (tmp_path / name).write_text("")
-
-    names = gen.collect_module_names(tmp_path)
-
-    assert_that(names).is_equal_to(["black", "ruff"])
+    package = root / name
+    package.mkdir(parents=True)
+    if "__init__.py" not in modules:
+        (package / "__init__.py").write_text("")
+    for file_name, source in modules.items():
+        (package / file_name).write_text(source)
+    return package
 
 
 def _registering_module() -> str:
@@ -64,101 +49,196 @@ def _registering_module() -> str:
     return "@register_tool\nclass Plugin:\n    pass\n"
 
 
-def test_collect_registering_module_names_skips_helper_modules(
-    gen: ModuleType,
-    tmp_path: Path,
-) -> None:
-    """Only modules applying ``@register_tool`` join the registering subset.
+def test_collect_module_names_lists_one_entry_per_package(tmp_path: Path) -> None:
+    """A package is entered through its ``definition`` module alone.
+
+    Importing ``definition`` runs the package ``__init__``, so listing the
+    package's other modules would only defeat their deliberate laziness.
 
     Args:
-        gen: Imported generator module.
         tmp_path: Pytest-provided temporary directory.
     """
-    (tmp_path / "ruff.py").write_text(_registering_module())
-    (tmp_path / "black.py").write_text(_registering_module())
-    (tmp_path / "oxlint_doctor.py").write_text("HELPER = True\n")
-
-    assert_that(gen.collect_module_names(tmp_path)).is_equal_to(
-        ["black", "oxlint_doctor", "ruff"],
+    _make_package(
+        root=tmp_path,
+        name="ruff",
+        modules={"definition.py": _registering_module(), "commands.py": "X = 1\n"},
     )
-    assert_that(gen.collect_registering_module_names(tmp_path)).is_equal_to(
+    _make_package(
+        root=tmp_path,
+        name="black",
+        modules={"definition.py": _registering_module()},
+    )
+
+    names = builtin_index.collect_module_names(tmp_path)
+
+    assert_that(names).is_equal_to(["black.definition", "ruff.definition"])
+
+
+def test_collect_module_names_lists_every_module_of_a_shared_package(
+    tmp_path: Path,
+) -> None:
+    """A package with no ``definition`` module contributes all its modules.
+
+    That is the ``ts_checker`` family: shared scaffolding behind ``tsc`` and
+    ``vue-tsc`` with no plugin of its own, and so no single entry point.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    _make_package(
+        root=tmp_path,
+        name="ts_checker",
+        modules={"base.py": "X = 1\n", "command.py": "Y = 2\n", "_private.py": ""},
+    )
+
+    names = builtin_index.collect_module_names(tmp_path)
+
+    assert_that(names).is_equal_to(["ts_checker.base", "ts_checker.command"])
+
+
+def test_collect_module_names_skips_private_and_non_tool_packages(
+    tmp_path: Path,
+) -> None:
+    """Private packages, ``core`` and loose files stay out of the index.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    _make_package(
+        root=tmp_path,
+        name="ruff",
+        modules={"definition.py": _registering_module()},
+    )
+    _make_package(root=tmp_path, name="core", modules={"runner.py": "X = 1\n"})
+    _make_package(root=tmp_path, name="_scratch", modules={"thing.py": "X = 1\n"})
+    (tmp_path / "not_a_package").mkdir()
+    (tmp_path / "not_a_package" / "loose.py").write_text("X = 1\n")
+    (tmp_path / "__init__.py").write_text("")
+
+    names = builtin_index.collect_module_names(tmp_path)
+
+    assert_that(names).is_equal_to(["ruff.definition"])
+
+
+def test_collect_registering_package_names_skips_shared_packages(
+    tmp_path: Path,
+) -> None:
+    """Only packages applying ``@register_tool`` join the registering set.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    _make_package(
+        root=tmp_path,
+        name="ruff",
+        modules={"definition.py": _registering_module()},
+    )
+    _make_package(
+        root=tmp_path,
+        name="black",
+        modules={"definition.py": _registering_module()},
+    )
+    _make_package(root=tmp_path, name="ts_checker", modules={"base.py": "X = 1\n"})
+
+    assert_that(builtin_index.collect_registering_package_names(tmp_path)).is_equal_to(
         ["black", "ruff"],
     )
 
 
-def test_collect_registering_module_names_ignores_comments_and_docstrings(
-    gen: ModuleType,
+def test_collect_registering_package_names_follows_the_imported_modules(
+    tmp_path: Path,
+) -> None:
+    """Only the modules discovery imports can contribute a registration.
+
+    The registering set drives the released binary's registry assertion, and a
+    frozen binary imports exactly the indexed modules. A decorator in a module
+    the index does not name would make that assertion expect a tool the binary
+    can never register, so it must not count. A shared package, whose every
+    public module is indexed, counts from anywhere.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    _make_package(
+        root=tmp_path,
+        name="oxlint",
+        modules={"definition.py": "X = 1\n", "doctor.py": _registering_module()},
+    )
+    _make_package(
+        root=tmp_path,
+        name="ts_checker",
+        modules={"base.py": _registering_module()},
+    )
+
+    assert_that(builtin_index.collect_registering_package_names(tmp_path)).is_equal_to(
+        ["ts_checker"],
+    )
+
+
+def test_collect_registering_package_names_ignores_comments_and_docstrings(
     tmp_path: Path,
 ) -> None:
     """A commented or docstring ``@register_tool`` is not a registration.
 
     Args:
-        gen: Imported generator module.
         tmp_path: Pytest-provided temporary directory.
     """
-    (tmp_path / "commented.py").write_text(
-        "# @register_tool\nclass Plugin:\n    pass\n",
-    )
-    (tmp_path / "docstring.py").write_text(
-        '"""This helper mentions @register_tool in the module docstring."""\n'
-        "HELPER = True\n",
-    )
-    (tmp_path / "literal.py").write_text('DECORATOR = "@register_tool"\n')
-    (tmp_path / "real.py").write_text(_registering_module())
-    (tmp_path / "attr.py").write_text(
-        "@registry.register_tool\nclass Plugin:\n    pass\n",
-    )
-    (tmp_path / "called.py").write_text(
-        "@register_tool()\nclass Plugin:\n    pass\n",
-    )
+    sources = {
+        "commented": "# @register_tool\nclass Plugin:\n    pass\n",
+        "docstring": (
+            '"""This helper mentions @register_tool in the module docstring."""\n'
+            "HELPER = True\n"
+        ),
+        "literal": 'DECORATOR = "@register_tool"\n',
+        "real": _registering_module(),
+        "attr": "@registry.register_tool\nclass Plugin:\n    pass\n",
+        "called": "@register_tool()\nclass Plugin:\n    pass\n",
+    }
+    for name, source in sources.items():
+        _make_package(root=tmp_path, name=name, modules={"definition.py": source})
 
-    assert_that(gen.collect_registering_module_names(tmp_path)).is_equal_to(
+    assert_that(builtin_index.collect_registering_package_names(tmp_path)).is_equal_to(
         ["attr", "called", "real"],
     )
 
 
-def test_collect_registering_module_names_fails_closed_on_syntax_error(
-    gen: ModuleType,
+def test_collect_registering_package_names_fails_closed_on_syntax_error(
     tmp_path: Path,
 ) -> None:
-    """An unparseable definition file is an input error, not a silent skip.
+    """An unparseable tool module is an input error, not a silent skip.
 
     Args:
-        gen: Imported generator module.
         tmp_path: Pytest-provided temporary directory.
     """
-    (tmp_path / "broken.py").write_text("def (\n")
+    _make_package(root=tmp_path, name="broken", modules={"definition.py": "def (\n"})
 
     with pytest.raises(ValueError, match="could not parse"):
-        gen.collect_registering_module_names(tmp_path)
+        builtin_index.collect_registering_package_names(tmp_path)
 
 
-def test_collect_module_names_rejects_missing_directory(
-    gen: ModuleType,
-    tmp_path: Path,
-) -> None:
-    """A missing definitions directory is an input error, not an empty index.
+def test_collect_module_names_rejects_missing_directory(tmp_path: Path) -> None:
+    """A missing tools directory is an input error, not an empty index.
 
     Args:
-        gen: Imported generator module.
         tmp_path: Pytest-provided temporary directory.
     """
     with pytest.raises(FileNotFoundError):
-        gen.collect_module_names(tmp_path / "nope")
+        builtin_index.collect_module_names(tmp_path / "nope")
 
 
-def test_render_index_emits_importable_tuple(
-    gen: ModuleType,
-    tmp_path: Path,
-) -> None:
+def test_render_index_emits_importable_tuple(tmp_path: Path) -> None:
     """The rendered text imports as a module exposing the module-name tuple.
 
     Args:
-        gen: Imported generator module.
         tmp_path: Pytest-provided temporary directory.
     """
     rendered_path = tmp_path / "_rendered_index.py"
-    rendered_path.write_text(gen.render_index(["black", "ruff"], ["black", "ruff"]))
+    rendered_path.write_text(
+        builtin_index.render_index(
+            ["black.definition", "ruff.definition"],
+            ["ruff"],
+        ),
+    )
 
     spec = importlib.util.spec_from_file_location("_rendered_index", rendered_path)
     if spec is None or spec.loader is None:
@@ -166,11 +246,30 @@ def test_render_index_emits_importable_tuple(
     rendered_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(rendered_module)
 
-    assert_that(rendered_module.BUILTIN_TOOL_MODULES).is_equal_to(("black", "ruff"))
+    assert_that(rendered_module.BUILTIN_TOOL_MODULES).is_equal_to(
+        ("black.definition", "ruff.definition"),
+    )
+    assert_that(rendered_module.REGISTERING_TOOL_PACKAGES).is_equal_to(("ruff",))
+
+
+def test_resolve_paths_follows_repo_layout(tmp_path: Path) -> None:
+    """Path resolution derives both locations from the repo root.
+
+    Args:
+        tmp_path: Pytest-provided temporary directory.
+    """
+    tools_dir, index_path = builtin_index.resolve_paths(tmp_path)
+
+    assert_that(str(tools_dir)).is_equal_to(
+        str(tmp_path / "lintro" / "tools"),
+    )
+    assert_that(str(index_path)).is_equal_to(
+        str(tmp_path / "lintro" / "plugins" / "_builtin_index.py"),
+    )
 
 
 def test_check_passes_against_real_repo() -> None:
-    """The committed index matches the definitions directory.
+    """The committed index matches the per-tool packages on disk.
 
     Runs only ``--check`` so the test cannot repair drift before asserting.
     """
@@ -186,94 +285,99 @@ def test_check_passes_against_real_repo() -> None:
     assert_that(result.returncode).described_as(
         result.stdout + result.stderr,
     ).is_equal_to(0)
+    assert_that(result.stdout).contains("is up to date")
 
 
 @pytest.fixture
-def fake_repo(
-    gen: ModuleType,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> tuple[Path, Path]:
-    """Point the generator at a throwaway definitions tree.
+def fake_repo(tmp_path: Path) -> tuple[Path, Path]:
+    """Point the generator at a throwaway tools tree.
 
     Args:
-        gen: Imported generator module.
         tmp_path: Pytest-provided temporary directory.
-        monkeypatch: Pytest monkeypatch fixture (restores module constants).
 
     Returns:
-        Tuple of (definitions directory, index path).
+        Tuple of (tools directory, index path).
     """
-    definitions = tmp_path / "definitions"
-    definitions.mkdir()
+    tools = tmp_path / "tools"
+    tools.mkdir()
     index_path = tmp_path / "_builtin_index.py"
-    monkeypatch.setattr(gen, "DEFINITIONS_DIR", definitions)
-    monkeypatch.setattr(gen, "INDEX_PATH", index_path)
-    monkeypatch.setattr(sys, "argv", ["generate-builtin-tool-index.py"])
-    return definitions, index_path
+    return tools, index_path
 
 
 def test_check_reports_drift(
-    gen: ModuleType,
     fake_repo: tuple[Path, Path],
-    monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Check mode exits 1 and reports drift without rewriting the index.
 
     Args:
-        gen: Imported generator module.
-        fake_repo: Definitions directory and index path fixture.
-        monkeypatch: Pytest monkeypatch fixture.
+        fake_repo: Tools directory and index path fixture.
         capsys: Pytest stdout/stderr capture fixture.
     """
-    definitions, index_path = fake_repo
-    (definitions / "ruff.py").write_text(_registering_module())
-    index_path.write_text(gen.render_index(["black"], ["black"]))
-    monkeypatch.setattr(sys, "argv", ["generate-builtin-tool-index.py", "--check"])
+    tools, index_path = fake_repo
+    _make_package(
+        root=tools,
+        name="ruff",
+        modules={"definition.py": _registering_module()},
+    )
+    index_path.write_text(
+        builtin_index.render_index(["black.definition"], ["black"]),
+    )
 
-    exit_code = gen.main()
+    exit_code = builtin_index.main(
+        ["--check"],
+        tools_dir=tools,
+        index_path=index_path,
+    )
 
     assert_that(exit_code).is_equal_to(1)
     assert_that(capsys.readouterr().out).contains("out of date")
     assert_that(index_path.read_text()).contains("black")
 
 
-def test_write_mode_refreshes_the_index(
-    gen: ModuleType,
-    fake_repo: tuple[Path, Path],
-) -> None:
+def test_write_mode_refreshes_the_index(fake_repo: tuple[Path, Path]) -> None:
     """Write mode replaces a stale index with the current module list.
 
     Args:
-        gen: Imported generator module.
-        fake_repo: Definitions directory and index path fixture.
+        fake_repo: Tools directory and index path fixture.
     """
-    definitions, index_path = fake_repo
-    (definitions / "ruff.py").write_text(_registering_module())
-    index_path.write_text(gen.render_index(["black"], ["black"]))
+    tools, index_path = fake_repo
+    _make_package(
+        root=tools,
+        name="ruff",
+        modules={"definition.py": _registering_module()},
+    )
+    index_path.write_text(
+        builtin_index.render_index(["black.definition"], ["black"]),
+    )
 
-    exit_code = gen.main()
+    exit_code = builtin_index.main(
+        [],
+        tools_dir=tools,
+        index_path=index_path,
+    )
 
     assert_that(exit_code).is_equal_to(0)
     assert_that(index_path.read_text()).is_equal_to(
-        gen.render_index(["ruff"], ["ruff"]),
+        builtin_index.render_index(["ruff.definition"], ["ruff"]),
     )
 
 
-def test_empty_definitions_directory_is_an_input_error(
-    gen: ModuleType,
+def test_empty_tools_directory_is_an_input_error(
     fake_repo: tuple[Path, Path],
 ) -> None:
-    """An empty definitions tree fails loudly instead of writing an empty index.
+    """An empty tools tree fails loudly instead of writing an empty index.
 
     Args:
-        gen: Imported generator module.
-        fake_repo: Definitions directory and index path fixture.
+        fake_repo: Tools directory and index path fixture.
     """
-    _, index_path = fake_repo
+    tools, index_path = fake_repo
 
-    exit_code = gen.main()
+    exit_code = builtin_index.main(
+        [],
+        tools_dir=tools,
+        index_path=index_path,
+    )
 
     assert_that(exit_code).is_equal_to(2)
     assert_that(index_path.exists()).is_false()

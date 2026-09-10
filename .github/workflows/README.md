@@ -15,7 +15,7 @@ comments so Renovate can track digest updates. Policy is enforced by
 
 - **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
   `reusable-test-python.yml`
-- **docker-ci.yml** — Manifest sync, multi-stage Docker build, dogfooding quality
+- **docker-ci.yml** — Multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
   CI-built image), integration tests, security audit, GHCR publish (main). Ephemeral
   `ci-<run_id>` tags are retained for partial reruns (#1138) and reclaimed by the weekly
@@ -69,12 +69,18 @@ comments so Renovate can track digest updates. Policy is enforced by
 - **release-auto-tag.yml** — Creates tags on release commits via
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
+- **mirror-release.yml** — On `release: published`, bumps the `lintro` pin in the
+  `lgtm-hq/lintro-pre-commit` mirror, merges the version-bump PR, and tags the mirror
+  `vX.Y.Z` so pre-commit consumers install the matching wheel (scripts under
+  `scripts/ci/mirror/`; see `docs/pre-commit.md`)
 
 Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
-are traceable from the Actions list rather than the default commit subject. Failure
-visibility itself lives upstream: the reusables run a `report-release-failure` job that
-writes trigger context to the step summary and opens/updates a deduplicated GitHub issue
-on `main` failures — hence the `actions: read` + `issues: write` job permissions.
+are traceable from the Actions list rather than the default commit subject. The mirror
+workflow (`mirror-release.yml`) uses a fixed run name because it is triggered by release
+events rather than branch pushes. Failure visibility itself lives upstream: the
+reusables run a `report-release-failure` job that writes trigger context to the step
+summary and opens/updates a deduplicated GitHub issue on `main` failures — hence the
+`actions: read` + `issues: write` job permissions.
 
 ## Publish
 
@@ -89,17 +95,36 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
   (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
-- **docker-tools-publish.yml** — Publishes the `lintro-tools` toolchain base image
-  (`docker/tools.Dockerfile`) via `reusable-docker.yml` on tool-pin changes plus a
-  weekly no-cache rebuild for CVE freshness; cosign-signed with SBOM + provenance
-  attestations. A follow-up root `Dockerfile` change will consume it via a
-  Renovate-managed digest-pinned `FROM`.
+- **docker-tools-candidate.yml** — On an in-repository `renovate/**` push that changes a
+  tool-version manifest, builds a candidate `lintro-tools` image and commits its digest
+  to both Dockerfile pin sites. The app-token push retriggers PR checks; its
+  `lgtm-digest-bump[bot]` actor fails the candidate job gate, so the commit cannot start
+  a second candidate build. Renovate normally preserves that digest commit as a branch
+  modification; a rebase that discards it simply causes the actor-gated flow to build a
+  fresh candidate.
+- **docker-tools-publish.yml** — Validates tools-image pull requests and runs the weekly
+  no-cache rebuild for CVE freshness. Maintainer `workflow_dispatch` can publish a tools
+  image explicitly. Merged Renovate candidates are promoted by digest, without a
+  rebuild, by `docker-tools-promote.yml`.
+- **docker-tools-promote.yml** — Classifies main pushes: merged Renovate PRs find their
+  candidate and retag its exact digest as `lintro-tools:latest`; ordinary main tools
+  changes (including installer/build-script updates) use a canonical publish fallback.
+  Consumer-only digest pins are skipped. A merged Renovate PR with a missing candidate
+  fails closed rather than rebuilding.
 
 ## Security & maintenance
 
 - **ghcr-cleanup.yml** — Scheduled GHCR cleanup via `reusable-ghcr-cleanup.yml`
-  (`py-lintro`, `py-lintro-base`) plus age-based sweep of ephemeral `ci-*` tags
-  (`sweep-ci-ghcr-tags.sh`, #1138)
+  (`py-lintro`, `py-lintro-base`) plus age-based sweeps of ephemeral `ci-*`, `sha-*`,
+  `renovate-*`, and tools candidate tags. The reusable candidate build emits the custom
+  candidate tag plus `sha-*`/`renovate-*` companion tags; candidates are removed when
+  their PR is closed without merge or they are at least 14 days old. Versions with any
+  persistent tag (such as promoted `latest`) are retained because GHCR deletes a whole
+  package version, not one tag.
+- **Digest-lag diagnostics** — `verify-manifest-tools.py` reports the tool, expected
+  version, and lagging image tag/digest with the actionable `digest-bump required`
+  message. It deliberately does not invent a PR number: the verifier runs inside an
+  image and has no reliable pull-request API context.
 - **vuln-suppression-check.yml** — Weekly OSV suppression staleness via
   `reusable-vuln-suppression-check.yml`
 - **dependency-vuln-gate.yml** — Pre-merge mirror of the release SBOM vulnerability gate
@@ -113,18 +138,57 @@ on `main` failures — hence the `actions: read` + `issues: write` job permissio
   allow-list, not just the Python lock, or the pre-merge gate would be looser than the
   release gate. Unfiltered trigger, so the `🔐 Dependency Vulnerability Gate` context
   always reports and is safe to require
-- **renovate.yml** — Daily dependency updates (lgtm-ci `harden-runner` +
-  `secure-checkout`)
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
   **test-built-package.yml**, **build-binary.yml**
+
+## Binary release reruns
+
+`build-binary.yml`'s `Build macOS Binary` / `Build Linux Binary` jobs are idempotent
+(#2435). Before compiling, each checks whether the release already carries its platform
+asset and whether that asset's SHA256 matches the `sha256-*` artifact this same run
+produced on an earlier attempt. The check also looks at `<asset>.new` when the published
+name is missing or stale, so an interrupted swap does not cost a rebuild. On a match the
+job reuses the asset and skips `Build binary`, `Verify binary`,
+`Smoke-test tool registry`, `Finalize binary` and `Upload to release`; only the artifact
+uploads run again. The same-run artifact is written after verify and smoke-test passed
+on that earlier attempt, which is what makes skipping them safe — an asset uploaded by
+hand has no such artifact and is rebuilt.
+
+Consequences for operators:
+
+- **Re-run failed jobs** on a tag run is the supported npm backfill path (#2247): the
+  binary jobs pass in ~2 minutes instead of a ~20-minute rebuild, and `npm-publish` runs
+  under the trusted workflow identity it needs. There is no separate dispatch path.
+- The two compile jobs upload with `scripts/build/upload_release_asset.sh`, which
+  uploads `<asset>.new`, verifies its checksum, and only then deletes and renames. A
+  kill between that delete and that rename leaves only `<asset>.new`, and both halves of
+  the next attempt recover from it: the reuse check promotes it when it matches the
+  run's checksum artifact (so the rerun still skips the rebuild), and the uploader
+  promotes it when it matches the binary it was about to upload. A killed runner can no
+  longer strip a good binary off a published release, which is what the
+  `softprops/action-gh-release` overwrite path did on `v0.147.3`. The
+  `Generate Man Page` and `Create Universal Binary` jobs still upload with
+  `softprops/action-gh-release`; their assets are regenerated cheaply, so the swap was
+  not extended to them.
 
 ## Token patterns
 
 - **`secrets.GITHUB_TOKEN`** — CI, PR comments, artifacts
 - **`secrets.RELEASE_APP_*`** — Release PR and auto-tag (GitHub App installation token
   via lgtm-ci release workflows)
+- **`secrets.DIGEST_APP_ID` / `secrets.DIGEST_APP_PRIVATE_KEY`** — The dedicated
+  `lgtm-digest-bump` GitHub App (Contents read/write only), minted immediately before
+  the candidate digest commit with explicit `permission-contents: write`. It is
+  installed only on `py-lintro`; do not substitute `RELEASE_APP_*`.
+- **`secrets.MIRROR_REPO_TOKEN`** — Cross-repo write to `lgtm-hq/lintro-pre-commit`
+  (fine-grained PAT or GitHub App token with contents + pull-requests write on that
+  repo) used by `mirror-release.yml`
 
 ## Concurrency
 
 Standard pattern: `<workflow>-${{ github.ref }}` with
-`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` for CI workflows.
+`cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` for CI workflows. The
+slower `docker-ci.yml` also maps `main` to `queue: max` and other refs to
+`queue: single`: up to 100 main runs can wait without displacement (GitHub does not
+guarantee dispatch order), while a new PR push still supersedes the prior pending and
+in-progress run.

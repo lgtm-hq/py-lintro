@@ -43,6 +43,28 @@ else:
 	echo "$version"
 }
 
+# Get a tool's minimum *compatible* version (manifest ``min_version``), which is
+# the floor lintro enforces at runtime. Distro-packaged tools install whatever
+# the package manager ships, so the install path compares against this rather
+# than the recommended pin.
+get_tool_min_version() {
+	local tool_name="$1"
+	local version
+	version=$(python3 -c "
+import runpy
+import sys
+
+sys.path.insert(0, '$PROJECT_ROOT')
+mod = runpy.run_path('$PROJECT_ROOT/lintro/_tool_versions.py')
+print(mod['get_min_version'](mod['ToolName']('$tool_name')))
+" 2>/dev/null)
+	if [ -z "$version" ]; then
+		echo "ERROR: Minimum version for '$tool_name' not found" >&2
+		return 1
+	fi
+	echo "$version"
+}
+
 # Show help if requested
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -68,9 +90,12 @@ This script installs:
   - Markdownlint-cli2 (Markdown linter)
   - Yamllint (YAML linter)
   - Hadolint (Dockerfile linter)
+  - Import-linter (Python import-contract checker)
+  - Pylint (Python static analyser; duplicate-code)
   - Actionlint (GitHub Actions workflow linter)
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
+  - Cppcheck (C/C++ static analysis)
   - RuboCop (Ruby linting and formatting)
   - Clippy (Rust linter; requires Rust toolchain)
   - Rustfmt (Rust formatter; requires Rust toolchain)
@@ -82,6 +107,7 @@ This script installs:
   - Semgrep (Security scanner)
   - ShellCheck (Shell script linter)
   - shfmt (Shell script formatter)
+  - Spectral (OpenAPI/AsyncAPI/JSON Schema linter)
   - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)
@@ -167,12 +193,17 @@ should_install() {
 
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
+# Note: a few tools are filtered under one name and verified under another.
+# markdownlint lists both names here, so --tools markdownlint-cli2 is valid.
+# import-linter lists only the filter name, so --tools lint-imports is
+# rejected by the validation below; the verification loop reconnects
+# import-linter to lint-imports with an explicit alias branch.
 SUPPORTED_TOOLS=(
-	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "rubocop" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo"
-	"trufflehog" "tsc"
+	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
+	"clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "rubocop" "ruff" "rustfmt" "semgrep"
+	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
+	"trufflehog" "tsc" "typos"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -281,8 +312,20 @@ else
 	BIN_DIR="$HOME/.local/bin"
 	mkdir -p "$BIN_DIR"
 	echo -e "${YELLOW}Installing tools locally to $BIN_DIR${NC}"
-	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH${NC}"
+	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH:${NC}"
+	echo -e "${YELLOW}    export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
 fi
+
+# Tools installed into $BIN_DIR must be reachable for the rest of this run:
+# later install steps probe with `command -v`, and so does the verification
+# loop. Without this a freshly installed binary would be reported missing (and
+# reinstalled) purely because the caller's shell has not been reloaded. This
+# only affects this process; the reminder above still applies to the user's
+# own shell.
+case ":$PATH:" in
+*":$BIN_DIR:"*) ;;
+*) export PATH="$BIN_DIR:$PATH" ;;
+esac
 
 # Function to detect platform and architecture
 detect_platform() {
@@ -326,16 +369,19 @@ install_python_package() {
 		full_package="$package==$version"
 	fi
 
-	# Prefer uv pip when available
+	# Prefer uv pip when available. Do not use `uv run` to locate the
+	# binary: `uv run` syncs this repo's pyproject.toml ranges
+	# (ruff>=0.15.9 → latest) and would copy the floated pin into
+	# BIN_DIR (#2220).
 	if command -v uv &>/dev/null; then
 		if uv pip install "$full_package"; then
-			# Copy the executable to target directory if it exists in uv environment
-			local uv_path
-			uv_path=$(uv run which "$package" 2>/dev/null || echo "")
-			if [ -n "$uv_path" ] && [ -f "$uv_path" ]; then
-				cp "$uv_path" "$BIN_DIR/$package"
+			local installed_path
+			installed_path=$(command -v "$package" 2>/dev/null || true)
+			if [ -n "$installed_path" ] && [ -f "$installed_path" ] &&
+				[ "$installed_path" != "$BIN_DIR/$package" ]; then
+				cp "$installed_path" "$BIN_DIR/$package"
 				chmod +x "$BIN_DIR/$package"
-				echo -e "${YELLOW}Copied $package from uv environment to $BIN_DIR${NC}"
+				echo -e "${YELLOW}Copied $package to $BIN_DIR${NC}"
 			fi
 			return 0
 		fi
@@ -996,8 +1042,9 @@ main() {
 
 		if [ -z "${RUST_TOOLCHAIN_VERSION:-}" ]; then
 			# Clippy versions match Rust release versions (clippy 1.94.0 = Rust 1.94.0).
-			# Use the highest version among rustc and clippy so that Renovate PRs
-			# that bump clippy independently install the correct toolchain.
+			# rustfmt/clippy pins bump only alongside rustc (#2205). Take
+			# max(rustc, clippy) so a drifted pair still installs a toolchain
+			# that can provide both components.
 			local _rustc_ver _clippy_ver
 			_rustc_ver=$(get_tool_version "rustc" 2>/dev/null || echo "")
 			_clippy_ver=$(get_tool_version "clippy" 2>/dev/null || echo "")
@@ -1046,7 +1093,8 @@ main() {
 		if ! command -v rustup &>/dev/null; then
 			echo -e "${YELLOW}Installing rustup...${NC}"
 			curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-				--default-toolchain "$RUST_TOOLCHAIN_VERSION" --component "$component"
+				--default-toolchain "$RUST_TOOLCHAIN_VERSION" \
+				--profile minimal --component "$component"
 			# Source cargo environment (respect CARGO_HOME if set)
 			cargo_env="${CARGO_HOME:-$HOME/.cargo}/env"
 			if [ -f "$cargo_env" ]; then
@@ -1060,7 +1108,7 @@ main() {
 				rustup update stable
 				rustup component add "$component"
 			else
-				rustup toolchain install "$RUST_TOOLCHAIN_VERSION"
+				rustup toolchain install "$RUST_TOOLCHAIN_VERSION" --profile minimal
 				rustup default "$RUST_TOOLCHAIN_VERSION"
 				rustup component add "$component" --toolchain "$RUST_TOOLCHAIN_VERSION"
 			fi
@@ -1097,6 +1145,85 @@ main() {
 			ensure_rust_toolchain "clippy"
 		fi
 	fi # clippy
+
+	if should_install "buf"; then
+		# Install buf (Protocol Buffer linter and formatter)
+		echo -e "${BLUE}Installing buf...${NC}"
+		BUF_VERSION=$(get_tool_version "buf") || exit 1
+		# An already-present buf only counts when it satisfies the pinned
+		# version; a stale binary would otherwise fail lintro's min_version
+		# check at runtime.
+		buf_needs_install=1
+		if [ $DRY_RUN -eq 0 ] && command -v buf &>/dev/null; then
+			# A failed buf binary or unparseable --version must not abort
+			# the installer under set -euo pipefail; treat that as "not
+			# installed" so the download branch still runs.
+			installed_version=$(
+				buf --version 2>/dev/null |
+					grep -oE '[0-9]+\.[0-9]+\.[0-9]+' |
+					head -1 || true
+			)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$BUF_VERSION"; then
+				echo -e "${GREEN}✓ buf v${installed_version} already installed (>= v${BUF_VERSION})${NC}"
+				buf_needs_install=0
+			else
+				echo -e "${YELLOW}⚠ Installing buf v${BUF_VERSION}...${NC}"
+			fi
+		fi
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install buf v${BUF_VERSION}"
+		elif [ $buf_needs_install -eq 1 ]; then
+			# buf release assets are named buf-$(uname -s)-$(uname -m), e.g.
+			# buf-Linux-x86_64, buf-Linux-aarch64, buf-Darwin-arm64.
+			os=$(uname -s)
+			arch=$(uname -m)
+			case "$arch" in
+			amd64) arch="x86_64" ;;
+			esac
+			tmpdir=$(mktemp -d)
+			asset="buf-${os}-${arch}"
+			binary_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/${asset}"
+			checksum_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/sha256.txt"
+			if download_with_retries "$binary_url" "$tmpdir/buf" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/sha256.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for buf${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for buf...${NC}"
+				expected=$(grep " ${asset}$" "$tmpdir/sha256.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ No checksum entry for ${asset}${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/buf" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/buf" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ No sha256sum or shasum available for checksum verification${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for buf (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				mv "$tmpdir/buf" "$BIN_DIR/buf"
+				chmod +x "$BIN_DIR/buf"
+				echo -e "${GREEN}✓ buf installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download buf${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir"
+		fi
+	fi # buf
 
 	if should_install "cargo-audit"; then
 		# Install cargo-audit (Rust dependency vulnerability scanner)
@@ -1201,6 +1328,81 @@ main() {
 			fi
 		fi
 	fi # cargo-deny
+
+	if should_install "typos"; then
+		# Install typos (source-code spell checker; crate "typos-cli", binary "typos")
+		# Prefer pre-built binary from cargo-quickinstall to avoid long compile times
+		echo -e "${BLUE}Installing typos...${NC}"
+		TYPOS_VERSION=$(get_tool_version "typos") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install typos-cli==${TYPOS_VERSION}"
+		elif command -v typos &>/dev/null; then
+			echo -e "${GREEN}✓ typos already installed${NC}"
+		else
+			typos_installed=false
+			# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+			*) target="" ;;
+			esac
+			# cargo-quickinstall only provides linux binaries
+			if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
+				tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/typos-cli-${TYPOS_VERSION}/typos-cli-${TYPOS_VERSION}-${target}.tar.gz"
+				echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
+				if download_with_retries "$tgz_url" "$tmpdir/typos.tar.gz" 3; then
+					tar -xzf "$tmpdir/typos.tar.gz" -C "$tmpdir"
+					if [ -f "$tmpdir/typos" ]; then
+						cp "$tmpdir/typos" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+						echo -e "${GREEN}✓ typos installed from pre-built binary${NC}"
+						typos_installed=true
+					fi
+				fi
+			fi
+			rm -rf "$tmpdir"
+
+			# Fallback to cargo install if pre-built binary not available
+			if [ "$typos_installed" = false ] && command -v cargo &>/dev/null; then
+				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
+				if cargo install typos-cli --locked --version "$TYPOS_VERSION"; then
+					# cargo install writes to $CARGO_HOME/bin; copy into BIN_DIR
+					# so later verification via command -v / PATH finds it.
+					cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin/typos"
+					if [ -x "$cargo_bin" ]; then
+						cp "$cargo_bin" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+					fi
+					if command -v typos &>/dev/null || [ -x "$BIN_DIR/typos" ]; then
+						echo -e "${GREEN}✓ typos installed via cargo${NC}"
+						typos_installed=true
+					else
+						echo -e "${YELLOW}⚠ cargo install succeeded but typos not on PATH${NC}"
+					fi
+				fi
+			fi
+
+			# Homebrew fallback for macOS hosts without a Rust toolchain.
+			if [ "$typos_installed" = false ] && command -v brew &>/dev/null; then
+				echo -e "${YELLOW}Falling back to Homebrew...${NC}"
+				if brew install typos-cli; then
+					echo -e "${GREEN}✓ typos installed via Homebrew${NC}"
+					typos_installed=true
+				fi
+			fi
+
+			if [ "$typos_installed" = false ]; then
+				# typos is part of the default toolset; a silent miss would
+				# leave every subsequent lintro run degraded and the
+				# verification step reporting a missing tool.
+				echo -e "${RED}✗ Failed to install typos (pre-built binary, cargo, and brew all unavailable)${NC}"
+				exit 1
+			fi
+		fi
+	fi # typos
 
 	if should_install "ruff"; then
 		# Install ruff (Python linting and formatting)
@@ -1364,6 +1566,32 @@ main() {
 		fi
 	fi # html-validate
 
+	if should_install "spectral"; then
+		# Install spectral via bun (OpenAPI/AsyncAPI/JSON Schema linting)
+		echo -e "${BLUE}Installing spectral...${NC}"
+
+		# Read spectral version from _tool_versions.py (single source of truth)
+		# Uses package alias: "@stoplight/spectral-cli" -> ToolName.SPECTRAL
+		SPECTRAL_VERSION=$(get_tool_version "@stoplight/spectral-cli") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install @stoplight/spectral-cli@${SPECTRAL_VERSION} globally via bun"
+		elif command -v spectral &>/dev/null; then
+			echo -e "${GREEN}✓ spectral already installed${NC}"
+		else
+			# Ensure bun is available (should already be installed for prettier)
+			if ! ensure_bun_installed; then
+				exit 1
+			fi
+			if bun add -g "@stoplight/spectral-cli@${SPECTRAL_VERSION}"; then
+				echo -e "${GREEN}✓ @stoplight/spectral-cli@${SPECTRAL_VERSION} installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to install spectral${NC}"
+				exit 1
+			fi
+		fi
+	fi # spectral
+
 	if should_install "semgrep"; then
 		# Isolated lockfile install (#2104): never share lintro's resolver.
 		echo -e "${BLUE}Installing semgrep (isolated venv)...${NC}"
@@ -1386,6 +1614,35 @@ main() {
 			exit 1
 		fi
 	fi # semgrep
+
+	if should_install "import-linter"; then
+		# Install import-linter (Python import-contract checker; binary: lint-imports)
+		echo -e "${BLUE}Installing import-linter...${NC}"
+		IMPORT_LINTER_VERSION=$(get_tool_version "import-linter") || exit 1
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install import-linter==${IMPORT_LINTER_VERSION}"
+		elif install_python_package "import-linter" "$IMPORT_LINTER_VERSION"; then
+			# The import-linter distribution installs a console script named
+			# lint-imports, so install_python_package (which stages by package
+			# name) cannot copy it into BIN_DIR. Stage it here by binary name.
+			# A successful pip install that yields no console script means the
+			# tool was not delivered, so fail instead of reporting success.
+			IMPORT_LINTER_BIN=$(command -v lint-imports 2>/dev/null || true)
+			if [ -z "$IMPORT_LINTER_BIN" ] || [ ! -f "$IMPORT_LINTER_BIN" ]; then
+				echo -e "${RED}✗ import-linter installed but lint-imports is not on PATH${NC}"
+				exit 1
+			fi
+			if [ "$IMPORT_LINTER_BIN" != "$BIN_DIR/lint-imports" ]; then
+				cp "$IMPORT_LINTER_BIN" "$BIN_DIR/lint-imports"
+				chmod +x "$BIN_DIR/lint-imports"
+				echo -e "${YELLOW}Copied lint-imports to $BIN_DIR${NC}"
+			fi
+			echo -e "${GREEN}✓ import-linter installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install import-linter${NC}"
+			exit 1
+		fi
+	fi # import-linter
 
 	if should_install "pip-audit"; then
 		# Install pip-audit (Python dependency vulnerability scanner)
@@ -1416,6 +1673,75 @@ main() {
 			exit 1
 		fi
 	fi # rubocop
+
+	# Install cppcheck (C/C++ static analysis) via system package manager.
+	# cppcheck ships no portable single binary; it is provided by Homebrew
+	# (macOS) and apt (Debian/Ubuntu). In Docker it is pre-installed via the
+	# Dockerfile apt layer, so the already-installed branch short-circuits.
+	#
+	# Because every path installs whatever the package manager ships, the
+	# version cannot be pinned at install time. It is therefore verified
+	# afterwards against the manifest ``min_version`` floor: below it lintro
+	# skips the tool at runtime, so accepting it here would let setup finish
+	# green while C/C++ analysis silently never runs.
+	if should_install "cppcheck"; then
+		echo -e "${BLUE}Installing cppcheck...${NC}"
+		CPPCHECK_MIN_VERSION=$(get_tool_min_version "cppcheck") || exit 1
+		cppcheck_needs_verify=1
+		if [ $DRY_RUN -eq 1 ]; then
+			# No version is pinned at install time: brew and apt supply
+			# whatever the distribution ships, and the floor is enforced
+			# afterwards. Saying "would install v<pin>" would misdescribe it.
+			log_info "[DRY-RUN] Would install the cppcheck package provided by brew/apt (unpinned)"
+			log_info "[DRY-RUN] Would verify cppcheck >= v${CPPCHECK_MIN_VERSION}"
+			cppcheck_needs_verify=0
+		elif command -v cppcheck &>/dev/null; then
+			echo -e "${GREEN}✓ cppcheck already installed${NC}"
+		elif command -v brew &>/dev/null; then
+			if brew install cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via Homebrew${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via Homebrew${NC}"
+				exit 1
+			fi
+		elif command -v apt-get &>/dev/null; then
+			cppcheck_apt="apt-get"
+			if [ "$(id -u)" -ne 0 ]; then
+				if command -v sudo &>/dev/null; then
+					cppcheck_apt="sudo apt-get"
+				else
+					echo -e "${RED}✗ cppcheck needs apt-get but sudo is unavailable${NC}"
+					exit 1
+				fi
+			fi
+			if $cppcheck_apt update && $cppcheck_apt install -y --no-install-recommends cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via apt${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via apt${NC}"
+				exit 1
+			fi
+		else
+			echo -e "${RED}✗ Cannot install cppcheck automatically; install via your package manager.${NC}"
+			exit 1
+		fi
+
+		if [ $cppcheck_needs_verify -eq 1 ]; then
+			# "Cppcheck 2.17.1" -> "2.17.1"
+			# `|| true`: grep exits 1 on no match, which under `set -e`/pipefail
+			# would abort the script before the explicit error below.
+			cppcheck_installed=$(cppcheck --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+			if [ -z "$cppcheck_installed" ]; then
+				echo -e "${RED}✗ Could not determine cppcheck version${NC}"
+				exit 1
+			elif version_ge "$cppcheck_installed" "$CPPCHECK_MIN_VERSION"; then
+				echo -e "${GREEN}✓ cppcheck v${cppcheck_installed} (>= v${CPPCHECK_MIN_VERSION})${NC}"
+			else
+				echo -e "${RED}✗ cppcheck v${cppcheck_installed} is older than the required v${CPPCHECK_MIN_VERSION}${NC}"
+				echo -e "${RED}  Your distribution's package is too old; install a newer cppcheck from Homebrew or upstream.${NC}"
+				exit 1
+			fi
+		fi
+	fi # cppcheck
 
 	if should_install "shellcheck"; then
 		# Install shellcheck (shell script linter)
@@ -1637,6 +1963,21 @@ main() {
 		fi
 	fi # pydoclint
 
+	if should_install "pylint"; then
+		# Install pylint (Python static analyser; duplicate-code checker)
+		echo -e "${BLUE}Installing pylint...${NC}"
+		PYLINT_VERSION=$(get_tool_version "pylint") || exit 1
+
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install pylint==${PYLINT_VERSION}"
+		elif install_python_package "pylint" "$PYLINT_VERSION"; then
+			echo -e "${GREEN}✓ pylint installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install pylint${NC}"
+			exit 1
+		fi
+	fi # pylint
+
 	if should_install "sqlfluff"; then
 		# Install sqlfluff (SQL linter and formatter)
 		echo -e "${BLUE}Installing sqlfluff...${NC}"
@@ -1824,14 +2165,17 @@ main() {
 		["actionlint"]="GitHub Actions linting"
 		["astro"]="Astro type checking"
 		["bandit"]="Python security checks"
+		["buf"]="Protocol Buffer linting and formatting"
 		["black"]="Python formatting"
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
 		["clippy"]="Rust linting"
+		["cppcheck"]="C/C++ static analysis"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["golangci-lint"]="Go meta-linter (requires the Go toolchain)"
 		["hadolint"]="Docker linting"
+		["import-linter"]="Python import-contract checking"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
@@ -1840,18 +2184,21 @@ main() {
 		["pip-audit"]="Python dependency vulnerability scanning"
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
+		["pylint"]="Python static analysis (duplicate-code)"
 		["rubocop"]="Ruby linting and formatting"
 		["ruff"]="Python linting and formatting"
 		["rustfmt"]="Rust formatting"
 		["semgrep"]="Security scanning"
 		["shellcheck"]="Shell script linting"
 		["shfmt"]="Shell script formatting"
+		["spectral"]="OpenAPI/AsyncAPI/JSON Schema linting"
 		["sqlfluff"]="SQL linting and formatting"
 		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["trufflehog"]="Secret detection with verification"
 		["tsc"]="TypeScript type checking"
+		["typos"]="Source-code spell checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
 	)
@@ -1866,7 +2213,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "rubocop" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "rubocop" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
@@ -1878,12 +2225,21 @@ main() {
 			# markdownlint alias → markdownlint-cli2 verification
 			elif [[ "$tool" == "markdownlint-cli2" ]] && should_install "markdownlint"; then
 				filtered+=("$tool")
+			# import-linter alias → lint-imports verification
+			elif [[ "$tool" == "lint-imports" ]] && should_install "import-linter"; then
+				filtered+=("$tool")
 			fi
 		done
 		tools_to_verify=("${filtered[@]}")
 	fi
 
 	for tool in "${tools_to_verify[@]}"; do
+		# Dry-run simulates the entire installer, including verification. A real
+		# PATH probe here would falsely report every not-yet-installed tool.
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would verify $tool is available"
+			continue
+		fi
 		if [ "$tool" = "clippy" ]; then
 			# Clippy is invoked through cargo
 			if command -v cargo &>/dev/null && cargo clippy --version &>/dev/null; then

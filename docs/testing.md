@@ -42,10 +42,19 @@ them.
 Put a test in `tests/integration/` when it needs a real tool binary or exercises the
 full check/format pipeline; put it in `tests/unit/` otherwise.
 
+## Assertions
+
+Tests assert with [`assertpy`](https://github.com/assertpy/assertpy)
+(`assert_that(...)`), which stays the project standard despite Renovate's abandoned flag
+— [`assertpy2`](https://github.com/Solganis/assertpy2) is the designated drop-in
+fallback if a future interpreter ever breaks it, `tests/unit/test_assertpy_guard.py` is
+the canary that would catch that, and the choice is re-evaluated in March 2027
+([#2437](https://github.com/lgtm-hq/py-lintro/issues/2437)).
+
 ## Test markers
 
-Markers are declared in `pytest.ini` and enforced with `--strict-markers`, so an unknown
-marker fails the run. The available markers are:
+Markers are declared in `pyproject.toml` (`[tool.pytest.ini_options]`) and enforced with
+`--strict-markers`, so an unknown marker fails the run. The available markers are:
 
 | Marker                                                                             | Meaning                                         |
 | ---------------------------------------------------------------------------------- | ----------------------------------------------- |
@@ -118,9 +127,9 @@ parity test sets `tool.exclude_patterns = []` before checking a sample file).
 
 ## Coverage expectations
 
-Coverage is measured against the `lintro` package. `pytest.ini` configures
-`--cov=lintro` with term-missing, HTML, and XML reports. In CI the coverage job enforces
-a minimum: `coverage-threshold: 80` in
+Coverage is measured against the `lintro` package: `[tool.coverage.run]` in
+`pyproject.toml` sets the source and `[tool.coverage.report]` the local floor. In CI the
+coverage job enforces a minimum of `coverage-threshold: 80` in
 [`.github/workflows/test-ci.yml`](../.github/workflows/test-ci.yml). The architecture
 docs set a higher aspirational target (≥ 70% floor, 90% goal per
 [`architecture/README.md`](architecture/README.md)).

@@ -9,13 +9,7 @@ from __future__ import annotations
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.pydoclint import PydoclintPlugin
-
-
-def test_plugin_definition_has_empty_conflicts_with() -> None:
-    """Plugin definition has empty conflicts_with list."""
-    plugin = PydoclintPlugin()
-    assert_that(plugin.definition.conflicts_with).is_empty()
+from lintro.tools.pydoclint.definition import PydoclintPlugin
 
 
 def test_plugin_definition_native_configs() -> None:

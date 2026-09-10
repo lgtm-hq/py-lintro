@@ -95,6 +95,10 @@ def test_compare_versions(version1: str, version2: str, expected: int) -> None:
         # Clippy: clippy output should convert 0.1.X to 1.X.0
         ("clippy", "clippy 0.1.92 (ded5c06cf2 2025-12-08)", "1.92.0"),
         ("clippy", "clippy 0.1.75 (abcdef123 2024-01-01)", "1.75.0"),
+        # typos: the binary is "typos" but `--version` prints the crate name.
+        ("typos", "typos-cli 1.49.0", "1.49.0"),
+        # Spectral prints a bare semantic version.
+        ("spectral", "6.16.1", "6.16.1"),
     ],
 )
 def test_extract_version_from_output(
@@ -158,16 +162,23 @@ def test_get_min_version_raises_keyerror_for_unknown_tool() -> None:
         get_min_version("nonexistent_tool")  # type: ignore[arg-type]
 
 
-def test_explicit_manifest_min_version_is_a_strict_floor() -> None:
+def test_explicit_manifest_min_version_is_a_strict_floor(
+    generated_version_artifacts: Path,
+) -> None:
     """Manifest ``min_version`` stays below the recommended pin.
 
     Renovate updates ``version`` only. An explicit ``min_version`` is the
     parser-compatibility floor so a still-installed previous pin is not
-    skipped after a recommended bump.
+    skipped after a recommended bump. The JSON side reads the generator's
+    rendered output (#2179); the runtime helpers under test still read the
+    working tree's artifacts, which the setup flow regenerates once they
+    stop being committed (epic #2176 phase 4).
+
+    Args:
+        generated_version_artifacts: Session dir with the rendered manifest.
     """
-    repo_root = Path(__file__).resolve().parents[3]
     manifest = json.loads(
-        (repo_root / "lintro" / "tools" / "manifest.json").read_text(),
+        (generated_version_artifacts / "manifest.json").read_text(),
     )
     explicit: list[dict[str, str]] = [
         entry
@@ -211,7 +222,8 @@ def test_all_external_tools_registered_in_tool_versions() -> None:
     from lintro._tool_versions import get_all_expected_versions
 
     repo_root = Path(__file__).resolve().parents[3]
-    manifest_path = repo_root / "lintro" / "tools" / "manifest.json"
+    # Names-only read: the hand-authored source stays committed after #2178.
+    manifest_path = repo_root / "lintro" / "tools" / "manifest.src.json"
 
     # Non-npm tools should be in TOOL_VERSIONS
     expected_non_npm_tools = {

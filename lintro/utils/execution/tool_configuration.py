@@ -124,7 +124,7 @@ def _advisory_tool_error_message(*, name: str) -> str:
     return (
         f"Tool '{name}' is an advisory AI finder and does not run under "
         f"'lintro chk' or 'lintro fmt': its findings are nondeterministic, so "
-        f"they must not gate deterministic checks or the health score. "
+        f"they must not gate deterministic checks or their issue counts. "
         f"Run 'lintro review --advisory-tools {name}' instead."
     )
 
@@ -211,7 +211,7 @@ def configure_tool_for_execution(
     include_venv: bool,
     incremental: bool,
     action: Action,
-    post_tools: set[str],
+    selected_tools: set[str],
     auto_install: bool = False,
     lintro_config: LintroConfig | None = None,
     diff_base: str | None = None,
@@ -237,7 +237,8 @@ def configure_tool_for_execution(
         include_venv: Whether to include virtual environment directories.
         incremental: Whether to only check changed files.
         action: The action being performed (check/fix).
-        post_tools: Set of post-check tool names.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         auto_install: Whether to auto-install Node.js deps if missing (global default).
         lintro_config: Optional LintroConfig to reuse; fetched via get_config() if None.
         diff_base: Resolved git base ref for ``--diff`` scanning, or None to scan
@@ -293,10 +294,12 @@ def configure_tool_for_execution(
     if effective_tool_auto_install:
         tool.set_options(auto_install=True)
 
-    # Handle Black post-check coordination with Ruff
-    # If Black is configured as a post-check, avoid double formatting by
-    # disabling Ruff's formatting stages unless explicitly overridden.
-    if "black" in post_tools and tool_name == ToolName.RUFF.value:
+    # Format authority on ``*.py`` (#1735 rule (d): fewest mutating
+    # capabilities wins). When black is in the run it owns FORMAT, so ruff is
+    # demoted to its FIX capability and its formatting stages are switched off
+    # unless the user explicitly asked for them. The derived DAG already puts
+    # ruff before black; this stops the two from formatting the same file.
+    if "black" in selected_tools and tool_name == ToolName.RUFF.value:
         tool_config = config_manager.get_tool_config(tool_name)
         lintro_tool_cfg = tool_config.lintro_tool_config or {}
         if action == Action.FIX:
@@ -556,9 +559,10 @@ def get_tools_to_run(
     explicit ``--tools`` list bypasses that allowlist so named tools still
     run; per-tool ``tools.<name>.enabled: false`` continues to apply.
 
-    A no-config default run (``tools`` is None, no config file, no in-memory
-    ``tools:`` section) is additionally scoped to languages detected in
-    *scan_roots* (default: the current working directory). Files use their
+    A no-config default run (``tools`` is None, no config file, and no
+    ``tools:`` / ``execution.enabled_tools`` selection from any tier, including
+    the user-level global config) is additionally scoped to languages detected
+    in *scan_roots* (default: the current working directory). Files use their
     parent directory; multiple roots are unioned. Explicit ``--tools all``
     and any configured project keep the full registry. Tools that are not
     in the language map (for example commitlint) are still selected when
@@ -628,13 +632,24 @@ def get_tools_to_run(
             available_tools = tool_manager.get_check_tools()
 
         # On a no-config default run (``tools`` is None, no config file, and no
-        # in-memory ``tools:`` section), scope the toolset to languages present
+        # tool selection from any tier), scope the toolset to languages present
         # in the project. Explicit ``--tools all`` and any configured project
         # keep the full behavior.
+        #
+        # The gate keys on *tool-selecting* config, not on file presence: a
+        # user-level global config that only sets ``ai:`` or ``enforce:`` (or
+        # an empty one) must not silently expand a default run to the whole
+        # registry, while ``tools:`` or ``execution.enabled_tools`` from either
+        # tier is a deliberate selection that does (#1235).
         detected_languages: list[str] = []
         scoped_names: set[str] | None = None
         scoped_by_detection = False
-        if tools is None and config.config_path is None and not config.tools:
+        if (
+            tools is None
+            and config.config_path is None
+            and not config.tools
+            and not config.execution.enabled_tools
+        ):
             detected_languages, scoped_names = _detection_scoped_tool_names(
                 scan_roots=scan_roots,
             )

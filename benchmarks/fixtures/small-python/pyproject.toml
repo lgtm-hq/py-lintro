@@ -1,0 +1,19 @@
+[project]
+name = "small-python-fixture"
+version = "0.0.0"
+description = "Pinned fixture for CLI overhead and comparative benchmarks"
+requires-python = ">=3.11"
+
+# Isolate this fixture from the repo-root module_size gate so single-tool
+# overhead measurements are not inflated by a follow-up pass.
+# ``execute_gates`` always runs the module-size gate, and an absent table
+# defaults to enabled, so it must be turned off explicitly here.
+[tool.lintro.module_size]
+enabled = false
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+pretty = false
+show_error_codes = false
+strict = false

@@ -1,7 +1,7 @@
 """Tool discovery for builtin and external plugins.
 
 This module handles discovering and loading Lintro tools from:
-1. Built-in tool definitions (lintro/tools/definitions/)
+1. Built-in per-tool packages (lintro/tools/<tool>/)
 2. External (third-party) plugins via Python entry points (``lintro.tools``)
 
 Third-party packages register a tool plugin by advertising an entry point in
@@ -25,9 +25,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.metadata
+import importlib.util
 import os
 import pkgutil
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -40,19 +40,40 @@ from lintro.plugins.protocol import (
     is_compatible_api_version,
 )
 from lintro.plugins.registry import ToolRegistry
+from lintro.utils.plugin_tool_names import (
+    ENTRY_POINT_GROUP as _ENTRY_POINT_GROUP,
+)
+from lintro.utils.plugin_tool_names import (
+    LEGACY_ENTRY_POINT_GROUP as _LEGACY_ENTRY_POINT_GROUP,
+)
+from lintro.utils.plugin_tool_names import (
+    known_plugin_tool_names,
+    register_tool_name_source,
+    reset_plugin_tool_name_cache,
+)
 
 if TYPE_CHECKING:
     from importlib.metadata import EntryPoint
 
-# Import path of the package holding the builtin tool definitions.
-BUILTIN_DEFINITIONS_PACKAGE = "lintro.tools.definitions"
+# Import path of the package holding the builtin per-tool packages (#2311).
+BUILTIN_TOOLS_PACKAGE = "lintro.tools"
 
-# Entry point group third-party packages use to register tool plugins.
-ENTRY_POINT_GROUP = "lintro.tools"
+# Packages under ``lintro.tools`` that hold shared scaffolding rather than a
+# tool. Mirrors ``lintro_build.builtin_index.NON_TOOL_PACKAGES``; the generated
+# index is the source of truth, and this only bounds the source-tree scan.
+NON_TOOL_PACKAGES = frozenset({"core"})
+
+# Module a per-tool package declares its plugin in (#2311).
+DEFINITION_MODULE_NAME = "definition"
+
+# Entry-point group names live in `lintro.utils.plugin_tool_names` so that
+# config parsing can read plugin names without importing `lintro.plugins`
+# (#1305, #2290). Re-exported here because this module is their documented home.
+ENTRY_POINT_GROUP = _ENTRY_POINT_GROUP
 
 # Previously documented group name, still honored so plugins packaged against
 # the old docs keep working after an upgrade. Deprecated: emits a warning.
-LEGACY_ENTRY_POINT_GROUP = "lintro.plugins"
+LEGACY_ENTRY_POINT_GROUP = _LEGACY_ENTRY_POINT_GROUP
 
 # Attributes a plugin class must expose to satisfy the LintroPlugin contract.
 _REQUIRED_PLUGIN_ATTRS = ("definition", "check", "fix", "set_options")
@@ -69,35 +90,68 @@ _discovered: bool = False
 
 
 def _module_names_from_package_scan() -> set[str]:
-    """Scan the definitions package for tool modules, when that is possible.
+    """Scan the per-tool packages for the modules discovery must import.
 
-    Complements the generated index so a definition module added to a source
-    checkout is discovered even before the index is regenerated. Returns an
-    empty set whenever the package exposes no importable search path — the
-    normal situation inside a frozen Nuitka onefile binary, where the index is
-    the only source of module names.
+    Complements the generated index so a package added to a source checkout is
+    discovered even before the index is regenerated. Returns an empty set
+    whenever ``lintro.tools`` exposes no importable search path — the normal
+    situation inside a frozen Nuitka onefile binary, where the index is the
+    only source of module names.
 
     Returns:
-        Public (non-underscore) module names found next to the definitions
-        package, or an empty set when the package cannot be scanned.
+        ``<package>.<module>`` names found under ``lintro.tools``, or an empty
+        set when the package cannot be scanned.
     """
     try:
-        package = importlib.import_module(BUILTIN_DEFINITIONS_PACKAGE)
+        package = importlib.import_module(BUILTIN_TOOLS_PACKAGE)
         search_path = [str(entry) for entry in getattr(package, "__path__", ()) or ()]
         if not search_path:
             return set()
         return {
-            module.name
-            for module in pkgutil.iter_modules(search_path)
-            if not module.name.startswith("_")
+            f"{tool_package.name}.{module_name}"
+            for tool_package in pkgutil.iter_modules(search_path)
+            if tool_package.ispkg
+            and not tool_package.name.startswith("_")
+            and tool_package.name not in NON_TOOL_PACKAGES
+            for module_name in _entry_module_names(package_name=tool_package.name)
         }
-    except Exception as e:  # noqa: BLE001 - scanning is best-effort, index wins
-        logger.debug(f"Could not scan {BUILTIN_DEFINITIONS_PACKAGE!r}: {e}")
+    except Exception as e:
+        logger.debug(f"Could not scan {BUILTIN_TOOLS_PACKAGE!r}: {e}")
         return set()
 
 
+def _entry_module_names(*, package_name: str) -> tuple[str, ...]:
+    """List the modules discovery must import for one per-tool package.
+
+    Mirrors ``lintro_build.builtin_index._entry_modules``: a per-tool package
+    is entered through its ``definition`` module, whose import runs the package
+    ``__init__`` and so pulls in the package's own re-export surface. A shared
+    package with no ``definition`` module (the ``ts_checker`` family) has no
+    such entry point, so all of its public modules are named instead.
+
+    Args:
+        package_name: Package base name under ``lintro.tools``, e.g. ``"ruff"``.
+
+    Returns:
+        Module base names within that package, or an empty tuple when the
+        package has no importable search path.
+    """
+    spec = importlib.util.find_spec(f"{BUILTIN_TOOLS_PACKAGE}.{package_name}")
+    locations = getattr(spec, "submodule_search_locations", None)
+    if spec is None or locations is None:
+        return ()
+    names = tuple(
+        module.name
+        for module in pkgutil.iter_modules([str(entry) for entry in locations])
+        if not module.name.startswith("_")
+    )
+    if DEFINITION_MODULE_NAME in names:
+        return (DEFINITION_MODULE_NAME,)
+    return names
+
+
 def get_builtin_module_names() -> tuple[str, ...]:
-    """Return the builtin tool definition modules to import.
+    """Return the builtin per-tool package modules to import.
 
     Combines the generated index (which travels with the compiled package and
     therefore works in wheels and frozen binaries alike) with a best-effort
@@ -105,7 +159,7 @@ def get_builtin_module_names() -> tuple[str, ...]:
     index was regenerated).
 
     Returns:
-        Sorted, de-duplicated module base names.
+        Sorted, de-duplicated ``<package>.<module>`` names.
     """
     names = set(BUILTIN_TOOL_MODULES)
     names.update(_module_names_from_package_scan())
@@ -113,7 +167,7 @@ def get_builtin_module_names() -> tuple[str, ...]:
 
 
 def discover_builtin_tools() -> int:
-    """Load all builtin tool definitions.
+    """Load all builtin per-tool packages.
 
     Imports every module named by :func:`get_builtin_module_names`, which
     triggers the ``@register_tool`` decorators.
@@ -122,18 +176,20 @@ def discover_builtin_tools() -> int:
         Number of tool modules loaded.
 
     Note:
-        Each tool definition file should use the @register_tool decorator
-        to register itself with the ToolRegistry.
+        Each per-tool package's ``definition`` module uses the @register_tool
+        decorator to register itself with the ToolRegistry. That module is the
+        package's entry point, so a decorator applied anywhere else in the
+        package registers nothing.
     """
     loaded_count = 0
 
     module_names = get_builtin_module_names()
     if not module_names:
-        logger.warning("No builtin tool definition modules are known")
+        logger.warning("No builtin tool modules are known")
         return loaded_count
 
     for name in module_names:
-        module_name = f"{BUILTIN_DEFINITIONS_PACKAGE}.{name}"
+        module_name = f"{BUILTIN_TOOLS_PACKAGE}.{name}"
         try:
             # Safe: module_name comes from the generated builtin index or a
             # scan of lintro's own package, never from user input.
@@ -158,13 +214,37 @@ class _PluginConfigError(Exception):
     """
 
 
-def _load_plugins_config() -> dict[str, Any]:
-    """Load the ``plugins`` configuration section for external plugin trust.
+def _plugins_mapping_from_yaml(path: Path) -> dict[str, Any]:
+    """Read the ``plugins`` mapping from a YAML config file.
 
-    Reads the ``plugins`` mapping from ``.lintro-config.yaml`` if present,
-    otherwise falls back to ``[tool.lintro.plugins]`` in ``pyproject.toml``.
-    This is intentionally lightweight and independent of the full config
-    loader so plugin discovery never triggers heavier config parsing.
+    Args:
+        path: Config file to read.
+
+    Returns:
+        dict[str, Any]: The ``plugins`` mapping, or empty if the file has no
+            ``plugins`` section.
+
+    Raises:
+        _PluginConfigError: When the file cannot be read or parsed. Callers
+            must fail closed and deny external plugins.
+    """
+    # Imported lazily to avoid pulling config parsing into module import.
+    from lintro.config.config_loader import _load_yaml_file
+
+    try:
+        data = _load_yaml_file(path)
+    except Exception as e:
+        raise _PluginConfigError(
+            f"Could not read plugins config {path}: {e}",
+        ) from e
+    if not isinstance(data, dict):
+        return {}
+    plugins = data.get("plugins")
+    return plugins if isinstance(plugins, dict) else {}
+
+
+def _plugins_mapping_from_pyproject() -> dict[str, Any]:
+    """Read ``[tool.lintro.plugins]`` from an upward-searched pyproject.toml.
 
     The pyproject fallback is read directly (rather than via the shared
     ``_load_pyproject_fallback``) so that a parse error surfaces here as a
@@ -173,31 +253,13 @@ def _load_plugins_config() -> dict[str, Any]:
     allowlist configured" and load every discovered plugin.
 
     Returns:
-        The raw ``plugins`` mapping, or an empty dict when no config source is
-        present (or a present source has no ``plugins`` section).
+        dict[str, Any]: The ``plugins`` mapping, or empty when no pyproject
+            file exists or it has no ``[tool.lintro.plugins]`` table.
 
     Raises:
-        _PluginConfigError: When a config source exists but cannot be read or
-            parsed. Callers must fail closed and deny external plugins.
+        _PluginConfigError: When a pyproject.toml exists but cannot be read
+            or parsed.
     """
-    # Imported lazily to avoid pulling config parsing into module import.
-    from lintro.config.config_loader import _find_config_file, _load_yaml_file
-
-    found_path = _find_config_file()
-    if found_path is not None:
-        try:
-            data = _load_yaml_file(found_path)
-        except Exception as e:  # noqa: BLE001 - any read/parse failure fails closed
-            raise _PluginConfigError(
-                f"Could not read plugins config {found_path}: {e}",
-            ) from e
-        if not isinstance(data, dict):
-            return {}
-        plugins = data.get("plugins")
-        return plugins if isinstance(plugins, dict) else {}
-
-    # pyproject.toml fallback: search upward and read directly so a TOML parse
-    # or read error fails closed instead of being swallowed into ``{}``.
     import tomllib
 
     current = Path.cwd().resolve()
@@ -223,6 +285,50 @@ def _load_plugins_config() -> dict[str, Any]:
         current = parent
 
     return {}
+
+
+def _load_plugins_config() -> dict[str, Any]:
+    """Load the ``plugins`` configuration section for external plugin trust.
+
+    Resolution matches :func:`lintro.config.config_loader.load_config`: the
+    user-level global file is the base tier, then a non-global project
+    ``.lintro-config.yaml`` overlays it. When no project YAML exists, an
+    upward-searched ``[tool.lintro.plugins]`` in ``pyproject.toml`` is the
+    project overlay. This stays independent of the full config loader so
+    plugin discovery never triggers heavier config parsing.
+
+    Returns:
+        The raw ``plugins`` mapping, or an empty dict when no config source is
+        present (or a present source has no ``plugins`` section). Unreadable
+        config sources raise ``_PluginConfigError`` from helpers so callers
+        can fail closed and deny external plugins.
+    """
+    # Imported lazily to avoid pulling config parsing into module import.
+    from lintro.config.config_loader import (
+        _deep_merge,
+        _exclude_global_file_when_tier_disabled,
+        _find_config_file,
+        _find_global_config_file,
+    )
+
+    plugins: dict[str, Any] = {}
+    global_file = _find_global_config_file()
+    if global_file is not None:
+        plugins = _plugins_mapping_from_yaml(path=global_file)
+
+    found_path = _find_config_file()
+    if found_path is not None and _exclude_global_file_when_tier_disabled(
+        candidate=found_path,
+    ):
+        found_path = None
+    if found_path is not None:
+        project_plugins = _plugins_mapping_from_yaml(path=found_path)
+        return _deep_merge(base=plugins, override=project_plugins)
+
+    pyproject_plugins = _plugins_mapping_from_pyproject()
+    if pyproject_plugins:
+        return _deep_merge(base=plugins, override=pyproject_plugins)
+    return plugins
 
 
 def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
@@ -265,6 +371,13 @@ def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
         return False, frozenset()
 
     if plugins_cfg:
+        enabled_flag = plugins_cfg.get("enabled")
+        if enabled_flag is False:
+            # Project ``plugins.enabled: false`` must disable external plugins
+            # even when the global tier supplies a ``trusted`` allowlist. Deep
+            # merge keeps inherited keys, but an explicit disable wins.
+            return False, None
+
         raw_trusted = plugins_cfg.get("trusted")
         if isinstance(raw_trusted, str):
             raw_trusted = [raw_trusted]
@@ -273,7 +386,6 @@ def _resolve_plugin_trust() -> tuple[bool, frozenset[str] | None]:
             trusted = frozenset(str(name) for name in raw_trusted)
             config_enabled = True
 
-        enabled_flag = plugins_cfg.get("enabled")
         if isinstance(enabled_flag, bool):
             config_enabled = config_enabled or enabled_flag
 
@@ -498,7 +610,7 @@ def _load_external_entry_point(*, ep: EntryPoint) -> int:
         logger.info(f"Loaded external plugin: {name} (from {origin})")
         return 1
 
-    except Exception as e:  # noqa: BLE001 - isolate any misbehaving plugin
+    except Exception as e:
         logger.warning(
             f"Failed to load plugin {ep.name!r}: {type(e).__name__}: {e}",
         )
@@ -555,38 +667,6 @@ def is_discovered() -> bool:
     return _discovered
 
 
-@lru_cache(maxsize=1)
-def _advertised_plugin_tool_names() -> frozenset[str]:
-    """Read the tool names advertised by installed plugin entry points.
-
-    Only the entry-point *metadata* is read: no plugin module is imported and
-    no plugin class is instantiated, so this stays cheap enough to call from
-    config parsing. The result is cached for the process lifetime because
-    installed distributions cannot change while lintro is running; call
-    :func:`reset_discovery` to drop the cache in tests.
-
-    Returns:
-        frozenset[str]: Lowercased entry-point names from both the current and
-        the legacy plugin entry-point groups.
-    """
-    names: set[str] = set()
-    for group in (ENTRY_POINT_GROUP, LEGACY_ENTRY_POINT_GROUP):
-        try:
-            entry_points = importlib.metadata.entry_points(group=group)
-        except Exception as e:  # noqa: BLE001 - config loading must not abort
-            # This runs inside config loading. A broken metadata backend (an
-            # unreadable dist-info directory, a third-party finder raising)
-            # must degrade to "no plugin names known", never take the whole
-            # configuration down with it.
-            logger.debug(f"Could not read {group!r} entry points: {e}")
-            continue
-        for ep in entry_points:
-            name = str(getattr(ep, "name", "") or "").strip().lower()
-            if name:
-                names.add(name)
-    return frozenset(names)
-
-
 def get_known_plugin_tool_names() -> frozenset[str]:
     """Return the tool names contributed by external plugins.
 
@@ -607,10 +687,24 @@ def get_known_plugin_tool_names() -> frozenset[str]:
     Returns:
         frozenset[str]: Lowercased tool names known to come from plugins.
     """
-    names: set[str] = set(_advertised_plugin_tool_names())
-    if _discovered:
-        names.update(ToolRegistry.get_names())
-    return frozenset(names)
+    return known_plugin_tool_names()
+
+
+def _registered_tool_names() -> frozenset[str]:
+    """Return registry tool names, but only once discovery has run.
+
+    Registered with :func:`~lintro.utils.plugin_tool_names.register_tool_name_source`
+    at import time so configuration parsing sees authoritative plugin
+    spellings whenever the plugin subsystem is loaded, without
+    ``lintro.config`` having to import ``lintro.plugins``.
+
+    Returns:
+        frozenset[str]: Registered tool names, or an empty set before
+        discovery has run.
+    """
+    if not _discovered:
+        return frozenset()
+    return frozenset(ToolRegistry.get_names())
 
 
 def reset_discovery() -> None:
@@ -620,4 +714,9 @@ def reset_discovery() -> None:
     """
     global _discovered
     _discovered = False
-    _advertised_plugin_tool_names.cache_clear()
+    reset_plugin_tool_name_cache()
+
+
+# Contribute registry names to the config-facing lookup. Registration happens
+# at import time so `lintro.config` never has to reach up into `lintro.plugins`.
+register_tool_name_source(_registered_tool_names)

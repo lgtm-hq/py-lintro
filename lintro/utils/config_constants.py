@@ -7,24 +7,9 @@ unified configuration system.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum, auto
 from typing import Any
 
 from lintro.enums.tool_name import ToolName
-
-
-class ToolOrderStrategy(StrEnum):
-    """Strategy for ordering tool execution.
-
-    Attributes:
-        PRIORITY: Use tool priority values (formatters before linters).
-        ALPHABETICAL: Alphabetical by tool name.
-        CUSTOM: Custom order defined in config.
-    """
-
-    PRIORITY = auto()
-    ALPHABETICAL = auto()
-    CUSTOM = auto()
 
 
 @dataclass
@@ -85,27 +70,4 @@ GLOBAL_SETTINGS: dict[str, dict[str, Any]] = {
         },
         "injectable": {ToolName.RUFF},
     },
-}
-
-# Default tool priorities (lower = runs first).
-# Formatters run before linters to avoid false positives.
-DEFAULT_TOOL_PRIORITIES: dict[str, int] = {
-    ToolName.BLACK: 15,
-    ToolName.RUFF: 20,
-    ToolName.OXFMT: 25,
-    ToolName.MARKDOWNLINT: 30,
-    ToolName.HTML_VALIDATE: 30,
-    ToolName.YAMLLINT: 35,
-    ToolName.BANDIT: 45,
-    ToolName.HADOLINT: 50,
-    ToolName.OXLINT: 50,
-    ToolName.ACTIONLINT: 55,
-    ToolName.RUBOCOP: 55,
-    ToolName.MYPY: 82,
-    ToolName.TSC: 82,
-    ToolName.GOLANGCI_LINT: 85,
-    ToolName.OSV_SCANNER: 90,
-    ToolName.PIP_AUDIT: 90,
-    ToolName.TRUFFLEHOG: 90,
-    ToolName.PYTEST: 100,
 }

@@ -137,18 +137,6 @@ def _classify_paths(
     return output_file.read_text().splitlines(), result.stdout + result.stderr
 
 
-def test_detect_changes_help() -> None:
-    """detect-changes.sh should provide help and exit 0."""
-    script_path = Path("scripts/ci/detect-changes.sh").resolve()
-    result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
-        [str(script_path), "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("Usage:")
-
-
 def test_resolve_pipeline_relevance_help() -> None:
     """resolve-pipeline-relevance.sh should provide help and exit 0."""
     result = subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
@@ -229,6 +217,42 @@ def test_resolve_pipeline_relevance_deny_by_default(
         assert_that(lines).contains("skip-reason=docs-only change")
     else:
         assert_that(lines).contains("skip-reason=")
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        ["lintro/plugins/registry.py"],
+        ["tests/integration/tools/shellcheck/test_check.py"],
+        ["docker/tools.Dockerfile"],
+        ["pyproject.toml"],
+        ["uv.lock"],
+    ],
+    ids=["lintro", "tests", "docker", "pyproject", "uv-lock"],
+)
+def test_resolve_pipeline_relevance_never_skips_integration_relevant_paths(
+    diff_repo: Path,
+    tmp_path: Path,
+    paths: list[str],
+) -> None:
+    """Code, test, image, and dependency changes always run the pipeline.
+
+    "🧪 Docker Integration Tests" is a required check whose heavy steps are
+    gated on ``pipeline``; a skip-list that ever swallowed one of these paths
+    would turn the required gate into a rubber stamp for exactly the changes
+    it exists to catch (#465).
+
+    Scoped to the deny-by-default path classification: a verified version-bump
+    PR still resolves pipeline=false through the RELEASE_BUMP override (#1362),
+    which this test deliberately does not set.
+
+    Args:
+        diff_repo: Fixture repository with a seed base commit.
+        tmp_path: Pytest-provided temporary directory.
+        paths: Changed paths making up the PR diff.
+    """
+    lines, _ = _classify_paths(diff_repo, tmp_path, paths)
+    assert_that(lines).contains("pipeline=true")
 
 
 def test_resolve_pipeline_relevance_rename_into_skippable_path_triggers(
@@ -490,46 +514,30 @@ def test_renovate_regex_manager_current_value() -> None:
     assert_that(content).contains("currentValue")
 
 
-def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
-    """Renovate runs the generator after npm, pypi, and regex pin bumps."""
+def test_renovate_runs_no_post_upgrade_commands() -> None:
+    """Renovate never runs repository commands (#2180, #2436).
+
+    Version artifacts are generated at package build time, and the isolated
+    semgrep lockfile is recompiled by a human or agent with
+    ``scripts/ci/compile-semgrep-lock.sh`` and enforced by the docker-ci
+    ``semgrep-lock`` gate. The Mend-hosted app executes neither
+    ``postUpgradeTasks`` nor ``allowedCommands`` (a self-hosted-only global
+    option that raised a permanent config warning), so any such wiring is a
+    silent no-op that masks drift.
+    """
     config_path = Path("renovate.json")
-    config = json.loads(config_path.read_text())
-    regen_rules = [
-        rule for rule in config.get("packageRules", []) if "postUpgradeTasks" in rule
-    ]
-    assert_that(regen_rules).is_not_empty()
+    content = config_path.read_text()
+    assert_that(content).does_not_contain("generate-tool-versions")
+    assert_that(content).does_not_contain("generate-builtin-tool-index")
+    assert_that(content).does_not_contain("postUpgradeTasks")
+    assert_that(content).does_not_contain("allowedCommands")
 
-    managers: set[str] = set()
-    file_names: set[str] = set()
-    commands: set[str] = set()
-    for rule in regen_rules:
-        managers.update(rule.get("matchManagers", []))
-        file_names.update(rule.get("matchFileNames", []))
-        commands.update(rule["postUpgradeTasks"].get("commands", []))
+    config = json.loads(content)
+    assert_that(config).does_not_contain_key("allowedCommands")
+    assert_that(
+        [rule for rule in config.get("packageRules", []) if "postUpgradeTasks" in rule],
+    ).is_empty()
 
-    assert_that(managers).contains(
-        "custom.regex",
-        "npm",
-        "pep621",
-        "pip_requirements",
-        "uv",
-    )
-    assert_that(file_names).contains(
-        "package.json",
-        "pyproject.toml",
-        "lintro/_tool_versions.py",
-        "requirements-semgrep.in",
-    )
-    file_filters: set[str] = set()
-    for rule in regen_rules:
-        file_filters.update(rule["postUpgradeTasks"].get("fileFilters", []))
-    assert_that(file_filters).contains("requirements-semgrep.txt")
-    assert_that(commands).contains("python3 scripts/ci/generate-tool-versions.py")
-    assert_that(commands).contains("scripts/ci/compile-semgrep-lock.sh")
-    assert_that(config.get("allowedCommands")).contains(
-        "python3 scripts/ci/generate-tool-versions.py",
-        "scripts/ci/compile-semgrep-lock.sh",
-    )
     disabled = [
         rule
         for rule in config.get("packageRules", [])
@@ -537,3 +545,48 @@ def test_renovate_post_upgrade_tasks_cover_tool_pin_managers() -> None:
         and "requirements-semgrep.txt" in rule.get("matchFileNames", [])
     ]
     assert_that(disabled).is_not_empty()
+
+
+def test_semgrep_lock_scripts_share_one_compile_invocation() -> None:
+    """The drift gate and the recompile script cannot diverge (#2436).
+
+    Both go through ``semgrep_lock_compile`` in the shared library, so the
+    gate always checks exactly the command it tells contributors to run.
+    """
+    library = Path("scripts/ci/semgrep-lock-lib.sh").read_text()
+    assert_that(library).contains("uv pip compile")
+    assert_that(library).contains("--generate-hashes")
+
+    for script_name in ("compile-semgrep-lock.sh", "check-semgrep-lock.sh"):
+        script = Path("scripts/ci") / script_name
+        content = script.read_text()
+        assert_that(content).contains("semgrep-lock-lib.sh")
+        assert_that(content).contains("semgrep_lock_compile")
+        assert_that(content).does_not_contain("uv pip compile")
+
+
+def test_semgrep_lock_gate_names_the_recompile_command() -> None:
+    """A drifted lockfile prints the one command that fixes it (#2436)."""
+    content = Path("scripts/ci/check-semgrep-lock.sh").read_text()
+    assert_that(content).contains("Run: scripts/ci/compile-semgrep-lock.sh")
+    assert_that(content).contains("semgrep_lock_strip_header")
+
+
+def test_local_lintro_prepends_local_bin_without_install_flag() -> None:
+    """Typos in ~/.local/bin must be visible on a plain ``check`` run.
+
+    ``add_local_bin_to_path`` used to live only inside the ``--install``
+    helper, so a fresh shell never exported PATH for an already-installed
+    binary.
+    """
+    script = Path("scripts/local/local-lintro.sh").read_text(encoding="utf-8")
+    main_start = script.find("main() {")
+    assert_that(main_start).is_not_equal_to(-1)
+    main_end = script.find("\n}", main_start)
+    main = script[main_start:main_end]
+    install_gate = main.find('if [ "${1:-}" = "--install"')
+    path_call = main.find("add_local_bin_to_path")
+
+    assert_that(path_call).is_not_equal_to(-1)
+    assert_that(install_gate).is_not_equal_to(-1)
+    assert_that(path_call).is_less_than(install_gate)

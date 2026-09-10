@@ -5,9 +5,18 @@ The dogfood AI review check reported ``success`` on every pull request while
 producing no review at all: a depleted Anthropic balance made every run abort,
 the wrapper swallowed the exit code, and ``AI Review ✓`` in the check list meant
 nothing (#1826). This module is the decision point that fixes that — it maps a
-``lintro review`` invocation to one of three outcomes:
+``lintro review`` invocation to one of four outcomes:
 
 * **reviewed** -- a review was produced (with or without P1 findings). Green.
+* **converged** -- the deterministic convergence stop rule (#2099) skipped the
+  round before any provider call, because the last N rounds all scored below
+  the configured threshold. Nothing was reviewed, but nothing needed to be, and
+  the reason is stated rather than implied by a silent pass. Green, including
+  when the last real round left open P1 findings: a REVIEWED round reports P1s
+  without reddening (see the exit-code contract below), and a skipped round is
+  not stricter about the same findings than the round that found them. The
+  count is never hidden, though -- ``open_p1`` stays on the envelope and the
+  headline says "skipped: N open P1 findings remain".
 * **not reviewed** -- no credential, a dead credential, a depleted balance, or an
   unreachable provider. The check goes red with a visible reason. It is
   deliberately *not* a required check, so a billing condition is loud without
@@ -45,6 +54,7 @@ import json
 import os
 import re
 import sys
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from pathlib import Path
@@ -70,7 +80,28 @@ NO_CREDENTIAL_STATUS: Final[int] = -1
 # red check that does not say why is only marginally better than a green one.
 NOT_INVOKED_STATUS: Final[int] = -2
 
+# 128 + SIGTERM. The wrapper's ``wait`` reports this when the runner signals
+# the step even if ``lintro review`` already wrote a persist envelope and
+# exited 0. Treat that envelope as the outcome, not "unexpected status 143".
+SIGTERM_STATUS: Final[int] = 143
+
+# Key lintro logs the inline-post failure envelope under. Kept in sync with
+# lintro.ai.review.output.INLINE_POST_FAILURE_KEY; this script runs from a
+# bare python3 on the runner and cannot import lintro.
+INLINE_POST_FAILURE_KEY: Final[str] = "inline_post_failure"
+
 DEFAULT_TRANSPORT: Final[str] = "cli"
+
+# Top-level key `lintro review` writes when the convergence stop rule skipped
+# the round (#2099). Mirrors lintro.ai.review.output.CONVERGED_ENVELOPE_KEY;
+# tests/scripts/test_classify_review_outcome.py fails if the two drift.
+CONVERGED_ENVELOPE_KEY: Final[str] = "converged"
+
+# Value of the envelope's top-level `outcome` field for a skipped round. Used
+# as the discriminator so a nested object carrying a `converged` key can never
+# be mistaken for the envelope itself. Mirrors
+# lintro.ai.review.output.CONVERGED_OUTCOME; a contract test pins the pair.
+CONVERGED_OUTCOME: Final[str] = "converged"
 
 # Kind labels refined for the active transport. Shared kinds stay as-is;
 # transport-specific labels make CI summaries self-diagnosing (#1923).
@@ -114,12 +145,17 @@ class ReviewOutcome(StrEnum):
 
     Members:
         REVIEWED: A review was produced; findings may or may not be present.
+        INCOMPLETE: A review was produced but coverage-at-HEAD is not 100%.
+        CONVERGED: The round was deliberately skipped by the convergence stop
+            rule before any provider call (#2099).
         NO_CREDENTIAL: No provider credential was available to review with.
         PROVIDER_UNAVAILABLE: The credential, balance, or endpoint failed.
         BROKEN: lintro itself could not complete the review.
     """
 
     REVIEWED = auto()
+    INCOMPLETE = auto()
+    CONVERGED = auto()
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
     BROKEN = auto()
@@ -129,9 +165,35 @@ class ReviewOutcome(StrEnum):
         """Return whether a review actually reached the pull request.
 
         Returns:
-            True only for :attr:`REVIEWED`.
+            True for :attr:`REVIEWED` and :attr:`INCOMPLETE` (a partial
+            review was produced).
         """
-        return self is ReviewOutcome.REVIEWED
+        return self in {ReviewOutcome.REVIEWED, ReviewOutcome.INCOMPLETE}
+
+    @property
+    def review_unavailable(self) -> bool:
+        """Return whether the diff went un-reviewed for a bad reason.
+
+        A skipped-because-converged round produced no review either, but it
+        is a decision rather than a failure: it must not carry the
+        "treat the diff as un-reviewed, fall back to CodeRabbit/Greptile"
+        advice.
+
+        This controls that fallback copy and the ``::error`` annotation only
+        — it is not the readiness gate. There is no readiness gate at check
+        level: open P1 findings are reported and never reddened, on a
+        REVIEWED round and on a CONVERGED skip alike. Both name the count and
+        exit 0; the merge decision is the reviewer's, not this check's.
+
+        Returns:
+            True only for the outcomes where a review was wanted and could
+            not be produced.
+        """
+        return self in {
+            ReviewOutcome.NO_CREDENTIAL,
+            ReviewOutcome.PROVIDER_UNAVAILABLE,
+            ReviewOutcome.BROKEN,
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +215,235 @@ class OutcomeReport:
     transport: str = DEFAULT_TRANSPORT
 
 
+def _payload_has_p1_findings(payload: Mapping[str, Any]) -> bool:
+    """Return whether a review envelope lists any P1 finding.
+
+    Questions are excluded even when the model labelled one P1, matching
+    ``ReviewResult.has_p1_findings`` and ``derive_verdict`` on the lintro
+    side: an open question is a request for information, not a defect claim,
+    and the two P1 gates must not disagree about what blocks.
+
+    Args:
+        payload: Decoded review JSON object.
+
+    Returns:
+        True when any non-question finding severity is ``P1``.
+    """
+    findings = payload.get("findings")
+    if not isinstance(findings, list):
+        return False
+    for item in findings:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("kind") or "").lower().endswith("question"):
+            continue
+        severity = str(item.get("severity") or "").upper()
+        if severity in {"P1", "SEVERITY.P1"}:
+            return True
+    return False
+
+
+def _iter_json_objects(*, text: str) -> Iterator[dict[str, Any]]:
+    """Yield every JSON object embedded in captured review output.
+
+    The captured output interleaves lintro's logging with one or more JSON
+    envelopes, so each ``{`` is tried as a document start and the objects
+    that decode are yielded in order. The single scan shared by every
+    envelope parser below, so a fix here applies to all of them.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Yields:
+        dict[str, Any]: Each top-level JSON object found in ``text``.
+    """
+    decoder = json.JSONDecoder()
+    index = text.find("{")
+    while index != -1:
+        try:
+            payload, _end = decoder.raw_decode(text[index:])
+        except ValueError:
+            index = text.find("{", index + 1)
+            continue
+        if isinstance(payload, dict):
+            yield payload
+        index = text.find("{", index + 1)
+
+
+def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the coverage object from a successful review JSON envelope.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The coverage mapping, or ``None`` when absent.
+    """
+    for payload in _iter_json_objects(text=text):
+        if "readiness_verdict" not in payload:
+            continue
+        coverage = payload.get("coverage")
+        extras = {
+            "stopped_reason": payload.get("stopped_reason") or "",
+            "has_p1_findings": _payload_has_p1_findings(payload),
+        }
+        if isinstance(coverage, dict):
+            merged = {**coverage}
+            if not merged.get("stopped_reason") and extras["stopped_reason"]:
+                merged["stopped_reason"] = extras["stopped_reason"]
+            merged["has_p1_findings"] = extras["has_p1_findings"]
+            return merged
+        if payload.get("readiness_verdict") == "incomplete":
+            return {
+                "complete": False,
+                "covered_at_head": 0,
+                "eligible": 0,
+                **extras,
+            }
+    return None
+
+
+def _parse_inline_post_failure(*, text: str) -> dict[str, Any] | None:
+    """Extract the inline-post failure envelope from captured review output.
+
+    ``lintro review --post`` logs this envelope when GitHub refused the
+    inline review batch, which means the round's findings reached the sticky
+    comment only. Without it the summary claimed the findings were posted
+    (#2266).
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The failure mapping, or ``None`` when inline posting was fine.
+    """
+    for payload in _iter_json_objects(text=text):
+        failure = payload.get(INLINE_POST_FAILURE_KEY)
+        if isinstance(failure, dict):
+            return failure
+    return None
+
+
+def _parse_converged_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the convergence stop-rule object from captured review output.
+
+    Shares :func:`_iter_json_objects` with every other envelope parser, so a
+    later fix to the scan reaches the stop-rule branch too. That scan tries
+    every ``{``, so it also yields objects nested inside a larger payload:
+    the ``outcome`` discriminator is therefore required alongside the
+    ``converged`` mapping, and only the producer's own top-level envelope
+    carries both. A finding or coverage object that merely happens to hold a
+    ``converged`` key can no longer classify a real review as a skip.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The ``converged`` mapping, or ``None`` when the round was not skipped.
+    """
+    for payload in _iter_json_objects(text=text):
+        if payload.get("outcome") != CONVERGED_OUTCOME:
+            continue
+        converged = payload.get(CONVERGED_ENVELOPE_KEY)
+        if isinstance(converged, dict):
+            return {**converged, "detail": str(payload.get("detail") or "")}
+    return None
+
+
+def _converged_open_p1(*, converged: dict[str, Any]) -> int | None:
+    """Read the open-P1 count off a converged envelope, or report it unusable.
+
+    A numeric string or a whole-valued float is accepted — those are shapes a
+    JSON producer can legitimately emit for a count. A boolean, a fraction, a
+    negative, a missing key, or anything else is not a count, and is reported
+    as unusable rather than silently degraded to zero.
+
+    Args:
+        converged: The ``converged`` mapping from the review JSON envelope.
+
+    Returns:
+        The count, or ``None`` when the field cannot be read as one.
+    """
+    raw = converged.get("open_p1")
+    if isinstance(raw, bool) or raw is None:
+        return None
+    if isinstance(raw, int):
+        return raw if raw >= 0 else None
+    if isinstance(raw, float):
+        return int(raw) if raw.is_integer() and raw >= 0 else None
+    if isinstance(raw, str):
+        try:
+            parsed = int(raw.strip())
+        except ValueError:
+            return None
+        return parsed if parsed >= 0 else None
+    return None
+
+
+def _converged_report(
+    *,
+    converged: dict[str, Any],
+    transport: str,
+) -> OutcomeReport:
+    """Build the CONVERGED outcome from a parsed stop-rule envelope.
+
+    Args:
+        converged: The ``converged`` mapping from the review JSON envelope.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Green report naming the round that was skipped, why, and how many
+        open P1 findings the last real round left behind.
+    """
+    round_number = converged.get("round", 0)
+    stable_rounds = converged.get("stable_rounds", 0)
+    open_p1 = _converged_open_p1(converged=converged)
+    if open_p1 is None:
+        # The count is the whole readiness gate for a skipped round. An
+        # unreadable one cannot be assumed to mean "nothing blocking": that
+        # would turn a malformed envelope into a green check, which is the
+        # silent pass this module exists to prevent. Fail closed and say so.
+        return OutcomeReport(
+            outcome=ReviewOutcome.BROKEN,
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    "converged envelope is unreadable — open_p1 is "
+                    f"{converged.get('open_p1')!r}, not a count"
+                ),
+            ),
+            detail=(
+                "lintro wrote a convergence stop-rule envelope whose open_p1 "
+                "field is missing or not a non-negative integer, so the "
+                "readiness gate for the skipped round cannot be evaluated."
+            ),
+            exit_code=1,
+            transport=transport,
+        )
+    noun = "finding" if open_p1 == 1 else "findings"
+    remaining = f"; skipped: {open_p1} open P1 {noun} remain" if open_p1 > 0 else ""
+    return OutcomeReport(
+        outcome=ReviewOutcome.CONVERGED,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                f"converged — round {round_number} skipped after "
+                f"{stable_rounds} stable rounds{remaining}"
+            ),
+        ),
+        detail=str(converged.get("detail") or ""),
+        # Exit 0 even with open P1s, mirroring a REVIEWED round: this check
+        # reports P1 findings without reddening for them (see the exit-code
+        # contract in scripts/ci/run-ai-review.sh), and a skipped round must
+        # not be stricter about the same findings than the round that found
+        # them. The readiness gate is informational at check level on both
+        # paths, so the count is named in the headline instead of hidden
+        # behind an exit code.
+        exit_code=0,
+        transport=transport,
+    )
+
+
 def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     """Extract the ``error`` object from captured review output.
 
@@ -165,18 +456,10 @@ def _parse_error_envelope(*, text: str) -> dict[str, Any] | None:
     Returns:
         The ``error`` mapping, or ``None`` when no envelope is present.
     """
-    decoder = json.JSONDecoder()
-    index = text.find("{")
-    while index != -1:
-        try:
-            payload, _end = decoder.raw_decode(text[index:])
-        except ValueError:
-            index = text.find("{", index + 1)
-            continue
-        error = payload.get("error") if isinstance(payload, dict) else None
+    for payload in _iter_json_objects(text=text):
+        error = payload.get("error")
         if isinstance(error, dict):
             return error
-        index = text.find("{", index + 1)
     return None
 
 
@@ -206,6 +489,80 @@ def _with_transport(*, transport: str, headline: str) -> str:
         Headline that always names the transport.
     """
     return f"[{transport}] {headline}"
+
+
+def _incomplete_report(
+    *,
+    coverage: dict[str, Any],
+    transport: str,
+) -> OutcomeReport:
+    """Build the INCOMPLETE outcome from a parsed coverage envelope.
+
+    Args:
+        coverage: Coverage mapping from the review JSON envelope.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Report that reddens the check and tells the next round to resume.
+    """
+    covered = coverage.get("covered_at_head", 0)
+    eligible = coverage.get("eligible", 0)
+    return OutcomeReport(
+        outcome=ReviewOutcome.INCOMPLETE,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                "review incomplete — "
+                f"{covered}/{eligible} files covered at HEAD; "
+                "next round resumes"
+            ),
+        ),
+        detail=str(coverage.get("stopped_reason") or ""),
+        exit_code=1,
+        transport=transport,
+    )
+
+
+def _reviewed_report(
+    *,
+    findings: bool,
+    transport: str,
+    inline_failure: Mapping[str, Any] | None = None,
+) -> OutcomeReport:
+    """Build the REVIEWED outcome for a finished envelope.
+
+    A round GitHub refused the inline comments for still produced a review, so
+    it stays green with an unchanged exit code — but it must not claim the
+    findings were posted inline when they only reached the sticky comment
+    (#2266).
+
+    Args:
+        findings: True when the review posted P1 findings.
+        transport: Active transport named on the headline.
+        inline_failure: Inline-post failure envelope, or ``None`` when the
+            inline comments went up normally.
+
+    Returns:
+        Green report; the review itself produced a result.
+    """
+    if inline_failure is not None:
+        kind = str(inline_failure.get("kind") or "unknown")
+        headline = f"reviewed — findings posted to the sticky comment only ({kind})"
+    elif findings:
+        headline = "reviewed — P1 findings posted"
+    else:
+        headline = "reviewed — no P1 findings"
+    return OutcomeReport(
+        outcome=ReviewOutcome.REVIEWED,
+        headline=_with_transport(transport=transport, headline=headline),
+        detail=(
+            str(inline_failure.get("reason") or "")
+            if inline_failure is not None
+            else ""
+        ),
+        exit_code=0,
+        transport=transport,
+    )
 
 
 def refine_failure_kind(
@@ -308,21 +665,34 @@ def classify(
             transport=transport,
         )
 
+    # A converged round is checked early: it produces no coverage and no
+    # error envelope at all, so every later branch would have to guess at a
+    # review that deliberately never ran.
+    #
+    # Not, however, ahead of a hard failure. The stop rule exits 0 or 1 and
+    # never 2, so status 2 alongside a converged envelope means something
+    # broke *after* the envelope was printed — a failed sticky post, a
+    # crashing later step. The failure is the news; reporting the skip would
+    # bury it behind a green-looking outcome, which is exactly the silent
+    # pass this module exists to prevent. Let the error branches below own
+    # that case.
+    if status != REVIEW_STATUS_ERROR:
+        converged = _parse_converged_envelope(text=output)
+        if converged is not None:
+            return _converged_report(converged=converged, transport=transport)
+
+    # A persist envelope wins over the wrapper exit status. ``wait`` reports
+    # 143 when the runner SIGTERMs the step after lintro already wrote
+    # INCOMPLETE JSON and exited 0 (#2156 / #2166 round 5).
+    coverage = _parse_coverage_envelope(text=output)
+    if coverage is not None and not coverage.get("complete", True):
+        return _incomplete_report(coverage=coverage, transport=transport)
+
     if status in (REVIEW_STATUS_CLEAN, REVIEW_STATUS_FINDINGS):
-        findings = status == REVIEW_STATUS_FINDINGS
-        return OutcomeReport(
-            outcome=ReviewOutcome.REVIEWED,
-            headline=_with_transport(
-                transport=transport,
-                headline=(
-                    "reviewed — P1 findings posted"
-                    if findings
-                    else "reviewed — no P1 findings"
-                ),
-            ),
-            detail="",
-            exit_code=0,
+        return _reviewed_report(
+            findings=status == REVIEW_STATUS_FINDINGS,
             transport=transport,
+            inline_failure=_parse_inline_post_failure(text=output),
         )
 
     error = _parse_error_envelope(text=output) or {}
@@ -343,6 +713,13 @@ def classify(
     )
 
     if status != REVIEW_STATUS_ERROR:
+        # ``wait`` can report SIGTERM after a finished review already wrote a
+        # complete envelope. Prefer that over "unexpected status 143".
+        if coverage is not None and coverage.get("complete", True):
+            return _reviewed_report(
+                findings=bool(coverage.get("has_p1_findings")),
+                transport=transport,
+            )
         # An exit status lintro does not define means the wrapper itself broke
         # (missing dependency, bad flag, crash). Never attribute that to the
         # provider — the fix is in lintro, not in the account.
@@ -408,14 +785,41 @@ def render_summary(*, report: OutcomeReport) -> str:
     Returns:
         Markdown text ending in a newline.
     """
-    icon = "✅" if report.outcome.produced_review else "🚫"
+    if report.outcome is ReviewOutcome.INCOMPLETE:
+        icon = "⚠️"
+    elif report.outcome is ReviewOutcome.CONVERGED:
+        icon = "🔁"
+    elif report.outcome.produced_review:
+        icon = "✅"
+    else:
+        icon = "🚫"
     lines = [
         f"### {icon} AI Review ({report.transport}) — {report.headline}",
         "",
     ]
+    if report.outcome is ReviewOutcome.INCOMPLETE:
+        lines.extend(
+            [
+                "A review was produced, but coverage-at-HEAD is not 100%. "
+                "The next round resumes with unreviewed files first. "
+                "P1 findings still pass this check; an unfinished review "
+                "does not.",
+                "",
+            ],
+        )
+    if report.outcome is ReviewOutcome.CONVERGED:
+        lines.extend(
+            [
+                "No provider call was made: the convergence stop rule found "
+                "the open findings stable below the configured threshold, so "
+                "another round would have re-reported the same set. Re-run "
+                "the review with `--full` to force one.",
+                "",
+            ],
+        )
     if report.detail:
         lines.extend(["> " + report.detail, ""])
-    if not report.outcome.produced_review:
+    if report.outcome.review_unavailable:
         lines.extend(
             [
                 "This check is informational and not required, so it cannot "
@@ -434,7 +838,7 @@ def _emit(*, report: OutcomeReport) -> None:
     Args:
         report: The classified outcome.
     """
-    annotation = "notice" if report.outcome.produced_review else "error"
+    annotation = "error" if report.outcome.review_unavailable else "notice"
     title = f"AI Review ({report.transport})"
     body = report.headline
     if report.detail:
@@ -457,8 +861,15 @@ def main(*, argv: list[str] | None = None) -> int:
         argv: Optional argument vector (defaults to ``sys.argv[1:]``).
 
     Returns:
-        Exit code for the wrapper: ``0`` when a review was produced, ``1``
-        otherwise.
+        Exit code for the wrapper. ``0`` means the review question was
+        answered: a review ran, or the convergence stop rule deliberately
+        skipped the round. Open P1 findings do not change that on either
+        path — they are reported in the headline and summary, never reddened,
+        because this check is informational and not required. ``1`` means no
+        review was produced at all (no credential, dead credential, depleted
+        balance, unreachable provider, a lintro-side failure, or an
+        unreadable envelope). Exit ``0`` is therefore not a promise that a
+        review ran, and exit ``1`` is never about findings.
     """
     parser = argparse.ArgumentParser(description="Classify an AI review run.")
     parser.add_argument(
@@ -508,7 +919,7 @@ def main(*, argv: list[str] | None = None) -> int:
         transport=args.transport,
     )
     _emit(report=report)
-    if not report.outcome.produced_review:
+    if report.outcome.review_unavailable:
         print(f"AI Review: {report.headline}", file=sys.stderr)
     return report.exit_code
 

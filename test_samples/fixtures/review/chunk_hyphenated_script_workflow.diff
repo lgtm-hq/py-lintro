@@ -1,0 +1,6 @@
+diff --git a/.github/workflows/site.yml b/.github/workflows/site.yml
+--- a/.github/workflows/site.yml
++++ b/.github/workflows/site.yml
+@@ -1 +1,2 @@
+ name: Site
++run: python scripts/ci/site/migrate-docs-content.py

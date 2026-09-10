@@ -20,7 +20,11 @@ from lintro.ai.providers.base import AIResponse
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
-from tests.unit.ai.conftest import MockAIProvider, MockIssue
+from tests.unit.ai.conftest import (
+    MockAIProvider,
+    MockIssue,
+    RecordingConsoleLogger,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -196,38 +200,38 @@ def test_summary_attachment_summary_attached_to_all_results_with_issues(
 # ---------------------------------------------------------------------------
 
 
-def test_log_fix_limit_message_no_log_when_within_limit():
-    """No console output when total_issues <= max_fix_attempts."""
-    logger = MagicMock()
+def test_log_fix_limit_message_no_log_when_within_limit() -> None:
+    """Nothing reaches the console when total_issues < max_fix_attempts."""
+    logger = RecordingConsoleLogger()
     _log_fix_limit_message(
         logger=logger,
         total_issues=3,
         max_fix_attempts=5,
     )
-    logger.console_output.assert_not_called()
+    assert_that(logger.lines).is_empty()
 
 
-def test_log_fix_limit_message_no_log_when_exactly_at_limit():
-    """No console output when total_issues == max_fix_attempts."""
-    logger = MagicMock()
+def test_log_fix_limit_message_no_log_when_exactly_at_limit() -> None:
+    """Nothing reaches the console when total_issues == max_fix_attempts."""
+    logger = RecordingConsoleLogger()
     _log_fix_limit_message(
         logger=logger,
         total_issues=5,
         max_fix_attempts=5,
     )
-    logger.console_output.assert_not_called()
+    assert_that(logger.lines).is_empty()
 
 
-def test_log_fix_limit_message_logs_when_over_limit():
-    """Logs skipped count when total_issues > max_fix_attempts."""
-    logger = MagicMock()
+def test_log_fix_limit_message_logs_when_over_limit() -> None:
+    """The skipped count reaches the console when the fix limit is exceeded."""
+    logger = RecordingConsoleLogger()
     _log_fix_limit_message(
         logger=logger,
         total_issues=10,
         max_fix_attempts=5,
     )
-    logger.console_output.assert_called_once()
-    msg = logger.console_output.call_args[0][0]
+    assert_that(logger.lines).is_length(1)
+    msg = logger.lines[0]
     assert_that(msg).contains("5 of")
     assert_that(msg).contains("10")
     assert_that(msg).contains("5 skipped")

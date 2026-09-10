@@ -19,11 +19,9 @@ class MockToolDefinition:
 
     Attributes:
         name: Name of the tool.
-        conflicts_with: List of tools this tool conflicts with.
     """
 
     name: str = "mock_tool"
-    conflicts_with: list[str] = field(default_factory=list)
 
 
 @dataclass

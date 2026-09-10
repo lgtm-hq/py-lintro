@@ -15,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:da2ecac40dc5c3c46f19fab1bf7f7203d341c2d4b0452291e4d446be61490f83 AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:1a533a42313ed4139be2a4afd645bce9082b217e15d430679a5209c5c8abf7d7 AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -32,8 +32,21 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock package.json /app/
 COPY lintro/ /app/lintro/
+COPY lintro_build/ /app/lintro_build/
 COPY requirements-semgrep.txt /app/requirements-semgrep.txt
+COPY scripts/ci/generate-tool-versions.py /app/scripts/ci/generate-tool-versions.py
+COPY scripts/ci/generate-builtin-tool-index.py /app/scripts/ci/generate-builtin-tool-index.py
 COPY scripts/utils/install-semgrep.sh /app/scripts/utils/install-semgrep.sh
+COPY scripts/utils/install-tools.sh /app/scripts/utils/install-tools.sh
+COPY scripts/utils/utils.sh /app/scripts/utils/utils.sh
+
+# Regenerate the version artifacts from their sources (#2179): this COPY of
+# lintro/ overwrites the tools stage's regenerated artifacts with the build
+# context's, so the app layer regenerates for itself. A no-op while the
+# artifacts are committed; load-bearing once they stop being committed
+# (epic #2176 phase 4).
+RUN python3 scripts/ci/generate-tool-versions.py && \
+    python3 scripts/ci/generate-builtin-tool-index.py
 
 ARG WITH_AI=false
 
@@ -52,6 +65,22 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     (UV_SYSTEM_PYTHON=1 uv pip uninstall --system semgrep || true) && \
     chmod +x /app/scripts/utils/install-semgrep.sh && \
     /app/scripts/utils/install-semgrep.sh --docker
+
+# New binaries land in docker/tools.Dockerfile, but this app image still
+# FROMs a digest-pinned tools image that will not contain them until the
+# next published digest. Bridge typos, spectral, buf, import-linter, pylint,
+# cppcheck and rubocop here so dogfood and the manifest-vs-image gate actually
+# run them instead of failing with binary_missing. No-op once the digest
+# already has them on PATH. rubocop is a Ruby gem, so the ruby runtime the
+# pinned digest predates has to come along with it.
+# hadolint ignore=DL3008
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    (command -v gem >/dev/null || (apt-get update && \
+    apt-get install -y --no-install-recommends ruby ruby-dev)) && \
+    chmod +x /app/scripts/utils/install-tools.sh && \
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,rubocop && \
+    rm -rf /var/lib/apt/lists/*
 
 # hadolint ignore=DL3008
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -81,7 +110,8 @@ RUN getent group tools >/dev/null || groupadd -r tools && \
 # tool set is still enforced at tools-image build time in docker/tools.Dockerfile.
 RUN echo "Smoke-testing tool stack..." && \
     ruff --version && prettier --version && rustfmt --version && \
-    shellcheck --version && semgrep --version && \
+    shellcheck --version && semgrep --version && typos --version && \
+    spectral --version && \
     echo "Tool stack smoke check passed."
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
@@ -107,7 +137,7 @@ CMD ["--help"]
 # -----------------------------------------------------------------------------
 # Stage: base — minimal runtime without external toolchains
 # -----------------------------------------------------------------------------
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS base
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS base
 
 LABEL org.opencontainers.image.description="Lintro base image (no external tools); GHCR package py-lintro-base"
 
@@ -131,8 +161,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=tools /usr/local/bin/uv /usr/local/bin/uv
 
-COPY pyproject.toml uv.lock /app/
+COPY pyproject.toml uv.lock package.json /app/
 COPY lintro/ /app/lintro/
+# The in-tree PEP 517 backend and its generator inputs (#2180): uv sync
+# builds lintro from /app, which regenerates the derived version artifacts.
+COPY lintro_build/ /app/lintro_build/
+COPY requirements-semgrep.txt /app/requirements-semgrep.txt
 
 RUN uv sync --no-dev --no-progress && (uv cache clean || true)
 
@@ -160,7 +194,7 @@ CMD ["--help"]
 # manages the digest bump. Only the `ai` target below depends on this stage, so
 # `--target base` / `--target full` builds never pull it.
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:cfed414443efcc26506150fe45c06aa0c80c1f8ab9f32a2abec6b47ea2c7f354 AS aitools
+FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:a2f111bdad51695008ea593ca09cb4991df4c5beab5ecaafce1ca5bd3b468bb4 AS aitools
 
 # -----------------------------------------------------------------------------
 # Stage: ai — full image plus the agent CLIs `--transport cli` drives
@@ -194,5 +228,15 @@ RUN echo "Smoke-testing AI agent CLIs..." && \
     gosu lintro codex --version && \
     gosu lintro agent --version && \
     echo "AI CLI smoke check passed."
+
+# This stage is the only place `full` and `ai` are installed together, so it is
+# the only place the `docstring_parser` module collision can reappear (#2378).
+# pydoclint fails to import when upstream `docstring-parser` shadows
+# `docstring-parser-fork`, and `lintro chk` would report that as a skip rather
+# than an error - so assert the import here, where it fails the build loudly.
+RUN echo "Smoke-testing the combined full+ai Python environment..." && \
+    /app/.venv/bin/pydoclint --version && \
+    /app/.venv/bin/python -c "import anthropic.lib.tools, docstring_parser" && \
+    echo "Combined full+ai smoke check passed."
 
 # ENTRYPOINT, CMD and HEALTHCHECK are inherited from `full`.

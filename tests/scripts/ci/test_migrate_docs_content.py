@@ -125,6 +125,10 @@ def test_tool_migration_uses_short_titles_and_groups(
         "# Configuration Guide\n\nBody.\n",
         encoding="utf-8",
     )
+    (docs_root / "watch-mode.md").write_text(
+        "# Watch Mode\n\nBody.\n",
+        encoding="utf-8",
+    )
     (docs_src / "README.md").write_text(
         "# Tool Analysis Documentation\n\nHub.\n",
         encoding="utf-8",
@@ -145,9 +149,13 @@ def test_tool_migration_uses_short_titles_and_groups(
     index = (site_content / "tools" / "index.md").read_text(encoding="utf-8")
     ruff = (site_content / "tools" / "ruff.md").read_text(encoding="utf-8")
     config = (site_content / "usage" / "configuration.md").read_text(encoding="utf-8")
+    watch = (site_content / "usage" / "watch-mode.md").read_text(encoding="utf-8")
     assert_that(index).contains('title: "tools"')
     assert_that(ruff).contains('title: "ruff"')
     assert_that(ruff).contains("navGroup: python")
     assert_that(config).contains('title: "configuration"')
     assert_that(config).contains("navGroup: setup")
+    assert_that(watch).contains('title: "watch mode"')
+    assert_that(watch).contains("navGroup: setup")
+    assert_that(watch).contains("order: 25")
     assert_that(ruff.split("---")[1]).does_not_contain("Tool Analysis")

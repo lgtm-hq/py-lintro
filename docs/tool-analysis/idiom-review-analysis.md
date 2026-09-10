@@ -7,7 +7,7 @@ provider to find issues that syntax-matching linters structurally cannot. It pro
 standard `ToolResult` / `Issue` objects like any other plugin, but it is classified
 **advisory** rather than deterministic: it runs under `lintro review` (alongside, or
 instead of, the diff review) and never under `lintro check` / `lintro fmt`, so
-nondeterministic findings can never gate deterministic checks or the health score
+nondeterministic findings can never gate deterministic checks or their issue counts
 (#1308).
 
 It has no external binary; all work is done through the existing AI provider

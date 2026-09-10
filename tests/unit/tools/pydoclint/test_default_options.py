@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.pydoclint import (
+from lintro.tools.pydoclint.definition import (
     PYDOCLINT_DEFAULT_TIMEOUT,
     PydoclintPlugin,
 )

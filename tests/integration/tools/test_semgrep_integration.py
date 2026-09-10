@@ -6,7 +6,6 @@ They verify the SemgrepPlugin definition, check command, and set_options method.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -14,14 +13,12 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if semgrep is not installed
-pytestmark = pytest.mark.skipif(
-    shutil.which("semgrep") is None,
-    reason="semgrep not installed",
-)
+pytestmark = require_tool("semgrep")
 
 
 @pytest.fixture

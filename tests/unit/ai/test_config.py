@@ -7,7 +7,10 @@ from assertpy import assert_that
 from pydantic import ValidationError
 
 from lintro.ai.config import AIConfig
+from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport, CliBareMode
+from lintro.ai.providers.anthropic.config import anthropic_settings
+from lintro.ai.providers.cursor.config import cursor_settings
 from lintro.ai.registry import AIProvider
 
 # -- Defaults --------------------------------------------------------------
@@ -17,7 +20,7 @@ def test_default_config_booleans_and_provider() -> None:
     """All boolean defaults and provider are correct out of the box."""
     config = AIConfig()
     assert_that(config.enabled).is_false()
-    assert_that(config.provider).is_equal_to("anthropic")
+    assert_that(config.provider).is_none()
     assert_that(config.default_fix).is_false()
     assert_that(config.auto_apply).is_false()
     assert_that(config.auto_apply_safe_fixes).is_true()
@@ -34,32 +37,38 @@ def test_default_config_optional_fields() -> None:
 
 def test_cursor_trust_workspace_defaults_true() -> None:
     """Cursor workspace trust is granted by default."""
-    config = AIConfig()
-    assert_that(config.cursor_trust_workspace).is_true()
+    config = AIConfig(provider=AIProvider.CURSOR)
+    assert_that(cursor_settings(config).trust_workspace).is_true()
 
 
 def test_cursor_trust_workspace_opt_out() -> None:
     """Cursor workspace trust can be explicitly disabled via config."""
-    config = AIConfig(cursor_trust_workspace=False)
-    assert_that(config.cursor_trust_workspace).is_false()
+    config = resolve_effective_ai_config(
+        {"providers": {"cursor": {"trust_workspace": False}}},
+    ).config
+    assert_that(cursor_settings(config).trust_workspace).is_false()
 
 
 def test_cli_bare_defaults_to_auto() -> None:
     """The Claude CLI bare-mode policy auto-detects by default."""
-    config = AIConfig()
-    assert_that(config.cli_bare).is_equal_to(CliBareMode.AUTO)
+    config = AIConfig(provider=AIProvider.ANTHROPIC)
+    assert_that(anthropic_settings(config).cli_bare).is_equal_to(CliBareMode.AUTO)
 
 
 def test_cli_bare_accepts_explicit_override() -> None:
     """The bare-mode policy is settable from a plain config string."""
-    config = AIConfig.from_mapping({"cli_bare": "never"})
-    assert_that(config.cli_bare).is_equal_to(CliBareMode.NEVER)
+    config = resolve_effective_ai_config(
+        {"providers": {"anthropic": {"cli_bare": "never"}}},
+    ).config
+    assert_that(anthropic_settings(config).cli_bare).is_equal_to(CliBareMode.NEVER)
 
 
 def test_cli_bare_rejects_unknown_value() -> None:
     """An unrecognised bare-mode value is a config error, not a guess."""
     with pytest.raises(ValidationError):
-        AIConfig(cli_bare="sometimes")  # type: ignore[arg-type]
+        AIConfig(
+            providers={"anthropic": {"cli_bare": "sometimes"}},  # type: ignore[dict-item]
+        )
 
 
 def test_default_config_numeric_fields() -> None:
@@ -96,6 +105,27 @@ def test_provider_invalid_rejected() -> None:
     """An invalid provider string is rejected by validation."""
     with pytest.raises(ValidationError):
         AIConfig.model_validate({"provider": "gemini"})
+
+
+def test_provider_optional_when_ai_disabled() -> None:
+    """Disabled AI config does not require a provider."""
+    config = AIConfig(enabled=False)
+    assert_that(config.provider).is_none()
+
+
+def test_provider_deferred_when_ai_enabled() -> None:
+    """Enabled AI config may omit provider until doctor or get_provider."""
+    config = AIConfig(enabled=True)
+    assert_that(config.provider).is_none()
+
+
+def test_provider_field_description_lists_accepted_values() -> None:
+    """Schema help lists providers alphabetically from the shared helper."""
+    description = AIConfig.model_fields["provider"].description
+    assert_that(description).contains("`ai.provider` in config")
+    assert_that(description).contains("LINTRO_AI_PROVIDER")
+    assert_that(description).contains("--provider")
+    assert_that(description).contains("anthropic, cursor, openai")
 
 
 # -- Boolean overrides -----------------------------------------------------

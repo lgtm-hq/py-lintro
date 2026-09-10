@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if osv-scanner is not installed
-pytestmark = pytest.mark.skipif(
-    shutil.which("osv-scanner") is None,
-    reason="osv-scanner not installed",
-)
+pytestmark = require_tool("osv-scanner")
 
 
 @pytest.mark.parametrize(

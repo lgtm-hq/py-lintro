@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro._tool_versions import get_tool_version
 from lintro.enums.tool_name import ToolName
@@ -594,7 +595,9 @@ def test_builder_package_names_match_the_manifest() -> None:
     from lintro.enums.tool_name import normalize_tool_name
 
     manifest = json.loads(
-        (Path(__file__).parents[4] / "lintro" / "tools" / "manifest.json").read_text(),
+        (
+            Path(__file__).parents[4] / "lintro" / "tools" / "manifest.src.json"
+        ).read_text(),
     )
     builder = NodeJSBuilder()
     for entry in manifest["tools"]:
@@ -960,6 +963,23 @@ def test_commitlint_runner_fallback_uses_scoped_package(
     assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
     assert_that(cmd[3]).starts_with("@commitlint/cli@")
     assert_that(cmd[4]).is_equal_to("commitlint")
+
+
+def test_spectral_runner_fallback_uses_scoped_package(
+    no_local_node_install: None,
+) -> None:
+    """Spectral's npm package is ``@stoplight/spectral-cli``, binary is ``spectral``.
+
+    Args:
+        no_local_node_install: Fixture removing any project-local Node install
+            from resolution.
+    """
+    builder = NodeJSBuilder()
+    with patch("shutil.which", _which_only("npx")):
+        cmd = builder.get_command("spectral", ToolName.SPECTRAL)
+    assert_that(cmd[:3]).is_equal_to(["npx", "--yes", "--package"])
+    assert_that(cmd[3]).starts_with("@stoplight/spectral-cli@")
+    assert_that(cmd[4]).is_equal_to("spectral")
 
 
 # =============================================================================
@@ -1380,12 +1400,27 @@ def test_package_flag_fallback_logs_the_full_command(
         clean_fallback_notices: Fixture clearing the one-time notice cache.
     """
     command = ["npx", "--package", "@commitlint/cli@19.0.0", "commitlint"]
-    with patch("lintro.tools.core.node_fallback.logger") as mock_logger:
-        notify_registry_fallback_selected(command)
+    warnings: list[str] = []
 
-    message = cast(str, mock_logger.warning.call_args.args[0])
-    assert_that(message).contains("npx --package @commitlint/cli@19.0.0 commitlint")
-    assert_that(message).does_not_contain("npx @commitlint/cli@19.0.0`")
+    def sink(message: object) -> None:
+        """Collect WARNING-level loguru messages.
+
+        Args:
+            message: Loguru message object carrying the record.
+        """
+        warnings.append(message.record["message"])  # type: ignore[attr-defined]
+
+    sink_id = logger.add(sink, level="WARNING", format="{message}")
+    try:
+        notify_registry_fallback_selected(command)
+    finally:
+        logger.remove(sink_id)
+
+    assert_that(warnings).is_length(1)
+    assert_that(warnings[0]).contains(
+        "npx --package @commitlint/cli@19.0.0 commitlint",
+    )
+    assert_that(warnings[0]).does_not_contain("npx @commitlint/cli@19.0.0`")
 
 
 def test_html_validate_bunx_fallback_warns_once(

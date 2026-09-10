@@ -6,7 +6,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.cargo_deny import CargoDenyPlugin
+from lintro.tools.cargo_deny.definition import CargoDenyPlugin
 
 
 @pytest.fixture
@@ -56,15 +56,6 @@ def test_definition_file_patterns(cargo_deny_plugin: CargoDenyPlugin) -> None:
     patterns = cargo_deny_plugin.definition.file_patterns
     assert_that(patterns).contains("Cargo.toml")
     assert_that(patterns).contains("deny.toml")
-
-
-def test_definition_priority(cargo_deny_plugin: CargoDenyPlugin) -> None:
-    """Verify the priority is 90.
-
-    Args:
-        cargo_deny_plugin: The plugin instance.
-    """
-    assert_that(cargo_deny_plugin.definition.priority).is_equal_to(90)
 
 
 def test_definition_timeout(cargo_deny_plugin: CargoDenyPlugin) -> None:

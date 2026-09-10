@@ -19,8 +19,15 @@ zero findings precisely because it did not finish, so a clean verdict here
 cannot clear a failure reported elsewhere — different file scope or ordinary
 timing variance is enough for the two to disagree. Using this verdict to absorb
 another job's failure can turn a required check green over a genuine finding.
-The code-quality gate therefore does not consume it; wiring it there needs the
-authoritative run to publish its own report (lgtm-ci#746).
+
+That scope rule is why the code-quality gate still ignores the verdict this
+copy produces for ``dogfood-skip-gate``: that job always lints the full repo,
+so its report is not evidence about an authoritative run that may be
+changed-files scoped. The gate instead consumes ``timeout-flake`` /
+``timed-out-tools`` from the reusable lint workflow, which runs the same
+classification on the authoritative run's own report (lgtm-ci#746, exposed
+since ``reusable-quality-lint`` v0.63.7) — the precondition this note used to
+say was unmet. See ``scripts/ci/evaluate-code-quality-gate.sh`` (#2242).
 
 Classification is deliberately conservative and fails closed. It reports
 ``timeout-flake=true`` only when **all** of the following hold:

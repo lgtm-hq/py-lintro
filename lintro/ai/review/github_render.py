@@ -1,11 +1,35 @@
-"""Finding and summary rendering for GitHub AI-review comments."""
+"""The one body-assembly pipeline for GitHub AI-review comments (#2304).
+
+Every comment a review posts is a list of Markdown blocks joined with a blank
+line — the sticky mission-control board, the per-round review body, the
+failure comment, the history archive, and the inline comment on a finding.
+Each used to join its own list with its own separator and its own size cap.
+The shapes differed; the assembly did not. :class:`Section` and
+:func:`assemble` are that assembly, and every surface goes through them, so a
+change to how a comment is put together is one edit rather than five.
+
+Sizing is not re-implemented here: :func:`assemble` caps through
+``github_contract.cap_body``. ``budget=None`` is the one opt-out, for a
+caller that owns sizing itself — the sticky renderer and the archive's trim
+loop, whose ``contract.fit_body`` search has to measure *un-capped* candidates
+to know which sections to prune, and the inline comment, which has never been
+capped at all.
+
+The module also renders the inline finding comment, the one review surface
+that is a *whole comment per finding* rather than an assembled body.
+
+Moved out of here by #2304, and no longer re-exported: the badge table and the
+numeric cell formatting live in :mod:`lintro.ai.review.github_badges`, and the
+one-line prose notes (timings, synthesis, coverage, inline-post failures,
+cross-chunk, convergence, run mechanics) in
+:mod:`lintro.ai.review.github_notes`.
+"""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
-from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
 from lintro.ai.review.agent_prompts import render_finding_prompt_panel
 from lintro.ai.review.checklist_display import (
     cleared_answers,
@@ -15,33 +39,81 @@ from lintro.ai.review.checklist_display import (
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.github_constants import _MENTION_RE, _SEVERITY_EMOJI
+from lintro.ai.review.github_contract import (
+    DEFAULT_BUDGET,
+    CommentBudget,
+    cap_body,
+)
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
-from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
 
 __all__ = [
     "REGRESSED_TITLE_SUFFIX",
-    "format_badge_table",
-    "format_badge_tables",
+    "SECTION_SEPARATOR",
+    "Section",
+    "assemble",
     "format_finding_comment",
-    "format_run_mechanics",
-    "run_stats_primary_cells",
     "sanitize_comment_text",
 ]
 
-#: Appended to the title of a regression's freshly raised inline comment, so
-#: the thread does not read as a brand-new finding.
+#: Blank line between two rendered sections. Every GitHub comment surface used
+#: this separator before the pipeline existed, so pinning it here is what makes
+#: the convergence byte-identical rather than merely equivalent.
+SECTION_SEPARATOR = "\n\n"
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class Section:
+    """One named block of Markdown in an assembled comment body.
+
+    The name is not rendered. It exists so a body reads as an ordered list of
+    parts a reviewer can point at — "the coverage row", "the run-history
+    fold" — instead of an anonymous list of strings, and so a test can assert
+    which parts a surface produced without matching on prose.
+
+    Attributes:
+        name: Stable identifier for this block, for tests and debugging.
+        text: Rendered Markdown. Empty text is omitted from the body, which is
+            how every optional section opts out.
+    """
+
+    name: str
+    text: str
+
+
+def assemble(
+    *,
+    sections: Sequence[Section],
+    budget: CommentBudget | None = DEFAULT_BUDGET,
+) -> str:
+    """Join a comment's sections into the body that gets posted.
+
+    Empty sections are dropped rather than rendered as blank space, so an
+    optional block opts out by returning ``""``.
+
+    Args:
+        sections: Ordered sections, top of the comment first.
+        budget: Budget the finished body is capped to. ``None`` skips the cap
+            for a caller that owns sizing itself — in practice the sticky
+            renderer, whose ``fit_body`` search has to see un-capped
+            candidates to know which sections to prune.
+
+    Returns:
+        str: The assembled Markdown body.
+    """
+    body = SECTION_SEPARATOR.join(section.text for section in sections if section.text)
+    if budget is None:
+        return body
+    return cap_body(body=body, budget=budget)
+
+
 REGRESSED_TITLE_SUFFIX = " (regressed)"
 
 #: Severities that earn a per-finding agent prompt panel (#1911). A P3 nit gets
 #: none: the panel is an affordance, and one on every finding is wallpaper.
 _PROMPT_SEVERITIES: frozenset[Severity] = frozenset({Severity.P1, Severity.P2})
-
-#: Line breaks that would end a badge-table row early. ``\r\n`` is matched as
-#: one break so a Windows-style value collapses to a single space, not two.
-_LINE_BREAK_RE = re.compile(r"\r\n|[\r\n]")
 
 
 def _chip(text: str) -> str:
@@ -54,200 +126,6 @@ def _severity_badge(*, severity: Severity) -> str:
     """Render a severity as a color emoji plus bold label."""
     emoji = _SEVERITY_EMOJI.get(severity, "⚪")
     return f"{emoji} **{severity.value}**"
-
-
-def _fmt_int(value: int) -> str:
-    """Format an integer with thousands separators."""
-    return f"{value:,}"
-
-
-def _fmt_cost(value: float, *, estimated: bool) -> str:
-    """Format a USD cost, prefixing ``~`` when the value is estimated."""
-    prefix = "~" if estimated else ""
-    return f"{prefix}${value:.4f}"
-
-
-def _fmt_tokens(total: int, *, estimated: bool) -> str:
-    """Format a token count, prefixing ``~`` when estimated."""
-    prefix = "~" if estimated else ""
-    return f"{prefix}{_fmt_int(total)} tok"
-
-
-def _escape_cell(text: str) -> str:
-    r"""Flatten and escape a badge-table cell so it cannot shear the row.
-
-    A table row is one line, so a carriage return or line feed in a value ends
-    the row and spills the rest of the cells into the document as prose. Line
-    breaks are therefore collapsed to spaces before escaping — GFM offers no
-    in-cell line break worth preserving here, and ``sanitize_comment_text``
-    caps length without touching them.
-
-    Backslashes are doubled first: escaping only the pipe would turn an input
-    of ``\|`` into ``\\|``, leaving the pipe with an even number of
-    preceding backslashes and readable as a delimiter again.
-    """
-    escaped = text.replace("\\", "\\\\").replace("|", "\\|")
-    return _LINE_BREAK_RE.sub(" ", escaped)
-
-
-def format_badge_table(*, cells: Sequence[tuple[str, str]]) -> list[str]:
-    r"""Render one ordered row of ``(label, value)`` pairs as a badge table.
-
-    GitHub-flavored Markdown has no chip primitive, so a single-row table —
-    labels as the header, values as the one body row — is the closest thing to
-    the approved chip design that renders without an external image.
-
-    A literal ``|`` would end the cell it appears in and shear the row, so it
-    is escaped here rather than at each call site — GFM honors ``\|`` inside
-    code spans too, which the code-chipped values rely on. Callers still own
-    their own sanitization and code-chip quoting.
-
-    Args:
-        cells: Ordered ``(label, value)`` pairs.
-
-    Returns:
-        Markdown lines, or an empty list when there is nothing to render.
-    """
-    if not cells:
-        return []
-    keys = " | ".join(_escape_cell(key) for key, _ in cells)
-    dividers = " | ".join("---" for _ in cells)
-    values = " | ".join(_escape_cell(value) for _, value in cells)
-    return [f"| {keys} |", f"| {dividers} |", f"| {values} |"]
-
-
-def format_badge_tables(
-    *,
-    rows: Sequence[Sequence[tuple[str, str]]],
-) -> list[str]:
-    """Render several badge rows as stacked single-row tables.
-
-    Args:
-        rows: Ordered row groups, each an ordered list of ``(label, value)``
-            pairs. Empty groups are skipped rather than emitting a blank table.
-
-    Returns:
-        Markdown lines with one blank line between consecutive tables.
-    """
-    lines: list[str] = []
-    for cells in rows:
-        table = format_badge_table(cells=cells)
-        if not table:
-            continue
-        if lines:
-            lines.append("")
-        lines.extend(table)
-    return lines
-
-
-def run_stats_primary_cells(*, metadata: ReviewMetadata) -> list[tuple[str, str]]:
-    """Build the primary run-stats badge row shared by every review surface.
-
-    Ordering is fixed across surfaces (epic #1905): model, est. cost, tokens
-    in, tokens out. ``~`` marks values estimated locally, so a subscription run
-    never presents an estimate as a billed figure.
-
-    Args:
-        metadata: Review run metadata.
-
-    Returns:
-        Ordered ``(label, value)`` pairs for the primary badge table.
-    """
-    estimated = metadata.token_usage_estimated
-    tilde = "~" if estimated else ""
-    prompt_tokens = int(metadata.token_usage.get("prompt", 0))
-    completion_tokens = int(metadata.token_usage.get("completion", 0))
-    return [
-        (
-            "model",
-            format_sourced_value(
-                f"`{sanitize_comment_text(metadata.model, limit=60)}`",
-                metadata.model_source or None,
-            ),
-        ),
-        ("est. cost", _fmt_cost(metadata.cost_estimate_usd, estimated=estimated)),
-        ("tokens in", f"{tilde}{_fmt_int(prompt_tokens)}"),
-        ("tokens out", f"{tilde}{_fmt_int(completion_tokens)}"),
-    ]
-
-
-def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
-    """Format the per-run mechanics footer for a single review run.
-
-    Args:
-        metadata: Review run metadata.
-
-    Returns:
-        Markdown describing model, provider, tokens, cost, depth, and duration.
-        Estimated token/cost figures are prefixed with ``~``.
-    """
-    estimated = metadata.token_usage_estimated
-    total_tokens = int(metadata.token_usage.get("total", 0))
-    prompt_tokens = int(metadata.token_usage.get("prompt", 0))
-    completion_tokens = int(metadata.token_usage.get("completion", 0))
-    source = "estimated" if estimated else "provider-reported"
-    parts = [
-        "**Model:** "
-        + format_sourced_value(
-            f"`{sanitize_comment_text(metadata.model, limit=60)}`",
-            metadata.model_source or None,
-        ),
-        "**Provider:** "
-        + format_sourced_value(
-            f"`{sanitize_comment_text(metadata.provider, limit=40)}`",
-            metadata.provider_source or None,
-        ),
-    ]
-    if metadata.transport or metadata.transport_source:
-        parts.append(
-            "**Transport:** "
-            + format_sourced_value(
-                f"`{sanitize_comment_text(metadata.transport or 'unset', limit=40)}`",
-                metadata.transport_source or None,
-            ),
-        )
-    if metadata.max_cost_usd is not None or metadata.max_cost_usd_source:
-        parts.append(
-            "**Max cost:** "
-            + format_max_cost_label(
-                max_cost_usd=metadata.max_cost_usd,
-                source=metadata.max_cost_usd_source or None,
-            ),
-        )
-    parts.extend(
-        [
-            f"**Depth:** {metadata.depth}",
-            (
-                f"**Tokens:** {_fmt_tokens(total_tokens, estimated=estimated)} "
-                f"(in {_fmt_int(prompt_tokens)} / out {_fmt_int(completion_tokens)}, "
-                f"{source})"
-            ),
-            f"**Est. cost:** "
-            f"{_fmt_cost(metadata.cost_estimate_usd, estimated=estimated)}",
-            f"**Duration:** {metadata.duration_seconds:.1f}s",
-        ],
-    )
-    return " · ".join(parts)
-
-
-def _severity_counts(*, findings: tuple[ReviewFinding, ...]) -> dict[Severity, int]:
-    """Count findings by severity.
-
-    Questions (#1925) carry no severity semantics and are excluded, so the
-    counts always match the finding set the derived verdict was computed from.
-
-    Args:
-        findings: Findings to count over.
-
-    Returns:
-        Count per severity, with every severity present.
-    """
-    counts: dict[Severity, int] = {Severity.P1: 0, Severity.P2: 0, Severity.P3: 0}
-    for finding in findings:
-        if finding.is_question:
-            continue
-        counts[finding.severity] = counts.get(finding.severity, 0) + 1
-    return counts
 
 
 def format_finding_comment(

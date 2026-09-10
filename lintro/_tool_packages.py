@@ -40,15 +40,18 @@ NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "oxlint": ToolName.OXLINT,
     "oxfmt": ToolName.OXFMT,
     "stylelint": ToolName.STYLELINT,
+    "@stoplight/spectral-cli": ToolName.SPECTRAL,
     "@astrojs/check": None,
 }
 
 PYPI_PACKAGE_OWNERS: dict[str, ToolName | None] = {
     "bandit": ToolName.BANDIT,
     "black": ToolName.BLACK,
+    "import-linter": ToolName.IMPORT_LINTER,
     "mypy": ToolName.MYPY,
     "pip-audit": ToolName.PIP_AUDIT,
     "pydoclint": ToolName.PYDOCLINT,
+    "pylint": ToolName.PYLINT,
     "pytest": ToolName.PYTEST,
     "ruff": ToolName.RUFF,
     "semgrep": ToolName.SEMGREP,

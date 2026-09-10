@@ -219,6 +219,16 @@ class OutputManager:
                 "Concurrent cleanup may delete this run directory.",
             )
 
+    def mark_run_complete(self) -> None:
+        """Remove the active marker after all output for this run is finalized."""
+        marker_path = self._active_marker_path(self.run_dir)
+        try:
+            marker_path.unlink(missing_ok=True)
+        except OSError as exc:
+            logger.warning(
+                f"Failed to remove active-run marker {marker_path}: {exc}.",
+            )
+
     def _pid_is_active(self, pid: int) -> bool:
         """Check whether a process ID is still alive."""
         if pid <= 0:

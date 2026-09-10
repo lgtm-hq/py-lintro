@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
+    "CustomAgentPassRequest",
     "CustomAgentPassResult",
     "build_custom_agent_prompt",
     "run_custom_agent_passes",
@@ -68,6 +69,7 @@ class CustomAgentPassResult:
         agent_name: Name of the agent that produced the pass.
         findings: Findings reported by the agent, already attributed via
             :attr:`~lintro.ai.review.models.review_finding.ReviewFinding.source`.
+        files: Changed files this pass actually reviewed.
         input_tokens: Prompt tokens consumed by the pass.
         output_tokens: Completion tokens produced by the pass.
         cost_estimate: Estimated USD cost of the pass.
@@ -75,6 +77,7 @@ class CustomAgentPassResult:
 
     agent_name: str
     findings: tuple[ReviewFinding, ...] = ()
+    files: tuple[str, ...] = ()
     input_tokens: int = 0
     output_tokens: int = 0
     cost_estimate: float = 0.0
@@ -231,18 +234,53 @@ def _findings_from_response(
     )
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CustomAgentPassRequest:
+    """Everything one run's custom-agent passes need.
+
+    Grouping the run-scope inputs keeps :func:`run_custom_agent_passes` to one
+    argument and makes a new input a field here rather than another keyword
+    threaded through the caller (issue #2301).
+
+    Attributes:
+        selected: Agents scoped to at least one changed file.
+        context: Collected review diff context.
+        provider: The run's default provider.
+        ai_config: The run's AI configuration.
+        budget: Session cost budget shared with the built-in passes.
+        repo_root: Absolute path to the repository under review.
+        workspace_root: Optional workspace root for per-agent providers.
+        use_one_shot: When True, avoid durable CLI provider sessions.
+        provider_cache: The owning
+            :class:`~lintro.ai.review.session.ReviewSession`'s cache of
+            providers built for ``model`` overrides, keyed by model name.
+            It is required, and required to be the session's own dict: a
+            local cache here would be dropped with the call frame and leak
+            every client an override built (issue #2302).
+        on_pass_complete: Optional callback invoked with each completed pass
+            as soon as it finishes, so a caller can recover work already done
+            if a later pass trips the cost cap.
+        on_agent_failed: Optional callback invoked with the agent's name when
+            a non-budget provider error skips it, so a caller can count it
+            toward skipped-agent metadata (issue #1245).
+    """
+
+    selected: tuple[SelectedCustomAgent, ...]
+    context: ReviewContext
+    provider: BaseAIProvider
+    ai_config: AIConfig
+    budget: CostBudget
+    repo_root: str = ""
+    workspace_root: Path | None = None
+    use_one_shot: bool = True
+    provider_cache: dict[str, BaseAIProvider]
+    on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None
+    on_agent_failed: Callable[[str], None] | None = None
+
+
 async def run_custom_agent_passes(
     *,
-    selected: tuple[SelectedCustomAgent, ...],
-    context: ReviewContext,
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    budget: CostBudget,
-    repo_root: str = "",
-    workspace_root: Path | None = None,
-    use_one_shot: bool = True,
-    on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None,
-    on_agent_failed: Callable[[str], None] | None = None,
+    request: CustomAgentPassRequest,
 ) -> tuple[CustomAgentPassResult, ...]:
     """Run every selected custom review agent against its scoped diff.
 
@@ -252,20 +290,7 @@ async def run_custom_agent_passes(
     discard an otherwise complete review.
 
     Args:
-        selected: Agents scoped to at least one changed file.
-        context: Collected review diff context.
-        provider: The run's default provider.
-        ai_config: The run's AI configuration.
-        budget: Session cost budget shared with the built-in passes.
-        repo_root: Absolute path to the repository under review.
-        workspace_root: Optional workspace root for per-agent providers.
-        use_one_shot: When True, avoid durable CLI provider sessions.
-        on_pass_complete: Optional callback invoked with each completed pass
-            as soon as it finishes, so a caller can recover work already done
-            if a later pass trips the cost cap.
-        on_agent_failed: Optional callback invoked with the agent's name when
-            a non-budget provider error skips it, so a caller can count it
-            toward skipped-agent metadata (issue #1245).
+        request: The run-scope inputs every pass reads.
 
     Returns:
         Results for every agent that completed a pass.
@@ -273,8 +298,21 @@ async def run_custom_agent_passes(
     Raises:
         AICostBudgetExceededError: When the session cost cap is reached.
     """
+    selected = request.selected
+    context = request.context
+    provider = request.provider
+    ai_config = request.ai_config
+    budget = request.budget
+    repo_root = request.repo_root
+    workspace_root = request.workspace_root
+    use_one_shot = request.use_one_shot
+    on_pass_complete = request.on_pass_complete
+    on_agent_failed = request.on_agent_failed
+
     results: list[CustomAgentPassResult] = []
-    provider_cache: dict[str, BaseAIProvider] = {}
+    # The session owns the providers an override builds, so its cache is
+    # filled in place rather than a local one being discarded here (#2302).
+    provider_cache = request.provider_cache
     for entry in selected:
         agent = entry.agent
         budget.check()
@@ -326,6 +364,7 @@ async def run_custom_agent_passes(
                 agent=agent,
                 content=response.content,
             ),
+            files=entry.files,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             cost_estimate=response.cost_estimate,

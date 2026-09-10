@@ -1,0 +1,5 @@
+diff --git a/scripts/ci/site/migrate-docs-content.py b/scripts/ci/site/migrate-docs-content.py
+--- a/scripts/ci/site/migrate-docs-content.py
++++ b/scripts/ci/site/migrate-docs-content.py
+@@ -0,0 +1 @@
++DOC_SPECS = ()

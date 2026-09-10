@@ -166,6 +166,7 @@ Arguments (all optional):
       "body": "The loop never terminates.\n\nCause: ...\n\nFix: ...",
       "confidence": "high",
       "suggested_code": "i += 1",
+      "suggestion_dropped": "",
       "checklist_ids": [2],
       "source": ""
     }
@@ -193,6 +194,12 @@ Arguments (all optional):
 }
 ```
 
+`suggestion_dropped` is empty when the finding's suggested patch validated against the
+file at HEAD. Otherwise it names why the one-click patch was withheld — `stale_anchor`,
+`ambiguous_anchor`, or `file_missing` — and `suggested_code` is cleared so no consumer
+can apply a hunk that no longer matches the file. The finding's prose (including its
+described fix) is always kept.
+
 Cost control:
 
 - The effective `ai.max_cost_usd` (after `LINTRO_AI_MAX_COST_USD` / CLI overlay and the
@@ -215,9 +222,10 @@ Notes and limits:
   `LINTRO_AI_TRANSCRIPT=1`); it is written under the gitignored `.lintro-cache/`, and no
   tool argument can turn it on.
 - An empty diff is a result, not an error: `findings: []` with zero-valued run metadata.
-- Without the `[ai]` extra, without a usable provider, or with `ai.review: false`, the
-  tool is still listed and returns `tool_unavailable` with `detail.reason` so an agent
-  gets a reason rather than a missing capability.
+- Without the `[ai]` extra, without a usable provider, or when effective review is off
+  (`ai.enabled` and `ai.review` are not both true after config and environment
+  overlays), the tool is still listed and returns `tool_unavailable` with
+  `detail.reason` so an agent gets a reason rather than a missing capability.
 - A failed review carries the same taxonomy `lintro review --output json` prints, under
   `detail.review_error` (`kind`, `provider`, `status`, `retryable`).
 - **Latency**: a depth-3 review runs for minutes. Progress notifications are not sent;
@@ -298,7 +306,15 @@ what lintro requires.
       "below_recommended": false,
       "status": "outdated",
       "error": "Version 0.9.0 is below minimum requirement 0.15.9",
-      "install_hint": "uv pip install 'ruff>=0.15.9'"
+      "install_hint": "uv pip install 'ruff>=0.15.9'",
+      "binary_path": "/proj/.venv/bin/ruff",
+      "advisory": {
+        "tool": "ruff",
+        "installed": "0.9.0",
+        "latest_known": "0.15.9",
+        "channel": "pip",
+        "update_command": "uv pip install --upgrade 'ruff>=0.15.9'"
+      }
     }
   ],
   "summary": { "ok": 28, "outdated": 7, "missing": 2, "total": 37 }

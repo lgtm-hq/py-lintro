@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -13,14 +15,20 @@ from click.testing import CliRunner
 
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.lifecycle.state import load_prior_review_state
+from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.state_store import write_local_state
 from lintro.cli import cli
 from lintro.cli_utils.commands.review import (
+    ReviewCommandOptions,
     _cli_overrides,
     _describe_config_source,
     _merge_advisory_into_json,
@@ -48,6 +56,28 @@ def _empty_result() -> ReviewResult:
     )
 
 
+def _partial_result(*, stopped_reason: str) -> ReviewResult:
+    return ReviewResult(
+        metadata=ReviewMetadata(
+            model="gpt-4o",
+            provider="openai",
+            context_window=128_000,
+            depth=1,
+            chunks_total=2,
+            chunks_current=1,
+            files_reviewed=1,
+            files_total=2,
+            checklist_items=0,
+            partial=True,
+            chunks_reviewed=1,
+            stopped_reason=stopped_reason,
+        ),
+        summary="Partial review.",
+        checklist=(),
+        findings=(),
+    )
+
+
 def test_review_help_shows_flags() -> None:
     """Review command help lists primary flags."""
     runner = CliRunner()
@@ -62,7 +92,25 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.output).contains("--transport")
     assert_that(result.output).contains("--provider")
     assert_that(result.output).contains("--model")
+    assert_that(result.output).contains("--review / --no-review")
     assert_that(result.output).contains("--max-cost-usd")
+
+
+def test_click_dests_match_review_command_options_fields() -> None:
+    """Every Click dest has a matching ``ReviewCommandOptions`` field.
+
+    ``review_command`` splats ``ctx.params`` into the frozen dataclass, so the
+    decorators and the dataclass are two sources of one truth: an added or
+    renamed option that never reaches the dataclass raises ``TypeError`` on
+    every ``lintro review`` invocation, and a stale field is dead weight the
+    Click surface can no longer populate.
+    """
+    from lintro.cli_utils.commands.review import review_command
+
+    click_dests = frozenset(param.name for param in review_command.params)
+    option_fields = frozenset(ReviewCommandOptions.__dataclass_fields__)
+
+    assert_that(click_dests).is_equal_to(option_fields)
 
 
 def test_review_invalid_provider_env_exits_two(
@@ -101,20 +149,26 @@ def test_review_nonnumeric_max_cost_usd_exits_two() -> None:
 
     assert_that(result.exit_code).is_equal_to(2)
     assert_that(result.output).contains("--max-cost-usd='plenty'")
-    assert_that(result.output).contains("0 for uncapped")
+    assert_that(result.output).contains("uncapped")
     assert_that(result.output).does_not_contain("Traceback")
 
 
-def test_review_max_cost_flag_beats_transport_profile() -> None:
-    """``--max-cost-usd 0`` lifts a YAML transport-profile cap (#2024)."""
-    runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
-    mock_context.unified_diff = ""
+@pytest.fixture
+def profile_cap_review_pipeline() -> Iterator[dict[str, MagicMock]]:
+    """Enter the review pipeline patched over a CLI transport-profile cap.
+
+    Shared by the cost-cap provenance tests so the same ~50-line patch
+    stack is not written twice (#2048).
+
+    Yields:
+        dict[str, MagicMock]: Entered patch mocks keyed by the patched
+            review dependency name.
+    """
     mock_config = MagicMock(
         ai={
             "enabled": True,
             "review": True,
+            "provider": "openai",
             "transport": "cli",
             "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
         },
@@ -125,117 +179,67 @@ def test_review_max_cost_flag_beats_transport_profile() -> None:
     mock_config.review.force_semantic_chunking = False
     mock_config.review.checklist_display = ChecklistDisplay.OFF
 
-    with (
-        patch("lintro.cli_utils.commands.review.require_ai"),
-        patch(
-            "lintro.cli_utils.commands.review.get_config",
-            return_value=mock_config,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
-            return_value=mock_context,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-            return_value=("", {}),
-        ),
-        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
-        patch(
-            "lintro.cli_utils.commands.review.run_review",
-            return_value=_empty_result(),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.render_review_output",
-        ) as mock_render,
-    ):
-        mock_get_provider.return_value = MagicMock(
-            model_name="gpt-4o",
-            name="openai",
-        )
-        result = runner.invoke(cli, ["review", "--max-cost-usd", "0"])
+    patches = _mock_review_pipeline(mock_config=mock_config)
+    with ExitStack() as stack:
+        yield {name: stack.enter_context(patcher) for name, patcher in patches.items()}
+
+
+def test_review_max_cost_flag_beats_transport_profile(
+    profile_cap_review_pipeline: dict[str, MagicMock],
+) -> None:
+    """``--max-cost-usd uncapped`` lifts a YAML transport-profile cap (#2154).
+
+    Args:
+        profile_cap_review_pipeline: Patched review pipeline over a CLI
+            transport-profile cap config.
+    """
+    result = CliRunner().invoke(cli, ["review", "--max-cost-usd", "uncapped"])
 
     assert_that(result.exit_code).is_equal_to(0)
+    mock_get_provider = profile_cap_review_pipeline["get_provider"]
     provider_config = mock_get_provider.call_args.args[0]
     assert_that(provider_config.max_cost_usd).is_none()
+    mock_render = profile_cap_review_pipeline["render_review_output"]
     rendered = mock_render.call_args.kwargs["result"]
     assert_that(rendered.metadata.max_cost_usd).is_none()
     assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("flag")
 
 
-def test_review_profile_cap_provenance_is_config() -> None:
-    """A YAML-only transport-profile cap is sourced as config, not default."""
-    runner = CliRunner()
-    mock_context = MagicMock()
-    mock_context.changed_files = []
-    mock_context.unified_diff = ""
-    mock_config = MagicMock(
-        ai={
-            "enabled": True,
-            "review": True,
-            "transport": "cli",
-            "transports": {"cli": {"max_cost_usd_advisory": 1.25}},
-        },
-    )
-    mock_config.review.depth = 1
-    mock_config.review.strictness = ReviewStrictness.BALANCED
-    mock_config.review.sensitivity = MagicMock()
-    mock_config.review.force_semantic_chunking = False
-    mock_config.review.checklist_display = ChecklistDisplay.OFF
+def test_review_labels_the_transcript_with_its_own_command(
+    profile_cap_review_pipeline: dict[str, MagicMock],
+) -> None:
+    """The CLI call site names the verb the transcript file is written under.
 
-    with (
-        patch("lintro.cli_utils.commands.review.require_ai"),
-        patch(
-            "lintro.cli_utils.commands.review.get_config",
-            return_value=mock_config,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
-            return_value=mock_context,
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
-            return_value=[],
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
-            return_value=("", {}),
-        ),
-        patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
-        patch(
-            "lintro.cli_utils.commands.review.run_review",
-            return_value=_empty_result(),
-        ),
-        patch(
-            "lintro.cli_utils.commands.review.render_review_output",
-        ) as mock_render,
-    ):
-        mock_get_provider.return_value = MagicMock(
-            model_name="gpt-4o",
-            name="openai",
-        )
-        result = runner.invoke(cli, ["review"])
+    ``get_provider`` defaults ``transcript_command`` to ``None``, so dropping
+    the kwarg here would silently rename every CLI review transcript without
+    failing a test of :mod:`lintro.ai.transcript` itself.
+
+    Args:
+        profile_cap_review_pipeline: Patched review pipeline over a CLI
+            transport-profile cap config.
+    """
+    result = CliRunner().invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
+    mock_get_provider = profile_cap_review_pipeline["get_provider"]
+    assert_that(mock_get_provider.call_args.kwargs).contains_entry(
+        {"transcript_command": "review"},
+    )
+
+
+def test_review_profile_cap_provenance_is_config(
+    profile_cap_review_pipeline: dict[str, MagicMock],
+) -> None:
+    """A YAML-only transport-profile cap is sourced as config, not default.
+
+    Args:
+        profile_cap_review_pipeline: Patched review pipeline over a CLI
+            transport-profile cap config.
+    """
+    result = CliRunner().invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    mock_render = profile_cap_review_pipeline["render_review_output"]
     rendered = mock_render.call_args.kwargs["result"]
     assert_that(rendered.metadata.max_cost_usd).is_equal_to(1.25)
     assert_that(rendered.metadata.max_cost_usd_source).is_equal_to("config")
@@ -297,6 +301,7 @@ def test_review_runs_when_review_enabled_without_lint() -> None:
             enabled=True,
             lint=False,
             review=True,
+            provider=AIProvider.OPENAI,
             transport=AITransport.API,
         ).model_dump(),
     )
@@ -326,13 +331,77 @@ def test_review_runs_when_review_enabled_without_lint() -> None:
     assert_that(result.exit_code).is_equal_to(0)
 
 
+def test_review_flag_enables_lint_only_config() -> None:
+    """``--review`` enables diff review without changing committed config."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+    lint_only_config = MagicMock(
+        ai=AIConfig(
+            enabled=True,
+            lint=True,
+            review=False,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
+    )
+    lint_only_config.review.depth = 1
+    lint_only_config.review.strictness = ReviewStrictness.BALANCED
+    lint_only_config.review.sensitivity = MagicMock()
+    lint_only_config.review.force_semantic_chunking = False
+    lint_only_config.review.checklist_display = ChecklistDisplay.OFF
+
+    with (
+        patches["require_ai"],
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=lint_only_config,
+        ),
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+    ):
+        result = runner.invoke(cli, ["review", "--review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+
+
+def test_no_review_flag_disables_review_enabled_config() -> None:
+    """``--no-review`` wins over an enabled committed review setting."""
+    runner = CliRunner()
+    mock_config = MagicMock(
+        ai=AIConfig(
+            enabled=True,
+            review=True,
+            provider=AIProvider.OPENAI,
+        ).model_dump(),
+    )
+
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=mock_config,
+        ),
+    ):
+        result = runner.invoke(cli, ["review", "--no-review"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains("AI review is disabled")
+    assert_that(result.output).contains("LINTRO_AI_REVIEW=1")
+
+
 def test_review_json_output_echoes_payload() -> None:
     """Review command echoes JSON when --output json is used."""
     runner = CliRunner()
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -346,23 +415,23 @@ def test_review_json_output_echoes_payload() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -373,7 +442,7 @@ def test_review_json_output_echoes_payload() -> None:
             ),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch(
@@ -400,7 +469,11 @@ def test_review_passes_transport_override_to_provider() -> None:
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -415,30 +488,30 @@ def test_review_passes_transport_override_to_provider() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
             "lintro.cli_utils.commands.review.get_provider",
         ) as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -463,7 +536,11 @@ def test_review_passes_provider_and_model_overrides_to_provider() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -478,30 +555,30 @@ def test_review_passes_provider_and_model_overrides_to_provider() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
             "lintro.cli_utils.commands.review.get_provider",
         ) as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch("lintro.cli_utils.commands.review.render_review_output"),
@@ -562,28 +639,28 @@ def test_review_stamps_resolved_transport_provenance_on_metadata() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch(
@@ -622,7 +699,11 @@ def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -643,28 +724,28 @@ def test_review_downgrades_billed_to_estimated_without_usage_counters() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch("lintro.cli_utils.commands.review.get_provider") as mock_get_provider,
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=estimated_result,
         ),
         patch(
@@ -688,7 +769,7 @@ def test_review_exits_zero_without_p1_findings() -> None:
     mock_context = MagicMock()
     mock_context.changed_files = []
     mock_context.unified_diff = ""
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -702,23 +783,23 @@ def test_review_exits_zero_without_p1_findings() -> None:
             return_value=mock_config,
         ),
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         ),
         patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         patch(
@@ -729,7 +810,7 @@ def test_review_exits_zero_without_p1_findings() -> None:
             ),
         ),
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         patch(
@@ -744,6 +825,27 @@ def test_review_exits_zero_without_p1_findings() -> None:
     )
 
 
+def _pin_review_config_defaults(mock_config: MagicMock) -> MagicMock:
+    """Pin the review-config fields the command reads unconditionally.
+
+    An auto-attr ``MagicMock`` answers every attribute with another mock, so a
+    fixture that omits a field silently feeds the command something no real
+    ``ReviewConfig`` would produce. The convergence stop rule is read on every
+    non-``--full`` review, so its two fields are pinned to the production
+    disable-by-default values here rather than in one branch of one helper —
+    every MagicMock review config in this file routes through this (#2099).
+
+    Args:
+        mock_config: Config mock to pin fields on.
+
+    Returns:
+        The same mock, for chaining at a construction site.
+    """
+    mock_config.review.convergence.threshold = None
+    mock_config.review.convergence.stable_rounds = 2
+    return mock_config
+
+
 def _mock_review_pipeline(
     *,
     mock_collect: MagicMock | None = None,
@@ -754,8 +856,8 @@ def _mock_review_pipeline(
     Args:
         mock_collect: Replacement for the context-collection patch.
         mock_config: Replacement lintro config. Defaults to a minimal config
-            with AI enabled; pass one to exercise config-dependent wiring
-            without duplicating the whole patch stack.
+            with AI enabled and an explicit provider; pass one to exercise
+            config-dependent wiring without duplicating the whole patch stack.
 
     Returns:
         Named patchers to enter around a ``CliRunner`` invocation.
@@ -764,21 +866,25 @@ def _mock_review_pipeline(
     mock_context.changed_files = []
     mock_context.unified_diff = ""
     if mock_config is None:
-        mock_config = MagicMock(ai={"enabled": True})
+        mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
         mock_config.review.depth = 1
         mock_config.review.strictness = ReviewStrictness.BALANCED
         mock_config.review.sensitivity = MagicMock()
         mock_config.review.force_semantic_chunking = False
         mock_config.review.checklist_display = ChecklistDisplay.OFF
+    # Applied to a caller-supplied config too, not just the default one built
+    # above: overlays such as _agent_mode_config() and the profile-cap fixture
+    # otherwise reach the stop rule with auto-attr mocks (#2099 review).
+    _pin_review_config_defaults(mock_config)
 
     collect_patch = (
         patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             mock_collect,
         )
         if mock_collect is not None
         else patch(
-            "lintro.cli_utils.commands.review.collect_review_context",
+            "lintro.ai.review.preparation.collect_review_context",
             return_value=mock_context,
         )
     )
@@ -791,19 +897,19 @@ def _mock_review_pipeline(
         ),
         "collect_review_context": collect_patch,
         "classify_changed_files": patch(
-            "lintro.cli_utils.commands.review.classify_changed_files",
+            "lintro.ai.review.preparation.classify_changed_files",
             return_value=[],
         ),
         "get_all_checklist_items": patch(
-            "lintro.cli_utils.commands.review.get_all_checklist_items",
+            "lintro.ai.review.preparation.get_all_checklist_items",
             return_value=[],
         ),
         "select_checklist_items": patch(
-            "lintro.cli_utils.commands.review.select_checklist_items",
+            "lintro.ai.review.preparation.select_checklist_items",
             return_value=[],
         ),
         "format_checklist_for_prompt": patch(
-            "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+            "lintro.ai.review.preparation.format_checklist_for_prompt",
             return_value=("", {}),
         ),
         "get_provider": patch(
@@ -814,7 +920,7 @@ def _mock_review_pipeline(
             ),
         ),
         "run_review": patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ),
         "render_review_output": patch(
@@ -1042,7 +1148,7 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
         completed_chunks=2,
         cause_message="Cursor CLI timed out after 300s",
     )
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = MagicMock(ai={"enabled": True, "provider": "openai"})
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
     mock_config.review.sensitivity = MagicMock()
@@ -1055,23 +1161,23 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
             return_value=mock_config,
         ):
             with patch(
-                "lintro.cli_utils.commands.review.collect_review_context",
+                "lintro.ai.review.preparation.collect_review_context",
                 return_value=mock_context,
             ):
                 with patch(
-                    "lintro.cli_utils.commands.review.classify_changed_files",
+                    "lintro.ai.review.preparation.classify_changed_files",
                     return_value=[],
                 ):
                     with patch(
-                        "lintro.cli_utils.commands.review.get_all_checklist_items",
+                        "lintro.ai.review.preparation.get_all_checklist_items",
                         return_value=[],
                     ):
                         with patch(
-                            "lintro.cli_utils.commands.review.select_checklist_items",
+                            "lintro.ai.review.preparation.select_checklist_items",
                             return_value=[],
                         ):
                             with patch(
-                                "lintro.cli_utils.commands.review.format_checklist_for_prompt",
+                                "lintro.ai.review.preparation.format_checklist_for_prompt",
                                 return_value=("", {}),
                             ):
                                 with patch(
@@ -1082,7 +1188,7 @@ def test_review_failure_renders_friendly_error_without_traceback() -> None:
                                     ),
                                 ):
                                     with patch(
-                                        "lintro.cli_utils.commands.review.run_review",
+                                        "lintro.ai.review.preparation.run_review",
                                         side_effect=execution_error,
                                     ):
                                         result = runner.invoke(cli, ["review"])
@@ -1125,7 +1231,9 @@ def _agent_mode_config(*, tmp_path: Path, mode: CustomAgentMode) -> MagicMock:
     Returns:
         The configured mock.
     """
-    mock_config = MagicMock(ai={"enabled": True})
+    mock_config = _pin_review_config_defaults(
+        MagicMock(ai={"enabled": True, "provider": "openai"}),
+    )
     mock_config.config_path = str(tmp_path / ".lintro-config.yaml")
     mock_config.review.depth = 1
     mock_config.review.strictness = ReviewStrictness.BALANCED
@@ -1193,7 +1301,7 @@ def test_review_passes_discovered_agents_to_run_review(tmp_path: Path) -> None:
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1201,11 +1309,11 @@ def test_review_passes_discovered_agents_to_run_review(tmp_path: Path) -> None:
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = run_review.call_args.kwargs
-    assert_that([agent.name for agent in kwargs["custom_agents"]]).is_equal_to(
+    options = run_review.call_args.kwargs["options"]
+    assert_that([agent.name for agent in options.custom_agents]).is_equal_to(
         ["no-raw-sql"],
     )
-    assert_that(kwargs["run_builtin_checklist"]).is_true()
+    assert_that(options.run_builtin_checklist).is_true()
 
 
 def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
@@ -1228,7 +1336,7 @@ def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1236,9 +1344,9 @@ def test_review_custom_agents_disabled_skips_discovery(tmp_path: Path) -> None:
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = run_review.call_args.kwargs
-    assert_that(kwargs["custom_agents"]).is_empty()
-    assert_that(kwargs["run_builtin_checklist"]).is_true()
+    options = run_review.call_args.kwargs["options"]
+    assert_that(options.custom_agents).is_empty()
+    assert_that(options.run_builtin_checklist).is_true()
 
 
 def test_review_custom_agents_only_disables_builtin_checklist(
@@ -1263,7 +1371,7 @@ def test_review_custom_agents_only_disables_builtin_checklist(
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1271,9 +1379,9 @@ def test_review_custom_agents_only_disables_builtin_checklist(
         result = runner.invoke(cli, ["review"])
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = run_review.call_args.kwargs
-    assert_that(kwargs["run_builtin_checklist"]).is_false()
-    assert_that(kwargs["custom_agents"]).is_length(1)
+    options = run_review.call_args.kwargs["options"]
+    assert_that(options.run_builtin_checklist).is_false()
+    assert_that(options.custom_agents).is_length(1)
 
 
 def test_review_custom_agents_only_with_no_valid_agents_errors(
@@ -1301,7 +1409,7 @@ def test_review_custom_agents_only_with_no_valid_agents_errors(
         patches["format_checklist_for_prompt"],
         patches["get_provider"],
         patch(
-            "lintro.cli_utils.commands.review.run_review",
+            "lintro.ai.review.preparation.run_review",
             return_value=_empty_result(),
         ) as run_review,
         patches["render_review_output"],
@@ -1344,6 +1452,53 @@ def test_review_help_shows_advisory_flags() -> None:
     assert_that(result.output).contains("--advisory-tools")
     assert_that(result.output).contains("--advisory-only")
     assert_that(result.output).contains("--fail-on-findings")
+
+
+def _advisory_error_result() -> ToolResult:
+    """Build an advisory tool result for a configuration/runtime failure."""
+    return ToolResult(
+        name="idiom-review",
+        success=False,
+        output=(
+            "ai.provider is required when ai.lint or ai.review is enabled. "
+            "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider. "
+            "Accepted providers: anthropic, cursor, openai."
+        ),
+        metadata={"advisory_error": "provider_required"},
+    )
+
+
+def test_advisory_only_unset_provider_exits_two_before_tools() -> None:
+    """--advisory-only fails closed on an unset provider before tools run."""
+    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.resolve_effective_ai_config",
+            lambda _mapping, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True},
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+        ) as run_advisory,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--output", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
+    assert_that(payload["error"]["message"]).contains("--provider")
+    assert_that(run_advisory.called).is_false()
 
 
 def test_advisory_only_exits_zero_with_findings() -> None:
@@ -1399,6 +1554,91 @@ def test_advisory_only_json_output() -> None:
     payload = json.loads(result.output)
     assert_that(payload["advisory"]).is_length(1)
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
+    assert_that(payload["advisory"][0]["success"]).is_false()
+
+
+def test_advisory_only_errored_tool_exits_two() -> None:
+    """An advisory tool that failed to run is not a finding and exits 2."""
+    from lintro.ai.review.error_contract import REVIEW_ERROR_EXIT_CODE
+
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.resolve_effective_ai_config",
+            lambda _mapping, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True, "provider": "openai"},
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_error_result()],
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--output", "json"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(REVIEW_ERROR_EXIT_CODE)
+    payload = json.loads(result.output[result.output.index("{") :])
+    assert_that(payload["error"]["kind"]).is_equal_to("provider_unavailable")
+    assert_that(payload["error"]["message"]).contains("`ai.provider` in config")
+    assert_that(payload).does_not_contain_key("advisory")
+    assert_that(payload).does_not_contain_key("findings")
+
+
+def test_advisory_only_provider_flag_reaches_advisory_tools() -> None:
+    """``--provider`` overlays YAML that omits ``ai.provider`` before tools run."""
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(ai={"enabled": True, "review": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as run_advisory,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--advisory-only", "--provider", "openai"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    ai_config = run_advisory.call_args.kwargs["ai_config"]
+    assert_that(ai_config.provider).is_equal_to(AIProvider.OPENAI)
+
+
+def test_advisory_failure_error_uses_metadata_not_prose() -> None:
+    """Classification keys off the typed marker, not error-message copy."""
+    from lintro.ai.exceptions import AIError, AIProviderRequiredError
+    from lintro.cli_utils.commands.review import _advisory_failure_error
+
+    marked = ToolResult(
+        name="idiom-review",
+        success=False,
+        output="tool failed for an unrelated reason",
+        metadata={"advisory_error": "provider_required"},
+    )
+    assert_that(_advisory_failure_error([marked])).is_instance_of(
+        AIProviderRequiredError,
+    )
+
+    prose_only = ToolResult(
+        name="idiom-review",
+        success=False,
+        output=("ai.provider is required when ai.lint or ai.review is enabled."),
+    )
+    error = _advisory_failure_error([prose_only])
+    assert_that(error).is_instance_of(AIError)
+    assert_that(error.__class__).is_equal_to(AIError)
 
 
 def test_advisory_only_rejects_diff_flags() -> None:
@@ -1572,22 +1812,194 @@ def test_full_review_json_merges_advisory_key() -> None:
     assert_that(payload["advisory"][0]["tool"]).is_equal_to("idiom-review")
 
 
+def test_sigterm_partial_skips_advisory_and_post() -> None:
+    """Runner SIGTERM must exit after the envelope, not burn the 5s window."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patch(
+            "lintro.ai.review.preparation.run_review",
+            return_value=_partial_result(stopped_reason="timeout (SIGTERM)"),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "partial", "partial": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_finding_result()],
+        ) as mock_advisory,
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--post",
+                "--pr",
+                "7",
+                "--repo",
+                "owner/name",
+                "--output",
+                "json",
+                "--advisory-tools",
+                "idiom-review",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["summary"]).is_equal_to("partial")
+    assert_that(payload).does_not_contain_key("advisory")
+    assert_that(mock_advisory.called).is_false()
+    assert_that(mock_post.called).is_false()
+
+
+def test_cost_cap_partial_still_runs_advisory_and_post() -> None:
+    """A cost-cap stop is not a runner SIGKILL window; --post still runs."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patch(
+            "lintro.ai.review.preparation.run_review",
+            return_value=_partial_result(stopped_reason="cost cap ($1.00) reached"),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "partial", "partial": True}),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as mock_advisory,
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--post",
+                "--pr",
+                "7",
+                "--repo",
+                "owner/name",
+                "--output",
+                "json",
+                "--advisory-tools",
+                "idiom-review",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(mock_advisory.called).is_true()
+    assert_that(mock_post.called).is_true()
+
+
+def test_full_review_keeps_results_when_advisory_errors() -> None:
+    """Advisory failure after a finished review does not discard the review."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patch(
+            "lintro.cli_utils.commands.review.render_review_output",
+            return_value=json.dumps({"summary": "ok", "findings": []}),
+        ) as mock_render,
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[_advisory_error_result()],
+        ),
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(cli, ["review", "--output", "json"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)
+    assert_that(payload["summary"]).is_equal_to("ok")
+    assert_that(payload["findings"]).is_equal_to([])
+    assert_that(payload["advisory"][0]["success"]).is_false()
+    assert_that(payload["advisory"][0]["output"]).contains("ai.provider is required")
+    assert_that(mock_render.called).is_true()
+    assert_that(mock_post.called).is_false()
+
+
+def test_full_review_forwards_effective_ai_config_to_advisory() -> None:
+    """The review command passes the resolved AIConfig into advisory tools."""
+    runner = CliRunner()
+    patches = _mock_review_pipeline()
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review.run_advisory_tools",
+            return_value=[],
+        ) as run_advisory,
+    ):
+        result = runner.invoke(cli, ["review"])
+
+    assert_that(result.exit_code).is_equal_to(0)
+    ai_config = run_advisory.call_args.kwargs["ai_config"]
+    assert_that(ai_config.provider).is_equal_to(AIProvider.OPENAI)
+
+
 def test_cli_overrides_lists_only_explicit_flags() -> None:
     """Only options the caller actually passed appear as overrides."""
     overrides = _cli_overrides(
-        depth=None,
-        strictness=None,
-        transport="cli",
-        provider=None,
-        model=None,
-        max_cost_usd=None,
-        timeout=600.0,
-        context_window=None,
-        semantic_chunks=False,
-        paths=None,
+        options=ReviewCommandOptions(
+            transport="cli",
+            review_override=True,
+            timeout=600.0,
+        ),
     )
 
-    assert_that(overrides).is_equal_to(["--transport cli", "--timeout 600"])
+    assert_that(overrides).is_equal_to(
+        ["--transport cli", "--review", "--timeout 600"],
+    )
 
 
 def test_describe_config_source_names_the_file_without_its_path() -> None:
@@ -1617,7 +2029,11 @@ def test_review_post_reports_config_source_and_transport() -> None:
     """
     runner = CliRunner()
     mock_config = MagicMock(
-        ai=AIConfig(enabled=True, transport=AITransport.API).model_dump(),
+        ai=AIConfig(
+            enabled=True,
+            provider=AIProvider.OPENAI,
+            transport=AITransport.API,
+        ).model_dump(),
     )
     mock_config.config_path = "/home/runner/work/repo/repo/.lintro-config.yaml"
     mock_config.review.depth = 1
@@ -1658,8 +2074,124 @@ def test_review_post_reports_config_source_and_transport() -> None:
         )
 
     assert_that(result.exit_code).is_equal_to(0)
-    kwargs = mock_post.call_args.kwargs
-    assert_that(kwargs["config_source"]).is_equal_to(
+    options = mock_post.call_args.kwargs["options"]
+    assert_that(options.config_source).is_equal_to(
         "`.lintro-config.yaml` + CLI overrides (--timeout 600)",
     )
-    assert_that(kwargs["transport"]).is_equal_to(str(AITransport.API))
+    assert_that(options.transport).is_equal_to(str(AITransport.API))
+
+
+def test_ci_does_not_import_the_local_ledger(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Actions runs may only resume from downloaded artifacts."""
+    ledger = tmp_path / "ledger"
+    write_local_state(
+        state=ReviewState(
+            coverage=(CoverageRecord("a.py", "h"),),
+            repo="lgtm-hq/py-lintro",
+            pr_number=999,
+        ),
+        key="pr-999",
+        directory=ledger,
+    )
+    monkeypatch.setattr(
+        "lintro.ai.review.state_store.LOCAL_STATE_DIR",
+        ledger,
+    )
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path / "empty-artifacts"))
+    (tmp_path / "empty-artifacts").mkdir()
+    loaded = load_prior_review_state(
+        pr_number=999,
+        head_ref="feature",
+        repo="lgtm-hq/py-lintro",
+    )
+    assert_that(loaded.coverage).is_empty()
+
+
+def test_post_replay_guards_an_unguarded_checkpoint_finding() -> None:
+    """The ``--post`` replay splice guards rows a checkpoint persisted raw.
+
+    A SIGTERM checkpoint stores chunk findings before finalize, so the prior
+    state can carry a phantom P1 with no cross-chunk tag. The CLI must run
+    the guard over exactly those replayed rows before posting (#2268).
+    """
+    from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+    from lintro.ai.review.finding_matcher import match_findings
+    from lintro.ai.review.models.changed_file import ChangedFile
+    from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+    from lintro.ai.review.models.review_state import ReviewState
+
+    phantom = ReviewFinding(
+        severity=Severity.P1,
+        category="correctness",
+        file="src/a.py",
+        line=2,
+        title="Test never updated for the new value",
+        description="tests/test_a.py is untouched in this round.",
+        cause="The chunk only carried the source file.",
+        fix="Update the test.",
+        confidence="high",
+        failure_scenario="CI passes on a stale assertion.",
+    )
+    prior = ReviewState(
+        findings=match_findings(
+            previous=None,
+            findings=(phantom,),
+            round_number=1,
+        ).records,
+    )
+    mock_context = MagicMock()
+    mock_context.changed_files = [
+        ChangedFile(
+            path="src/a.py",
+            status=ChangedFileStatus.MODIFIED,
+            additions=1,
+            deletions=0,
+        ),
+        ChangedFile(
+            path="tests/test_a.py",
+            status=ChangedFileStatus.MODIFIED,
+            additions=1,
+            deletions=0,
+        ),
+    ]
+    mock_context.unified_diff = ""
+    runner = CliRunner()
+    patches = _mock_review_pipeline(
+        mock_collect=MagicMock(return_value=mock_context),
+    )
+
+    with (
+        patches["require_ai"],
+        patches["get_config"],
+        patches["collect_review_context"],
+        patches["classify_changed_files"],
+        patches["get_all_checklist_items"],
+        patches["select_checklist_items"],
+        patches["format_checklist_for_prompt"],
+        patches["get_provider"],
+        patches["run_review"],
+        patches["render_review_output"],
+        patch(
+            "lintro.cli_utils.commands.review.load_prior_review_state",
+            return_value=prior,
+        ),
+        patch("lintro.cli_utils.commands.review.persist_review_state"),
+        patch(
+            "lintro.ai.review.github.post_review_to_github",
+            return_value=True,
+        ) as mock_post,
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--post", "--pr", "7", "--repo", "owner/name"],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    posted = mock_post.call_args.kwargs["result"].findings
+    assert_that(posted).is_length(1)
+    assert_that(posted[0].severity).is_equal_to(Severity.P2)
+    assert_that(posted[0].cross_chunk_contradiction).is_not_none()

@@ -47,7 +47,7 @@ def _stub_logger(monkeypatch: pytest.MonkeyPatch) -> None:
         def __getattr__(
             self,
             name: str,
-        ) -> Callable[..., None]:  # noqa: D401 - test stub
+        ) -> Callable[..., None]:
             def _(*a: Any, **k: Any) -> None:
                 return None
 
@@ -80,7 +80,7 @@ def test_get_tools_to_run_unknown_tool_raises(monkeypatch: pytest.MonkeyPatch) -
     try:
         _ = tc.get_tools_to_run(tools="notatool", action="check")
         raise AssertionError("Expected ValueError for unknown tool")
-    except ValueError as e:  # noqa: PT017
+    except ValueError as e:
         assert_that(str(e)).contains("Unknown tool")
 
 
@@ -111,7 +111,7 @@ def test_get_tools_to_run_fmt_with_cannot_fix_raises(
         def can_fix(self) -> bool:
             return self._definition.can_fix
 
-        def set_options(self, **kwargs: Any) -> None:  # noqa: D401
+        def set_options(self, **kwargs: Any) -> None:
             return None
 
     # Ensure we resolve a tool instance with can_fix False
@@ -126,7 +126,7 @@ def test_get_tools_to_run_fmt_with_cannot_fix_raises(
     try:
         _ = tc.get_tools_to_run(tools="bandit", action="fmt")
         raise AssertionError("Expected ValueError for non-fix tool in fmt")
-    except ValueError as e:  # noqa: PT017
+    except ValueError as e:
         assert_that(str(e)).contains("does not support formatting")
 
 
@@ -193,8 +193,13 @@ def test_main_loop_get_tool_raises_appends_failure(
     )
     out = capsys.readouterr().out
     data = json.loads(out)
-    tool_names = [r.get("tool") for r in data.get("results", [])]
-    assert_that("ruff" in tool_names).is_true()
+    results = {r.get("tool"): r for r in data.get("results", [])}
+    # Two selected tools take the real parallel dispatcher, which must turn an
+    # unresolvable tool into a failed result rather than aborting the run, and
+    # must still run the tool that resolved.
+    assert_that(results).contains_key("ruff", "black")
+    assert_that(results["ruff"].get("success")).is_false()
+    assert_that(results["black"].get("success")).is_true()
     # Exit should be failure due to appended failure result
     assert_that(code).is_equal_to(1)
 
@@ -258,239 +263,3 @@ def test_write_reports_errors_are_swallowed(monkeypatch: pytest.MonkeyPatch) -> 
         raw_output=False,
     )
     assert_that(code).is_equal_to(0)
-
-
-def test_unknown_post_check_tool_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unknown post-check tool names should be warned and skipped gracefully.
-
-    Args:
-        monkeypatch: Pytest fixture to modify objects during the test.
-    """
-    _stub_logger(monkeypatch)
-
-    import lintro.utils.tool_executor as te
-
-    ok = ToolResult(name="ruff", success=True, output="", issues_count=0)
-    ruff_tool = type(
-        "_T",
-        (),
-        {
-            "name": "ruff",
-            "definition": FakeToolDefinition(name="ruff", can_fix=True),
-            "can_fix": True,
-            "set_options": lambda _self, **k: None,
-            "reset_options": lambda _self: None,
-            "copy_for_execution": lambda _self: _self,
-            "check": lambda _self, paths, options=None: ok,
-            "fix": lambda _self, paths, options=None: ok,
-            "options": {},
-        },
-    )()
-
-    monkeypatch.setattr(
-        te,
-        "get_tools_to_run",
-        lambda _tools, _action, **_kwargs: ToolsToRunResult(
-            to_run=["ruff"],
-        ),
-        raising=True,
-    )
-    monkeypatch.setattr(tool_manager, "get_tool", lambda name: ruff_tool)
-    monkeypatch.setattr(
-        te,
-        "load_post_checks_config",
-        lambda: {"enabled": True, "tools": ["notatool"], "enforce_failure": False},
-        raising=True,
-    )
-
-    code = run_lint_tools_simple(
-        action="check",
-        paths=["."],
-        tools="all",
-        tool_options=None,
-        exclude=None,
-        include_venv=False,
-        group_by="auto",
-        output_format="grid",
-        verbose=False,
-        raw_output=False,
-    )
-    assert_that(code).is_equal_to(0)
-
-
-def test_post_checks_early_filter_removes_black_from_main(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Black should be excluded from main phase when configured as post-check.
-
-    Args:
-        monkeypatch: Pytest fixture to modify objects during the test.
-    """
-    import lintro.utils.config as cfg
-    import lintro.utils.post_checks as pc
-    import lintro.utils.tool_executor as te
-
-    class LoggerCapture:
-        def __init__(self) -> None:
-            self.tools_list: list[str] | None = None
-            self.run_dir: str | None = None
-
-        def __getattr__(self, name: str) -> Callable[..., None]:  # default no-ops
-            def _(*a: Any, **k: Any) -> None:
-                return None
-
-            return _
-
-        def print_lintro_header(self) -> None:
-            return None
-
-        def print_tool_header(self, tool_name: str, action: str) -> None:
-            # Capture tool names that get executed
-            if self.tools_list is None:
-                self.tools_list = []
-            self.tools_list.append(tool_name)
-            return None
-
-    logger = LoggerCapture()
-    from lintro.utils import console
-
-    monkeypatch.setattr(
-        console,
-        "create_logger",
-        lambda **k: logger,
-        raising=True,
-    )
-
-    # Tools initially include ruff and black
-    monkeypatch.setattr(
-        te,
-        "get_tools_to_run",
-        lambda _tools, _action, **_kwargs: ToolsToRunResult(
-            to_run=["ruff", "black"],
-        ),
-        raising=True,
-    )
-
-    def post_check_config():
-        return {"enabled": True, "tools": ["black"], "enforce_failure": True}
-
-    # Early config marks black as post-check
-    # Must patch in all modules that import load_post_checks_config
-    monkeypatch.setattr(cfg, "load_post_checks_config", post_check_config, raising=True)
-    monkeypatch.setattr(te, "load_post_checks_config", post_check_config, raising=True)
-    monkeypatch.setattr(pc, "load_post_checks_config", post_check_config, raising=True)
-
-    # Provide a no-op ruff tool
-    ok = ToolResult(name="ruff", success=True, output="", issues_count=0)
-    ruff_tool = type(
-        "_T",
-        (),
-        {
-            "name": "ruff",
-            "definition": FakeToolDefinition(name="ruff", can_fix=True),
-            "can_fix": True,
-            "set_options": lambda _self, **k: None,
-            "reset_options": lambda _self: None,
-            "copy_for_execution": lambda _self: _self,
-            "check": lambda _self, paths, options=None: ok,
-            "fix": lambda _self, paths, options=None: ok,
-            "options": {},
-        },
-    )()
-    monkeypatch.setattr(
-        tool_manager,
-        "get_tool",
-        lambda name: ruff_tool,
-        raising=True,
-    )
-    monkeypatch.setattr(
-        OutputManager,
-        "write_reports_from_results",
-        lambda self, results: None,
-        raising=True,
-    )
-
-    # Mock execute_post_checks to not run any post-checks
-    # (we're only testing that black is filtered from the main phase)
-    def mock_execute_post_checks(**kwargs: Any) -> tuple[int, int, int]:
-        return (
-            kwargs.get("total_issues", 0),
-            kwargs.get("total_fixed", 0),
-            kwargs.get("total_remaining", 0),
-        )
-
-    monkeypatch.setattr(
-        te,
-        "execute_post_checks",
-        mock_execute_post_checks,
-        raising=True,
-    )
-
-    code = run_lint_tools_simple(
-        action="check",
-        paths=["."],
-        tools="all",
-        tool_options=None,
-        exclude=None,
-        include_venv=False,
-        group_by="auto",
-        output_format="grid",
-        verbose=False,
-        raw_output=False,
-    )
-    assert_that(code).is_equal_to(0)
-    # Ensure black is not in main-phase tool headers (only ruff should run)
-    assert_that(logger.tools_list).is_not_none()
-    assert_that(logger.tools_list).is_equal_to(["ruff"])
-
-
-def test_all_filtered_results_in_no_tools_warning(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """If filtering removes all tools, executor should return failure gracefully.
-
-    When all selected tools are configured as post-checks (filtered from main phase)
-    but post-checks don't actually produce results, the executor should return 1.
-
-    Args:
-        monkeypatch: Pytest fixture to modify objects during the test.
-    """
-    _stub_logger(monkeypatch)
-
-    import lintro.utils.tool_executor as te
-
-    # Mock config that filters out all tools to post-checks
-    mock_config = {"enabled": True, "tools": ["black"], "enforce_failure": True}
-
-    # Start with only black
-    monkeypatch.setattr(
-        te,
-        "get_tools_to_run",
-        lambda _tools, _action, **_kwargs: ToolsToRunResult(
-            to_run=["black"],
-        ),
-        raising=True,
-    )
-    # Early config filters out black
-    monkeypatch.setattr(te, "load_post_checks_config", lambda: mock_config)
-    # Mock execute_post_checks to do nothing (simulates post-checks not running)
-    # Returns (total_issues, total_fixed, total_remaining)
-    monkeypatch.setattr(
-        te,
-        "execute_post_checks",
-        lambda **kwargs: (0, 0, 0),
-    )
-
-    code = run_lint_tools_simple(
-        action="check",
-        paths=["."],
-        tools="all",
-        tool_options=None,
-        exclude=None,
-        include_venv=False,
-        group_by="auto",
-        output_format="grid",
-        verbose=False,
-        raw_output=False,
-    )
-    assert_that(code).is_equal_to(1)

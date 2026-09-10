@@ -17,12 +17,12 @@ guides.
 **Pick a reference implementation.** Do not write plugin/parser code from scratch.
 Mirror the closest existing tool:
 
-| Tool type              | Reference                                |
-| ---------------------- | ---------------------------------------- |
-| Simple linter (no fix) | `lintro/tools/definitions/actionlint.py` |
-| Linter + formatter     | `lintro/tools/definitions/ruff.py`       |
-| Security scanner       | `lintro/tools/definitions/bandit.py`     |
-| Shell tool             | `lintro/tools/definitions/shellcheck.py` |
+| Tool type              | Reference                               |
+| ---------------------- | --------------------------------------- |
+| Simple linter (no fix) | `lintro/tools/actionlint/definition.py` |
+| Linter + formatter     | `lintro/tools/ruff/definition.py`       |
+| Security scanner       | `lintro/tools/bandit/definition.py`     |
+| Shell tool             | `lintro/tools/shellcheck/definition.py` |
 
 Read all files for that reference tool (definition, parser package, unit tests,
 integration test, test samples) before writing any new code.
@@ -53,7 +53,33 @@ overview of how Lintro dogfoods its own codebase.
 
 ## Step 1 — Plugin definition
 
-Create `lintro/tools/definitions/<tool>.py`.
+Every tool is one package under `lintro/tools/<tool>/` (see `lintro/tools/ruff/`). There
+is no central definitions module to edit and no registration list to append to —
+discovery finds the package (#2311):
+
+- `lintro/tools/<tool>/definition.py` — the plugin and its `ToolDefinition`, next to the
+  helper modules it delegates to. The file name matters: discovery enters a tool package
+  through its `definition` module, so `@register_tool` must be reachable from there.
+- `lintro/tools/<tool>/__init__.py` — the package's import surface: re-export the plugin
+  class, its module-level constants and every helper other packages import, and list
+  them in `__all__`, so no caller reaches past the package. Importing `definition` runs
+  this module, which is how the package's other modules come along — and why a module
+  left out of it is never loaded by discovery. A tool package must not import
+  `lintro.ai`: the layers contract puts `ai` above `tools`, and moving the import into a
+  function body is not a fix, because import-linter counts those too.
+- `pyproject.toml` — append `lintro/tools/<tool>` to `[tool.lintro.pylint] include`, and
+  add the same path to `GATE_PACKAGES` in `tests/unit/test_duplicate_code_baseline.py`,
+  in the same change. The duplicate-code gate's scope follows the files, so a package
+  left out of `include` is a definition that silently escapes the ratchet, and the test
+  asserts the two lists are equal.
+- `pyproject.toml` — the import-linter `layers` contract lists the `tools -> plugins`
+  edges a tool package needs (`lintro.tools.<tool>.definition -> lintro.plugins.base`,
+  `.protocol` and `.registry`) under `[tool.importlinter]` `ignore_imports`. Add exactly
+  those three; never a new kind of edge.
+
+Helper modules that two tools share and neither owns go in their own package with no
+`definition.py` — `lintro/tools/ts_checker/` behind `tsc` and `vue-tsc` is the only one.
+Discovery lists every public module of such a package instead of a single entry point.
 
 Structure (mirrored from your reference tool):
 
@@ -65,6 +91,7 @@ from dataclasses import dataclass
 from lintro._tool_versions import get_min_version
 from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
@@ -80,8 +107,11 @@ class <Tool>Plugin(BaseToolPlugin):
             can_fix=False,
             tool_type=ToolType.LINTER,         # see ToolType options below
             file_patterns=["*.ext"],
-            priority=50,                        # see DEFAULT_TOOL_PRIORITIES
-            conflicts_with=[],
+            claims=[                            # see "Claims" below
+                Claim(patterns=["*.ext"], capabilities={Cap.CHECK}),
+            ],
+            reads_tree=True,
+            partitionable=True,
             native_configs=[".toolrc"],
             version_command=["<tool>", "--version"],
             min_version=get_min_version(ToolName.<TOOL>),
@@ -104,12 +134,13 @@ class <Tool>Plugin(BaseToolPlugin):
 
 **Key implementation notes:**
 
-- `check()` must return a `ToolResult`; call `self._prepare_execution(paths, options)`
-  and check `ctx.should_skip` first.
+- `check()` must return a `ToolResult`; call `self.prepare(paths, options)` first and
+  return its result unchanged when it hands back a `ToolResult`
+  (`if isinstance(ctx, ToolResult): return ctx`).
 - `fix()` raises `NotImplementedError` when `can_fix=False`.
 - Always use list args in subprocess calls, never `shell=True`; add `# nosec B404` on
   the `import subprocess` line.
-- `_prepare_execution()` handles file discovery and filtering by `file_patterns`. Use
+- `prepare()` handles file discovery and filtering by `file_patterns`. Use
   `ctx.rel_files` for the filtered list.
 - If the tool has per-rule documentation URLs, implement `doc_url(self, code)` and add a
   `DocUrlTemplate` entry (see Step 3).
@@ -182,13 +213,13 @@ Choose the path that matches the tool's distribution mechanism.
    }
    ```
 
-2. **`lintro/tools/manifest.json`** — add a tool entry (version must match
-   `_tool_versions.py`):
+2. **`lintro/tools/manifest.src.json`** — add the hand-authored tool entry with **no
+   `version` key**; the generator renders `lintro/tools/manifest.json` from it with the
+   version injected from `_tool_versions.py`:
 
    ```json
    {
      "name": "<tool>",
-     "version": "x.y.z",
      "install": { "type": "binary" },
      "tier": "tools",
      "category": "external",
@@ -198,10 +229,9 @@ Choose the path that matches the tool's distribution mechanism.
    }
    ```
 
-3. **`renovate.json`** — add **two** custom manager entries (one for
-   `_tool_versions.py`, one for `manifest.json`), copying the pattern from an existing
-   binary tool. Both entries must reference the same upstream package on the same
-   datasource so Renovate keeps them in sync.
+3. **`renovate.json`** — add a custom manager entry for the pin in `_tool_versions.py`,
+   copying the pattern from an existing binary tool. The rendered manifest follows via
+   the generator at build time — no second manager is needed.
 
 4. **`scripts/utils/install-tools.sh`** — four sync points (see Step 8).
 
@@ -228,11 +258,13 @@ Choose the path that matches the tool's distribution mechanism.
    "<npm-package>": "^x.y.z"
    ```
 
-4. **Run the generator** (see Step 9) to regenerate `lintro/_generated_versions.py` and
-   sync version fields in `manifest.json`.
+4. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "npm"`
+   and `install.package` set, and **no `version` key**; the generator injects the
+   version from `package.json`.
 
-5. **`lintro/tools/manifest.json`** — the generator writes the `version` field; verify
-   the entry has the correct `install.type = "npm"` and `install.package`.
+5. **Run `just generate`** (see Step 9) to refresh the derived artifacts in your working
+   tree (they are gitignored — nothing to commit). The generator errors when a seeded
+   package has no manifest entry, so the src entry must exist first.
 
 ### Path C — Bundled Python (e.g. ruff, bandit, yamllint)
 
@@ -264,14 +296,21 @@ Choose the path that matches the tool's distribution mechanism.
    ./scripts/ci/compile-semgrep-lock.sh
    ```
 
+   Commit the recompiled lockfile with the `.in` change: nothing regenerates it
+   automatically. When the two drift apart, docker-ci's 🔐 Semgrep Lockfile Drift check
+   (`scripts/ci/check-semgrep-lock.sh`) goes red with the diff and the recompile
+   command, and the image `publish` job refuses to run.
+
    Keep the package listed in `REQUIREMENTS_PYPI_SOURCES` in
-   `scripts/ci/generate-tool-versions.py` so the generator still reads the pin from
+   `lintro_build/versions/generate.py` so the generator still reads the pin from
    `requirements-semgrep.txt`.
 
-3. **Run the generator** (see Step 9).
+3. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "pip"`
+   and `install.package = "<pypi-package>"`, and **no `version` key**; the generator
+   injects the version from `pyproject.toml`.
 
-4. **`lintro/tools/manifest.json`** — verify the generated entry has
-   `install.type = "pip"` and `install.package = "<pypi-package>"`.
+4. **Run `just generate`** (see Step 9) — the generator errors when a seeded package has
+   no manifest entry, so the src entry must exist first.
 
 ---
 
@@ -289,30 +328,59 @@ branch in that same module.
 Add the tool to `get_install_hints()` in `lintro/tools/core/version_checking.py` so
 `lintro doctor` can display context-aware install instructions.
 
+**Claims** declare what the tool touches and what it does to it (epic #1735). Pair the
+tool's `file_patterns` with the capabilities it applies:
+
+| Capability   | When to use                                             |
+| ------------ | ------------------------------------------------------- |
+| `Cap.FIX`    | The tool rewrites files to remove diagnostics           |
+| `Cap.FORMAT` | The tool rewrites files to a canonical layout           |
+| `Cap.CHECK`  | The tool reports diagnostics without rewriting anything |
+
+`Cap.FIX`/`Cap.FORMAT` must be declared if and only if `can_fix=True`, and at most one
+tool may hold `Cap.FORMAT` for a given pattern — a second one is dual formatting
+authority. Set `reads_tree=False` only for a tool that does not read the working tree at
+all, and `partitionable=False` when the tool's verdict depends on seeing the whole
+project (type checkers, contract checkers, dependency audits).
+`tests/unit/plugins/test_tool_claims.py` enforces all of this.
+
 ---
 
-## Step 6 — DEFAULT_TOOL_PRIORITIES
+## Step 6 — Execution order (nothing to do)
 
-The default priority for all tools is `50`. Only add an entry to
-`DEFAULT_TOOL_PRIORITIES` in `lintro/utils/config_priority.py` if the tool needs a
-non-default priority (e.g. formatters run first, type checkers run last). Check existing
-entries before deciding on a value.
+Execution order is derived from the `claims` you declared in Step 5, so there is no
+priority to pick and no table to edit. Run `lintro check --explain-order` after
+registering the tool to see where it lands and which claim put it there.
 
 ---
 
-## Step 7 — pyproject.toml: package list
+## Step 7 — pyproject.toml: packaging (usually nothing to do)
 
-Add the new parser package to the `packages` list in `pyproject.toml` so it is included
-in the wheel:
+Nothing is needed for the parser package itself. `pyproject.toml` discovers packages
+automatically, so `lintro.parsers.<tool>` ships as soon as it has an `__init__.py`:
 
 ```toml
-[tool.setuptools]
-packages = [
-  ...
-  "lintro.parsers.<tool>",
-  ...
-]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["lintro*"]
+exclude = ["lintro_build*", "tests*", "..."]  # keep repo-only trees out
+namespaces = false                            # setuptools defaults to true
 ```
+
+`exclude` and `namespaces` are load-bearing, so copy the real table from
+`pyproject.toml` rather than this excerpt if you ever edit it: `namespaces = false` is
+what keeps `lintro/ascii-art` and the prompt-template data directories out of the
+package list, and `exclude` is what keeps the in-tree build backend out of the wheel —
+`include = ["lintro*"]` matches `lintro_build` too.
+
+Only two cases need an edit:
+
+- **Non-Python files** the tool ships (templates, schemas, corpora) must be declared in
+  `[tool.setuptools.package-data]`; discovery covers modules, not data.
+- **A new top-level directory** whose name starts with `lintro` (like `lintro_build`)
+  must be added to the `exclude` list, or it lands in the wheel.
+
+Verify with `uv build` and `unzip -l dist/*.whl` when in doubt.
 
 ---
 
@@ -330,36 +398,28 @@ Four places require editing (keep alphabetical order throughout):
 
 ---
 
-## Step 9 — Run the version generator
+## Step 9 — Regenerate the derived artifacts
 
-After any version-related edits, run:
+After any version-related or definition edits, refresh your working tree:
 
 ```bash
-python3 scripts/ci/generate-tool-versions.py
+just generate
 ```
 
-This regenerates `lintro/_generated_versions.py` and syncs version fields in
-`lintro/tools/manifest.json`. Verify the output is consistent and commit it alongside
-the other changes.
+This regenerates `lintro/_generated_versions.py`, renders `lintro/tools/manifest.json`
+from `manifest.src.json`, and rewrites `lintro/plugins/_builtin_index.py` so the new
+tool package is discoverable from frozen (Nuitka onefile) binaries. **All three outputs
+are gitignored** — they are generated at package build time (#2176), so there is nothing
+to commit and no drift gate to satisfy. Editable installs regenerate them automatically
+on `uv pip install -e .` / `just setup`; after editing a version source locally, run
+`just generate` to keep your working tree current.
 
-To check without writing (useful before pushing):
+To check your tree is in sync without writing:
 
 ```bash
 python3 scripts/ci/generate-tool-versions.py --check
+python3 scripts/ci/generate-builtin-tool-index.py --check
 ```
-
-CI fails the PR if `_generated_versions.py` or `manifest.json` are out of sync.
-
-Also regenerate the builtin tool index so the new definition module is discoverable from
-frozen (Nuitka onefile) binaries, which cannot glob the `lintro/tools/definitions/`
-source directory:
-
-```bash
-python3 scripts/ci/generate-builtin-tool-index.py
-```
-
-This rewrites `lintro/plugins/_builtin_index.py`. CI fails the PR when it is out of sync
-(`--check`).
 
 ---
 
@@ -522,11 +582,11 @@ If the tool is available as a Homebrew formula and its version matches what
 
 A new-tool PR is **not mergeable** until all three gates pass:
 
-| Gate                                                                                   | What it checks                                                                                                                                                                                     |
-| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness    | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, `DEFAULT_TOOL_PRIORITIES` entry is consistent, and docs references exist |
-| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                                              |
-| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails                |
+| Gate                                                                                   | What it checks                                                                                                                                                                      |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [**#1509**](https://github.com/lgtm-hq/py-lintro/issues/1509) — plugin completeness    | Parametrized test suite asserts that every registered plugin has an integration surface, `tool_type`/manifest tags agree, and docs references exist                                 |
+| [**#1510**](https://github.com/lgtm-hq/py-lintro/issues/1510) — dogfood skip allowlist | Dogfooding CI fails if any enabled tool reports SKIP without an entry in the committed allowlist; every allowlist entry must have a written rationale                               |
+| [**#1511**](https://github.com/lgtm-hq/py-lintro/issues/1511) — manifest vs image      | `scripts/ci/verify-manifest-tools.py` runs inside the freshly built CI image; if the manifest declares the tool but the image cannot execute its `version_command`, the build fails |
 
 Until those gates are live, satisfy their intent manually by working through the
 [pre-submit checklist](#pre-submit-checklist) below.
@@ -560,26 +620,31 @@ python3 scripts/ci/generate-builtin-tool-index.py --check
 
 Implementation checklist:
 
-- [ ] `lintro/tools/definitions/<tool>.py` — `@register_tool`, `BaseToolPlugin`,
-      `ToolDefinition`
+- [ ] `lintro/tools/<tool>/definition.py` — `@register_tool`, `BaseToolPlugin`,
+      `ToolDefinition`; `lintro/tools/<tool>/__init__.py` re-exports them
+- [ ] `pyproject.toml` — `[tool.lintro.pylint] include` gains `lintro/tools/<tool>`, and
+      `GATE_PACKAGES` in `tests/unit/test_duplicate_code_baseline.py` gains the same
+      path (duplicate-code gate scope follows the files, and the test asserts the two
+      lists are equal)
+- [ ] `pyproject.toml` — import-linter `ignore_imports` gains the three
+      `lintro.tools.<tool>.definition -> lintro.plugins.{base,protocol,registry}` edges
 - [ ] `lintro/parsers/<tool>/` — `__init__.py`, `<tool>_issue.py`, `<tool>_parser.py`
 - [ ] `lintro/enums/tool_name.py` — `ToolName.<TOOL>` (alphabetical)
 - [ ] `lintro/enums/doc_url_template.py` — `DocUrlTemplate.<TOOL>` (if applicable)
 - [ ] Version registration (Path A / B / C, see Step 4)
-- [ ] `lintro/tools/manifest.json` — tool entry with correct version and install type
+- [ ] `lintro/tools/manifest.src.json` — tool entry with install type and **no version
+      key**
 - [ ] `lintro/tools/core/version_parsing.py` — `TOOLS_WITH_SIMPLE_VERSION_PATTERN` (if
       applicable)
 - [ ] `lintro/tools/core/version_checking.py` — install hints
-- [ ] `lintro/utils/config_priority.py` — `DEFAULT_TOOL_PRIORITIES` (if non-default)
+- [ ] `claims`, `reads_tree` and `partitionable` declared on the `ToolDefinition`
 - [ ] `pyproject.toml` — parser package added to `packages` list
 - [ ] `scripts/utils/install-tools.sh` — 4 sync points (help, SUPPORTED_TOOLS, install
       block, tools_to_verify)
 - [ ] `docker/tools.Dockerfile` — verify step
 - [ ] `Dockerfile` — root block and non-root block (for npm/bun tools)
-- [ ] `renovate.json` — custom managers for `_tool_versions.py` and `manifest.json`
-      (binary tools only)
-- [ ] `scripts/ci/generate-tool-versions.py --check` passes
-- [ ] `scripts/ci/generate-builtin-tool-index.py --check` passes
+- [ ] `renovate.json` — custom manager for `_tool_versions.py` (binary tools only)
+- [ ] `just generate` runs cleanly (derived artifacts are gitignored, not committed)
 - [ ] Unit tests (parser + plugin) added
 - [ ] Integration tests added (with `skipif` guard)
 - [ ] Test samples added (`violations.<ext>` and `clean.<ext>`)

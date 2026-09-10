@@ -5,6 +5,8 @@ import click
 from lintro.api import core as api
 from lintro.api.pipeline import run_lint_with_ai
 from lintro.cli_utils.diff_option import validate_diff_base_ref
+from lintro.cli_utils.order_explain import emit_order_explanation
+from lintro.exceptions.errors import ConfigurationError
 from lintro.utils.git_diff import DIFF_DEFAULT_SENTINEL
 
 # Constants
@@ -127,6 +129,20 @@ DEFAULT_ACTION: str = "fmt"
     is_flag=True,
     help="Suppress the decorative ASCII art printed after the run.",
 )
+@click.option(
+    "--profile",
+    is_flag=True,
+    help="Show a per-tool performance profile (timing table + suggestions)",
+)
+@click.option(
+    "--explain-order",
+    "explain_order",
+    is_flag=True,
+    help=(
+        "Print the execution order this run would use, with the claim behind "
+        "each constraint, then exit without running any tool."
+    ),
+)
 def format_command(
     ctx: click.Context,
     paths: tuple[str, ...],
@@ -147,6 +163,8 @@ def format_command(
     yes: bool,
     dry_run: bool,
     no_art: bool,
+    profile: bool,
+    explain_order: bool,
 ) -> None:
     """Format code using configured formatting tools.
 
@@ -178,34 +196,53 @@ def format_command(
         yes: bool: Skip confirmation prompt and proceed immediately.
         dry_run: bool: Preview would-be fixes without modifying any files.
         no_art: bool: Suppress the decorative ASCII art printed after the run.
+        profile: bool: Whether to emit a per-tool performance profile.
+        explain_order: bool: Print the derived execution order
+            and exit without running tools.
+
+    Raises:
+        SystemExit: Process exit with the aggregated exit code from tools,
+            or 1 when the config cannot be parsed.
     """
     validate_diff_base_ref(diff_base=diff_base)
 
     # Default to current directory if no paths provided
     normalized_paths: list[str] = list(paths) if paths else list(DEFAULT_PATHS)
 
+    if explain_order:
+        emit_order_explanation(
+            tools=tools,
+            action=DEFAULT_ACTION,
+            paths=normalized_paths,
+        )
+
     # Run the AI-aware pipeline: execute, AI-enhance, render.
-    exit_code: int = run_lint_with_ai(
-        action=DEFAULT_ACTION,
-        paths=normalized_paths,
-        tools=tools,
-        tool_options=tool_options,
-        exclude=exclude,
-        include_venv=include_venv,
-        group_by=group_by,
-        output_format=output_format,
-        verbose=verbose,
-        raw_output=raw_output,
-        output_file=output,
-        diff_base=diff_base,
-        debug=debug,
-        stream=stream,
-        no_log=no_log,
-        auto_install=auto_install,
-        yes=yes,
-        dry_run=dry_run,
-        no_art=no_art,
-    )
+    try:
+        exit_code: int = run_lint_with_ai(
+            action=DEFAULT_ACTION,
+            paths=normalized_paths,
+            tools=tools,
+            tool_options=tool_options,
+            exclude=exclude,
+            include_venv=include_venv,
+            group_by=group_by,
+            output_format=output_format,
+            verbose=verbose,
+            raw_output=raw_output,
+            output_file=output,
+            diff_base=diff_base,
+            debug=debug,
+            stream=stream,
+            no_log=no_log,
+            auto_install=auto_install,
+            yes=yes,
+            dry_run=dry_run,
+            no_art=no_art,
+            profile=profile,
+        )
+    except ConfigurationError as exc:
+        click.echo(str(exc), err=True)
+        raise SystemExit(1) from exc
 
     # Exit with code from tool execution.
     # For a normal fmt action, exit_code is 1 only if there were execution

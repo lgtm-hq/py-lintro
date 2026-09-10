@@ -65,8 +65,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Counts are asserted so a partial rewrite is a failure rather than a silent
 # half-update — the same contract tests/unit/test_workflow_wiring.py enforces.
 PINNED_SITES: dict[str, int] = {
-    ".github/workflows/dogfood-nightly.yml": 3,
-    ".github/workflows/docker-ci.yml": 4,
+    # 5: dogfood-full, its bounded retry, the digest-lag verifier, the
+    # skip gate and its bounded retry (#2246).
+    ".github/workflows/dogfood-nightly.yml": 5,
+    # 1: the single workflow-level `env: LINTRO_FORK_FALLBACK_IMAGE` that all
+    # four fork-fallback consumers read (#2297).
+    ".github/workflows/docker-ci.yml": 1,
 }
 
 ORG = "lgtm-hq"
@@ -172,19 +176,18 @@ def _fetch_page(*, token: str, page: int) -> list[dict[str, Any]]:
         return []
     # The https:// scheme is asserted above, so no file:/custom scheme can be
     # opened; the URL is built from module constants, not from user input.
-    request = (
-        urllib.request.Request(  # noqa: S310 — HTTPS-only validated above  # nosec B310
-            url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "py-lintro-pin-sync",
-            },
-        )
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "User-Agent": "py-lintro-pin-sync",
+        },
     )
     try:
-        with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+        # nosemgrep: dynamic-urllib-use-detected
+        with urllib.request.urlopen(  # nosec B310
             request,
             timeout=30,
         ) as response:

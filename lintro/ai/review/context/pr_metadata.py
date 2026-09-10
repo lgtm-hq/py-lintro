@@ -100,8 +100,7 @@ def _parse_pr_view_json(
             )
         if not isinstance(head_repository, dict):
             raise ReviewContextError(
-                "gh pr view JSON missing or invalid required field: "
-                "'headRepository'.",
+                "gh pr view JSON missing or invalid required field: 'headRepository'.",
                 code=ReviewContextErrorCode.GH_METADATA_INVALID,
             )
         if parsed_head_repo is not None:

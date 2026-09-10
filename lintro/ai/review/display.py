@@ -8,15 +8,27 @@ from rich.text import Text
 
 from lintro.ai.cost import format_cost
 from lintro.ai.display.shared import cost_str, print_section_header
-from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
+from lintro.ai.resolved_ai_config import (
+    MAX_COST_LABEL,
+    format_max_cost_label,
+    format_sourced_value,
+)
 from lintro.ai.review.checklist_display import (
     cleared_answers,
     orphan_concerns,
     questions_for_finding,
 )
+from lintro.ai.review.coverage_degradation import (
+    COVERAGE_LIMITED_HEADLINE,
+    describe_coverage_degradations,
+)
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.patch_validation import describe_suggestion_drops
+from lintro.ai.review.severity_gate import describe_cross_chunk_contradictions
+from lintro.ai.review.synthesis_note import format_synthesis_note
+from lintro.ai.review.timings import format_timing_summary
 
 __all__ = ["render_review_terminal"]
 
@@ -57,7 +69,7 @@ def render_review_terminal(
             max_cost_usd=metadata.max_cost_usd,
             source=metadata.max_cost_usd_source,
         )
-        max_cost_parts = f" | Max cost: {cap_label}"
+        max_cost_parts = f" | {MAX_COST_LABEL}: {cap_label}"
     header_detail = (
         f"Model: {format_sourced_value(metadata.model, metadata.model_source)} | "
         f"Provider: "
@@ -86,6 +98,26 @@ def render_review_terminal(
     if metadata.chunks_total > 1:
         output.print(
             f"[dim]Reviewed in {metadata.chunks_total} semantic chunks[/dim]",
+        )
+
+    coverage_note = describe_coverage_degradations(metadata=metadata)
+    if coverage_note:
+        # No silent caps: a capped run must never look like a clean one.
+        output.print(
+            f"[bold yellow]⚠ {COVERAGE_LIMITED_HEADLINE}[/bold yellow]",
+        )
+        output.print(f"[yellow]{coverage_note}[/yellow]")
+
+    synthesis_note = format_synthesis_note(metadata=metadata)
+    if synthesis_note:
+        # Only rendered when the optional cross-chunk pass actually ran, so a
+        # default run's terminal output is unchanged (#2269).
+        output.print(f"[dim]{synthesis_note}[/dim]")
+
+    if metadata.timings is not None:
+        # One line, always on: which phase dominated the wait (#2148).
+        output.print(
+            f"[dim]{format_timing_summary(timings=metadata.timings)}[/dim]",
         )
 
     output.print(
@@ -131,6 +163,14 @@ def _render_findings(
 
     console.print()
     console.print(f"[bold cyan]Findings ({len(sorted_findings)})[/bold cyan]")
+    drops = describe_suggestion_drops(findings=result.findings)
+    if drops:
+        console.print(f"[yellow]{drops}[/yellow]")
+    contradictions = describe_cross_chunk_contradictions(findings=result.findings)
+    if contradictions:
+        # No silent edits: a guard-driven downgrade is stated where the
+        # severities it changed are read (#2265).
+        console.print(f"[yellow]{contradictions}[/yellow]")
 
     for index, finding in enumerate(sorted_findings, start=1):
         _render_finding_panel(
@@ -169,6 +209,16 @@ def _render_finding_panel(
     body.append(f"{finding.cause}\n\n")
     body.append("Fix: ", style="bold")
     body.append(finding.fix)
+
+    if finding.suggestion_dropped is not None:
+        body.append("\n\n")
+        body.append("Suggestion dropped: ", style="bold yellow")
+        body.append(
+            f"{finding.suggestion_dropped} "
+            "(did not match the file at head; fix text kept, "
+            "one-click commit withheld)",
+            style="yellow",
+        )
 
     if show_linked_questions:
         linked_questions = questions_for_finding(

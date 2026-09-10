@@ -569,6 +569,7 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.OXFMT: "oxfmt",
                 ToolName.OXLINT: "oxlint",
                 ToolName.PRETTIER: "prettier",
+                ToolName.SPECTRAL: "@stoplight/spectral-cli",
                 ToolName.STYLELINT: "stylelint",
                 ToolName.SVELTE_CHECK: "svelte-check",
                 ToolName.TSC: "typescript",
@@ -594,6 +595,8 @@ class NodeJSBuilder(CommandBuilder):
                 ToolName.TSC: "tsc",
                 # Package is "@commitlint/cli", binary is "commitlint"
                 ToolName.COMMITLINT: "commitlint",
+                # Package is "@stoplight/spectral-cli", binary is "spectral"
+                ToolName.SPECTRAL: "spectral",
             }
         return self._binary_names
 
@@ -845,6 +848,9 @@ class StandaloneBuilder(CommandBuilder):
     TOOL_BINARY_MAP: ClassVar[dict[str, str]] = {
         "osv_scanner": "osv-scanner",
         "golangci_lint": "golangci-lint",
+        # Registry name and manifest name both map to the same binary.
+        "import-linter": "lint-imports",
+        "import_linter": "lint-imports",
         "dotenv_linter": "dotenv-linter",
         "pip_audit": "pip-audit",
     }
@@ -866,8 +872,10 @@ class StandaloneBuilder(CommandBuilder):
                     ToolName.GITLEAKS,
                     ToolName.GOLANGCI_LINT,
                     ToolName.HADOLINT,
+                    ToolName.IMPORT_LINTER,
                     ToolName.OSV_SCANNER,
                     ToolName.PIP_AUDIT,
+                    ToolName.PYLINT,
                     ToolName.SHELLCHECK,
                     ToolName.SHFMT,
                     ToolName.SEMGREP,

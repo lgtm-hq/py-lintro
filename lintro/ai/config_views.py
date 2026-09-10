@@ -12,7 +12,6 @@ from dataclasses import dataclass
 
 from lintro.ai.enums import (
     AITransport,
-    CliBareMode,
     ConfidenceLevel,
     SanitizeMode,
 )
@@ -21,11 +20,15 @@ from lintro.ai.registry import AIProvider
 
 @dataclass(frozen=True)
 class AIProviderConfig:
-    """Read-only view of provider-related AI settings."""
+    """Read-only view of the *shared* provider-related AI settings.
 
-    provider: AIProvider
+    Vendor-only knobs are not here: since #2309 they live on the provider's
+    own ``ai.providers.<name>`` block, reachable through
+    :meth:`~lintro.ai.config.AIConfig.provider_settings`.
+    """
+
+    provider: AIProvider | None
     transport: AITransport | None
-    cli_bare: CliBareMode
     model: str | None
     api_key_env: str | None
     api_base_url: str | None

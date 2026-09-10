@@ -5,6 +5,7 @@
 .coverage
 .claude
 .lintro-cache
+ai-review-state/
 
 ### dirs
 Reports/
@@ -343,7 +344,15 @@ dist
 .lintro/
 coverage.json
 
+# Hyperfine exports are machine-specific: generated locally, never committed.
+benchmarks/results/hyperfine/*.json
+
 # act secrets file (DO NOT COMMIT)
 .secrets
 __pycache__/
 *.pyc
+
+# Derived version artifacts, generated at build time (#2180)
+lintro/_generated_versions.py
+lintro/tools/manifest.json
+lintro/plugins/_builtin_index.py

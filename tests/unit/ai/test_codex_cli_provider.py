@@ -12,7 +12,7 @@ from assertpy import assert_that
 
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
-from lintro.ai.providers.openai import OpenAIProvider, _find_codex
+from lintro.ai.providers.openai.provider import OpenAIProvider, _find_codex
 from lintro.ai.registry import AIProvider
 from tests.unit.ai.conftest import patch_cli_exec
 
@@ -21,7 +21,7 @@ from tests.unit.ai.conftest import patch_cli_exec
 def _mock_codex_on_path() -> Iterator[None]:
     """Patch codex binary discovery for CLI transport tests."""
     with patch(
-        "lintro.ai.providers.openai._find_codex",
+        "lintro.ai.providers.openai.provider._find_codex",
         return_value="/usr/local/bin/codex",
     ):
         yield
@@ -48,7 +48,7 @@ def _jsonl_response(*, text: str = '{"summary": "ok"}') -> str:
 def test_codex_cli_init_raises_when_codex_missing() -> None:
     """Raise when the codex binary is not on PATH."""
     with (
-        patch("lintro.ai.providers.openai._find_codex", return_value=None),
+        patch("lintro.ai.providers.openai.provider._find_codex", return_value=None),
         pytest.raises(AINotAvailableError, match="codex"),
     ):
         OpenAIProvider(transport=AITransport.CLI)

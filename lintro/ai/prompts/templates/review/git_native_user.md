@@ -22,6 +22,17 @@ Review this code change for actionable findings.
 {changed_files}
 </{boundary}>
 
+**Every file this PR changes (this chunk's own files are marked
+`— **(this chunk)**`):**
+
+<{boundary}>
+{pr_changed_files}
+</{boundary}>
+
+Unmarked files above are part of this PR but are not in this chunk's diff. Any copy of
+them you read from disk is the stale base-commit version, not this PR's state — never
+treat it as evidence that such a file was not updated, not touched, or missing a change.
+
 ---
 
 ### Interaction paths (trace each explicitly)

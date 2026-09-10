@@ -1,4 +1,4 @@
-"""P1 evidence gate for review findings (#1925).
+"""Mechanical severity gates for review findings (#1925, #2265).
 
 Severity inflation is the norm for AI reviewers — in the corpus behind epic
 #1905 one bot marked 92% of its findings P1. Under a verdict derived from open
@@ -10,6 +10,10 @@ carry a concrete ``failure_scenario``. One that does not is downgraded to P2 at
 parse time and marked, so the downgrade is visible on the surfaces instead of
 being an invisible edit of the model's output. Nothing is dropped, and no other
 severity is touched.
+
+The cross-chunk guard (#2265) is the second gate and shares that posture; it
+lives in :mod:`lintro.ai.review.cross_chunk_gate` and is re-exported here so
+both gates stay reachable from one import.
 """
 
 from __future__ import annotations
@@ -19,12 +23,26 @@ from dataclasses import replace
 
 from loguru import logger
 
+from lintro.ai.review.cross_chunk_gate import (
+    CROSS_CHUNK_DOWNGRADE_REASON,
+    UNCHANGED_CLAIM_PHRASES,
+    apply_cross_chunk_guard,
+    count_cross_chunk_contradictions,
+    cross_chunk_contradictions,
+    describe_cross_chunk_contradictions,
+)
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 
 __all__ = [
+    "CROSS_CHUNK_DOWNGRADE_REASON",
     "P1_DOWNGRADE_REASON",
+    "UNCHANGED_CLAIM_PHRASES",
+    "apply_cross_chunk_guard",
     "apply_p1_evidence_gate",
+    "count_cross_chunk_contradictions",
     "count_downgrades",
+    "cross_chunk_contradictions",
+    "describe_cross_chunk_contradictions",
     "describe_downgrades",
     "downgraded_findings",
 ]

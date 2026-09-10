@@ -72,7 +72,8 @@ older Python versions.
 
 Bundled Python tools are available via the `lintro[full]` extra (or Homebrew
 `lintro-full`). The default `pip install lintro` installs the CLI only. Tool versions
-are centrally managed in `manifest.json` and `pyproject.toml`:
+are centrally managed in `pyproject.toml` and the version sources the build-time
+generator reads (#2176):
 
 **Bundled Python Tools:**
 
@@ -84,6 +85,13 @@ are centrally managed in `manifest.json` and `pyproject.toml`:
   `--tool-options`)
 - `yamllint` - YAML linter
 - `pydoclint` - Python docstring linter
+- `import-linter` - Python import-contract checker (binary `lint-imports`); it reports a
+  clean result when the project has no import-linter configuration, so it is safe to
+  leave enabled
+- `pylint` - Python static analyser. Lintro runs it project-scoped (one invocation over
+  every discovered file) so cross-module checkers such as `duplicate-code` (R0801) can
+  see the whole set. Configure it in `[tool.pylint.<section>]`; with no configuration
+  pylint's own defaults apply and overlap heavily with ruff
 
 ### Optional External Tools
 
@@ -102,6 +110,8 @@ order and for what changed.
   `npm install -D @commitlint/cli @commitlint/config-conventional`); requires a
   commitlint config, skipped otherwise
 - `hadolint` - Dockerfile linter (download from GitHub releases)
+- `buf` - Protocol Buffer linter and formatter (`brew install bufbuild/buf/buf` or
+  GitHub releases)
 - `actionlint` - GitHub Actions linter (download from GitHub releases)
 - `semgrep` - Security scanner and code analyzer (`./scripts/utils/install-semgrep.sh`
   from a checkout, `uv tool install semgrep`, or `brew install semgrep`). Not included
@@ -110,6 +120,8 @@ order and for what changed.
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled
   by default (`brew install trufflehog` or GitHub releases)
+- `cppcheck` - C/C++ static analyzer (`brew install cppcheck` or
+  `apt-get install cppcheck`)
 - `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
   <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
 - `rubocop` - Ruby linter and formatter (`gem install rubocop`)
@@ -124,6 +136,11 @@ order and for what changed.
 - `pip-audit` - Python dependency vulnerability scanner (`pip install pip-audit`,
   `uv add pip-audit`, or `brew install pip-audit`)
 - `taplo` - TOML linter and formatter (`brew install taplo` or GitHub releases)
+- `typos` - Source-code spell checker with auto-fix (`brew install typos-cli` or
+  `cargo install typos-cli`). A no-config default `lintro check` only selects it when a
+  `typos.toml`, `.typos.toml` or `_typos.toml` exists at a scan root. `--tools typos`
+  and an unscoped Lintro config still run it; after `lintro init`, add it to
+  `execution.enabled_tools` (the recommended profile's language allowlist omits it)
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)
@@ -141,6 +158,11 @@ order and for what changed.
   `bun add -D svelte-check` or `npm install -D svelte-check`)
 - `vue-tsc` - Vue TypeScript type checker for `.vue` files (`bun add -D vue-tsc` or
   `npm install -D vue-tsc`)
+- `spectral` - OpenAPI/AsyncAPI/JSON Schema linter (`bun add -D @stoplight/spectral-cli`
+  or `npm install -D @stoplight/spectral-cli`). Select it with `--tools spectral`, a
+  scan-root `.spectral.yaml`/`.yml`/`.json`/`.js` on a no-config run, or
+  `execution.enabled_tools` (add `spectral` after `lintro init`); after selection it
+  skips when no ruleset is found.
 
 ### Checking Versions
 
@@ -487,6 +509,48 @@ lintro check --include-venv
 lintro check --output-format grid --group-by code
 ```
 
+### Performance Profiling
+
+Add `--profile` to `check` or `format` to see how long each main-phase tool took.
+Executors always record those timings (including under parallel execution); the flag
+only controls whether they are rendered. Post-checks are omitted. The table is human and
+JSON only — csv/sarif/markdown stdout stay unchanged. The `CUMULATIVE` row is the sum of
+per-tool seconds, not parallel wall-clock.
+
+```bash
+# Show a per-tool timing table with optimization suggestions
+lintro check --profile
+
+# Machine-readable timings under a "profile" key in the JSON payload
+lintro check --profile --output-format json
+```
+
+Example output:
+
+```text
+Performance Profile
+
+Tool Timing (sorted by duration):
+┌────────────┬──────────┬─────────────┬────────┐
+│ Tool       │ Duration │ Issue files │ Issues │
+├────────────┼──────────┼─────────────┼────────┤
+│ mypy       │ 12.34s   │ 2           │ 3      │
+│ ruff       │ 0.42s    │ 5           │ 5      │
+├────────────┼──────────┼─────────────┼────────┤
+│ CUMULATIVE │ 12.76s   │             │ 8      │
+└────────────┴──────────┴─────────────┴────────┘
+
+Suggestions:
+  - mypy is slowest (97% of total time)
+  - mypy: consider incremental mode or the mypy daemon (dmypy)
+```
+
+The `Issue files` column (JSON `files_with_issues`) counts the distinct files each tool
+reported issues on — not files scanned — so a clean run reports 0. `issues_found` uses
+the same detected/remaining merge as JSON `results[]`. In JSON mode the profile is added
+additively under a top-level `profile` key (`cumulative_tool_duration`, `tools[]`,
+`suggestions[]`) and the existing `results`/`summary` schema is unchanged.
+
 ## Tips and Tricks
 
 ### 1. Use Grid Formatting
@@ -647,7 +711,7 @@ sudo lintro check
 ### Getting Help
 
 - **Command help:** `lintro --help` or `lintro check --help`
-- **List tools:** `lintro list-tools --show-conflicts`
+- **List tools:** `lintro list-tools`
 - **GitHub Issues:** Report bugs or request features
 - **Documentation:** Check other guides in the `docs/` directory
 

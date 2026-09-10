@@ -19,7 +19,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
 from lintro.models.core.tool_result import ToolResult
-from lintro.tools.definitions.ruff import RuffPlugin
+from lintro.tools.ruff.definition import RuffPlugin
 from tests.test_samples_helpers import copy_sample
 
 if TYPE_CHECKING:

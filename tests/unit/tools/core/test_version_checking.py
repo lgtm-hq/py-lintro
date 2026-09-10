@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.tools.core import version_checking
 from lintro.tools.core.version_checking import (
@@ -128,6 +127,21 @@ def test_get_install_hints_includes_commitlint_cli_alias() -> None:
     assert_that(result["@commitlint/cli"]).is_equal_to(result["commitlint"])
 
 
+def test_get_install_hints_includes_spectral_cli_alias() -> None:
+    """``@stoplight/spectral-cli`` npm alias has the same bun install hint.
+
+    The hint must be a plain argv-safe string: no nested quotes or backticks
+    around the scoped package name.
+    """
+    result = get_install_hints()
+    hint = result["spectral"]
+    assert_that(result).contains_key("@stoplight/spectral-cli")
+    assert_that(hint).contains("bun add")
+    assert_that(hint).contains("@stoplight/spectral-cli@")
+    assert_that(hint).does_not_contain("`")
+    assert_that(result["@stoplight/spectral-cli"]).is_equal_to(hint)
+
+
 def test_get_install_hints_uses_commitlint_companion_version(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -193,14 +207,28 @@ def test_get_install_hints_missing_template_logs_debug(
         lambda: {"hadolint": "2.12.0", "totally_missing_tool": "1.0.0"},
     )
     version_checking._logged_warnings.clear()
-    mock_logger = MagicMock()
-    with patch.object(version_checking, "logger", mock_logger):
-        get_install_hints()
-    mock_logger.warning.assert_not_called()
-    mock_logger.debug.assert_called()
-    debug_msg = mock_logger.debug.call_args[0][0]
-    assert_that(debug_msg).contains("Missing install hints")
-    assert_that(debug_msg).contains("totally_missing_tool")
+    records: list[tuple[str, str]] = []
+
+    def sink(message: object) -> None:
+        """Collect the level and text of each loguru record.
+
+        Args:
+            message: Loguru message object carrying the record.
+        """
+        record = message.record  # type: ignore[attr-defined]
+        records.append((record["level"].name, record["message"]))
+
+    sink_id = logger.add(sink, level="DEBUG", format="{message}")
+    try:
+        hints = get_install_hints()
+    finally:
+        logger.remove(sink_id)
+
+    debug_messages = [text for level, text in records if level == "DEBUG"]
+    assert_that([text for level, text in records if level == "WARNING"]).is_empty()
+    assert_that("\n".join(debug_messages)).contains("Missing install hints")
+    assert_that("\n".join(debug_messages)).contains("totally_missing_tool")
+    assert_that(hints).does_not_contain_key("totally_missing_tool")
 
 
 def test_get_install_hints_external_tools() -> None:

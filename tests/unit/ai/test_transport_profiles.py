@@ -7,6 +7,7 @@ from assertpy import assert_that
 
 from lintro.ai.config import AIConfig, AITransportProfiles, CliTransportProfile
 from lintro.ai.enums import AITransport, CostBasis
+from lintro.ai.registry import AIProvider
 from lintro.ai.transport import (
     DEFAULT_API_TIMEOUT,
     DEFAULT_CLI_TIMEOUT,
@@ -32,8 +33,8 @@ def _isolate_bare_mode_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
 
 
-def test_cli_defaults_to_whole_turn_timeout() -> None:
-    """CLI without a profile uses the 900s whole-turn default."""
+def test_cli_defaults_to_per_chunk_timeout() -> None:
+    """CLI without a profile uses the 1800s per-chunk default."""
     config = AIConfig(enabled=True, transport=AITransport.CLI)
     resolved = resolve_transport_settings(config)
     assert_that(resolved.timeout).is_equal_to(DEFAULT_CLI_TIMEOUT)
@@ -152,7 +153,10 @@ def test_cli_auth_mode_reports_api_key_when_bare_billing_engages(
     subscription/unpriceable (#1923).
     """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-    config = AIConfig(transport=AITransport.CLI)
+    config = AIConfig(
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.CLI,
+    )
 
     resolved = resolve_transport_settings(config)
 

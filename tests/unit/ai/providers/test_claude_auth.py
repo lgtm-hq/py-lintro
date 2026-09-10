@@ -13,7 +13,8 @@ from assertpy import assert_that
 
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.providers import claude_auth
-from lintro.ai.providers.anthropic import AnthropicProvider
+from lintro.ai.providers.anthropic.metadata import ANTHROPIC_MANAGED_SETTINGS_ENV
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.claude_auth import (
     BARE_MODE_ENV,
     CLAUDE_API_KEY_ENV,
@@ -45,11 +46,12 @@ def isolated_auth_env(
     config_dir.mkdir()
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(config_dir))
     # A real machine-level managed settings file would otherwise leak into
-    # every "no credential" assertion.
-    monkeypatch.setattr(
-        claude_auth,
-        "_managed_settings_path",
-        lambda: tmp_path / "managed-settings.json",
+    # every "no credential" assertion. The override is the documented escape
+    # hatch on the Anthropic metadata, so the test uses it rather than patching
+    # a private helper.
+    monkeypatch.setenv(
+        ANTHROPIC_MANAGED_SETTINGS_ENV,
+        str(tmp_path / "managed-settings.json"),
     )
     workdir = tmp_path / "repo"
     workdir.mkdir()
@@ -312,7 +314,7 @@ def _mock_claude_on_path() -> Iterator[None]:
         None: Control, with ``_find_claude`` returning a fake path.
     """
     with patch(
-        "lintro.ai.providers.anthropic._find_claude",
+        "lintro.ai.providers.anthropic.provider._find_claude",
         return_value="/usr/local/bin/claude",
     ):
         yield

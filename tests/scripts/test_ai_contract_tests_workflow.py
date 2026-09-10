@@ -23,6 +23,8 @@ import pytest
 import yaml
 from assertpy import assert_that
 
+from tests.scripts._action_pins import action_pin, actions_used_in
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ai-contract-tests.yml"
 RUNNER = REPO_ROOT / "scripts" / "ci" / "run-ai-contract-tests.sh"
@@ -229,18 +231,21 @@ def test_runner_help_exits_zero() -> None:
 
 
 @pytest.mark.parametrize(
-    "action_ref",
+    "action",
     [
-        "step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c",
-        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "step-security/harden-runner",
+        "actions/checkout",
     ],
 )
-def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
-    """Third-party actions are pinned to full commit SHAs.
+def test_workflow_uses_pinned_actions(*, action: str) -> None:
+    """The workflow hardens the runner and checks out, both at pinned SHAs.
+
+    Membership is what this asserts; the pin itself is derived from the
+    workflow files (#2432) and its shape is enforced by
+    ``pinned_action_shas`` rather than by a literal repeated here.
 
     Args:
-        action_ref: The expected ``owner/repo@sha`` reference.
+        action: The ``owner/repo`` identifier expected in the workflow.
     """
-    body = WORKFLOW.read_text(encoding="utf-8")
-
-    assert_that(body).contains(action_ref)
+    assert_that(actions_used_in(WORKFLOW)).contains(action)
+    assert_that(WORKFLOW.read_text(encoding="utf-8")).contains(action_pin(action))

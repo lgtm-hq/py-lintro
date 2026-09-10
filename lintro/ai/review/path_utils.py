@@ -6,6 +6,8 @@ from pathlib import PurePosixPath
 
 from identify import identify
 
+from lintro.ai.review.file_language import languages_for_path
+
 _TEST_NAME_MARKERS = (".spec.", ".test.", "_test.")
 _TEST_LAYER_PARTS: frozenset[str] = frozenset({"unit", "integration"})
 _E2E_DIR_EXACT: frozenset[str] = frozenset({"e2e", "playwright-tests"})
@@ -16,6 +18,7 @@ _GENERIC_IDENTIFY_TAGS: frozenset[str] = frozenset({"plain-text", "text"})
 # coverage lives in identify's maintained map — not a local suffix table.
 _NON_SOURCE_IDENTIFY_TAGS: frozenset[str] = frozenset(
     {
+        "diff",
         "audio",
         "binary",
         "csv",
@@ -42,9 +45,20 @@ def _has_tests_ancestor(path: PurePosixPath) -> bool:
     return any(part in ("tests", "__tests__") for part in path.parts[:-1])
 
 
+#: First path segments that mark a repository-level test tree.
+_TOP_LEVEL_TESTS_ROOTS: frozenset[tuple[str, ...]] = frozenset(
+    {("tests",), ("__tests__",)},
+)
+
+
 def _is_under_tests_directory(*, pure_path: PurePosixPath) -> bool:
     """Return True when a path sits under tests/ or __tests__."""
     return _has_tests_ancestor(pure_path) or pure_path.parts[:1] == ("tests",)
+
+
+def _is_top_level_tests_root(*, pure_path: PurePosixPath) -> bool:
+    """Return True when a path's first segment is ``tests`` or ``__tests__``."""
+    return pure_path.parts[:1] in _TOP_LEVEL_TESTS_ROOTS
 
 
 def _is_non_test_artifact(*, pure_path: PurePosixPath) -> bool:
@@ -63,6 +77,34 @@ def _meaningful_source_identify_tags(*, name: str) -> set[str]:
     """Return identify language/source tags after stripping generic and data tags."""
     tags = set(identify.tags_from_filename(name))
     return tags - _GENERIC_IDENTIFY_TAGS - _NON_SOURCE_IDENTIFY_TAGS
+
+
+def is_source_code_path(path: str) -> bool:
+    """Return True when a path names source code rather than docs, config, or data.
+
+    Used when deciding whether a file can own a test: a changed
+    ``docs/migrate-docs-content.md`` next to ``scripts/ci/site/migrate-docs-content.py``
+    must not make the script's stem look ambiguous.
+
+    Args:
+        path: Repository-relative path.
+
+    Returns:
+        True when identify reports a meaningful language tag for the file
+        name, or when the path is an extensionless script under a top-level
+        ``bin/`` or ``scripts/`` directory (which
+        :func:`~lintro.ai.review.file_language.languages_for_path` treats as
+        shell), and the path is not a docs, config, or fixture artifact.
+    """
+    pure_path = PurePosixPath(path.replace("\\", "/"))
+    if _is_non_test_artifact(pure_path=pure_path):
+        return False
+    if _meaningful_source_identify_tags(name=pure_path.name):
+        return True
+    # ``scripts/ci/run`` carries no identify tag from its name alone, yet the
+    # language layer already calls it shell; pairing must agree so the
+    # script can own ``test_run.bats`` and count toward stem uniqueness.
+    return "shell" in languages_for_path(path=path)
 
 
 def _looks_like_test_code(*, pure_path: PurePosixPath) -> bool:
@@ -157,10 +199,40 @@ def _has_e2e_name_marker(*, name_lower: str) -> bool:
     return name_lower.endswith((".e2e.ts", ".e2e.tsx", ".e2e.js", ".e2e.jsx"))
 
 
+def normalize_stem(*, stem: str) -> str:
+    """Return a separator-insensitive form of a file stem.
+
+    Hyphenated and underscored names describe the same module for pairing
+    purposes (``migrate-docs-content.py`` is tested by
+    ``test_migrate_docs_content.py``), so both are lower-cased and their
+    separators are folded to ``_``.
+
+    Args:
+        stem: File stem or basename to normalise.
+
+    Returns:
+        The lower-cased stem with ``-`` folded to ``_``.
+    """
+    return stem.lower().replace("-", "_")
+
+
 def _test_name_matches_stem(*, name: str, source_stem: str) -> bool:
-    """Return True when a test filename pairs with a source stem."""
-    lower = name.lower()
-    stem = source_stem.lower()
+    """Return True when a test filename pairs with a source stem.
+
+    Both sides are normalised with :func:`normalize_stem` first, so hyphenated
+    sources pair with underscored test filenames and vice versa. Exact matches
+    are unaffected by the normalisation.
+
+    Args:
+        name: Test file basename.
+        source_stem: Source file stem without its extension.
+
+    Returns:
+        True when the basename uses a conventional test naming pattern for the
+        source stem.
+    """
+    lower = normalize_stem(stem=name)
+    stem = normalize_stem(stem=source_stem)
     prefixes = (
         f"test_{stem}.",
         f"{stem}_test.",
@@ -207,8 +279,73 @@ def _package_local_test_mirror_match(
     return None
 
 
-def _parents_compatible(*, test_path: str, source_path: str) -> bool:
-    """Return True when test and source paths are directory-related."""
+def _tests_root_chain_compatible(
+    *,
+    mirrored: str,
+    source_parent: str,
+    allow_prefix: bool = False,
+) -> bool:
+    """Return True when a top-level ``tests/`` chain projects onto a source chain.
+
+    ``mirrored`` is the test file's directory chain below the ``tests/`` (or
+    ``__tests__/``) root with any ``unit``/``integration`` layer already
+    stripped. Two deterministic projections are accepted:
+
+    * **Prefix** — the test chain matches the leading segments of the source
+      chain, so ``tests/scripts/ci/test_x.py`` and ``tests/scripts/test_x.py``
+      both pair with ``scripts/ci/site/x.py``. Because the match is anchored on
+      the source's own top-level directory, unrelated trees never pair (a
+      ``lintro/`` source is not paired with a ``tests/scripts/`` test). This
+      projection is looser than a mirror, so it is only offered when the
+      caller passes ``allow_prefix=True``, which the chunker does exactly when
+      no other source in the diff shares the stem; otherwise two same-stem
+      sources under one tree would be paired by sort order.
+    * **Suffix** — the test chain matches the trailing segments of the source
+      chain, the existing mirror layout where ``tests/unit/ai/review`` pairs
+      with ``lintro/ai/review``. Suffix matches require at least two segments so
+      a single shared directory name cannot pair unrelated trees.
+
+    Sources under a ``src``-like but non-canonical root (``src2/``) are rejected
+    outright, preserving the existing guard against near-miss mirror roots.
+
+    Args:
+        mirrored: Test directory chain below the tests root.
+        source_parent: POSIX directory chain of the source file.
+        allow_prefix: Whether the prefix projection may be used.
+
+    Returns:
+        True when the two chains are compatible under an allowed projection.
+    """
+    source_parts = tuple(part for part in source_parent.split("/") if part)
+    test_parts = tuple(part for part in mirrored.split("/") if part)
+    if not test_parts or not source_parts:
+        return False
+    if source_parts[0].startswith("src") and source_parts[0] != "src":
+        return False
+    if allow_prefix and source_parts[: len(test_parts)] == test_parts:
+        return True
+    if len(test_parts) < 2:
+        return False
+    return source_parts[-len(test_parts) :] == test_parts
+
+
+def _parents_compatible(
+    *,
+    test_path: str,
+    source_path: str,
+    allow_prefix: bool = False,
+) -> bool:
+    """Return True when test and source paths are directory-related.
+
+    Args:
+        test_path: Test file path.
+        source_path: Source file path.
+        allow_prefix: Whether the looser prefix projection under ``tests/``
+            may pair the two; see :func:`_tests_root_chain_compatible`.
+
+    Returns:
+        True when the parents are compatible.
+    """
     test_pure = PurePosixPath(test_path.replace("\\", "/"))
     source_pure = PurePosixPath(source_path.replace("\\", "/"))
     test_parent = test_pure.parent.as_posix()
@@ -229,19 +366,11 @@ def _parents_compatible(*, test_path: str, source_path: str) -> bool:
             return source_parent == "src"
         if source_parent == f"src/{mirrored}":
             return True
-        source_parts = tuple(part for part in source_parent.split("/") if part)
-        test_parts = tuple(part for part in mirrored.split("/") if part)
-        if not test_parts:
-            return False
-        if len(test_parts) < 2:
-            return False
-        if (
-            source_parts
-            and source_parts[0].startswith("src")
-            and source_parts[0] != "src"
-        ):
-            return False
-        return source_parts[-len(test_parts) :] == test_parts
+        return _tests_root_chain_compatible(
+            mirrored=mirrored,
+            source_parent=source_parent,
+            allow_prefix=allow_prefix,
+        )
 
     package_match = _package_local_test_mirror_match(
         test_parent=test_parent,
@@ -259,11 +388,27 @@ def _parents_compatible(*, test_path: str, source_path: str) -> bool:
     return False
 
 
+def _has_near_miss_source_root(*, path: str | None) -> bool:
+    """Return True when a source path sits under a ``src``-like but non-``src`` root.
+
+    Args:
+        path: Source file path, or ``None`` when unknown.
+
+    Returns:
+        True for roots such as ``src2/`` or ``srcs/`` that must never pair.
+    """
+    if not path:
+        return False
+    parts = [part for part in path.replace("\\", "/").split("/") if part]
+    return len(parts) > 1 and parts[0].startswith("src") and parts[0] != "src"
+
+
 def matches_test_for_source(
     *,
     test_path: str,
     source_stem: str,
     source_path: str | None = None,
+    stem_is_unique: bool = False,
 ) -> bool:
     """Return True when ``test_path`` appears to test ``source_stem``.
 
@@ -271,6 +416,10 @@ def matches_test_for_source(
         test_path: Candidate test file path.
         source_stem: Source file stem without extension.
         source_path: Optional full source path for disambiguation.
+        stem_is_unique: When True, the caller has established that no other
+            source under review shares this stem. A test under a tests root
+            then pairs on the stem alone, which is the only case where
+            unrelated top-level trees are allowed to pair.
 
     Returns:
         True when the test path explicitly pairs with the source stem.
@@ -285,4 +434,20 @@ def matches_test_for_source(
     if source_path is None:
         return True
 
-    return _parents_compatible(test_path=test_path, source_path=source_path)
+    if _parents_compatible(
+        test_path=test_path,
+        source_path=source_path,
+        allow_prefix=stem_is_unique,
+    ):
+        return True
+
+    # The unique-stem fallback may cross directory trees, but never from a
+    # near-miss source root such as ``src2/``: that guard exists to stop a
+    # look-alike tree from claiming ``tests/`` files, and a unique stem does
+    # not change what the root is.
+    if _has_near_miss_source_root(path=source_path):
+        return False
+    # Only a top-level test root may pair across trees. A nested
+    # ``other/tests/`` belongs to the ``other/`` tree, and
+    # ``_parents_compatible`` has already rejected that tree above.
+    return stem_is_unique and _is_top_level_tests_root(pure_path=test_pure)

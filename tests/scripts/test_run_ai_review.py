@@ -7,11 +7,13 @@ valid YAML and feeds ``LINTRO_AI_*`` from repo Actions variables (#1971).
 
 from __future__ import annotations
 
+import base64
 import math
 import os
 import re
 import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -20,6 +22,7 @@ from click.testing import CliRunner
 
 from lintro.ai import transport
 from lintro.cli import cli
+from tests.scripts._action_pins import action_pin, actions_used_in
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_SCRIPT = REPO_ROOT / "scripts" / "ci" / "enable_review_config.py"
@@ -32,7 +35,36 @@ PROJECT_CONFIG = REPO_ROOT / ".lintro-config.yaml"
 CREDENTIAL_ENV = "CLAUDE_CODE_OAUTH_TOKEN"
 CURSOR_CREDENTIAL_ENV = "CURSOR_API_KEY"
 PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
-_PINNED_CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+#: Lane credentials added by #2472. The Codex subscription session is decoded
+#: into ~/.codex/auth.json by a dedicated step (its own injection site); the
+#: z.ai gateway token is forwarded under the ANTHROPIC_AUTH_TOKEN env name.
+CODEX_SESSION_ENV = "CODEX_AUTH_JSON"
+ZAI_GATEWAY_ENV = "ZAI_AUTH_TOKEN"
+GATEWAY_AUTH_ENV = "ANTHROPIC_AUTH_TOKEN"
+_OPENAI_EGRESS_HOSTS = (
+    "api.openai.com:443",
+    "auth.openai.com:443",
+    "chatgpt.com:443",
+)
+_ZAI_EGRESS_HOSTS = ("api.z.ai:443",)
+#: Derived from the workflow files (#2432) so a Renovate action bump cannot
+#: fail these tests on its own: Renovate rewrites `uses:` refs and cannot see
+#: a literal in a test module.
+
+
+def _pinned_checkout() -> str:
+    """Return the repo-wide ``actions/checkout`` pin, resolved lazily.
+
+    Resolving at call time keeps the repo-wide pin scan out of module import,
+    so a pin regression fails the tests that assert it instead of erroring the
+    whole module at collection.
+
+    Returns:
+        str: The ``actions/checkout@<sha>`` reference every workflow uses.
+    """
+    return action_pin("actions/checkout")
+
+
 _HEAD_REF_RE = re.compile(
     r"github\.event\.pull_request\.head\.(?:sha|ref|name)\b"
     r"|github\.(?:head_ref|sha|ref_name|ref)\b",
@@ -118,22 +150,26 @@ def test_committed_config_keeps_ai_off_with_review_ready() -> None:
     """Local default stays AI-off; CI turns it on via ``LINTRO_AI_ENABLED=1``.
 
     ``ai.review: true`` is committed so enabling the master switch does not
-    rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is the
-    spend ceiling (2.00; restored by #2025 after the 0.50 side-effect in
-    #2018 / 9f43a98a).
+    rely on the deprecated implied-sub-toggle path. ``ai.max_cost_usd`` is
+    unset after the #2156 rollout (no committed cap; CI forwards
+    ``LINTRO_AI_MAX_COST_USD``, and dogfood operators set ``uncapped``).
+    Historical: #2018 / 9f43a98a briefly shipped 0.50; #2025 restored 2.00 as
+    the interim committed cap.
     """
     loaded = yaml.safe_load(PROJECT_CONFIG.read_text(encoding="utf-8"))
     ai_section = loaded["ai"]
     assert_that(ai_section["enabled"]).is_false()
     assert_that(ai_section["review"]).is_true()
-    assert_that(ai_section["max_cost_usd"]).is_equal_to(2.00)
+    assert_that(ai_section).does_not_contain_key("max_cost_usd")
     workflow_text = WORKFLOW.read_text(encoding="utf-8")
     assert_that(workflow_text).contains("#2018 / 9f43a98a")
+    assert_that(workflow_text).contains("LINTRO_AI_MAX_COST_USD")
+    assert_that(workflow_text).does_not_contain("|| '2.00'")
     assert_that(workflow_text).does_not_contain("0.50 that landed with\n# #1971")
 
 
 def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
-    """The review step overlays provider/model/transport from Actions variables."""
+    """The review step overlays AI settings from Actions variables."""
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     steps = loaded["jobs"]["ai-review"]["steps"]
     review_steps = [
@@ -149,6 +185,9 @@ def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
         "${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}",
     )
     assert_that(env["LINTRO_AI_MODEL"]).is_equal_to("${{ vars.LINTRO_AI_MODEL }}")
+    assert_that(env["LINTRO_AI_MAX_COST_USD"]).is_equal_to(
+        "${{ vars.LINTRO_AI_MAX_COST_USD }}",
+    )
     assert_that(env).does_not_contain_key("AI_REVIEW_MAX_COST_USD")
 
 
@@ -158,6 +197,15 @@ def test_shell_help_exits_zero() -> None:
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Usage:")
+    assert_that(result.stdout).contains("--locate-prior-state")
+
+
+def test_shell_locate_prior_state_is_a_noop_without_github() -> None:
+    """Locate mode does not require a provider credential and always exits 0."""
+    result = _run_shell(args=["--locate-prior-state"], env_overrides={})
+
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("run-id=")
 
 
 def test_shell_fails_visibly_without_oauth_token() -> None:
@@ -176,6 +224,31 @@ def test_shell_fails_visibly_without_oauth_token() -> None:
     assert_that(result.stdout).contains("::error")
     assert_that(result.stdout).contains("no provider credential")
     assert_that(result.stderr).contains("nothing was reviewed")
+
+
+def test_shell_standard_anthropic_path_with_empty_gateway_env() -> None:
+    """Empty gateway env must not disturb the standard claude subscription path.
+
+    The workflow always emits ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN into
+    the review step; in non-gateway mode they resolve to '' and reach the
+    claude subprocess via os.environ (#2473). With a valid OAuth token and
+    both gateway vars empty, the gate must still pass — the failure here must
+    be the missing PR number, not a no-credential skip.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "dummy-claude-token",
+            GATEWAY_AUTH_ENV: "",
+            "ANTHROPIC_BASE_URL": "",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).does_not_contain("no provider credential")
 
 
 def test_shell_fails_visibly_without_cursor_key_when_provider_is_cursor() -> None:
@@ -198,6 +271,221 @@ def test_shell_fails_visibly_without_cursor_key_when_provider_is_cursor() -> Non
     assert_that(result.returncode).is_equal_to(1)
     assert_that(result.stdout).contains("::error")
     assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_fails_visibly_without_codex_session_when_provider_is_openai(
+    tmp_path: Path,
+) -> None:
+    """The openai lane is satisfied by the auth.json session, not a token env.
+
+    Codex has no OAuth-token env var (#2472): a set ``CLAUDE_CODE_OAUTH_TOKEN``
+    must not satisfy the openai gate, and a missing ``~/.codex/auth.json`` is
+    the visible no-credential failure. HOME is pointed at an empty tmp dir so
+    the assertion never depends on the runner's real ~/.codex.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            "HOME": str(tmp_path),
+            CREDENTIAL_ENV: "dummy-claude-token",
+            "LINTRO_AI_PROVIDER": "openai",
+            "PR_NUMBER": "123",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("::error")
+    assert_that(result.stdout).contains("no provider credential")
+
+
+def test_shell_accepts_codex_session_without_any_token_env(tmp_path: Path) -> None:
+    """A restored ~/.codex/auth.json satisfies the openai gate (#2472).
+
+    The failure must be the missing PR number (classifier, invoked), not a
+    missing-credential skip — the workflow decodes CODEX_AUTH_JSON into
+    ~/.codex/auth.json and the wrapper proceeds on that file alone.
+    """
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    (codex_dir / "auth.json").write_text("{}", encoding="utf-8")
+
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            "HOME": str(tmp_path),
+            CREDENTIAL_ENV: "",
+            "LINTRO_AI_PROVIDER": "openai",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).does_not_contain("no provider credential")
+
+
+def test_shell_accepts_gateway_token_for_anthropic_without_oauth() -> None:
+    """ANTHROPIC_AUTH_TOKEN + ANTHROPIC_BASE_URL satisfies the anthropic gate.
+
+    With the Claude OAuth secret absent, a gateway deployment (#2472) must
+    still pass the credential gate: the failure here must be the missing PR
+    number, not a no-credential skip. The workflow always sets the pair
+    together; the gate requires both so a token alone can never be forwarded
+    to the default api.anthropic.com endpoint.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            GATEWAY_AUTH_ENV: "dummy-gateway-token",
+            "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).does_not_contain("no provider credential")
+
+
+def test_shell_rejects_gateway_token_without_gateway_endpoint() -> None:
+    """A gateway token without ANTHROPIC_BASE_URL fails the credential gate.
+
+    Forwarding the gateway credential to the default api.anthropic.com
+    endpoint would leak it to an unintended host (#2472), so the gate must
+    require both halves of the pair and fail visibly on the orphan token.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            GATEWAY_AUTH_ENV: "dummy-gateway-token",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stdout).does_not_contain("never invoked")
+
+
+def test_shell_rejects_gateway_endpoint_without_token() -> None:
+    """A gateway endpoint without ANTHROPIC_AUTH_TOKEN fails the gate too.
+
+    The mirror of the orphan-token case: pointing the CLI at a gateway it
+    cannot authenticate to must not half-activate the lane — with the Claude
+    OAuth secret absent, the gate reports the missing credential visibly
+    rather than running unauthenticated against the gateway URL (#2472).
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stdout).does_not_contain("never invoked")
+
+
+def test_shell_rejects_cleartext_gateway_endpoint() -> None:
+    """A non-https gateway URL fails the gate even with a token present.
+
+    The gateway credential travels in a header to ANTHROPIC_BASE_URL, so a
+    cleartext scheme would expose it in transit (CWE-319) — the gate only
+    accepts https endpoints (#2473 review).
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            GATEWAY_AUTH_ENV: "dummy-gateway-token",
+            "ANTHROPIC_BASE_URL": "http://api.z.ai/api/anthropic",
+            "LINTRO_AI_PROVIDER": "anthropic",
+            "PR_NUMBER": "",
+        },
+    )
+
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("no provider credential")
+    assert_that(result.stdout).does_not_contain("never invoked")
+
+
+def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
+    """The workflow must restore auth.json where the wrapper's gate looks.
+
+    The restore step decodes CODEX_AUTH_JSON into ``$HOME/.codex/auth.json``
+    and the openai credential branch stats exactly that file (#2472); if the
+    paths drift apart, the review fails as "no provider credential" on a run
+    whose secret was delivered correctly. Exercised behaviourally against a
+    shared ``HOME``: after a successful restore, the wrapper's credential
+    gate must pass (its next failure is the missing PR number), and with no
+    restored session it must not.
+    """
+    # Static guards binding each hop to the same path: the wrapper's gate
+    # stats the session file, and the workflow's restore step is the step
+    # that invokes the script writing it (binding workflow → script).
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    assert_that(shell_text).contains('/.codex/auth.json"')
+
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    restore_steps = [
+        step
+        for step in loaded["jobs"]["ai-review"]["steps"]
+        if str(step.get("name", "")).startswith("Restore Codex subscription session")
+    ]
+    assert_that(restore_steps).is_length(1)
+    restore_run = str(restore_steps[0]["run"]).strip()
+    assert_that(restore_run).is_equal_to("scripts/ci/restore-codex-session.sh")
+    restore_script = REPO_ROOT / "scripts" / "ci" / "restore-codex-session.sh"
+    assert_that(restore_script.read_text(encoding="utf-8")).contains(
+        ".codex/auth.json",
+    )
+
+    base_env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)}
+    encoded = base64.b64encode(b'{"OPENAI_API_KEY": null}').decode("ascii")
+    restored = subprocess.run(  # nosec B603 - fixed argv against a repo script in a controlled test
+        [str(restore_script)],
+        capture_output=True,
+        text=True,
+        env={**base_env, "CODEX_AUTH_JSON": encoded},
+    )
+    assert_that(restored.returncode).is_equal_to(0)
+    assert_that(tmp_path.joinpath(".codex", "auth.json").exists()).is_true()
+
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            GATEWAY_AUTH_ENV: "",
+            "LINTRO_AI_PROVIDER": "openai",
+            "PR_NUMBER": "",
+            "HOME": str(tmp_path),
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).does_not_contain("no provider credential")
+
+    # Without the restored session, the same invocation must fail the gate.
+    not_restored = _run_shell(
+        args=[],
+        env_overrides={
+            CREDENTIAL_ENV: "",
+            GATEWAY_AUTH_ENV: "",
+            "LINTRO_AI_PROVIDER": "openai",
+            "PR_NUMBER": "",
+            "HOME": str(tmp_path.joinpath("empty-home")),
+        },
+    )
+    assert_that(not_restored.returncode).is_equal_to(1)
+    assert_that(not_restored.stdout).contains("no provider credential")
 
 
 def test_shell_lowercases_provider_without_bash4_syntax() -> None:
@@ -356,22 +644,42 @@ def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
     assert_that(pull_request).does_not_contain_key("paths-ignore")
 
 
+_BEST_EFFORT_STATE_STEPS = frozenset(
+    {
+        "Locate prior review-state run",
+        "Download prior review-state artifacts",
+    },
+)
+
+
 def test_workflow_never_rewrites_its_conclusion_to_success() -> None:
-    """No ``continue-on-error`` anywhere, so a failed review shows as failed.
+    """The review step cannot swallow failure; locate/download may.
 
     Job-level ``continue-on-error`` rewrites the job conclusion to ``success``,
     which is exactly how a review that produced nothing kept reading as a pass for
-    months (#1826). The check is not required, so a red conclusion is visible
-    without being blocking — that is the whole trade this asserts.
+    months (#1826). Locate and download are best-effort plumbing: their
+    ``continue-on-error`` keeps a missing prior artifact from skipping the
+    review. The review step itself still has none. The check is not required,
+    so a red conclusion is visible without being blocking.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     job = loaded["jobs"]["ai-review"]
     assert_that(job).does_not_contain_key("continue-on-error")
+    review_seen = False
     for step in job["steps"]:
+        name = str(step.get("name", ""))
+        if name in _BEST_EFFORT_STATE_STEPS:
+            assert_that(step.get("continue-on-error")).described_as(
+                f"step {name!r} is best-effort plumbing",
+            ).is_true()
+            continue
+        if name.startswith("Run AI review"):
+            review_seen = True
         assert_that(step).described_as(
-            f"step {step.get('name')!r} must not swallow its own failure",
+            f"step {name!r} must not swallow its own failure",
         ).does_not_contain_key("continue-on-error")
+    assert_that(review_seen).is_true()
 
 
 def test_workflow_job_is_same_repo_only() -> None:
@@ -390,18 +698,20 @@ def test_workflow_job_is_same_repo_only() -> None:
 
 
 def test_workflow_job_reads_pull_requests() -> None:
-    """The workflow token only needs contents + pull-requests read.
+    """The workflow token stays read-only: contents, PRs, and actions.
 
     ``actions/checkout`` reads the trusted base ref (``contents: read``).
-    ``gh`` fetches the PR diff (``pull-requests: read``). ``--post`` writes
-    as ``lintro-review[bot]`` via the App token (#2050), so the job-scoped
-    ``GITHUB_TOKEN`` stays read-only.
+    ``gh`` fetches the PR diff (``pull-requests: read``). Cross-run
+    artifact listing needs ``actions: read`` (#2158). ``--post`` writes
+    as ``lintro-review[bot]`` via the App token (#2050), so the
+    job-scoped ``GITHUB_TOKEN`` never gains write.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     perms = loaded["jobs"]["ai-review"]["permissions"]
     assert_that(perms["pull-requests"]).is_equal_to("read")
     assert_that(perms["contents"]).is_equal_to("read")
+    assert_that(perms["actions"]).is_equal_to("read")
 
 
 def test_workflow_installs_from_base_ref_not_pr_head() -> None:
@@ -442,6 +752,10 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     )
     workflow_text = WORKFLOW.read_text(encoding="utf-8")
     assert_that(workflow_text).contains("TWO-PR BOOTSTRAP")
+    assert_that(workflow_text).contains("default branch")
+    assert_that(workflow_text).does_not_contain(
+        "GitHub runs the workflow YAML from the PR",
+    )
     assert_that(workflow_text).does_not_contain(".ai-review-installer")
     assert_that(workflow_text).does_not_contain("enable_cursor_workspace_trust")
 
@@ -449,13 +763,13 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
 @pytest.mark.parametrize(
     ("uses", "expected"),
     [
-        (_PINNED_CHECKOUT, True),
+        ("pin:actions/checkout", True),
         ("evil/checkout@deadbeef", True),
         ("acme/checkout-action@1", True),
         ("acme/pr-checkout@1", True),
         ("acme/pr-checkout-action@1", True),
-        ("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", False),
-        ("astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d", False),
+        ("pin:actions/setup-node", False),
+        ("pin:astral-sh/setup-uv", False),
     ],
     ids=[
         "pinned-actions-checkout",
@@ -474,6 +788,8 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
         uses: A workflow ``uses`` pin.
         expected: Whether the pin is checkout-like.
     """
+    if uses.startswith("pin:"):
+        uses = action_pin(uses.removeprefix("pin:"))
     assert_that(_is_checkout_like_action(uses)).is_equal_to(expected)
 
 
@@ -592,7 +908,7 @@ def test_workflow_forbids_head_ref_fetches() -> None:
         if isinstance(uses, str) and _is_checkout_like_action(uses):
             pin = uses.split("#", 1)[0].strip()
             checkout_uses.append(pin)
-            assert_that(pin).is_equal_to(_PINNED_CHECKOUT)
+            assert_that(pin).is_equal_to(_pinned_checkout())
 
         with_block = step.get("with") or {}
         ref = str(with_block.get("ref", ""))
@@ -623,11 +939,11 @@ def test_workflow_forbids_head_ref_fetches() -> None:
             f"step {step.get('name')!r} must not use pull_request.head sha/ref",
         ).is_none()
 
-    assert_that(checkout_uses).is_equal_to([_PINNED_CHECKOUT])
+    assert_that(checkout_uses).is_equal_to([_pinned_checkout()])
 
 
 def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
-    """#2023 defaults ``ai.cursor_trust_workspace``; the CI patcher is gone."""
+    """#2023 defaults ``ai.providers.cursor.trust_workspace``; no CI patcher."""
     assert_that(
         (REPO_ROOT / "scripts" / "ci" / "enable_cursor_workspace_trust.py").exists(),
     ).is_false()
@@ -644,18 +960,30 @@ def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
 
 
 def test_workflow_secret_scoped_to_review_step_only() -> None:
-    """Provider credentials are injected only into the final review step env.
+    """Provider credentials are injected only into post-trust-install steps.
 
     Secrets must not appear in workflow- or job-level env maps, nor in
     earlier steps (checkout, CLI install, uv sync, etc.), so PR-controlled code
     paths never receive a token before the trusted base-ref install completes.
-    This is the ordering control audited in #1317.
+    This is the ordering control audited in #1317. #2472 adds two legitimate
+    injection sites: the review step's z.ai gateway token (ANTHROPIC_AUTH_TOKEN
+    mapped from secrets.ZAI_AUTH_TOKEN) and the Codex session-restore step
+    (CODEX_AUTH_JSON, decoded into ~/.codex/auth.json after the trusted
+    install).
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     workflow_env = loaded.get("env")
     job_env = loaded["jobs"]["ai-review"].get("env")
-    for credential_env in PROVIDER_CREDENTIAL_ENVS:
+    # CODEX_SESSION_ENV (CODEX_AUTH_JSON) is one of the lane credentials: only
+    # the restore step may carry it, never workflow/job env or any other step
+    # (#2473 review).
+    lane_credentials = (
+        *PROVIDER_CREDENTIAL_ENVS,
+        GATEWAY_AUTH_ENV,
+        CODEX_SESSION_ENV,
+    )
+    for credential_env in lane_credentials:
         if workflow_env is not None:
             assert_that(workflow_env).does_not_contain_key(credential_env)
         if job_env is not None:
@@ -666,22 +994,59 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
         step for step in steps if str(step.get("name", "")).startswith("Run AI review")
     ]
     assert_that(review_steps).is_length(1)
+    restore_steps = [
+        step
+        for step in steps
+        if str(step.get("name", "")).startswith("Restore Codex subscription session")
+    ]
+    assert_that(restore_steps).is_length(1)
 
     # Assert on the parsed env map, not on a dump of the whole step: a mention
     # in a `run:` line or a comment would satisfy a text search while the step
     # never actually received the secret.
     review_step = review_steps[0]
+    # The claude token rides only in the non-gateway anthropic lane
+    # (#2473 review): gateway mode empties it so the two anthropic auth
+    # sources are never both in play, and the openai/cursor lanes don't
+    # receive a Claude credential they cannot use. Exact-expression
+    # assertions, not substring checks: GitHub Actions has no ternary, and
+    # `cond && '' || secret` degrades to always-secret because '' is falsy —
+    # only the inverted form (secret in the TRUE branch) can yield ''. The
+    # provider comparison uses the defaulted form the review step itself
+    # applies, so the lane activates when LINTRO_AI_PROVIDER is unset.
     assert_that(review_step["env"][CREDENTIAL_ENV]).is_equal_to(
-        "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}",
+        "${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+        " && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN"
+        " || '' }}",
     )
     assert_that(review_step["env"][CURSOR_CREDENTIAL_ENV]).is_equal_to(
         "${{ secrets.CURSOR_API_KEY }}",
     )
+    assert_that(review_step["env"][GATEWAY_AUTH_ENV]).is_equal_to(
+        "${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+        " && vars.ZAI_BASE_URL && secrets." + ZAI_GATEWAY_ENV + " || '' }}",
+    )
+    assert_that(review_step["env"]["ANTHROPIC_BASE_URL"]).is_equal_to(
+        "${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+        " && vars.ZAI_BASE_URL || '' }}",
+    )
+    # The review step must not receive the Codex session either: the restore
+    # step — not the step that runs the review — is CODEX_AUTH_JSON's only
+    # injection site (#2473).
+    assert_that(review_step["env"]).does_not_contain_key(CODEX_SESSION_ENV)
+    # The restore step maps the org secret to the env the restore script
+    # reads; the script decodes it into $HOME/.codex/auth.json (behavioral
+    # binding covered in test_codex_session_path_is_bound_between_scripts).
+    restore_step = restore_steps[0]
+    assert_that(restore_step["env"][CODEX_SESSION_ENV]).is_equal_to(
+        "${{ secrets.CODEX_AUTH_JSON }}",
+    )
+    injection_sites = (review_step, restore_step)
     for step in steps:
-        if step is review_step:
+        if step in injection_sites:
             continue
         step_env = step.get("env") or {}
-        for credential_env in PROVIDER_CREDENTIAL_ENVS:
+        for credential_env in lane_credentials:
             assert_that(step_env).described_as(
                 f"step {step.get('name')!r}",
             ).does_not_contain_key(credential_env)
@@ -712,24 +1077,31 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
 
 
 @pytest.mark.parametrize(
-    "action_ref",
+    "action",
     [
-        "step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c",
-        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
-        "astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d",
-        "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
-        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        "step-security/harden-runner",
+        "actions/checkout",
+        "astral-sh/setup-uv",
+        "actions/setup-node",
+        "actions/create-github-app-token",
+        "actions/download-artifact",
+        "actions/upload-artifact",
+        "actions/github-script",
     ],
 )
-def test_workflow_pins_actions_to_sha(*, action_ref: str) -> None:
-    """Third-party actions are pinned to full commit SHAs.
+def test_workflow_uses_pinned_actions(*, action: str) -> None:
+    """The reviewed workflow keeps using each action it depends on.
+
+    Membership of the action is the assertion; the SHA it resolves to is
+    derived from the workflow files (#2432), and its shape -- a 40-hex commit
+    with a ``# vX.Y.Z`` comment, identical across every workflow -- is enforced
+    by ``pinned_action_shas`` in ``tests/scripts/test_action_pins.py``.
 
     Args:
-        action_ref: The ``owner/repo@sha`` reference expected in the workflow.
+        action: The ``owner/repo`` identifier expected in the workflow.
     """
-    content = WORKFLOW.read_text(encoding="utf-8")
-
-    assert_that(content).contains(action_ref)
+    assert_that(actions_used_in(WORKFLOW)).contains(action)
+    assert_that(WORKFLOW.read_text(encoding="utf-8")).contains(action_pin(action))
 
 
 def test_workflow_mints_lintro_review_app_token_for_posting() -> None:
@@ -751,7 +1123,7 @@ def test_workflow_mints_lintro_review_app_token_for_posting() -> None:
     mint = mint_steps[0]
     assert_that(mint["id"]).is_equal_to("lintro-review-app")
     assert_that(mint["uses"]).is_equal_to(
-        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        action_pin("actions/create-github-app-token"),
     )
     mint_with = mint["with"]
     assert_that(mint_with["app-id"]).is_equal_to(
@@ -858,7 +1230,7 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     resolve_steps = [
         step for step in steps if "ai_tools_arg_pin.py" in str(step.get("run", ""))
     ]
-    assert_that(resolve_steps).is_length(2)
+    assert_that(resolve_steps).is_length(3)
 
     claude_pins = next(step for step in resolve_steps if step.get("id") == "pins")
     pin_run = claude_pins["run"]
@@ -905,6 +1277,35 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
         "${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}",
     )
 
+    # Codex lane (#2472): Renovate-pinned npm install, gated on the provider.
+    # The codex pin step is the invocation PR's third ai_tools_arg_pin.py
+    # call site — resolve_steps counts three.
+    codex_pins = next(step for step in resolve_steps if step.get("id") == "codex-pins")
+    assert_that(codex_pins["if"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER == 'openai' }}",
+    )
+    assert_that(codex_pins["run"]).contains("CODEX_VERSION")
+    assert_that(codex_pins["run"]).contains("--exact")
+
+    codex_install_steps = [
+        step
+        for step in steps
+        if str(step.get("run", "")).strip() == "scripts/ci/install-codex-cli.sh"
+    ]
+    assert_that(codex_install_steps).is_length(1)
+    codex_install = codex_install_steps[0]
+    assert_that(codex_install["if"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER == 'openai' }}",
+    )
+    assert_that(codex_install["env"]["CODEX_VERSION"]).is_equal_to(
+        "${{ steps.codex-pins.outputs.codex-version }}",
+    )
+
+
+# The only wildcard the AI Review job may allowlist: GitHub's hosted-runner
+# watchdog domain, whose region shard rotates (#2352).
+_WATCHDOG_WILDCARD_ENDPOINT = "*.githubapp.com:443"
+
 
 def test_workflow_allows_the_npm_registry_egress() -> None:
     """Harden-runner permits the endpoints the pinned CLI install needs.
@@ -925,15 +1326,28 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
 
     endpoints_raw = harden_steps[0]["with"]["allowed-endpoints"]
     unconditional = endpoints_raw.replace("${{ env.AI_REVIEW_CURSOR_EGRESS }}", "")
+    unconditional = unconditional.replace("${{ env.AI_REVIEW_OPENAI_EGRESS }}", "")
+    unconditional = unconditional.replace("${{ env.AI_REVIEW_ZAI_EGRESS }}", "")
     endpoints = unconditional.split()
     cursor_hosts = _CURSOR_EGRESS_HOSTS
     assert_that(endpoints).contains(
         "registry.npmjs.org:443",
         "nodejs.org:443",
         "release-assets.githubusercontent.com:443",
+        "pipelines.actions.githubusercontent.com:443",
+        "results-receiver.actions.githubusercontent.com:443",
     )
+    # Hosted-runner watchdog endpoints (#2352). One wildcard, deliberately:
+    # the hosted-compute region shard rotates (eus-02 and iad-02 both seen on
+    # 2026-09-05), so exact hosts would leave this 75-minute job killable in
+    # every other region, and githubapp.com is a GitHub-owned domain. Any other
+    # wildcard — a bare `*`, `*:443`, or a third-party suffix — stays forbidden.
+    assert_that(endpoints).contains(_WATCHDOG_WILDCARD_ENDPOINT)
     for endpoint in endpoints:
-        assert_that(endpoint).described_as(endpoint).does_not_contain("*")
+        if "*" in endpoint:
+            assert_that(endpoint).described_as(endpoint).is_equal_to(
+                _WATCHDOG_WILDCARD_ENDPOINT,
+            )
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
             "cursor.sh",
         )
@@ -952,6 +1366,113 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     for host in parsed_hosts:
         assert_that(host).described_as(host).does_not_contain("*")
     assert_that(endpoints_raw).contains("${{ env.AI_REVIEW_CURSOR_EGRESS }}")
+
+    # Codex lane (#2472): OpenAI auth + ChatGPT-backend hosts, provider-gated.
+    openai_egress = job_env["AI_REVIEW_OPENAI_EGRESS"]
+    assert_that(openai_egress).contains("vars.LINTRO_AI_PROVIDER == 'openai'")
+    openai_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", openai_egress)
+    if openai_branch is None:
+        pytest.fail("openai egress expression must quote hosts and default to empty")
+    assert_that(set(openai_branch.group(1).split())).is_equal_to(
+        set(_OPENAI_EGRESS_HOSTS),
+    )
+    assert_that(endpoints_raw).contains("${{ env.AI_REVIEW_OPENAI_EGRESS }}")
+
+    # z.ai lane (#2472): gateway host, gated on the effective provider
+    # (defaulted to anthropic, matching the review step) AND the
+    # ZAI_BASE_URL variable being set — the comparison direction is pinned
+    # so a ==/!= sign inversion cannot enable egress on an UNSET variable.
+    zai_egress = job_env["AI_REVIEW_ZAI_EGRESS"]
+    assert_that(zai_egress).contains(
+        "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'",
+    )
+    assert_that(zai_egress).contains("vars.ZAI_BASE_URL != ''")
+    zai_branch = re.search(r"&&\s+'([^']+)'\s*\|\|\s*''", zai_egress)
+    if zai_branch is None:
+        pytest.fail("z.ai egress expression must quote hosts and default to empty")
+    assert_that(set(zai_branch.group(1).split())).is_equal_to(set(_ZAI_EGRESS_HOSTS))
+    assert_that(endpoints_raw).contains("${{ env.AI_REVIEW_ZAI_EGRESS }}")
+
+
+def test_run_ai_review_tees_under_pipefail() -> None:
+    """The review pipeline must tee output and fail when the CLI exits non-zero."""
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    assert_that(shell_text).contains("set -euo pipefail")
+    assert_that(shell_text).contains("PYTHONUNBUFFERED=1")
+    assert_that(shell_text).contains('>"$output_file" 2>&1 &')
+    assert_that(shell_text).contains('kill -TERM "$lintro_pid"')
+    assert_that(shell_text).contains('tail --pid="$lintro_pid"')
+    assert_that(shell_text).contains("ps -o sid=")
+    assert_that(shell_text).contains('"$sid" == "$child"')
+    assert_that(shell_text).contains("kill -KILL")
+    assert_that(shell_text).contains("trap '' TERM")
+    assert_that(shell_text).contains("reaped=$?")
+    assert_that(shell_text).contains("sleep 0.5")
+    assert_that(shell_text).contains("[ai-review] still running")
+    assert_that(shell_text).contains("persist-on-SIGTERM enabled")
+    assert_that(shell_text).contains("review_state_artifacts.py")
+    assert_that(shell_text).contains(
+        'upload --suffix "$suffix" --budget-seconds "$budget"',
+    )
+    assert_that(shell_text).contains("timeout --signal=TERM --kill-after=1")
+    assert_that(shell_text).contains("_CANCEL_UPLOAD_BUDGET_SECONDS=2")
+    assert_that(shell_text).contains(
+        '_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"',
+    )
+    inline_call = '_upload_review_state inline "${_CANCEL_UPLOAD_BUDGET_SECONDS}"'
+    assert_that(shell_text.index(inline_call)).is_less_than(
+        shell_text.rindex("classify_review_outcome.py"),
+    )
+    assert_that(shell_text).contains("ckpt-${elapsed}")
+    assert_that(shell_text).contains("unset ACTIONS_RUNTIME_TOKEN ACTIONS_RESULTS_URL")
+    assert_that(shell_text).contains(
+        'ACTIONS_RUNTIME_TOKEN="${REVIEW_STATE_RUNTIME_TOKEN}"',
+    )
+    result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
+        [
+            "bash",
+            "-c",
+            'set -euo pipefail; set +e; false | tee /dev/null; status=$?; exit "$status"',
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert_that(result.returncode).is_not_equal_to(0)
+
+
+def test_term_immune_log_mirror_is_reaped_with_sigkill() -> None:
+    """A ``trap '' TERM`` tail must not block wait after the review exits."""
+    result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False
+        [
+            "bash",
+            "-c",
+            """
+            set -euo pipefail
+            tmp="$(mktemp)"
+            : >"$tmp"
+            ( sleep 0.2; printf '{}\\n' >"$tmp" ) &
+            child=$!
+            (trap '' TERM; tail --pid="$child" -n +1 -f "$tmp") &
+            log_pid=$!
+            wait "$child"
+            status=$?
+            while kill -0 "$child" 2>/dev/null; do
+              wait "$child"
+              status=$?
+            done
+            kill -KILL "$log_pid" 2>/dev/null || true
+            wait "$log_pid" 2>/dev/null || true
+            rm -f "$tmp"
+            exit "$status"
+            """,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert_that(result.returncode).is_equal_to(0)
 
 
 def test_review_timeout_fits_inside_the_job_timeout() -> None:
@@ -1012,3 +1533,128 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
         f"{posting_margin_minutes} min posting margin — bump it together "
         "with CLI_REVIEW_TIMEOUT_SECONDS / ai.transports.cli.timeout",
     ).is_greater_than_or_equal_to(budget)
+
+
+def _ai_review_steps() -> list[Any]:
+    """Return the parsed AI-review job steps.
+
+    Returns:
+        Step mappings from ``ai-review.yml``.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    steps = loaded["jobs"]["ai-review"]["steps"]
+    assert_that(steps).is_instance_of(list)
+    return list(steps)
+
+
+def test_workflow_locates_prior_state_via_existing_script() -> None:
+    """Prior-state lookup extends ``run-ai-review.sh``, not a new script."""
+    steps = _ai_review_steps()
+    locate_steps = [
+        step for step in steps if step.get("name") == "Locate prior review-state run"
+    ]
+    assert_that(locate_steps).is_length(1)
+    locate = locate_steps[0]
+    assert_that(locate["id"]).is_equal_to("prior-state")
+    assert_that(locate.get("continue-on-error")).is_true()
+    run = locate["run"]
+    assert_that(run).contains("scripts/ci/review_state_artifacts.py")
+    assert_that(run).contains("scripts/ci/run-ai-review.sh --locate-prior-state")
+    assert_that(run).contains("GITHUB_OUTPUT")
+    env = locate["env"]
+    assert_that(env["PR_NUMBER"]).is_equal_to("${{ github.event.number }}")
+    assert_that(env["GITHUB_REPOSITORY"]).is_equal_to("${{ github.repository }}")
+    assert_that(env["GITHUB_RUN_ID"]).is_equal_to("${{ github.run_id }}")
+    assert_that(env["GH_TOKEN"]).is_equal_to("${{ secrets.GITHUB_TOKEN }}")
+    for credential_env in PROVIDER_CREDENTIAL_ENVS:
+        assert_that(env).does_not_contain_key(credential_env)
+
+
+def test_workflow_downloads_prior_state_across_runs() -> None:
+    """Cross-run download uses the pinned action and skips when no run-id."""
+    steps = _ai_review_steps()
+    download_steps = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and str(step["uses"]).startswith("actions/download-artifact@")
+    ]
+    assert_that(download_steps).is_length(1)
+    download = download_steps[0]
+    assert_that(download.get("continue-on-error")).is_true()
+    assert_that(download["if"]).is_equal_to("steps.prior-state.outputs.run-id != ''")
+    download_with = download["with"]
+    assert_that(download_with["run-id"]).is_equal_to(
+        "${{ steps.prior-state.outputs.run-id }}",
+    )
+    assert_that(download_with["pattern"]).is_equal_to(
+        "lintro-review-state-pr-${{ github.event.number }}-*",
+    )
+    assert_that(download_with["merge-multiple"]).is_true()
+    assert_that(download_with["github-token"]).is_equal_to(
+        "${{ secrets.GITHUB_TOKEN }}",
+    )
+    assert_that(download_with["path"]).is_equal_to("ai-review-state")
+
+
+def test_workflow_uploads_state_artifacts_on_always() -> None:
+    """The final upload is always() and no-ops when no state files exist."""
+    steps = _ai_review_steps()
+    upload_steps = [
+        step
+        for step in steps
+        if isinstance(step.get("uses"), str)
+        and str(step["uses"]).startswith("actions/upload-artifact@")
+    ]
+    assert_that(upload_steps).is_length(1)
+    upload = upload_steps[0]
+    assert_that(upload["if"]).is_equal_to("always()")
+    upload_with = upload["with"]
+    name = str(upload_with["name"])
+    assert_that(name).contains("lintro-review-state-pr-")
+    assert_that(name).contains("github.event.number")
+    assert_that(name).contains("github.run_attempt")
+    assert_that(name).contains("-final")
+    assert_that(upload_with["path"]).is_equal_to("ai-review-state/")
+    assert_that(upload_with["if-no-files-found"]).is_equal_to("ignore")
+    assert_that(upload_with["retention-days"]).is_equal_to(30)
+
+
+def test_workflow_keeps_mint_immediately_before_review() -> None:
+    """Artifact plumbing must not sit between the App token and ``--post``."""
+    steps = _ai_review_steps()
+    names = [str(step.get("name", "")) for step in steps]
+    mint_index = names.index("Mint lintro-review App token")
+    review_index = next(
+        index for index, name in enumerate(names) if name.startswith("Run AI review")
+    )
+    upload_index = names.index("Upload review-state artifacts")
+    locate_index = names.index("Locate prior review-state run")
+    download_index = names.index("Download prior review-state artifacts")
+    runtime_index = names.index("Expose Actions runtime for state upload")
+    assert_that(review_index).is_equal_to(mint_index + 1)
+    assert_that(locate_index).is_less_than(mint_index)
+    assert_that(download_index).is_less_than(mint_index)
+    assert_that(runtime_index).is_less_than(mint_index)
+    assert_that(upload_index).is_greater_than(review_index)
+
+
+def test_workflow_exports_runtime_token_into_review_step() -> None:
+    """In-step upload needs the runtime token that ``run:`` steps lack."""
+    steps = _ai_review_steps()
+    runtime = next(
+        step
+        for step in steps
+        if step.get("name") == "Expose Actions runtime for state upload"
+    )
+    assert_that(runtime["id"]).is_equal_to("artifact-runtime")
+    assert_that(str(runtime["uses"])).starts_with("actions/github-script@")
+    review = next(
+        step for step in steps if str(step.get("name", "")).startswith("Run AI review")
+    )
+    assert_that(review["env"]["ACTIONS_RUNTIME_TOKEN"]).is_equal_to(
+        "${{ steps.artifact-runtime.outputs.runtime-token }}",
+    )
+    assert_that(review["env"]["ACTIONS_RESULTS_URL"]).is_equal_to(
+        "${{ steps.artifact-runtime.outputs.results-url }}",
+    )

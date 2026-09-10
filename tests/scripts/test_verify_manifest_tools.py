@@ -37,7 +37,7 @@ def test_tool_command_returns_manifest_version_command() -> None:
     module = _load_verify_manifest_tools_module()
 
     # Access private function for testing - module loaded dynamically via importlib
-    tool_command_fn = module._tool_command  # noqa: SLF001
+    tool_command_fn = module._tool_command
     cmd = tool_command_fn(
         "astro_check",
         {
@@ -54,7 +54,7 @@ def test_tool_command_rejects_missing_version_command() -> None:
     """verify-manifest-tools should raise when version_command is absent."""
     module = _load_verify_manifest_tools_module()
 
-    tool_command_fn = module._tool_command  # noqa: SLF001
+    tool_command_fn = module._tool_command
     assert_that(tool_command_fn).raises(ValueError).when_called_with(
         "astro_check",
         {"name": "astro_check", "install": {"type": "npm"}},
@@ -70,7 +70,7 @@ def test_clippy_versions_match_ignores_unobservable_patch() -> None:
     """
     module = _load_verify_manifest_tools_module()
 
-    versions_match = module._versions_match  # noqa: SLF001
+    versions_match = module._versions_match
     assert_that(versions_match("clippy", "1.97.1", "1.97.0")).is_true()
     assert_that(versions_match("clippy", "1.97.0", "1.97.0")).is_true()
 
@@ -79,7 +79,7 @@ def test_clippy_versions_mismatch_on_minor_drift() -> None:
     """Clippy still fails when the observable major.minor genuinely drifts."""
     module = _load_verify_manifest_tools_module()
 
-    versions_match = module._versions_match  # noqa: SLF001
+    versions_match = module._versions_match
     assert_that(versions_match("clippy", "1.97.1", "1.96.0")).is_false()
 
 
@@ -87,16 +87,102 @@ def test_non_clippy_versions_require_exact_match() -> None:
     """Non-clippy tools keep strict, patch-level version equality."""
     module = _load_verify_manifest_tools_module()
 
-    versions_match = module._versions_match  # noqa: SLF001
+    versions_match = module._versions_match
     assert_that(versions_match("ruff", "1.97.1", "1.97.1")).is_true()
     assert_that(versions_match("ruff", "1.97.1", "1.97.0")).is_false()
+
+
+def test_version_mismatch_names_the_lagging_image_and_digest_bump(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A main failure points directly at the missing candidate digest pin."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="99.0.0",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 1.2.3", False),
+    )
+    monkeypatch.setenv(
+        "LINTRO_IMAGE_REF",
+        "ghcr.io/lgtm-hq/py-lintro:ci-123@sha256:" + "a" * 64,
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    output = capsys.readouterr().out
+    assert_that(output).contains("digest-bump required")
+    assert_that(output).contains("git")
+    assert_that(output).contains("99.0.0")
+    assert_that(output).contains("ci-123@sha256:")
+
+
+def test_version_mismatch_names_manifest_bump_for_newer_image(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A newer image directs maintainers to bump the manifest."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="1.0.0",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 2.0.0", False),
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    output = capsys.readouterr().out
+    assert_that(output).contains("manifest bump required")
+    assert_that(output).contains("newer than the manifest")
+    assert_that(output).does_not_contain("digest-bump required")
+
+
+def test_version_mismatch_reports_unavailable_ordering(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unparseable version ordering produces an actionable diagnostic."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="latest",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 1.2.3", False),
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    assert_that(capsys.readouterr().out).contains("version ordering unavailable")
 
 
 def test_parse_allow_missing_splits_and_dedupes() -> None:
     """--allow-missing values are comma-split, trimmed, and de-duplicated."""
     module = _load_verify_manifest_tools_module()
 
-    parse = module._parse_allow_missing  # noqa: SLF001
+    parse = module._parse_allow_missing
     assert_that(parse(None)).is_equal_to(set())
     assert_that(parse([])).is_equal_to(set())
     assert_that(parse(["terraform"])).is_equal_to({"terraform"})
@@ -239,8 +325,8 @@ def test_empty_allow_missing_leaves_behavior_unchanged(
     module = _load_verify_manifest_tools_module()
     # `git --version` -> "git version X.Y.Z"; declare that exact version so the
     # match succeeds regardless of the runner's git build.
-    _, output, _ = module._run(["git", "--version"])  # noqa: SLF001
-    actual = module._parse_version(output, "git")  # noqa: SLF001
+    _, output, _ = module._run(["git", "--version"])
+    actual = module._parse_version(output, "git")
     manifest = _write_manifest(
         tmp_path,
         name="git",
@@ -257,7 +343,7 @@ def test_parse_allow_version_lag_splits_and_dedupes() -> None:
     """--allow-version-lag uses the same comma-split parsing as allow-missing."""
     module = _load_verify_manifest_tools_module()
 
-    parse = module._parse_allow_version_lag  # noqa: SLF001
+    parse = module._parse_allow_version_lag
     assert_that(parse(None)).is_equal_to(set())
     assert_that(parse(["astro_check, ruff", "ruff"])).is_equal_to(
         {"astro_check", "ruff"},
@@ -268,7 +354,7 @@ def test_is_image_older_than_manifest_ordering() -> None:
     """Numeric segment ordering distinguishes older / equal / newer images."""
     module = _load_verify_manifest_tools_module()
 
-    older = module._is_image_older_than_manifest  # noqa: SLF001
+    older = module._is_image_older_than_manifest
     assert_that(older(expected="7.1.3", actual="7.0.9")).is_true()
     assert_that(older(expected="7.1.3", actual="7.1.3")).is_false()
     assert_that(older(expected="7.1.0", actual="7.1.3")).is_false()
@@ -279,11 +365,11 @@ def test_version_tuple_stops_at_prerelease_tag() -> None:
     """A pre-release tag stops parsing so "7.1.0-rc.1" is (7, 1, 0)."""
     module = _load_verify_manifest_tools_module()
 
-    version_tuple = module._version_tuple  # noqa: SLF001
+    version_tuple = module._version_tuple
     assert_that(version_tuple("7.1.0-rc.1")).is_equal_to((7, 1, 0))
     assert_that(version_tuple("7.1.3")).is_equal_to((7, 1, 3))
     # A pre-release build must not read as newer than its release.
-    older = module._is_image_older_than_manifest  # noqa: SLF001
+    older = module._is_image_older_than_manifest
     assert_that(older(expected="7.1.0", actual="7.1.0-rc.1")).is_false()
 
 
@@ -294,8 +380,8 @@ def test_allow_version_lag_older_image_passes_with_warning(
 ) -> None:
     """An allow-version-lag tool with an older installed version warns, not fails."""
     module = _load_verify_manifest_tools_module()
-    _, output, _ = module._run(["git", "--version"])  # noqa: SLF001
-    actual = module._parse_version(output, "git")  # noqa: SLF001
+    _, output, _ = module._run(["git", "--version"])
+    actual = module._parse_version(output, "git")
     assert_that(actual).is_not_none()
     # Declare a version strictly newer than whatever git reports on this runner.
     parts = [int(p) for p in str(actual).split(".")]
@@ -398,7 +484,7 @@ def test_run_returns_timeout_code_with_captured_output(
     module = _load_verify_manifest_tools_module()
     _fake_timeout_run(module, monkeypatch, stdout=b"1.151.0\n")
 
-    code, output, timed_out = module._run(["semgrep", "--version"])  # noqa: SLF001
+    code, output, timed_out = module._run(["semgrep", "--version"])
 
     assert_that(code).is_equal_to(124)
     assert_that(output).is_equal_to("1.151.0")
@@ -503,3 +589,30 @@ def test_timeout_with_wrong_version_still_fails(
     code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
 
     assert_that(code).is_equal_to(1)
+
+
+def test_numerically_equal_versions_ask_for_a_manifest_string_alignment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``7.1`` vs ``7.1.0`` is a spelling mismatch, not an unorderable pair."""
+    module = _load_verify_manifest_tools_module()
+    manifest = _write_manifest(
+        tmp_path,
+        name="git",
+        version="7.1",
+        version_command=["git", "--version"],
+    )
+    monkeypatch.setattr(
+        module,
+        "_run",
+        lambda cmd: (0, "git version 7.1.0", False),
+    )
+
+    code = _run_main(module, monkeypatch, ["--manifest", str(manifest)])
+
+    assert_that(code).is_equal_to(1)
+    output = capsys.readouterr().out
+    assert_that(output).contains("align the manifest string to the installed version")
+    assert_that(output).does_not_contain("version ordering unavailable")

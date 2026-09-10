@@ -6,57 +6,26 @@ They verify the RustfmtPlugin definition, check command, fix command, and set_op
 
 from __future__ import annotations
 
-import re
-import shutil
-import subprocess  # nosec B404 - subprocess is used to drive the tool/CLI under test; invocations use shell=False
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
-from packaging.version import Version
+
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
 
-def _get_rustfmt_version() -> Version | None:
-    """Get the installed rustfmt version.
-
-    Returns:
-        Version object or None if not installed or version cannot be determined.
-    """
-    if shutil.which("rustfmt") is None:
-        return None
-    try:
-        result = subprocess.run(  # nosec B603 B607 - fixed argv run against a real binary in a controlled test; binary name resolved from PATH, not attacker-controlled; shell=False, no user shell input
-            ["rustfmt", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        # Output format: "rustfmt <version>-<channel> (<commit-hash> <date>)"
-        match = re.search(r"(\d+\.\d+\.\d+)", result.stdout)
-        if match:
-            return Version(match.group(1))
-    except (subprocess.SubprocessError, ValueError):
-        pass
-    return None
-
-
-_RUSTFMT_MIN_VERSION = Version("1.8.0")
-_installed_version = _get_rustfmt_version()
-
-# Skip all tests if rustfmt is not installed or version is below minimum
-pytestmark = pytest.mark.skipif(
-    shutil.which("rustfmt") is None
-    or shutil.which("cargo") is None
-    or _installed_version is None
-    or _installed_version < _RUSTFMT_MIN_VERSION,
-    reason=f"rustfmt >= {_RUSTFMT_MIN_VERSION} or cargo not installed "
-    f"(found: {_installed_version})",
-)
+# rustfmt is driven through cargo by the plugin, so both must be present.
+# The version floor comes from lintro's own enforced minimum, so it cannot
+# drift from what the plugin will actually run.
+pytestmark = [
+    require_tool("rustfmt"),
+    require_tool("cargo"),
+]
 
 
 @pytest.fixture

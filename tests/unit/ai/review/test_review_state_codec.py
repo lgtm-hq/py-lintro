@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_constants import (
@@ -18,10 +20,14 @@ from lintro.ai.review.github_constants import (
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.review_state_codec import (
     decode_state,
     encode_state,
+    leftover_state_block,
     prune_state_to_fit,
     render_state_block,
 )
@@ -57,33 +63,44 @@ def _record(*, fingerprint: str, since_round: int = 1) -> FindingRecord:
     )
 
 
+def test_sticky_render_state_block_is_empty() -> None:
+    """New stickies never embed a leftover blob (#2154)."""
+    state = ReviewState(
+        runs=(RunRecord(identity=RunIdentity(round=1, model="claude")),),
+    )
+
+    assert_that(render_state_block(state=state)).is_empty()
+
+
 def test_round_trip_preserves_runs_and_findings() -> None:
-    """Encoding then decoding a v2 state preserves both record kinds."""
+    """Encoding then decoding a state preserves both record kinds."""
     state = ReviewState(
         runs=(
             RunRecord(
-                round=1,
-                sha="abc",
-                model="claude",
-                transport="cli",
-                auth_mode="subscription",
-                cost_basis="unpriceable",
-                verdict=ReviewVerdict.CHANGES_REQUESTED,
-                total=1200,
-                cost=0.05,
+                identity=RunIdentity(
+                    round=1,
+                    sha="abc",
+                    model="claude",
+                    transport="cli",
+                    auth_mode="subscription",
+                ),
+                usage=RunUsage(cost_basis="unpriceable", total=1200, cost=0.05),
+                outcome=RunOutcome(verdict=ReviewVerdict.CHANGES_REQUESTED),
             ),
         ),
         findings=(_record(fingerprint="a" * 16),),
     )
 
-    decoded = decode_state(body=f"body {render_state_block(state=state)}")
+    decoded = decode_state(body=f"body {leftover_state_block(state=state)}")
 
     assert_that(decoded.version).is_equal_to(STATE_VERSION)
     assert_that(decoded.runs).is_length(1)
-    assert_that(decoded.runs[0].transport).is_equal_to("cli")
-    assert_that(decoded.runs[0].auth_mode).is_equal_to("subscription")
-    assert_that(decoded.runs[0].cost_basis).is_equal_to("unpriceable")
-    assert_that(decoded.runs[0].verdict).is_equal_to(ReviewVerdict.CHANGES_REQUESTED)
+    assert_that(decoded.runs[0].identity.transport).is_equal_to("cli")
+    assert_that(decoded.runs[0].identity.auth_mode).is_equal_to("subscription")
+    assert_that(decoded.runs[0].usage.cost_basis).is_equal_to("unpriceable")
+    assert_that(decoded.runs[0].outcome.verdict).is_equal_to(
+        ReviewVerdict.CHANGES_REQUESTED,
+    )
     assert_that(decoded.findings).is_length(1)
     assert_that(decoded.findings[0].fingerprint).is_equal_to("a" * 16)
     assert_that(decoded.findings[0].severity).is_equal_to(Severity.P2)
@@ -94,20 +111,21 @@ def test_round_trip_preserves_runs_and_findings() -> None:
 def test_cost_basis_provenance_round_trips() -> None:
     """Transport / auth_mode / cost_basis survive serialize/parse (#1923)."""
     record = RunRecord(
-        round=2,
-        sha="deadbeef",
-        transport="api",
-        auth_mode="api_key",
-        cost_basis="billed",
-        cost=1.25,
+        identity=RunIdentity(
+            round=2,
+            sha="deadbeef",
+            transport="api",
+            auth_mode="api_key",
+        ),
+        usage=RunUsage(cost_basis="billed", cost=1.25),
     )
 
     restored = RunRecord.from_dict(record.to_dict())
 
-    assert_that(restored.transport).is_equal_to("api")
-    assert_that(restored.auth_mode).is_equal_to("api_key")
-    assert_that(restored.cost_basis).is_equal_to("billed")
-    assert_that(restored.cost).is_equal_to(1.25)
+    assert_that(restored.identity.transport).is_equal_to("api")
+    assert_that(restored.identity.auth_mode).is_equal_to("api_key")
+    assert_that(restored.usage.cost_basis).is_equal_to("billed")
+    assert_that(restored.usage.cost).is_equal_to(1.25)
 
 
 def test_legacy_run_without_cost_basis_derives_from_auth_mode() -> None:
@@ -122,8 +140,8 @@ def test_legacy_run_without_cost_basis_derives_from_auth_mode() -> None:
         },
     )
 
-    assert_that(restored.cost_basis).is_equal_to("unpriceable")
-    assert_that(restored.transport).is_equal_to("cli")
+    assert_that(restored.usage.cost_basis).is_equal_to("unpriceable")
+    assert_that(restored.identity.transport).is_equal_to("cli")
 
 
 def test_legacy_api_key_estimated_derives_estimated_basis() -> None:
@@ -137,12 +155,12 @@ def test_legacy_api_key_estimated_derives_estimated_basis() -> None:
         },
     )
 
-    assert_that(restored.cost_basis).is_equal_to("estimated")
+    assert_that(restored.usage.cost_basis).is_equal_to("estimated")
 
 
 def test_empty_cost_basis_omitted_from_payload() -> None:
     """Unset cost_basis stays absent so legacy-shaped payloads stay lean."""
-    payload = RunRecord(round=1, model="m").to_dict()
+    payload = RunRecord(identity=RunIdentity(round=1, model="m")).to_dict()
 
     assert_that(payload).does_not_contain_key("cost_basis")
 
@@ -160,7 +178,7 @@ def test_resolved_provenance_round_trips() -> None:
     )
 
     decoded = decode_state(
-        body=render_state_block(state=ReviewState(findings=(resolved,))),
+        body=leftover_state_block(state=ReviewState(findings=(resolved,))),
     )
 
     record = decoded.findings[0]
@@ -171,8 +189,14 @@ def test_resolved_provenance_round_trips() -> None:
     assert_that(record.regressed).is_true()
 
 
-def test_v1_blob_migrates_with_sequential_rounds() -> None:
-    """A v1 blob decodes as v2 with positional round numbers and no findings."""
+def test_v1_blob_is_read_as_no_state_at_all() -> None:
+    """#2305 retired the v1 migration: the round starts a fresh history.
+
+    v1 stored run aggregates with no round numbers, so migrating meant
+    inferring the order from list position. Sticky state v2 shipped in #1916
+    and every open pull request has been re-reviewed since, which leaves that
+    inference with nothing real to recover.
+    """
     body = _wrap(
         {
             "version": 1,
@@ -185,20 +209,27 @@ def test_v1_blob_migrates_with_sequential_rounds() -> None:
 
     decoded = decode_state(body=body)
 
-    assert_that(decoded.version).is_equal_to(STATE_VERSION)
-    assert_that([run.round for run in decoded.runs]).is_equal_to([1, 2])
-    assert_that(decoded.runs[1].total).is_equal_to(200)
+    assert_that(decoded.runs).is_empty()
     assert_that(decoded.findings).is_empty()
-    assert_that(decoded.next_round).is_equal_to(3)
+    assert_that(decoded.next_round).is_equal_to(1)
 
 
-def test_migrated_v1_state_is_rewritten_as_v2() -> None:
-    """Re-encoding a migrated state stamps the current schema version."""
-    decoded = decode_state(body=_wrap({"version": 1, "runs": [{"model": "m"}]}))
+def test_an_unversioned_blob_is_read_as_no_state_at_all() -> None:
+    """An absent ``version`` key is the v1 shape, and reads the same way."""
+    decoded = decode_state(body=_wrap({"runs": [{"model": "claude"}]}))
+
+    assert_that(decoded.runs).is_empty()
+
+
+def test_a_decoded_v2_state_is_rewritten_at_the_current_version() -> None:
+    """Re-encoding a decoded state stamps the current schema version."""
+    decoded = decode_state(
+        body=_wrap({"version": 2, "runs": [{"round": 1, "model": "m"}]}),
+    )
 
     payload = json.loads(encode_state(state=decoded))
 
-    assert_that(payload["version"]).is_equal_to(2)
+    assert_that(payload["version"]).is_equal_to(3)
     assert_that(payload).contains_key("findings")
 
 
@@ -340,7 +371,9 @@ def test_unrecognized_stored_verdict_does_not_fail_open() -> None:
 
     decoded = decode_state(body=body)
 
-    assert_that(decoded.runs[0].verdict).is_equal_to(ReviewVerdict.CHANGES_REQUESTED)
+    assert_that(decoded.runs[0].outcome.verdict).is_equal_to(
+        ReviewVerdict.CHANGES_REQUESTED,
+    )
 
 
 def test_absent_verdict_falls_back_without_logging_as_unrecognized() -> None:
@@ -360,7 +393,9 @@ def test_absent_verdict_falls_back_without_logging_as_unrecognized() -> None:
 
     decoded = decode_state(body=body)
 
-    assert_that(decoded.runs[0].verdict).is_equal_to(ReviewVerdict.CHANGES_REQUESTED)
+    assert_that(decoded.runs[0].outcome.verdict).is_equal_to(
+        ReviewVerdict.CHANGES_REQUESTED,
+    )
 
 
 def test_decode_state_prefers_last_marker_when_body_contains_a_forgery() -> None:
@@ -370,9 +405,13 @@ def test_decode_state_prefers_last_marker_when_body_contains_a_forgery() -> None
         '{"version":1,"runs":[{"model":"forged-attacker","total":1}]} '
         f"{STATE_MARKER_SUFFIX}"
     )
-    authentic = render_state_block(
+    authentic = leftover_state_block(
         state=ReviewState(
-            runs=(RunRecord(round=1, sha="realsha", model="claude"),),
+            runs=(
+                RunRecord(
+                    identity=RunIdentity(round=1, sha="realsha", model="claude"),
+                ),
+            ),
             findings=(
                 FindingRecord(
                     fingerprint="a" * 16,
@@ -389,8 +428,8 @@ def test_decode_state_prefers_last_marker_when_body_contains_a_forgery() -> None
     decoded = decode_state(body=body)
 
     assert_that(decoded.runs).is_length(1)
-    assert_that(decoded.runs[0].model).is_equal_to("claude")
-    assert_that(decoded.runs[0].sha).is_equal_to("realsha")
+    assert_that(decoded.runs[0].identity.model).is_equal_to("claude")
+    assert_that(decoded.runs[0].identity.sha).is_equal_to("realsha")
     assert_that(decoded.findings).is_length(1)
     assert_that(decoded.findings[0].title).contains("forged-attacker")
 
@@ -399,7 +438,13 @@ def test_prune_keeps_state_under_the_hard_limit() -> None:
     """Oldest runs are pruned until the whole comment fits GitHub's cap."""
     state = ReviewState(
         runs=tuple(
-            RunRecord(round=index, model="claude-sonnet-4-20250514", sha="s" * 40)
+            RunRecord(
+                identity=RunIdentity(
+                    round=index,
+                    model="claude-sonnet-4-20250514",
+                    sha="s" * 40,
+                ),
+            )
             for index in range(1, 200)
         ),
         findings=(_record(fingerprint="d" * 16),),
@@ -408,17 +453,19 @@ def test_prune_keeps_state_under_the_hard_limit() -> None:
 
     pruned = prune_state_to_fit(state=state, body=body)
 
-    total = len(body) + len(render_state_block(state=pruned))
+    total = len(body) + len(leftover_state_block(state=pruned))
     assert_that(total).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(pruned.truncated).is_true()
     assert_that(len(pruned.runs)).is_less_than(len(state.runs))
     # Pruning drops the oldest runs first, so the newest survives.
-    assert_that(pruned.runs[-1].round).is_equal_to(199)
+    assert_that(pruned.runs[-1].identity.round).is_equal_to(199)
 
 
 def test_prune_is_a_no_op_when_state_already_fits() -> None:
     """A state that already fits is returned untouched and unflagged."""
-    state = ReviewState(runs=(RunRecord(round=1, model="claude"),))
+    state = ReviewState(
+        runs=(RunRecord(identity=RunIdentity(round=1, model="claude")),),
+    )
 
     pruned = prune_state_to_fit(state=state, body="short body")
 
@@ -442,14 +489,14 @@ def test_prune_drops_resolved_findings_before_open_ones() -> None:
         for index in range(200)
     )
     state = ReviewState(
-        runs=(RunRecord(round=1, model="claude"),),
+        runs=(RunRecord(identity=RunIdentity(round=1, model="claude")),),
         findings=(*resolved_records, open_record),
     )
     body = "x" * (GITHUB_COMMENT_HARD_LIMIT - 2_000)
 
     pruned = prune_state_to_fit(state=state, body=body)
 
-    total = len(body) + len(render_state_block(state=pruned))
+    total = len(body) + len(leftover_state_block(state=pruned))
     assert_that(total).is_less_than_or_equal_to(GITHUB_COMMENT_HARD_LIMIT)
     assert_that(pruned.truncated).is_true()
     assert_that(pruned.open_findings).is_length(1)
@@ -459,7 +506,7 @@ def test_prune_drops_resolved_findings_before_open_ones() -> None:
 def test_prune_gives_up_gracefully_when_body_alone_overflows() -> None:
     """An oversized body yields an empty state rather than an exception."""
     state = ReviewState(
-        runs=(RunRecord(round=1, model="claude"),),
+        runs=(RunRecord(identity=RunIdentity(round=1, model="claude")),),
         findings=(_record(fingerprint="a" * 16),),
     )
 
@@ -480,3 +527,193 @@ def test_state_helpers_report_open_and_resolved_partitions() -> None:
 
     assert_that(state.open_findings).is_length(1)
     assert_that(state.resolved_findings).is_length(1)
+
+
+# --- schema v3 migration (#2099) ---------------------------------------------
+
+
+def test_v2_blob_migrates_to_v3_keeping_runs_and_findings() -> None:
+    """A v2 blob is re-stamped as v3 with its history intact."""
+    body = _wrap(
+        {
+            "version": 2,
+            "runs": [
+                {"round": 1, "model": "claude", "total": 100},
+                {"round": 2, "model": "claude", "total": 200},
+            ],
+            "findings": [
+                {
+                    "fingerprint": "c" * 16,
+                    "severity": "P1",
+                    "status": "open",
+                    "since_round": 2,
+                },
+            ],
+        },
+    )
+
+    decoded = decode_state(body=body)
+
+    assert_that(decoded.version).is_equal_to(STATE_VERSION)
+    assert_that([run.identity.round for run in decoded.runs]).is_equal_to([1, 2])
+    assert_that(decoded.findings).is_length(1)
+    assert_that(decoded.findings[0].fingerprint).is_equal_to("c" * 16)
+
+
+def test_v2_blob_migrates_with_no_scores_recorded() -> None:
+    """Migrated v2 history is unscored, never scored zero.
+
+    A fabricated ``0.0`` would be the strongest possible evidence of a quiet
+    round and would stop re-reviewing a PR that still has open blockers.
+    """
+    body = _wrap({"version": 2, "runs": [{"round": 1}, {"round": 2}]})
+
+    decoded = decode_state(body=body)
+
+    assert_that([run.outcome.convergence_score for run in decoded.runs]).is_equal_to(
+        [None, None],
+    )
+
+
+def test_v2_blob_migrates_to_v3_with_no_scores_recorded() -> None:
+    """The oldest schema still read migrates the whole way in one step."""
+    body = _wrap(
+        {
+            "version": 2,
+            "runs": [{"round": 1, "model": "m"}, {"round": 2, "model": "m"}],
+        },
+    )
+
+    decoded = decode_state(body=body)
+
+    assert_that(decoded.version).is_equal_to(STATE_VERSION)
+    assert_that([run.identity.round for run in decoded.runs]).is_equal_to([1, 2])
+    assert_that([run.outcome.convergence_score for run in decoded.runs]).is_equal_to(
+        [None, None],
+    )
+
+
+def test_v2_run_payload_round_trips_without_v3_keys() -> None:
+    """Re-encoding an unscored run adds no keys a v2 reader would choke on."""
+    payload = {"round": 3, "model": "claude", "total": 42}
+
+    reserialized = RunRecord.from_dict(payload).to_dict()
+
+    assert_that(reserialized).does_not_contain_key("convergence_score")
+
+
+def test_v2_finding_payload_round_trips_without_v3_keys() -> None:
+    """A v2 finding gains no evidence_style key on the way back out."""
+    payload = {
+        "fingerprint": "d" * 16,
+        "severity": "P2",
+        "status": "open",
+        "since_round": 1,
+    }
+
+    record = FindingRecord.from_dict(payload)
+
+    assert_that(record).is_not_none()
+    assert record is not None
+    assert_that(record.to_dict()).does_not_contain_key("evidence_style")
+
+
+def test_v3_round_trip_preserves_score_and_evidence_style() -> None:
+    """The two v3 additions survive an encode/decode cycle."""
+    state = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, model="claude"),
+                outcome=RunOutcome(convergence_score=4.25),
+            ),
+        ),
+        findings=(
+            replace(
+                _record(fingerprint="e" * 16),
+                evidence_style=EvidenceStyle.SPECULATIVE,
+            ),
+        ),
+    )
+
+    decoded = decode_state(body=f"body {leftover_state_block(state=state)}")
+
+    assert_that(decoded.runs[0].outcome.convergence_score).is_equal_to(4.25)
+    assert_that(decoded.findings[0].evidence_style).is_equal_to(
+        EvidenceStyle.SPECULATIVE,
+    )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["not-a-number", float("inf"), -1.0, True],
+    ids=["score=text", "score=infinite", "score=negative", "score=bool"],
+)
+def test_an_unusable_stored_score_reads_as_not_measured(raw: object) -> None:
+    """A corrupted score degrades to unknown, never to a quiet zero.
+
+    Args:
+        raw: Unusable stored ``convergence_score`` value under test.
+    """
+    record = RunRecord.from_dict({"round": 1, "convergence_score": raw})
+
+    assert_that(record.outcome.convergence_score).is_none()
+
+
+def test_an_unknown_evidence_style_reads_as_the_highest_likelihood() -> None:
+    """A renamed label must never deflate a PR toward an early stop."""
+    record = FindingRecord.from_dict(
+        {"fingerprint": "f" * 16, "evidence_style": "telepathy"},
+    )
+
+    assert_that(record).is_not_none()
+    assert record is not None
+    assert_that(record.evidence_style).is_equal_to(EvidenceStyle.DIFF_LOCAL)
+
+
+def test_decode_state_never_fabricates_a_score_from_a_corrupt_blob() -> None:
+    """A sticky blob carrying an unusable score decodes to "not measured"."""
+    decoded = decode_state(
+        body=_wrap(
+            {
+                "version": 3,
+                "runs": [{"round": 1, "sha": "abc1234", "convergence_score": "NaN"}],
+                "findings": [{"fingerprint": "fp", "evidence_style": "hunch"}],
+            },
+        ),
+    )
+
+    assert_that(decoded.runs[0].outcome.convergence_score).is_none()
+    assert_that(decoded.findings[0].evidence_style).is_equal_to(
+        EvidenceStyle.DIFF_LOCAL,
+    )
+
+
+def test_a_measured_zero_score_survives_decode() -> None:
+    """A clean round's 0.0 is a measurement, not "not measured"."""
+    decoded = decode_state(
+        body=_wrap(
+            {
+                "version": 3,
+                "runs": [{"round": 1, "sha": "abc1234", "convergence_score": 0.0}],
+                "findings": [],
+            },
+        ),
+    )
+
+    assert_that(decoded.runs[0].outcome.convergence_score).is_equal_to(0.0)
+    assert_that(decoded.runs[0].outcome.convergence_score).is_not_none()
+
+
+def test_an_overflowing_score_decodes_as_not_measured() -> None:
+    """A value float() cannot represent degrades to None instead of aborting."""
+    decoded = decode_state(
+        body=_wrap(
+            {
+                "version": 3,
+                "runs": [{"round": 1, "sha": "abc1234", "convergence_score": 10**400}],
+                "findings": [],
+            },
+        ),
+    )
+
+    assert_that(decoded.runs[0].outcome.convergence_score).is_none()

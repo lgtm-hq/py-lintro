@@ -12,6 +12,7 @@ from lintro.ai.prompts.review import (
     format_external_review_section,
     format_lint_results_section,
     format_output_rules,
+    format_pr_changed_files_for_prompt,
 )
 from lintro.ai.review.checklist_selector import format_checklist_for_prompt
 from lintro.ai.review.models.checklist_item import ChecklistItem
@@ -89,6 +90,13 @@ def build_review_user_prompt(
         changed_file_count=len(context.changed_files),
         changed_files=redact_prompt_text(
             text=format_changed_files_for_prompt(files=context.changed_files),
+            source="changed files",
+        ),
+        pr_changed_files=redact_prompt_text(
+            text=format_pr_changed_files_for_prompt(
+                files=context.changed_files,
+                chunk_paths={file.path for file in context.changed_files},
+            ),
             source="changed files",
         ),
         interaction_paths=interaction_paths,

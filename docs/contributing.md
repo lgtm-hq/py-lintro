@@ -85,6 +85,27 @@ commits before merge.
    uv sync --dev
    ```
 
+   `[dependency-groups] dev` in `pyproject.toml` is the project's only dev dependency
+   list; there is no `dev` or `test` extra. It already carries ruff, black, mypy, bandit
+   and yamllint. Add `--extra full` to also install the wrapped tools the group lacks
+   (pylint, pydoclint, import-linter), which CI installs for dogfooding.
+
+   `pyproject.toml` marker-disables anthropic's `docstring-parser` dependency via
+   `[tool.uv] override-dependencies` so it cannot collide with pydoclint's
+   `docstring-parser-fork` — both install the same `docstring_parser` module, and
+   installing both silently breaks pydoclint. Because that override also strips the
+   fork's only route into an `ai`-without-`full` sync, the uv-only `ai-runtime`
+   dependency-group puts it back — and it is listed in `[tool.uv] default-groups`, so
+   every sync gets it without a flag. See issue #2378 before touching either
+   declaration.
+
+   `uv sync --dev --extra full --extra ai` gives you the linters and the AI providers in
+   one environment, which is what `lintro review` work wants. A bare
+   `uv sync --extra ai` is not additive — it rebuilds `.venv` without `full`, dropping
+   pylint, pydoclint and import-linter. If you want the AI extra on its own, put it in a
+   separate environment with `UV_PROJECT_ENVIRONMENT=.venv-ai uv sync --extra ai`, and
+   keep that variable set for the follow-up `uv run` commands.
+
 3. Run tests:
 
    ```bash
@@ -96,6 +117,37 @@ commits before merge.
    ```bash
    ./scripts/local/local-lintro.sh check --output-format grid
    ```
+
+## Common tasks with `just`
+
+Common development tasks are wrapped as [`just`](https://github.com/casey/just) recipes
+in the repository `justfile`. Install `just` once:
+
+```bash
+# macOS
+brew install just
+
+# Linux
+cargo install just
+```
+
+Then list and run recipes:
+
+```bash
+just --list            # Show all available recipes
+just setup             # Set up the dev environment (uv sync + editable install)
+just lint              # Run lintro check (runs mypy first)
+just format            # Format the codebase with lintro
+just test              # Run the full test suite with coverage
+just test-unit -- -v   # Run unit tests only; `--` forwards pytest args
+just pre-commit        # Lint, then run the test suite
+just clean             # Remove build/test artifacts
+```
+
+Each recipe delegates to the existing `uv`/`scripts/` commands, so you can always run
+those directly if you prefer not to install `just`. Makefile-era aliases
+`just lintro-check` and `just lintro-format` still map to `lint` and `format`;
+`just chk` and `just fmt` are shorter names for the same recipes.
 
 ## More Information
 
@@ -129,8 +181,9 @@ consistent UX and maintainable implementation.
 
 1. Core code
 
-- Create a tool plugin in `lintro/tools/definitions/` (subclass `BaseToolPlugin`, use
-  `@register_tool`).
+- Create a tool package `lintro/tools/<tool>/` with the plugin in its `definition.py`
+  (subclass `BaseToolPlugin`, use `@register_tool`) and the package's import surface in
+  `__init__.py`.
 - Implement `definition` property returning `ToolDefinition`.
 - Implement `check()` (and `fix()` only if the tool supports auto-fixes).
 - Add a parser module in `lintro/parsers/<tool>/` for the tool's default output.
@@ -154,10 +207,24 @@ consistent UX and maintainable implementation.
   For OS/arch tarballs, encapsulate download/extract in a helper.
 - Verify checksums when possible.
 
+### Generated artifacts
+
+Three files are derived and **not committed** (#2176), each from its own inputs:
+`lintro/_generated_versions.py` (from the per-install-type version sources),
+`lintro/tools/manifest.json` (rendered from `manifest.src.json` with resolved versions
+injected), and `lintro/plugins/_builtin_index.py` (from the per-tool packages under
+`lintro/tools/`). They are generated at package build time by the in-tree PEP 517
+backend (`lintro_build/backend.py`), so every wheel, sdist, editable install, Docker
+image, and frozen binary carries current copies. `just setup` (via
+`uv pip install -e .`) generates them into your gitignored working tree; after editing a
+version source locally, run `just generate` to refresh them.
+
 ### Tool Version Sources (Including Companion Packages)
 
-- `lintro/tools/manifest.json` is the canonical source of external tool versions used by
-  Docker/CI. Add new tool binaries here.
+- `lintro/_tool_versions.py` (binary tools), `package.json` (npm tools), and
+  `pyproject.toml` (bundled Python tools) are the canonical version sources. New tool
+  binaries get a hand-authored entry in `lintro/tools/manifest.src.json` (no `version`
+  key); the generator renders `lintro/tools/manifest.json` from it at build time.
 - npm-managed tool versions come from `package.json` via `_NPM_PACKAGE_TO_TOOL` in
   `lintro/_tool_versions.py`.
 - If a tool requires companion npm packages (for example, a checker plugin that ships

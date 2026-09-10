@@ -44,7 +44,7 @@ organized by priority and grouped into logical phases.
 lintro/cli.py                    # Line 219: broad except
 lintro/parsers/ruff/ruff_parser.py    # Line 91: silent return None
 lintro/enums/hadolint_enums.py   # Lines 47, 67: bare except
-lintro/tools/implementations/pytest/markers.py  # Line 112: bare except
+lintro/tools/pytest/markers.py  # Line 112: bare except
 ```
 
 **Acceptance Criteria:**
@@ -379,10 +379,10 @@ lintro watch --tools ruff,prettier
 
 **Tasks:**
 
-- [ ] Integrate file watcher (watchdog)
-- [ ] Implement debouncing
-- [ ] Design output for continuous mode
-- [ ] Handle tool conflicts in watch
+- [x] Integrate file watcher (watchdog)
+- [x] Implement debouncing
+- [x] Design output for continuous mode
+- [x] Handle tool conflicts in watch
 
 ### P3: Language Server Protocol (LSP)
 

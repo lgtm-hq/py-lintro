@@ -13,15 +13,14 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from tests.integration.tools.astro_check.conftest import astro_check_is_available
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if astro is not installed or not working
-pytestmark = pytest.mark.skipif(
-    not astro_check_is_available(),
-    reason="astro not installed or not working",
+pytestmark = require_tool(
+    "astro",
+    launchers=(("bunx",), ("npx",)),
 )
 
 

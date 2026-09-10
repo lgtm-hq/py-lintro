@@ -2,7 +2,7 @@
 
 Covers the pure JSON name-diff helper (``compute-new-manifest-tools.py``) and
 the git-resolution shell wrapper (``compute-new-manifest-tools.sh``), which
-feeds the ``--allow-missing`` allowlist to the manifest-vs-image gate. The
+feeds the newly-added tool set to the manifest-vs-image gate. The
 wrapper is exercised against a real temporary git repository so the merge-base
 and fail-closed paths are covered end to end.
 """
@@ -12,7 +12,9 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import shutil
 import subprocess  # nosec B404 - drives the scripts under test with shell=False
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -60,7 +62,7 @@ def _manifest(names: list[str]) -> str:
 def test_tool_names_missing_file_is_empty() -> None:
     """A non-existent manifest path yields an empty name set (new-manifest case)."""
     module = _load_module()
-    names = module._tool_names(Path("/definitely/not/here.json"))  # noqa: SLF001
+    names = module._tool_names(Path("/definitely/not/here.json"))
     assert_that(names).is_equal_to(set())
 
 
@@ -76,7 +78,7 @@ def test_tool_names_reads_declared_names(tmp_path: Path) -> None:
             },
         ),
     )
-    names = module._tool_names(manifest)  # noqa: SLF001
+    names = module._tool_names(manifest)
     assert_that(names).is_equal_to({"ruff", "black"})
 
 
@@ -151,16 +153,34 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+def _src_manifest(names: list[str]) -> str:
+    """Render a manifest.src.json string declaring the given tool names.
+
+    Args:
+        names: Tool names to include.
+
+    Returns:
+        str: The source-manifest JSON (no tool version keys, #2178).
+    """
+    return json.dumps(
+        {"version": 2, "tools": [{"name": n} for n in names]},
+    )
+
+
 def _write_manifest_file(repo: Path, names: list[str]) -> None:
-    """Write the repo manifest declaring the given tool names.
+    """Write the repo manifest pair declaring the given tool names.
+
+    Mirrors the real repository layout since #2178: the hand-authored
+    ``manifest.src.json`` (no versions) plus the rendered ``manifest.json``.
 
     Args:
         repo: Repository root.
         names: Tool names to declare.
     """
-    manifest = repo / "lintro" / "tools" / "manifest.json"
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_text(_manifest(names))
+    tools_dir = repo / "lintro" / "tools"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    (tools_dir / "manifest.json").write_text(_manifest(names))
+    (tools_dir / "manifest.src.json").write_text(_src_manifest(names))
 
 
 def _run_sh(
@@ -261,6 +281,132 @@ def test_sh_new_manifest_treats_all_as_added(tmp_path: Path) -> None:
     result = _run_sh(repo, base_ref="main")
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout.strip()).is_equal_to("ruff,terraform")
+
+
+def test_sh_pre_split_merge_base_falls_back_to_manifest_json(
+    tmp_path: Path,
+) -> None:
+    """A merge-base without manifest.src.json diffs against manifest.json.
+
+    Transition window for #2178: bases that predate the manifest split carry
+    only the rendered manifest; the added diff must use it rather than
+    treating every current tool as new.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "--initial-branch=main")
+    tools_dir = repo / "lintro" / "tools"
+    tools_dir.mkdir(parents=True)
+    (tools_dir / "manifest.json").write_text(_manifest(["ruff", "black"]))
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "pre-split base (manifest.json only)")
+    _git(repo, "checkout", "-b", "feature")
+    _write_manifest_file(repo, ["ruff", "black", "terraform"])
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "split manifest and add terraform")
+    result = _run_sh(repo, base_ref="main")
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout.strip()).is_equal_to("terraform")
+    assert_that(result.stderr).contains("pre-split base")
+
+
+def _init_generator_repo(tmp_path: Path) -> Path:
+    """Create a repo carrying the real generator machinery and fake sources.
+
+    Mirrors the post-flip layout (#2180): manifest.src.json and the version
+    sources are committed, the rendered manifest.json is not.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+
+    Returns:
+        Path: The repository root, checked out on a feature branch.
+    """
+    repo = tmp_path / "repo"
+    (repo / "scripts" / "ci").mkdir(parents=True)
+    shutil.copytree(_REPO_ROOT / "lintro_build", repo / "lintro_build")
+    shutil.copy(
+        _REPO_ROOT / "scripts" / "ci" / "generate-tool-versions.py",
+        repo / "scripts" / "ci" / "generate-tool-versions.py",
+    )
+    (repo / "lintro" / "tools").mkdir(parents=True)
+    (repo / "lintro" / "_tool_packages.py").write_text(
+        "from lintro.enums.tool_name import ToolName\n"
+        "NPM_PACKAGE_OWNERS: dict[str, ToolName | None] = {}\n"
+        "PYPI_PACKAGE_OWNERS: dict[str, ToolName | None] = {}\n",
+    )
+    (repo / "lintro" / "_tool_versions.py").write_text(
+        "from lintro.enums.tool_name import ToolName\n"
+        "TOOL_VERSIONS: dict = {\n"
+        '    ToolName.HADOLINT: "2.14.0",\n'
+        "}\n",
+    )
+    (repo / "package.json").write_text(json.dumps({"devDependencies": {}}))
+    (repo / "pyproject.toml").write_text('[project]\nname = "fake"\n')
+    (repo / "requirements-semgrep.txt").write_text("")
+    (repo / "lintro" / "tools" / "manifest.src.json").write_text(
+        json.dumps(
+            {
+                "tools": [
+                    {"name": "hadolint", "install": {"type": "binary"}},
+                ],
+            },
+            indent=2,
+        )
+        + "\n",
+    )
+    _git(repo, "init", "--initial-branch=main")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "post-flip base (no rendered manifest)")
+    _git(repo, "checkout", "-b", "feature")
+    return repo
+
+
+def test_sh_version_changed_renders_merge_base_from_sources(
+    tmp_path: Path,
+) -> None:
+    """Post-flip version bumps still resolve version-changed tolerance.
+
+    With the rendered manifest no longer committed (#2180), the old side of
+    the version diff is rendered from the merge-base's own committed sources
+    and generator; a bumped pin must surface in the version-changed set.
+    """
+    repo = _init_generator_repo(tmp_path)
+
+    tool_versions = repo / "lintro" / "_tool_versions.py"
+    tool_versions.write_text(
+        tool_versions.read_text().replace('"2.14.0"', '"2.15.0"'),
+    )
+    _git(repo, "commit", "-am", "bump hadolint")
+    # The working tree's rendered manifest exists (CI regenerates before the
+    # gate runs); the merge-base's does not.
+    result = subprocess.run(  # nosec B603 - fixed argv against a repo-owned script; shell=False
+        [sys.executable, str(repo / "scripts" / "ci" / "generate-tool-versions.py")],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=repo,
+    )
+    assert_that(result.returncode).described_as(
+        result.stdout + result.stderr,
+    ).is_equal_to(0)
+
+    run = subprocess.run(  # nosec B603 - fixed argv against a real binary; shell=False
+        [str(_SH_SCRIPT)],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=repo,
+        env={
+            "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+            "HOME": os.environ.get("HOME", "/tmp"),  # nosec B108 - test fallback
+            "BASE_REF": "main",
+            "EMIT": "version-changed",
+        },
+    )
+    assert_that(run.returncode).is_equal_to(0)
+    assert_that(run.stdout.strip()).is_equal_to("hadolint")
+    assert_that(run.stderr).contains("Rendered merge-base manifest")
 
 
 def test_sh_unresolvable_base_fails_closed(tmp_path: Path) -> None:
@@ -375,12 +521,12 @@ def test_py_version_changed_no_change_is_empty(tmp_path: Path) -> None:
 def test_version_tuple_stops_at_prerelease_tag() -> None:
     """A pre-release tag stops parsing so "7.1.0-rc.1" is (7, 1, 0)."""
     module = _load_module()
-    version_tuple = module._version_tuple  # noqa: SLF001
+    version_tuple = module._version_tuple
     assert_that(version_tuple("7.1.0-rc.1")).is_equal_to((7, 1, 0))
     assert_that(version_tuple("7.1.3")).is_equal_to((7, 1, 3))
     # Pre-release tags collapse to their release base, so ordering is decided
     # by the numeric segments only.
-    is_upward = module._is_upward_bump  # noqa: SLF001
+    is_upward = module._is_upward_bump
     assert_that(is_upward("7.1.0-rc.1", "7.2.0")).is_true()
     assert_that(is_upward("7.2.0", "7.1.0-rc.1")).is_false()
 

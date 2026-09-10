@@ -7,6 +7,11 @@ Only presentation lives here. The probes themselves — and the
 ``{check, status, detail, remediation}`` health report the MCP ``lintro_doctor``
 tool serves — live in :mod:`lintro.utils.doctor_report`, so the same data backs
 the terminal output, ``--json``, and an agent (issue #1240).
+
+One exception: the derived execution-order section (issues #1741, #1742) is
+terminal-only. It is rendered on the Rich path after the ``--json`` and
+markdown early returns, so neither ``--json`` nor the MCP health report
+carries it.
 """
 
 from __future__ import annotations
@@ -32,6 +37,7 @@ from lintro.cli_utils.install_output import (
     render_outcome_summary,
     unresolved_tool_names,
 )
+from lintro.cli_utils.order_explain import render_doctor_order_section
 from lintro.enums.tool_status import ToolStatus
 from lintro.tools.core.install_context import RuntimeContext
 from lintro.tools.core.install_quickfix import build_quick_fix
@@ -39,7 +45,8 @@ from lintro.tools.core.tool_registry import (
     CATEGORY_LABELS,
     ManifestRegistry,
 )
-from lintro.tools.definitions.oxlint_doctor import (
+from lintro.tools.core.update_channels import format_advisory_line
+from lintro.tools.oxlint.doctor import (
     OxlintCheckResult,
     check_oxlint_type_aware,
 )
@@ -119,7 +126,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version:<10}", style="yellow")
         line.append(f"(>= {r.tool.min_version}, rec. {r.tool.version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        if r.upgrade_hint:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.INCOMPATIBLE:
         line = Text("    ")
@@ -128,7 +138,10 @@ def _render_tool_line(
         line.append(f"{r.installed_version or '?':<10}", style="red")
         line.append(f"(>= {r.tool.min_version})", style="dim")
         console.print(line)
-        console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
+        if r.advisory:
+            console.print(f"         [dim]{format_advisory_line(r.advisory)}[/dim]")
+        if r.upgrade_hint:
+            console.print(f"         [dim]Upgrade: {r.upgrade_hint}[/dim]")
 
     elif r.status == ToolStatus.DISABLED:
         line = Text("    ")
@@ -338,8 +351,7 @@ def _generate_markdown_report(
         for check in ai_checks:
             hint = check.hint or "-"
             lines.append(
-                f"| {check.name} | {check.status.upper()} "
-                f"| {check.message} | {hint} |",
+                f"| {check.name} | {check.status.upper()} | {check.message} | {hint} |",
             )
 
     lines.append("")
@@ -604,6 +616,7 @@ def doctor_command(
     _render_ai_checks(display_console, ai_checks)
     _render_oxlint_checks(display_console, oxlint_checks)
     _render_mcp_extra(display_console)
+    render_doctor_order_section(display_console)
 
     # Summary
     display_console.print()
@@ -683,11 +696,11 @@ def _output_json(
         for r in all_results
         if r.status == ToolStatus.DISABLED and r.tool.tier != "dev"
     )
-    tools_json: dict[str, dict[str, str | None]] = {}
+    tools_json: dict[str, dict[str, object]] = {}
     issues: list[dict[str, str]] = []
 
     for r in all_results:
-        tools_json[r.tool.name] = {
+        tool_entry: dict[str, object] = {
             "recommended": r.tool.version,
             "min_version": r.tool.min_version,
             "expected": r.tool.min_version,
@@ -701,7 +714,9 @@ def _output_json(
             "path": r.path,
             "install_hint": r.install_hint,
             "upgrade_hint": r.upgrade_hint,
+            "advisory": r.advisory.to_dict() if r.advisory is not None else None,
         }
+        tools_json[r.tool.name] = tool_entry
         if r.status == ToolStatus.MISSING and r.tool.tier != "dev":
             issues.append(
                 {

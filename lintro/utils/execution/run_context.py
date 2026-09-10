@@ -39,8 +39,10 @@ class RunContext:
         clean_stdout_output: Whether stdout must carry a single machine
             readable document (json/sarif/csv/markdown), which routes all
             decorative console UI to stderr.
-        score_only: Whether stdout must carry only the numeric health score.
         group_by: How to group issues in formatted and JSON output.
+        profile: Whether to emit the human/JSON performance profile. Timings
+            are recorded for main-phase tools regardless; this flag only
+            gates rendering.
     """
 
     action: Action
@@ -50,5 +52,5 @@ class RunContext:
     logger: Any
     lintro_config: Any
     clean_stdout_output: bool
-    score_only: bool
     group_by: str = "auto"
+    profile: bool = False

@@ -19,16 +19,29 @@ still names the sticky's fix-all for everything open across all rounds.
 from __future__ import annotations
 
 from lintro import __version__ as lintro_version
-from lintro.ai.resolved_ai_config import format_max_cost_label, format_sourced_value
+from lintro.ai.resolved_ai_config import (
+    MAX_COST_LABEL,
+    format_max_cost_label,
+    format_sourced_value,
+)
 from lintro.ai.review.agent_prompts import (
     prompt_findings,
     render_agent_prompt_panel,
 )
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
-from lintro.ai.review.github_constants import MAX_COMMENT_CHARS
-from lintro.ai.review.github_render import (
+from lintro.ai.review.github_badges import (
     format_badge_tables,
     run_stats_primary_cells,
+)
+from lintro.ai.review.github_notes import (
+    format_coverage_limited_warning,
+    format_cross_chunk_note,
+    format_synthesis_note_line,
+    format_timings_note,
+)
+from lintro.ai.review.github_render import (
+    Section,
+    assemble,
     sanitize_comment_text,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
@@ -50,8 +63,6 @@ _SHORT_SHA = 7
 
 #: Maximum file entries listed before the files collapsible summarizes the rest.
 _MAX_LISTED_FILES = 60
-
-_TRUNCATION_NOTICE = "\n\n> ✂️ Comment truncated to fit GitHub's size limit."
 
 
 def build_review_body(
@@ -85,36 +96,48 @@ def build_review_body(
         Markdown body for the review, capped to GitHub's comment size limit.
     """
     round_number = prior_state.next_round
-    sections = [
-        _header(
-            result=result,
-            match=match,
-            prior_state=prior_state,
-            round_number=round_number,
-            head_sha=head_sha,
-        ),
-        _prompt_section(
-            result=result,
-            round_number=round_number,
-        ),
-        _run_stats_section(
-            result=result,
-            transport=transport,
-            auth_mode=auth_mode,
-            config_source=config_source,
-        ),
-        _commits_section(
-            result=result,
-            prior_state=prior_state,
-            round_number=round_number,
-            head_sha=head_sha,
-            new_commits=new_commits,
-        ),
-        _files_section(result=result),
-        REVIEW_BODY_FOOTER,
-    ]
-    body = "\n\n".join(section for section in sections if section)
-    return _cap(body=body)
+    return assemble(
+        sections=[
+            Section(
+                name="header",
+                text=_header(
+                    result=result,
+                    match=match,
+                    prior_state=prior_state,
+                    round_number=round_number,
+                    head_sha=head_sha,
+                ),
+            ),
+            Section(
+                name="prompt",
+                text=_prompt_section(
+                    result=result,
+                    round_number=round_number,
+                ),
+            ),
+            Section(
+                name="run_stats",
+                text=_run_stats_section(
+                    result=result,
+                    transport=transport,
+                    auth_mode=auth_mode,
+                    config_source=config_source,
+                ),
+            ),
+            Section(
+                name="commits",
+                text=_commits_section(
+                    result=result,
+                    prior_state=prior_state,
+                    round_number=round_number,
+                    head_sha=head_sha,
+                    new_commits=new_commits,
+                ),
+            ),
+            Section(name="files", text=_files_section(result=result)),
+            Section(name="footer", text=REVIEW_BODY_FOOTER),
+        ],
+    )
 
 
 def _short(sha: str) -> str:
@@ -144,7 +167,7 @@ def _plural(*, count: int, noun: str) -> str:
 
 def _prior_sha(*, prior_state: ReviewState) -> str:
     """Return the head sha of the most recent prior round, if any."""
-    return prior_state.runs[-1].sha if prior_state.runs else ""
+    return prior_state.runs[-1].identity.sha if prior_state.runs else ""
 
 
 def _header(
@@ -249,10 +272,17 @@ def _run_stats_section(
     metadata = result.metadata
     primary = run_stats_primary_cells(metadata=metadata)
 
+    # Guard on the *sanitized* transport, not the raw one: appending a
+    # provenance suffix to an empty value makes it truthy, which would let a
+    # blank transport render as a bare " (config)" row (#1972 owner comment,
+    # 2026-08-14 item 2). Test for presence before truncating, too: a blank
+    # longer than the limit truncates to the ellipsis, which is truthy again
+    # and would render "… (config)".
+    sanitized_transport = sanitize_comment_text(transport).strip()
     transport_label = ""
-    if transport:
+    if sanitized_transport:
         transport_label = format_sourced_value(
-            sanitize_comment_text(transport, limit=40),
+            sanitize_comment_text(sanitized_transport, limit=40),
             metadata.transport_source or None,
         )
     if transport_label and auth_mode:
@@ -265,7 +295,7 @@ def _run_stats_section(
     if metadata.max_cost_usd is not None or metadata.max_cost_usd_source:
         secondary.append(
             (
-                "max cost",
+                MAX_COST_LABEL,
                 format_max_cost_label(
                     max_cost_usd=metadata.max_cost_usd,
                     source=metadata.max_cost_usd_source or None,
@@ -285,6 +315,24 @@ def _run_stats_section(
 
     lines = ["**📊 Run stats**", ""]
     lines.extend(format_badge_tables(rows=[primary, secondary]))
+    coverage_warning = format_coverage_limited_warning(metadata=metadata)
+    if coverage_warning:
+        # Parity with the cost-cap partial warning: a findings-cap run says so
+        # in the run-stats block, where the reader looks for run mechanics.
+        lines.extend(["", coverage_warning])
+    cross_chunk_note = format_cross_chunk_note(findings=result.findings)
+    if cross_chunk_note:
+        # A guard-driven downgrade is run mechanics too: the reader needs to
+        # know a severity below was set here rather than by the model (#2265).
+        lines.extend(["", cross_chunk_note])
+    synthesis_note = format_synthesis_note_line(metadata=metadata)
+    if synthesis_note:
+        # Rendered only when the optional cross-chunk pass ran (#2269), so a
+        # default round's run-stats block is byte-identical to before.
+        lines.extend(["", synthesis_note])
+    timings_note = format_timings_note(metadata=metadata)
+    if timings_note:
+        lines.extend(["", timings_note])
     if config_source:
         source = sanitize_comment_text(config_source, limit=300)
         lines.extend(["", f"<sub>Config source: {source}</sub>"])
@@ -330,7 +378,7 @@ def _commits_section(
         )
     else:
         sentence = (
-            f"This round reviewed the PR's full diff against `{base}` " f"at `{head}`."
+            f"This round reviewed the PR's full diff against `{base}` at `{head}`."
         )
     return "\n".join(
         [
@@ -418,18 +466,3 @@ def _files_section(*, result: ReviewResult) -> str:
     return "\n".join(
         [f"<details><summary>{summary}</summary>", "", *entries, "", "</details>"],
     )
-
-
-def _cap(*, body: str) -> str:
-    """Trim an over-long body, leaving an explicit truncation marker.
-
-    Args:
-        body: Assembled review body.
-
-    Returns:
-        The body, truncated with a visible notice when over the size cap.
-    """
-    if len(body) <= MAX_COMMENT_CHARS:
-        return body
-    keep = MAX_COMMENT_CHARS - len(_TRUNCATION_NOTICE)
-    return body[:keep].rstrip() + _TRUNCATION_NOTICE

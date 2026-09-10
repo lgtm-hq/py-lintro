@@ -12,6 +12,11 @@ from lintro.ai.cli_schemas import REVIEW_CLI_SCHEMA
 from lintro.ai.prompts.review import REVIEW_OUTPUT_SCHEMA, format_output_rules
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.merge import (
+    ChunkReviewPartial,
+    merge_pr_summaries,
+    merge_review_results,
+)
 from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -19,13 +24,8 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
-from lintro.ai.review.orchestrator import (
-    _ChunkReviewPartial,
-    _payload_to_partial,
-    merge_pr_summaries,
-    merge_review_results,
-)
 from lintro.ai.review.output import review_result_to_dict
+from lintro.ai.review.response_pipeline import payload_to_partial
 from lintro.ai.review.verdict import VERDICT_LABELS, VERDICT_RUBRIC_FINE_PRINT
 
 _T = TypeVar("_T")
@@ -66,7 +66,7 @@ def _partial(
     pr_summary: ReviewSummary | None = None,
     verdict_reasoning: VerdictReasoning | None = None,
     file_assessments: tuple[FileAssessment, ...] = (),
-) -> _ChunkReviewPartial:
+) -> ChunkReviewPartial:
     """Build a chunk partial carrying only the narrative fields under test.
 
     Args:
@@ -78,7 +78,7 @@ def _partial(
     Returns:
         The constructed partial.
     """
-    return _ChunkReviewPartial(
+    return ChunkReviewPartial(
         summary=summary,
         checklist=(),
         findings=(),
@@ -115,7 +115,7 @@ def _payload() -> dict[str, Any]:
 
 def test_payload_to_partial_carries_narrative_fields() -> None:
     """A chunk partial keeps the structured narrative alongside the flat text."""
-    partial = _payload_to_partial(response=_response(), payload=_payload())
+    partial = payload_to_partial(response=_response(), payload=_payload())
 
     assert_that(partial.summary).is_equal_to("Adds narrative outputs.")
     assert_that(_require(partial.pr_summary).walkthrough[0].text).is_equal_to(
@@ -129,7 +129,7 @@ def test_payload_to_partial_carries_narrative_fields() -> None:
 
 def test_payload_to_partial_degrades_on_legacy_payload() -> None:
     """A findings-only legacy payload still produces a usable partial."""
-    partial = _payload_to_partial(
+    partial = payload_to_partial(
         response=_response(),
         payload={"summary": "Merge with fixes.", "checklist": [], "findings": []},
     )
@@ -352,6 +352,8 @@ def test_prompt_rubric_names_the_same_verdicts_as_the_code_rubric() -> None:
     """The rubric shown to the model and the rendered one cannot drift apart."""
     rules = format_output_rules(checklist_count=1)
 
-    for label in VERDICT_LABELS.values():
+    for verdict, label in VERDICT_LABELS.items():
+        if verdict is ReviewVerdict.INCOMPLETE:
+            continue
         assert_that(rules).contains(label)
         assert_that(VERDICT_RUBRIC_FINE_PRINT).contains(label)

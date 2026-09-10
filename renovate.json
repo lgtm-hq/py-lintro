@@ -3,10 +3,6 @@
   "extends": [
     "local>lgtm-hq/.github:renovate-config"
   ],
-  "allowedCommands": [
-    "python3 scripts/ci/generate-tool-versions.py",
-    "scripts/ci/compile-semgrep-lock.sh"
-  ],
   "packageRules": [
     {
       "description": "test_samples are fixed tool-test inputs; never update them",
@@ -52,11 +48,8 @@
     {
       "groupName": "rust toolchain",
       "groupSlug": "rust-toolchain",
-      "description": "Group rustc and clippy because clippy versions match Rust release versions",
-      "matchPackageNames": [
-        "rust-lang/rust",
-        "rust-lang/rust-clippy"
-      ]
+      "description": "Single rust-family knob: rustc. rustfmt/clippy are bundled with the toolchain and have no independent managers (#2205)",
+      "matchPackageNames": ["rust-lang/rust"]
     },
     {
       "groupName": "linting tools",
@@ -64,6 +57,8 @@
       "matchPackageNames": [
         "hadolint",
         "hadolint/hadolint",
+        "buf",
+        "bufbuild/buf",
         "actionlint",
         "rhysd/actionlint",
         "prettier",
@@ -74,6 +69,7 @@
         "oxlint",
         "oxfmt",
         "stylelint",
+        "@stoplight/spectral-cli",
         "gitleaks",
         "gitleaks/gitleaks",
         "rubocop",
@@ -110,6 +106,13 @@
       "automerge": false
     },
     {
+      "description": "Binary pins in _tool_versions.py install only when the tools image rebuilds; do not automerge versions-only (#2220)",
+      "matchPackageNames": [
+        "golangci/golangci-lint"
+      ],
+      "automerge": false
+    },
+    {
       "description": "lintro-ai-tools base image digest pin (FROM in the Dockerfile 'aitools' stage); full CI validates the bump",
       "matchDatasources": ["docker"],
       "matchPackageNames": [
@@ -119,7 +122,7 @@
       "automerge": false
     },
     {
-      "description": "Agent CLIs release close to daily; batch them into one weekly PR — the hybrid capability guard (#1612) tolerates the lag",
+      "description": "Agent CLIs release close to daily; batch them into one weekly PR \u2014 the hybrid capability guard (#1612) tolerates the lag",
       "groupName": "ai agent CLIs",
       "groupSlug": "ai-agent-clis",
       "matchFileNames": [
@@ -134,59 +137,12 @@
       "automerge": false
     },
     {
-      "description": "Regenerate version artifacts when tool version sources change",
-      "matchManagers": [
-        "custom.regex",
-        "npm",
-        "pep621",
-        "pip_requirements",
-        "uv"
-      ],
-      "matchFileNames": [
-        "Dockerfile",
-        "docker/tools.Dockerfile",
-        "lintro/_tool_versions.py",
-        "lintro/tools/manifest.json",
-        "package.json",
-        "pyproject.toml"
-      ],
-      "postUpgradeTasks": {
-        "commands": [
-          "python3 scripts/ci/generate-tool-versions.py"
-        ],
-        "fileFilters": [
-          "lintro/_tool_versions.py",
-          "lintro/_generated_versions.py",
-          "lintro/tools/manifest.json",
-          "package.json",
-          "pyproject.toml",
-          "Dockerfile",
-          "docker/tools.Dockerfile"
-        ],
-        "executionMode": "branch"
-      }
+      "description": "assertpy is deliberately kept despite the abandoned flag: pure Python, works on 3.14, guarded by tests/unit/test_assertpy_guard.py, assertpy2 is the designated fallback (#2437). Null threshold suppresses the dependency-dashboard abandonment notice for it",
+      "matchPackageNames": ["assertpy"],
+      "abandonmentThreshold": null
     },
     {
-      "description": "Recompile the isolated semgrep lockfile after its .in pin changes",
-      "matchManagers": ["pip_requirements"],
-      "matchFileNames": [
-        "requirements-semgrep.in"
-      ],
-      "postUpgradeTasks": {
-        "commands": [
-          "scripts/ci/compile-semgrep-lock.sh",
-          "python3 scripts/ci/generate-tool-versions.py"
-        ],
-        "fileFilters": [
-          "requirements-semgrep.txt",
-          "lintro/_generated_versions.py",
-          "lintro/tools/manifest.json"
-        ],
-        "executionMode": "branch"
-      }
-    },
-    {
-      "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in",
+      "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in by scripts/ci/compile-semgrep-lock.sh; CI gates the drift (#2436)",
       "matchFileNames": [
         "requirements-semgrep.txt"
       ],
@@ -250,10 +206,11 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
-      "description": "Exact uv pin for setup-uv in the binary build workflow (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
+      "description": "Exact uv pins for setup-uv in the binary build and semgrep-lock workflows (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
       "customType": "regex",
       "managerFilePatterns": [
-        ".github/workflows/build-binary.yml"
+        ".github/workflows/build-binary.yml",
+        ".github/workflows/docker-ci.yml"
       ],
       "matchStrings": [
         "UV_VERSION: '(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)'"
@@ -361,7 +318,7 @@
       "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
-      "description": "Update golangci-lint in _tool_versions.py (manifest follows via generator)",
+      "description": "Update golangci-lint in _tool_versions.py. Must land with a lintro-tools digest built at that pin (#2220); versions-only breaks Docker verify.",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
@@ -451,6 +408,19 @@
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
+      "description": "Update buf version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.BUF:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "github-releases",
+      "packageNameTemplate": "bufbuild/buf",
+      "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
       "description": "Update trufflehog version in _tool_versions.py (manifest follows via generator)",
       "customType": "regex",
       "managerFilePatterns": [
@@ -501,7 +471,19 @@
       "packageNameTemplate": "cargo-deny"
     },
     {
-      "description": "Update rustc in _tool_versions.py (manifest follows via generator)",
+      "description": "Update typos version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.TYPOS:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "crate",
+      "packageNameTemplate": "typos-cli"
+    },
+    {
+      "description": "Update rustc in _tool_versions.py (manifest follows via generator). rustfmt/clippy pins are bundled with this toolchain — bump those records in the same PR; they have no independent managers (#2205)",
       "customType": "regex",
       "managerFilePatterns": [
         "lintro/_tool_versions\\.py"
@@ -512,32 +494,6 @@
       "datasourceTemplate": "github-tags",
       "packageNameTemplate": "rust-lang/rust",
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
-    },
-    {
-      "description": "Update clippy in _tool_versions.py (manifest follows via generator)",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.CLIPPY:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rust-clippy",
-      "extractVersionTemplate": "^rust-(?<version>.*)$"
-    },
-    {
-      "description": "Update rustfmt in _tool_versions.py (manifest follows via generator)",
-      "customType": "regex",
-      "managerFilePatterns": [
-        "lintro/_tool_versions\\.py"
-      ],
-      "matchStrings": [
-        "ToolName\\.RUSTFMT:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ],
-      "datasourceTemplate": "github-tags",
-      "packageNameTemplate": "rust-lang/rustfmt",
-      "extractVersionTemplate": "^v(?<version>.*)$"
     },
     {
       "description": "Pinned py-lintro release image (nightly dogfood + docker-ci fork fallback, #1751); all pin sites bump together",

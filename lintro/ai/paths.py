@@ -133,7 +133,7 @@ def atomic_write_bytes(
             raise
         with handle:
             handle.write(data)
-        os.chmod(tmp, mode)  # noqa: S103 - mirrors the replaced file's own mode
+        os.chmod(tmp, mode)
         Path(tmp).replace(path)
     except BaseException:
         Path(tmp).unlink(missing_ok=True)

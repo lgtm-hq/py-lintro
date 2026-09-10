@@ -10,7 +10,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.prettier.prettier_issue import PrettierIssue
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.prettier import PrettierPlugin
+    from lintro.tools.prettier.definition import PrettierPlugin
 
 
 def test_create_timeout_result_basic(prettier_plugin: PrettierPlugin) -> None:

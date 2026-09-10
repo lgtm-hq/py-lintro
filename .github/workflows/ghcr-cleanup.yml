@@ -36,9 +36,16 @@ name: Maintenance - GHCR Registry Cleanup
         required: false
         default: 91
         type: number
+      candidate_min_age_days:
+        description: >-
+          Minimum age in days before sweeping tools-candidate-pr<n>-<sha> tags
+          whose Renovate PR is still open. Scheduled runs always use 14.
+        required: false
+        default: 14
+        type: number
 
 concurrency:
-  group: ghcr-cleanup
+  group: lintro-tools-registry
   cancel-in-progress: false
 
 permissions: {}
@@ -46,7 +53,7 @@ permissions: {}
 jobs:
   prune-untagged:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36 # v0.69.8
     permissions:
       contents: read # checkout repo and lgtm-ci tooling sparse checkout
       packages: write # delete untagged GHCR package versions via Packages API
@@ -55,7 +62,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36' # v0.69.8
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -89,7 +96,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -135,7 +142,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -159,9 +166,45 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: scripts/ci/maintenance/sweep-ci-ghcr-tags.sh
 
+  sweep-tools-candidates:
+    name: 🧹 Sweep tools candidate tags
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: read
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Sweep stale candidate versions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # yamllint disable-line rule:line-length
+          MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 14 || inputs.candidate_min_age_days }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: python3 scripts/ci/maintenance/sweep-tools-candidate-tags.py
+
   prune-untagged-base:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36 # v0.69.8
     permissions:
       contents: read # checkout repo and lgtm-ci tooling sparse checkout
       packages: write # delete untagged GHCR package versions via Packages API
@@ -170,7 +213,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36' # v0.69.8
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes

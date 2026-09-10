@@ -6,7 +6,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.rubocop import RubocopPlugin
+from lintro.tools.rubocop import RubocopPlugin
 
 
 def test_definition_metadata(rubocop_plugin: RubocopPlugin) -> None:

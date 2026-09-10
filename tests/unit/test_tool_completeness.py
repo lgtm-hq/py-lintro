@@ -5,9 +5,7 @@ This turns the ``lintro-verify`` new-tool checklist into a merge gate
 the full set of integration surfaces and to keep its sources of truth in
 agreement:
 
-- ``lintro/tools/manifest.json`` entry
-- ``DEFAULT_TOOL_PRIORITIES`` drives the *effective* priority (no dead
-  ``priority=`` declarations that silently fall back to 50)
+- ``lintro/tools/manifest.src.json`` entry
 - manifest ``tags`` agree with the definition's ``tool_type``
 - install hints in ``lintro/tools/core/version_checking.py``
 - ``docs/tool-analysis/<tool>-analysis.md`` and a ``docs/configuration.md``
@@ -43,11 +41,10 @@ from lintro.tools.core.version_checking import (
     get_install_hints,
     get_minimum_versions,
 )
-from lintro.utils.unified_config import get_tool_priority
 
 # ── Repository layout ──────────────────────────────────────────────────────
 REPO_ROOT = Path(__file__).resolve().parents[2]
-MANIFEST_PATH = REPO_ROOT / "lintro" / "tools" / "manifest.json"
+MANIFEST_PATH = REPO_ROOT / "lintro" / "tools" / "manifest.src.json"
 TOOL_ANALYSIS_DIR = REPO_ROOT / "docs" / "tool-analysis"
 CONFIGURATION_DOC = REPO_ROOT / "docs" / "configuration.md"
 README = REPO_ROOT / "README.md"
@@ -151,7 +148,11 @@ def _expected_tags(tool_type: ToolType) -> set[str]:
 
 
 def _load_manifest_tools() -> dict[str, dict[str, object]]:
-    """Return ``{name: entry}`` parsed from ``manifest.json``.
+    """Return ``{name: entry}`` parsed from ``manifest.src.json``.
+
+    The hand-authored source (#2178) carries everything completeness checks
+    need (names, install metadata, tags) and stays committed after the
+    rendered manifest stops being committed.
 
     Returns:
         Mapping of manifest tool name to its raw entry dict.
@@ -186,11 +187,11 @@ MANIFEST_EXEMPT: dict[str, str] = {
 # flags (infrastructure/type_checker/documentation) or tag security tools as
 # "linter". Documented under the epic-#1490 audit; align manifest + tool_type.
 TAGS_EXEMPT: dict[str, str] = {
-    "dotenv_linter": "manifest tags [linter,formatter] but tool_type=LINTER — TODO(#1495)",  # noqa: E501
+    "dotenv_linter": "manifest tags [linter,formatter] but tool_type=LINTER — TODO(#1495)",
     "actionlint": "manifest omits 'infrastructure' present in tool_type (#1490)",
     "astro-check": "manifest omits 'type_checker' present in tool_type (#1490)",
     "bandit": "manifest tags 'linter' but tool_type=SECURITY only (#1490)",
-    "cargo_deny": "manifest tags 'linter', omits 'infrastructure' vs tool_type (#1490)",  # noqa: E501
+    "cargo_deny": "manifest tags 'linter', omits 'infrastructure' vs tool_type (#1490)",
     "hadolint": "manifest omits 'infrastructure' present in tool_type (#1490)",
     "pydoclint": "manifest omits 'documentation' present in tool_type (#1490)",
     "sqlfluff": "manifest omits 'formatter' present in tool_type (#1490)",
@@ -198,37 +199,9 @@ TAGS_EXEMPT: dict[str, str] = {
     "vue-tsc": "manifest omits 'type_checker' present in tool_type (#1490)",
 }
 
-# Tools whose definition priority is "dead": DEFAULT_TOOL_PRIORITIES either has
-# no entry (falls back to 50) or a different value, so the declared priority is
-# never the effective one. pip-audit is the tracked example (#1506); align each
-# definition's priority with DEFAULT_TOOL_PRIORITIES.
-PRIORITY_EXEMPT: dict[str, str] = {
-    "pip_audit": "declares 90 but DEFAULT_TOOL_PRIORITIES lacks entry (eff. 50) — TODO(#1506)",  # noqa: E501
-    "actionlint": "declares 40, DEFAULT_TOOL_PRIORITIES says 55 (#1490)",
-    "astro-check": "declares 83, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "bandit": "declares 90, DEFAULT_TOOL_PRIORITIES says 45 (#1490)",
-    "black": "declares 90, DEFAULT_TOOL_PRIORITIES says 15 (#1490)",
-    "cargo_audit": "declares 95, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "cargo_deny": "declares 90, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "clippy": "declares 85, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "commitlint": "declares 35, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "gitleaks": "declares 90, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "idiom-review": "declares 95, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1496)",
-    "oxfmt": "declares 80, DEFAULT_TOOL_PRIORITIES says 25 (#1490)",
-    "prettier": "declares 80, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "pydoclint": "declares 45, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "pytest": "declares 90, DEFAULT_TOOL_PRIORITIES says 100 (#1490)",
-    "ruff": "declares 85, DEFAULT_TOOL_PRIORITIES says 20 (#1490)",
-    "rustfmt": "declares 80, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "semgrep": "declares 85, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "svelte-check": "declares 83, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "vue-tsc": "declares 83, no DEFAULT_TOOL_PRIORITIES entry (eff. 50) (#1490)",
-    "yamllint": "declares 40, DEFAULT_TOOL_PRIORITIES says 35 (#1490)",
-}
-
 # No install hint template in version_checking.py.
 INSTALL_HINT_EXEMPT: dict[str, str] = {
-    "idiom-review": "AI plugin installed via lintro[ai] extra, not an external binary (#1496)",  # noqa: E501
+    "idiom-review": "AI plugin installed via lintro[ai] extra, not an external binary (#1496)",
 }
 
 # No docs/tool-analysis/<tool>-analysis.md.
@@ -246,7 +219,7 @@ TOOL_ANALYSIS_EXEMPT: dict[str, str] = {
 
 # No dedicated docs/configuration.md section.
 CONFIGURATION_EXEMPT: dict[str, str] = {
-    "idiom-review": "not in configuration.md; documented under AI features — TODO(#1496)",  # noqa: E501
+    "idiom-review": "not in configuration.md; documented under AI features — TODO(#1496)",
     "cargo_audit": "no configuration.md section yet (#1490)",
     "rustfmt": "no configuration.md section yet (#1490)",
     "pytest": "only appears in the tool-ordering table, no dedicated section (#1490)",
@@ -279,7 +252,7 @@ INTEGRATION_TESTS_EXEMPT: dict[str, str] = {
     "clippy": "no integration test yet (#1490)",
     "hadolint": "no integration test yet (#1490)",
     "idiom-review": "AI plugin; no external-tool integration test (#1496)",
-    "pytest": "test runner exercised via the suite itself, no wrapper integration test (#1490)",  # noqa: E501
+    "pytest": "test runner exercised via the suite itself, no wrapper integration test (#1490)",
 }
 
 # No test_samples/tools/<lang>/<tool>/ directory named after the tool.
@@ -373,33 +346,15 @@ def test_registry_is_populated() -> None:
 # ── Per-tool completeness assertions ────────────────────────────────────────
 @pytest.mark.parametrize("tool", TOOL_NAMES)
 def test_manifest_entry_exists(tool: str) -> None:
-    """Every non-exempt tool has a ``manifest.json`` entry.
+    """Every non-exempt tool has a ``manifest.src.json`` entry.
 
     Args:
         tool: Registry tool name (parametrized).
     """
     _skip_if_exempt(tool, MANIFEST_EXEMPT)
     assert_that(_MANIFEST_TOOLS).described_as(
-        f"{tool}: missing manifest.json entry",
+        f"{tool}: missing manifest.src.json entry",
     ).contains_key(_canonical(tool))
-
-
-@pytest.mark.parametrize("tool", TOOL_NAMES)
-def test_priority_is_effective(tool: str) -> None:
-    """The definition's declared priority is the effective priority.
-
-    Guards against "dead" priorities where a definition declares a value that
-    ``DEFAULT_TOOL_PRIORITIES`` overrides (or omits, falling back to 50).
-
-    Args:
-        tool: Registry tool name (parametrized).
-    """
-    _skip_if_exempt(tool, PRIORITY_EXEMPT)
-    declared = _DEFINITIONS[tool].priority  # type: ignore[attr-defined]
-    effective = get_tool_priority(tool)
-    assert_that(effective).described_as(
-        f"{tool}: declared priority {declared} != effective {effective}",
-    ).is_equal_to(declared)
 
 
 @pytest.mark.parametrize("tool", TOOL_NAMES)
@@ -413,7 +368,7 @@ def test_manifest_tags_match_tool_type(tool: str) -> None:
     _skip_if_exempt(tool, TAGS_EXEMPT)
     canonical = _canonical(tool)
     assert_that(_MANIFEST_TOOLS).described_as(
-        f"{tool}: missing manifest.json entry",
+        f"{tool}: missing manifest.src.json entry",
     ).contains_key(canonical)
     entry = _MANIFEST_TOOLS[canonical]
     raw_tags = entry.get("tags", [])

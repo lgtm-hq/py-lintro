@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.semgrep import SemgrepPlugin
+from lintro.tools.semgrep.definition import SemgrepPlugin
 
 
 @pytest.fixture

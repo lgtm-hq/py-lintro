@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Diff tool names / versions between an old and a new manifest.
 
-Used by ``compute-new-manifest-tools.sh`` to derive allowlists for the
+Used by ``compute-new-manifest-tools.sh`` to derive name sets for the
 manifest-vs-image gate:
 
 * ``--emit added`` (default): tool names present in the new manifest but
-  absent from the old one → fed to ``--allow-missing`` so a PR-introduced
-  tool's absent binary in the digest-pinned base image is tolerated (#1565).
+  absent from the old one → the newly-added set the wrapper verifies in
+  the app image (#2192). A miss must be bridged in the root Dockerfile.
 * ``--emit version-changed``: tool names whose declared version changed
   between the old and new manifest → fed to ``--allow-version-lag`` so a
   PR that bumps a baked tool can merge before the tools image republishes
@@ -163,11 +163,11 @@ def _version_changed_names(
     """Return sorted names whose version was bumped *upward* between manifests.
 
     Only tools present in *both* manifests are considered. Newly-added tools
-    are handled by ``--emit added`` / ``--allow-missing`` instead. Downgrades
-    and unparseable version changes are deliberately excluded so they fail
-    closed: ``--allow-version-lag`` is meant for upward bumps only, and a
-    downgrade leaves the pinned image *newer* than the manifest — a real drift
-    the gate must still hard-fail.
+    are handled by ``--emit added`` and verified in the app image (#2192).
+    Downgrades and unparseable version changes are deliberately excluded so
+    they fail closed: ``--allow-version-lag`` is meant for upward bumps only,
+    and a downgrade leaves the pinned image *newer* than the manifest — a
+    real drift the gate must still hard-fail.
 
     Args:
         old_versions: Name → version from the base-branch manifest.

@@ -421,3 +421,243 @@ def test_stale_waiting_run_for_older_release_still_alarms(module: Any) -> None:
 
     assert_that(code).is_equal_to(1)
     assert_that(report).contains("FAILED")
+
+
+@pytest.mark.parametrize("status", ["waiting", "queued", "in_progress"])
+def test_pending_npm_publish_job_returns_parent_run_url(
+    module: Any,
+    status: str,
+) -> None:
+    """Find pending npm jobs nested in the expected production run."""
+    run_url = "https://github.com/lgtm-hq/py-lintro/actions/runs/33275807446"
+    runs = json.dumps(
+        {
+            "workflow_runs": [
+                {
+                    "id": 33275807446,
+                    "status": "waiting",
+                    "head_branch": "v1.2.3",
+                    "html_url": run_url,
+                },
+            ],
+        },
+    )
+    jobs = json.dumps(
+        {
+            "jobs": [
+                {
+                    "name": "Publish to npm / Package and publish",
+                    "status": status,
+                },
+            ],
+        },
+    )
+
+    registry_fetch = _fetcher(
+        pypi=_pypi_body(version="1.2.2"),
+        npm=_npm_body(version="1.2.3"),
+        formula=_formula_body(version="1.2.3"),
+        runs=runs,
+    )
+
+    def fetch(*, url: str) -> str:
+        return jobs if "/jobs?" in url else registry_fetch(url=url)
+
+    pending = module.pending_npm_publish_runs(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=fetch,
+        expected="1.2.3",
+    )
+
+    assert_that(pending).is_equal_to([run_url])
+
+
+def test_pending_npm_ignores_manual_and_stale_runs(module: Any) -> None:
+    """Manual main runs and pending runs for older tags are not correlated."""
+    calls: list[str] = []
+
+    def fetch(*, url: str) -> str:
+        calls.append(url)
+        return json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 33379778791,
+                        "status": "waiting",
+                        "head_branch": "main",
+                        "html_url": "https://github.com/lgtm-hq/py-lintro/actions/runs/33379778791",
+                    },
+                    {
+                        "id": 33271096983,
+                        "status": "waiting",
+                        "head_branch": "v1.2.2",
+                        "html_url": "https://github.com/lgtm-hq/py-lintro/actions/runs/33271096983",
+                    },
+                ],
+            },
+        )
+
+    pending = module.pending_npm_publish_runs(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=fetch,
+        expected="1.2.3",
+    )
+
+    assert_that(pending).is_empty()
+    assert_that(calls).is_length(1)
+
+
+def test_pending_npm_api_degradation_is_reported(module: Any) -> None:
+    """A jobs API outage must not silently claim npm is clear."""
+
+    def fetch(*, url: str) -> str:
+        if "/jobs?" in url:
+            raise OSError("jobs API down")
+        return json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 33275807446,
+                        "status": "in_progress",
+                        "head_branch": "v1.2.3",
+                        "html_url": "https://github.com/lgtm-hq/py-lintro/actions/runs/33275807446",
+                    },
+                ],
+            },
+        )
+
+    assert_that(module.pending_npm_publish_runs).raises(RuntimeError).when_called_with(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=fetch,
+        expected="1.2.3",
+    )
+
+
+def test_release_pipeline_rejects_non_object_workflow_payload(module: Any) -> None:
+    """A non-object workflow-runs response degrades as a runtime error."""
+    assert_that(module.release_pipeline_pending).raises(RuntimeError).when_called_with(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=lambda url: "[]",
+        expected="1.2.3",
+    )
+
+
+@pytest.mark.parametrize("payload", ["[]", '"workflow runs"', "{}"])
+def test_pending_npm_rejects_non_object_workflow_payload(
+    module: Any,
+    payload: str,
+) -> None:
+    """A non-object workflow-runs response degrades as a runtime error."""
+    assert_that(module.pending_npm_publish_runs).raises(RuntimeError).when_called_with(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=lambda url: payload,
+        expected="1.2.3",
+    )
+
+
+def test_pending_npm_rejects_non_object_jobs_payload(module: Any) -> None:
+    """A non-object jobs response degrades as a runtime error."""
+
+    def fetch(*, url: str) -> str:
+        if "/jobs?" in url:
+            return "[]"
+        return json.dumps(
+            {
+                "workflow_runs": [
+                    {
+                        "id": 33275807446,
+                        "status": "waiting",
+                        "head_branch": "v1.2.3",
+                        "html_url": "https://github.com/lgtm-hq/py-lintro/actions/runs/33275807446",
+                    },
+                ],
+            },
+        )
+
+    assert_that(module.pending_npm_publish_runs).raises(RuntimeError).when_called_with(
+        repo="lgtm-hq/py-lintro",
+        workflow="publish-pypi-on-tag.yml",
+        fetch=fetch,
+        expected="1.2.3",
+    )
+
+
+def test_npm_pending_skew_report_contains_approval_url(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A real npm lag alarm gives maintainers an actionable run URL."""
+    run_url = "https://github.com/lgtm-hq/py-lintro/actions/runs/33275807446"
+    runs = json.dumps(
+        {
+            "workflow_runs": [
+                {
+                    "id": 33275807446,
+                    "status": "waiting",
+                    "head_branch": "v1.2.3",
+                    "html_url": run_url,
+                },
+            ],
+        },
+    )
+    jobs = json.dumps(
+        {
+            "jobs": [
+                {
+                    "name": "Publish to npm / Package and publish",
+                    "status": "waiting",
+                },
+            ],
+        },
+    )
+
+    registry_fetch = _fetcher(
+        pypi=_pypi_body(version="1.2.3"),
+        npm=_npm_body(version="1.2.2"),
+        formula=_formula_body(version="1.2.3"),
+        runs=runs,
+    )
+
+    def fetch(*, url: str) -> str:
+        return jobs if "/jobs?" in url else registry_fetch(url=url)
+
+    code, report = module.audit(
+        args=_args(module),
+        fetch=fetch,
+        now=NOW,
+    )
+    assert_that(code).is_equal_to(1)
+    assert_that(report).contains(f"pending approval: run {run_url}")
+
+    summary = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(module, "fetch_text", fetch)
+    assert_that(module.main(["--expected", "1.2.3"])).is_equal_to(1)
+    assert_that(summary.read_text(encoding="utf-8")).contains(
+        f"pending approval: run {run_url}",
+    )
+
+
+def test_npm_approval_enrichment_is_omitted_for_other_lagging_channel(
+    module: Any,
+) -> None:
+    """A pending production run does not enrich a non-npm skew alarm."""
+    code, report = module.audit(
+        args=_args(module),
+        fetch=_fetcher(
+            pypi=_pypi_body(version="1.2.2"),
+            npm=_npm_body(version="1.2.3"),
+            formula=_formula_body(version="1.2.3"),
+            runs=_runs_body(statuses=["completed"]),
+        ),
+        now=NOW,
+    )
+
+    assert_that(code).is_equal_to(1)
+    assert_that(report).does_not_contain("pending approval")

@@ -17,10 +17,8 @@ def make_offense(
     message: str = "Prefer single-quoted strings.",
     correctable: bool = True,
     corrected: bool = False,
-    start_line: int = 3,
-    start_column: int = 10,
-    last_line: int | None = None,
-    last_column: int | None = None,
+    start: tuple[int, int] = (3, 10),
+    end: tuple[int, int] | None = None,
 ) -> dict[str, Any]:
     """Build a single RuboCop offense dictionary.
 
@@ -31,14 +29,15 @@ def make_offense(
         message: The offense message.
         correctable: Whether RuboCop can autocorrect the offense.
         corrected: Whether RuboCop already corrected the offense.
-        start_line: Offense start line.
-        start_column: Offense start column.
-        last_line: Offense end line (defaults to ``start_line``).
-        last_column: Offense end column (defaults to ``start_column``).
+        start: Offense start position as ``(line, column)``.
+        end: Offense end position as ``(line, column)``; defaults to
+            ``start``.
 
     Returns:
         A dictionary shaped like a RuboCop offense entry.
     """
+    start_line, start_column = start
+    last_line, last_column = end if end is not None else start
     return {
         "severity": severity,
         "message": message,
@@ -48,8 +47,8 @@ def make_offense(
         "location": {
             "start_line": start_line,
             "start_column": start_column,
-            "last_line": last_line if last_line is not None else start_line,
-            "last_column": last_column if last_column is not None else start_column,
+            "last_line": last_line,
+            "last_column": last_column,
             "line": start_line,
             "column": start_column,
         },

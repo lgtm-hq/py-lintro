@@ -105,6 +105,14 @@ def test_subclass_caught_by_base_exception(exception_class: type) -> None:
         raise exception_class("caught by base")
 
 
+def test_configuration_error_is_value_error() -> None:
+    """ConfigurationError must remain catchable as ValueError."""
+    exc = ConfigurationError("bad config")
+
+    assert_that(exc).is_instance_of(ValueError)
+    assert_that(exc).is_instance_of(LintroError)
+
+
 def test_exception_args_preserved() -> None:
     """Test exception args are preserved for introspection."""
     exc = ToolExecutionError("tool failed", "extra", "info")

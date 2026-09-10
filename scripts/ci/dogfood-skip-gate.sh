@@ -5,16 +5,18 @@ set -euo pipefail
 
 # dogfood-skip-gate.sh
 #
-# No-silent-skip gate (issue #1510). Runs lintro chk inside the pinned
-# py-lintro Docker image with `--output-format json` over the whole repo,
-# then runs scripts/ci/check-dogfood-skips.py to fail when an enabled tool
-# silently skips for a reason not covered by the committed allowlist.
+# No-silent-skip gate (issue #1510). Consumes the authoritative JSON report
+# from the dogfooding lint job when one is supplied, then runs
+# scripts/ci/check-dogfood-skips.py to fail when an enabled tool silently skips
+# for a reason not covered by the committed allowlist.
 #
-# This runs AFTER the dogfooding lint job as a dedicated gate: the dogfood
-# jobs use an external reusable workflow (no place to add a step), so the gate
-# re-derives the structured skip state from the same image. Only the `skipped`
-# state matters here — real lint issues are gated by the dogfood job itself, so
-# lintro's own exit code is intentionally ignored.
+# The full-repo dogfooding jobs use an external reusable workflow (no place to
+# add a post-lint step), which publishes `linting-json-report`. The workflow
+# gate downloads that artifact and supplies REPORT_JSON, avoiding a second
+# full-repo lint. When REPORT_JSON is unset, this script retains its historical
+# derive-in-container path for changed-files PRs and dogfood-nightly. Only the
+# `skipped` state matters here — real lint issues are gated by the dogfooding
+# job itself, so lintro's own exit code is intentionally ignored.
 #
 # The same report is also classified for tool-execution timeouts (#1653) via
 # scripts/ci/classify-lint-timeout.py, and the verdict is published as the
@@ -26,15 +28,23 @@ set -euo pipefail
 #
 # Usage:
 #   LINTRO_IMAGE=ghcr.io/lgtm-hq/py-lintro:ci-123 scripts/ci/dogfood-skip-gate.sh
+#   LINTRO_IMAGE=ghcr.io/lgtm-hq/py-lintro:ci-123 \
+#   REPORT_JSON=.lintro/artifacts/json/results.json \
+#   scripts/ci/dogfood-skip-gate.sh
 #
 # Environment:
-#   LINTRO_IMAGE   Required. Pinned py-lintro image (CI tag or digest).
+#   LINTRO_IMAGE   Required. Pinned py-lintro image (CI tag or digest), used
+#                  for report validation even when REPORT_JSON is supplied.
 #   TOOL_OPTIONS   Optional. lintro --tool-options string (match the dogfood
 #                  run so tool coverage — and thus skip behaviour — is identical).
+#   LINTRO_VERSION_TIMEOUT  Optional. Forwarded into the container when set;
+#                  bounds lintro's per-tool version probe (semgrep's update
+#                  check stalls past the 30s default under CI egress, #2216).
 #   ALLOWLIST      Optional. Allowlist path (default:
 #                  scripts/ci/dogfood-skip-allowlist.yaml).
-#   REPORT_JSON    Optional. Where to write the JSON report (default:
-#                  dogfood-skip-report.json).
+#   REPORT_JSON    Optional. Existing JSON report to consume. When set, the
+#                  container lint is skipped. When unset, the report is
+#                  written to dogfood-skip-report.json.
 #   MAP_HOST_USER  Optional. true maps host UID/GID into the container
 #                  (default: true on GitHub Actions).
 
@@ -42,15 +52,19 @@ show_help() {
 	cat <<'EOF'
 Usage:
   LINTRO_IMAGE=<image> scripts/ci/dogfood-skip-gate.sh
+  LINTRO_IMAGE=<image> REPORT_JSON=<existing-report> scripts/ci/dogfood-skip-gate.sh
 
 Run lintro chk (JSON) in Docker and fail on non-allowlisted tool skips.
-Also publishes timeout-flake / timed-out-tools to GITHUB_OUTPUT (#1653).
+Also publishes timeout-flake / timed-out-tools to GITHUB_OUTPUT (#1653), plus
+status / exit-code once the skip check reaches a verdict (#2246): their absence
+is how a caller tells a killed run from a real skip regression.
 
 Environment:
   LINTRO_IMAGE   Required. Pinned py-lintro image (CI tag or digest).
   TOOL_OPTIONS   Optional. lintro --tool-options string.
   ALLOWLIST      Optional. Allowlist YAML (default: scripts/ci/dogfood-skip-allowlist.yaml).
-  REPORT_JSON    Optional. JSON report output path (default: dogfood-skip-report.json).
+  REPORT_JSON    Optional. Existing JSON report to consume. When unset, lintro
+                 derives a report in Docker at dogfood-skip-report.json.
   MAP_HOST_USER  Optional. true maps host UID/GID into the container.
 
 Exit codes:
@@ -68,7 +82,6 @@ fi
 : "${LINTRO_IMAGE:?LINTRO_IMAGE is required}"
 : "${TOOL_OPTIONS:=}"
 : "${ALLOWLIST:=scripts/ci/dogfood-skip-allowlist.yaml}"
-: "${REPORT_JSON:=dogfood-skip-report.json}"
 : "${MAP_HOST_USER:=}"
 if [[ -z "${MAP_HOST_USER}" ]] && [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
 	MAP_HOST_USER=true
@@ -76,6 +89,35 @@ fi
 
 log_info() { echo "[INFO] $*"; }
 log_error() { echo "[ERROR] $*" >&2; }
+
+report_from_artifact=false
+if [[ -n "${REPORT_JSON:-}" ]]; then
+	report_from_artifact=true
+	if [[ ! -s "$REPORT_JSON" ]]; then
+		log_error "REPORT_JSON does not point to a readable report: ${REPORT_JSON}"
+		exit 2
+	fi
+	log_info "Using pre-existing lint report: ${REPORT_JSON}"
+else
+	REPORT_JSON=dogfood-skip-report.json
+fi
+
+# The workspace is mounted at /code. Validate and translate an absolute
+# supplied path before touching Docker so an out-of-workspace report fails
+# without even pulling the image.
+report_in_container="/code/${REPORT_JSON}"
+if [[ "$REPORT_JSON" == /* ]]; then
+	workspace_dir="$(pwd -P)"
+	case "$REPORT_JSON" in
+	"${workspace_dir}"/*)
+		report_in_container="/code/${REPORT_JSON#"${workspace_dir}/"}"
+		;;
+	*)
+		log_error "REPORT_JSON must be inside the mounted workspace: ${REPORT_JSON}"
+		exit 2
+		;;
+	esac
+fi
 
 # Pull explicitly so a registry failure surfaces as a clear gate error rather
 # than an empty report.
@@ -98,6 +140,11 @@ declare -a docker_args=(
 	-v "$(pwd):/code"
 	-w /code
 )
+# Forward the probe budget when the caller sets it; `docker run -e NAME`
+# passes the host value through only when the variable is defined.
+if [[ -n "${LINTRO_VERSION_TIMEOUT:-}" ]]; then
+	docker_args+=(-e LINTRO_VERSION_TIMEOUT)
+fi
 if [[ "$MAP_HOST_USER" == "true" ]]; then
 	docker_args+=(--user "$(id -u):$(id -g)")
 fi
@@ -108,20 +155,23 @@ if [[ -n "$TOOL_OPTIONS" ]]; then
 fi
 lintro_args+=(--output-format json --output "$REPORT_JSON")
 
-# lintro exits non-zero when it finds real issues; the gate only cares about
-# skips, so ask lintro to write the machine-readable report directly. Stdout can
-# contain operational messages from the CLI and must not be parsed as JSON.
-log_info "Running lintro check (JSON) in container to derive skip state..."
-rm -f "$REPORT_JSON" "${REPORT_JSON}.stdout"
-set +e
-"${docker_args[@]}" "${LINTRO_IMAGE}" "${lintro_args[@]}" >"${REPORT_JSON}.stdout"
-lintro_exit_code=$?
-set -e
-log_info "lintro exited ${lintro_exit_code} (ignored; gate checks skips only)"
+if [[ "$report_from_artifact" != true ]]; then
+	# lintro exits non-zero when it finds real issues; the gate only cares about
+	# skips, so ask lintro to write the machine-readable report directly. Stdout
+	# can contain operational messages from the CLI and must not be parsed as
+	# JSON.
+	log_info "Running lintro check (JSON) in container to derive skip state..."
+	rm -f "$REPORT_JSON" "${REPORT_JSON}.stdout"
+	set +e
+	"${docker_args[@]}" "${LINTRO_IMAGE}" "${lintro_args[@]}" >"${REPORT_JSON}.stdout"
+	lintro_exit_code=$?
+	set -e
+	log_info "lintro exited ${lintro_exit_code} (ignored; gate checks skips only)"
 
-if [[ ! -s "$REPORT_JSON" ]]; then
-	log_error "lintro produced no JSON report at ${REPORT_JSON}; cannot gate skips"
-	exit 2
+	if [[ ! -s "$REPORT_JSON" ]]; then
+		log_error "lintro produced no JSON report at ${REPORT_JSON}; cannot gate skips"
+		exit 2
+	fi
 fi
 
 # Classify tool-execution timeouts before the skip check so the outputs are
@@ -142,7 +192,32 @@ fi
 # needed. The workspace is mounted at /code, so the report and allowlist are
 # both visible there.
 log_info "Checking skips against ${ALLOWLIST}..."
+set +e
 "${docker_args[@]}" --entrypoint python3 "${LINTRO_IMAGE}" \
 	/code/scripts/ci/check-dogfood-skips.py \
-	--report "/code/${REPORT_JSON}" \
+	--report "$report_in_container" \
 	--allowlist "/code/${ALLOWLIST}"
+gate_exit_code=$?
+set -e
+
+# Publish this gate's own verdict (#2246). A consumer must be able to tell
+# "the gate ran and found non-allowlisted skips" from "the runner died before
+# the gate reached a verdict": the first is a regression to report, the second
+# is a night with no coverage that a bounded retry can still answer. Only a
+# completed check writes these outputs, so their absence IS the no-verdict
+# signal — nothing here can be forged by a killed run. Only the checker's two
+# verdict codes publish a status: 2 (report/allowlist error) and a docker-side
+# kill such as 143 leave status absent so the retry predicate (status == '')
+# and the classifier see a missing verdict, not a fabricated failed one. The
+# raw exit code is still published for those, so the shared infra classifier
+# can tell a SIGTERM (143, absorbed as a kill) from a configuration error (2,
+# which stays action-required).
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+	case "${gate_exit_code}" in
+	0) printf 'status=passed\n' >>"${GITHUB_OUTPUT}" ;;
+	1) printf 'status=failed\n' >>"${GITHUB_OUTPUT}" ;;
+	esac
+	printf 'exit-code=%s\n' "${gate_exit_code}" >>"${GITHUB_OUTPUT}"
+fi
+
+exit "${gate_exit_code}"

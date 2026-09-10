@@ -25,7 +25,7 @@ from lintro.plugins.base import BaseToolPlugin
 PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[str]]] = [
     (
         ToolName.RUFF,
-        "lintro.tools.definitions.ruff.RuffPlugin",
+        "lintro.tools.ruff.definition.RuffPlugin",
         True,
         ToolType.LINTER | ToolType.FORMATTER,
         ["Python", "linter"],
@@ -33,7 +33,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.BLACK,
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         True,
         ToolType.FORMATTER,
         ["Python", "formatter"],
@@ -41,7 +41,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.HADOLINT,
-        "lintro.tools.definitions.hadolint.HadolintPlugin",
+        "lintro.tools.hadolint.definition.HadolintPlugin",
         False,
         ToolType.LINTER | ToolType.INFRASTRUCTURE,
         ["Dockerfile", "best practice"],
@@ -49,7 +49,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.MARKDOWNLINT,
-        "lintro.tools.definitions.markdownlint.MarkdownlintPlugin",
+        "lintro.tools.markdownlint.definition.MarkdownlintPlugin",
         False,
         ToolType.LINTER,
         ["Markdown", "linter"],
@@ -57,7 +57,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.YAMLLINT,
-        "lintro.tools.definitions.yamllint.YamllintPlugin",
+        "lintro.tools.yamllint.definition.YamllintPlugin",
         False,
         ToolType.LINTER,
         ["YAML", "linter"],
@@ -65,7 +65,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.MYPY,
-        "lintro.tools.definitions.mypy.MypyPlugin",
+        "lintro.tools.mypy.definition.MypyPlugin",
         False,
         ToolType.LINTER | ToolType.TYPE_CHECKER,
         ["type", "Python"],
@@ -73,7 +73,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.BANDIT,
-        "lintro.tools.definitions.bandit.BanditPlugin",
+        "lintro.tools.bandit.definition.BanditPlugin",
         False,
         ToolType.SECURITY,
         ["security", "Python"],
@@ -81,7 +81,7 @@ PLUGIN_DEFINITIONS: list[tuple[ToolName, str, bool, ToolType, list[str], list[st
     ),
     (
         ToolName.PYTEST,
-        "lintro.tools.definitions.pytest.PytestPlugin",
+        "lintro.tools.pytest.definition.PytestPlugin",
         False,
         ToolType.TEST_RUNNER,
         ["test"],
@@ -316,40 +316,6 @@ def test_definition_has_file_patterns(
     """
     plugin = _get_plugin_instance(plugin_class_path)
     assert_that(plugin.definition.file_patterns).is_not_empty()
-
-
-@pytest.mark.parametrize(
-    (
-        "tool_name",
-        "plugin_class_path",
-        "can_fix",
-        "tool_type",
-        "keywords",
-        "configs",
-    ),
-    PLUGIN_DEFINITIONS,
-    ids=[str(t[0]) for t in PLUGIN_DEFINITIONS],
-)
-def test_definition_has_priority(
-    tool_name: ToolName,
-    plugin_class_path: str,
-    can_fix: bool,
-    tool_type: ToolType,
-    keywords: list[str],
-    configs: list[str],
-) -> None:
-    """Each plugin definition has a valid priority.
-
-    Args:
-        tool_name: The expected tool name.
-        plugin_class_path: Full module path to the plugin class.
-        can_fix: Whether the tool can fix issues.
-        tool_type: The type of tool.
-        keywords: Keywords expected in the description.
-        configs: Native configuration files supported.
-    """
-    plugin = _get_plugin_instance(plugin_class_path)
-    assert_that(plugin.definition.priority).is_greater_than(0)
 
 
 @pytest.mark.parametrize(

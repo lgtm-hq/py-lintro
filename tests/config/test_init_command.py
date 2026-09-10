@@ -166,7 +166,6 @@ def test_default_template_has_sensible_defaults() -> None:
 
     assert_that(parsed["enforce"]["line_length"]).is_equal_to(88)
     assert_that(parsed["enforce"]["target_python"]).is_equal_to("py313")
-    assert_that(parsed["execution"]["tool_order"]).is_equal_to("priority")
     assert_that(parsed["tools"]["ruff"]["enabled"]).is_true()
     assert_that(parsed["defaults"]["mypy"]["strict"]).is_true()
     assert_that(parsed["defaults"]["mypy"]["ignore_missing_imports"]).is_true()

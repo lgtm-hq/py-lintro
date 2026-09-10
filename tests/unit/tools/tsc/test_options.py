@@ -8,8 +8,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.tools.definitions.tsc import (
-    TSC_DEFAULT_PRIORITY,
+from lintro.tools.tsc.definition import (
     TSC_DEFAULT_TIMEOUT,
     TSC_FILE_PATTERNS,
     TscPlugin,
@@ -111,15 +110,6 @@ def test_default_options_values(
     assert_that(tsc_plugin.definition.default_options[option_name]).is_equal_to(
         expected_value,
     )
-
-
-def test_definition_priority(tsc_plugin: TscPlugin) -> None:
-    """Plugin has correct priority.
-
-    Args:
-        tsc_plugin: The TscPlugin instance to test.
-    """
-    assert_that(tsc_plugin.definition.priority).is_equal_to(TSC_DEFAULT_PRIORITY)
 
 
 # =============================================================================

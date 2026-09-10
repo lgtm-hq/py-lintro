@@ -2,27 +2,36 @@
 set -euo pipefail
 
 # compile-semgrep-lock.sh - Re-resolve requirements-semgrep.txt from the
-# committed .in pin with hashes. Renovate runs this after bumping the .in
-# file so transitives are never edited in place.
+# committed .in pin with hashes.
+#
+# Run this by hand (or from an agent) whenever requirements-semgrep.in
+# changes, and commit the result; transitives are never edited in place.
+# Nothing regenerates the lockfile automatically — the Mend-hosted Renovate
+# app never executes post-upgrade commands (#2436) — so CI enforces it
+# instead: scripts/ci/check-semgrep-lock.sh fails the "Semgrep Lockfile
+# Drift" check when the committed lockfile no longer matches the .in pin.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-IN_FILE="$PROJECT_ROOT/requirements-semgrep.in"
 
-if [ ! -f "$IN_FILE" ]; then
-	echo "Error: $IN_FILE not found" >&2
-	exit 1
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+	cat <<'EOF'
+Re-resolve requirements-semgrep.txt from requirements-semgrep.in.
+
+Usage:
+  scripts/ci/compile-semgrep-lock.sh
+
+Rewrites the committed hash-pinned lockfile (Python 3.11 floor, matching
+requires-python). Commit the result together with the .in change; on a PR
+whose lockfile drifted, CI's scripts/ci/check-semgrep-lock.sh gate turns the
+"Semgrep Lockfile Drift" check red and the image publish will not run.
+
+Requires uv on PATH.
+EOF
+	exit 0
 fi
 
-if ! command -v uv >/dev/null 2>&1; then
-	echo "Error: uv is required to compile the isolated semgrep lockfile" >&2
-	exit 1
-fi
+# shellcheck source=./semgrep-lock-lib.sh disable=SC1091 # sibling helper; resolved from SCRIPT_DIR at runtime
+source "${SCRIPT_DIR}/semgrep-lock-lib.sh"
 
-cd "$PROJECT_ROOT"
-uv pip compile \
-	--no-config \
-	--generate-hashes \
-	--python-version 3.11 \
-	--output-file requirements-semgrep.txt \
-	requirements-semgrep.in
+semgrep_lock_require_inputs
+semgrep_lock_compile requirements-semgrep.txt

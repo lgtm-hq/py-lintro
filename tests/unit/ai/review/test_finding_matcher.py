@@ -18,14 +18,18 @@ from lintro.ai.review.finding_matcher import (
     match_findings,
     normalize_file_path,
     normalize_title,
+    review_findings_from_unposted,
 )
+from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.finding_occurrence import (
     FindingOccurrence,
     parse_occurrences,
 )
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.sticky import matcher_reviewed_paths
 
 
 def _finding(
@@ -711,3 +715,181 @@ def test_parse_occurrences_deduplicates_repeated_locations() -> None:
             FindingOccurrence(file="src/app.py", line=20),
         ),
     )
+
+
+def test_unread_file_findings_carry_forward() -> None:
+    """Absence because a file was not re-reviewed is not a fix."""
+    first = match_findings(
+        previous=None,
+        findings=[_finding(title="Leak", file="src/app.py")],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="sha2",
+        reviewed_paths=frozenset({"src/other.py"}),
+    )
+
+    assert_that(second.resolved).is_empty()
+    assert_that(second.carried).is_length(1)
+    assert_that(second.carried[0].status).is_equal_to(FindingStatus.OPEN)
+
+
+def test_departed_path_resolves_unread_finding() -> None:
+    """A deleted file's findings resolve even though it was not re-read."""
+    first = match_findings(
+        previous=None,
+        findings=[_finding(title="Leak", file="src/gone.py")],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="sha2",
+        reviewed_paths=frozenset(),
+        departed_paths=frozenset({"src/gone.py"}),
+    )
+
+    assert_that(second.resolved).is_length(1)
+    assert_that(second.resolved[0].resolved_sha).is_equal_to("sha2")
+    assert_that(second.resolved[0].status).is_equal_to(FindingStatus.RESOLVED)
+
+
+def test_zero_call_carried_round_does_not_resolve_findings(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A fully-carried resume round must not auto-resolve open findings."""
+    result = replace(
+        sample_review_result,
+        coverage=CoverageCounts(
+            reviewed=0,
+            carried=1,
+            awaiting=0,
+            eligible=1,
+        ),
+        metadata=replace(sample_review_result.metadata, reviewed_paths=()),
+    )
+    reviewed = matcher_reviewed_paths(result=result)
+    assert_that(reviewed).is_equal_to(frozenset())
+
+    first = match_findings(
+        previous=None,
+        findings=[_finding(title="Leak", file="src/app.py")],
+        round_number=1,
+    )
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=[],
+        round_number=2,
+        head_sha="sha2",
+        reviewed_paths=reviewed,
+    )
+    assert_that(second.resolved).is_empty()
+    assert_that(second.carried).is_length(1)
+    assert_that(second.carried[0].status).is_equal_to(FindingStatus.OPEN)
+
+
+def test_review_findings_from_unposted_replays_open_records() -> None:
+    """Unposted open records become findings so a quiet resume can post them."""
+    fingerprint = fingerprint_for(
+        file="a.py",
+        category="security",
+        title="Fail-open default",
+    )
+    prior = ReviewState(
+        findings=(
+            FindingRecord(
+                fingerprint=fingerprint,
+                title="Fail-open default",
+                file="a.py",
+                category="security",
+                line=12,
+                severity=Severity.P1,
+                description="Unknown status grants access",
+                cause="else branch returns Active",
+                fix="Default to Expired",
+                confidence="high",
+            ),
+        ),
+    )
+    replayed = review_findings_from_unposted(
+        prior=prior,
+        current=(),
+        reviewed_paths=frozenset(),
+    )
+    assert_that(replayed).is_length(1)
+    assert_that(replayed[0].file).is_equal_to("a.py")
+    assert_that(replayed[0].title).is_equal_to("Fail-open default")
+    assert_that(replayed[0].description).is_equal_to("Unknown status grants access")
+    assert_that(replayed[0].cause).is_equal_to("else branch returns Active")
+    assert_that(replayed[0].fix).is_equal_to("Default to Expired")
+
+
+def test_review_findings_from_unposted_skips_reviewed_and_posted() -> None:
+    """Re-reviewed or already-posted records must not be replayed."""
+    posted = FindingRecord(
+        fingerprint="postedfingerprint",
+        title="Already posted",
+        file="posted.py",
+        inline_comment_id=99,
+        description="Already posted body",
+        cause="posted cause",
+        fix="posted fix",
+    )
+    reread = FindingRecord(
+        fingerprint="rereadfingerprint",
+        title="Re-read file",
+        file="reread.py",
+        description="Re-read body",
+        cause="reread cause",
+        fix="reread fix",
+    )
+    current = _finding(title="Current", file="current.py")
+    prior = ReviewState(findings=(posted, reread))
+    replayed = review_findings_from_unposted(
+        prior=prior,
+        current=(current,),
+        reviewed_paths=frozenset({"reread.py"}),
+    )
+    assert_that(replayed).is_empty()
+
+
+def test_finding_record_body_fields_round_trip() -> None:
+    """Description/cause/fix survive artifact serialization for resume replay."""
+    record = FindingRecord(
+        fingerprint="bodyfieldsfingerprint",
+        title="Fail-open default",
+        file="a.py",
+        description="Unknown status grants access",
+        cause="else branch returns Active",
+        fix="Default to Expired",
+        confidence="high",
+    )
+    restored = FindingRecord.from_dict(record.to_dict())
+    assert restored is not None
+    assert_that(restored.description).is_equal_to("Unknown status grants access")
+    assert_that(restored.cause).is_equal_to("else branch returns Active")
+    assert_that(restored.fix).is_equal_to("Default to Expired")
+    assert_that(restored.confidence).is_equal_to("high")
+
+
+def test_review_findings_from_unposted_skips_title_only_records() -> None:
+    """Title-only records cannot reconstruct an actionable inline comment."""
+    prior = ReviewState(
+        findings=(
+            FindingRecord(
+                fingerprint="titleonlyfingerprint",
+                title="Fail-open default",
+                file="a.py",
+            ),
+        ),
+    )
+    replayed = review_findings_from_unposted(
+        prior=prior,
+        current=(),
+        reviewed_paths=frozenset(),
+    )
+    assert_that(replayed).is_empty()

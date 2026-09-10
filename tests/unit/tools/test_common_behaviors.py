@@ -14,6 +14,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.tool_name import ToolName
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.base import BaseToolPlugin
 
 if TYPE_CHECKING:
@@ -52,7 +53,7 @@ def _get_plugin_instance(plugin_class_path: str) -> BaseToolPlugin:
 # (plugin_class_path, tool_name, sample_file, success_output)
 TOOL_CHECK_SUCCESS_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         "test.py",
         (True, "All done! 1 file left unchanged."),
@@ -64,7 +65,7 @@ TOOL_CHECK_SUCCESS_CONFIGS = [
 # (plugin_class_path, tool_name, sample_file, failure_output)
 TOOL_CHECK_FAILURE_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         "test.py",
         (False, "would reformat test.py\nOh no! 1 file would be reformatted."),
@@ -76,7 +77,7 @@ TOOL_CHECK_FAILURE_CONFIGS = [
 # (plugin_class_path, tool_name, executable_cmd)
 TOOL_TIMEOUT_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         ["black"],
         id="black",
@@ -87,27 +88,27 @@ TOOL_TIMEOUT_CONFIGS = [
 # (plugin_class_path, error_match_pattern)
 TOOLS_THAT_CANNOT_FIX = [
     pytest.param(
-        "lintro.tools.definitions.hadolint.HadolintPlugin",
+        "lintro.tools.hadolint.definition.HadolintPlugin",
         "cannot automatically fix",
         id="hadolint",
     ),
     pytest.param(
-        "lintro.tools.definitions.yamllint.YamllintPlugin",
+        "lintro.tools.yamllint.definition.YamllintPlugin",
         "cannot automatically fix",
         id="yamllint",
     ),
     pytest.param(
-        "lintro.tools.definitions.markdownlint.MarkdownlintPlugin",
+        "lintro.tools.markdownlint.definition.MarkdownlintPlugin",
         "cannot fix issues",
         id="markdownlint",
     ),
     pytest.param(
-        "lintro.tools.definitions.mypy.MypyPlugin",
+        "lintro.tools.mypy.definition.MypyPlugin",
         "cannot automatically fix",
         id="mypy",
     ),
     pytest.param(
-        "lintro.tools.definitions.pytest.PytestPlugin",
+        "lintro.tools.pytest.definition.PytestPlugin",
         "cannot automatically fix",
         id="pytest",
     ),
@@ -117,12 +118,12 @@ TOOLS_THAT_CANNOT_FIX = [
 # (plugin_class_path, tool_name)
 TOOL_EARLY_SKIP_CONFIGS = [
     pytest.param(
-        "lintro.tools.definitions.black.BlackPlugin",
+        "lintro.tools.black.definition.BlackPlugin",
         ToolName.BLACK,
         id="black",
     ),
     pytest.param(
-        "lintro.tools.definitions.hadolint.HadolintPlugin",
+        "lintro.tools.hadolint.definition.HadolintPlugin",
         ToolName.HADOLINT,
         id="hadolint",
     ),
@@ -435,16 +436,14 @@ def test_check_early_return_when_should_skip(
     """
     plugin = _get_plugin_instance(plugin_class_path)
 
-    early_result = MagicMock()
-    early_result.success = True
-    early_result.issues_count = 0
-
-    ctx = mock_execution_context(
-        should_skip=True,
-        early_result=early_result,
+    early_result = ToolResult(
+        name=str(expected_name),
+        success=True,
+        output="",
+        issues_count=0,
     )
 
-    with patch.object(plugin, "_prepare_execution", return_value=ctx):
+    with patch.object(plugin, "prepare", return_value=early_result):
         result = plugin.check(["/tmp"], {})
 
-    assert_that(result.success).is_true()
+    assert_that(result).is_same_as(early_result)

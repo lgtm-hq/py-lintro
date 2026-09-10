@@ -1,4 +1,4 @@
-"""Tests for ``_generator.seed.parse_seed``."""
+"""Tests for ``lintro_build.versions.seed.parse_seed``."""
 
 from __future__ import annotations
 

@@ -138,9 +138,7 @@ def render_signature_map(signatures: list[Signature]) -> str:
     blocks: list[str] = []
     for sig in signatures:
         block = (
-            f"# {sig.file}:{sig.line} ({sig.kind})\n"
-            f"{sig.signature}\n"
-            f"{sig.body_preview}"
+            f"# {sig.file}:{sig.line} ({sig.kind})\n{sig.signature}\n{sig.body_preview}"
         )
         blocks.append(block.rstrip())
     return "\n\n".join(blocks)

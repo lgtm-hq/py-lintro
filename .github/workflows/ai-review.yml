@@ -21,11 +21,30 @@ name: AI Review - Dogfood
 # authenticates only against an API key, which is precisely the credential that
 # does not work for the Anthropic dogfood (#1838).
 #
-# Spend ceiling is the committed `ai.max_cost_usd: 2.00` in `.lintro-config.yaml`
-# (the empirically validated value from #1976/#1977; the 0.50 that landed with
-# #2018 / 9f43a98a was a side-effect, restored here by #2025). Under the CLI
-# transport the call bills the subscription, so the figure is advisory rather
-# than enforced spend control (#1923).
+# FALLBACK LANES (#2472): two further credential pools, both on this same
+# transport:
+#   - openai: the pinned `codex` binary on a ChatGPT-plan subscription. The
+#     credential is the ~/.codex/auth.json session (org secret CODEX_AUTH_JSON,
+#     decoded by a dedicated step) — Codex has no OAuth-token env var, and
+#     CODEX_API_KEY would bill metered API credits instead of the subscription.
+#     The runner steps resolve the Renovate-pinned version
+#     (scripts/ci/ai_tools_arg_pin.py), install it
+#     (scripts/ci/install-codex-cli.sh) and restore the session
+#     (scripts/ci/restore-codex-session.sh); with provider=openai and the
+#     secret unset the run fails visibly at the credential gate.
+#   - anthropic + gateway: when the repo variable ZAI_BASE_URL is set (e.g.
+#     z.ai's GLM Coding Plan endpoint), the same pinned `claude` binary is
+#     pointed at the gateway via ANTHROPIC_BASE_URL and authenticated with
+#     ANTHROPIC_AUTH_TOKEN (org secret ZAI_AUTH_TOKEN). The CLI transport
+#     forwards os.environ to the subprocess, so no product change is involved.
+#
+# Spend ceiling: committed YAML leaves `ai.max_cost_usd` unset (#2156
+# rollout). The `LINTRO_AI_MAX_COST_USD` Actions variable is the operator
+# overlay (#2024 / #2155): `uncapped` lifts the ceiling; overlay `0` is
+# rejected as ambiguous. YAML `0` is still a literal $0 cap. Under the CLI
+# transport the figure is a runtime bound, not marginal dollars (#1923).
+# Historical note: #2018 / 9f43a98a briefly shipped 0.50; #2025 restored 2.00
+# as the interim committed cap; this rollout removes that committed cap.
 #
 # Posts a review comment: the review runs with `--post`, so lintro maintains a
 # single sticky comment on the PR (rich findings + cumulative telemetry) and
@@ -46,20 +65,26 @@ name: AI Review - Dogfood
 # following hold (structurally asserted in tests/scripts/test_run_ai_review.py):
 #   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
 #   2. Trusted install: checkout ref is pull_request.base.sha, never PR head.
-#   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN and
-#      CURSOR_API_KEY) are injected only into the final review step env, after
+#   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN,
+#      CURSOR_API_KEY, ZAI_AUTH_TOKEN, and CODEX_AUTH_JSON) are injected
+#      only into the review step / codex-session-restore step env, after
 #      the trusted base-ref checkout, the pinned CLI installs, and uv sync.
 # No GitHub Environment gate is required once (1–3) hold; the trusted-install
 # mechanism from #1074 is the primary control. Re-audit if the checkout ref,
 # job guard, or secret injection site changes.
 #
-# TWO-PR BOOTSTRAP (#2025): this job checks out only the trusted base ref.
-# GitHub runs the workflow YAML from the PR, so a brand-new script invoked
-# here would be missing on the PR that introduces it. Convention: PR 1 lands
-# the script inert (no workflow step calls it yet); PR 2, after PR 1 is on
-# main, adds the step that invokes it. Never land a new script and its first
-# workflow invocation in the same PR. A second `actions/checkout` (any
-# `path:`) fails the audit in tests/scripts/test_run_ai_review.py.
+# TWO-PR BOOTSTRAP (#2025, rationale corrected #2158): this job checks
+# out only the trusted base ref. Since 8 Dec 2025, GitHub evaluates
+# pull_request_target workflow YAML and GITHUB_SHA from the repository
+# default branch, not from the pull request (changelog 2025-11-07).
+# Combined with the base-sha checkout, a new workflow step cannot see a
+# brand-new script until that script is already on the default branch.
+# Convention: PR 1 lands the script inert (no workflow step calls it
+# yet); PR 2, after PR 1 is on main, adds the step that invokes it.
+# Never land a new script and its first workflow invocation in the same
+# PR. Extending an already-invoked script (run-ai-review.sh) is the
+# allowed same-PR path. A second `actions/checkout` (any `path:`) fails
+# the audit in tests/scripts/test_run_ai_review.py.
 
 # No paths filter: every PR gets the dogfood review (#1902). The lintro/**
 # filter dated from API-metered billing; under subscription billing the CI and
@@ -78,10 +103,12 @@ jobs:
   ai-review:
     name: AI Review
     runs-on: ubuntu-24.04
-    # No continue-on-error, at either level: a job-level continue-on-error
-    # rewrites the conclusion to `success`, which is precisely how a review that
-    # never ran kept reading as a pass (#1826). The check is not required, so a
-    # red conclusion here is visible without being blocking.
+    # No job-level continue-on-error: that rewrites the conclusion to
+    # `success`, which is precisely how a review that never ran kept
+    # reading as a pass (#1826). Locate/download are the only step-level
+    # exceptions (best-effort plumbing; they must not skip the review).
+    # The review step itself still has none. The check is not required,
+    # so a red conclusion here is visible without being blocking.
     #
     # Skip draft PRs and never run for fork PRs. Fork PRs already cannot read
     # secrets, but requiring head.repo == the base repo makes it explicit that
@@ -111,26 +138,45 @@ jobs:
       # The workflow GITHUB_TOKEN is only used by `gh` to fetch the PR
       # diff, which needs pull-requests: read.
       pull-requests: read
-    # COUPLED to ai.transports.cli.timeout (default 900 s,
+      # Cross-run artifact listing / download-artifact with run-id uses
+      # the workflow GITHUB_TOKEN (#2158). Upload uses the same token.
+      actions: read
+    # COUPLED to ai.transports.cli.timeout (default 1800 s,
     # lintro.ai.transport.DEFAULT_CLI_TIMEOUT): the
-    # job budget must cover setup (~7 min) + the full review timeout (15 min) +
-    # posting margin, so lintro's own timeout always fires before the runner
-    # kills the job — a runner kill truncates the JSON envelope the outcome
-    # classifier reads. Invariant enforced by tests/scripts/
-    # test_run_ai_review.py; bump both values together. 75 (was 30, then 50) because
-    # custom-agent passes stack additional per-call --timeout budgets on top
-    # of the main review call, and provider-heavy diffs were hitting the old
-    # ceiling exactly (#1976 reviews killed at the boundary four times; #1977's
-    # oscillated around 45-55 min and was killed at 50 twice).
-    timeout-minutes: 75
+    # job budget must cover setup (~7 min) + one per-chunk CLI timeout
+    # (30 min) + posting margin, so lintro's own timeout always fires before
+    # the runner kills the job — a runner kill truncates the JSON envelope
+    # the outcome classifier reads. Invariant enforced by tests/scripts/
+    # test_run_ai_review.py; bump both values together. 75 (was 30, then 50)
+    # because custom-agent passes stack additional per-call --timeout budgets
+    # on top of the main review call, and provider-heavy diffs were hitting
+    # the old ceiling exactly (#1976 reviews killed at the boundary four
+    # times; #1977's oscillated around 45-55 min and was killed at 50 twice).
+    # 1800s is one chunk, not the whole serial run. A 14-chunk review can
+    # still hit this job budget; incremental ``state.json`` checkpoints
+    # then let the next round resume (#2156), but a *rerun* of the same
+    # run does not resume its own prior attempt (#2506), so a diff whose
+    # serial review exceeds the budget is cancelled on every rerun. 120
+    # (was 75) after #2452's ~45-file review was cancelled at 75 twice on
+    # 2026-09-09 with its previous round completing in ~70. The coupling
+    # test only guarantees the per-chunk CLI timeout fires before a
+    # *single-chunk* job kill.
+    timeout-minutes: 120
     # Cursor shards are appended only when the dogfood provider is Cursor.
     # They stay out of the anthropic path so that job cannot reach Cursor
     # hosts. A rotated shard (e.g. repo43.cursor.sh) is named in the
     # harden-runner summary of the failed run; fix is a one-line allowlist
     # PR on AI_REVIEW_CURSOR_EGRESS. No wildcards on this job.
+    # The OpenAI (#2472 lane 1) and z.ai (#2472 lane 2) hosts follow the same
+    # provider-gated pattern: they are allowlisted only for their lane, so the
+    # other providers' jobs never reach those hosts.
     env:
       # yamllint disable-line rule:line-length
       AI_REVIEW_CURSOR_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' && 'downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443 agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443' || '' }}
+      # yamllint disable-line rule:line-length
+      AI_REVIEW_OPENAI_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'openai' && 'api.openai.com:443 auth.openai.com:443 chatgpt.com:443' || '' }}
+      # yamllint disable-line rule:line-length
+      AI_REVIEW_ZAI_EGRESS: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL != '' && 'api.z.ai:443' || '' }}
 
     steps:
       - name: Harden Runner
@@ -142,8 +188,24 @@ jobs:
         # GitHub releases CDN; those runs blocked it and the action fell
         # back to nodejs.org — allowlisted so Node install is not a silent
         # fallback.
+        # pipelines.actions.githubusercontent.com and
+        # results-receiver.actions.githubusercontent.com are the artifact
+        # service (#2158 / in-step persist upload). This job forbids
+        # wildcard endpoints, so `*.blob.core.windows.net` (used by
+        # publish jobs) cannot be copied here. No additional blob-redirect
+        # host has been observed on artifact upload/download in this repo.
+        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
+        # request-orchestrator endpoints (hosted-compute-watchdog-*,
+        # hosted-compute-request-orchestrator-*). Blocking them correlates with
+        # long jobs being reclaimed mid-run ("The runner has received a shutdown
+        # signal", exit 143), and this is the longest job in the repo (75 min)
+        # — see #2352. This is the one wildcard this job allows: the region
+        # shard rotates (eus-02 and iad-02 both seen on 2026-09-05), so exact
+        # hosts would leave the job killable in every other region, and
+        # githubapp.com is GitHub-owned — unlike the Cursor shards above, which
+        # stay exact. A bare `*` or `*:443` catch-all remains forbidden.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -153,6 +215,8 @@ jobs:
             objects.githubusercontent.com:443
             raw.githubusercontent.com:443
             release-assets.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
             api.anthropic.com:443
             astral.sh:443
             releases.astral.sh:443
@@ -160,7 +224,10 @@ jobs:
             files.pythonhosted.org:443
             nodejs.org:443
             registry.npmjs.org:443
+            *.githubapp.com:443
             ${{ env.AI_REVIEW_CURSOR_EGRESS }}
+            ${{ env.AI_REVIEW_OPENAI_EGRESS }}
+            ${{ env.AI_REVIEW_ZAI_EGRESS }}
 
       - name: Checkout base ref (trusted lintro install)
         # Install lintro from the PR's BASE ref (main), NOT the PR head. The
@@ -175,6 +242,42 @@ jobs:
           # GH_TOKEN — so leaving the token in .git/config would only widen
           # what a compromised review step could read.
           persist-credentials: false
+
+      - name: Locate prior review-state run
+        # API listing, not download-artifact's same-run default. Extends
+        # run-ai-review.sh so this is not a new script invocation (#2158).
+        # Empty run-id is the no-op: first review on a PR, or no valid prior.
+        # continue-on-error keeps a locator failure from skipping the
+        # review. The file-existence guard covers already-open PRs whose
+        # base.sha still has the pre-plumbing run-ai-review.sh (that
+        # older script treats --locate-prior-state as a PR number).
+        id: prior-state
+        continue-on-error: true
+        env:
+          PR_NUMBER: ${{ github.event.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ -f scripts/ci/review_state_artifacts.py ]]; then
+            scripts/ci/run-ai-review.sh --locate-prior-state
+          else
+            echo "run-id=" >>"${GITHUB_OUTPUT:?}"
+          fi
+
+      - name: Download prior review-state artifacts
+        # Skipped until a prior completed run actually uploaded state.
+        # continue-on-error: a download failure must not skip the review.
+        if: steps.prior-state.outputs.run-id != ''
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ steps.prior-state.outputs.run-id }}
+          pattern: lintro-review-state-pr-${{ github.event.number }}-*
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ai-review-state
 
       - name: Resolve pinned agent-CLI versions
         id: pins
@@ -194,6 +297,16 @@ jobs:
           python3 scripts/ci/ai_tools_arg_pin.py CURSOR_AGENT_VERSION \
             CURSOR_AGENT_SHA256_X64 --format github >>"$GITHUB_OUTPUT"
 
+      - name: Resolve pinned codex version
+        id: codex-pins
+        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
+        # Same single pin site as the other lanes: the codex CLI this job
+        # drives is the one the released ai image ships and the contract
+        # tests verify. --exact: the installer rejects npm ranges/aliases.
+        run: |
+          python3 scripts/ci/ai_tools_arg_pin.py CODEX_VERSION \
+            --exact --format github >>"$GITHUB_OUTPUT"
+
       - name: Set up Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -212,6 +325,13 @@ jobs:
           CURSOR_AGENT_SHA256_X64: ${{ steps.cursor-pins.outputs.cursor-agent-sha256-x64 }}
         run: scripts/ci/install-cursor-agent.sh
 
+      - name: Install pinned codex CLI
+        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
+        env:
+          # yamllint disable-line rule:line-length
+          CODEX_VERSION: ${{ steps.codex-pins.outputs.codex-version }}
+        run: scripts/ci/install-codex-cli.sh
+
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
@@ -224,6 +344,37 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra ai
+
+      - name: Expose Actions runtime for state upload
+        # run: steps do not receive ACTIONS_RUNTIME_TOKEN /
+        # ACTIONS_RESULTS_URL (runner Node/container actions do).
+        # Export masked outputs so the review step can upload
+        # checkpoints before a cancel skips later always() steps.
+        id: artifact-runtime
+        # yamllint disable-line rule:line-length
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const token = process.env.ACTIONS_RUNTIME_TOKEN || ''
+            const results = process.env.ACTIONS_RESULTS_URL || ''
+            if (token) {
+              core.setSecret(token)
+            }
+            core.setOutput('runtime-token', token)
+            core.setOutput('results-url', results)
+
+      - name: Restore Codex subscription session
+        # The openai lane's credential (#2472): decode the CODEX_AUTH_JSON
+        # org secret into $HOME/.codex/auth.json for the pinned codex CLI.
+        # Sits after the trusted base-ref checkout, the pinned installs and
+        # uv sync, and ahead of the App-token mint so the mint stays
+        # immediately before the review step (#2050 invariant). An unset
+        # secret warns and exits 0 — the wrapper's credential gate owns the
+        # visible failure (no-silent-skip, #1826).
+        if: ${{ vars.LINTRO_AI_PROVIDER == 'openai' }}
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+        run: scripts/ci/restore-codex-session.sh
 
       - name: Mint lintro-review App token
         id: lintro-review-app
@@ -250,7 +401,15 @@ jobs:
           # its account has no balance, and its mere presence would make
           # lintro's bare-mode detection think a bare `claude` call could
           # authenticate (LINTRO_CLI_BARE pins the decision regardless).
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Only the non-gateway anthropic lane carries the subscription
+          # token (#2473 review): gateway mode empties it so the session and
+          # the gateway token are never both in play, and the openai/cursor
+          # lanes don't receive a Claude credential they cannot use. The
+          # condition is inverted (secret in the TRUE branch) because
+          # `cond && '' || secret` can never yield '': GHA's `||` falls
+          # through on the falsy ''.
+          # yamllint disable-line rule:line-length
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ ((vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # Cursor CLI auth when LINTRO_AI_PROVIDER=cursor. Empty when the
           # org/repo secret is unset — the wrapper then fails visibly rather
           # than posting nothing.
@@ -280,3 +439,46 @@ jobs:
           LINTRO_AI_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT || 'cli' }}
           LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER || 'anthropic' }}
           LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
+          # z.ai GLM gateway lane (#2472 lane 2). With provider anthropic
+          # (explicit or via the same default the review step applies) and
+          # ZAI_BASE_URL set, the pinned `claude` binary is pointed at the
+          # gateway (z.ai's documented Anthropic-compatible endpoint) and
+          # ANTHROPIC_AUTH_TOKEN authenticates it — the GLM Coding Plan
+          # subscription, not api.anthropic.com. Empty in every other mode:
+          # both keys resolve to '' so the claude-subscription and Codex
+          # lanes are untouched. The CLI transport forwards os.environ to
+          # the subprocess, and LINTRO_CLI_BARE=never keeps gateway auth
+          # intact. A non-default gateway host (e.g. open.bigmodel.cn) needs
+          # a matching AI_REVIEW_ZAI_EGRESS allowlist edit.
+          # yamllint disable-line rule:line-length
+          ANTHROPIC_BASE_URL: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL || '' }}
+          # yamllint disable-line rule:line-length
+          ANTHROPIC_AUTH_TOKEN: ${{ (vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic' && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}
+          # Spend ceiling overlay (#2024 / #2154 / #2156). Unset falls
+          # through to committed YAML (now unset = no cap). Overlay
+          # `uncapped` is the explicit lift; overlay `0` is rejected as
+          # ambiguous. YAML `0` is still a literal $0 cap. The CLI
+          # transport treats a numeric cap as a runtime bound, not
+          # marginal dollars, under subscription auth.
+          LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}
+          # In-step persist upload (#2173). Masked outputs from the
+          # github-script step above; blank when the runner omitted them.
+          ACTIONS_RUNTIME_TOKEN: ${{ steps.artifact-runtime.outputs.runtime-token }}
+          ACTIONS_RESULTS_URL: ${{ steps.artifact-runtime.outputs.results-url }}
+
+      - name: Upload review-state artifacts
+        # Final upload is best-effort. A cancelled job skips later
+        # always() steps (dogfood #2166 round 5 / job 97293667852).
+        # run-ai-review.sh uploads checkpoints and an inline snapshot
+        # from inside the review step so persist survives that skip.
+        # This step still runs on a clean or step-timeout finish.
+        # if-no-files-found: ignore so pre-feature runs no-op.
+        if: always()
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # yamllint disable-line rule:line-length
+          name: lintro-review-state-pr-${{ github.event.number }}-attempt-${{ github.run_attempt }}-final
+          path: ai-review-state/
+          if-no-files-found: ignore
+          retention-days: 30

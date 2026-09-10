@@ -358,7 +358,7 @@ def review_fixes_interactive(
                 validate_mode = not validate_mode
                 state = "enabled" if validate_mode else "disabled"
                 console.print(
-                    f"  [dim]Per-group validation {state} " "(no fixes applied).[/dim]",
+                    f"  [dim]Per-group validation {state} (no fixes applied).[/dim]",
                 )
                 console.print()
                 continue

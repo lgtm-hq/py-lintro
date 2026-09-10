@@ -321,7 +321,6 @@ Same options as check command, but only runs tools that can auto-fix issues.
 
 **Options:**
 
-- `--show-conflicts` - Show potential conflicts between tools
 - `--output FILE` - Save tool list to file
 
 ## Output to Files

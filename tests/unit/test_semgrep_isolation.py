@@ -14,11 +14,12 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REQUIREMENTS = _REPO_ROOT / "requirements-semgrep.txt"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _UV_LOCK = _REPO_ROOT / "uv.lock"
-_MANIFEST = _REPO_ROOT / "lintro" / "tools" / "manifest.json"
-_GENERATED = _REPO_ROOT / "lintro" / "_generated_versions.py"
 _INSTALL_SCRIPT = _REPO_ROOT / "scripts" / "utils" / "install-semgrep.sh"
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
 _COMPILE_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "compile-semgrep-lock.sh"
+_COMPILE_LIB = _REPO_ROOT / "scripts" / "ci" / "semgrep-lock-lib.sh"
+_CHECK_SCRIPT = _REPO_ROOT / "scripts" / "ci" / "check-semgrep-lock.sh"
+_DOCKER_CI = _REPO_ROOT / ".github" / "workflows" / "docker-ci.yml"
 _IN_FILE = _REPO_ROOT / "requirements-semgrep.in"
 _TOOLS_PUBLISH = _REPO_ROOT / ".github" / "workflows" / "docker-tools-publish.yml"
 _PIN_RE = re.compile(r"^semgrep==([0-9][^\s\\]+)", re.MULTILINE)
@@ -58,18 +59,52 @@ def test_semgrep_in_pin_matches_compiled_lockfile() -> None:
     assert in_match is not None
     assert_that(in_match.group(1)).is_equal_to(_semgrep_pin())
     compile_script = _COMPILE_SCRIPT.read_text(encoding="utf-8")
-    assert_that(compile_script).contains("--generate-hashes")
-    assert_that(compile_script).contains("requirements-semgrep.in")
+    # The resolver invocation lives in the shared library since #2436 so the
+    # recompile script and the CI drift gate cannot diverge.
+    assert_that(compile_script).contains("semgrep-lock-lib.sh")
+    library = _COMPILE_LIB.read_text(encoding="utf-8")
+    assert_that(library).contains("--generate-hashes")
+    assert_that(library).contains("requirements-semgrep.in")
     assert_that(_COMPILE_SCRIPT.stat().st_mode & 0o111).is_not_equal_to(0)
 
 
-def test_semgrep_requirements_pin_matches_manifest() -> None:
-    """The requirements pin and the tool manifest agree on semgrep's version."""
+def test_semgrep_lockfile_drift_is_gated_in_ci() -> None:
+    """A stale lockfile fails its own CI check, not the whole pipeline (#2436).
+
+    Nothing recompiles the lockfile automatically — the Mend-hosted Renovate
+    app never executed post-upgrade commands — so the gate is the enforcement.
+    """
+    assert_that(_CHECK_SCRIPT.exists()).is_true()
+    assert_that(_CHECK_SCRIPT.stat().st_mode & 0o111).is_not_equal_to(0)
+    check_script = _CHECK_SCRIPT.read_text(encoding="utf-8")
+    assert_that(check_script).contains("semgrep-lock-lib.sh")
+    assert_that(check_script).contains("Run: scripts/ci/compile-semgrep-lock.sh")
+
+    workflow = _DOCKER_CI.read_text(encoding="utf-8")
+    assert_that(workflow).contains("scripts/ci/check-semgrep-lock.sh")
+
+
+def test_semgrep_requirements_pin_matches_manifest(
+    generated_version_artifacts: Path,
+) -> None:
+    """The requirements pin and the rendered artifacts agree on semgrep.
+
+    Cross-checks against freshly generated outputs (#2179) rather than the
+    checkout's committed copies, so the check keeps working once the
+    artifacts stop being committed.
+
+    Args:
+        generated_version_artifacts: Session dir with the rendered outputs.
+    """
     pin = _semgrep_pin()
-    manifest = json.loads(_MANIFEST.read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (generated_version_artifacts / "manifest.json").read_text(encoding="utf-8"),
+    )
     entry = next(tool for tool in manifest["tools"] if tool["name"] == "semgrep")
     assert_that(entry["version"]).is_equal_to(pin)
-    generated = _GENERATED.read_text(encoding="utf-8")
+    generated = (generated_version_artifacts / "_generated_versions.py").read_text(
+        encoding="utf-8",
+    )
     assert_that(generated).contains(f'"semgrep": "{pin}"')
 
 
@@ -82,7 +117,12 @@ def test_tools_extra_does_not_include_semgrep() -> None:
     assert_that(any(item.startswith("sqlfluff") for item in tools)).is_true()
     assert_that(any(item.startswith("pip-audit") for item in tools)).is_true()
     uv = pyproject["tool"]["uv"]
-    assert_that(uv).does_not_contain_key("override-dependencies")
+    # The guard is that no uv override re-introduces semgrep into the shared
+    # resolver, not that the table is empty: #2378 added an unrelated
+    # `docstring-parser` override, checked by
+    # tests/unit/test_docstring_parser_override.py.
+    overrides = uv.get("override-dependencies", [])
+    assert_that(any(item.startswith("semgrep") for item in overrides)).is_false()
 
 
 def test_uv_lock_has_no_semgrep_package() -> None:

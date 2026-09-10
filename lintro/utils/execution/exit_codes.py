@@ -20,7 +20,6 @@ def determine_exit_code(
     all_results: list[ToolResult],
     total_issues: int,
     total_remaining: int,
-    main_phase_empty_due_to_filter: bool,
 ) -> int:
     """Determine final exit code based on results.
 
@@ -29,7 +28,6 @@ def determine_exit_code(
         all_results: List of all tool results.
         total_issues: Total issues found.
         total_remaining: Remaining issues after fix.
-        main_phase_empty_due_to_filter: Whether main phase was empty due to filtering.
 
     Returns:
         Exit code (0=success, 1=failure).
@@ -52,10 +50,6 @@ def determine_exit_code(
     else:  # check
         if total_issues > 0:
             exit_code = DEFAULT_EXIT_CODE_FAILURE
-
-    # If all tools were filtered to post-checks but nothing ran, return failure
-    if main_phase_empty_due_to_filter and not all_results:
-        exit_code = DEFAULT_EXIT_CODE_FAILURE
 
     return exit_code
 

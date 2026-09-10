@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from assertpy import assert_that
@@ -14,11 +15,15 @@ from lintro.config.config_loader import (
     _parse_execution_config,
     _parse_tool_config,
     _parse_tools_config,
+    _pyproject_lintro_catalog,
+    build_config_from_dict,
     clear_config_cache,
     get_default_config,
     load_config,
 )
-from lintro.plugins import discovery
+from lintro.config.enforce_config import EnforceConfig
+from lintro.config.execution_config import ExecutionConfig
+from lintro.exceptions.errors import ConfigurationError
 
 
 def test_empty_data() -> None:
@@ -34,7 +39,6 @@ def test_execution_config_empty_data() -> None:
     config = _parse_execution_config({})
 
     assert_that(config.enabled_tools).is_equal_to([])
-    assert_that(config.tool_order).is_equal_to("priority")
     assert_that(config.fail_fast).is_false()
     assert_that(config.parallel).is_true()
 
@@ -50,7 +54,7 @@ def test_string_enabled_tools() -> None:
 
 def test_tool_config_empty_data() -> None:
     """Should return default ToolConfig."""
-    config = _parse_tool_config({})
+    config = _parse_tool_config("ruff", {})
 
     assert_that(config.enabled).is_true()
     assert_that(config.config_source).is_none()
@@ -60,7 +64,7 @@ def test_disabled_tool() -> None:
     """Should parse enabled=False."""
     data = {"enabled": False}
 
-    config = _parse_tool_config(data)
+    config = _parse_tool_config("ruff", data)
 
     assert_that(config.enabled).is_false()
 
@@ -83,6 +87,50 @@ def test_with_bool_values() -> None:
 
     assert_that(config["ruff"].enabled).is_true()
     assert_that(config["prettier"].enabled).is_false()
+
+
+def test_tools_config_rejects_non_string_key() -> None:
+    """A numeric ``tools:`` key must raise ValueError, not AttributeError."""
+    with pytest.raises(ValueError, match="tool name must be a string"):
+        _parse_tools_config(
+            cast(dict[str, Any], {3.14: {"enabled": True}}),
+        )
+
+
+def test_load_config_non_string_tool_key_raises_configuration_error(
+    tmp_path: Path,
+) -> None:
+    """YAML ``tools.3.14`` must exit as ConfigurationError, not a traceback.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("tools:\n  3.14:\n    enabled: true\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="tool name must be a string"):
+        load_config(config_path=str(config_file))
+
+
+def test_tools_config_rejects_scalar_entry() -> None:
+    """A known tool whose value is not a mapping or bool must raise.
+
+    ``tools.ruff: 0`` used to be dropped, so ruff stayed at the default
+    (enabled). The parser must fail closed instead.
+    """
+    with pytest.raises(ValueError) as exc_info:
+        _parse_tools_config({"ruff": 0})
+
+    assert_that(str(exc_info.value)).contains("tools.ruff")
+    assert_that(str(exc_info.value)).contains("mapping or boolean")
+
+
+def test_tools_config_rejects_string_entry() -> None:
+    """A string tool value such as ``"yes"`` must raise."""
+    with pytest.raises(ValueError) as exc_info:
+        _parse_tools_config({"ruff": "yes"})
+
+    assert_that(str(exc_info.value)).contains("tools.ruff")
 
 
 def test_defaults_empty_data() -> None:
@@ -141,21 +189,119 @@ def test_tool_sections() -> None:
 def test_execution_settings() -> None:
     """Should extract execution settings."""
     data = {
-        "tool_order": "alphabetical",
         "fail_fast": True,
+        "parallel": False,
     }
 
     result = _convert_pyproject_to_config(data)
 
-    assert_that(result["execution"]["tool_order"]).is_equal_to("alphabetical")
     assert_that(result["execution"]["fail_fast"]).is_true()
+    assert_that(result["execution"]["parallel"]).is_false()
 
 
-def test_load_yaml_config_with_defaults(tmp_path: Path) -> None:
+def test_convert_nested_execution_and_enforce_tables() -> None:
+    """Nested ``[tool.lintro.execution]`` / ``enforce`` tables must be merged."""
+    result = _convert_pyproject_to_config(
+        {
+            "execution": {"fail_fast": True, "max_fix_retries": 5},
+            "enforce": {"line_length": 100},
+        },
+    )
+
+    assert_that(result["execution"]["fail_fast"]).is_true()
+    assert_that(result["execution"]["max_fix_retries"]).is_equal_to(5)
+    assert_that(result["enforce"]["line_length"]).is_equal_to(100)
+
+
+def test_pyproject_catalog_keys_match_model_fields() -> None:
+    """Catalog execution/enforce keys must come from the Pydantic models."""
+    catalog = _pyproject_lintro_catalog()
+
+    assert_that(catalog.execution_keys).is_equal_to(
+        frozenset(ExecutionConfig.model_fields),
+    )
+    assert_that(catalog.enforce_keys).is_equal_to(
+        frozenset(EnforceConfig.model_fields),
+    )
+
+
+def test_parse_tools_config_rejects_null_entry() -> None:
+    """A null ``tools.<name>`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="tools.ruff must be a mapping or boolean"):
+        _parse_tools_config({"ruff": None})
+
+
+def test_convert_scalar_execution_raises() -> None:
+    """A scalar ``[tool.lintro] execution`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="execution must be a mapping"):
+        _convert_pyproject_to_config({"execution": False})
+
+
+def test_convert_scalar_enforce_raises() -> None:
+    """A scalar ``[tool.lintro] enforce`` value must raise ValueError."""
+    with pytest.raises(ValueError, match="enforce must be a mapping"):
+        _convert_pyproject_to_config({"enforce": 1})
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["enforce", "execution", "defaults", "tools"],
+)
+def test_build_config_from_dict_rejects_null_mapping_section(
+    section: str,
+) -> None:
+    """A YAML-null mapping section must raise ValueError, not AttributeError.
+
+    Args:
+        section: Top-level key that typed parsers assume is a mapping.
+    """
+    with pytest.raises(ValueError, match=f"{section} must be a mapping"):
+        build_config_from_dict({section: None})
+
+
+@pytest.mark.parametrize(
+    "section",
+    ["enforce", "execution", "defaults", "tools"],
+)
+def test_load_config_null_mapping_section_raises_configuration_error(
+    tmp_path: Path,
+    section: str,
+) -> None:
+    """A bare ``section:`` in YAML must raise ConfigurationError.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+        section: Top-level mapping section spelled as a YAML null.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(f"{section}:\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match=f"{section} must be a mapping"):
+        load_config(config_path=str(config_file))
+
+
+def test_load_config_null_tool_raises_configuration_error(tmp_path: Path) -> None:
+    """Runtime load must wrap a null tool entry as ConfigurationError.
+
+    Args:
+        tmp_path: Temporary directory path for test files.
+    """
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text("tools:\n  ruff:\n", encoding="utf-8")
+
+    with pytest.raises(ConfigurationError, match="tools.ruff must be a mapping"):
+        load_config(config_path=str(config_file))
+
+
+def test_load_yaml_config_with_defaults(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Should load .lintro-config.yaml file with defaults section.
 
     Args:
         tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
     """
     config_content = """\
 defaults:
@@ -166,19 +312,13 @@ defaults:
     config_file = tmp_path / ".lintro-config.yaml"
     config_file.write_text(config_content)
 
-    import os
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
 
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        clear_config_cache()
+    config = load_config()
 
-        config = load_config()
-
-        assert_that(config.get_tool_defaults("prettier")["singleQuote"]).is_true()
-        assert_that(config.get_tool_defaults("prettier")["tabWidth"]).is_equal_to(2)
-    finally:
-        os.chdir(original_cwd)
+    assert_that(config.get_tool_defaults("prettier")["singleQuote"]).is_true()
+    assert_that(config.get_tool_defaults("prettier")["tabWidth"]).is_equal_to(2)
 
 
 def test_load_explicit_path(tmp_path: Path) -> None:
@@ -199,66 +339,23 @@ enforce:
     assert_that(config.enforce.line_length).is_equal_to(120)
 
 
-def test_score_config_defaults(tmp_path: Path) -> None:
-    """Score config falls back to defaults when unspecified.
-
-    Args:
-        tmp_path: Temporary directory path for test files.
-    """
-    config_file = tmp_path / "custom-config.yaml"
-    config_file.write_text("enforce:\n  line_length: 88\n")
-
-    config = load_config(config_path=str(config_file))
-
-    assert_that(config.score.error_weight).is_equal_to(10.0)
-    assert_that(config.score.warning_weight).is_equal_to(3.0)
-    assert_that(config.score.info_weight).is_equal_to(1.0)
-    assert_that(config.score.scale).is_equal_to(100.0)
-
-
-def test_score_config_from_yaml(tmp_path: Path) -> None:
-    """Score weights and scale load from the ``score`` section.
-
-    Args:
-        tmp_path: Temporary directory path for test files.
-    """
-    config_content = """\
-score:
-  error_weight: 20
-  warning_weight: 5
-  info_weight: 2
-  scale: 200
-"""
-    config_file = tmp_path / "custom-config.yaml"
-    config_file.write_text(config_content)
-
-    config = load_config(config_path=str(config_file))
-
-    assert_that(config.score.error_weight).is_equal_to(20.0)
-    assert_that(config.score.warning_weight).is_equal_to(5.0)
-    assert_that(config.score.info_weight).is_equal_to(2.0)
-    assert_that(config.score.scale).is_equal_to(200.0)
-
-
-def test_returns_default_when_no_config(tmp_path: Path) -> None:
+def test_returns_default_when_no_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Should return default config when no file found.
 
     Args:
         tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
     """
-    import os
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
 
-    original_cwd = os.getcwd()
-    try:
-        os.chdir(tmp_path)
-        clear_config_cache()
+    config = load_config(allow_pyproject_fallback=False)
 
-        config = load_config(allow_pyproject_fallback=False)
-
-        # Should get default empty config
-        assert_that(config.enforce.line_length).is_none()
-    finally:
-        os.chdir(original_cwd)
+    # Should get default empty config
+    assert_that(config.enforce.line_length).is_none()
 
 
 def test_returns_sensible_defaults() -> None:
@@ -268,7 +365,6 @@ def test_returns_sensible_defaults() -> None:
     assert_that(config.enforce.line_length).is_equal_to(88)
     # target_python is None to let tools infer from requires-python
     assert_that(config.enforce.target_python).is_none()
-    assert_that(config.execution.tool_order).is_equal_to("priority")
 
 
 def _fake_plugin_names(
@@ -282,8 +378,7 @@ def _fake_plugin_names(
         *names: Entry-point tool names to advertise.
     """
     monkeypatch.setattr(
-        discovery,
-        "_advertised_plugin_tool_names",
+        "lintro.utils.plugin_tool_names.advertised_plugin_tool_names",
         lambda: frozenset(names),
     )
 
@@ -374,8 +469,6 @@ def test_known_keys_do_not_warn() -> None:
             {
                 "ruff": {"enabled": True},
                 "line_length": 88,
-                "tool_order": "priority",
-                "post_checks": {},
                 "versions": {},
                 "module_size": {},
                 "plugins": {"enabled": True},
@@ -389,17 +482,17 @@ def test_known_keys_do_not_warn() -> None:
 def test_externally_parsed_keys_do_not_warn() -> None:
     """Documented keys parsed by other loaders must not trip the warning.
 
-    ``licenses`` is read by ``lintro.config.licenses_config`` and the ordering
-    keys by ``lintro.utils.config.get_tool_order_config``; none of them reach
-    this converter, so warning about them would cry wolf on valid config.
+    ``licenses`` is read by ``lintro.config.licenses_config``, ``module_size``
+    by ``lintro.utils.config`` and ``plugins`` by ``lintro.plugins.discovery``;
+    none of them reach this converter, so warning about them would cry wolf on
+    valid config.
     """
     output = _capture_warnings(
         lambda: _convert_pyproject_to_config(
             {
                 "licenses": {"allow": ["MIT"]},
-                "tool_order": "custom",
-                "tool_order_custom": ["ruff", "black"],
-                "tool_priorities": {"ruff": 5},
+                "module_size": {"threshold": 800},
+                "plugins": {"enabled": True},
             },
         ),
     )
@@ -422,3 +515,14 @@ def test_plugin_cannot_shadow_reserved_config_keys(
     assert_that(result["execution"]["fail_fast"]).is_true()
     assert_that(result["enforce"]["line_length"]).is_equal_to(100)
     assert_that(result["tools"]).is_empty()
+
+
+def test_nested_pyproject_execution_fail_fast_is_applied() -> None:
+    """Valid nested ``[tool.lintro.execution] fail_fast`` must reach LintroConfig."""
+    import tomllib
+
+    parsed = tomllib.loads("[tool.lintro.execution]\nfail_fast = true\n")
+    converted = _convert_pyproject_to_config(parsed["tool"]["lintro"])
+    config = build_config_from_dict(converted)
+
+    assert_that(config.execution.fail_fast).is_true()

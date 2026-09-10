@@ -7,6 +7,7 @@ from assertpy import assert_that
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
+    AIProviderRequiredError,
     AIRateLimitError,
 )
 from lintro.ai.review.errors_taxonomy import (
@@ -196,6 +197,17 @@ def test_classify_unknown_falls_back() -> None:
     assert_that(kind).is_equal_to(ReviewErrorKind.UNKNOWN)
 
 
+def test_provider_required_classifies_as_unavailable() -> None:
+    """An unset provider is unavailable, not a malformed model response."""
+    error = AIProviderRequiredError(
+        "ai.provider is required when ai.lint or ai.review is enabled.",
+    )
+    kind = classify_provider_error(provider="unset", error=error)
+
+    assert_that(kind).is_equal_to(ReviewErrorKind.PROVIDER_UNAVAILABLE)
+    assert_that(kind).is_not_equal_to(ReviewErrorKind.INVALID_RESPONSE)
+
+
 def test_value_error_classifies_as_invalid_response() -> None:
     """A parse ValueError is an invalid-response failure, not a provider error."""
     error = ValueError("could not parse model response as JSON")
@@ -262,6 +274,47 @@ def test_resolve_cause_text_prefers_cause_message() -> None:
     )
 
 
+def test_resolve_cause_text_skips_empty_timeout_cause() -> None:
+    """asyncio.TimeoutError() stringifies empty; keep the CLI wrapper text."""
+    error = AIProviderError("agent CLI timed out after 1800s")
+    error.__cause__ = TimeoutError()
+    assert_that(resolve_cause_text(error=error)).contains("timed out after 1800s")
+
+
+def test_classify_timeout_error_cause_as_timeout() -> None:
+    """A CLI timeout chained from TimeoutError classifies as TIMEOUT."""
+    error = AIProviderError("agent CLI timed out after 1800s")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="cursor", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
+
+
+def test_timeout_error_wins_over_http_504_signature() -> None:
+    """A TimeoutError cause is TIMEOUT even when the wrapper looks like 504."""
+    error = AIProviderError("HTTP 504 gateway timeout")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="anthropic", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.TIMEOUT)
+
+
+def test_credit_signature_wins_over_nested_timeout_error() -> None:
+    """A credits signature must not become TIMEOUT just because a cause timed out."""
+    error = AIProviderError("Your credit balance is too low to access the API")
+    error.__cause__ = TimeoutError()
+    kind = classify_provider_error(provider="anthropic", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.INSUFFICIENT_CREDITS)
+
+
+def test_quota_signature_wins_over_typed_rate_limit() -> None:
+    """OpenAI insufficient_quota mapped to AIRateLimitError is still credits."""
+    error = AIRateLimitError(
+        "OpenAI rate limit exceeded: Error code: 429 - insufficient_quota: "
+        "You exceeded your current quota",
+    )
+    kind = classify_provider_error(provider="openai", error=error)
+    assert_that(kind).is_equal_to(ReviewErrorKind.INSUFFICIENT_CREDITS)
+
+
 def test_shared_fallback_without_provider() -> None:
     """With no provider map, shared heuristics still classify credit errors."""
     error = AIProviderError("insufficient credits remaining on the account")
@@ -298,6 +351,21 @@ def test_error_comment_surfaces_real_cause_for_depleted_credits() -> None:
     assert_that(body).contains("credit balance is too low")
     assert_that(body).does_not_contain("aborted before all chunks")
     assert_that(body).contains("`anthropic`")
+
+
+def test_error_comment_provider_required_uses_unavailable_copy() -> None:
+    """An unset provider sticky uses PROVIDER_UNAVAILABLE copy, not parse copy."""
+    error = AIProviderRequiredError(
+        "ai.provider is required when ai.lint or ai.review is enabled. "
+        "Set it via `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
+    )
+    body = format_error_comment(error=error, provider="unset")
+
+    assert_that(body).contains("no AI provider is configured")
+    assert_that(body).contains("`ai.provider` in config")
+    assert_that(body).contains("LINTRO_AI_PROVIDER")
+    assert_that(body).contains("--provider")
+    assert_that(body).does_not_contain("malformed")
 
 
 def test_error_comment_unknown_includes_surfaced_cause() -> None:

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from assertpy import assert_that
 
-from lintro.tools.implementations.ruff.fix import execute_ruff_fix
+from lintro.tools.ruff.fix import execute_ruff_fix
 
 
 def test_execute_ruff_fix_combined_lint_and_format_issues(

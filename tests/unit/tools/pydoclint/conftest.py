@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.definitions.pydoclint import PydoclintPlugin
+from lintro.tools.pydoclint.definition import PydoclintPlugin
 
 
 @pytest.fixture

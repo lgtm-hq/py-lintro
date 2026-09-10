@@ -43,8 +43,9 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
 
 ### ✅ Preserved Features
 
-- Executes `golangci-lint run --output.json.path stdout --show-stats=false ./...`
-- Autofix path runs `golangci-lint run --fix ./...`, then re-checks
+- Executes `golangci-lint run --output.json.path stdout --show-stats=false`
+  `--allow-parallel-runners ./...`
+- Autofix path runs the same command plus `--fix`, then re-checks
 - Parses JSON `Issues[]` into structured issues (linter, position, message, severity,
   fixable)
 - Discovers the Go module root (`go.mod`) from provided paths
@@ -61,6 +62,10 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
   `linters.exclusions.paths`/`formatters.exclusions.paths` settings are the way to
   exclude paths, and `linters.exclusions.rules` suppresses specific findings)
 - Times out after a configurable default (120s)
+- `--allow-parallel-runners` is always passed: golangci-lint otherwise takes an
+  exclusive `golangci-lint.lock` in the system temp directory, and a second concurrent
+  instance exits 3 with `parallel golangci-lint is running` and an empty `Issues` array
+  — findings vanish with no diagnostic in the JSON (#2391)
 - A blank `Severity` normalizes to `WARNING`; an explicit `Severity` is kept
 - The parser tolerates a trailing human-readable stats footer and ANSI codes
 
@@ -75,8 +80,10 @@ lossless for the tool, and golangci-lint is not among its SARIF-native candidate
 ### Core golangci-lint
 
 ```bash
-golangci-lint run --output.json.path stdout --show-stats=false ./...
-golangci-lint run --fix ./...
+golangci-lint run --output.json.path stdout --show-stats=false \
+  --allow-parallel-runners ./...
+golangci-lint run --output.json.path stdout --show-stats=false \
+  --allow-parallel-runners --fix ./...
 ```
 
 ### Lintro Wrapper
@@ -89,9 +96,10 @@ result = tool.fix(["path/to/go/module"], {})
 
 ## Configuration Strategy
 
-- Minimum/recommended version tracked in `lintro/_tool_versions.py` and
-  `lintro/tools/manifest.json` (kept in sync by the manifest generator; bumped by
-  Renovate via `golangci/golangci-lint` GitHub releases)
+- Recommended version tracked in `lintro/_tool_versions.py` (rendered into the generated
+  `lintro/tools/manifest.json` at build time; bumped by Renovate via
+  `golangci/golangci-lint` GitHub releases); the optional compatibility floor
+  (`min_version`) is authored in `lintro/tools/manifest.src.json`
 - Uses the system `golangci-lint`; install via `brew install golangci-lint` or the
   official installer at <https://golangci-lint.run/welcome/install/>
 - Native configs: `.golangci.yml`, `.golangci.yaml`, `.golangci.toml`, `.golangci.json`

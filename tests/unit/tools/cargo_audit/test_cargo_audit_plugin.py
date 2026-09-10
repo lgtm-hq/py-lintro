@@ -13,7 +13,7 @@ from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.cargo_audit import (
+from lintro.tools.cargo_audit.definition import (
     CARGO_AUDIT_DEFAULT_TIMEOUT,
     CargoAuditPlugin,
 )
@@ -82,15 +82,6 @@ def test_definition_file_patterns(cargo_audit_plugin: CargoAuditPlugin) -> None:
     """
     patterns = cargo_audit_plugin.definition.file_patterns
     assert_that(patterns).contains("Cargo.lock")
-
-
-def test_definition_priority(cargo_audit_plugin: CargoAuditPlugin) -> None:
-    """Verify the priority is 95.
-
-    Args:
-        cargo_audit_plugin: The plugin instance.
-    """
-    assert_that(cargo_audit_plugin.definition.priority).is_equal_to(95)
 
 
 def test_definition_timeout(cargo_audit_plugin: CargoAuditPlugin) -> None:

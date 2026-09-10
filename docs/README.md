@@ -14,6 +14,7 @@ configuring, and contributing to Lintro.
 
 - **[Getting Started](getting-started.md)** - Installation, first steps, and basic usage
 - **[Configuration Guide](configuration.md)** - Tool configuration and customization
+- **[Watch Mode](watch-mode.md)** - Continuous linting on file changes
 - **[AI Features](ai-features.md)** - AI-powered summaries, explanations, and fix
   suggestions
 - **[AI review transports](ai-review-transports.md)** - API vs CLI profiles,
@@ -165,6 +166,7 @@ lintro check --fix
 | **Markdownlint-cli2** | Markdown         | Style Checking          | [Config Guide](configuration.md#markdownlint-cli2-configuration) |
 | **Actionlint**        | GitHub Workflows | Workflow Linting        | [Analysis](tool-analysis/actionlint-analysis.md)                 |
 | **Hadolint**          | Dockerfile       | Best Practices          | [Config Guide](configuration.md#hadolint-configuration)          |
+| **buf**               | Protobuf         | Lint & Format           | [Analysis](tool-analysis/buf-analysis.md)                        |
 
 ## 📋 Command Reference
 

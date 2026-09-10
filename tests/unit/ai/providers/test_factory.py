@@ -9,9 +9,9 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
-from lintro.ai.providers import anthropic as anthropic_mod
 from lintro.ai.providers import get_provider
-from lintro.ai.providers import openai as openai_mod
+from lintro.ai.providers.anthropic import provider as anthropic_mod
+from lintro.ai.providers.openai import provider as openai_mod
 
 
 def test_get_provider_anthropic():
@@ -36,6 +36,23 @@ def test_get_provider_unknown_raises():
     config = AIConfig.model_construct(provider="unknown")
     with pytest.raises(ValueError, match="Unknown AI provider"):
         get_provider(config)
+
+
+def test_get_provider_requires_explicit_provider() -> None:
+    """An enabled-but-unset provider fails with the three-way migration path."""
+    from lintro.ai.exceptions import AIProviderRequiredError
+
+    config = AIConfig(enabled=True, lint=True, review=False)
+    with pytest.raises(
+        AIProviderRequiredError,
+        match="ai.provider is required",
+    ) as exc_info:
+        get_provider(config)
+    message = str(exc_info.value)
+    assert_that(message).contains("`ai.provider` in config")
+    assert_that(message).contains("LINTRO_AI_PROVIDER")
+    assert_that(message).contains("--provider")
+    assert_that(message).contains("anthropic, cursor, openai")
 
 
 def test_get_provider_case_insensitive():
@@ -68,14 +85,14 @@ def test_get_provider_passes_model():
 def test_get_provider_cursor_trust_defaults_on() -> None:
     """Cursor provider trusts the workspace when AIConfig uses the default."""
     from lintro.ai.enums import AITransport
-    from lintro.ai.providers.cursor import CursorProvider
+    from lintro.ai.providers.cursor.provider import CursorProvider
 
     config = AIConfig(
         provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
         transport=AITransport.CLI,
     )
     with patch(
-        "lintro.ai.providers.cursor._find_agent",
+        "lintro.ai.providers.cursor.provider._find_agent",
         return_value="/usr/local/bin/agent",
     ):
         provider = get_provider(config)
@@ -85,17 +102,19 @@ def test_get_provider_cursor_trust_defaults_on() -> None:
 
 
 def test_get_provider_cursor_trust_opted_out() -> None:
-    """get_provider threads an explicit cursor_trust_workspace=False opt-out."""
+    """get_provider threads an explicit ``trust_workspace: false`` opt-out."""
     from lintro.ai.enums import AITransport
-    from lintro.ai.providers.cursor import CursorProvider
+    from lintro.ai.provider_enum import AIProvider
+    from lintro.ai.providers.cursor.config import CursorConfig
+    from lintro.ai.providers.cursor.provider import CursorProvider
 
     config = AIConfig(
         provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
         transport=AITransport.CLI,
-        cursor_trust_workspace=False,
+        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=False)},
     )
     with patch(
-        "lintro.ai.providers.cursor._find_agent",
+        "lintro.ai.providers.cursor.provider._find_agent",
         return_value="/usr/local/bin/agent",
     ):
         provider = get_provider(config)
@@ -105,14 +124,18 @@ def test_get_provider_cursor_trust_opted_out() -> None:
 
 
 def test_get_provider_anthropic_threads_cli_bare() -> None:
-    """get_provider threads ai.cli_bare into the Anthropic provider."""
+    """get_provider threads ai.providers.anthropic.cli_bare into the provider."""
     from lintro.ai.enums import AITransport, CliBareMode
-    from lintro.ai.providers.anthropic import AnthropicProvider
+    from lintro.ai.provider_enum import AIProvider
+    from lintro.ai.providers.anthropic.config import AnthropicConfig
+    from lintro.ai.providers.anthropic.provider import AnthropicProvider
 
     config = AIConfig(
         provider="anthropic",  # type: ignore[arg-type]  # Pydantic coerces str
         transport=AITransport.CLI,
-        cli_bare=CliBareMode.NEVER,
+        providers={
+            AIProvider.ANTHROPIC: AnthropicConfig(cli_bare=CliBareMode.NEVER),
+        },
     )
     with patch.object(
         anthropic_mod,

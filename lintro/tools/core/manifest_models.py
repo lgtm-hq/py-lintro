@@ -14,10 +14,13 @@ class ManifestTool:
         version: Recommended/tested version string.
         min_version: Hard minimum compatible version (required; set equal to
             version when compatibility range is not yet proven).
-        install_type: Installation method (pip, npm, binary, cargo, rustup).
+        install_type: Installation method (pip, npm, binary, cargo, gem,
+            rustup).
         install_package: Package name for pip/npm/cargo installs.
         install_bin: Binary name if different from package.
         install_component: Rustup component name (e.g., "clippy").
+        update_channel: Optional install-channel override when path heuristics
+            fail (e.g., "homebrew", "uv_tool").
         tier: Tool tier — "tools" (production) or "dev" (optional).
         category: Display grouping — "bundled", "npm", or "external".
         version_command: Command to check installed version.
@@ -32,6 +35,7 @@ class ManifestTool:
     install_package: str | None = None
     install_bin: str | None = None
     install_component: str | None = None
+    update_channel: str | None = None
     tier: str = "tools"
     category: str = "external"
     version_command: tuple[str, ...] = field(default_factory=tuple)

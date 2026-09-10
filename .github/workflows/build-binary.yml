@@ -34,7 +34,7 @@ permissions: {}
 # two stay equal. Artifact URL lookup may still consult the manifest, so the
 # continue-on-error retry below remains as belt-and-suspenders (#1487, #1513).
 env:
-  UV_VERSION: '0.12.5'
+  UV_VERSION: '0.12.11'
 
 jobs:
   get-release-info:
@@ -80,7 +80,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -137,7 +137,7 @@ jobs:
         # Resolved tag is set for both workflow_call and workflow_dispatch.
         if: needs.get-release-info.outputs.release_tag != ''
         # yamllint disable-line rule:line-length
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: dist/lintro.1
@@ -155,6 +155,10 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      # #2435: the reuse check lists and downloads this run's own sha256
+      # artifact (including earlier attempts) to decide whether the asset on
+      # the release is one this job already verified.
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -168,7 +172,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -184,6 +188,8 @@ jobs:
             releases.astral.sh:443
             uploads.github.com:443
             nuitka.net:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -220,11 +226,37 @@ jobs:
         run: |
           uv sync --group build --no-default-groups
 
+      # #2435: a rerun of this job (the supported npm backfill path, see
+      # docs/npm-distribution.md) used to rebuild from scratch even when the
+      # release already carried this job's own verified binary. The step below
+      # reuses that asset when its SHA256 matches the sha256 artifact this run
+      # produced, and every step it makes redundant is gated on its output. It
+      # also promotes an `<asset>.new` left behind by a swap that was killed
+      # between its delete and its rename, so that window costs no rebuild.
+      - name: Check for reusable release asset
+        id: reuse
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/reuse_release_asset.sh
+          "$RELEASE_TAG"
+          "lintro-macos-$BUILD_ARCH"
+          "sha256-$BUILD_ARCH"
+          "dist/nuitka/lintro-macos-$BUILD_ARCH"
+
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
+        # #2435: this step also tees a baseline snapshot into its own log, the
+        # part that survives a runner kill. The interval samples still reach a
+        # human only via Stop memory sampler's replay or the failure artifact.
         run: scripts/ci/memory-sampler.sh start memory-sampler.log memory-sampler.pid
 
       - name: Build binary
+        # #2435: skipped when the release already carries this job's verified
+        # binary.
+        if: steps.reuse.outputs.reuse != 'true'
         timeout-minutes: 25
         # `--no-default-groups` is required here too: `uv run` re-syncs the
         # environment with the default groups and would reinstall `dev`.
@@ -257,11 +289,17 @@ jobs:
           retention-days: 7
 
       - name: Verify binary
+        # Safe to skip on reuse: the checksum that authorised the reuse came
+        # from a same-run artifact written only after this step and the smoke
+        # test passed on an earlier attempt of this same job.
+        if: steps.reuse.outputs.reuse != 'true'
         run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
       # #2006: --version/--help pass even when the frozen binary ships an empty
       # tool registry. This asserts the registry is actually populated.
       - name: Smoke-test tool registry
+        # Same reuse invariant as Verify binary above.
+        if: steps.reuse.outputs.reuse != 'true'
         # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
         # the cold onefile extraction each of the three invocations may pay.
         timeout-minutes: 20
@@ -272,6 +310,9 @@ jobs:
       # (same hardening as the Build binary step above).
       - name: Finalize binary
         id: sha256
+        # On reuse the asset is already at the finalized path and its checksum
+        # comes from the reuse step's output.
+        if: steps.reuse.outputs.reuse != 'true'
         env:
           BUILD_ARCH: ${{ matrix.arch }}
         run: >-
@@ -280,6 +321,11 @@ jobs:
           "dist/nuitka/lintro-macos-$BUILD_ARCH"
           "$BUILD_ARCH"
 
+      # Ungated on reuse (#2435) so a later attempt still finds the binary and
+      # its checksum among the run artifacts. No `overwrite:` needed: artifacts
+      # are per-attempt, so re-uploading a name an earlier attempt already used
+      # is not a conflict — run 33996465351 carries two `sha256-linux-x64`
+      # artifacts, one per attempt, and the reuse check reads them by run id.
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -289,7 +335,10 @@ jobs:
 
       - name: Save SHA256 to file
         env:
-          SHA256: ${{ steps.sha256.outputs.sha256 }}
+          # #2435: Finalize binary is skipped on reuse, so fall back to the
+          # checksum the reuse step verified against the release asset.
+          # yamllint disable-line rule:line-length
+          SHA256: ${{ steps.sha256.outputs.sha256 || steps.reuse.outputs.sha256 }}
           BUILD_ARCH: ${{ matrix.arch }}
         run: |
           echo "$SHA256" > "sha256-$BUILD_ARCH.txt"
@@ -303,13 +352,21 @@ jobs:
 
       - name: Upload to release
         # Resolved tag is set for both workflow_call and workflow_dispatch.
-        if: needs.get-release-info.outputs.release_tag != ''
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
-        with:
-          tag_name: ${{ needs.get-release-info.outputs.release_tag }}
-          files: dist/nuitka/lintro-macos-${{ matrix.arch }}
+        # #2435: upload-then-swap instead of the action's overwrite_files,
+        # which deletes the published asset before uploading its replacement.
+        # Skipped entirely when the asset being uploaded is the one already
+        # on the release.
+        if: >-
+          needs.get-release-info.outputs.release_tag != '' &&
+          steps.reuse.outputs.reuse != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/upload_release_asset.sh
+          "$RELEASE_TAG"
+          "dist/nuitka/lintro-macos-$BUILD_ARCH"
 
   build-linux:
     name: Build Linux Binary
@@ -322,6 +379,10 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      # #2435: the reuse check lists and downloads this run's own sha256
+      # artifact (including earlier attempts) to decide whether the asset on
+      # the release is one this job already verified.
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -333,8 +394,26 @@ jobs:
 
     steps:
       - name: Harden Runner
+        # GitHub's own hosted-runner control plane under githubapp.com: the
+        # hosted-compute-watchdog-prod-* and hosted-compute-request-
+        # orchestrator-prod-* shards (iad-01, iad-02, eus-01, eus-02 -- every
+        # shard observed in this repo's job logs) and the results receiver.
+        # The x64 job was reclaimed mid-run on 7 of 7 attempts for v0.147.7
+        # ("The runner has received a shutdown signal", 15-20 minutes in)
+        # while this list denied them, while the arm64 sibling -- same source,
+        # same runner class -- has never been observed dying that way (#1761,
+        # #2339). Exact hosts rather than the `*.githubapp.com:443` wildcard
+        # the docker-ci/ai-review jobs carry (#2353), by owner decision. If
+        # GitHub adds a shard the kills return; the trigger is the kill itself
+        # (a "shutdown signal" 15-20 minutes into a single matrix leg), not a
+        # named host -- a reclaimed runner does not reliably publish its
+        # harden-runner summary. The agreed procedure on that signal is an
+        # immediate issue and a next PR reverting this job to the wildcard
+        # (#2488 tracks narrowing the others). macOS legs are out of scope:
+        # never observed reclaimed, and harden-runner enforces differently
+        # there.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -350,6 +429,17 @@ jobs:
             releases.astral.sh:443
             uploads.github.com:443
             nuitka.net:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            hosted-compute-watchdog-prod-iad-01.githubapp.com:443
+            hosted-compute-watchdog-prod-iad-02.githubapp.com:443
+            hosted-compute-watchdog-prod-eus-01.githubapp.com:443
+            hosted-compute-watchdog-prod-eus-02.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-iad-01.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-iad-02.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-eus-01.githubapp.com:443
+            hosted-compute-request-orchestrator-prod-eus-02.githubapp.com:443
+            actions-results-receiver-production.githubapp.com:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -383,11 +473,32 @@ jobs:
         run: |
           uv sync --group build --no-default-groups
 
+      # #2435: see the macOS job — the reuse check and the `if:` guards it
+      # feeds are kept identical across the two jobs.
+      - name: Check for reusable release asset
+        id: reuse
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/reuse_release_asset.sh
+          "$RELEASE_TAG"
+          "lintro-linux-$BUILD_ARCH"
+          "sha256-linux-$BUILD_ARCH"
+          "dist/nuitka/lintro-linux-$BUILD_ARCH"
+
       - name: Start memory sampler
         # #1707: background vmstat/free sampler; log uploads on failure only.
+        # #2435: this step also tees a baseline snapshot into its own log, the
+        # part that survives a runner kill. The interval samples still reach a
+        # human only via Stop memory sampler's replay or the failure artifact.
         run: scripts/ci/memory-sampler.sh start memory-sampler.log memory-sampler.pid
 
       - name: Build binary
+        # #2435: skipped when the release already carries this job's verified
+        # binary.
+        if: steps.reuse.outputs.reuse != 'true'
         timeout-minutes: 25
         run: |
           HOST_ARCH="${{ matrix.arch == 'x64' && 'x86_64' || 'arm64' }}"
@@ -416,11 +527,17 @@ jobs:
           retention-days: 7
 
       - name: Verify binary
+        # Safe to skip on reuse: the checksum that authorised the reuse came
+        # from a same-run artifact written only after this step and the smoke
+        # test passed on an earlier attempt of this same job.
+        if: steps.reuse.outputs.reuse != 'true'
         run: scripts/build/verify_built_binary.sh dist/nuitka/lintro
 
       # #2006: --version/--help pass even when the frozen binary ships an empty
       # tool registry. This asserts the registry is actually populated.
       - name: Smoke-test tool registry
+        # Same reuse invariant as Verify binary above.
+        if: steps.reuse.outputs.reuse != 'true'
         # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
         # the cold onefile extraction each of the three invocations may pay.
         timeout-minutes: 20
@@ -430,6 +547,8 @@ jobs:
       # through env so the two never drift apart.
       - name: Finalize binary
         id: sha256
+        # See the macOS job.
+        if: steps.reuse.outputs.reuse != 'true'
         env:
           BUILD_ARCH: ${{ matrix.arch }}
         run: >-
@@ -438,6 +557,8 @@ jobs:
           "dist/nuitka/lintro-linux-$BUILD_ARCH"
           "linux-$BUILD_ARCH"
 
+      # Ungated on reuse and `overwrite:`-free for the same reason as the macOS
+      # job above (#2435).
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -447,7 +568,9 @@ jobs:
 
       - name: Save SHA256 to file
         env:
-          SHA256: ${{ steps.sha256.outputs.sha256 }}
+          # #2435: see the macOS job.
+          # yamllint disable-line rule:line-length
+          SHA256: ${{ steps.sha256.outputs.sha256 || steps.reuse.outputs.sha256 }}
         run: |
           echo "$SHA256" > sha256-linux-${{ matrix.arch }}.txt
 
@@ -460,14 +583,18 @@ jobs:
 
       - name: Upload to release
         # Resolved tag is set for both workflow_call and workflow_dispatch.
-        if: needs.get-release-info.outputs.release_tag != ''
-        # yamllint disable-line rule:line-length
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
-        with:
-          tag_name: ${{ needs.get-release-info.outputs.release_tag }}
-          files: dist/nuitka/lintro-linux-${{ matrix.arch }}
+        # #2435: see the macOS job — upload-then-swap, skipped on reuse.
+        if: >-
+          needs.get-release-info.outputs.release_tag != '' &&
+          steps.reuse.outputs.reuse != 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: >-
+          scripts/build/upload_release_asset.sh
+          "$RELEASE_TAG"
+          "dist/nuitka/lintro-linux-$BUILD_ARCH"
 
   create-universal-binary:
     name: Create Universal Binary
@@ -484,7 +611,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -495,17 +622,28 @@ jobs:
             uploads.github.com:443
 
       # Needed for scripts/build/create_universal.sh and the binary smoke
-      # test (scripts/ci/smoke-test-binary.py reads the generated builtin
-      # index under lintro/plugins). The codeload /
-      # objects.githubusercontent.com endpoints above are what actions/checkout
-      # fetches through, and match the other sparse-checkout jobs here.
+      # test. smoke-test-binary.py reads lintro/plugins/_builtin_index.py,
+      # which is no longer committed (#2180), so the checkout carries the
+      # builtin-index generator's inputs instead: lintro/tools (the per-tool
+      # packages it scans) and the lintro_build package (the
+      # implementation). The codeload / objects.githubusercontent.com
+      # endpoints above are what actions/checkout fetches through, and match
+      # the other sparse-checkout jobs here.
       - name: Checkout scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           sparse-checkout: |
             scripts
             lintro/plugins
+            lintro/tools
+            lintro_build
           persist-credentials: false
+
+      # #2202: regenerate the builtin index the smoke test reads; the file
+      # stopped being committed in #2180 and this job never builds the
+      # package, so nothing else generates it. Stdlib-only and offline.
+      - name: Generate builtin tool index
+        run: python3 scripts/ci/generate-builtin-tool-index.py
 
       - name: Download arm64 binary
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -546,7 +684,7 @@ jobs:
       - name: Upload to release
         # Resolved tag is set for both workflow_call and workflow_dispatch.
         if: needs.get-release-info.outputs.release_tag != ''
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.get-release-info.outputs.release_tag }}
           files: binaries/lintro-macos-universal
@@ -575,7 +713,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -624,7 +762,7 @@ jobs:
 
       - name: Dispatch formula update
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36 # v0.69.8
         with:
           formula: lintro
           version: ${{ steps.version.outputs.version }}

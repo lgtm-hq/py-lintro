@@ -163,10 +163,10 @@ and cost-budget controls.
 > ```
 >
 > Why: advisory findings are opinions produced by a nondeterministic model. Letting them
-> share `chk` meant two identical runs could disagree, the `--fail-under` health-score
-> gate could move on model mood rather than on regressions, and every contributor paid
-> API latency and dollars on a command meant to be reflexive and offline. Your
-> `tools.idiom-review` config section is unchanged — only the invoking verb moved.
+> share `chk` meant two identical runs could disagree, its reported issue counts could
+> move on model mood rather than on regressions, and every contributor paid API latency
+> and dollars on a command meant to be reflexive and offline. Your `tools.idiom-review`
+> config section is unchanged — only the invoking verb moved.
 
 Advisory tools under `lintro review`:
 
@@ -179,8 +179,11 @@ Advisory tools under `lintro review`:
 | `--tool-options`           | `tool:option=value` overrides, as in `chk`                           |
 
 Advisory findings never affect the exit code unless `--fail-on-findings` is passed, and
-they never contribute to the `chk` health score. With `--output json`, they appear under
-an additive `advisory` key so existing consumers of the review JSON keep working.
+they never contribute to the `chk` issue counts. One exception: a round short-circuited
+by the [convergence stop rule](#review-convergence-deterministic-re-review-stop) returns
+before the advisory tools run at all, so `--fail-on-findings` is inert on that
+invocation. With `--output json`, they appear under an additive `advisory` key so
+existing consumers of the review JSON keep working.
 
 `idiom-review` offers two modes:
 
@@ -312,6 +315,465 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### When inline comments cannot be posted
+
+A finding always has a surface. When GitHub refuses the inline review batch — or a
+finding anchors to a line that is not in the PR's diff — the affected findings are
+folded into the sticky comment in full, and the sticky says which of the two happened:
+
+- `GitHub rate limit (HTTP <status>)` — the token was throttled: any HTTP 429, or a 403
+  whose message names a rate limit (primary API quota or the secondary content-creation
+  limit); the next round retries posting the comments and may be throttled again.
+- `some findings map to no line in this PR's diff (HTTP 422)` — GitHub rejected a
+  comment's anchor (a 422 whose errors name `line` or `position`). The same phrase
+  without an `HTTP` suffix marks findings lintro itself could not map to a diff line
+  before posting; no request was rejected in that case.
+- `this token is not permitted to post reviews on this PR (HTTP 403)` — a 401 or 403
+  whose message names no rate limit; the status shown is the one GitHub returned.
+- `the inline review comments could not be posted` — anything else, including a request
+  that never reached GitHub.
+
+The cause is classified from the status and message GitHub actually returned, so a
+throttled round is never reported as a diff-mapping problem. When GitHub rejects the
+inline POST, the CI job summary reads the same classification and says the findings
+reached the sticky comment only, instead of claiming they were posted inline. Exit codes
+are unaffected: the review still ran.
+
+### Suggested-patch validation
+
+A GitHub `suggestion` block is a one-click commit, so every one is checked against the
+real file at HEAD before any surface renders it — the terminal panels, the JSON payload,
+and `--post` alike. The file is read at the head revision (locally, or through `gh` in
+`--pr` mode); the PR tree is never checked out or executed.
+
+- **Exact match** — the suggestion is posted as-is.
+- **Drifted but unique** — the change's `before` block occurs exactly once elsewhere in
+  the file, so the hunk and the comment anchor are re-anchored to it.
+- **Anything else** — the one-click patch is withheld. The finding keeps its prose and
+  its described `fix`, and is tagged with why: `stale_anchor` (the block is not there),
+  `ambiguous_anchor` (it is there more than once), or `file_missing` (the file is
+  unreadable at HEAD).
+
+Drops are never silent. Terminal output marks each affected finding and prints a run
+total, `--output json` carries `suggestions_dropped` plus a
+`suggestions_dropped_by_reason` tally alongside a per-finding `suggestion_dropped` tag,
+and the sticky comment states the count and reasons.
+
+### Review coverage completeness
+
+A capped CLI review is **not a guaranteed full finding set**. Under `--transport cli`,
+every chunk prompt carries the `ai.cli_max_findings_per_call` ceiling, and a chunk that
+still exhausts the provider's output-token cap is retried once at a tighter ceiling. In
+both cases every chunk is still reviewed — but the model was told to stop at N findings,
+so lower-severity issues beyond the cap may exist and go unreported.
+
+That is recorded and surfaced rather than left silent:
+
+- `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
+  event, each with a `reason` (`findings_cap_applied`, `output_exhaustion_retried`, or —
+  when the opt-in pass below ran — `synthesis_truncated` / `synthesis_failed`), the
+  `chunk_index`, and the `findings_cap` that was in force. The synthesis reasons carry a
+  placeholder `chunk_index` of `-1` and a placeholder `findings_cap` of `0`, and are
+  excluded from `findings_cap_applied`, which only ever reports a real per-call ceiling.
+  A chunk that ran under the cap and then retried after output exhaustion contributes
+  two entries with the same `chunk_index`. `findings_coverage_complete` is the derived
+  "no coverage degradation of any kind" boolean: **any** entry in
+  `coverage_degradations` makes it false, including a synthesis pass that was truncated
+  or did not complete. `findings_cap_applied` is the narrower signal and stays `null`
+  for a run degraded only by the synthesis pass, because no per-call ceiling was in
+  force.
+- The terminal prints a `⚠ Coverage limited` banner under the run header.
+- The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
+  same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
+- `--output json` exposes `findings_coverage_complete`, `coverage_degradations`,
+  `findings_cap_applied`, and `output_exhaustion_retried` at the payload root (and
+  `coverage_degradations` inside `metadata`). The MCP `lintro_review` payload carries
+  all four on its `run` block and hoists only `findings_coverage_complete` to the
+  tool-result root, next to `coverage`.
+
+**Coverage limitation is a separate axis from `partial`.** `partial` / `stopped_reason`
+mean the run _stopped early_ and planned review work was left undone (built-in chunks or
+custom-agent passes, on a cost cap or an interrupt). A findings-cap run finished its
+planned work, just not at full depth, so it is reported as its own signal with equal
+prominence instead of being folded into `partial`. A run can be both. It is also
+distinct from `coverage.complete` in the JSON payload, which says whether every eligible
+file was covered at HEAD.
+
+An uncapped, complete run renders exactly as it always has — no banner, no warning row,
+`findings_coverage_complete: true`.
+
+This is distinct from the hard `cli_max_diff_bytes` ceiling: a diff over that limit is
+refused outright with `DIFF_TOO_LARGE` and is a hard failure, not a degraded success.
+
+### Cross-chunk contradiction guard
+
+A chunked review shows each chunk the _other_ files at the base commit. When a source
+file and its test, or a module and its importer, land in different chunks, a chunk can
+report in good faith that the other side "was never updated" — and a phantom P1 like
+that is enough to render the whole PR blocked.
+
+A deterministic guard runs at finalize, next to the P1 evidence gate, and never asks the
+model anything. It fires only when both halves hold for one finding:
+
+- its own text (title, description, cause, failure scenario) carries an explicit
+  unchanged claim — `is untouched`, `was never updated`, `is not in the diff`,
+  `at the base revision`, and the rest of the phrase set in
+  `lintro/ai/review/severity_gate.py`. Incomplete-update wording such as
+  `is not updated to accept the new flag` or `was not changed to handle it` is
+  deliberately not a claim: that is a real finding about a changed file; **and**
+- that text names a file the PR actually changed, other than the finding's own file.
+  Matching folds case, `\` to `/`, and `-` to `_`, and falls back to a path-suffix or
+  basename match, so `migrate-docs-content.py` still matches
+  `scripts/migrate_docs_content.py`.
+
+Both halves must sit in the same sentence of the same field. Within that sentence,
+co-occurrence is enough: the claim is not parsed for which file it predicates, so a
+sentence that mixes an unchanged claim about one file with a changed file it also names
+is treated as a contradiction. That is deliberate; the cost of a false positive is a
+visible one-band downgrade, never a dropped finding. A bare basename such as `utils.py`
+only counts when exactly one changed file has that name; a directory-qualified path must
+match the changed path or be a `/`-delimited suffix of it.
+
+On a hit the finding is tagged
+`cross_chunk_contradiction: unchanged_file_claim_downgraded` (or
+`unchanged_file_claim_tagged` when it was already P3, which has no lower band) and moved
+down one severity band (P1 → P2, P2 → P3, P3 stays P3 and is tagged). Nothing is
+dropped: the prose is kept, and a downgraded P1 can no longer drive `Blocked` on its
+own. Questions are never touched.
+
+The pairing is deliberate. A missed contradiction only leaves a finding at its reported
+severity, while a false positive would quietly demote a real defect — so the guard
+prefers false negatives, and an ordinary cross-file reference with no unchanged claim
+never fires it.
+
+The downgrade is visible everywhere: the terminal prints the count under the findings
+header, `--output json` carries `cross_chunk_contradictions` at the payload root plus a
+per-finding `cross_chunk_contradiction` tag, and the GitHub review body (in **📊 Run
+stats**) and the sticky comment share one note. A run the guard did not touch renders
+exactly as before on the terminal and the GitHub surfaces; the JSON keys are always
+present, carrying `0` at the root and `null` per finding.
+
+Prevention runs ahead of that downgrade. Every chunk prompt now carries the **whole**
+PR's changed-file list, not just the chunk's own slice, with the chunk's files marked
+`— **(this chunk)**` and a note that the unmarked files are on disk at the base commit
+and must never be read as this PR's state. CI checks the base out shallow, so a chunk
+that opened one of those files previously saw the pre-PR version and reported it as
+never updated; with the full list in the prompt, the contradiction that the guard
+downgrades mostly stops being written in the first place, for a few hundred extra tokens
+per chunk.
+
+### Cross-chunk synthesis (opt-in, off by default)
+
+A large diff is reviewed in chunks, and every chunk prompt carries only its own files'
+diff. A bug that exists solely in the _combination_ of two files split across chunks is
+therefore invisible to every chunk: a signature changed in `a.py` with a caller updated
+to the wrong shape in `b.py`, a config key renamed in one file with a consumer left
+reading the old name.
+
+`review.synthesis` adds one extra provider call per round, made after the chunk findings
+are merged, that sees the whole changed-file list, a compact per-chunk digest (which
+files each chunk reviewed, and one line per finding it already reported), and as much of
+the whole-PR diff as its token budget allows. It is asked for cross-file inconsistencies
+only, and is told never to restate a chunk finding.
+
+```yaml
+review:
+  synthesis:
+    enabled: false # default — see below
+    max_findings: 5 # ceiling on what the pass may add (int >= 1)
+```
+
+**It is off by default on purpose.** It costs one additional call per round, and the
+cost and wall-clock delta is measured through the phase timings above and the #2147
+cross-provider agreement matrix before it is switched on (#2269).
+
+How it behaves when enabled:
+
+- It runs only when the round actually used more than one chunk. A single-chunk run has
+  no boundary to reason across and is never charged for the extra call.
+- It runs only on the completed path. A round that already stopped on a cost cap, a
+  timeout, or an interrupt (`partial`) skips the pass entirely and spends no extra call,
+  so an enabled multi-chunk partial carries no `synthesis` block at all — the same shape
+  a disabled run has.
+- Its input is bounded by the same per-call diff-token budget the chunk calls were
+  planned against, and the budget covers the **whole prompt**: the changed-file list and
+  the per-chunk digest are rendered and charged first, and the diff takes only what they
+  leave over. A digest too large for the budget sheds its already-reported finding
+  lines, largest chunk first, before the per-chunk file lines are touched. If the whole
+  PR does not fit, the files that more than one chunk referenced go in first — those are
+  the seams the pass exists to inspect — and the rest follow in path order until the
+  budget is spent. The first file that does not fit ends the selection: a cross-chunk
+  file is cut into the remaining budget and kept, a non-priority one is dropped, and
+  nothing follows either way, so the diff never jumps out of one file mid-hunk into
+  another. Anything cut or dropped anywhere in the prompt — a shed digest line as much
+  as a dropped file — sets `truncated`. A large digest can therefore set it on a round
+  whose remaining budget still held the whole diff.
+- **Its findings pass every filter a chunk finding passes**, in this order: the **P1
+  evidence gate** (applied by the same finding parser as every chunk, so a phantom P1
+  with no failure mechanism comes back as a marked, non-blocking P2 rather than failing
+  the review); the run's **sensitivity policy**; and the **cross-chunk contradiction
+  guard** described above. The guard matters here for the phantom the evidence gate
+  cannot catch — the one that _does_ name a failure mechanism while claiming a file the
+  PR changed was never updated. The pass sees the whole PR, so a claim like that is
+  wrong here for the same reason it is wrong in a chunk: it comes back tagged
+  `cross_chunk_contradiction` and one band lower, so it cannot block on its own. What
+  survives is then deduplicated against the chunk findings by the same fingerprint the
+  state ledger uses and only then capped at `max_findings` — both on the guarded
+  severity, so a tagged finding cannot slip through a dedupe drop under a different
+  fingerprint, and a restatement can never consume a slot in the cap window that a novel
+  cross-file finding needed. A guarded synthesized finding is counted in the root
+  `cross_chunk_contradictions` like any other and keeps its `"origin": "synthesis"`. On
+  a resumed run they also go through the validation tail's **context-finding rejection**
+  alongside the chunk findings, so a synthesized finding on a path this round was not
+  asked to re-review is discarded; `findings_added` is recomputed from what survived
+  that tail, so the JSON block, the shared note, and the rendered finding list can never
+  disagree.
+- **A synthesis failure is never fatal.** A provider error, a timeout, a budget stop, an
+  interrupt that lands while the extra call is in flight, or an unreadable answer (not
+  JSON, not an object, or a `findings` value that is not a list) leaves the chunk
+  findings intact and marks the run's coverage degraded instead. A budget stop _during_
+  this call is recorded as `synthesis_failed` and does not make the run `partial`: every
+  chunk was already reviewed, so the only thing the cap cost was the optional sweep.
+
+What it adds to the surfaces:
+
+- A `synthesis` phase span in the timings block (see _Review phase timings_ below), so
+  its cost and wall-clock delta per round reads off the existing surfaces. The phase is
+  absent entirely from a round where the pass did not run.
+- One shared note on the terminal, the GitHub review body's run-stats block, and the
+  sticky's `This run` table, rendered only when the pass ran. Its wording follows the
+  outcome: `Cross-chunk synthesis added 1 cross-file finding.` is the one-finding form,
+  and the sentence also has plural (`added 3 cross-file findings`), empty
+  (`found no cross-file inconsistencies`), and failed
+  (`did not complete; the chunk findings below are unaffected`) forms, plus a trailing
+  sentence about the truncated input when the pass saw less than its whole input — the
+  per-chunk digest or the diff was cut, matching the `truncated` flag below.
+- A `synthesis` block at the root of `--output json`, present only when the pass ran:
+
+  ```json
+  {
+    "synthesis": {
+      "enabled": true,
+      "findings_added": 1,
+      "truncated": false,
+      "failed": false
+    }
+  }
+  ```
+
+  `findings_added` is what survived the cap and the dedupe, not what the model returned.
+  `truncated` means the pass saw less than its whole prompt input: the per-chunk digest
+  or the diff was cut. Its whole prompt (the changed-file list, the per-chunk digest,
+  and the diff together) is fitted to one token budget, so a large digest shrinks the
+  diff rather than overrunning the context window — and a digest large enough to shed
+  its own finding lines sets `truncated` even when the whole diff still fit. `failed`
+  distinguishes a pass that could not answer from one that found nothing, which
+  `findings_added: 0` alone cannot. The same block is on the MCP `lintro_review` payload
+  root, and MCP findings carry `"origin": "synthesis"` too.
+
+- `"origin": "synthesis"` on each finding the pass contributed, in the JSON `findings`
+  list and in the persisted state blob. The key is absent on every ordinary chunk
+  finding, so a run without the pass is byte-identical to one from before it existed.
+- A `synthesis_truncated` or `synthesis_failed` entry in `coverage_degradations` (see
+  _Review coverage completeness_ above) when the input was cut or the pass did not
+  complete. The run stays complete for the chunk findings either way.
+
+### Review convergence (deterministic re-review stop)
+
+File-level resume already spares a long-lived PR from re-reading files it has covered at
+HEAD, but every round still re-reports the findings that are already open and already on
+the board — so a PR that has stopped moving keeps paying for rounds that say the same
+thing. Convergence scoring ends that remaining treadmill in code — never by asking the
+model.
+
+Each round scores the findings still open after it:
+
+```text
+score = floor + (ceiling - floor) × confidence × likelihood
+```
+
+| Input                         | Value                                                   |
+| ----------------------------- | ------------------------------------------------------- |
+| Severity band (floor–ceiling) | P1 `6.0`–`10.0` · P2 `3.0`–`6.0` · P3 `0.5`–`3.0`       |
+| Confidence multiplier         | `high` 1.0 · `medium` 0.6 · `low` 0.3 (absent ⇒ medium) |
+| Likelihood (`evidence_style`) | `diff_local` 1.0 · `cross_file` 0.8 · `speculative` 0.4 |
+| Systemic categories           | `contract-drift`, `breaking-change` ⇒ likelihood 1.0    |
+
+The round score is the **sum over the open findings**. Questions are excluded, exactly
+as they are excluded from the readiness verdict. Resolved findings contribute nothing,
+so a round that fixed everything scores `0.00`. For calibration: one high-confidence P1
+read straight off the diff scores `10.00`; one low-confidence P3 scores `1.25`.
+
+Every input is a field lintro already parses, so the score is a pure function of the
+tracked findings — no wall clock, no randomness, no extra provider call. The score and
+its trajectory are persisted per round in the review state (schema v3) and rendered
+under the sticky comment's `Findings` heading:
+
+```text
+Convergence score 1.25 · trajectory 12.40 → 4.50 → 1.25
+```
+
+**The short-circuit contract.** With `review.convergence.threshold` set, the next round
+is skipped when the last `review.convergence.stable_rounds` recorded scores are all
+_strictly_ below the threshold. The decision is made from persisted state before the
+provider is constructed, so a converged round costs nothing:
+
+- No provider call, no findings, no state write — the round counter, the tracked
+  findings, and the carried coverage stay exactly as the last real round left them, and
+  the next round that does run resumes from there.
+- The sticky comment is re-rendered from the last good board with a
+  `🔁 Converged — converged at round N (score X < threshold Y)` banner.
+- `--output json` emits a distinct envelope
+  (`{"outcome": "converged", "converged": {...}}`) that carries no `readiness_verdict`,
+  no `findings`, and no `partial` key. `scripts/ci/classify_review_outcome.py` reports
+  it as its own **converged** outcome — never as "reviewed, found nothing". Exit 0
+  unless `converged.open_p1` is greater than zero, in which case the skip exits 1 and
+  the check goes red; see the readiness-gate bullet below for the single exit contract.
+- A `partial` or coverage-limited round can never count toward the streak: a low score
+  from a round that never looked properly is not evidence of stability. Rounds persisted
+  before scoring existed carry no score and are likewise not evidence.
+- Pending resume work blocks the skip too. If the last round left a model-flagged file
+  to re-read, or a group/import invalidation it never served, the next round runs even
+  when the score says quiet: a quiet score means the findings stopped moving, not that
+  every file has been looked at. Skipping would drop that queued work rather than defer
+  it.
+- The stop rule is a `lintro review` (CLI) feature. The MCP `lintro_review` tool does
+  not read `review.convergence.threshold` and always reviews — it is a single-shot tool
+  call with no persisted round history of its own to converge over.
+- A converged skip is a short-circuit of the whole command, not just the review round:
+  it returns before the advisory tools (`idiom-review` and friends) run, so
+  `--fail-on-findings` is inert on that invocation and never contributes to its exit
+  code. Nothing is inherited from the last round — a later invocation does not carry the
+  earlier one's advisory exit; the advisory tools simply do not run again until a round
+  does. Run `lintro review --full` to force the round and its advisory tail. This is
+  deliberate: the skip exists to spend nothing.
+- A converged skip reports the open P1 findings the last real round left in force, and
+  treats them exactly as a reviewed round does. The CLI exits 1 locally — the same exit
+  a round that found them produces — while the CI check stays **green** on both paths:
+  `scripts/ci/classify_review_outcome.py` reports P1 findings without reddening (see the
+  exit-code contract in `scripts/ci/run-ai-review.sh`), and a skipped round is never
+  stricter about the same findings than the round that found them. The readiness gate is
+  informational at check level, so the count is surfaced rather than hidden behind an
+  exit code: `converged.open_p1` in the JSON envelope,
+  `skipped: N open P1 findings remain` in the check headline, and the same sentence on
+  the sticky's converged banner.
+- `review.convergence.threshold` must be greater than zero; scores are non-negative, so
+  a zero threshold could never be met and is rejected by config validation.
+- `lintro review --full` is the _only_ thing that breaks the skip. The rule is evaluated
+  from persisted state, not from what triggered the run, so a `synchronize` push, a
+  manual `workflow_dispatch`, and a ChatOps re-review are all skipped just the same
+  unless the invocation passes `--full`. A dispatch that must review has to pass it
+  explicitly — this repo's own dogfood wrapper does not.
+- **A skip persists across later pushes.** Because a skipped round writes no state, the
+  next push re-reads the same quiet trajectory and reaches the same decision: new
+  commits do not restart scoring, and the PR stays skipped until a `--full` run records
+  a fresh score. That is the intended behavior for a PR that has stopped moving, but it
+  does mean enabling a threshold is not a per-push setting — plan on `--full` being the
+  way back to reviewing.
+
+**Disabled by default.** With `threshold` unset — the default — behavior is identical to
+a build without the feature: every round reviews.
+
+```yaml
+# .lintro-config.yaml
+review:
+  convergence:
+    threshold: null # float > 0; null (default) disables the stop rule
+    stable_rounds: 2 # consecutive sub-threshold rounds required (int ≥ 1)
+```
+
+### Review readiness verdict
+
+The merge-readiness verdict is derived in code from open-finding severities (never asked
+of the model): any P1 → blocked; else any P2 → changes requested; else any P3 → nits
+only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
+otherwise flip that verdict run-to-run: borderline findings must be P3, and every
+finding `description` must name the rubric boundary it used.
+
+A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
+`--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
+Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
+
+### Review phase timings
+
+Every `lintro review` run is instrumented with per-phase wall-clock spans (monotonic
+clock, always on, no extra provider calls). They answer which phase dominates a slow
+review — provider latency, chunking, context collection, or parse/merge — so perf work
+is driven by measurement rather than guesswork.
+
+The terminal output carries a one-line summary under the header, ordered by descending
+duration so the dominant phase reads first:
+
+```text
+total 4m52s — provider 4m10s (7 chunks, max parallel 5, questions 30.2s), context 22.0s, merge 8.0s, resume 1.2s, chunking 0.4s, validation 0.1s
+```
+
+The same line is posted to GitHub as a `Timings:` note under the review body's run-stats
+block and the sticky comment's `This run` table (and in the run-mechanics footer of
+error stickies). `--output-format json` carries the full breakdown in a top-level
+`timings` block:
+
+```json
+{
+  "timings": {
+    "total_seconds": 292.0,
+    "max_parallel": 5,
+    "phases": [
+      { "name": "context_collection", "seconds": 22.0, "occurrences": 1 },
+      { "name": "chunking", "seconds": 0.4, "occurrences": 1 },
+      { "name": "resume_planning", "seconds": 1.2, "occurrences": 1 },
+      { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
+      { "name": "provider", "seconds": 250.0, "occurrences": 1 },
+      { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
+      { "name": "synthesis", "seconds": 12.4, "occurrences": 1 },
+      { "name": "validation", "seconds": 0.1, "occurrences": 1 }
+    ],
+    "chunks": [
+      {
+        "chunk_index": 0,
+        "files": 3,
+        "queued_seconds": 0.0,
+        "in_flight_seconds": 61.2,
+        "total_seconds": 61.2,
+        "failed": false
+      }
+    ]
+  }
+}
+```
+
+Reading the block:
+
+- `phases` is in first-occurrence order, so it reads chronologically. `provider` is an
+  envelope covering the whole chunk fan-out plus any custom-agent passes, matching the
+  `phase_timings.provider` key; phases that run once per chunk inside it
+  (`generated_questions` at depth ≥ 2, `adversarial` at depth ≥ 3) fold every occurrence
+  into one span, and `occurrences` says how many. Those nested spans are already counted
+  inside `provider`, and chunks run concurrently, so phase sums can exceed
+  `total_seconds` — the sum answers "how much provider work happened", `total_seconds`
+  answers "how long did the user wait". The summary line lists nested phases inside the
+  provider parenthetical for the same reason, e.g.
+  `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
+- `synthesis` is the optional cross-chunk pass (see _Cross-chunk synthesis_ above). It
+  is off by default and only runs on a multi-chunk round, so the phase is absent from
+  most runs; when it is absent the round made no extra call.
+- `validation` is the post-merge tail of the run: provider session teardown and progress
+  callbacks, then the pass that decides what survives (context-finding rejection,
+  coverage and resume bookkeeping, flag reconciliation). A slow session close therefore
+  shows up here rather than only in the total.
+- `metadata.duration_seconds` now equals `total_seconds`: it includes the caller's
+  context collection and the validation pass, where it previously started just before
+  the provider calls. Consumers comparing durations across versions should expect the
+  larger figure for the same provider work.
+- Each chunk splits its wall clock into `queued_seconds` (waiting on the concurrency
+  semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
+  capped by the effective concurrency ceiling, not by provider latency. That ceiling is
+  `min(chunk count, ai.max_parallel_calls)`, or 1 when a cost cap serializes chunk calls
+  (#2154); it is reported as `max_parallel`.
+- GitHub posting happens after the result is rendered, so it is outside the measured
+  window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
+  existing consumers.
+
 ## Configuration
 
 ### Basic Setup
@@ -428,10 +890,10 @@ ai:
 
   # Spend ceiling per AI session, in USD; the run stops
   # scheduling new calls once spent+reserved reaches the cap. null disables
-  # it. A cost cap does NOT force serial execution — chunk reviews still
-  # fan out up to max_parallel_calls. Trade-off: calls already in flight
-  # when the ceiling is hit still finish, so the final total may overshoot
-  # by up to (max_parallel_calls − 1) in-flight calls' cost.
+  # it. A cost cap serializes chunk reviews (one provider call at a time,
+  # #2154) so the resume queue cannot invert; the call already in flight
+  # when the ceiling is hit still finishes, so the final total may
+  # overshoot by up to one call's cost.
   # (float >= 0 | null, default: null)
   max_cost_usd: null
 
@@ -546,20 +1008,26 @@ ai:
   # Max cached entries before eviction. (int >= 1, default: 1000)
   cache_max_entries: 1000
 
-  # ── Anthropic CLI transport ───────────────────────────────────
-  # Whether to pass "--bare" to the "claude" binary. "--bare" drops the CLI's
-  # agentic tool surface but also disables OAuth session login, so it only
-  # authenticates against an API key. "auto" sends it only when a key is
-  # reachable (ANTHROPIC_API_KEY or an apiKeyHelper), so a subscription login
-  # keeps working. Override per run with LINTRO_CLI_BARE.
-  # (auto | always | never, default: auto)
-  cli_bare: auto
-
-  # ── Cursor workspace trust ──
-  # Choosing provider: cursor grants workspace trust (passes "--trust" to the
-  # agent CLI). Set false to restore the agent's interactive trust prompt.
-  # (bool, default: true)
-  cursor_trust_workspace: true
+  # ── Provider-specific settings ────────────────────────────────
+  # Knobs only one provider reads live under the provider that reads them,
+  # never in the shared namespace above. See "Provider-specific settings".
+  providers:
+    anthropic:
+      # Whether to pass "--bare" to the "claude" binary. "--bare" drops the
+      # CLI's agentic tool surface but also disables OAuth session login, so
+      # it only authenticates against an API key. "auto" sends it only when a
+      # key is reachable (ANTHROPIC_API_KEY or an apiKeyHelper), so a
+      # subscription login keeps working. Override per run with
+      # LINTRO_CLI_BARE. (auto | always | never, default: auto)
+      cli_bare: auto
+    cursor:
+      # Choosing provider: cursor grants workspace trust (passes "--trust" to
+      # the agent CLI). Set false to restore the agent's interactive trust
+      # prompt. (bool, default: true)
+      trust_workspace: true
+    # OpenAI reads no vendor-only setting today; the block is recognized so
+    # a future one has a home.
+    openai: {}
 
   # ── Advanced / trust (leave off unless you understand the risk) ──
   # Let the git-native (CLI transport) review path delegate diff retrieval to
@@ -568,6 +1036,104 @@ ai:
   # warning under "Data & Privacy". (bool, default: false)
   review_allow_unredacted_git_native: false
 ```
+
+### Provider-specific settings
+
+Settings every provider honours — `provider`, `transport`, `model`, `max_cost_usd`, the
+budget and output knobs — stay at the top of the `ai:` block. A setting **only one
+vendor understands** lives under that vendor instead:
+
+```yaml
+ai:
+  provider: cursor
+  transport: cli
+  providers:
+    cursor:
+      trust_workspace: false
+    anthropic:
+      cli_bare: never
+```
+
+Each block is declared and validated by the provider's own plugin
+(`lintro/ai/providers/<name>/config.py`), so switching providers never means re-reading
+which top-level keys still apply. Two kinds of key you might get wrong are treated
+differently, and the split is by **what** is unrecognized, not by which layer you wrote
+it on:
+
+- **An unknown field inside a block lintro knows** fails the config load on every layer,
+  including `.lintro-config.yaml`. The message names the full path you wrote —
+  `ai.providers.cursor.workspace_trust: Extra inputs are not permitted`. A vendor's own
+  block is a closed set of settings, so a typo there means the setting you wanted is not
+  applied, and failing loudly beats a silent default.
+- **A block for a provider lintro does not know** is dropped from a config file with a
+  warning naming it, matching how an unrecognized top-level `ai:` key is treated: a
+  stale `providers.<vendor>` block must not break every run. On an **override**
+  (`LINTRO_AI_PROVIDERS__…` or `--provider-option`) an unknown provider is a hard error
+  instead, because an override typed for one invocation that silently does nothing is
+  worse than one that stops the run.
+
+An empty block means "this provider, all defaults": `cursor:` with nothing under it and
+an empty `providers:` section are both accepted. Blocks for providers you are not using
+are kept but not applied; `lintro config` shows only the selected provider's block and a
+one-line count of the rest.
+
+Nested settings resolve on exactly the same layers as the shared ones — **flag > env >
+project config > user config > default** — and carry the same per-field provenance,
+which `lintro config` prints in parentheses.
+
+| Layer   | Spelling                                                                                                                                         |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Flag    | `lintro review --provider-option trust_workspace=false` (repeatable; applies to the provider the run resolves to)                                |
+| Env     | `LINTRO_AI_PROVIDERS__CURSOR__TRUST_WORKSPACE=false` — the prefix, the provider, and the field, upper-cased and joined by **double** underscores |
+| Project | `ai.providers.cursor.trust_workspace` in `.lintro-config.yaml`                                                                                   |
+| User    | the same key in the user-level `~/.lintro-config.yaml`, overridden per project                                                                   |
+
+> **One exception — `LINTRO_CLI_BARE`.** The Anthropic CLI transport reads
+> `LINTRO_CLI_BARE` itself, _after_ resolution, so it outranks every layer above for
+> `ai.providers.anthropic.cli_bare` — config, `LINTRO_AI_PROVIDERS__ANTHROPIC__CLI_BARE`
+> and `--provider-option cli_bare=…` alike. `lintro config` reports the resolved value
+> and its provenance, which is therefore not the value the run uses when that variable
+> is set. It predates the nested block
+> ([#1838](https://github.com/lgtm-hq/py-lintro/issues/1838)); no other provider setting
+> has a second path.
+
+The available settings today:
+
+| Setting           | Provider    | Values                      | Default |
+| ----------------- | ----------- | --------------------------- | ------- |
+| `trust_workspace` | `cursor`    | `true` / `false`            | `true`  |
+| `cli_bare`        | `anthropic` | `auto` / `always` / `never` | `auto`  |
+
+#### Migrating from the top-level spellings
+
+Before this layout both settings sat on the flat `ai:` block. The old spellings are
+still accepted **for one release** — they are mapped into the nested block and warned
+about once per run, naming the new path — and are then removed
+([#2464](https://github.com/lgtm-hq/py-lintro/issues/2464)). When both are present, the
+nested value wins.
+
+| Old                         | New                                   |
+| --------------------------- | ------------------------------------- |
+| `ai.cursor_trust_workspace` | `ai.providers.cursor.trust_workspace` |
+| `ai.cli_bare`               | `ai.providers.anthropic.cli_bare`     |
+
+### Cursor workspace trust
+
+> **Note — `ai.providers.cursor.trust_workspace` grants workspace trust by default.**
+>
+> Choosing `provider: cursor` is the consent, so lintro passes `--trust` to the `agent`
+> CLI by default rather than stalling on its interactive trust prompt. The residual risk
+> is that review content is untrusted and prompt-injectable: a `lintro review --pr N`
+> run embeds the diff of an arbitrary fork PR, and an injected instruction in that diff
+> is then read by an agent operating with full workspace trust. Lintro redacts secrets
+> and scans prompts for injection patterns, but neither is a guarantee. Set
+> `trust_workspace: false` to restore the agent's interactive trust prompt if you want
+> that posture; reviewing untrusted fork PRs with the Cursor provider is the case that
+> most warrants it.
+
+`ai.providers.cursor.trust_workspace` is the **only** default site for this flag:
+`CursorProvider` takes it as a required argument, and the Cursor plugin always forwards
+the resolved block value.
 
 ### Config Defaults for CLI Flags
 
@@ -585,7 +1151,56 @@ CLI flags always override config: passing `--fix` on the CLI turns it on even if
 
 ### Providers
 
-#### [Anthropic](https://docs.anthropic.com/) (default)
+Every provider fact below — defaults, transports, the API-key variable, the CLI binary
+and the per-model prices — is declared once, in that provider's plugin metadata
+(`lintro/ai/providers/<name>/metadata.py`), and read everywhere else through
+`lintro.ai.registry`. The two tables below are snapshots of that metadata, asserted cell
+by cell by `tests/unit/ai/providers/test_docs_provider_table.py`, so they cannot drift
+from the code. There is no code generator, so updating them is two steps: change the
+metadata, then run that test and paste the SNAPSHOT block it prints between the markers.
+CI runs the same test, so a metadata change without the paste-back fails the build.
+
+<!-- BEGIN SNAPSHOT: provider-table -->
+
+| Provider  | Default model       | API key env         | Transports             | CLI binary |
+| --------- | ------------------- | ------------------- | ---------------------- | ---------- |
+| Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | `api` (default), `cli` | `claude`   |
+| OpenAI    | `gpt-4o`            | `OPENAI_API_KEY`    | `api` (default), `cli` | `codex`    |
+| Cursor    | `auto`              | `CURSOR_API_KEY`    | `cli` (default)        | `agent`    |
+
+<!-- END SNAPSHOT: provider-table -->
+
+`(default)` marks the transport lintro documents and `lintro doctor` steers you to. It
+is also the fallback for an omitted `ai.transport`: `api` for `anthropic` and `openai`,
+`cli` for `cursor`, the only transport Cursor serves (#2449). An explicit
+`transport: api` with `provider: cursor` still fails with
+`cursor provider only supports transport: cli`. Set `ai.transport` explicitly anyway.
+
+Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
+reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
+subscription); `estimate_cost_with_floor` gives those calls a non-zero estimate so a
+_flag or env_ cap can still stop the run. It does not make a committed YAML cap
+enforceable on an `unpriceable` transport — see the Cursor section below.
+
+<!-- BEGIN SNAPSHOT: model-pricing-table -->
+
+| Provider  | Model                       | Input  | Output |
+| --------- | --------------------------- | ------ | ------ |
+| Anthropic | `claude-sonnet-4-6`         | $3.00  | $15.00 |
+| Anthropic | `claude-sonnet-4-20250514`  | $3.00  | $15.00 |
+| Anthropic | `claude-haiku-4-5-20251001` | $0.80  | $4.00  |
+| Anthropic | `claude-opus-4-20250514`    | $15.00 | $75.00 |
+| OpenAI    | `gpt-4o`                    | $2.50  | $10.00 |
+| OpenAI    | `gpt-4o-mini`               | $0.15  | $0.60  |
+| OpenAI    | `gpt-4-turbo`               | $10.00 | $30.00 |
+| OpenAI    | `o1`                        | $15.00 | $60.00 |
+| OpenAI    | `o1-mini`                   | $1.10  | $4.40  |
+| Cursor    | `auto`                      | $0.00  | $0.00  |
+| Cursor    | `gpt-5.3-codex-fast`        | $0.00  | $0.00  |
+
+<!-- END SNAPSHOT: model-pricing-table -->
+
+#### [Anthropic](https://docs.anthropic.com/)
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -615,6 +1230,46 @@ ai:
 See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
 options and pricing.
 
+#### [Cursor](https://docs.cursor.com/en/cli/overview)
+
+```bash
+export CURSOR_API_KEY=...
+```
+
+```yaml
+ai:
+  provider: cursor
+  transport: cli # cursor is CLI-only
+  # model: auto  # default
+```
+
+The `agent` CLI bills against a Cursor subscription rather than per token, so its models
+are priced at zero above and the run's cost basis is `unpriceable`
+(`lintro/ai/transport.py`). What that means for `ai.max_cost_usd` depends on where the
+cap was set (`cap_is_enforced` in `lintro/ai/review/cost_cap.py`, #2154):
+
+- `--max-cost-usd` or `LINTRO_AI_MAX_COST_USD` — **enforced**. Operator intent for this
+  run enforces on every cost basis, and `estimate_cost_with_floor` is what gives the
+  budget a non-zero number to count against.
+- `ai.max_cost_usd` in committed YAML — **display-only for `lintro review`**. Committed
+  policy is transport-unaware and enforces only where real money is at stake (`billed`
+  or `estimated`), so `run_planning.py` builds the review's `CostBudget` with
+  `max_cost_usd=None` and the reported `$` figure is a shadow estimate, not a ceiling.
+  This is the review path only: the AI lint sessions behind `lintro chk` / `fmt` build
+  `CostBudget(max_cost_usd=ai_config.max_cost_usd)` unconditionally
+  (`lintro/ai/orchestrator.py`), so a YAML cap does stop those, priced off the same
+  fallback estimate.
+
+#### Measuring a provider choice
+
+Provider and model choice changes what a review finds. The offline eval in
+[`evals/review-efficacy/`](https://github.com/lgtm-hq/py-lintro/tree/main/evals/review-efficacy)
+runs the same corpus through every `(provider, model, transport)` config N times and
+reports each config's run-to-run noise floor, the cross-config finding and verdict
+agreement, and precision/recall against labeled findings. It is not part of the test
+suite and it spends real inference money behind a confirmation flag. The directory is
+pruned from the published distributions, so running it needs a repository checkout.
+
 ## Transports
 
 Lintro reaches a provider one of two ways, selected by `ai.transport`:
@@ -628,11 +1283,13 @@ Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures
 decision table and `ai.transports.*` profiles (#1923).
 
 `ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
-`ai.review` is enabled. Omitting it is not fatal: `lintro doctor` reports the config as
-incompatible, and the provider factory falls back to `api` so an existing run keeps
-working. That fallback exists for backward compatibility — legacy configs that set only
-`ai.enabled: true` (which implicitly switches `lint` and `review` on) rely on it — and
-is not something to depend on in new config.
+`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility, but the
+run still works: each provider plugin falls back to the transport it documents — `api`
+for `anthropic` and `openai`, `cli` for `cursor` (#2449). That fallback exists for
+backward compatibility — legacy configs that set only `ai.enabled: true` (which
+implicitly switches `lint` and `review` on) rely on it — and is not something to depend
+on in new config. Asking Cursor for `transport: api` explicitly is still fatal:
+`cursor provider only supports transport: cli`.
 
 `cursor` is a CLI-only provider: pair it with `transport: cli`. `anthropic` and `openai`
 support both transports.
@@ -647,17 +1304,24 @@ ai:
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
 config for a single invocation. `lintro review` also accepts `--provider`, `--model`,
-and `--max-cost-usd`. Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`,
-`LINTRO_AI_TRANSPORT`, `LINTRO_AI_ENABLED`, `LINTRO_AI_MAX_COST_USD`) apply to every AI
-surface and lose to CLI flags. There is no `--enabled` flag.
+`--review/--no-review`, `--max-cost-usd`, and the repeatable
+`--provider-option NAME=VALUE` for one `ai.providers.<provider>.<field>` setting.
+Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`, `LINTRO_AI_TRANSPORT`,
+`LINTRO_AI_ENABLED`, `LINTRO_AI_REVIEW`, `LINTRO_AI_MAX_COST_USD`, and
+`LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`) apply to every AI surface and lose to CLI
+flags. There is no `--enabled` flag.
 
 ### Invocation overrides
 
-Resolution order for `provider`, `model`, `transport`, `enabled`, and `max_cost_usd` is:
+Resolution order for `provider`, `model`, `transport`, `enabled`, `review`,
+`max_cost_usd`, and every `ai.providers.<provider>.<field>` setting is:
 
 ```text
-CLI flag > environment variable > .lintro-config.yaml > built-in default
+CLI flag > environment variable > .lintro-config.yaml > user ~/.lintro-config.yaml > built-in default
 ```
+
+One resolver produces all of it, so nested provider settings carry the same per-field
+provenance the shared ones do — see "Provider-specific settings".
 
 Overlays replace the active transport profile's cost cap
 (`ai.transports.api.max_cost_usd` / `ai.transports.cli.max_cost_usd_advisory`) as well
@@ -669,12 +1333,21 @@ as the legacy `ai.max_cost_usd` scalar.
 | `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`        | any model id; empty env falls through                                                        |
 | `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                               |
 | `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
-| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | Positive float = USD cap. Overlay **`0` = uncapped** (YAML `0` is $0). Invalid fails loud.   |
+| `LINTRO_AI_REVIEW` / `lintro review --review/--no-review` | `ai.review`       | `1`/`0`/`true`/`false`. The master `ai.enabled` switch must also be on.                      |
+| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | USD cap. Overlay `uncapped` lifts. Overlay `0` is rejected (YAML `0` is $0).                 |
+
+> **Do not copy a cost cap between the two surfaces.** `0` means different things in
+> YAML and in an overlay: `ai.max_cost_usd: 0` is a real $0 cap that stops the run on
+> the first budgeted call, while `LINTRO_AI_MAX_COST_USD=0` / `--max-cost-usd 0` is
+> rejected as ambiguous. Overlay `uncapped` lifts the ceiling outright; YAML `null` (or
+> omitting the key) only clears the legacy scalar; a transport-profile cap
+> (`ai.transports.api.max_cost_usd` or `ai.transports.cli.max_cost_usd_advisory`) still
+> applies.
 
 Unset variables are absent (fall through). Invalid values fail at resolution with a
 message naming the variable and the accepted values — they never silently use the config
 default. Review output annotates each resolved field with its source
-(`provider: cursor (env)`, `max cost: uncapped (env)`).
+(`provider: cursor (env)`, `Max cost: uncapped (env)`).
 
 ```bash
 # Try Cursor locally without dirtying .lintro-config.yaml
@@ -683,12 +1356,15 @@ LINTRO_AI_PROVIDER=cursor LINTRO_AI_TRANSPORT=cli lintro review --uncommitted
 # Same thing with flags (flags win if both are set)
 lintro review --uncommitted --provider cursor --model cursor-grok-4.6-high --transport cli
 
-# Lift the committed cost cap for this run (0 = uncapped, not a $0 cap)
-LINTRO_AI_MAX_COST_USD=0 lintro review --uncommitted
-lintro review --uncommitted --max-cost-usd 0
+# Run without a cost cap (`uncapped`; overlay `0` is an error)
+LINTRO_AI_MAX_COST_USD=uncapped lintro review --uncommitted
+lintro review --uncommitted --max-cost-usd uncapped
 
 # Kill switch for this environment
 LINTRO_AI_ENABLED=0 lintro check .
+
+# Enable diff review without changing the committed config
+LINTRO_AI_ENABLED=1 LINTRO_AI_REVIEW=1 lintro review --uncommitted
 ```
 
 ### Transport authentication
@@ -711,7 +1387,8 @@ else.
 >
 > `claude --bare` runs the CLI without its agentic tool surface, but it also disables
 > OAuth session login — in bare mode the binary authenticates only against an API key.
-> Lintro therefore chooses the flag per invocation (`ai.cli_bare`, default `auto`):
+> Lintro therefore chooses the flag per invocation (`ai.providers.anthropic.cli_bare`,
+> default `auto`):
 >
 > - An API key is reachable (`ANTHROPIC_API_KEY` is set, or a Claude Code settings file
 >   declares an `apiKeyHelper`) → lintro sends `--bare`, and the call bills that key
@@ -719,10 +1396,10 @@ else.
 > - No API key is reachable → lintro omits `--bare`, and the call uses your `claude`
 >   login session, billed to that subscription.
 >
-> Force either mode explicitly with `ai.cli_bare: always|never` in config, or with the
-> `LINTRO_CLI_BARE=always|never` environment variable (the environment wins). Codex and
-> Cursor are unaffected — both accept a CLI login session. See
-> [#1838](https://github.com/lgtm-hq/py-lintro/issues/1838).
+> Force either mode explicitly with `ai.providers.anthropic.cli_bare: always|never` in
+> config, or with the `LINTRO_CLI_BARE=always|never` environment variable (the
+> environment wins). Codex and Cursor are unaffected — both accept a CLI login session.
+> See [#1838](https://github.com/lgtm-hq/py-lintro/issues/1838).
 
 ### Failures are visible, never a green no-op
 
@@ -807,14 +1484,23 @@ developer's login.
   because `--bare` disables OAuth session login (see the `--bare` note above). Set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
   binary's egress and version predictable under an egress allowlist.
+- **Two more subscription lanes (#2472).** With provider `anthropic` (the default) and
+  the `ZAI_BASE_URL` variable set, the pinned `claude` binary is pointed at a gateway
+  (e.g. z.ai's GLM Coding Plan endpoint) via `ANTHROPIC_BASE_URL` +
+  `ANTHROPIC_AUTH_TOKEN` — the CLI transport forwards `os.environ` to the subprocess, so
+  no product code is involved. `LINTRO_AI_PROVIDER=openai` runs the version-pinned
+  `codex` CLI on a ChatGPT-plan session: the workflow resolves the Renovate-pinned
+  version, installs the CLI and decodes an org secret into `~/.codex/auth.json` (Codex
+  has no OAuth-token env var; `CODEX_API_KEY` is metered API billing, not the
+  subscription) before the review step; with the secret unset the run fails visibly at
+  the credential gate.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing
-  note above). Setting a cap does **not** serialize provider calls: review chunks still
-  fan out up to `ai.max_parallel_calls`. In-flight calls that started before the ceiling
-  was hit still finish, so the session may overshoot by up to (`max_parallel_calls` − 1)
-  calls' cost. Review metadata records per-phase timings (`context_collection`,
-  `provider`, `parse_merge`) so wall-clock regressions are visible in JSON / MCP output.
+  note above). Setting a cap serializes chunk reviews to one provider call at a time
+  (#2154), so the session can overshoot by at most the call in flight when the ceiling
+  is hit. Review metadata records per-phase timings (see "Review phase timings" above)
+  so wall-clock regressions are visible in JSON / MCP output.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
   only — no credential, no quota — on every PR. The real-invocation tier spends quota
   and runs weekly, gated behind the free tier.
@@ -1142,6 +1828,11 @@ Raw provider request/response traffic can be written as NDJSON under
 - Payloads are secret-redacted before write; API keys and auth headers are never logged
 - Older transcript files are pruned (default: keep last 10 runs via
   `ai.transcript_retention`)
+- Files are named `<UTC timestamp>-<label>.ndjson`. The label is `review` for a review
+  (CLI or MCP) and `ai` for everything else — lintro states it from the call site rather
+  than guessing it from the command line, so the label never drifts behind the CLI
+  surface. Every event payload already carries the provider, transport and direction, so
+  the label is cosmetic.
 
 ### Important notes
 

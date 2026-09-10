@@ -1,0 +1,60 @@
+"""Canary module for the mock-only scanner (#2375).
+
+Stored with a ``.py.txt`` suffix so pytest does not collect it and the
+scanners' live ``rglob("*.py")`` sweep of ``tests/`` never sees it. The
+positive-control test copies it into ``tmp_path`` as a real module.
+"""
+
+from unittest.mock import MagicMock
+
+import pytest
+from assertpy import assert_that
+
+
+def test_canary_direct_mock_assert() -> None:
+    """Every assertion is a mock helper call, so this must be reported."""
+    collaborator = MagicMock()
+    collaborator("payload")
+    collaborator.assert_called_once()
+
+
+def test_canary_tainted_local() -> None:
+    """Call bookkeeping laundered through a local must still be reported."""
+    collaborator = MagicMock()
+    collaborator("payload")
+    observed = collaborator.call_count
+    assert_that(observed).is_equal_to(1)
+
+
+def test_canary_observable_result() -> None:
+    """Asserting on a returned value is real, so this must not be reported."""
+    collaborator = MagicMock(return_value="ok")
+    assert_that(collaborator("payload")).is_equal_to("ok")
+
+
+def test_canary_raises_is_a_real_assertion() -> None:
+    """``pytest.raises`` counts as an assertion, so this must not be reported."""
+    collaborator = MagicMock(side_effect=ValueError("boom"))
+    with pytest.raises(ValueError):
+        collaborator("payload")
+    collaborator.assert_called_once()
+
+
+class _Holder:
+    """Plain object the attribute-assignment canary writes onto."""
+
+    other: int = 3
+
+
+def test_canary_attribute_assignment_does_not_taint_the_object() -> None:
+    """Assigning bookkeeping to an attribute must not taint the object itself.
+
+    ``ast.walk`` over the assignment target also visits the ``Load``-context
+    ``holder``. Tainting it would misclassify the real assertion below, so
+    this canary must stay unreported (#2375).
+    """
+    collaborator = MagicMock()
+    collaborator("payload")
+    holder = _Holder()
+    holder.captured = collaborator.call_args
+    assert_that(holder.other).is_equal_to(3)

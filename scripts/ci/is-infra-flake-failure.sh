@@ -13,6 +13,10 @@
 #   UPSTREAM_CONCLUSION - Job conclusion when distinct from result
 #   STATUS_OUTPUT       - Upstream lint status output (passed, failed, or empty)
 #   EXIT_CODE_OUTPUT    - Upstream lint exit code (0, 1, 143, or empty)
+#   TIMEOUT_FLAKE       - 'true' when the SAME lint attempt's own JSON report
+#                         proves its only failures were tool-execution timeouts
+#                         with zero findings anywhere (#1653)
+#   TIMED_OUT_TOOLS     - Comma-separated tool names for the log message
 
 set -euo pipefail
 
@@ -29,6 +33,9 @@ Environment variables:
   UPSTREAM_CONCLUSION   Job conclusion when distinct from result
   STATUS_OUTPUT         Upstream lint status output
   EXIT_CODE_OUTPUT      Upstream lint exit code
+  TIMEOUT_FLAKE         'true' when the same attempt's report proves a
+                        tool-execution timeout with zero findings (#1653)
+  TIMED_OUT_TOOLS       Comma-separated timed-out tool names (log only)
 EOF
 	exit 0
 fi
@@ -56,6 +63,7 @@ is_infra_flake_failure() {
 	local conclusion="${2:-}"
 	local status_output="${3:-}"
 	local exit_code_output="${4:-}"
+	local timeout_flake="${5:-}"
 
 	# Nothing to classify when the upstream job succeeded.
 	if [[ "${result}" == "success" ]]; then
@@ -67,6 +75,27 @@ is_infra_flake_failure() {
 	# checked before the lint-verdict guard: a SIGTERM'd run may still have
 	# written status=failed on its way out.
 	if [[ "${exit_code_output}" == "143" ]]; then
+		return 0
+	fi
+
+	# Tool-execution timeout in THIS attempt (#1653). A tool that exceeds its
+	# execution timeout makes lintro exit 1 with status=failed — structurally
+	# identical to a real verdict — so this branch, like the 143 branch, must
+	# sit above the lint-verdict guard.
+	#
+	# Trusting it is only sound because the flag is derived from the
+	# authoritative attempt's OWN JSON report (lgtm-ci#746, exposed since
+	# reusable-quality-lint v0.63.7) and because that classifier fails closed:
+	# 'true' requires at least one timed-out tool, zero issues from every tool,
+	# and no non-timeout failure anywhere (classify-lint-timeout.py). Anything
+	# else — a missing/malformed report, another tool failing, any finding —
+	# yields 'false' or an empty value, both of which fall through and stay red.
+	# The caller is responsible for passing only the effective attempt's own
+	# flag and only for a lint verdict (run-code-quality-gate.sh scopes it by
+	# verdict-source, so a docker-build failure can never be absorbed here).
+	if [[ "${timeout_flake}" == "true" ]]; then
+		echo "Tool-execution timeout in the authoritative lint run" \
+			"(tools: ${TIMED_OUT_TOOLS:-unknown}); zero findings reported."
 		return 0
 	fi
 
@@ -106,7 +135,8 @@ if is_infra_flake_failure \
 	"${UPSTREAM_RESULT}" \
 	"${UPSTREAM_CONCLUSION:-}" \
 	"${STATUS_OUTPUT:-}" \
-	"${EXIT_CODE_OUTPUT:-}"; then
+	"${EXIT_CODE_OUTPUT:-}" \
+	"${TIMEOUT_FLAKE:-}"; then
 	exit 0
 fi
 

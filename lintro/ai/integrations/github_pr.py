@@ -21,6 +21,7 @@ from loguru import logger
 
 from lintro.ai.enums import ConfidenceLevel
 from lintro.ai.models import AIFixSuggestion, AISummary
+from lintro.ai.models.github_api_response import GitHubApiResponse
 from lintro.ai.paths import OUTSIDE_WORKSPACE_SENTINEL, to_provider_path
 from lintro.ai.review.models.review_thread import ReviewThread
 
@@ -280,7 +281,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -340,7 +343,9 @@ class GitHubPRReporter:
 
         req = self._authorized_request(url=url, method="GET")
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:
@@ -380,7 +385,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -428,7 +435,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -471,7 +480,9 @@ class GitHubPRReporter:
             url = f"{base_url}?per_page=100&page={page}"
             req = self._authorized_request(url=url, method="GET")
             try:
-                with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+                # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+                # nosemgrep: dynamic-urllib-use-detected
+                with urllib.request.urlopen(  # nosec B310
                     req,
                     timeout=30,
                 ) as resp:
@@ -544,7 +555,9 @@ class GitHubPRReporter:
             content_type="application/json",
         )
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:
@@ -716,7 +729,9 @@ class GitHubPRReporter:
             logger.warning("Refusing non-HTTPS URL: {}", url)
             return None
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:
@@ -763,6 +778,31 @@ class GitHubPRReporter:
             The HTTP status when GitHub answered, or ``None`` when the
             request was refused locally or failed in transit.
         """
+        return self.api_response(method, url, payload).status
+
+    def api_response(
+        self,
+        method: str,
+        url: str,
+        payload: dict[str, Any] | None = None,
+    ) -> GitHubApiResponse:
+        """Make an authenticated GitHub API request and report the answer.
+
+        Callers that must explain a rejection — rather than only retry it —
+        need the status *and* the message GitHub returned (#2266), so this is
+        the widest of the three request helpers; :meth:`api_http_status` and
+        :meth:`api_request` narrow it.
+
+        Args:
+            method: HTTP method.
+            url: Full API URL.
+            payload: JSON payload, or ``None`` for methods with no body.
+
+        Returns:
+            The status and error message GitHub answered with. The status is
+            ``None`` when the request was refused locally or failed in
+            transit.
+        """
         data = None if payload is None else json.dumps(payload).encode()
         req = self._authorized_request(
             url=url,
@@ -773,14 +813,16 @@ class GitHubPRReporter:
         parsed = urllib.parse.urlparse(url)
         if parsed.scheme != "https":
             logger.warning("Refusing non-HTTPS URL: {}", url)
-            return None
+            return GitHubApiResponse(message=f"refusing non-HTTPS URL: {url}")
 
         try:
-            with urllib.request.urlopen(  # noqa: S310 — HTTPS-only validated above  # nosemgrep: dynamic-urllib-use-detected — HTTPS-only validated above  # nosec B310 — HTTPS-only validated above
+            # HTTPS-only is validated above, so no file:/custom scheme is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
+            with urllib.request.urlopen(  # nosec B310
                 req,
                 timeout=30,
             ) as resp:
-                return int(resp.status)
+                return GitHubApiResponse(status=int(resp.status))
         except urllib.error.HTTPError as e:
             try:
                 body = e.read().decode("utf-8", "replace")[:500]
@@ -793,10 +835,13 @@ class GitHubPRReporter:
                 e.code,
                 body,
             )
-            return int(e.code)
+            return GitHubApiResponse(
+                status=int(e.code),
+                message=_error_message(body=body),
+            )
         except urllib.error.URLError as e:
             logger.warning("GitHub API request error: {}", e.reason)
-            return None
+            return GitHubApiResponse(message=str(e.reason))
 
     def api_request(
         self,
@@ -870,6 +915,42 @@ class GitHubPRReporter:
             stacklevel=2,
         )
         return self.api_request(method, url, payload)
+
+
+def _error_message(*, body: str) -> str:
+    """Summarize a GitHub error body into one line.
+
+    A REST error carries the human sentence in ``message`` and the specifics
+    in ``errors`` — a 422 says only "Validation Failed" until its per-field
+    entries are folded in, and those entries are what identify a comment that
+    anchored outside the diff (#2266).
+
+    Args:
+        body: Raw response body, already truncated by the caller.
+
+    Returns:
+        A single-line summary, falling back to the raw body when it is not
+        the JSON object GitHub documents.
+    """
+    try:
+        payload = json.loads(body)
+    except (TypeError, ValueError):
+        return body.strip()
+    if not isinstance(payload, dict):
+        return body.strip()
+    parts = [str(payload.get("message") or "").strip()]
+    errors = payload.get("errors")
+    if isinstance(errors, list):
+        for item in errors:
+            if not isinstance(item, dict):
+                parts.append(str(item).strip())
+                continue
+            detail = str(item.get("message") or "").strip()
+            field_name = str(item.get("field") or "").strip()
+            if field_name and field_name not in detail:
+                detail = f"{field_name}: {detail}" if detail else field_name
+            parts.append(detail)
+    return " ".join(part for part in parts if part)
 
 
 def _dig(payload: dict[str, Any], *keys: str) -> dict[str, Any] | None:

@@ -84,9 +84,9 @@ def patched_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setattr(async_module, "AsyncToolExecutor", _FakeExecutor)
     monkeypatch.setattr(
-        async_module,
+        tool_manager,
         "get_parallel_batches",
-        lambda tools, tool_manager: [list(tools)],
+        lambda tools: [list(tools)],
     )
     monkeypatch.setattr(
         tool_manager,
@@ -114,7 +114,7 @@ def _invoke() -> list[ToolResult]:
         tool_option_dict={},
         exclude=None,
         include_venv=False,
-        post_tools=set(),
+        selected_tools=set(),
         max_workers=2,
     )
 
@@ -169,3 +169,123 @@ def test_run_coroutine_blocking_inside_running_loop() -> None:
         return _run_coroutine_blocking(coro())
 
     assert_that(asyncio.run(caller())).is_equal_to("done")
+
+
+def test_parallel_executor_records_a_failed_result_for_an_uninitializable_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tool that cannot be configured fails alone; its batch mate still runs.
+
+    Before #1742 post-check filtering usually left one tool in the main list,
+    so the sequential loop handled init failures and this branch was never
+    reached. With every selected tool in one list the parallel dispatcher owns
+    that case, and must degrade the tool rather than abort the run.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(async_module, "AsyncToolExecutor", _FakeExecutor)
+    monkeypatch.setattr(
+        tool_manager,
+        "get_parallel_batches",
+        lambda tools: [list(tools)],
+    )
+    monkeypatch.setattr(tool_manager, "get_tool", lambda name: object())
+
+    def _configure(**kwargs: Any) -> Any:
+        """Fail for ruff only.
+
+        Args:
+            **kwargs: Keyword arguments the production helper receives.
+
+        Returns:
+            The tool, for every name that is not ruff.
+
+        Raises:
+            ValueError: When the tool being configured is ruff.
+        """
+        if kwargs["tool_name"] == "ruff":
+            raise ValueError("ruff is not installed")
+        return kwargs["tool"]
+
+    monkeypatch.setattr(
+        parallel_module,
+        "configure_tool_for_execution",
+        _configure,
+    )
+
+    results = run_tools_parallel(
+        tools_to_run=["ruff", "yamllint"],
+        paths=["."],
+        action=Action.CHECK,
+        config_manager=cast(UnifiedConfigManager, object()),
+        tool_option_dict={},
+        exclude=None,
+        include_venv=False,
+        selected_tools={"ruff", "yamllint"},
+        max_workers=2,
+    )
+
+    by_name = {result.name: result for result in results}
+    assert_that(sorted(by_name)).is_equal_to(["ruff", "yamllint"])
+    assert_that(by_name["ruff"].success).is_false()
+    assert_that(by_name["ruff"].output).contains("Failed to initialize tool")
+    # Stamped so a crashed tool still appears in ``--profile``.
+    assert_that(by_name["ruff"].duration_seconds).is_not_none()
+    assert_that(by_name["yamllint"].success).is_true()
+
+
+def test_parallel_executor_survives_a_batch_where_every_tool_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A batch left with no usable tool is skipped, not dispatched empty.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(async_module, "AsyncToolExecutor", _FakeExecutor)
+    monkeypatch.setattr(
+        tool_manager,
+        "get_parallel_batches",
+        lambda tools: [list(tools)],
+    )
+
+    def _raise(name: str) -> object:
+        """Fail to resolve every tool.
+
+        Args:
+            name: Tool name being resolved.
+
+        Returns:
+            Never returns; the call always raises.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        raise RuntimeError(f"{name} not available")
+
+    monkeypatch.setattr(tool_manager, "get_tool", _raise)
+    monkeypatch.setattr(
+        parallel_module,
+        "configure_tool_for_execution",
+        lambda **kwargs: kwargs["tool"],
+    )
+
+    results = run_tools_parallel(
+        tools_to_run=["ruff", "black"],
+        paths=["."],
+        action=Action.CHECK,
+        config_manager=cast(UnifiedConfigManager, object()),
+        tool_option_dict={},
+        exclude=None,
+        include_venv=False,
+        selected_tools={"ruff", "black"},
+        max_workers=2,
+    )
+
+    by_name = {result.name: result for result in results}
+    assert_that(sorted(by_name)).is_equal_to(["black", "ruff"])
+    for name in ("black", "ruff"):
+        assert_that(by_name[name].success).is_false()
+        assert_that(by_name[name].output).contains("Failed to initialize tool")
+        assert_that(by_name[name].duration_seconds).is_not_none()

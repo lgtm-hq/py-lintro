@@ -148,6 +148,52 @@ def test_ai_result_error_on_exception():
     assert_that(ai_result.error).is_true()
 
 
+def test_unset_provider_skips_enhancement_without_fail_on_ai_error() -> None:
+    """Chk treats an unset provider as an enhancement skip, not a crash."""
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, lint=True).model_dump(),
+    )
+    logger = MagicMock()
+
+    with patch("lintro.ai.orchestrator.require_ai"):
+        ai_result = run_ai_enhancement(
+            action=Action.CHECK,
+            all_results=[],
+            lintro_config=config,
+            logger=logger,
+            output_format="json",
+        )
+
+    assert_that(ai_result).is_instance_of(AIResult)
+    assert_that(ai_result.error).is_true()
+
+
+def test_unset_provider_reraises_when_fail_on_ai_error() -> None:
+    """fail_on_ai_error re-raises the required-provider configuration error."""
+    from lintro.ai.exceptions import AIProviderRequiredError
+
+    config = LintroConfig(
+        ai=AIConfig(
+            enabled=True,
+            lint=True,
+            fail_on_ai_error=True,
+        ).model_dump(),
+    )
+    logger = MagicMock()
+
+    with (
+        patch("lintro.ai.orchestrator.require_ai"),
+        pytest.raises(AIProviderRequiredError, match="ai.provider is required"),
+    ):
+        run_ai_enhancement(
+            action=Action.CHECK,
+            all_results=[],
+            lintro_config=config,
+            logger=logger,
+            output_format="json",
+        )
+
+
 def test_ai_result_error_propagates_when_fail_on_ai_error():
     """Exceptions propagate when fail_on_ai_error=True."""
     config = LintroConfig(

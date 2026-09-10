@@ -19,6 +19,7 @@ from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 __all__ = [
     "VERDICT_LABELS",
     "VERDICT_RUBRIC_FINE_PRINT",
+    "apply_coverage_gate",
     "derive_readiness_verdict",
     "resolve_bullet_finding",
     "verdict_label",
@@ -30,6 +31,7 @@ VERDICT_LABELS: dict[ReviewVerdict, str] = {
     ReviewVerdict.CHANGES_REQUESTED: "Changes requested",
     ReviewVerdict.NITS_ONLY: "Nits only",
     ReviewVerdict.READY: "Ready",
+    ReviewVerdict.INCOMPLETE: "Incomplete",
 }
 
 # Import-time exhaustiveness guard: a new ReviewVerdict member added without a
@@ -81,6 +83,28 @@ def derive_readiness_verdict(
     if Severity.P3 in severities:
         return ReviewVerdict.NITS_ONLY
     return ReviewVerdict.READY
+
+
+def apply_coverage_gate(
+    *,
+    findings_verdict: ReviewVerdict,
+    coverage_complete: bool,
+) -> ReviewVerdict:
+    """Force INCOMPLETE when coverage-at-HEAD is not 100%.
+
+    READY requires full coverage and no blocking findings. A partial
+    round is INCOMPLETE even with zero findings.
+
+    Args:
+        findings_verdict: Verdict derived from open finding severities.
+        coverage_complete: True when every eligible file is covered at HEAD.
+
+    Returns:
+        ``INCOMPLETE`` when coverage is short; otherwise *findings_verdict*.
+    """
+    if not coverage_complete:
+        return ReviewVerdict.INCOMPLETE
+    return findings_verdict
 
 
 def verdict_label(*, verdict: ReviewVerdict) -> str:

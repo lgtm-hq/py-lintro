@@ -17,7 +17,7 @@ def test_trufflehog_issue_display_row() -> None:
         detector_type=8,
         description="GitHub personal access token",
         verified=False,
-        raw="ghp_examplefakeexamplefakeexamplefake1234",  # noqa: S106
+        raw="ghp_examplefakeexamplefakeexamplefake1234",
     )
 
     row = issue.to_display_row()
@@ -37,7 +37,7 @@ def test_trufflehog_issue_verified_status_in_message() -> None:
         line=1,
         detector_name="AWS",
         verified=True,
-        raw="AKIAIOSFODNN7EXAMPLE",  # noqa: S106
+        raw="AKIAIOSFODNN7EXAMPLE",
     )
 
     assert_that(issue.message).contains("(verified)")

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import subprocess  # nosec B404 - CompletedProcess objects are constructed to drive the providers under test
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -17,9 +18,12 @@ from assertpy import assert_that
 
 from lintro.ai.enums import AITransport
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.providers.anthropic import AnthropicProvider
-from lintro.ai.providers.cursor import CursorProvider
-from lintro.ai.providers.openai import OpenAIProvider
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
+from lintro.ai.providers.cursor.provider import CursorProvider
+from lintro.ai.providers.openai.provider import (
+    OpenAIProvider,
+    _openai_strict_schema,
+)
 from tests.unit.ai.conftest import patch_cli_exec
 
 _CLAUDE_COMPLETION = json.dumps(
@@ -113,7 +117,7 @@ def _claude_on_path() -> Iterator[None]:
         None: For the duration of the patched lookup.
     """
     with patch(
-        "lintro.ai.providers.anthropic._find_claude",
+        "lintro.ai.providers.anthropic.provider._find_claude",
         return_value="/usr/local/bin/claude",
     ):
         yield
@@ -127,7 +131,7 @@ def _agent_on_path() -> Iterator[None]:
         None: For the duration of the patched lookup.
     """
     with patch(
-        "lintro.ai.providers.cursor._find_agent",
+        "lintro.ai.providers.cursor.provider._find_agent",
         return_value="/usr/local/bin/agent",
     ):
         yield
@@ -141,7 +145,7 @@ def _codex_on_path() -> Iterator[None]:
         None: For the duration of the patched lookup.
     """
     with patch(
-        "lintro.ai.providers.openai._find_codex",
+        "lintro.ai.providers.openai.provider._find_codex",
         return_value="/usr/local/bin/codex",
     ):
         yield
@@ -286,7 +290,7 @@ async def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> N
         reject="--resume",
         calls=calls,
     )
-    provider = CursorProvider()
+    provider = CursorProvider(cursor_trust_workspace=True)
     with patch_cli_exec(side_effect=runner):
         provider.begin_durable_session(repo_root="/tmp/repo")
         await provider.complete("first", repo_root="/tmp/repo")
@@ -297,6 +301,8 @@ async def test_cursor_backstop_retries_without_resume(_agent_on_path: None) -> N
     assert_that(completions).is_length(3)
     assert_that(completions[1]).contains("--resume", "sess-123")
     assert_that(completions[-1]).does_not_contain("--resume")
+    # The retry drops --resume only; the explicit trust grant survives it.
+    assert_that(completions[-1]).contains("--trust")
 
 
 # -- Codex ------------------------------------------------------------------
@@ -319,6 +325,195 @@ async def test_codex_sends_output_schema_when_advertised(_codex_on_path: None) -
     assert_that(cmd).contains("--output-schema")
     # The prompt stays the trailing positional even after optional flags.
     assert_that(cmd[-1]).is_equal_to("-")
+
+
+async def test_codex_output_schema_points_at_temp_file_not_inline_json(
+    _codex_on_path: None,
+) -> None:
+    """--output-schema must carry a file PATH containing the schema.
+
+    codex reads the flag's value as a filename: passing the schema JSON itself
+    made codex try to open a file named after the whole schema text and abort
+    with "Filename too long" (os error 36) before any request was sent
+    (first live Codex-lane dogfood, #2472). The file must hold the schema and
+    be cleaned up after the call.
+    """
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json\n  --sandbox <mode>\n  --output-schema <file>\n",
+        completion=_CODEX_COMPLETION,
+        version="codex-cli 0.60.0",
+        calls=calls,
+    )
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
+
+    cmd = _completion_calls(calls)[-1]
+    schema_arg = cmd[cmd.index("--output-schema") + 1]
+    assert_that(schema_arg).ends_with(".json")
+    assert_that(schema_arg.startswith("{")).is_false()
+    # The schema rides in the file, and the temp file is cleaned up.
+    assert_that(Path(schema_arg).exists()).is_false()
+    # The path was written with the schema when the call was made.
+    assert_that(cmd.count("--output-schema")).is_equal_to(1)
+
+
+async def test_codex_output_schema_is_normalized_for_openai_strict_mode(
+    _codex_on_path: None,
+) -> None:
+    """The written schema must satisfy OpenAI strict structured outputs.
+
+    OpenAI rejects schemas whose ``required`` omits any ``properties`` key
+    (``invalid_json_schema``: "Missing 'finding_ref'") — the exact failure of
+    the first live Codex-lane dogfood. The temp file must therefore carry the
+    normalized form: every property required, formerly-optional ones nullable,
+    and the temp file removed after the call.
+    """
+    schema_with_optional_key = CliSchemaRequest(
+        schema={
+            "type": "object",
+            "required": ["summary"],
+            "additionalProperties": False,
+            "properties": {
+                "summary": {
+                    "type": "object",
+                    "required": ["headline"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "headline": {"type": "string"},
+                        "walkthrough": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "required": ["text"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "text": {"type": "string"},
+                                    "finding_ref": {"type": "string"},
+                                },
+                            },
+                        },
+                    },
+                },
+                "flagged_files": {"type": "array"},
+            },
+        },
+        schema_name="lintro_review",
+    )
+    captured: dict[str, str] = {}
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json\n  --sandbox <mode>\n  --output-schema <file>\n",
+        completion=_CODEX_COMPLETION,
+        version="codex-cli 0.60.0",
+        calls=calls,
+    )
+
+    def _spy(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        """Capture the schema file content at spawn time (pre-cleanup)."""
+        if "--output-schema" in cmd:
+            path = cmd[cmd.index("--output-schema") + 1]
+            captured["schema"] = Path(path).read_text(encoding="utf-8")
+        return runner(cmd, **kwargs)
+
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=_spy):
+        await provider.complete(
+            "hello",
+            repo_root="/tmp/repo",
+            cli_schema=schema_with_optional_key,
+        )
+
+    written = json.loads(captured["schema"])
+    summary = written["properties"]["summary"]
+    # Every property is required; optional ones are nullable instead.
+    assert_that(sorted(written["required"])).is_equal_to(
+        ["flagged_files", "summary"],
+    )
+    assert_that(written["properties"]["flagged_files"]["type"]).is_equal_to(
+        ["array", "null"],
+    )
+    assert_that(sorted(summary["required"])).is_equal_to(["headline", "walkthrough"])
+    assert_that(summary["properties"]["walkthrough"]["type"]).is_equal_to(
+        ["array", "null"],
+    )
+    bullet = summary["properties"]["walkthrough"]["items"]
+    assert_that(sorted(bullet["required"])).is_equal_to(["finding_ref", "text"])
+    assert_that(bullet["properties"]["finding_ref"]["type"]).is_equal_to(
+        ["string", "null"],
+    )
+    assert_that(bullet["properties"]["text"]["type"]).is_equal_to("string")
+    # Required, non-optional properties keep their original type.
+    assert_that(written["properties"]["summary"]["type"]).is_equal_to("object")
+    # And the temp file did not survive the call.
+    schema_arg = _completion_calls(calls)[-1][
+        _completion_calls(calls)[-1].index("--output-schema") + 1
+    ]
+    assert_that(Path(schema_arg).exists()).is_false()
+
+
+def test_openai_strict_schema_makes_composite_optional_types_nullable() -> None:
+    """Optional list-typed and anyOf/oneOf properties gain a null variant."""
+    schema = {
+        "type": "object",
+        "required": ["kept"],
+        "properties": {
+            "kept": {"type": ["string", "number"]},
+            "multi": {"type": ["string", "number"]},
+            "already": {"type": ["string", "null"]},
+            "any": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+            "one": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+            "untyped": {"description": "no type key"},
+        },
+    }
+
+    normalized = _openai_strict_schema(schema)
+
+    props = normalized["properties"]
+    assert_that(sorted(normalized["required"])).is_equal_to(
+        ["already", "any", "kept", "multi", "one", "untyped"],
+    )
+    assert_that(props["kept"]["type"]).is_equal_to(["string", "number"])
+    assert_that(props["multi"]["type"]).is_equal_to(["string", "number", "null"])
+    assert_that(props["already"]["type"]).is_equal_to(["string", "null"])
+    assert_that(props["any"]["anyOf"]).is_equal_to(
+        [{"type": "string"}, {"type": "integer"}, {"type": "null"}],
+    )
+    assert_that(props["one"]["oneOf"]).is_equal_to(
+        [{"type": "string"}, {"type": "null"}],
+    )
+    assert_that(props["untyped"]).is_equal_to({"description": "no type key"})
+    # Input is not mutated.
+    assert_that(schema["required"]).is_equal_to(["kept"])
+
+
+async def test_codex_output_schema_temp_file_cleaned_up_after_retry_ladder(
+    _codex_on_path: None,
+) -> None:
+    """The schema temp file outlives the backstop retry, then is removed.
+
+    The cleanup runs after the guarded call returns (including its retry
+    ladder): the first attempt carries the schema file, the retry drops the
+    rejected flag, and no temp file is left behind once the call settles.
+    """
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json\n  --sandbox <mode>\n  --output-schema <file>\n",
+        completion=_CODEX_COMPLETION,
+        version="codex-cli 0.60.0",
+        reject="--output-schema",
+        calls=calls,
+    )
+    provider = OpenAIProvider(transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("hello", repo_root="/tmp/repo", cli_schema=_SCHEMA)
+
+    completions = _completion_calls(calls)
+    assert_that(completions).is_length(2)
+    first_schema_path = completions[0][completions[0].index("--output-schema") + 1]
+    assert_that(completions[-1]).does_not_contain("--output-schema")
+    assert_that(Path(first_schema_path).exists()).is_false()
 
 
 async def test_codex_omits_output_schema_when_not_advertised(

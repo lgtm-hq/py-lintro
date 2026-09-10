@@ -9,10 +9,11 @@ lives in the AI package so the core summary renderer
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.resolved_ai_config import (
+    MAX_COST_LABEL,
     ResolvedAIConfig,
     format_max_cost_label,
     format_sourced_value,
@@ -27,18 +28,25 @@ AI_STATUS_NO_CONFIG = "[dim]disabled (no config)[/dim]"
 
 def render_ai_status(
     *,
-    ai_config: AIConfig | ResolvedAIConfig | Mapping[str, Any] | None,
+    ai_config: AIConfig | ResolvedAIConfig | None,
     is_ci: bool,
 ) -> list[str]:
     """Render the pre-execution AI status lines.
 
+    This renderer never resolves configuration. It reports a value some
+    caller already resolved (#2299):
+    :func:`lintro.ai.interface.render_ai_status` is the seam that turns the
+    core executor's raw ``ai:`` mapping into a
+    :class:`~lintro.ai.resolved_ai_config.ResolvedAIConfig`, through the same
+    resolver execution uses. What that seam can pass is limited by what the
+    core summary hands it: project and environment layers, without the
+    invocation's flags (see
+    `#2374 <https://github.com/lgtm-hq/py-lintro/issues/2374>`_).
+
     Args:
-        ai_config: Raw ``ai:`` mapping as held by the core executor, an
-            already-parsed :class:`AIConfig`, a :class:`ResolvedAIConfig`
-            carrying provenance, or None when unavailable. A mapping is
-            parsed here with diagnostics off, because rendering a summary
-            must not emit unknown-key warnings or migration hints (the
-            resolver on the AI entry path already reports them).
+        ai_config: A :class:`ResolvedAIConfig` carrying provenance, a bare
+            :class:`AIConfig` (rendered without provenance annotations), or
+            None when no configuration is available.
         is_ci: Whether the run is in a CI environment (affects the
             ``auto_apply`` warning wording).
 
@@ -57,13 +65,6 @@ def render_ai_status(
         resolved_for_cost = ai_config
         sources = ai_config.sources
         ai_config = ai_config.config
-    elif isinstance(ai_config, Mapping):
-        from lintro.ai.config import AIConfig as _AIConfig
-
-        resolved = _AIConfig.resolve_from_mapping(ai_config, diagnostics=False)
-        resolved_for_cost = resolved
-        sources = resolved.sources
-        ai_config = resolved.config
 
     if not ai_config.enabled:
         disabled = "[dim]disabled[/dim]"
@@ -75,28 +76,37 @@ def render_ai_status(
     import os
 
     from lintro.ai.availability import is_provider_available
+    from lintro.ai.provider_enum import (
+        AIProvider,
+        accepted_provider_values,
+        provider_required_error,
+    )
     from lintro.ai.providers import get_default_model
-    from lintro.ai.registry import PROVIDERS, AIProvider
+    from lintro.ai.registry import metadata_for
 
-    provider_name = ai_config.provider.lower()
+    if ai_config.provider is None:
+        provider_name = ""
+        ai_parts.append("[yellow]enabled (provider unset)[/yellow]")
+        if ai_config.any_feature_enabled:
+            ai_parts.append(f"  [yellow]{provider_required_error()}[/yellow]")
+    else:
+        provider_name = str(ai_config.provider).lower()
     supported = set(AIProvider)
 
     # Check: unknown provider
-    if provider_name not in supported:
+    if provider_name and provider_name not in supported:
         ai_parts.append("[red]enabled (unknown provider)[/red]")
-        names = ", ".join(sorted(supported))
+        names = accepted_provider_values()
         ai_parts.append(
-            f"  [yellow]'{ai_config.provider}' is not supported. "
-            f"Use: {names}[/yellow]",
+            f"  [yellow]'{ai_config.provider}' is not supported. Use: {names}[/yellow]",
         )
-    else:
+    elif provider_name:
         # Check SDK availability
         sdk_ok = is_provider_available(provider_name)
 
         # Check API key
-        key_env = ai_config.api_key_env or PROVIDERS.default_api_key_envs.get(
-            AIProvider(provider_name),
-            "",
+        key_env = (
+            ai_config.api_key_env or metadata_for(provider_name).default_api_key_env
         )
         key_set = bool(os.environ.get(key_env)) if key_env else False
 
@@ -117,7 +127,9 @@ def render_ai_status(
                 f"  [yellow]set {key_env} env var[/yellow]",
             )
 
-    provider_label = str(ai_config.provider)
+    provider_label = (
+        str(ai_config.provider) if ai_config.provider is not None else "unset"
+    )
     if sources is not None:
         provider_label = format_sourced_value(
             provider_label,
@@ -125,8 +137,8 @@ def render_ai_status(
         )
     ai_parts.append(f"  provider: {provider_label}")
 
-    effective_model = ai_config.model or get_default_model(
-        provider_name,
+    effective_model = ai_config.model or (
+        get_default_model(provider_name) if provider_name else None
     )
     if effective_model:
         model_label = effective_model
@@ -149,21 +161,18 @@ def render_ai_status(
         )
         from lintro.ai.transport import resolve_max_cost_with_source
 
-        cap, cap_source = (
-            resolve_max_cost_with_source(resolved_for_cost)
-            if resolved_for_cost is not None
-            else (
-                ai_config.max_cost_usd,
-                sources.get("max_cost_usd"),
+        # ``sources`` and ``resolved_for_cost`` are assigned in the same
+        # branches, so a known provenance map always carries a resolved
+        # config; the guard is narrowing only, never a fallback (#2048).
+        if resolved_for_cost is not None:
+            cap, cap_source = resolve_max_cost_with_source(resolved_for_cost)
+            ai_parts.append(
+                f"  {MAX_COST_LABEL}: "
+                + format_max_cost_label(
+                    max_cost_usd=cap,
+                    source=cap_source,
+                ),
             )
-        )
-        ai_parts.append(
-            "  max_cost_usd: "
-            + format_max_cost_label(
-                max_cost_usd=cap,
-                source=cap_source,
-            ),
-        )
 
     # auto_apply warning
     if ai_config.auto_apply:

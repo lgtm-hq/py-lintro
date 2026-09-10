@@ -7,9 +7,28 @@ more tools to Lintro without any change to the Lintro core repository.
 ## Overview
 
 Lintro uses a plugin architecture that lets you add support for new linting and
-formatting tools. Built-in tools live in `lintro/tools/definitions/`; external tools
-ship in their own distributions and are discovered automatically at startup via Python
-entry points in the **`lintro.tools`** group.
+formatting tools. Every built-in tool is one package under `lintro/tools/<tool>/`;
+external tools ship in their own distributions and are discovered automatically at
+startup via Python entry points in the **`lintro.tools`** group.
+
+A built-in tool package looks like this (#2311):
+
+```text
+lintro/tools/<tool>/
+├── __init__.py      # re-exports the plugin and the helpers other packages use
+├── definition.py    # @register_tool plugin class + its ToolDefinition
+└── ...              # command builders, executors, per-tool processing
+```
+
+`ruff` and `pytest` are the worked examples. Plugin discovery enters each package
+through its `definition` module — importing it runs the package `__init__`, so the
+package's own re-export surface comes along — which is what registers the tool. There is
+no central list to append to.
+
+One exception: a shared helper package with no `definition.py` registers nothing and is
+indexed by its public modules instead. `lintro/tools/ts_checker/` is the only such
+package today; it holds the base, command and execution helpers that `tsc` and `vue_tsc`
+share, and it still appears in the duplicate-code gate scope.
 
 An external plugin gets the exact same lifecycle as a built-in tool: config injection,
 file discovery, subprocess execution, output normalization, and per-invocation execution
@@ -85,7 +104,9 @@ Create a plugin class that inherits from `BaseToolPlugin`:
 ```python
 from dataclasses import dataclass
 
+from lintro.enums.capability import Cap
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.plugins import LINTRO_PLUGIN_API_VERSION
 from lintro.plugins.base import BaseToolPlugin
@@ -108,8 +129,11 @@ class MyToolPlugin(BaseToolPlugin):
             can_fix=False,  # Set to True if tool can auto-fix issues
             tool_type=ToolType.LINTER,  # LINTER, FORMATTER, or SECURITY
             file_patterns=["*.py"],  # Glob patterns for files to check
-            priority=50,  # Execution priority (higher = runs earlier)
-            conflicts_with=[],  # Names of conflicting tools
+            claims=[  # What the tool touches and what it does to it
+                Claim(patterns=["*.py"], capabilities={Cap.CHECK}),
+            ],
+            reads_tree=True,  # Must run after mutating tools settle
+            partitionable=False,  # True if the file set can be sharded
             native_configs=["pyproject.toml", ".mytool.yaml"],  # Config files
             version_command=["my-tool", "--version"],  # Command to get version
             min_version="1.0.0",  # Minimum supported version
@@ -130,10 +154,11 @@ class MyToolPlugin(BaseToolPlugin):
         Returns:
             ToolResult with check results.
         """
-        # Use _prepare_execution for common setup (version check, file discovery)
-        ctx = self._prepare_execution(paths, options)
-        if ctx.should_skip:
-            return ctx.early_result
+        # Use prepare() for common setup (version check, file discovery). It
+        # returns the finished ToolResult when execution must stop early.
+        ctx = self.prepare(paths, options)
+        if isinstance(ctx, ToolResult):
+            return ctx
 
         # Build and run the tool command
         cmd = ["my-tool", "check"] + ctx.rel_files
@@ -172,20 +197,54 @@ class MyToolPlugin(BaseToolPlugin):
 
 The `ToolDefinition` dataclass defines your tool's metadata:
 
-| Field             | Type        | Description                        |
-| ----------------- | ----------- | ---------------------------------- |
-| `name`            | `str`       | Unique tool identifier             |
-| `description`     | `str`       | Brief description                  |
-| `can_fix`         | `bool`      | Whether tool supports auto-fixing  |
-| `tool_type`       | `ToolType`  | LINTER, FORMATTER, or SECURITY     |
-| `file_patterns`   | `list[str]` | Glob patterns for target files     |
-| `priority`        | `int`       | Execution order (higher = earlier) |
-| `conflicts_with`  | `list[str]` | Names of conflicting tools         |
-| `native_configs`  | `list[str]` | Config file names                  |
-| `version_command` | `list[str]` | Command to check version           |
-| `min_version`     | `str`       | Minimum supported version          |
-| `default_options` | `dict`      | Default tool options               |
-| `default_timeout` | `int`       | Default timeout in seconds         |
+| Field             | Type          | Description                                          |
+| ----------------- | ------------- | ---------------------------------------------------- |
+| `name`            | `str`         | Unique tool identifier                               |
+| `description`     | `str`         | Brief description                                    |
+| `can_fix`         | `bool`        | Whether tool supports auto-fixing                    |
+| `tool_type`       | `ToolType`    | LINTER, FORMATTER, or SECURITY                       |
+| `file_patterns`   | `list[str]`   | Glob patterns for target files                       |
+| `claims`          | `list[Claim]` | Patterns plus the capabilities applied to them       |
+| `reads_tree`      | `bool`        | Reads the working tree, so runs after mutation       |
+| `partitionable`   | `bool`        | File set may be sharded without changing the verdict |
+| `native_configs`  | `list[str]`   | Config file names                                    |
+| `version_command` | `list[str]`   | Command to check version                             |
+| `min_version`     | `str`         | Minimum supported version                            |
+| `default_options` | `dict`        | Default tool options                                 |
+| `default_timeout` | `int`         | Default timeout in seconds                           |
+
+### Claims and capabilities
+
+`claims` declares _what a tool touches_ and _what it does to it_. It is the **only**
+input to execution ordering: the scalar `priority` integer it replaced, and the unused
+`conflicts_with` list, were deleted in #1742. A `Claim` pairs glob patterns with a set
+of `Cap` values:
+
+| Capability   | Meaning                                                    |
+| ------------ | ---------------------------------------------------------- |
+| `Cap.FIX`    | Rewrites a file to remove diagnostics (`ruff check --fix`) |
+| `Cap.FORMAT` | Rewrites a file to a canonical layout (`black`)            |
+| `Cap.CHECK`  | Reports diagnostics only; never mutates                    |
+
+There is deliberately no `LINT` or `ANALYZE`: both would be synonyms for `CHECK`
+distinguished only by analysis depth, which is not a scheduling input. Depth is carried
+by the two orthogonal scope booleans instead:
+
+- `reads_tree` — must the tool run after mutation settles? False only for a tool that
+  reads something other than the working tree (commitlint reads git commit messages),
+  which is therefore unordered and may run first.
+- `partitionable` — can its file set be sharded or narrowed without changing its
+  verdict? False for project-scoped analysis such as mypy, pylint's cross-module checks,
+  import-linter contracts and dependency audits.
+
+Ordering per pattern is `FIX` → `FORMAT` → `CHECK`, and at most one tool may hold
+`FORMAT` for a given pattern. This derivation **is** execution order (issue #1742):
+there is no `tool_order` strategy and no `DEFAULT_TOOL_PRIORITIES` table to fall back
+on, and parallel batching reads the same graph. Run `lintro check --explain-order` to
+see the order a run would use with the claim behind each constraint, or `lintro doctor`
+for the summary. See
+[Tool Ordering Configuration](configuration.md#tool-ordering-configuration) in the
+configuration guide.
 
 ### ToolResult
 
@@ -203,10 +262,199 @@ The `ToolResult` dataclass represents execution results:
 
 The `BaseToolPlugin` base class provides useful methods:
 
-- `_prepare_execution(paths, options)` - Common setup (version check, file discovery)
+- `prepare(paths, options)` - Common setup (version check, file discovery); returns an
+  `ExecutionContext`, or a `ToolResult` to return as-is when execution stops early
 - `_run_subprocess(cmd, timeout, cwd)` - Run tool command safely
 - `_get_executable_command(tool_name)` - Get command with proper path
 - `_discover_files(paths, patterns)` - Find files matching patterns
+
+### Per-file check runs
+
+Tools that lint one file at a time should not write their own loop either. Call
+`lintro.tools.core.check_runner.run_per_file_check()` from `check()` with the command
+builder and the parser; it runs the command per file, turns a timeout or an OS error
+into a per-file failure, and aggregates every issue into a single `ToolResult`.
+
+```python
+from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_check
+
+
+def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+    ctx = self.prepare(paths, options)
+    if isinstance(ctx, ToolResult):
+        return ctx
+    return run_per_file_check(
+        ctx,
+        plugin=self,
+        command=lambda f: [*self._build_command(), str(f)],
+        parse=lambda output: parse_mytool_output(output=output),
+    )
+```
+
+`PerFileCheckPolicy` is optional and carries the only two classification choices the
+runner cannot infer: `issues_imply_failure` marks a file unsuccessful when the parser
+found issues even though the command exited zero, and `failure_message` records an
+execution error when the command exits non-zero _without_ producing a parseable issue
+(leave it `None` when the tool's exit status is a reliable verdict on its own). `label`
+renames the progress bar.
+
+### Per-file fix runs
+
+Tools that fix one file at a time should not write their own loop. Call
+`lintro.tools.core.fix_runner.run_per_file_fix()` from `fix()` with the two command
+builders, the parser and a `PerFileFixPolicy`; it runs check -> fix -> optional
+verification per file and aggregates the initial/fixed/remaining counts into a single
+`ToolResult`.
+
+```python
+from lintro.tools.core.fix_runner import (
+    PerFileFixPolicy,
+    VerifyMode,
+    run_per_file_fix,
+)
+
+
+def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+    ctx = self.prepare(paths, options, no_files_message="No files to format.")
+    if isinstance(ctx, ToolResult):
+        return ctx
+    return run_per_file_fix(
+        ctx,
+        plugin=self,
+        check_command=self._diff_command,
+        fix_command=self._write_command,
+        parse=lambda output: parse_mytool_output(output=output),
+        policy=PerFileFixPolicy(
+            check_failure_message="mytool check failed before fix",
+            verify=VerifyMode.AFTER_SUCCESS,
+            verify_failure_message="mytool recheck failed",
+        ),
+    )
+```
+
+`VerifyMode` picks how surviving issues are counted: `NEVER` skips re-checking entirely
+and trusts the fix command's exit status, `AFTER_SUCCESS` re-checks only after a clean
+fix, and `ALWAYS` re-checks even when the fix exits non-zero (for tools that apply fixes
+partially).
+
+Both runners classify a single check-style invocation through the same
+`check_runner.check_one_file()` step, so a timeout, an execution error and a parser
+failure are reported identically whether the tool is checking or fixing. A non-zero exit
+that produced no parseable issue is the one outcome the two sides can differ on: it
+becomes an execution error only when a message is configured, and `failure_message` is
+optional on the check side while `check_failure_message` is mandatory on the fix side.
+
+### Batch check and fix runs
+
+Tools that hand their whole file list to one invocation use
+`lintro.tools.core.batch_runner` instead. `run_batch_check()` runs the command once,
+parses it and classifies the outcome; `run_batch_fix()` runs check -> fix -> re-check
+and scores the difference.
+
+```python
+from lintro.tools.core.batch_runner import (
+    BatchCheckPolicy,
+    BatchCommands,
+    BatchFixPolicy,
+    BatchSuccess,
+    run_batch_check,
+    run_batch_fix,
+)
+
+
+def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+    ctx = self.prepare(paths, options)
+    if isinstance(ctx, ToolResult):
+        return ctx
+    return run_batch_check(
+        ctx,
+        plugin=self,
+        cmd=[*self._build_command(), *ctx.rel_files],
+        parse=lambda output: parse_mytool_output(output=output),
+        policy=BatchCheckPolicy(
+            success=BatchSuccess.ISSUES_ONLY,
+            report_cwd=True,
+        ),
+        cwd=ctx.cwd,
+    )
+```
+
+`BatchCheckPolicy` carries the two classification choices. `BatchSuccess` says what the
+verdict is derived from: `ISSUES_ONLY` for a tool that exits non-zero purely to report
+findings, `EXIT_STATUS` for one whose exit code is the whole verdict, and
+`EXIT_AND_ISSUES` (the default) when both must be clean. `BatchOutput` says when the raw
+output is surfaced — `NEVER`, `ON_FAILURE` (the default),
+`ON_EXIT_FAILURE_WITHOUT_ISSUES` for tools where unparseable output is the only sign of
+a compilation or config error, and `ON_ISSUES_OR_EXIT_FAILURE`. Both policies also carry
+`tool_name` (the name timeout messages use when it differs from the registered one) and
+`report_cwd` (whether the working directory is recorded on the `ToolResult`, which tools
+emitting issue paths relative to it need).
+
+`run_batch_fix()` takes both fully built command lines as a
+`BatchCommands(check=..., fix=...)` bundle — the check command runs twice, once before
+the fix and once to score it — plus a `BatchFixPolicy` holding the wording of the
+summary (`fixed_label`, `all_fixed_message`, `verbose_output_label`) and two reporting
+switches: `report_initial_issues` prefixes `ToolResult.issues` with the pre-fix set for
+tools that render a two-table view, and `always_report_initial_issues` passes an empty
+list rather than `None` when nothing was detected.
+
+Both entry points take `on_timeout` and `on_error` hooks. Leave `on_timeout` out to get
+the standard `batch_timeout_result()` / `batch_fix_timeout_result()` shape, and pass it
+only when the tool has its own timeout message. Leave `on_error` out to let a launch
+failure propagate. Those two result builders are exported on their own, so a tool whose
+middle section is bespoke — a missing-config skip, a per-module loop, a dependency-error
+hint — can still share the timeout and result-construction shapes without adopting the
+whole runner.
+
+### Ecosystem preconditions
+
+Two families of tools cannot run from the directory lintro discovered their files in.
+`lintro.tools.core` carries the shared preconditions so each definition states the
+requirement rather than reimplementing it.
+
+**Cargo workspaces.** `cargo clippy`, `cargo fmt` and `cargo deny` must be launched from
+a directory that owns a `Cargo.toml`, but lintro hands the plugin whatever its file
+patterns matched — `*.rs` for clippy and rustfmt, `Cargo.toml` and `deny.toml` for
+cargo-deny. `find_cargo_root()` walks every path upward to the nearest manifest and
+reconciles the results: one package wins outright, several fall back to their common
+ancestor and only if that ancestor owns a `Cargo.toml` of its own.
+
+```python
+from lintro.tools.core.cargo import find_cargo_root
+
+cargo_root = find_cargo_root(ctx.files, tool_label="rustfmt")
+if cargo_root is None:
+    return ToolResult(name=self.definition.name, success=True, output="...", issues_count=0)
+```
+
+`tool_label` is optional and affects logging only: pass it to explain an unresolvable
+multi-package layout to the user, leave it out to fail silently and let the caller emit
+its own skip message.
+
+**Node dependencies.** `astro-check` and `svelte-check` ship inside the project they
+lint, so neither exists until `node_modules` is populated. `ensure_node_modules()` makes
+the three-way decision — skip on a read-only directory, install when the user passed
+`--auto-install`, otherwise skip with the instruction to pass it — and returns the skip
+`ToolResult` for the caller to return, or `None` when the tool may proceed.
+
+```python
+from lintro.tools.core.node_modules import ensure_node_modules
+
+skip_result = ensure_node_modules(
+    plugin=self,
+    cwd=cwd_path,
+    auto_install=bool(merged_options.get("auto_install", False)),
+    tool_label="astro-check",
+)
+if skip_result is not None:
+    return skip_result
+```
+
+`tool_label` is the human-facing tool name; it names the tool in the log lines and in
+the `Skipping <tool>: ...` messages, so it is the spelling users see rather than the
+registered snake_case name. The one outcome it does not reach is the plain
+missing-`node_modules` skip: that path logs nothing and returns the unprefixed
+`node_modules not found. Use --auto-install to install dependencies.`
 
 ### Execution Isolation (important for correctness)
 
@@ -299,9 +547,9 @@ A minimal third-party plugin distribution contains:
 
 ## Example Plugins
 
-See the built-in plugins in `lintro/tools/definitions/` for complete examples:
+See the built-in plugins under `lintro/tools/` for complete examples:
 
-- `ruff.py` - Python linter with fix support
-- `bandit.py` - Security scanner (no fix)
-- `prettier.py` - JavaScript/TypeScript formatter
-- `hadolint.py` - Dockerfile linter
+- `lintro/tools/ruff/definition.py` - Python linter with fix support
+- `lintro/tools/bandit/definition.py` - Security scanner (no fix)
+- `lintro/tools/prettier/definition.py` - JavaScript/TypeScript formatter
+- `lintro/tools/hadolint/definition.py` - Dockerfile linter

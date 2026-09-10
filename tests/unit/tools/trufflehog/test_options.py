@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.trufflehog import (
+from lintro.tools.trufflehog.definition import (
     TRUFFLEHOG_DEFAULT_TIMEOUT,
     TrufflehogPlugin,
 )

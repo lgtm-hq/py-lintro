@@ -7,7 +7,7 @@ from pathlib import Path
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.vue_tsc import VueTscPlugin
+from lintro.tools.vue_tsc.definition import VueTscPlugin
 
 # =============================================================================
 # Tests for JSONC tsconfig parsing (issue #570)

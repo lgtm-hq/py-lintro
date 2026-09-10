@@ -7,8 +7,9 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
+from lintro.models.core.tool_result import ToolResult
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.rubocop import RubocopPlugin
+from lintro.tools.rubocop import RubocopPlugin
 
 from .conftest import make_ctx, make_result, offense, rubocop_json
 
@@ -154,7 +155,12 @@ def test_check_skips_when_no_files(
     """
     from unittest.mock import MagicMock
 
-    early = MagicMock()
+    early = ToolResult(
+        name="rubocop",
+        success=True,
+        output="No files to check.",
+        issues_count=0,
+    )
     ctx = MagicMock()
     ctx.should_skip = True
     ctx.early_result = early

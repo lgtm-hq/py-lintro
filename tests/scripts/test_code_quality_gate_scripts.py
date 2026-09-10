@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess  # nosec B404 - subprocess drives shell scripts under test; shell=False
 import tempfile
 from pathlib import Path
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +37,7 @@ def _run_script(
         "scripts/ci/assert-required-check.sh",
         "scripts/ci/evaluate-code-quality-gate.sh",
         "scripts/ci/run-code-quality-gate.sh",
+        "scripts/ci/summarize-code-quality-gate.sh",
     ],
 )
 def test_code_quality_gate_scripts_expose_help(script: str) -> None:
@@ -147,16 +150,20 @@ def test_assert_required_check_passes_on_success() -> None:
     assert_that(result.stdout).contains("Required check satisfied")
 
 
-def test_assert_required_check_treats_cancelled_as_infra_flake() -> None:
-    """assert-required-check should not fail on infra-cancelled upstream jobs."""
+def test_assert_required_check_fails_closed_on_a_cancelled_upstream() -> None:
+    """An infra-cancelled upstream produced no lint verdict, so it stays red.
+
+    Fail-closed contract (#2296): cancellation is still classified as infra
+    noise, but a check that never observed a lint run must not report success.
+    """
     result = _run_script(
         "scripts/ci/assert-required-check.sh",
         env={
             "UPSTREAM_RESULT": "cancelled",
         },
     )
-    assert_that(result.returncode).is_equal_to(0)
-    assert_that(result.stdout).contains("infra flake")
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout + result.stderr).contains("No lint verdict")
 
 
 def test_assert_required_check_fails_on_genuine_lint_failure() -> None:
@@ -195,7 +202,12 @@ def test_assert_required_check_does_not_absorb_lint_failure_with_artifact_reason
 
 
 def test_assert_required_check_reports_infra_flake_output() -> None:
-    """Absorbing a flake must be visible to consumers via the infra-flake output."""
+    """A red no-verdict check must stay distinguishable from a lint failure.
+
+    ``infra-flake`` survives the fail-closed rework (#2296) so the rerun bot,
+    the job summary and dashboards can tell "lint failed" from "lint did not
+    run"; ``status=no-verdict`` names the second case.
+    """
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
         output_path = output_file.name
 
@@ -207,8 +219,11 @@ def test_assert_required_check_reports_infra_flake_output() -> None:
                 "UPSTREAM_RESULT": "cancelled",
             },
         )
-        assert_that(result.returncode).is_equal_to(0)
-        assert_that(Path(output_path).read_text()).contains("infra-flake=true")
+        assert_that(result.returncode).is_equal_to(1)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("infra-flake=true")
+        assert_that(output).contains("status=no-verdict")
+        assert_that(output).contains("exit-code=1")
     finally:
         Path(output_path).unlink(missing_ok=True)
 
@@ -252,7 +267,6 @@ def test_evaluate_code_quality_gate_prefers_retry_success() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "success",
                 "PRIMARY_LINT_STATUS": "",
@@ -284,7 +298,6 @@ def test_evaluate_code_quality_gate_rejects_newline_in_lint_status(
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": f"boom{injection}status-output=passed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -312,7 +325,6 @@ def test_run_code_quality_gate_fails_closed_on_injected_lint_status() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "boom\nstatus-output=passed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -335,7 +347,6 @@ def test_evaluate_gate_keeps_primary_failure_when_retry_is_killed() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -365,7 +376,6 @@ def test_run_gate_stays_red_when_retry_killed_after_primary_lint_failure() -> No
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -393,7 +403,6 @@ def test_run_gate_recovers_when_retry_passes_after_primary_flake() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -422,7 +431,6 @@ def test_evaluate_code_quality_gate_propagates_docker_build_failure() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "failure",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "skipped",
             },
         )
@@ -446,7 +454,6 @@ def test_run_code_quality_gate_fails_on_docker_build_failure() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "failure",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "skipped",
             },
         )
@@ -458,8 +465,13 @@ def test_run_code_quality_gate_fails_on_docker_build_failure() -> None:
         Path(output_path).unlink(missing_ok=True)
 
 
-def test_run_code_quality_gate_passes_after_runner_shutdown() -> None:
-    """End-to-end gate should absorb a SIGTERM (exit 143) runner shutdown."""
+def test_run_code_quality_gate_fails_closed_after_runner_shutdown() -> None:
+    """End-to-end gate stays red when both attempts died at SIGTERM (exit 143).
+
+    Both attempts flaked, so no lint verdict exists. The gate reports
+    ``passed=false`` / ``status=no-verdict`` / ``infra-flake=true`` (#2296) and
+    the auto-rerun retries the run.
+    """
     with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
         output_path = output_file.name
 
@@ -469,7 +481,6 @@ def test_run_code_quality_gate_passes_after_runner_shutdown() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "",
@@ -478,11 +489,13 @@ def test_run_code_quality_gate_passes_after_runner_shutdown() -> None:
                 "RETRY_LINT_EXIT_CODE": "143",
             },
         )
-        assert_that(result.returncode).is_equal_to(0)
+        assert_that(result.returncode).is_equal_to(1)
         output = Path(output_path).read_text()
-        assert_that(output).contains("result=success")
-        assert_that(output).contains("passed=true")
-        # Absorbed noise proves nothing about lint, so publish must be blocked.
+        assert_that(output).contains("result=failure")
+        assert_that(output).contains("passed=false")
+        assert_that(output).contains("status=no-verdict")
+        # Kept so the rerun bot and dashboards can tell this red apart from a
+        # genuine lint failure.
         assert_that(output).contains("infra-flake=true")
     finally:
         Path(output_path).unlink(missing_ok=True)
@@ -505,7 +518,6 @@ def test_run_code_quality_gate_absorbs_post_lint_failure_after_passed_lint() -> 
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "passed",
                 "PRIMARY_LINT_EXIT_CODE": "0",
@@ -531,7 +543,6 @@ def test_run_code_quality_gate_fails_when_lint_never_reported() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "",
@@ -559,7 +570,6 @@ def test_run_code_quality_gate_marks_clean_pass_as_non_flake() -> None:
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "success",
                 "PRIMARY_LINT_STATUS": "passed",
                 "PRIMARY_LINT_EXIT_CODE": "0",
@@ -584,7 +594,6 @@ def test_run_code_quality_gate_fails_when_retry_reports_real_lint_failure() -> N
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": "success",
-                "MANIFEST_SYNC_RESULT": "success",
                 "PRIMARY_LINT_RESULT": "failure",
                 "RETRY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "",
@@ -601,22 +610,16 @@ def test_run_code_quality_gate_fails_when_retry_reports_real_lint_failure() -> N
         Path(output_path).unlink(missing_ok=True)
 
 
-# --- Tool-execution timeout classification (#1653) ---------------------------
+# --- Tool-execution timeout classification (#1653, #2242) --------------------
 
 
-def test_gate_never_absorbs_on_a_timeout_claim() -> None:
-    """A tool-timeout claim must not green a lint-shaped verdict.
+def test_gate_never_absorbs_without_timeout_evidence() -> None:
+    """A lint-shaped verdict with no timeout evidence stays red.
 
-    #1653 originally absorbed a lint failure when the no-silent-skip gate
-    reported ``timeout-flake=true``. That evidence comes from a *different*
-    job which always lints the full repo, so it is not evidence about the
-    authoritative run: under ``lint-scope == 'changed'`` the verdict comes from
-    changed files only, and a tool that times out contributes zero findings
-    precisely because it did not finish. A genuine finding could therefore be
-    absorbed and the required check turned green (lgtm-ci#746).
-
-    The absorb was removed. This asserts it stays removed: an unknown
-    environment variable must not change the classification of a lint verdict.
+    A per-tool execution timeout makes lintro exit ``1`` with
+    ``status=failed`` — indistinguishable from a genuine verdict by outputs
+    alone. Absorption therefore needs positive evidence; absence of the flag
+    is never evidence.
     """
     proc = _run_script(
         "scripts/ci/is-infra-flake-failure.sh",
@@ -624,46 +627,271 @@ def test_gate_never_absorbs_on_a_timeout_claim() -> None:
             "UPSTREAM_RESULT": "failure",
             "STATUS_OUTPUT": "failed",
             "EXIT_CODE_OUTPUT": "1",
-            # Whatever a future caller passes, a real lint verdict stays red.
-            "TIMEOUT_FLAKE": "true",
+            "TIMEOUT_FLAKE": "",
         },
     )
 
     assert_that(proc.returncode).is_equal_to(1)
 
 
-def test_gate_scripts_carry_no_timeout_flake_plumbing() -> None:
-    """No gate script may consume a tool-timeout flag.
+@pytest.mark.parametrize(
+    "flag",
+    [
+        "false",
+        "True",
+        "TRUE",
+        "yes",
+        "1",
+        " true",
+        "true ",
+        "maybe",
+    ],
+)
+def test_infra_flake_absorbs_only_the_exact_true_literal(flag: str) -> None:
+    """Anything but the literal ``true`` must fail closed and stay red."""
+    proc = _run_script(
+        "scripts/ci/is-infra-flake-failure.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "failed",
+            "EXIT_CODE_OUTPUT": "1",
+            "TIMEOUT_FLAKE": flag,
+        },
+    )
 
-    Guards against the absorb being reintroduced by wiring the flag back in
-    (lgtm-ci#746). A sound implementation must classify the authoritative
-    run's own structured report, which the upstream reusable lint workflow
-    does not publish today.
+    assert_that(proc.returncode).is_equal_to(1)
+
+
+def test_infra_flake_absorbs_the_authoritative_timeout_verdict() -> None:
+    """``timeout-flake=true`` from the same attempt is non-blocking (#2242).
+
+    The reusable lint workflow computes the flag from the authoritative run's
+    own JSON report and fails closed: it needs at least one timed-out tool,
+    zero findings from every tool, and no non-timeout failure.
     """
-    for name in (
-        "is-infra-flake-failure.sh",
-        "assert-required-check.sh",
-        "run-code-quality-gate.sh",
-    ):
-        script = (_REPO_ROOT / "scripts" / "ci" / name).read_text(
-            encoding="utf-8",
-        )
-        assert_that(script).described_as(name).does_not_contain("TIMEOUT_FLAKE")
+    proc = _run_script(
+        "scripts/ci/is-infra-flake-failure.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "failed",
+            "EXIT_CODE_OUTPUT": "1",
+            "TIMEOUT_FLAKE": "true",
+            "TIMED_OUT_TOOLS": "mypy,semgrep",
+        },
+    )
+
+    assert_that(proc.returncode).is_equal_to(0)
+    assert_that(proc.stdout).contains("mypy,semgrep")
 
 
 @pytest.mark.parametrize(
-    ("docker_build", "manifest_sync", "expected_source"),
+    ("primary_flag", "retry_flag", "expected"),
     [
-        ("failure", "success", "docker-build"),
-        ("success", "failure", "manifest-sync"),
-        ("success", "success", "lint"),
-        ("success", "skipped", "lint"),
+        # The retry is authoritative here, so only its own verdict counts: a
+        # stale flag from the losing primary must not be paired with it.
+        ("true", "false", "timeout-flake-output=false"),
+        ("false", "true", "timeout-flake-output=true"),
+    ],
+)
+def test_evaluate_gate_takes_timeout_evidence_from_the_effective_attempt(
+    *,
+    primary_flag: str,
+    retry_flag: str,
+    expected: str,
+) -> None:
+    """Timeout evidence follows the same attempt precedence as the verdict."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/evaluate-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": primary_flag,
+                "RETRY_LINT_RESULT": "failure",
+                "RETRY_LINT_STATUS": "failed",
+                "RETRY_LINT_EXIT_CODE": "1",
+                "RETRY_LINT_TIMEOUT_FLAKE": retry_flag,
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(Path(output_path).read_text()).contains(expected)
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_evaluate_gate_drops_timeout_evidence_on_a_build_failure() -> None:
+    """Lint-only evidence must never be attached to a docker-build verdict."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/evaluate-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "failure",
+                "PRIMARY_LINT_RESULT": "success",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "mypy",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("verdict-source=docker-build")
+        assert_that(output).contains("timeout-flake-output=false")
+        assert_that(output).does_not_contain("timeout-flake-output=true")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_evaluate_gate_sanitizes_the_timed_out_tool_list() -> None:
+    """The log-only tool list is reduced to tool-name characters."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/evaluate-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "mypy;rm -rf /$(id)",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("timed-out-tools-output=mypyrm-rf")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_fails_closed_on_an_authoritative_tool_timeout() -> None:
+    """End-to-end: a proven tool timeout is diagnosed but never absorbed.
+
+    A tool that exceeded its execution timeout did not finish, so the run is
+    not a lint verdict. #2296 supersedes the absorb direction of #1653: the
+    classifier stays (it names the cause) but the gate goes red.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "semgrep",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(1)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("result=failure")
+        assert_that(output).contains("passed=false")
+        assert_that(output).contains("status=no-verdict")
+        assert_that(output).contains("infra-flake=true")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_stays_red_for_a_changed_scope_timeout() -> None:
+    """Changed-files scope has no timeout verdict and stays fail-closed.
+
+    ``dogfooding-lint-changed`` publishes no JSON report, so the workflow
+    passes an empty flag. Changed-scope runs lint a handful of files, so a
+    per-tool timeout there is unlikely and worth a human look — this
+    asymmetry is a decision (#2242), not an omission.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "success",
+                "PRIMARY_LINT_RESULT": "failure",
+                "PRIMARY_LINT_STATUS": "failed",
+                "PRIMARY_LINT_EXIT_CODE": "1",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(1)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("result=failure")
+        assert_that(output).contains("passed=false")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_does_not_absorb_a_build_failure_on_timeout_evidence() -> None:
+    """A docker-build failure normalizes to failed/1 and must stay red.
+
+    ``run-code-quality-gate.sh`` scopes the timeout evidence by
+    ``verdict-source``, so lint-only proof can never green a build failure.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/run-code-quality-gate.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "DOCKER_BUILD_RESULT": "failure",
+                "PRIMARY_LINT_RESULT": "success",
+                "PRIMARY_LINT_STATUS": "passed",
+                "PRIMARY_LINT_EXIT_CODE": "0",
+                "PRIMARY_LINT_TIMEOUT_FLAKE": "true",
+                "PRIMARY_LINT_TIMED_OUT_TOOLS": "mypy",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(1)
+        assert_that(Path(output_path).read_text()).contains("passed=false")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_run_gate_never_consumes_the_skip_gate_verdict() -> None:
+    """Only the authoritative attempt's own outputs may reach the gate.
+
+    ``dogfood-skip-gate`` runs its own copy of the classifier over a full-repo
+    lint that is a different run from the authoritative one, so its verdict
+    must stay diagnostic. The gate reads ``*_LINT_TIMEOUT_FLAKE`` from the
+    reusable lint workflow only.
+    """
+    for name in ("run-code-quality-gate.sh", "evaluate-code-quality-gate.sh"):
+        script = (_REPO_ROOT / "scripts" / "ci" / name).read_text(encoding="utf-8")
+        assert_that(script).described_as(name).does_not_contain("dogfood-skip-gate")
+        assert_that(script).described_as(name).does_not_contain("SKIP_GATE")
+
+
+@pytest.mark.parametrize(
+    ("docker_build", "expected_source"),
+    [
+        ("failure", "docker-build"),
+        ("success", "lint"),
     ],
 )
 def test_evaluate_code_quality_gate_reports_verdict_source(
     *,
     docker_build: str,
-    manifest_sync: str,
     expected_source: str,
 ) -> None:
     """The evaluator names the job its verdict came from (#1653)."""
@@ -676,7 +904,6 @@ def test_evaluate_code_quality_gate_reports_verdict_source(
             env={
                 "GITHUB_OUTPUT": output_path,
                 "DOCKER_BUILD_RESULT": docker_build,
-                "MANIFEST_SYNC_RESULT": manifest_sync,
                 "PRIMARY_LINT_RESULT": "failure",
                 "PRIMARY_LINT_STATUS": "failed",
                 "PRIMARY_LINT_EXIT_CODE": "1",
@@ -688,3 +915,344 @@ def test_evaluate_code_quality_gate_reports_verdict_source(
         )
     finally:
         Path(output_path).unlink(missing_ok=True)
+
+
+# --- Fail-closed required check (#2296) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    (
+        "upstream_result",
+        "status_output",
+        "exit_code_output",
+        "expected_returncode",
+        "expected_status",
+        "expected_infra_flake",
+    ),
+    [
+        # Runner shutdown: SIGTERM'd lint reported no verdict, so the required
+        # check goes red while still naming the cause for the auto-rerun.
+        ("failure", "", "143", 1, "status=no-verdict", "infra-flake=true"),
+        # A clean lint run stays green and is not flagged as noise.
+        ("success", "passed", "0", 0, "status=passed", "infra-flake=false"),
+        # A genuine lint failure is red and must never claim to be infra noise.
+        ("failure", "failed", "1", 1, "status=failed", "infra-flake=false"),
+    ],
+)
+def test_assert_required_check_fail_closed_matrix(
+    *,
+    upstream_result: str,
+    status_output: str,
+    exit_code_output: str,
+    expected_returncode: int,
+    expected_status: str,
+    expected_infra_flake: str,
+) -> None:
+    """The required check is red unless a lint verdict says it passed (#2296).
+
+    Acceptance matrix for the fail-closed gate: runner loss (exit 143) is red
+    with ``infra-flake=true``, a successful run is green, and a genuine lint
+    failure is red with ``infra-flake=false`` so nothing reruns it as noise.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/assert-required-check.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "UPSTREAM_RESULT": upstream_result,
+                "STATUS_OUTPUT": status_output,
+                "EXIT_CODE_OUTPUT": exit_code_output,
+                "STATUS_EXPECTED": "passed",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(expected_returncode)
+        output = Path(output_path).read_text()
+        assert_that(output).contains(expected_status)
+        assert_that(output).contains(expected_infra_flake)
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_assert_required_check_keeps_a_passing_verdict_green() -> None:
+    """A post-lint job failure on a passing verdict is still absorbed.
+
+    This is the mirror image of the no-verdict case and the only infra class
+    #2296 leaves green: lint ran and passed, and only a later step of the
+    surrounding job failed. ``infra-flake=true`` keeps image promotion blocked.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/assert-required-check.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "UPSTREAM_RESULT": "failure",
+                "STATUS_OUTPUT": "passed",
+                "EXIT_CODE_OUTPUT": "0",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("status=passed")
+        assert_that(output).contains("infra-flake=true")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_assert_required_check_fails_closed_on_a_status_only_no_verdict() -> None:
+    """The status-mismatch branch fails closed too (#2296).
+
+    An upstream job that reported success while its lint status says something
+    other than ``passed`` — a SIGTERM'd run that wrote a stale status on the
+    way out — has no verdict either.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as output_file:
+        output_path = output_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/assert-required-check.sh",
+            env={
+                "GITHUB_OUTPUT": output_path,
+                "UPSTREAM_RESULT": "success",
+                "STATUS_OUTPUT": "failed",
+                "EXIT_CODE_OUTPUT": "143",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(1)
+        output = Path(output_path).read_text()
+        assert_that(output).contains("status=no-verdict")
+        assert_that(output).contains("infra-flake=true")
+    finally:
+        Path(output_path).unlink(missing_ok=True)
+
+
+def test_gate_summary_explains_a_no_verdict_failure() -> None:
+    """The red check must read as runner loss, not as a lint violation."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as summary_file:
+        summary_path = summary_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/summarize-code-quality-gate.sh",
+            env={
+                "GITHUB_STEP_SUMMARY": summary_path,
+                "GATE_INFRA_FLAKE": "true",
+                "GATE_STATUS": "no-verdict",
+                "GATE_RESULT": "failure",
+                "GITHUB_RUN_ATTEMPT": "2",
+                "MAX_RERUNS": "3",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        summary = Path(summary_path).read_text()
+        assert_that(summary).contains("No lint verdict (runner loss)")
+        assert_that(summary).contains("auto-rerun will retry")
+        assert_that(summary).contains("run attempt 2; up to 3 automatic reruns")
+    finally:
+        Path(summary_path).unlink(missing_ok=True)
+
+
+def test_gate_summary_is_silent_without_an_infra_flake() -> None:
+    """A plain lint failure gets no runner-loss explanation."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as summary_file:
+        summary_path = summary_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/summarize-code-quality-gate.sh",
+            env={
+                "GITHUB_STEP_SUMMARY": summary_path,
+                "GATE_INFRA_FLAKE": "false",
+                "GATE_STATUS": "failed",
+                "GATE_RESULT": "failure",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        assert_that(Path(summary_path).read_text()).is_empty()
+    finally:
+        Path(summary_path).unlink(missing_ok=True)
+
+
+def test_gate_summary_explains_an_absorbed_post_lint_failure() -> None:
+    """A green infra-flake gets the promotion-blocked explanation instead."""
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as summary_file:
+        summary_path = summary_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/summarize-code-quality-gate.sh",
+            env={
+                "GITHUB_STEP_SUMMARY": summary_path,
+                "GATE_INFRA_FLAKE": "true",
+                "GATE_STATUS": "passed",
+                "GATE_RESULT": "success",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        summary = Path(summary_path).read_text()
+        assert_that(summary).contains("Lint passed")
+        assert_that(summary).does_not_contain("No lint verdict")
+    finally:
+        Path(summary_path).unlink(missing_ok=True)
+
+
+def test_auto_rerun_signature_matches_the_assert_script_message() -> None:
+    """The rerun signature is a fixed string grepped from the failed job log.
+
+    ``auto-rerun-on-infra-failure.yml`` matches with ``grep -qF``, so the
+    signature must stay a byte-identical substring of what
+    ``assert-required-check.sh`` prints; a drifted message would silently stop
+    the rerun. The literal below is the third copy on purpose — changing the
+    message means changing all three together, and this test is what makes a
+    half-done rename loud.
+    """
+    signature = "No lint verdict (runner loss); auto-rerun will retry"
+    assert_script = (
+        _REPO_ROOT / "scripts" / "ci" / "assert-required-check.sh"
+    ).read_text(encoding="utf-8")
+    workflow = (
+        _REPO_ROOT / ".github" / "workflows" / "auto-rerun-on-infra-failure.yml"
+    ).read_text(encoding="utf-8")
+
+    assert_that(assert_script).contains(signature)
+    assert_that(workflow).contains(signature)
+
+
+def test_gate_summary_attempt_budget_matches_the_auto_rerun_budget() -> None:
+    """The summary's "attempt N of M" must not quote a stale rerun budget.
+
+    ``MAX_RERUNS`` in docker-ci.yml and ``max-reruns`` in
+    auto-rerun-on-infra-failure.yml are the same number in two files; bind
+    them so a changed budget cannot leave the job summary lying.
+    """
+    docker_ci = (_REPO_ROOT / ".github" / "workflows" / "docker-ci.yml").read_text(
+        encoding="utf-8",
+    )
+    auto_rerun = (
+        _REPO_ROOT / ".github" / "workflows" / "auto-rerun-on-infra-failure.yml"
+    ).read_text(encoding="utf-8")
+
+    summary_budget = re.findall(r"MAX_RERUNS: '(\d+)'", docker_ci)
+    rerun_budget = re.findall(r"max-reruns: '(\d+)'", auto_rerun)
+
+    assert_that(summary_budget).is_length(1)
+    assert_that(rerun_budget).is_length(1)
+    assert_that(summary_budget).is_equal_to(rerun_budget)
+
+
+def test_gate_summary_stops_promising_a_rerun_past_the_budget() -> None:
+    """The last attempt must not claim another rerun is coming.
+
+    ``max-reruns`` counts reruns, not attempts, so attempt 4 of a budget of 3
+    is the final one and the summary says the budget is exhausted.
+    """
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as summary_file:
+        summary_path = summary_file.name
+
+    try:
+        result = _run_script(
+            "scripts/ci/summarize-code-quality-gate.sh",
+            env={
+                "GITHUB_STEP_SUMMARY": summary_path,
+                "GATE_INFRA_FLAKE": "true",
+                "GATE_STATUS": "no-verdict",
+                "GATE_RESULT": "failure",
+                "GITHUB_RUN_ATTEMPT": "4",
+                "MAX_RERUNS": "3",
+            },
+        )
+        assert_that(result.returncode).is_equal_to(0)
+        summary = Path(summary_path).read_text()
+        assert_that(summary).contains("budget (3) is now exhausted")
+    finally:
+        Path(summary_path).unlink(missing_ok=True)
+
+
+_AUTO_RERUN_WORKFLOW = (
+    _REPO_ROOT / ".github" / "workflows" / "auto-rerun-on-infra-failure.yml"
+)
+
+
+def _auto_rerun_signatures() -> list[str]:
+    """Read the extra rerun signatures exactly as the reusable workflow gets them.
+
+    Returns:
+        The non-empty lines of the workflow's ``signatures`` block.
+    """
+    workflow = yaml.safe_load(_AUTO_RERUN_WORKFLOW.read_text(encoding="utf-8"))
+    block = workflow["jobs"]["rerun"]["with"]["signatures"]
+    return [line for line in block.splitlines() if line.strip()]
+
+
+def _matches_any_signature(*, log: str, signatures: list[str]) -> bool:
+    """Match a job log the way the rerun bot does, with a real ``grep -qF``.
+
+    Args:
+        log: Captured job-log text.
+        signatures: Fixed strings from the workflow's signature block.
+
+    Returns:
+        True when at least one signature matches the log.
+    """
+    return any(
+        subprocess.run(  # nosec B603 B607 - fixed argv, no shell, test-local input
+            ["grep", "-qF", "--", signature],
+            input=log,
+            text=True,
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 0
+        for signature in signatures
+    )
+
+
+def test_auto_rerun_matches_a_real_no_verdict_gate_log() -> None:
+    """The rerun bot's own matcher must fire on the line the gate really prints.
+
+    The literal-containment test above pins the three copies of the sentence
+    against drift; this one closes the remaining gap by running
+    ``assert-required-check.sh`` for real and feeding its output to ``grep
+    -qF`` with the signatures parsed out of the workflow — the same matcher
+    lgtm-ci's reusable rerun applies to the failed job's log.
+    """
+    result = _run_script(
+        "scripts/ci/assert-required-check.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "",
+            "EXIT_CODE_OUTPUT": "143",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(
+        _matches_any_signature(
+            log=result.stdout + result.stderr,
+            signatures=_auto_rerun_signatures(),
+        ),
+    ).is_true()
+
+
+def test_auto_rerun_ignores_a_real_lint_failure_log() -> None:
+    """A genuine lint failure must never be rerun as if it were runner noise."""
+    result = _run_script(
+        "scripts/ci/assert-required-check.sh",
+        env={
+            "UPSTREAM_RESULT": "failure",
+            "STATUS_OUTPUT": "failed",
+            "EXIT_CODE_OUTPUT": "1",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(
+        _matches_any_signature(
+            log=result.stdout + result.stderr,
+            signatures=_auto_rerun_signatures(),
+        ),
+    ).is_false()

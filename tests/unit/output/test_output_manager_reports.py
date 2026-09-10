@@ -117,6 +117,29 @@ def test_cleanup_old_runs_preserves_active_run_dirs(
     assert_that((tmp_path / "run-20000101-000003-000000-9999").exists()).is_true()
 
 
+def test_mark_run_complete_removes_active_marker(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Completing a run should make its directory eligible for later cleanup."""
+    monkeypatch.setenv("LINTRO_LOG_DIR", str(tmp_path))
+    manager = OutputManager(keep_last=2)
+    completed_run = manager.run_dir
+    marker = manager.run_dir / ".active"
+    assert_that(marker.exists()).is_true()
+
+    manager.mark_run_complete()
+    manager.mark_run_complete()  # A missing marker is an idempotent success.
+
+    assert_that(marker.exists()).is_false()
+    for suffix in (1, 2):
+        (tmp_path / f"run-99991231-23595{suffix}-000000-9999").mkdir()
+
+    manager.cleanup_old_runs()
+
+    assert_that(completed_run.exists()).is_false()
+
+
 def test_create_run_dir_fallback_updates_base_dir(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -2,7 +2,7 @@
 
 These tests lock in the observable behavior shared by ``tsc`` and ``vue-tsc``
 after their common implementation was extracted into
-:class:`lintro.tools.definitions._ts_checker_base.TypeScriptCheckerPlugin`.
+:class:`lintro.tools.ts_checker.base.TypeScriptCheckerPlugin`.
 
 They deliberately assert on user-facing output copy, command construction,
 tsconfig discovery priority, framework deferral, and dependency-error shaping
@@ -21,9 +21,9 @@ import pytest
 from assertpy import assert_that
 
 from lintro.models.core.tool_result import ToolResult
-from lintro.tools.definitions._ts_checker_base import TypeScriptCheckerPlugin
-from lintro.tools.definitions.tsc import TscPlugin
-from lintro.tools.definitions.vue_tsc import VueTscPlugin
+from lintro.tools.ts_checker.base import TypeScriptCheckerPlugin
+from lintro.tools.tsc.definition import TscPlugin
+from lintro.tools.vue_tsc.definition import VueTscPlugin
 
 
 def _run_check(

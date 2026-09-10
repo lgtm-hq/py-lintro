@@ -156,7 +156,7 @@ async def test_anthropic_aclose_closes_sdk_client(
 ) -> None:
     """AnthropicProvider.aclose closes the AsyncAnthropic-like client."""
     pytest.importorskip("anthropic")
-    from lintro.ai.providers.anthropic import AnthropicProvider
+    from lintro.ai.providers.anthropic.provider import AnthropicProvider
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     provider = AnthropicProvider()
@@ -179,7 +179,7 @@ async def test_openai_aclose_closes_sdk_client(
 ) -> None:
     """OpenAIProvider.aclose closes the AsyncOpenAI-like client."""
     pytest.importorskip("openai")
-    from lintro.ai.providers.openai import OpenAIProvider
+    from lintro.ai.providers.openai.provider import OpenAIProvider
 
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     provider = OpenAIProvider()
@@ -197,11 +197,11 @@ async def test_openai_aclose_closes_sdk_client(
 
 async def test_cursor_aclose_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
     """CursorProvider.aclose is a no-op (no poolable client)."""
-    import lintro.ai.providers.cursor as cursor_mod
-    from lintro.ai.providers.cursor import CursorProvider
+    from lintro.ai.providers.cursor import provider as cursor_mod
+    from lintro.ai.providers.cursor.provider import CursorProvider
 
     monkeypatch.setattr(cursor_mod, "_find_agent", lambda: "/usr/bin/agent")
-    provider = CursorProvider()
+    provider = CursorProvider(cursor_trust_workspace=True)
     await provider.aclose()
     await provider.aclose()
     assert_that(provider._client).is_none()

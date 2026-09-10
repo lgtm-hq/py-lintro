@@ -12,15 +12,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pytest
 from assertpy import assert_that
 
-from tests.integration.tools.tsc.conftest import tsc_is_available
+from tests.integration._tools import require_tool
 
-pytestmark = pytest.mark.skipif(
-    not tsc_is_available(),
-    reason="tsc not available",
-)
+pytestmark = require_tool("tsc")
 
 
 def _write_json(path: Path, content: dict[str, Any]) -> None:
@@ -49,7 +45,7 @@ def test_excluded_file_not_checked(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory for the test project.
     """
-    from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
     # Project tsconfig scopes to src/ only
     _write_json(
@@ -91,7 +87,7 @@ def test_monorepo_with_references(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory for the test project.
     """
-    from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
     # Root tsconfig with references
     _write_json(
@@ -144,7 +140,7 @@ def test_no_root_tsconfig_discovers_subdirs(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory for the test project.
     """
-    from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
     # No root tsconfig — only sub-projects
     _write_json(
@@ -171,7 +167,7 @@ def test_backward_compat_no_tsconfig(tmp_path: Path) -> None:
     Args:
         tmp_path: Temporary directory for the test project.
     """
-    from lintro.tools.definitions.tsc import TscPlugin
+    from lintro.tools.tsc.definition import TscPlugin
 
     _write_ts(
         tmp_path / "app.ts",

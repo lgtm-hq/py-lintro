@@ -16,7 +16,7 @@
 #   test_samples/**/*.md → testing + documentation
 #   npm/**/package.json → release only
 #   .github/workflows/*security*.yml, *codeql*.yml → ci + security
-#   lintro/tools/definitions/{bandit,gitleaks,semgrep}.py → enhancement + security
+#   lintro/tools/{bandit,gitleaks,semgrep}/** → enhancement + security
 ---
 enhancement:
   - changed-files:
@@ -64,16 +64,15 @@ security:
       - any-glob-to-any-file:
           - '.github/workflows/*security*.yml'
           - '.github/workflows/*codeql*.yml'
-          - 'lintro/tools/definitions/bandit.py'
-          - 'lintro/tools/definitions/gitleaks.py'
-          - 'lintro/tools/definitions/semgrep.py'
+          - 'lintro/tools/bandit/**'
+          - 'lintro/tools/gitleaks/**'
+          - 'lintro/tools/semgrep/**'
 
 testing:
   - changed-files:
       - any-glob-to-any-file:
           - 'tests/**'
           - 'pytest.ini'
-          - 'tox.ini'
           - 'test_samples/**'
           - 'scripts/ci/testing/**'
 

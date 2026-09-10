@@ -6,15 +6,19 @@ flag surface between releases, and a removed flag breaks every review at
 runtime (see #1611, where ``@anthropic-ai/claude-code`` 2.1.218 dropped
 ``--json-schema-name``).
 
-This module is the **single source of truth** for what lintro sends to each
-binary and what it requires of it:
+This module holds the shared vocabulary for what lintro sends to each binary
+and what it requires of it. The contracts themselves are declared per provider
+(``lintro/ai/providers/<name>/cli_contract.py``) and reached through the
+provider's :class:`~lintro.ai.providers.protocol.ProviderMetadata`, so a
+vendor's CLI identity and its flag contract cannot drift apart (#2308):
 
 * ``required_flags`` -- flags lintro cannot work without. They are not gated at
   runtime (silently dropping them would hang or badly degrade a call); instead
   the contract test asserts each one is still advertised by the installed
   binary, so drift breaks CI rather than a user's review.
 * ``optional_flags`` -- flags lintro degrades gracefully without. These are
-  gated by :meth:`~lintro.ai.providers.cli_transport.CliTransport.supports_flag`
+  gated by the capability guard's
+  :meth:`~lintro.ai.providers.cli_capabilities.CliCapabilityGuard.supports_flag`
   before being sent and dropped-and-retried if the binary rejects them.
 * ``version_floor`` -- a *known-incompatible-below* floor, not a known-good
   pin. It is deliberately conservative: binaries below it predate the flag
@@ -25,20 +29,48 @@ binary and what it requires of it:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.registry import all_metadata, metadata_for
 
 __all__ = [
-    "CLI_CONTRACTS",
     "CliContract",
     "OptionalCliFlag",
     "cli_contract_for",
+    "cli_contracts",
+    "flag_named_in",
     "format_version",
     "unadvertised_flags",
 ]
+
+# Flag characters that continue a flag token. Used to bound flag matches in CLI
+# output so ``--foo`` does not match inside ``--foobar``.
+_FLAG_CHAR = r"[0-9a-z-]"
+
+
+def flag_named_in(lowered_text: str, flag: str) -> bool:
+    """Return whether *flag* is named in *lowered_text* as a whole token.
+
+    A plain substring test would let a rejection of ``--foobar`` also match a
+    candidate ``--foo``, dropping the wrong optional flag. Matching on flag-token
+    boundaries keeps the backstop precise even if a future contract adds flags
+    that share a prefix.
+
+    Args:
+        lowered_text: Already-lowercased CLI output. Either a rejection on stderr
+            or ``--help`` text: the runtime guard and the contract gate share
+            this matcher precisely so both read a flag the same way.
+        flag: The candidate flag, e.g. ``--resume``.
+
+    Returns:
+        True when the flag appears as a complete token.
+    """
+    pattern = rf"(?<!{_FLAG_CHAR}){re.escape(flag.lower())}(?!{_FLAG_CHAR})"
+    return re.search(pattern, lowered_text) is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,10 +146,6 @@ def unadvertised_flags(
     Returns:
         The subset of *flags* not present as whole tokens.
     """
-    # Imported inside the function on purpose: cli_transport imports this module
-    # at load time, so a module-level import here would close the cycle.
-    from lintro.ai.providers.cli_transport import flag_named_in
-
     return tuple(flag for flag in flags if not flag_named_in(lowered_help, flag))
 
 
@@ -135,99 +163,6 @@ def format_version(version: tuple[int, ...] | None) -> str:
     return ".".join(str(part) for part in version)
 
 
-_ANTHROPIC_CONTRACT = CliContract(
-    binary="claude",
-    display_name="Claude",
-    upgrade_hint=(
-        "Upgrade Claude Code: npm install -g @anthropic-ai/claude-code@latest"
-    ),
-    # Claude Code 2.x introduced the --bare / --json-schema surface lintro
-    # drives; 1.x cannot serve a structured CLI review at all.
-    version_floor=(2, 0, 0),
-    # `--bare` is sent conditionally (see lintro.ai.providers.claude_auth): it
-    # disables OAuth session login, so it is only safe when the binary can
-    # reach an API key. It stays *required* rather than optional because the
-    # API-key path cannot degrade without it -- silently dropping it there
-    # would hand the agentic tool surface a review prompt -- so its
-    # disappearance from the flag surface must break CI, not a user's review.
-    required_flags=(
-        "--bare",
-        "--print",
-        "--output-format",
-        "--permission-mode",
-        "--model",
-        "--append-system-prompt",
-        "--json-schema",
-    ),
-    optional_flags=(
-        OptionalCliFlag(
-            flag="--json-schema-name",
-            purpose="names the structured-output schema",
-        ),
-        OptionalCliFlag(
-            flag="--resume",
-            purpose="reuses one CLI session across review turns",
-        ),
-    ),
-)
-
-_OPENAI_CONTRACT = CliContract(
-    binary="codex",
-    display_name="Codex",
-    upgrade_hint="Upgrade Codex CLI: npm install -g @openai/codex@latest",
-    # `codex exec --json` with structured output stabilised during 0.20.x.
-    version_floor=(0, 20, 0),
-    help_args=("exec", "--help"),
-    required_flags=(
-        "--json",
-        "--sandbox",
-        "--model",
-    ),
-    optional_flags=(
-        OptionalCliFlag(
-            flag="--output-schema",
-            purpose="requests native structured output",
-        ),
-    ),
-)
-
-_CURSOR_CONTRACT = CliContract(
-    binary="agent",
-    display_name="Cursor agent",
-    upgrade_hint=(
-        "Upgrade the Cursor agent CLI: curl https://cursor.com/install -fsS | bash"
-    ),
-    # The agent CLI uses calendar versioning; every release carrying the
-    # --print/--output-format surface lintro drives is 2025 or later.
-    version_floor=(2025, 1, 1),
-    required_flags=(
-        "--print",
-        "--output-format",
-        "--mode",
-        "--model",
-        "--workspace",
-    ),
-    optional_flags=(
-        OptionalCliFlag(
-            flag="--trust",
-            purpose="grants the agent workspace trust",
-        ),
-        OptionalCliFlag(
-            flag="--resume",
-            purpose="reuses one CLI session across review turns",
-        ),
-    ),
-)
-
-CLI_CONTRACTS: Mapping[AIProvider, CliContract] = MappingProxyType(
-    {
-        AIProvider.ANTHROPIC: _ANTHROPIC_CONTRACT,
-        AIProvider.OPENAI: _OPENAI_CONTRACT,
-        AIProvider.CURSOR: _CURSOR_CONTRACT,
-    },
-)
-
-
 def cli_contract_for(provider: AIProvider) -> CliContract:
     """Return the declared CLI contract for *provider*.
 
@@ -236,5 +171,32 @@ def cli_contract_for(provider: AIProvider) -> CliContract:
 
     Returns:
         The provider's :class:`CliContract`.
+
+    Raises:
+        KeyError: If *provider* declares no CLI contract. Callers that cannot
+            assume one iterate :func:`cli_contracts` instead.
     """
-    return CLI_CONTRACTS[provider]
+    contract = metadata_for(provider).cli_contract
+    if contract is None:
+        raise KeyError(provider)
+    return contract
+
+
+def cli_contracts() -> Mapping[AIProvider, CliContract]:
+    """Return every declared CLI contract, keyed by provider.
+
+    Built from plugin metadata on each call rather than cached in a module
+    global: a cached copy is exactly the parallel table #2308 removed, and the
+    lookup only walks three in-memory records.
+
+    Returns:
+        A read-only mapping in :class:`~lintro.ai.provider_enum.AIProvider`
+        declaration order, holding only providers that declare a contract.
+    """
+    return MappingProxyType(
+        {
+            provider: metadata.cli_contract
+            for provider, metadata in all_metadata().items()
+            if metadata.cli_contract is not None
+        },
+    )

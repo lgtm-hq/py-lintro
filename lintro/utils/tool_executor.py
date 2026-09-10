@@ -1,18 +1,7 @@
-"""Execute phase of a Lintro run.
+"""Execute tools into a run artifact and optionally render its output.
 
-The runner is split into two phases (issue #1823):
-
-1. :func:`execute_run` selects tools, runs them, aggregates their results,
-   scores the run, and resolves the exit code. It writes no files, emits no
-   output document, and imports nothing from :mod:`lintro.ai`. Its product is
-   a :class:`~lintro.models.core.run_artifact.RunArtifact`.
-2. :func:`lintro.utils.execution.run_renderer.render_run` turns that artifact
-   into console/JSON/SARIF/CSV output and the run's files.
-
-:func:`run_lint_tools_simple` remains as a thin, AI-free wrapper over both, so
-every existing caller keeps its exit-code contract. Callers that want AI
-enhancement run it between the two phases; see
-:func:`lintro.ai.interface.enhance_artifact`.
+The execute/render split from issue #1823 keeps execution AI-free while
+``run_lint_tools_simple`` preserves the legacy one-call exit-code contract.
 """
 
 from __future__ import annotations
@@ -24,7 +13,6 @@ from lintro.enums.action import Action, normalize_action
 from lintro.models.core.run_artifact import RunArtifact
 from lintro.models.core.tool_result import ToolResult
 from lintro.tools import tool_manager
-from lintro.utils.config import load_post_checks_config
 from lintro.utils.execution.exit_codes import (
     DEFAULT_EXIT_CODE_FAILURE,
     DEFAULT_EXIT_CODE_SUCCESS,
@@ -61,8 +49,8 @@ from lintro.utils.execution.tool_configuration import (
     get_tool_display_name,
     get_tools_to_run,
 )
+from lintro.utils.gates import execute_gates
 from lintro.utils.output import OutputManager
-from lintro.utils.post_checks import execute_post_checks
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
@@ -90,11 +78,11 @@ def build_run_context(
     *,
     action: str | Action,
     output_format: str,
-    score: bool = False,
     debug: bool = False,
     no_art: bool = False,
     dry_run: bool = False,
     group_by: str = "auto",
+    profile: bool = False,
 ) -> RunContext:
     """Create the run-scoped state shared by the execute and render phases.
 
@@ -105,11 +93,12 @@ def build_run_context(
     Args:
         action: Action to perform ("check", "fmt", "test").
         output_format: Output format requested for the run.
-        score: Whether stdout must carry only the numeric health score.
         debug: Whether to show DEBUG messages on the console.
         no_art: Whether to suppress the decorative ASCII art.
         dry_run: Whether this is a ``fmt --dry-run`` preview.
         group_by: How to group issues in formatted and JSON output.
+        profile: Whether to emit the human/JSON performance profile. Main-tool
+            timings are recorded regardless; this flag only gates rendering.
 
     Returns:
         RunContext: The shared context for this run.
@@ -141,9 +130,6 @@ def build_run_context(
     # stderr and suppress the human summary so stdout carries only the payload
     # (grid remains the default human view).
     clean_stdout_output = output_format.lower() in ("json", "sarif", "csv", "markdown")
-    # Score-only takes priority over machine-readable formats so
-    # ``--score --output-format json`` still prints only the numeric score.
-    score_only = bool(score)
 
     lintro_config = get_config()
 
@@ -154,7 +140,7 @@ def build_run_context(
 
     logger = create_logger(
         run_dir=output_manager.run_dir,
-        route_stderr=clean_stdout_output or score_only,
+        route_stderr=clean_stdout_output,
         art_enabled=art_enabled,
     )
 
@@ -166,8 +152,8 @@ def build_run_context(
         logger=logger,
         lintro_config=lintro_config,
         clean_stdout_output=clean_stdout_output,
-        score_only=score_only,
         group_by=group_by,
+        profile=profile,
     )
 
 
@@ -180,7 +166,7 @@ def _execute_tools_parallel(
     tool_option_dict: dict[str, Any],
     exclude: str | None,
     include_venv: bool,
-    post_tools: set[str],
+    selected_tools: set[str],
     incremental: bool,
     effective_auto_install: bool,
     diff_base: str | None,
@@ -196,7 +182,8 @@ def _execute_tools_parallel(
         tool_option_dict: Parsed ``--tool-options`` mapping.
         exclude: Exclude patterns.
         include_venv: Whether to include virtual environment directories.
-        post_tools: Tools reserved for the post-check phase.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         incremental: Whether to only scan files changed since the last run.
         effective_auto_install: Resolved auto-install setting.
         diff_base: Resolved ``--diff`` base ref, or ``None``.
@@ -218,7 +205,7 @@ def _execute_tools_parallel(
         tool_option_dict=tool_option_dict,
         exclude=exclude,
         include_venv=include_venv,
-        post_tools=post_tools,
+        selected_tools=selected_tools,
         max_workers=ctx.lintro_config.execution.max_workers,
         incremental=incremental,
         auto_install=effective_auto_install,
@@ -231,8 +218,10 @@ def _execute_tools_parallel(
         try:
             tool = tool_manager.get_tool(result.name)
             _enrich_issues_with_doc_urls(tool, result)
-        except (KeyError, ValueError):
-            pass  # Tool not found — skip enrichment
+        except (KeyError, OSError, ValueError, RuntimeError):
+            # Unresolvable tool: the parallel dispatcher already recorded a
+            # failure result for it, so there is nothing to enrich.
+            continue
 
     # Dry-run: restrict each result to would-fix issues before totals and
     # display so non-auto-fixable diagnostics don't inflate the count.
@@ -260,7 +249,7 @@ def _execute_tools_sequential(
     tool_option_dict: dict[str, Any],
     exclude: str | None,
     include_venv: bool,
-    post_tools: set[str],
+    selected_tools: set[str],
     incremental: bool,
     effective_auto_install: bool,
     diff_base: str | None,
@@ -276,7 +265,8 @@ def _execute_tools_sequential(
         tool_option_dict: Parsed ``--tool-options`` mapping.
         exclude: Exclude patterns.
         include_venv: Whether to include virtual environment directories.
-        post_tools: Tools reserved for the post-check phase.
+        selected_tools: Every tool selected for this run, used to
+            resolve per-pattern format authority.
         incremental: Whether to only scan files changed since the last run.
         effective_auto_install: Resolved auto-install setting.
         diff_base: Resolved ``--diff`` base ref, or ``None``.
@@ -294,6 +284,7 @@ def _execute_tools_sequential(
     all_results: list[ToolResult] = []
 
     for tool_name in tools_to_run:
+        attempt_started = time.monotonic()
         try:
             tool = tool_manager.get_tool(tool_name)
 
@@ -314,7 +305,7 @@ def _execute_tools_sequential(
                 include_venv=include_venv,
                 incremental=incremental,
                 action=ctx.action,
-                post_tools=post_tools,
+                selected_tools=selected_tools,
                 auto_install=effective_auto_install,
                 lintro_config=ctx.lintro_config,
                 diff_base=diff_base,
@@ -362,13 +353,15 @@ def _execute_tools_sequential(
             # Show user-friendly error message on console
             logger.console_output(f"Error running {tool_name}: {e}")
 
-            # Create a failed result for this tool
+            # Create a failed result for this tool. Duration is recorded so
+            # crashed tools still appear in the ``--profile`` table/JSON.
             all_results.append(
                 ToolResult(
                     name=tool_name,
                     success=False,
                     output=f"Failed to initialize tool: {e}",
                     issues_count=0,
+                    duration_seconds=time.monotonic() - attempt_started,
                 ),
             )
 
@@ -390,8 +383,8 @@ def execute_run(
     incremental: bool = False,
     auto_install: bool = False,
     yes: bool = False,
+    run_gates: bool = True,
     ignore_conflicts: bool = False,
-    fail_under: float | None = None,
     diff_base: str | None = None,
     ai_status_lines: list[str] | None = None,
     on_tool_result: Callable[[ToolResult], None] | None = None,
@@ -411,7 +404,7 @@ def execute_run(
         tool_options: Additional tool options.
         exclude: Patterns to exclude.
         include_venv: Whether to include virtual environments.
-        group_by: How to group results (used by post-checks).
+        group_by: How to group results.
         output_format: Output format for results.
         verbose: Whether to enable verbose output.
         raw_output: Whether to show raw tool output instead of formatted output.
@@ -419,9 +412,9 @@ def execute_run(
         auto_install: Whether to auto-install Node.js deps if node_modules is
             missing.
         yes: Skip confirmation prompt and proceed immediately.
+        run_gates: Whether the run-level gates (module size, duplicate
+            code) may run.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
-        fail_under: When set, force exit code 1 if the computed health score
-            is strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL`
             resolves the repository default base; any other value is used as
@@ -438,8 +431,8 @@ def execute_run(
     failed result, so they stay debuggable.
 
     Returns:
-        RunArtifact: The results, totals, health score, and exit code for the
-        run. ``early_exit`` is set when the run stopped before any tool ran.
+        RunArtifact: The results, totals, severity tallies, and exit code for
+        the run. ``early_exit`` is set when the run stopped before any tool ran.
     """
     logger = ctx.logger
 
@@ -464,12 +457,8 @@ def execute_run(
 
     # On a no-config first run the toolset is scoped to detected languages;
     # tell the user what was selected and how to customize. Suppressed for
-    # machine-readable stdout and score-only mode.
-    if (
-        tools_result.scoped_by_detection
-        and not ctx.clean_stdout_output
-        and not ctx.score_only
-    ):
+    # machine-readable stdout.
+    if tools_result.scoped_by_detection and not ctx.clean_stdout_output:
         from lintro.utils.execution.tool_configuration import format_detection_notice
 
         logger.console_output(
@@ -488,8 +477,6 @@ def execute_run(
             total_issues=0,
             total_fixed=0,
             total_remaining=0,
-            main_phase_empty_due_to_filter=False,
-            fail_under=fail_under,
         )
 
     if not tools_to_run and skipped_tools:
@@ -497,30 +484,6 @@ def execute_run(
             skipped_tools=skipped_tools,
             output_format=output_format,
             logger=logger,
-        )
-
-    # Load post-checks config early to exclude those tools from main phase
-    post_cfg_early = load_post_checks_config()
-    post_enabled_early = bool(post_cfg_early.get("enabled", False))
-    post_tools_early: set[str] = (
-        {t.lower() for t in (post_cfg_early.get("tools", []) or [])}
-        if post_enabled_early
-        else set()
-    )
-
-    # Filter out post-check tools from main phase
-    if post_tools_early:
-        tools_to_run = [t for t in tools_to_run if t.lower() not in post_tools_early]
-
-    # If early post-check filtering removed all tools from the main phase,
-    # that's okay - post-checks will still run. Track this state so we can
-    # return failure if post-checks don't run either.
-    main_phase_empty_due_to_filter = bool(not tools_to_run and post_tools_early)
-    if main_phase_empty_due_to_filter:
-        logger.console_output(
-            text=(
-                "All selected tools are configured as post-checks - skipping main phase"
-            ),
         )
 
     # Print main header with output directory information
@@ -576,13 +539,9 @@ def execute_run(
         effective_auto_install = is_container
 
     # Pre-execution config summary. Suppressed for clean-stdout formats
-    # (json/sarif/csv/markdown) and score-only mode because it writes the rich
-    # Configuration box to stdout via its own Console, bypassing route_stderr.
-    if (
-        not ctx.clean_stdout_output
-        and not ctx.score_only
-        and (tools_to_run or skipped_tools)
-    ):
+    # (json/sarif/csv/markdown) because it writes the rich Configuration box
+    # to stdout via its own Console, bypassing route_stderr.
+    if not ctx.clean_stdout_output and (tools_to_run or skipped_tools):
         proceed = confirm_pre_execution(
             tools_to_run=tools_to_run,
             skipped_tools=skipped_tools,
@@ -611,7 +570,7 @@ def execute_run(
         tool_option_dict=tool_option_dict,
         exclude=exclude,
         include_venv=include_venv,
-        post_tools=post_tools_early,
+        selected_tools=set(tools_to_run),
         incremental=incremental,
         effective_auto_install=effective_auto_install,
         diff_base=resolved_diff_base,
@@ -640,25 +599,20 @@ def execute_run(
             ),
         )
 
-    # Execute post-checks if configured
-    total_issues, total_fixed, total_remaining = execute_post_checks(
-        action=ctx.action,
-        paths=paths,
-        exclude=exclude,
-        include_venv=include_venv,
-        group_by=group_by,
-        output_format=output_format,
-        verbose=verbose,
-        raw_output=raw_output,
-        logger=logger,
-        all_results=all_results,
-        total_issues=total_issues,
-        total_fixed=total_fixed,
-        total_remaining=total_remaining,
-        diff_base=resolved_diff_base,
-    )
+    # Run the run-level gates (module size, duplicate code) over the results.
+    if run_gates:
+        total_issues = execute_gates(
+            action=ctx.action,
+            paths=paths,
+            exclude=exclude,
+            include_venv=include_venv,
+            output_format=output_format,
+            logger=logger,
+            all_results=all_results,
+            total_issues=total_issues,
+        )
 
-    # Dry-run: post-checks may append additional check-mode results. Restrict
+    # Dry-run: a gate may append an additional check-mode result. Restrict
     # every result to its would-fix subset and re-derive the totals so the
     # summary and exit code count only auto-fixable issues.
     if ctx.dry_run_preview:
@@ -677,8 +631,6 @@ def execute_run(
         total_issues=total_issues,
         total_fixed=total_fixed,
         total_remaining=total_remaining,
-        main_phase_empty_due_to_filter=main_phase_empty_due_to_filter,
-        fail_under=fail_under,
     )
 
 
@@ -701,21 +653,18 @@ def run_lint_tools_simple(
     no_log: bool = False,
     auto_install: bool = False,
     yes: bool = False,
+    run_gates: bool = True,
     ai_fix: bool = False,
     ignore_conflicts: bool = False,
     transport: str | None = None,
     dry_run: bool = False,
-    score: bool = False,
-    fail_under: float | None = None,
     diff_base: str | None = None,
     no_art: bool = False,
+    on_tool_result: Callable[[ToolResult], None] | None = None,
+    render_summary: bool = True,
+    profile: bool = False,
 ) -> int:
     """Run tools and render their output, returning the process exit code.
-
-    A thin wrapper over :func:`build_run_context`, :func:`execute_run`, and
-    :func:`lintro.utils.execution.run_renderer.render_run`. It runs no AI:
-    callers that want AI enhancement drive the three phases themselves and
-    insert :func:`lintro.ai.interface.enhance_artifact` between them.
 
     Args:
         action: Action to perform ("check", "fmt", "test").
@@ -735,6 +684,8 @@ def run_lint_tools_simple(
         no_log: Whether to disable file logging (not yet implemented).
         auto_install: Whether to auto-install Node.js deps if node_modules missing.
         yes: Skip confirmation prompt and proceed immediately.
+        run_gates: Whether the run-level gates (module size, duplicate
+            code) may run.
         ai_fix: Accepted for signature compatibility; this wrapper runs no AI.
         ignore_conflicts: Whether to ignore tool configuration conflicts.
         transport: Accepted for signature compatibility; this wrapper runs no AI.
@@ -743,10 +694,6 @@ def run_lint_tools_simple(
             the fixable tool set; the reported issues are exactly what a real
             ``fmt`` run would address. Exit code mirrors check semantics: 0 when
             nothing would be fixed, 1 when fixes are available.
-        score: When True with human-readable output, print only the 0-100
-            health score line and suppress the normal execution summary.
-        fail_under: When set, exit with code 1 if the computed health score is
-            strictly below this threshold (CI gate).
         diff_base: Git base ref for ``--diff`` scanning. ``None`` scans all
             files; :data:`~lintro.utils.git_diff.DIFF_DEFAULT_SENTINEL` resolves
             the repository default base; any other value is used as the base
@@ -754,6 +701,10 @@ def run_lint_tools_simple(
         no_art: When True, suppress decorative ASCII art regardless of the
             ``output.art`` config value. Art is also suppressed automatically
             when ``output.art`` is ``False`` or stdout is not a TTY.
+        on_tool_result: Optional custom live renderer for each completed tool.
+        render_summary: Whether to render the normal final report and summary.
+        profile: When True, render a per-tool performance profile after the run
+            and include the profile payload in JSON output.
 
     Programming errors raised while a tool executes (``TypeError``,
     ``AttributeError``) propagate to the caller.
@@ -764,43 +715,52 @@ def run_lint_tools_simple(
     ctx = build_run_context(
         action=action,
         output_format=output_format,
-        score=score,
         debug=debug,
         no_art=no_art,
         dry_run=dry_run,
         group_by=group_by,
+        profile=profile,
     )
-    from lintro.utils.execution.run_renderer import make_result_display
+    try:
+        from lintro.utils.execution.run_renderer import make_result_display
 
-    artifact = execute_run(
-        ctx=ctx,
-        paths=paths,
-        tools=tools,
-        tool_options=tool_options,
-        exclude=exclude,
-        include_venv=include_venv,
-        group_by=group_by,
-        output_format=output_format,
-        verbose=verbose,
-        raw_output=raw_output,
-        incremental=incremental,
-        auto_install=auto_install,
-        yes=yes,
-        ignore_conflicts=ignore_conflicts,
-        fail_under=fail_under,
-        diff_base=diff_base,
-        on_tool_result=make_result_display(
+        result_display = on_tool_result or make_result_display(
             logger=ctx.logger,
             output_format=output_format,
             raw_output=raw_output,
             action=ctx.action,
             group_by=group_by,
-        ),
-    )
-    render_run(
-        artifact,
-        ctx=ctx,
-        output_format=output_format,
-        output_file=output_file,
-    )
-    return artifact.exit_code
+        )
+        artifact = execute_run(
+            ctx=ctx,
+            paths=paths,
+            tools=tools,
+            tool_options=tool_options,
+            exclude=exclude,
+            include_venv=include_venv,
+            group_by=group_by,
+            output_format=output_format,
+            verbose=verbose,
+            raw_output=raw_output,
+            incremental=incremental,
+            auto_install=auto_install,
+            yes=yes,
+            run_gates=run_gates,
+            ignore_conflicts=ignore_conflicts,
+            diff_base=diff_base,
+            on_tool_result=result_display,
+        )
+        if render_summary:
+            render_run(
+                artifact,
+                ctx=ctx,
+                output_format=output_format,
+                output_file=output_file,
+            )
+        return artifact.exit_code
+    finally:
+        ctx.output_manager.mark_run_complete()
+        try:
+            ctx.output_manager.cleanup_old_runs()
+        except OSError as exc:
+            ctx.logger.warning(f"Warning: Failed to clean up old runs: {exc}")

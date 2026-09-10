@@ -11,10 +11,26 @@ agree on what "the tool passed" means.
 from __future__ import annotations
 
 from enum import StrEnum, auto
-from typing import TYPE_CHECKING
+from typing import Protocol
 
-if TYPE_CHECKING:
-    from lintro.models.core.tool_result import ToolResult
+
+class ToolOutcome(Protocol):
+    """Structural view of the result fields this module reads.
+
+    ``lintro.enums`` is the bottom layer, so it must not name
+    ``lintro.models.core.ToolResult`` even under ``TYPE_CHECKING``: an
+    ``import-linter`` layering contract counts type-checking imports as edges.
+    ``ToolResult`` satisfies this protocol structurally.
+
+    Attributes:
+        success: Whether the tool reported a clean run.
+        skipped: Whether the tool never executed.
+        timed_out: Whether the tool's subprocess exceeded its deadline.
+    """
+
+    success: bool
+    skipped: bool
+    timed_out: bool
 
 
 class ToolRunStatus(StrEnum):
@@ -35,7 +51,7 @@ class ToolRunStatus(StrEnum):
     ERRORED = auto()
 
 
-def tool_run_status(*, result: ToolResult, issue_count: int) -> ToolRunStatus:
+def tool_run_status(*, result: ToolOutcome, issue_count: int) -> ToolRunStatus:
     """Derive the collapsed status of a completed tool result.
 
     Precedence is deliberate: a skipped tool never ran, a timeout is an

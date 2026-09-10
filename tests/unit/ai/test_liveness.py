@@ -50,6 +50,7 @@ from tests.unit.ai.conftest import MockAIProvider
         (ReviewErrorKind.RATE_LIMITED, LivenessState.RATE_LIMITED),
         (ReviewErrorKind.SERVER_ERROR, LivenessState.UNREACHABLE),
         (ReviewErrorKind.TIMEOUT, LivenessState.UNREACHABLE),
+        (ReviewErrorKind.PROVIDER_UNAVAILABLE, LivenessState.UNKNOWN),
         (ReviewErrorKind.UNKNOWN, LivenessState.UNKNOWN),
     ],
 )

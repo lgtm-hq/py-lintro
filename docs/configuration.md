@@ -22,8 +22,8 @@ Lintro uses a clear 5-tier configuration model that separates concerns:
 | **ai**        | AI-powered summaries and fixes                      | When enabled + API key set |
 
 The five tiers above form the `LintroConfig` model's core configuration story
-(`lintro/config/lintro_config.py`). Two additional optional sections — `review`
-(diff-review checklist) and `score` (health-score weights, see **Health Score** below) —
+(`lintro/config/lintro_config.py`). Additional optional sections — `review` (diff-review
+checklist) and `watch` (`lintro watch` defaults; see [Watch Mode](watch-mode.md)) —
 configure specific commands rather than tool resolution.
 
 ### Key Principles
@@ -56,7 +56,6 @@ The configuration system works in a specific order:
      still selected when their native config file is present at a scan root. Nested
      YAML/Markdown/shell files count; a lone root `README.md` does not enable Markdown
      tools.
-   - `tool_order`: Controls execution order (priority, alphabetical, or custom)
    - `fail_fast`: Whether to stop on first tool failure
    - `parallel`: Whether to run tools in parallel (default: `true`)
    - `max_workers`: Maximum parallel workers, 1-32 (default: CPU count)
@@ -103,6 +102,96 @@ For a tool like Prettier:
 
 This ensures consistent behavior while respecting tool-specific configurations.
 
+### Configuration Source Precedence
+
+Independently of the tier model above (which describes _how_ each section is applied),
+Lintro resolves _where_ config values come from in a fixed order. Later sources override
+earlier ones **key-by-key** via a deep merge, including nested `ai:` and `tools:`
+sections:
+
+1. **Built-in defaults** — the empty baseline configuration.
+2. **User-level global config** — `~/.lintro-config.yaml` (see below). Supplies base
+   values shared across all your projects.
+3. **Project config** — the first of: an upward-searched `.lintro-config.yaml` variant,
+   or `[tool.lintro]` in `pyproject.toml`. Overrides the global config per key.
+
+A value set in the global config survives only where the project config does not
+override that exact key path. An auto-discovered global file that is absent or empty is
+never an error — only an explicit `LINTRO_GLOBAL_CONFIG` path that does not exist is
+(see [below](#user-level-global-config)).
+
+In the `tools:` section a scalar entry such as `ruff: false` is a complete statement
+about the tool, so a project scalar replaces the global mapping wholesale. A project
+_mapping_ that never mentions `enabled` is only a partial statement, so a global
+`ruff: false` still keeps the tool disabled while the project's other keys apply.
+
+### User-Level Global Config
+
+Place a `~/.lintro-config.yaml` in your home directory to share settings across every
+project. It uses the exact same schema as a project `.lintro-config.yaml`, including
+`plugins:` and `licenses:`. Those sections are loaded from the resolved global file as
+the base tier and overlaid by a non-global project file; the home dotfile and the active
+global file are never treated as a project config, even when `LINTRO_GLOBAL_CONFIG=off`.
+Project config always wins on a per-key basis, so the global file is best for personal
+defaults (for example an `ai:` block, a preferred `enforce.line_length`, or a
+`plugins.trusted` allowlist) that individual projects can still override.
+
+**Resolution order** (first existing file wins):
+
+1. `LINTRO_GLOBAL_CONFIG` — an explicit file path, or `off` (also `0`, `false`, `no`,
+   `none`, or empty) to disable the global tier entirely. Useful for CI and hermetic
+   test environments that must not inherit a developer's personal defaults. An explicit
+   path that does not exist is an error rather than a silent fallback, so a typo cannot
+   leave you running without the defaults you asked for; use `off` to opt out
+   deliberately.
+2. `~/.lintro-config.yaml` — the primary, authoritative location.
+3. `$XDG_CONFIG_HOME/lintro/config.yaml` — an XDG fallback, where `$XDG_CONFIG_HOME`
+   defaults to `~/.config` when unset.
+
+The home-directory dotfile deliberately takes precedence over the XDG fallback when both
+exist, so `~/.lintro-config.yaml` is always authoritative.
+
+If your project lives inside your home directory, the upward search for a project
+`.lintro-config.yaml` can reach `~/.lintro-config.yaml` itself. That file is counted as
+the **global tier only** — never as both tiers — so it is reported once and its keys are
+still listed as global contributions rather than looking like a project override of
+itself. This holds even when the global tier is disabled: with
+`LINTRO_GLOBAL_CONFIG=off` the home dotfile is ignored outright rather than demoted to a
+project config, which is what makes the switch genuinely hermetic. The same switch
+applies to the plugin-trust and licenses loaders: they search upward on their own, so
+without it a cwd under `$HOME` would still pick up `plugins:` / `licenses:` from the
+home file.
+
+> [!IMPORTANT] **Upgrading with an existing `~/.lintro-config.yaml`.** Before user-level
+> global config existed, that file only took effect when the upward search happened to
+> reach it — that is, for projects under your home directory with no config of their
+> own. It is now a base layer for **every** project, so keys your project config omits
+> (an `ai:` block, `enforce.line_length`, tool enables) start applying where they
+> previously did not. If you were using it as a no-project-config fallback and want the
+> old behavior, move it into the projects that need it, or set
+> `LINTRO_GLOBAL_CONFIG=off`.
+
+A global file that only sets `ai:` or `enforce:` does not change which tools a default
+run selects — language scoping for an otherwise unconfigured project still applies. A
+global `tools:` section or `execution.enabled_tools` is a deliberate tool selection, so
+it opts the run out of language scoping just as a project config does.
+
+Run `lintro config` to see a **Global Config** section reporting whether a global file
+was found, its resolved path, and which effective values it contributed (the keys your
+project config did not override). The same details appear under `global_config` in
+`lintro config --json`. Only keys that survive section parsing are listed there — an
+unrecognized key such as `output.typo`, or a section Lintro does not read from config at
+all, is never reported as a contribution it does not actually make.
+
+```yaml
+# ~/.lintro-config.yaml — applies to all your projects unless overridden
+enforce:
+  line_length: 100
+ai:
+  enabled: true
+  provider: anthropic
+```
+
 ## Lintro Configuration
 
 ### Configuration File: `.lintro-config.yaml`
@@ -113,7 +202,6 @@ Create a `.lintro-config.yaml` in your project root:
 # Tier 1: EXECUTION - What tools run and how
 execution:
   enabled_tools: [] # Empty = all enabled tools (config present); no-config first run is language-scoped
-  tool_order: priority # priority | alphabetical | [custom list]
   fail_fast: false
   parallel: true # Run tools in parallel (default: true)
   max_workers: 10 # Max parallel workers, 1-32 (default: CPU count)
@@ -145,6 +233,11 @@ tools:
     auto_install: true # Override global auto_install for this tool only
 ```
 
+Each `tools.<name>` value must be a mapping (`ruff: {}` or `ruff: {enabled: true}`) or a
+boolean (`ruff: true` / `ruff: false`). A bare `tools.ruff:` is YAML null and is
+rejected by `check`, `format`, and `config show` with exit 1. Use
+`lintro config validate` for a structured report.
+
 ### Configuration Report Command
 
 Use `lintro config` to view the current configuration status for all tools:
@@ -163,82 +256,85 @@ lintro config --json
 The config command shows:
 
 - **Enforce settings**: Central `line_length`, `target_python`
-- **Tool execution order**: Based on configured strategy (priority, alphabetical, or
-  custom)
+- **Tool execution order**: Derived from each tool's declared claims
 - **Per-tool configuration**: Whether enabled, native config found
 - **Defaults applied**: Which tools are using fallback defaults
 
-### Health Score
+### Severity Counts and the Count Delta
 
-`lintro check` computes a single, deterministic **0-100 health score** that aggregates
-every issue across every tool into one trackable, CI-gateable, shareable number.
-
-```bash
-lintro check                  # normal output + health score line at the end
-lintro check --score          # print ONLY the score (for scripts/badges)
-lintro check --fail-under 75  # exit 1 if the score is below 75
-lintro check --output-format json   # score included under summary.health_score
-lintro badge                  # markdown shields.io badge for the score
-lintro badge --style flat     # shields.io style variant
-lintro badge --url            # bare badge URL
-lintro badge --json           # score, tier, color, url, and markdown as JSON
-```
-
-`--json` and `--url` are mutually exclusive. `lintro badge` runs a score-only check (or
-accepts `--score N` to skip the run) and prints a shields.io snippet such as
-`![Lintro Score](https://img.shields.io/badge/lintro-84%2F100-brightgreen)`. Badge color
-follows the tiers below: bright green (75+), yellow (50–74), red (<50).
-
-#### Scoring model
-
-Every issue is normalised to one of three severities (`ERROR`, `WARNING`, `INFO`) and
-weighted, then mapped onto 0-100 with a smoothly saturating penalty:
+`lintro check` reports what it found by severity, and how that changed since the
+previous check in the same workspace:
 
 ```text
-weighted  = error_weight   * n_errors
-          + warning_weight * n_warnings
-          + info_weight    * n_info
-
-score     = floor( 100 * scale / (scale + weighted) )
+Issues: 3 errors, 1 warning, 0 info
+Change since last run: -12 errors, +1 warning
 ```
 
-With the default weights (`ERROR=10`, `WARNING=3`, `INFO=1`) and `scale=100`, this has
-the following guaranteed properties:
+The change line is coloured by the **direction of improvement**, not by the arithmetic
+sign: fewer issues is better, so `-12 errors` is green and `+3 errors` is red. Only the
+severities that actually moved are listed; a run with no movement reads `no change`.
+Severities are compared most-severe first, so trading an error for a warning still reads
+as an improvement.
 
-- **Zero issues → exactly 100.** A clean run is unambiguous.
-- **Any issue → strictly below 100** (`floor` keeps it at most 99).
-- **Monotonic.** Adding an issue, or raising its severity, never raises the score.
-- **Bounded** to `[0, 100]` and **deterministic** — the result depends only on the
-  severity counts and the configured weights/scale, never on ordering or timing.
+The comparison baseline is stored as `severity-baseline.json` at the root of the log
+directory — `LINTRO_LOG_DIR`, default `.lintro` — rather than inside a `run-*`
+directory, so run pruning never removes it.
 
-The score hits 50 when the total weighted penalty equals `scale` (e.g. ten `ERROR`
-issues, or ~33 `WARNING` issues, with the defaults).
+Only a run that actually measured the project reads or writes it, and the same rule
+governs both sides. A run qualifies when it is a `check` (not `format` or `test`, which
+measure something else), is not a `fmt --dry-run` preview (those report as checks but
+count only the auto-fixable subset), and had at least one tool actually inspect files.
+Runs that do not qualify — an empty directory, an all-skipped toolset, a toolset that
+declined to run for want of configuration, an early exit — leave the previous baseline
+in place rather than overwriting it with zeroes, so the next comparison may be against
+an older run rather than the immediately preceding one. A missing or unreadable baseline
+simply omits the change line, and never fails a run.
 
-#### Score tiers
+A **tool timeout** is treated differently by the baseline and by the badge, on purpose.
+A check where one tool timed out but another inspected files still records a baseline:
+the alternative would let a single flaky `semgrep` or `gitleaks` timeout freeze the
+baseline, so the next successful run would report its delta against an arbitrarily old
+measurement. `lintro badge` refuses that same run, because a badge is a public claim and
+"0 issues" would assert something about findings that were never collected.
 
-| Score  | Tier         |
-| ------ | ------------ |
-| 75-100 | `great`      |
-| 50-74  | `needs-work` |
-| 0-49   | `critical`   |
+> **Removed in favour of this (issue #1739).** `lintro` used to compute a 0-100 "health
+> score" along with `check --score` and `check --fail-under N`. The score had no size
+> normalization, so ten errors scored the same in a 200-line project and a 500k-line
+> one, and enabling more tools mechanically lowered it. `--fail-under` gated CI on that
+> fabricated number; it is gone with no replacement, because `chk` already exits
+> non-zero when issues exist.
 
-#### Configuring the weights
+#### The badge
 
-Weights and the smoothing scale are tunable via the `score` section:
-
-```yaml
-# .lintro-config.yaml
-score:
-  error_weight: 10 # penalty per ERROR issue
-  warning_weight: 3 # penalty per WARNING issue
-  info_weight: 1 # penalty per INFO issue
-  scale: 100 # larger = the score decays more slowly
+```bash
+lintro badge                  # markdown shields.io badge for the issue counts
+lintro badge --style flat     # shields.io style variant
+lintro badge --url            # bare badge URL
+lintro badge --json           # counts, message, color, url, and markdown as JSON
 ```
+
+`--json` and `--url` are mutually exclusive. `lintro badge` runs a check and prints a
+shields.io snippet such as
+`![Lintro Issues](https://img.shields.io/badge/lintro-0%20issues-brightgreen)`. Badge
+colour is bright green for a clean run, red when any error was found, and yellow when
+only warnings or info issues remain.
+
+Passing any of `--errors N` / `--warnings N` / `--info N` skips the live check entirely
+and treats the severities you omit as zero.
+
+A live badge **refuses to publish** rather than assert a quality claim the run did not
+support. It exits non-zero, printing no snippet, when the check exited early, when any
+tool timed out, and when nothing actually inspected a file — which covers an empty
+directory, an all-skipped toolset, and a toolset that declined to run for want of
+configuration.
 
 #### JSON output
 
-In `--output-format json` the score is added **additively** under
-`summary.health_score`, leaving all existing keys untouched:
+In `--output-format json` the tallies appear under `summary`, alongside `total_issues`,
+`total_fixed` and `total_remaining`, which are unchanged. The `summary.health_score`
+object is **gone** — this is a breaking change for anything that read it.
+`severity_delta` appears only when a comparable baseline exists; on a first run the key
+is absent rather than zero. The **stdout** document looks like this:
 
 ```json
 {
@@ -246,12 +342,27 @@ In `--output-format json` the score is added **additively** under
     "total_issues": 3,
     "total_fixed": 0,
     "total_remaining": 3,
-    "health_score": {
-      "score": 88,
-      "tier": "great",
-      "severity_counts": { "error": 1, "warning": 0, "info": 0 },
-      "weighted_penalty": 10.0
-    }
+    "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
+    "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
+  }
+}
+```
+
+`--output` files and configured JSON artifacts carry the same two severity keys, but the
+rest of their `summary` object differs from the stdout document by design — it adds
+`timestamp` and `tools_run`, and omits `total_remaining`:
+
+```json
+{
+  "timestamp": "2026-09-06T00:00:00+00:00",
+  "action": "check",
+  "summary": {
+    "total_issues": 3,
+    "total_fixed": 0,
+    "tools_run": 12,
+    "timed_out_tools": [],
+    "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
+    "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
   }
 }
 ```
@@ -476,27 +587,39 @@ export LINTRO_DOCKER=1
 # Opt in to loading external (third-party) plugins. Disabled by default.
 export LINTRO_ENABLE_EXTERNAL_PLUGINS=1
 
+# Force-clear discovery/config caches on each invoke. Accepted truthy values
+# after trim + case-insensitive match: 1, true, yes, on.
+export LINTRO_NO_CACHE=1
+
 # AI config overlays (flag > env > .lintro-config.yaml > default). See
 # docs/ai-features.md "Invocation overrides".
 export LINTRO_AI_PROVIDER=cursor
 export LINTRO_AI_MODEL=cursor-grok-4.6-high
 export LINTRO_AI_TRANSPORT=cli
 export LINTRO_AI_ENABLED=1
-export LINTRO_AI_MAX_COST_USD=0 # 0 = uncapped; a positive number is a USD cap
+export LINTRO_AI_REVIEW=1
+export LINTRO_AI_MAX_COST_USD=uncapped # sentinel; a positive number is a USD cap; overlay 0 is an error
+export LINTRO_AI_PROVIDERS__CURSOR__TRUST_WORKSPACE=false # one ai.providers.<name>.<field> setting
 ```
 
-| Variable                         | Description                                                       | Default   |
-| -------------------------------- | ----------------------------------------------------------------- | --------- |
-| `LINTRO_LOG_DIR`                 | Base directory for run logs and artifacts                         | `.lintro` |
-| `LINTRO_VERSION_TIMEOUT`         | Timeout in seconds for tool version checks (must be `>= 1`)       | `30`      |
-| `LINTRO_DOCKER`                  | Force Docker install-context detection when set to `1`            | -         |
-| `LINTRO_CONFIG`                  | Shown in the `lintro` environment report; informational only      | -         |
-| `LINTRO_ENABLE_EXTERNAL_PLUGINS` | Opt in to loading external (third-party) plugins (`1`/`0`)        | `0`       |
-| `LINTRO_AI_PROVIDER`             | Override `ai.provider` (`anthropic` / `openai` / `cursor`)        | -         |
-| `LINTRO_AI_MODEL`                | Override `ai.model`                                               | -         |
-| `LINTRO_AI_TRANSPORT`            | Override `ai.transport` (`api` / `cli`)                           | -         |
-| `LINTRO_AI_ENABLED`              | Override `ai.enabled` (`1`/`0`/`true`/`false`)                    | -         |
-| `LINTRO_AI_MAX_COST_USD`         | Override `ai.max_cost_usd` (positive USD cap; **`0` = uncapped**) | -         |
+| Variable                                   | Description                                                                                                                                                                                                                                     | Default   |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
+| `LINTRO_LOG_DIR`                           | Base directory for run logs and artifacts                                                                                                                                                                                                       | `.lintro` |
+| `LINTRO_VERSION_TIMEOUT`                   | Timeout in seconds for tool version checks (must be `>= 1`)                                                                                                                                                                                     | `30`      |
+| `LINTRO_DOCKER`                            | Force Docker install-context detection when set to `1`                                                                                                                                                                                          | -         |
+| `LINTRO_CONFIG`                            | Shown in the `lintro` environment report; informational only                                                                                                                                                                                    | -         |
+| `LINTRO_ENABLE_EXTERNAL_PLUGINS`           | Opt in to loading external (third-party) plugins (`1`/`0`)                                                                                                                                                                                      | `0`       |
+| `LINTRO_NO_CACHE`                          | Force-clear caches each invoke (`1`/`true`/`yes`/`on`)                                                                                                                                                                                          | -         |
+| `LINTRO_AI_PROVIDER`                       | Override `ai.provider` (`anthropic` / `openai` / `cursor`)                                                                                                                                                                                      | -         |
+| `LINTRO_AI_MODEL`                          | Override `ai.model`                                                                                                                                                                                                                             | -         |
+| `LINTRO_AI_TRANSPORT`                      | Override `ai.transport` (`api` / `cli`)                                                                                                                                                                                                         | -         |
+| `LINTRO_AI_ENABLED`                        | Override `ai.enabled` (`1`/`0`/`true`/`false`)                                                                                                                                                                                                  | -         |
+| `LINTRO_AI_REVIEW`                         | Override `ai.review` (`1`/`0`/`true`/`false`)                                                                                                                                                                                                   | -         |
+| `LINTRO_AI_MAX_COST_USD`                   | Override `ai.max_cost_usd` (USD cap or `uncapped`; `0` is rejected — YAML `0` is a $0 cap, so never copy the value between the two surfaces)                                                                                                    | -         |
+| `LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>` | Override one `ai.providers.<provider>.<field>` setting, e.g. `LINTRO_AI_PROVIDERS__CURSOR__TRUST_WORKSPACE`. Provider and field are upper-cased and joined by a double underscore; an unknown provider or field is an error, not a silent no-op | -         |
+
+`LINTRO_NO_CACHE` is truthy after trim and case-insensitive match against `1`, `true`,
+`yes`, or `on`.
 
 > **Note:** There is no environment variable for tool timeouts, verbosity, exclude
 > patterns, output format, or auto-install. Use CLI flags (`--exclude`,
@@ -598,6 +721,10 @@ enabled = false
 enabled = false
 ```
 
+`[tool.lintro.execution]` and `[tool.lintro.enforce]` nested tables are equivalent to
+the YAML `execution:` / `enforce:` sections. Flat keys such as `fail_fast` under
+`[tool.lintro]` also work.
+
 `pyproject.toml` is a _fallback_: when a `.lintro-config.yaml` exists, it is the only
 configuration source and these tables are not consulted.
 
@@ -633,7 +760,20 @@ lintro doctor --json               # machine-readable output for CI
 
 The `--json` output includes per-tool fields: `installed`, `recommended`, `min_version`,
 `status` (OK, MISSING, OUTDATED, INCOMPATIBLE, DISABLED, UNKNOWN), `install_hint`, and
-`upgrade_hint`.
+`upgrade_hint`. `upgrade_hint` is the install-strategy command (pin conflicts, uv vs
+pip, node package manager). Doctor, `lintro versions --json`, and MCP `lintro_versions`
+always include `advisory` (`null` when the tool is current). When present, that object
+has the detected update channel and a path-heuristic `update_command`. Execute
+`upgrade_hint` to change installs; `update_command` is diagnostic and can disagree with
+`upgrade_hint` when the binary path and the manifest strategy name different managers.
+`binary_path` is the tool binary resolved past cargo/bash wrappers. A `standalone` or
+`unknown` path does not inherit a pip/npm/cargo `update_command` from manifest
+`install.type`.
+
+The human `lintro versions` table labels a tool **OUTDATED** when it meets the minimum
+but trails the recommended pin (`below_recommended`). JSON `version_check_passed` stays
+`true` in that case; only the table status string changed from PASS. The process still
+exits 0.
 
 ### Node.js Package Manager Policy {#node-package-manager-policy}
 
@@ -779,97 +919,75 @@ defaults:
 
 ### Tool Ordering Configuration
 
-Lintro supports configurable tool execution order. By default, tools run in priority
-order (formatters before linters), but you can change this behavior.
+**Execution order is not configurable.** Since #1742 it is _derived_ from what each tool
+declares it touches and what it does to it, so it is complete, verifiable and the same
+everywhere lintro reports it. The scalar `tool_order`, `tool_order_custom`,
+`tool_priorities` and `definition.priority` settings are deleted; so is the
+`[tool.lintro.post_checks]` table, whose only real job — running black after ruff — now
+falls out of the model.
 
-```toml
-[tool.lintro]
-# Tool order strategy: "priority" (default), "alphabetical", or "custom"
-tool_order = "priority"
+**Upgrading.** Leftover `tool_order`, `tool_order_custom`, `tool_priorities` or
+`[tool.lintro.post_checks]` keys warn as unknown and are ignored; a run that carried
+them keeps working and needs no edit to succeed. The one hard break is
+`lintro list-tools --show-conflicts`, which is removed and now fails as an unknown
+option — use `lintro check --explain-order` to see what orders a run instead.
 
-# For "custom" strategy, specify the order explicitly
-tool_order_custom = ["prettier", "black", "ruff", "markdownlint", "yamllint"]
+Derivation rules:
 
-# Override individual tool priorities (lower = runs first)
-tool_priorities = { ruff = 5, black = 10, prettier = 1 }
-```
+| Rule              | Behaviour                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------- |
+| Phase per pattern | A tool occupies the earliest phase it holds there: `FIX` → `FORMAT` → `CHECK`               |
+| One invocation    | A tool that both fixes and checks a pattern sits in `FIX`; its diagnostics come out with it |
+| Edges             | Every earlier-phase tool precedes every later-phase tool for that pattern                   |
+| Ties              | Equal phases derive no edge, so the tie breaks alphabetically                               |
+| Broad claims      | Only `*` subsumes: it joins every group, while `*.py` never joins `test_*.py`               |
+| Project-scoped    | A claim with no patterns (osv-scanner) derives no edges                                     |
+| Cycles            | Reported before ordering, naming the tools and the patterns whose edges closed them         |
 
-**Tool Order Strategies:**
+The pairings this recovers include `ruff → black` on Python, `oxlint → oxfmt` on JS/TS,
+`stylelint → prettier` on CSS, `prettier → html-validate` on HTML and
+`shfmt → shellcheck` on shell.
 
-| Strategy       | Description                                                      |
-| -------------- | ---------------------------------------------------------------- |
-| `priority`     | Formatters run before linters based on priority values (default) |
-| `alphabetical` | Tools run in alphabetical order by name                          |
-| `custom`       | Tools run in order specified by `tool_order_custom`              |
+Parallel runs use the same graph: two tools share a batch only when no derived edge
+separates them, so a mutator and a tool that must observe its writes never run
+concurrently.
 
-**Default Tool Priorities:**
-
-| Tool          | Priority | Type             |
-| ------------- | -------- | ---------------- |
-| prettier      | 10       | Formatter        |
-| black         | 15       | Formatter        |
-| ruff          | 20       | Linter/Formatter |
-| markdownlint  | 30       | Linter           |
-| html_validate | 30       | Linter           |
-| yamllint      | 35       | Linter           |
-| pydoclint     | 40       | Linter           |
-| bandit        | 45       | Security         |
-| hadolint      | 50       | Infrastructure   |
-| vale          | 50       | Linter (docs)    |
-| actionlint    | 55       | Infrastructure   |
-| rubocop       | 55       | Linter/Formatter |
-| pytest        | 100      | Test Runner      |
-
-Lower priority values run first. This ensures formatters run before linters, avoiding
-false positives from linters detecting issues that formatters would fix.
-
-### Post-checks Configuration
-
-Black is integrated as a post-check tool by default. Post-checks run after the main
-tools complete and can be configured to enforce failure if issues are found. This avoids
-double-formatting with Ruff and keeps formatting decisions explicit.
-
-```toml
-[tool.lintro.post_checks]
-enabled = true
-tools = ["black"]        # Black runs after core tools
-enforce_failure = true   # Fail the run if Black finds issues in check mode
-```
-
-Notes:
-
-- With post-checks enabled for Black, Ruff’s `format`/`format_check` stages can be
-  disabled or overridden via CLI when desired.
-- In `lintro check`, Black runs with `--check` and contributes to failure when
-  `enforce_failure` is true. In `lintro format`, Black formats files in the post-check
-  phase.
-
-#### Black Options via `--tool-options`
-
-You can override Black behavior on the CLI. Supported options include `line_length`,
-`target_version`, `fast`, `preview`, and `diff`.
+### Inspecting the order
 
 ```bash
-# Increase line length and target a specific Python version
-lintro check --tool-options "black:line_length=100,black:target_version=py313"
-
-# Enable fast and preview modes
-lintro format --tool-options "black:fast=True,black:preview=True"
-
-# Show diffs during formatting (in addition to applying changes)
-lintro format --tool-options "black:diff=True"
+lintro check --explain-order              # the order this run would use, then exit
+lintro check --tools ruff,black --explain-order
+lintro format --explain-order
+lintro doctor                             # compact summary section
+lintro config                             # the same order, as a table
 ```
 
-These options can also be set in `pyproject.toml` under `[tool.lintro.black]`:
+`--explain-order` prints the order and exits without running a single tool. Tool
+selection is resolved exactly as the real run would resolve it, and the order comes from
+the same scheduler the run uses, so what you see is what would have executed.
 
-```toml
-[tool.lintro.black]
-line_length = 100
-target_version = "py313"
-fast = false
-preview = false
-diff = false
+Sample output:
+
+```text
+Execution order (derived from tool claims)
+  This is the order that runs. It is derived from what each tool claims to touch, not configured.
+
+    1. ruff
+        (unconstrained; alphabetical tiebreak)
+    2. black
+        after ruff — *.py: ruff(fix) -> black(format)
+        after ruff — *.pyi: ruff(fix) -> black(format)
+
+  Cycles (0): the derived graph is a DAG.
 ```
+
+### Format authority on Python
+
+`*.py` is the one pattern in the 42-tool set with two mutating claimants. Black holds
+`{FORMAT}` and ruff holds `{FIX, FORMAT}`, so black owns the format phase (fewest
+mutating capabilities wins) and ruff is demoted to its fix capability: when black is in
+the run, ruff's `format` / `format_check` stages are switched off unless you ask for
+them explicitly through `--tool-options` or `[tool.lintro.ruff]`.
 
 ### Ruff vs Black Policy (Python)
 
@@ -913,7 +1031,7 @@ Rationale:
 **Every Node.js tool resolves the same way.** There is one chain, implemented once in
 `NodeJSBuilder` (`lintro/tools/core/command_builders.py`), and it applies to
 `astro check`, `commitlint`, `html-validate`, `markdownlint-cli2`, `oxfmt`, `oxlint`,
-`prettier`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
+`prettier`, `spectral`, `stylelint`, `svelte-check`, `tsc` and `vue-tsc` alike:
 
 1. **`node_modules/.bin/<binary>`**, searched **upward** from the directory being
    checked until the nearest `package.json` or `.git` (whichever is hit first). A nested
@@ -1130,6 +1248,71 @@ lintro check --tools semgrep --tool-options "semgrep:severity=ERROR"
 # Exclude test files
 lintro check --tools semgrep --tool-options "semgrep:exclude=tests/*|vendor/*"
 ```
+
+#### Cppcheck Configuration
+
+Cppcheck is a static analysis tool for C/C++ that detects undefined behavior,
+memory-safety defects, and other bugs. It is check-only (no auto-fix) and runs
+standalone on files without any build/project context.
+
+**Installation:**
+
+- macOS: `brew install cppcheck`
+- Debian/Ubuntu: `apt-get install cppcheck`
+
+Lintro runs Cppcheck over the files it discovers and drives it entirely through
+command-line options, so configuration goes through `--tool-options`. Cppcheck's own
+project modes (`--project=compile_commands.json`, GUI project files) and suppression
+files are not wired into the Lintro integration.
+
+Only source files (`.c`, `.cpp`, `.cc`, `.cxx`, `.c++`) are passed to Cppcheck. Headers
+handed to Cppcheck directly are analyzed as standalone translation units and misfire
+without the source that defines their macros and uses their declarations, so — as
+upstream's manual recommends — Lintro lets Cppcheck reach headers through the sources
+that `#include` them. `unusedFunction` is likewise unsupported and rejected with a
+`ValueError`, as is `all`, which implies it: they need whole-program visibility, while
+Lintro invokes Cppcheck on the file list discovered for the run — a path argument, a
+`--diff` scope, or the whole tree — so functions would be reported unused merely because
+their callers were outside that list.
+
+Lintro requires Cppcheck **2.13.0 or newer**. Cppcheck ships no portable single binary,
+so the Docker image installs Debian's package (currently 2.17.1 on trixie) and
+`install-tools.sh` uses apt or Homebrew. Distribution packages older than 2.13.0 are
+rejected by the version check; install from Homebrew or upstream in that case.
+
+**Available Options via `--tool-options`:**
+
+| Option         | Type           | Description                                                                                                                                                                                                                                                                                 |
+| -------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enable`       | string \| list | Check categories forwarded to `--enable=`. Commas separate `--tool-options` entries, so several values are written pipe-separated (`cppcheck:enable=warning\|style`). Default `warning,style,performance,portability` (`error` checks always run). `unusedFunction` and `all` are rejected. |
+| `inconclusive` | bool           | Report findings cppcheck cannot fully confirm.                                                                                                                                                                                                                                              |
+| `std`          | string         | Language standard (e.g. `c11`, `c++17`).                                                                                                                                                                                                                                                    |
+| `inline_suppr` | bool           | Honor inline `// cppcheck-suppress` comments.                                                                                                                                                                                                                                               |
+| `suppress`     | string \| list | Suppression specifications forwarded to `--suppress=`, one flag per value. Several values are written pipe-separated (`cppcheck:suppress=missingInclude\|unusedStructMember`).                                                                                                              |
+
+**Example Usage:**
+
+```bash
+# Run with the default check set
+lintro check src/ --tools cppcheck
+
+# Enable only warnings, and assume C11. Options are comma-separated; the pipe
+# is the list separator *within* one value.
+lintro check src/ --tools cppcheck \
+  --tool-options "cppcheck:enable=warning,cppcheck:std=c11"
+
+# Enable several categories (pipe-delimited list inside one option)
+lintro check src/ --tools cppcheck --tool-options "cppcheck:enable=warning|style"
+
+# Include inconclusive findings and suppress missing-include noise
+lintro check src/ --tools cppcheck \
+  --tool-options "cppcheck:inconclusive=true,cppcheck:suppress=missingInclude"
+```
+
+Cppcheck's structured output is parsed from its native XML report (schema version 2).
+SARIF output is available in recent versions but is lossy for cppcheck (it collapses
+`style`/`performance`/`portability` into a single `warning` level), so the native XML
+parser is used. See [Cppcheck Analysis](./tool-analysis/cppcheck-analysis.md).
 
 #### Gitleaks Configuration
 
@@ -1350,6 +1533,118 @@ skip-checking-short-docstrings = true
 - `check-return-types`: Validate return types match (default: true)
 - `check-arg-order`: Verify argument order matches signature
 - `skip-checking-short-docstrings`: Skip single-line docstrings
+
+#### import-linter Configuration {#import-linter}
+
+**Tool:** [import-linter](https://github.com/seddonym/import-linter) (binary
+`lint-imports`) — checks architectural import contracts for a Python package.
+
+**Install:** `uv pip install 'lintro[full]'` or `uv pip install import-linter`
+
+**File:** `pyproject.toml` (also reads `.importlinter` and `setup.cfg`)
+
+```toml
+[tool.importlinter]
+root_package = "mypkg"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture"
+type = "layers"
+layers = ["mypkg.api", "mypkg.services", "mypkg.storage"]
+
+[[tool.importlinter.contracts]]
+name = "CLI must not be imported by the core"
+type = "forbidden"
+source_modules = ["mypkg.core"]
+forbidden_modules = ["mypkg.cli"]
+```
+
+**Behaviour in Lintro:**
+
+- Project-scoped: the tool runs **once** per invocation against the whole import graph,
+  regardless of how many files were passed.
+- Configuration is discovered by walking upward from the given paths; the tool then runs
+  from the config file's directory so the root package is importable.
+- A project with no import-linter configuration reports a clean result rather than an
+  error, so the tool is safe to leave enabled.
+- Check-only. `lintro format` never runs import-linter.
+
+**Available `--tool-options`:**
+
+- `timeout`: Seconds to allow the graph build and contract check (default: 60)
+
+**Usage:**
+
+```bash
+lintro check .
+lintro check . --tools import-linter
+```
+
+Contract syntax and every contract type are documented upstream at
+<https://import-linter.readthedocs.io/en/stable/contract_types/>.
+
+#### pylint Configuration {#pylint}
+
+**Tool:** [pylint](https://github.com/pylint-dev/pylint) — Python static analyser.
+Lintro wires it in mainly for `duplicate-code` (`R0801`), the copy-paste detector no
+other bundled tool provides.
+
+**Install:** `uv pip install 'lintro[full]'` or `uv pip install pylint`
+
+**File:** pylint reads the first of these that declares pylint configuration, in this
+precedence order: `pylintrc`, `pylintrc.toml`, `.pylintrc`, `.pylintrc.toml`,
+`pyproject.toml`, `setup.cfg`, `tox.ini`. Lintro discovers the same file and passes it
+as `--rcfile`.
+
+```toml
+[tool.pylint.main]
+disable = ["all"]
+enable = ["duplicate-code"]
+jobs = 0
+
+[tool.pylint.similarities]
+min-similarity-lines = 12
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+```
+
+**Behaviour in Lintro:**
+
+- Project-scoped: every discovered file is passed to a **single** `pylint` invocation.
+  Cross-module checkers only see clones that appear in one run, so per-file execution
+  would silently miss every `R0801`.
+- Configuration is discovered by walking upward from the given paths and is passed as
+  `--rcfile`. With no pylint configuration anywhere above the paths, pylint's built-in
+  defaults apply — which overlap heavily with ruff, so configure it explicitly.
+- The `R0801` message body (the file list plus the duplicated source block) is preserved
+  verbatim; it is the only description of what is duplicated.
+- pylint's message category becomes the Lintro severity: `fatal`/`error` are ERROR,
+  `warning` and `refactor` (which includes `duplicate-code`) are WARNING, and
+  `convention`/`info` are INFO.
+- Check-only. `lintro format` never runs pylint.
+
+**Available `--tool-options`:**
+
+- `disable`: Message or category to disable, forwarded to `--disable=`. Commas separate
+  `--tool-options` entries, so several values are written pipe-separated
+  (`pylint:disable=C0114|R0801`)
+- `enable`: Message or category to enable, forwarded to `--enable=`. Several values are
+  written pipe-separated (`pylint:enable=duplicate-code|C0114`)
+- `timeout`: Seconds to allow the run (default: 900; a whole-repo pylint run is slow)
+
+**Usage:**
+
+```bash
+lintro check .
+lintro check . --tools pylint
+lintro check . --tools pylint --tool-options "pylint:disable=all,pylint:enable=duplicate-code"
+# Several message ids in one option: pipe-separated, because commas split entries
+lintro check . --tools pylint --tool-options "pylint:enable=duplicate-code|C0114"
+```
+
+Every message id and symbol is documented upstream at
+<https://pylint.readthedocs.io/en/stable/user_guide/messages/messages_overview.html>.
 
 ### Frontend Tools
 
@@ -1722,6 +2017,70 @@ lintro format --tools oxfmt --tool-options "oxfmt:ignore_path=.oxfmtignore"
 lintro format --tools oxfmt --tool-options "oxfmt:timeout=60"
 ```
 
+### API Description Tools
+
+#### Spectral Configuration
+
+Spectral is a linter for OpenAPI (2.0/3.0/3.1), AsyncAPI, and JSON Schema documents. It
+is check-only (no autofixer) and **requires a ruleset**. Lintro discovers a supported
+ruleset upward from the target (or uses the `ruleset` option) and skips as a non-error
+when none is found. With a ruleset, Spectral checks every matching `*.yaml`, `*.yml`,
+and `*.json` file. Lintro always supplies Spectral's internal `--ignore-unknown-format`
+flag so non-API documents do not produce format warnings; the flag is not a
+`--tool-options` setting.
+
+Spectral is intentionally absent from the language map: enabling it for every YAML or
+JSON project would be too broad. A native `.spectral.*` file at a scan root selects it
+on a no-config first run; after `lintro init`, add `spectral` to
+`execution.enabled_tools`. Users can also name it with `--tools spectral`; once
+selected, Spectral still skips unless discovery or the `ruleset` option finds a ruleset.
+
+**Native Config Detection:**
+
+Lintro detects (and Spectral requires) one of these ruleset files:
+
+- `.spectral.yaml`
+- `.spectral.yml`
+- `.spectral.json`
+- `.spectral.js`
+
+**Installation:**
+
+```bash
+# bun (recommended)
+bun add -D @stoplight/spectral-cli
+
+# npm
+npm install -D @stoplight/spectral-cli
+```
+
+Lintro prefers the project's own `node_modules/.bin/spectral`, then a binary on `PATH`,
+then a version-pinned `bunx`/`npx` fetch. See
+[Node.js Tool Resolution](#nodejs-tool-resolution).
+
+**File:** `.spectral.yaml`
+
+```yaml
+extends: ['spectral:oas'] # or ["spectral:asyncapi"]
+```
+
+**Available Options via `--tool-options`:**
+
+| Option    | Type    | Description                                      |
+| --------- | ------- | ------------------------------------------------ |
+| `ruleset` | string  | Explicit path to a ruleset (overrides discovery) |
+| `timeout` | integer | Execution timeout in seconds (default: 30)       |
+
+**Usage Examples:**
+
+```bash
+# Lint an OpenAPI document (rulesets are discovered upward from the target)
+lintro check --tools spectral openapi.yaml
+
+# Use an explicit ruleset
+lintro check --tools spectral --tool-options "spectral:ruleset=.spectral.custom.yaml"
+```
+
 ### Web Framework Tools
 
 #### Astro Check Configuration
@@ -1903,7 +2262,7 @@ runtime. Branches 3 and 4 emit a one-time warning because they require network a
 the npm registry, and a failure on either path is reported with install guidance rather
 than html-validate's raw error.
 
-**Node runtime requirement:** the pinned html-validate (currently `11.6.2`) declares
+**Node runtime requirement:** the pinned html-validate (currently `11.11.0`) declares
 `engines: { "node": "^22.22.0 || >= 24.8.0" }`. Any consumer that installs it, or that
 reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 20,
 21, and 22.0–22.21 are not supported. Size your CI matrix accordingly.
@@ -2165,6 +2524,101 @@ brew install vale
 lintro check docs/ --tools vale
 lintro check docs/ --tools vale --tool-options vale:min_alert_level=warning
 lintro check docs/ --tools vale --tool-options vale:config=.vale.ini
+```
+
+#### Typos Configuration
+
+[typos](https://github.com/crate-ci/typos) is a fast, low-false-positive spell checker
+for source code and documentation. It checks all text files and can auto-correct
+misspellings.
+
+> **When typos runs.** typos is language-agnostic, so it has no entry in the manifest's
+> `language_map`. That makes selection depend on which path a project takes:
+>
+> - **No Lintro config (first run).** Tool selection comes from language detection,
+>   which does not pull typos in on its own. It joins through the "unmapped tool with a
+>   native config" path — i.e. as soon as a `typos.toml`, `.typos.toml` or `_typos.toml`
+>   exists at a scan root. crate-ci/typos also reads `[tool.typos]` in `pyproject.toml`
+>   and `[package.metadata.typos]` / `[workspace.metadata.typos]` in `Cargo.toml`; those
+>   files are **not** in Lintro's `native_configs`, so a typical Python or Rust tree
+>   does not auto-select the plugin. The binary still honors those tables once typos is
+>   selected. An empty `[tool.lintro]` table is not a config, so this path still
+>   applies.
+> - **With a resolved Lintro config, or `--tools all`.** Language scoping is bypassed. A
+>   resolved config is `.lintro-config.yaml` (or `.yml`), a **non-empty**
+>   `[tool.lintro]` table in `pyproject.toml`, or an in-memory `tools:` section. Typos
+>   then runs when the binary is on `PATH` **and** it is not filtered out by
+>   `execution.enabled_tools` or `tools.typos.enabled: false`. `lintro init`'s
+>   recommended profile writes a language-based `enabled_tools` allowlist that does
+>   **not** include typos, so those projects do not start spell-checking on upgrade. An
+>   existing **unscoped** `lintro check` (`enabled_tools: []` or omitted) will.
+>
+> `lintro check --tools typos` selects it explicitly in either case.
+>
+> Two things are worth knowing before that first run:
+>
+> - **Turning it off.** Do not create a Lintro config solely to disable typos on a
+>   no-config first run: that file is a resolved config, so language scoping is skipped
+>   and an empty `enabled_tools` allowlist runs the full unscoped registry, including
+>   typos. On a first run, omit `typos.toml` / `.typos.toml` / `_typos.toml` instead. On
+>   a project that already has a Lintro config, disable the tool:
+>
+>   ```yaml
+>   tools:
+>     typos:
+>       enabled: false
+>   ```
+>
+>   Or leave it out of `execution.enabled_tools` if you use an allowlist
+>   (`lintro init --profile recommended` already does).
+>
+>   `--tools` is an allowlist rather than an opt-out: `lintro check --tools ruff` runs
+>   ruff _only_, dropping every other tool as well, so reach for it to narrow a single
+>   run, not to exclude one tool.
+>
+> - **Project vocabulary.** The first run usually reports a handful of deliberate
+>   spellings — product names, abbreviations, deliberate misspellings inside test
+>   fixtures. Add them to `.typos.toml` rather than suppressing the tool: real words go
+>   in `[default.extend-words]`, and anything that is only correct in one context is
+>   better handled by a context-anchored `[default] extend-ignore-re` pattern so the
+>   same word is still caught elsewhere. `lintro format --tools typos` applies the
+>   corrections typos is confident about, which clears most of the rest.
+
+**File:** `typos.toml`, `.typos.toml`, or `_typos.toml`
+
+```toml
+# Accept project-specific vocabulary that the default dictionary flags
+[default.extend-words]
+unparseable = "unparseable"
+
+# Skip files/directories that deliberately contain non-English or fixture text
+[files]
+extend-exclude = ["tests/fixtures/"]
+```
+
+**Available Options:**
+
+| Option    | Type    | Description                                     |
+| --------- | ------- | ----------------------------------------------- |
+| `timeout` | integer | Per-invocation timeout in seconds (default: 30) |
+
+typos' word list and file scope are configured through its native `typos.toml` file
+rather than `--tool-options`. Lintro runs typos with `--force-exclude` so that
+`[files] extend-exclude` still applies to the explicit file list Lintro passes. Lintro
+also pre-filters the file list with a NUL-byte sniff over each file's first 8 KiB, which
+keeps `lintro format` away from the common binary formats (images, archives, compiled
+objects). That heuristic is not exhaustive — a binary format with no NUL byte in its
+header can still reach `--write-changes` — so add the extensions you care about to
+`[files] extend-exclude` when a project stores unusual binary assets.
+
+**Usage Examples:**
+
+```bash
+# Check spelling across the project
+lintro check --tools typos
+
+# Auto-correct misspellings in place
+lintro format --tools typos
 ```
 
 ### Rust Tools
@@ -2714,6 +3168,52 @@ lintro format --tools taplo --tool-options taplo:indent_string="    "
 lintro check --tools taplo --tool-options taplo:schema=pyproject.schema.json
 ```
 
+### Buf Configuration
+
+**File:** `buf.yaml` (or `buf.work.yaml` for multi-module workspaces)
+
+buf works with or without a `buf.yaml`. When no config is present, buf lints against its
+`STANDARD` default rule set with the current directory as the module root. Add a
+`buf.yaml` to select rule categories (`MINIMAL`, `BASIC`, `STANDARD`) or to opt into
+`COMMENTS`/`UNARY_RPC`:
+
+```yaml
+version: v2
+lint:
+  use:
+    - STANDARD
+  except:
+    - PACKAGE_VERSION_SUFFIX
+```
+
+**Available Options:**
+
+| Option             | Type    | Description                                                         |
+| ------------------ | ------- | ------------------------------------------------------------------- |
+| `config`           | string  | Path to a `buf.yaml` (CLI `--tool-options` cannot pass inline YAML) |
+| `disable_symlinks` | boolean | Do not follow symlinks when reading sources                         |
+
+**Usage Examples:**
+
+```bash
+# Lint Protocol Buffer files (buf lint)
+lintro check --tools buf
+
+# Format .proto files in place (buf format --write)
+lintro format --tools buf
+
+# Use an explicit buf.yaml (path relative to the project root)
+lintro check --tools buf --tool-options buf:config=proto/buf.yaml
+```
+
+> **Note on module roots:** lintro runs buf from your **project root** — the nearest
+> ancestor of the selected `.proto` files holding a project marker (`.git`,
+> `pyproject.toml`, `package.json`, ...), not their common parent directory. A relative
+> `config` path is therefore resolved from the project root. buf's directory-based rules
+> (e.g. `PACKAGE_DIRECTORY_MATCH`) resolve package paths relative to that same
+> directory, so add a `buf.yaml` with a `modules` `path` when your protos live in a
+> subdirectory and their packages are not laid out relative to the project root.
+
 ### Infrastructure Tools
 
 #### Hadolint Configuration
@@ -2878,10 +3378,12 @@ uv pip install 'lintro[ai]'
 # Or from source checkout:
 uv sync --extra ai
 
-# Set API key for your configured provider
-# Anthropic (default): ANTHROPIC_API_KEY
-# OpenAI:              OPENAI_API_KEY
-# Custom:              set ai.api_key_env in config to use any env var name
+# Set the API key for your configured provider. `ai.provider` is required;
+# lintro has no default provider.
+# Anthropic: ANTHROPIC_API_KEY
+# OpenAI:    OPENAI_API_KEY
+# Cursor:    CURSOR_API_KEY
+# Custom:    set ai.api_key_env in config to use any env var name
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
@@ -2920,7 +3422,7 @@ ai:
 | `enabled`               | bool   | `false`        | Master switch; ANDs with `lint` / `review`                                                   |
 | `lint`                  | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                      |
 | `review`                | bool   | `false`        | Enable the `lintro review` AI diff review                                                    |
-| `provider`              | string | `anthropic`    | AI provider (`anthropic` or `openai`)                                                        |
+| `provider`              | string | `anthropic`    | AI provider (`anthropic`, `openai`, or `cursor`)                                             |
 | `model`                 | string | (default)      | Model override                                                                               |
 | `api_key_env`           | string | (default)      | Custom env var for API key                                                                   |
 | `default_fix`           | bool   | `false`        | Always run `--fix` in check                                                                  |
@@ -2930,7 +3432,7 @@ ai:
 | `max_fix_attempts`      | int    | `20`           | Max issues to attempt fixing per run                                                         |
 | `max_parallel_calls`    | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
 | `max_retries`           | int    | `2`            | Max retries for transient errors (0-10)                                                      |
-| `max_cost_usd`          | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `0` = uncapped (YAML `0` is $0)                     |
+| `max_cost_usd`          | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `uncapped` lifts; overlay `0` is an error           |
 | `api_timeout`           | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
 | `transports`            | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
 | `validate_after_group`  | bool   | `false`        | Validate immediately after each accepted group                                               |
@@ -3008,20 +3510,20 @@ lintro review --advisory-only --tool-options idiom-review:enabled=true
 
 ## Advanced Configuration
 
-### Tool Conflicts and Priorities
+### Tool Overlap
 
-Some tools may conflict with each other. Lintro handles this by:
-
-1. **Priority system** - Higher priority tools run first
-2. **Conflict detection** - Warns about conflicting tools
-3. **Auto-resolution** - Chooses the best tool for each task
+Two tools that touch the same files are not a conflict to be resolved by dropping one.
+They are ordered by the derived DAG, and where both would _format_ the same pattern the
+loser is demoted rather than dropped — ruff keeps its fix capability and black owns
+formatting on `*.py`. No tool is ever removed from a run, so `--ignore-conflicts` is
+inert and kept only for call-site compatibility.
 
 ```bash
-# Check for conflicts
-lintro list-tools --show-conflicts
+# See the order and the claim behind every constraint
+lintro check --explain-order
 
-# Force conflicting tools to run
-lintro check --tools ruff,black --ignore-conflicts
+# List every tool with its position in that order
+lintro list-tools
 ```
 
 ### Performance Optimization

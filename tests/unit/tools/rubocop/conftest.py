@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.rubocop import RubocopPlugin
+from lintro.tools.rubocop import RubocopPlugin
 
 
 @pytest.fixture

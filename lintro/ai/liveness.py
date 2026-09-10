@@ -408,7 +408,7 @@ def check_liveness_sync(
         provider = get_provider(config)
     except (AIError, ValueError) as exc:
         return LivenessResult(
-            provider=config.provider,
+            provider=(str(config.provider) if config.provider is not None else "unset"),
             transport=transport,
             state=LivenessState.MISSING_CREDENTIAL,
             message=f"provider could not be constructed: {exc}",

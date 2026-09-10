@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -29,6 +29,7 @@ from lintro.ai.review.response_recovery import (
     SCHEMA_RETRY_MIN_TIMEOUT,
     UNSTRUCTURED_CATEGORY,
 )
+from lintro.ai.review.session import ReviewSessionOptions
 
 _PROSE = (
     "Reviewed the four commits. Two actionable findings:\n\n"
@@ -73,6 +74,9 @@ def _provider() -> MagicMock:
         A provider double suitable for single-chunk reviews.
     """
     provider = MagicMock()
+    # The run session closes every provider it owns (#2302), so the
+    # double has to model an awaitable ``aclose``.
+    provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-20250514"
     provider.name = "anthropic"
     provider.capabilities = ProviderCapabilities(supports_sessions=False)
@@ -122,19 +126,21 @@ def _run(
         calls.append(kwargs)
         return queue.pop(0)
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.provider_call.call_ai", side_effect=_call_ai):
         result = run_review(
             _context(),
-            provider=_provider(),
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                api_timeout=api_timeout,
+            options=ReviewSessionOptions(
+                provider=_provider(),
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    api_timeout=api_timeout,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
     return result, calls
 
@@ -277,19 +283,21 @@ def test_failed_retry_still_recovers_the_original_answer() -> None:
             raise item
         return item
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.provider_call.call_ai", side_effect=_call_ai):
         result = run_review(
             _context(),
-            provider=_provider(),
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                api_timeout=900.0,
+            options=ReviewSessionOptions(
+                provider=_provider(),
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    api_timeout=900.0,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     assert_that(calls).is_length(2)
@@ -310,19 +318,21 @@ def test_cost_cap_on_the_retry_is_not_swallowed() -> None:
             raise item
         return item
 
-    with patch("lintro.ai.review.orchestrator.call_ai", side_effect=_call_ai):
+    with patch("lintro.ai.review.provider_call.call_ai", side_effect=_call_ai):
         result = run_review(
             _context(),
-            provider=_provider(),
-            ai_config=AIConfig(
-                enabled=True,
-                transport=AITransport.API,
-                api_timeout=900.0,
+            options=ReviewSessionOptions(
+                provider=_provider(),
+                ai_config=AIConfig(
+                    enabled=True,
+                    transport=AITransport.API,
+                    api_timeout=900.0,
+                ),
+                depth=1,
+                checklist_items=[],
+                checklist_text="1. [logic-bug] Example?",
+                classifications=[],
             ),
-            depth=1,
-            checklist_items=[],
-            checklist_text="1. [logic-bug] Example?",
-            classifications=[],
         )
 
     # The orchestrator finalizes a partial review on the cost cap rather than

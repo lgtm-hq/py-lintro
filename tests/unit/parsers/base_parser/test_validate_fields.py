@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
-
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.parsers.base_parser import validate_int_field, validate_str_field
 
@@ -29,21 +28,39 @@ def test_validate_str_field_none_returns_default() -> None:
     assert_that(result).is_equal_to("default")
 
 
+def _captured_warnings(value: object) -> list[str]:
+    """Validate a value as a string field and return the warnings it emitted.
+
+    Args:
+        value: Value handed to :func:`validate_str_field`.
+
+    Returns:
+        list[str]: Warning messages emitted during validation.
+    """
+    warnings: list[str] = []
+    handler_id = logger.add(
+        lambda message: warnings.append(message.record["message"]),
+        level="WARNING",
+    )
+    try:
+        validate_str_field(value, "test_field", log_warning=True)
+    finally:
+        logger.remove(handler_id)
+    return warnings
+
+
 def test_validate_str_field_logs_warning() -> None:
     """Log warning when log_warning is True and type mismatches."""
-    with patch("lintro.parsers.base_parser.logger") as mock_logger:
-        validate_str_field(123, "test_field", log_warning=True)
-        mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args[0][0]
-        assert_that(call_args).contains("test_field")
-        assert_that(call_args).contains("int")
+    warnings = _captured_warnings(value=123)
+
+    assert_that(warnings).is_length(1)
+    assert_that(warnings[0]).contains("test_field")
+    assert_that(warnings[0]).contains("int")
 
 
 def test_validate_str_field_no_warning_for_none() -> None:
     """Do not log warning for None values."""
-    with patch("lintro.parsers.base_parser.logger") as mock_logger:
-        validate_str_field(None, "test_field", log_warning=True)
-        mock_logger.warning.assert_not_called()
+    assert_that(_captured_warnings(value=None)).is_empty()
 
 
 # === Validate Int Field Tests ===
@@ -75,8 +92,15 @@ def test_validate_int_field_none_returns_default() -> None:
 
 def test_validate_int_field_logs_warning() -> None:
     """Log warning when log_warning is True and type mismatches."""
-    with patch("lintro.parsers.base_parser.logger") as mock_logger:
+    warnings: list[str] = []
+    handler_id = logger.add(
+        lambda message: warnings.append(message.record["message"]),
+        level="WARNING",
+    )
+    try:
         validate_int_field("bad", "line_number", log_warning=True)
-        mock_logger.warning.assert_called_once()
-        call_args = mock_logger.warning.call_args[0][0]
-        assert_that(call_args).contains("line_number")
+    finally:
+        logger.remove(handler_id)
+
+    assert_that(warnings).is_length(1)
+    assert_that(warnings[0]).contains("line_number")

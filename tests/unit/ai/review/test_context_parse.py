@@ -34,10 +34,7 @@ def test_split_unified_diff_by_file_returns_sections(sample_unified_diff: str) -
 def test_unified_diff_preamble_preserves_leading_status_lines() -> None:
     """Leading bytes before the first diff header are treated as preamble."""
     diff_text = (
-        "==> Fetching pull request\n\n"
-        "diff --git a/a.py b/a.py\n"
-        "+++ b/a.py\n"
-        "+a\n"
+        "==> Fetching pull request\n\ndiff --git a/a.py b/a.py\n+++ b/a.py\n+a\n"
     )
     assert_that(unified_diff_preamble(unified_diff=diff_text)).is_equal_to(
         "==> Fetching pull request\n\n",
@@ -157,18 +154,14 @@ def test_parse_changed_files_normalizes_git_status(
 
 def test_split_unified_diff_by_file_supports_quoted_paths() -> None:
     """Quoted diff headers parse paths containing spaces."""
-    diff_text = (
-        'diff --git "a/foo bar.py" "b/foo bar.py"\n' "+++ b/foo bar.py\n" "+change\n"
-    )
+    diff_text = 'diff --git "a/foo bar.py" "b/foo bar.py"\n+++ b/foo bar.py\n+change\n'
     sections = split_unified_diff_by_file(unified_diff=diff_text)
     assert_that(sections).contains_key("foo bar.py")
 
 
 def test_split_unified_diff_by_file_supports_unquoted_spaced_paths() -> None:
     """Unquoted diff headers parse paths containing spaces."""
-    diff_text = (
-        "diff --git a/foo bar.py b/foo bar.py\n" "+++ b/foo bar.py\n" "+change\n"
-    )
+    diff_text = "diff --git a/foo bar.py b/foo bar.py\n+++ b/foo bar.py\n+change\n"
     sections = split_unified_diff_by_file(unified_diff=diff_text)
     assert_that(sections).contains_key("foo bar.py")
 
@@ -176,9 +169,7 @@ def test_split_unified_diff_by_file_supports_unquoted_spaced_paths() -> None:
 def test_split_unified_diff_by_file_unescapes_doubled_backslashes() -> None:
     """Quoted headers preserve literal backslash-n sequences in filenames."""
     diff_text = (
-        'diff --git "a/foo\\\\nbar.py" "b/foo\\\\nbar.py"\n'
-        "@@ -0,0 +1 @@\n"
-        "+change\n"
+        'diff --git "a/foo\\\\nbar.py" "b/foo\\\\nbar.py"\n@@ -0,0 +1 @@\n+change\n'
     )
     sections = split_unified_diff_by_file(unified_diff=diff_text)
     assert_that(sections).contains_key("foo\\nbar.py")
@@ -187,9 +178,7 @@ def test_split_unified_diff_by_file_unescapes_doubled_backslashes() -> None:
 def test_split_unified_diff_by_file_unescapes_quoted_double_quotes() -> None:
     """Quoted headers parse paths containing escaped double quotes."""
     diff_text = (
-        'diff --git "a/he\\"said.py" "b/he\\"said.py"\n'
-        '+++ "b/he\\"said.py"\n'
-        "+change\n"
+        'diff --git "a/he\\"said.py" "b/he\\"said.py"\n+++ "b/he\\"said.py"\n+change\n'
     )
     sections = split_unified_diff_by_file(unified_diff=diff_text)
     assert_that(sections).contains_key('he"said.py')
@@ -323,7 +312,7 @@ def test_unquote_git_path_decodes_octal_and_c_escapes() -> None:
 def test_unquote_git_path_treats_invalid_octal_as_literal() -> None:
     """Octal escapes above 0xFF decode as literal backslashes, not ValueError."""
     diff_text = (
-        'diff --git "a/bad\\400name.py" "b/bad\\400name.py"\n' "+++ b/bad\\400name.py\n"
+        'diff --git "a/bad\\400name.py" "b/bad\\400name.py"\n+++ b/bad\\400name.py\n'
     )
     sections = split_unified_diff_by_file(unified_diff=diff_text)
     assert_that(sections).contains_key("bad\\400name.py")

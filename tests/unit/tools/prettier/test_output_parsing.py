@@ -8,7 +8,7 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 if TYPE_CHECKING:
-    from lintro.tools.definitions.prettier import PrettierPlugin
+    from lintro.tools.prettier.definition import PrettierPlugin
 
 
 def test_check_parses_prettier_output_correctly(

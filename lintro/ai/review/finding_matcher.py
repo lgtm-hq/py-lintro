@@ -25,6 +25,11 @@ from dataclasses import replace
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.finding_pairing import (
+    merge_pair,
+    next_free_ordinal,
+    pair_group,
+)
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -33,11 +38,13 @@ from lintro.ai.review.models.review_state import ReviewState
 
 __all__ = [
     "FINGERPRINT_LENGTH",
+    "count_blocking_findings",
     "derive_verdict",
     "fingerprint_for",
     "match_findings",
     "normalize_file_path",
     "normalize_title",
+    "review_findings_from_unposted",
 ]
 
 # Truncated sha256 hex digest length. 16 hex chars (64 bits) keeps the state
@@ -126,6 +133,32 @@ def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
     return ReviewVerdict.READY
 
 
+def count_blocking_findings(*, findings: Iterable[FindingRecord]) -> int:
+    """Count the open findings that block merge readiness.
+
+    The single definition of "blocking" shared by :func:`derive_verdict` and
+    every surface that has to report the same thing in a number rather than a
+    verdict — notably the converged-skip envelope and its sticky banner
+    (#2099). Keeping one predicate is the point: a copy that drifted would let
+    the board and the verdict disagree about what is holding a PR.
+
+    Args:
+        findings: Tracked finding records; resolved records are ignored.
+
+    Returns:
+        Number of open, non-question P1 records. Questions are excluded for
+        the same reason :func:`derive_verdict` excludes them — an open
+        question is a request for information, not a defect claim.
+    """
+    return sum(
+        1
+        for record in findings
+        if record.status is FindingStatus.OPEN
+        and not record.is_question
+        and record.severity is Severity.P1
+    )
+
+
 def _normalized_occurrences(
     *,
     finding: ReviewFinding,
@@ -202,117 +235,105 @@ def _current_records(
             occurrences=_normalized_occurrences(finding=finding),
             occurrences_total=len(finding.occurrences),
             severity_downgraded=finding.severity_downgraded,
+            cross_chunk_contradiction=finding.cross_chunk_contradiction,
+            description=finding.description,
+            cause=finding.cause,
+            fix=finding.fix,
+            confidence=finding.confidence,
+            origin=finding.origin,
+            evidence_style=finding.evidence_style,
         )
         for index, finding in enumerate(findings)
     ]
 
 
-def _pair_group(
+def review_findings_from_unposted(
     *,
-    prior: Sequence[FindingRecord],
-    current: Sequence[FindingRecord],
-) -> dict[int, int]:
-    """Pair current records to prior records within one fingerprint group.
+    prior: ReviewState,
+    current: Sequence[ReviewFinding],
+    reviewed_paths: frozenset[str],
+) -> tuple[ReviewFinding, ...]:
+    """Rebuild findings for open prior records that never got an inline post.
 
-    Candidate pairs are ranked by absolute line distance; ties prefer a prior
-    record that is still open, so an ambiguous match carries a finding over
-    rather than declaring it resolved.
+    A SIGTERM after a coverage checkpoint leaves ``FindingRecord``s with no
+    ``inline_comment_id``. Resume then skips COVERED files and would
+    otherwise never post those issues. Records for files this run
+    re-reviewed are omitted so absence can resolve them.
 
     Args:
-        prior: Prior records sharing the fingerprint.
-        current: Current-round records sharing the fingerprint.
+        prior: Artifact state loaded for this resume.
+        current: Findings already produced by this run.
+        reviewed_paths: Paths this run actually read.
 
     Returns:
-        Mapping of current index to prior index for the chosen pairs.
+        Reconstructed findings that should be posted this round.
     """
-    candidates = [
-        (
-            abs(current_record.line - prior_record.line),
-            0 if prior_record.status is FindingStatus.OPEN else 1,
-            abs(current_record.ordinal - prior_record.ordinal),
-            prior_index,
-            current_index,
+    seen = {
+        fingerprint_for(
+            file=finding.file,
+            category=finding.category,
+            title=finding.title,
         )
-        for current_index, current_record in enumerate(current)
-        for prior_index, prior_record in enumerate(prior)
-    ]
-    candidates.sort()
-
-    pairs: dict[int, int] = {}
-    used_prior: set[int] = set()
-    for _distance, _open_first, _ordinal_gap, prior_index, current_index in candidates:
-        if current_index in pairs or prior_index in used_prior:
+        for finding in current
+    }
+    extra: list[ReviewFinding] = []
+    for record in prior.findings:
+        if record.status is not FindingStatus.OPEN:
             continue
-        pairs[current_index] = prior_index
-        used_prior.add(prior_index)
-    return pairs
+        if record.inline_comment_id is not None:
+            continue
+        if record.fingerprint in seen:
+            continue
+        path = normalize_file_path(record.file)
+        if path in reviewed_paths or record.file in reviewed_paths:
+            continue
+        if not (record.description or record.cause or record.fix):
+            continue
+        extra.append(review_finding_from_record(record=record))
+    return tuple(extra)
 
 
-def _next_free_ordinal(*, taken: set[int]) -> int:
-    """Return the lowest 1-based ordinal not already used in a group.
+def review_finding_from_record(*, record: FindingRecord) -> ReviewFinding:
+    """Rebuild the finding a tracked record was made from.
 
-    Args:
-        taken: Ordinals already claimed by records sharing the fingerprint.
+    Copies the fields a record persists: severity, category, file, line,
+    title, description, cause, fix, confidence, checklist ids, kind,
+    occurrences, the P1 downgrade flag, the cross-chunk tag, origin and
+    evidence style. ``description`` and ``confidence`` fall back to the title
+    and ``medium`` because a record written before those fields existed leaves
+    them empty.
 
-    Returns:
-        The smallest unused ordinal.
-    """
-    ordinal = 1
-    while ordinal in taken:
-        ordinal += 1
-    return ordinal
-
-
-def _merge_pair(
-    *,
-    prior: FindingRecord,
-    current: FindingRecord,
-) -> tuple[FindingRecord, FindingMatchOutcome]:
-    """Merge a matched prior record with its current-round sighting.
-
-    A finding with several occurrences is one pattern, not one finding per
-    location, so the merged record keeps this round's surviving occurrences
-    while holding the high-water total. Fixing 6 of 20 call sites therefore
-    reads as partial progress on an open finding, and only the disappearance
-    of the whole pattern resolves it.
+    The rebuild is **not** a round trip. ``suggested_change``,
+    ``suggested_code``, ``failure_scenario`` and ``source`` are not persisted
+    on a record, so they come back at their defaults — a rebuilt finding can
+    render prose (the agent prompt, the sticky's folded detail) but never a
+    committable suggestion block.
 
     Args:
-        prior: Previously tracked record.
-        current: Freshly built record for this round.
+        record: The tracked record to rebuild.
 
     Returns:
-        Tuple of the merged record and the transition it represents.
+        ReviewFinding: The finding the record describes, minus the fields a
+        record does not persist.
     """
-    regressed = prior.status is FindingStatus.RESOLVED
-    merged = FindingRecord(
-        fingerprint=prior.fingerprint,
-        # The ordinal is part of the persistent identity: a matched finding
-        # keeps the one it was first assigned, so its key stays stable and can
-        # never collide with a sibling still tracked under the old ordinal.
-        ordinal=prior.ordinal,
-        severity=current.severity,
-        category=current.category,
-        title=current.title,
-        file=current.file,
-        line=current.line,
-        status=FindingStatus.OPEN,
-        since_round=prior.since_round,
-        resolved_sha=prior.resolved_sha,
-        resolved_round=prior.resolved_round,
-        inline_comment_id=prior.inline_comment_id,
-        regressed=regressed or prior.regressed,
-        checklist_ids=current.checklist_ids or prior.checklist_ids,
-        kind=current.kind,
-        # A round that reports no occurrence list is not a claim that the
-        # pattern shrank to one location — it is silence, so the previously
-        # tracked locations are carried rather than treated as progress.
-        occurrences=current.occurrences or prior.occurrences,
-        occurrences_total=max(prior.occurrence_total, current.occurrence_total),
-        severity_downgraded=current.severity_downgraded,
+    return ReviewFinding(
+        severity=record.severity,
+        category=record.category,
+        file=record.file,
+        line=record.line,
+        title=record.title,
+        description=record.description or record.title,
+        cause=record.cause,
+        fix=record.fix,
+        confidence=record.confidence or "medium",
+        checklist_ids=record.checklist_ids,
+        kind=record.kind,
+        occurrences=record.occurrences,
+        severity_downgraded=record.severity_downgraded,
+        cross_chunk_contradiction=record.cross_chunk_contradiction,
+        origin=record.origin,
+        evidence_style=record.evidence_style,
     )
-    if regressed:
-        return merged, FindingMatchOutcome.REGRESSED
-    return merged, FindingMatchOutcome.CARRIED
 
 
 def match_findings(
@@ -321,6 +342,8 @@ def match_findings(
     findings: Sequence[ReviewFinding],
     round_number: int,
     head_sha: str = "",
+    reviewed_paths: frozenset[str] | None = None,
+    departed_paths: frozenset[str] | None = None,
 ) -> FindingMatchResult:
     """Match this round's findings against the previously persisted state.
 
@@ -340,6 +363,11 @@ def match_findings(
         round_number: Round number being recorded (1-based).
         head_sha: Head commit sha reviewed in this round; stamped onto findings
             resolved by this round.
+        reviewed_paths: Files re-reviewed this round. Open findings on other
+            paths carry forward. ``None`` keeps the legacy resolve-on-absence
+            behavior.
+        departed_paths: Paths that left the diff (deletes and rename sources)
+            and may resolve even when they were not re-reviewed.
 
     Returns:
         The per-round transitions plus the merged record set to persist.
@@ -365,7 +393,7 @@ def match_findings(
     for fingerprint, group in current_by_fingerprint.items():
         prior_indices = prior_by_fingerprint.get(fingerprint, [])
         prior_group = [prior_records[index] for index in prior_indices]
-        pairs = _pair_group(prior=prior_group, current=group)
+        pairs = pair_group(prior=prior_group, current=group)
         # Every prior record of this fingerprint stays in state (matched, or
         # carried as resolved), so their ordinals remain taken.
         taken = {record.ordinal for record in prior_group}
@@ -377,7 +405,7 @@ def match_findings(
                 continue
             prior_record = prior_group[group_index]
             matched_prior.add(prior_indices[group_index])
-            updated, outcome = _merge_pair(prior=prior_record, current=record)
+            updated, outcome = merge_pair(prior=prior_record, current=record)
             assigned[current_index] = updated
             outcomes[updated.key] = outcome
             if outcome is FindingMatchOutcome.REGRESSED:
@@ -390,7 +418,7 @@ def match_findings(
             key=lambda index: (group[index].line, index),
         )
         for current_index in unmatched:
-            ordinal = _next_free_ordinal(taken=taken)
+            ordinal = next_free_ordinal(taken=taken)
             taken.add(ordinal)
             record = replace(group[current_index], ordinal=ordinal)
             assigned[current_index] = record
@@ -404,6 +432,14 @@ def match_findings(
             continue
         if record.status is FindingStatus.RESOLVED:
             merged.append(record)
+            continue
+        path = record.file
+        left_diff = departed_paths is not None and path in departed_paths
+        unread = reviewed_paths is not None and path not in reviewed_paths
+        if unread and not left_diff:
+            merged.append(record)
+            carried.append(record)
+            outcomes[record.key] = FindingMatchOutcome.CARRIED
             continue
         closed = replace(
             record,

@@ -79,10 +79,8 @@ def test_multi_line_offense_range() -> None:
             "a.rb": [
                 make_offense(
                     cop_name="Layout/IndentationConsistency",
-                    start_line=4,
-                    start_column=3,
-                    last_line=5,
-                    last_column=8,
+                    start=(4, 3),
+                    end=(5, 8),
                 ),
             ],
         },

@@ -22,16 +22,16 @@ import pytest
 from assertpy import assert_that
 
 from lintro.plugins.base import BaseToolPlugin
-from lintro.tools.definitions.astro_check import AstroCheckPlugin
-from lintro.tools.definitions.commitlint import CommitlintPlugin
-from lintro.tools.definitions.markdownlint import MarkdownlintPlugin
-from lintro.tools.definitions.oxfmt import OxfmtPlugin
-from lintro.tools.definitions.oxlint import OxlintPlugin
-from lintro.tools.definitions.prettier import PrettierPlugin
-from lintro.tools.definitions.stylelint import StylelintPlugin
-from lintro.tools.definitions.svelte_check import SvelteCheckPlugin
-from lintro.tools.definitions.tsc import TscPlugin
-from lintro.tools.definitions.vue_tsc import VueTscPlugin
+from lintro.tools.astro_check.definition import AstroCheckPlugin
+from lintro.tools.commitlint.definition import CommitlintPlugin
+from lintro.tools.markdownlint.definition import MarkdownlintPlugin
+from lintro.tools.oxfmt.definition import OxfmtPlugin
+from lintro.tools.oxlint.definition import OxlintPlugin
+from lintro.tools.prettier.definition import PrettierPlugin
+from lintro.tools.stylelint.definition import StylelintPlugin
+from lintro.tools.svelte_check.definition import SvelteCheckPlugin
+from lintro.tools.tsc.definition import TscPlugin
+from lintro.tools.vue_tsc.definition import VueTscPlugin
 
 #: Plugin class, the tool name it resolves, and a benign subprocess payload.
 #: stylelint parses its output as JSON, so it gets an empty result array.

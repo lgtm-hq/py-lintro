@@ -40,6 +40,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from lintro.enums.execution_class import ExecutionClass
 from lintro.enums.tool_type import ToolType
+from lintro.models.core.claim import Claim
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -101,8 +102,19 @@ class ToolDefinition:
             and ``fmt``) or advisory (an AI finder; runs under
             ``lintro review`` only).
         file_patterns: Glob patterns for files this tool operates on.
-        priority: Execution priority (lower = runs first). Default is 50.
-        conflicts_with: Names of tools that conflict with this one.
+        claims: What the tool touches and what it does to it — the declarative
+            replacement for ``priority`` (#1735). Every pattern in
+            ``file_patterns`` should appear in some claim; commitlint is the
+            one exception, because it reads commit messages rather than files
+            and therefore claims nothing.
+        reads_tree: Whether the tool reads the working tree and so must run
+            after mutation settles. False only for tools that read something
+            else entirely (commitlint reads git commit messages), which are
+            unordered and may run first.
+        partitionable: Whether the tool's file set can be sharded or narrowed
+            to a subset without changing its verdict. False for project-scoped
+            tools whose analysis spans the whole graph (mypy, pylint,
+            import-linter, type checkers, dependency audits).
         native_configs: Config files the tool respects natively
             (Lintro won't interfere).
         version_command: Command to check tool version
@@ -124,9 +136,12 @@ class ToolDefinition:
     # File targeting
     file_patterns: list[str] = field(default_factory=list)
 
-    # Execution
-    priority: int = 50
-    conflicts_with: list[str] = field(default_factory=list)
+    # Declarative scheduling inputs (#1735). Conservative defaults: an
+    # external plugin that declares nothing is treated as reading the tree and
+    # as not shardable, which is the safe direction for both.
+    claims: list[Claim] = field(default_factory=list)
+    reads_tree: bool = True
+    partitionable: bool = False
 
     # Native config files this tool respects (Lintro should NOT interfere)
     native_configs: list[str] = field(default_factory=list)
@@ -143,12 +158,10 @@ class ToolDefinition:
         """Validate tool definition.
 
         Raises:
-            ValueError: If name is empty or priority is negative.
+            ValueError: If name is empty.
         """
         if not self.name:
             raise ValueError("Tool name cannot be empty")
-        if self.priority < 0:
-            raise ValueError(f"Tool priority must be non-negative, got {self.priority}")
 
     @property
     def is_advisory(self) -> bool:

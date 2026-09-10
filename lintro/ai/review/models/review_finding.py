@@ -5,8 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from lintro.ai.review.enums.cross_chunk_contradiction import (
+    CrossChunkContradiction,
+)
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.finding_origin import FindingOrigin
+from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.suggested_change import SuggestedChange
 
@@ -79,6 +84,23 @@ class ReviewFinding:
             unranged blob cannot express. ``None`` when the model reported no
             structured change; ``suggested_code`` is then read as a
             single-line change over the finding's own line.
+        suggestion_dropped: Why patch validation stripped this finding's
+            suggestion (#2101), or ``None`` when nothing was dropped. A
+            dropped suggestion clears ``suggested_change`` and
+            ``suggested_code`` so no surface can render an unvalidated block,
+            while the finding's prose is kept intact.
+        cross_chunk_contradiction: Why the cross-chunk guard tagged this
+            finding (#2265), or ``None`` when nothing contradicted the diff.
+            Set when the finding's own text claims a file in the pull
+            request's changed set was never touched, which only a chunk-local
+            view of the diff can produce. The finding keeps its prose and is
+            downgraded one severity band rather than dropped.
+        origin: Which non-chunk pass produced this finding, or ``None`` for
+            an ordinary chunk finding (#2269). Set to
+            :data:`FindingOrigin.SYNTHESIS` by the final cross-chunk pass so
+            surfaces can attribute a whole-PR finding that no single chunk
+            could have reported. Serialized only when set, so a run without
+            the pass renders exactly as it did before.
     """
 
     severity: Severity
@@ -99,6 +121,9 @@ class ReviewFinding:
     evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     suggested_change: SuggestedChange | None = None
+    suggestion_dropped: SuggestionDropReason | None = None
+    cross_chunk_contradiction: CrossChunkContradiction | None = None
+    origin: FindingOrigin | None = None
 
     @property
     def all_occurrences(self) -> tuple[FindingOccurrence, ...]:

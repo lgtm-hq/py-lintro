@@ -55,15 +55,17 @@ scripts/
 
 Scripts for building standalone binaries and distribution packages.
 
-| Script                                | Purpose                                                                                                     | Usage                                                           |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_macos.py`                    |
-| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_linux.py`                    |
-| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                             | `uv run python scripts/generate-man-page.py`                    |
-| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing) | `uv run python scripts/generate-checklist-corpus-schema.py`     |
-| `verify_built_binary.sh`              | Verify a built binary responds to `--version` and `--help`                                                  | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`     |
-| `finalize_binary.sh`                  | Rename binary, ensure executable, compute SHA256, write the `sha256` step output                            | `./scripts/build/finalize_binary.sh <source> <target> [label]`  |
-| `create_universal.sh`                 | Combine arm64 and x86_64 macOS binaries into a universal fat binary with `lipo`                             | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>` |
+| Script                                | Purpose                                                                                                     | Usage                                                                    |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_macos.py`                             |
+| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_linux.py`                             |
+| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                             | `uv run python scripts/generate-man-page.py`                             |
+| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing) | `uv run python scripts/generate-checklist-corpus-schema.py`              |
+| `verify_built_binary.sh`              | Verify a built binary responds to `--version` and `--help`                                                  | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`              |
+| `finalize_binary.sh`                  | Rename binary, ensure executable, compute SHA256, write the `sha256` step output                            | `./scripts/build/finalize_binary.sh <source> <target> [label]`           |
+| `create_universal.sh`                 | Combine arm64 and x86_64 macOS binaries into a universal fat binary with `lipo`                             | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>`          |
+| `reuse_release_asset.sh`              | Reuse a release asset whose SHA256 matches this run's checksum artifact instead of rebuilding (#2435)       | `./scripts/build/reuse_release_asset.sh <tag> <asset> <artifact> <dest>` |
+| `upload_release_asset.sh`             | Attach a binary to a release by upload-then-swap, never deleting the live asset first (#2435)               | `./scripts/build/upload_release_asset.sh <tag> <file> [asset-name]`      |
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 
@@ -78,6 +80,7 @@ packages and (dry-run) publish them. See the
 | `download_release_binaries.sh` | Download release binaries for staging                      | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`    |
 | `smoke_test.sh`                | Pack + install the meta-package and run `lintro --version` | `./scripts/ci/npm/smoke_test.sh`                                |
 | `publish_packages.sh`          | Publish npm packages (dry-run unless `LIVE=1`)             | `./scripts/ci/npm/publish_packages.sh`                          |
+| `assert_dispatch_allowed.sh`   | Allow a live publish only from the tag pipeline (#2247)    | `./scripts/ci/npm/assert_dispatch_allowed.sh`                   |
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 
@@ -87,84 +90,108 @@ renders, validates, and auto-merges `Formula/lintro.rb` (binary) and
 `Formula/lintro-full.rb` (PyPI full install). Only release-support helpers remain here
 (see Homebrew Scripts below).
 
+### 🪞 Mirror Release Scripts (`ci/mirror/`)
+
+Scripts that sync the `lgtm-hq/lintro-pre-commit` pre-commit mirror on each py-lintro
+release (see [pre-commit integration](../docs/pre-commit.md)). Driven by
+`.github/workflows/mirror-release.yml`.
+
+| Script                      | Purpose                                                    | Usage                                                                              |
+| --------------------------- | ---------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `resolve-version.sh`        | Resolve the release tag/version and prerelease flag        | `RELEASE_TAG=v1.2.3 ./scripts/ci/mirror/resolve-version.sh`                        |
+| `wait-for-pypi-wheel.sh`    | Poll PyPI until a `bdist_wheel` exists for the version     | `./scripts/ci/mirror/wait-for-pypi-wheel.sh lintro 1.2.3`                          |
+| `bump_pin.py`               | Rewrite/verify the `lintro==X.Y.Z` pin in mirror pyproject | `python3 scripts/ci/mirror/bump_pin.py --pyproject pyproject.toml --version 1.2.3` |
+| `publish-mirror-release.sh` | Bump pin, merge the version-bump PR, and tag the mirror    | `GH_TOKEN=… ./scripts/ci/mirror/publish-mirror-release.sh 1.2.3`                   |
+
 ### 🔧 CI/CD Scripts (`ci/`)
 
 Scripts for GitHub Actions workflows and continuous integration.
 
-| Script                               | Purpose                                                                    | Usage                                                                                                                      |
-| ------------------------------------ | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `coverage-manager.sh`                | Unified coverage ops (extract/badge/comment/threshold)                     | `./scripts/utils/coverage-manager.sh --help`                                                                               |
-| `ci-log.sh`                          | Generic CI logging utility for workflow status messages                    | `./scripts/ci/ci-log.sh <message>`                                                                                         |
-| `ci-post-pr-comment.sh`              | Post comments to PRs using GitHub API                                      | `./scripts/ci/ci-post-pr-comment.sh [file]`                                                                                |
-| `post-pr-delete-previous.sh`         | Delete previous PR comments by marker                                      | `./scripts/ci/post-pr-delete-previous.sh --help`                                                                           |
-| `lintro-report-generate.sh`          | Generate comprehensive Lintro reports                                      | `./scripts/ci/lintro-report-generate.sh`                                                                                   |
-| `pull-lintro-image.sh`               | Pull lintro Docker image from GHCR and log digest                          | `./scripts/ci/testing/pull-lintro-image.sh`                                                                                |
-| `resolve-lintro-image.sh`            | Resolve GHCR image for scheduled lintro analysis with sha fallback         | `LINTRO_SHA=<sha> ./scripts/ci/testing/resolve-lintro-image.sh`                                                            |
-| `maintenance/delete-ci-ghcr-tags.sh` | Manually delete a specific ephemeral CI GHCR tag (sole-tag versions)       | `CI_TAG=<tag> ./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                                             |
-| `maintenance/sweep-ci-ghcr-tags.sh`  | Age-based sweep of ephemeral `ci-*` GHCR tags (weekly ghcr-cleanup)        | `./scripts/ci/maintenance/sweep-ci-ghcr-tags.sh`                                                                           |
-| `promote-ci-docker-images.sh`        | Promote CI-validated image to release tags by digest retag                 | `./scripts/ci/promote-ci-docker-images.sh --help`                                                                          |
-| `smoke-test-ai-tools.sh`             | Run every baked agent CLI in the ai-tools staging image                    | `IMAGE=<ref> PLATFORM=linux/arm64 ./scripts/ci/smoke-test-ai-tools.sh`                                                     |
-| `cosign-sign-images.sh`              | Sign promoted image digests with Cosign keyless OIDC                       | `./scripts/ci/cosign-sign-images.sh --help`                                                                                |
-| `coverage-badge-update.sh`           | Generate and update coverage badge                                         | `./scripts/ci/coverage-badge-update.sh --help`                                                                             |
-| `sbom-generate.sh`                   | Generate and export SBOMs via bomctl                                       | `./scripts/ci/sbom-generate.sh --help`                                                                                     |
-| `egress-audit-lite.sh`               | Audit reachability of allowed endpoints                                    | `./scripts/ci/egress-audit-lite.sh --help`                                                                                 |
-| `detect-changes.sh`                  | Detect repo diffs and set has_changes output                               | `./scripts/ci/detect-changes.sh --help`                                                                                    |
-| `detect-fork-pr.sh`                  | Detect fork PRs and set `is-fork` output for conditional steps             | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                                                                   |
-| `resolve-pipeline-relevance.sh`      | Resolve heavy-pipeline path relevance and set `pipeline` output            | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                                                        |
-| `release-bump-only.sh`               | Classify automated version-bump PRs via diff allowlist (#1362)             | `./scripts/ci/release-bump-only.sh --help`                                                                                 |
-| `dogfood-changed-files.sh`           | Lint only PR-changed files via lintro Docker (full-repo fallback)          | `./scripts/ci/dogfood-changed-files.sh --help`                                                                             |
-| `dogfood-skip-gate.sh`               | Fail dogfood CI on non-allowlisted skipped tools                           | `LINTRO_IMAGE=<image> ./scripts/ci/dogfood-skip-gate.sh`                                                                   |
-| `check-dogfood-skips.py`             | Validate dogfood skip JSON against the committed allowlist                 | `python3 scripts/ci/check-dogfood-skips.py --help`                                                                         |
-| `classify-lint-timeout.py`           | Classify a lintro JSON report as a tool-execution-timeout flake (#1653)    | `python3 scripts/ci/classify-lint-timeout.py --help`                                                                       |
-| `evaluate-test-gate.sh`              | Evaluate upstream compat/coverage results for required-check gate          | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh`                                         |
-| `evaluate-code-quality-gate.sh`      | Select effective dogfooding lint attempt for code-quality gate             | `./scripts/ci/evaluate-code-quality-gate.sh --help`                                                                        |
-| `run-code-quality-gate.sh`           | Evaluate + assert docker-ci code-quality gate for required rollup          | `./scripts/ci/run-code-quality-gate.sh --help`                                                                             |
-| `assert-required-check.sh`           | Fail required check unless upstream passed or infra flake                  | `./scripts/ci/assert-required-check.sh --help`                                                                             |
-| `is-infra-flake-failure.sh`          | Classify infra flakes (exit 143, cancelled, passed lint, tool timeout)     | `./scripts/ci/is-infra-flake-failure.sh --help`                                                                            |
-| `fail-on-security-audit.sh`          | Fail CI when security audit finds vulnerabilities                          | `./scripts/ci/fail-on-security-audit.sh`                                                                                   |
-| `free-disk-space.sh`                 | Free disk space on CI runner for Docker builds                             | `./scripts/ci/free-disk-space.sh`                                                                                          |
-| `memory-sampler.sh`                  | Background vmstat/free memory sampler around binary builds (#1707)         | `./scripts/ci/memory-sampler.sh start <log> <pid-file>`                                                                    |
-| `run-with-memory-trace.sh`           | Run a command with a live memory trace streamed to the job log (#1761)     | `./scripts/ci/run-with-memory-trace.sh <command> [args...]`                                                                |
-| `collect-oom-evidence.sh`            | Best-effort dmesg/journal OOM-killer evidence after a failed build (#1707) | `./scripts/ci/collect-oom-evidence.sh <output-file>`                                                                       |
-| `validate-docker-backfill-inputs.sh` | Validate workflow-dispatch backfill version/ref inputs                     | `BACKFILL_VERSION=<ver> BACKFILL_REF=<ref> ./scripts/ci/validate-docker-backfill-inputs.sh`                                |
-| `resolve-allowed-endpoints.sh`       | Flatten the shared harden-runner egress allowlist into a job output        | `./scripts/ci/resolve-allowed-endpoints.sh --help`                                                                         |
-| `security-comment.sh`                | Run osv-scanner via lintro in Docker and generate security PR comment      | `./scripts/ci/security-comment.sh --help`                                                                                  |
-| `install-osv-scanner.sh`             | Download and verify osv-scanner with curl exit-23 retries                  | `./scripts/ci/security/install-osv-scanner.sh`                                                                             |
-| `check-vuln-suppressions.sh`         | Verbose wrapper for lgtm-ci vulnerability suppression check                | `./scripts/ci/security/check-vuln-suppressions.sh`                                                                         |
-| `run-ai-review.sh`                   | Dogfood `lintro review` on a PR using trusted base-branch lintro           | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                                                              |
-| `classify_review_outcome.py`         | Decide whether a `lintro review` run actually produced a review (#1826)    | `python3 scripts/ci/classify_review_outcome.py --status 2 --output-file review.log`                                        |
-| `run-ai-contract-tests.sh`           | Run a tier of the agent-CLI contract suite in the ai-tools image (#1614)   | `IMAGE=<ref> TIER=1 ./scripts/ci/run-ai-contract-tests.sh`                                                                 |
-| `ai_tools_image_pin.py`              | Resolve the digest-pinned lintro-ai-tools image from the root Dockerfile   | `python3 scripts/ci/ai_tools_image_pin.py`                                                                                 |
-| `ai_tools_arg_pin.py`                | Resolve a pinned agent-CLI/Node version ARG from the ai-tools Dockerfile   | `python3 scripts/ci/ai_tools_arg_pin.py CLAUDE_CODE_VERSION`                                                               |
-| `install-claude-cli.sh`              | Install the pinned `@anthropic-ai/claude-code` CLI on a CI runner (#1894)  | `CLAUDE_CODE_VERSION=$(python3 scripts/ci/ai_tools_arg_pin.py CLAUDE_CODE_VERSION) ./scripts/ci/install-claude-cli.sh`     |
-| `install-cursor-agent.sh`            | Install the pinned Cursor `agent` CLI on a CI runner (#1971)               | `CURSOR_AGENT_VERSION=$(python3 scripts/ci/ai_tools_arg_pin.py CURSOR_AGENT_VERSION) ./scripts/ci/install-cursor-agent.sh` |
-| `classify-osv-results.py`            | Classify osv_scanner JSON as ok, vulns, or error for CI status             | `python3 scripts/ci/classify-osv-results.py osv-results.json`                                                              |
-| `check-release-version-skew.py`      | Alarm on post-release PyPI/npm/Homebrew version skew (#1712)               | `python3 scripts/ci/check-release-version-skew.py --help`                                                                  |
-| `sync-pinned-release-image.py`       | Point the pinned release image at the newest published release (#1590)     | `uv run python scripts/ci/sync-pinned-release-image.py --help`                                                             |
-| `classify-release-tag.py`            | Classify a release tag as stable or prerelease for publish gating          | `python3 scripts/ci/classify-release-tag.py v1.2.3`                                                                        |
-| `format-security-comment.py`         | Format lintro osv_scanner JSON as security PR comment markdown             | `python3 scripts/ci/format-security-comment.py osv-results.json`                                                           |
-| `format-changelog.py`                | Reflow generated `CHANGELOG.md` to lintro 88-col markdown                  | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                                                                      |
-| `update-security-support.py`         | Stamp `SECURITY.md` support table to the current `major.minor` line        | `python3 scripts/ci/update-security-support.py 0.81.0`                                                                     |
-| `finalize-version-pr.py`             | Finalize the release Version-PR (reflow CHANGELOG + stamp SECURITY)        | `python3 scripts/ci/finalize-version-pr.py`                                                                                |
-| `test-install-package.sh`            | Install and verify built package in isolated venv                          | `./scripts/ci/test-install-package.sh wheel`                                                                               |
-| `test-built-package-integration.sh`  | Run integration tests for built package in isolated venv                   | `./scripts/ci/test-built-package-integration.sh`                                                                           |
-| `test-venv-setup.sh`                 | Create isolated Python 3.13 virtual environment                            | `./scripts/ci/test-venv-setup.sh`                                                                                          |
-| `test-verify-cli.sh`                 | Verify lintro CLI entry points in installed package                        | `./scripts/ci/test-verify-cli.sh`                                                                                          |
-| `test-verify-imports.sh`             | Verify critical package imports in installed lintro                        | `./scripts/ci/test-verify-imports.sh wheel`                                                                                |
-| `extract-test-summary.sh`            | Extract pytest test summary to JSON for PR comments                        | `./scripts/ci/testing/extract-test-summary.sh <log> <out.json>`                                                            |
-| `load-ci-docker-images.sh`           | Load Docker images from CI tarball artifact                                | `./scripts/ci/testing/load-ci-docker-images.sh`                                                                            |
-| `pull-ci-docker-images.sh`           | Pull CI Docker images from GHCR for testing                                | `./scripts/ci/testing/pull-ci-docker-images.sh`                                                                            |
-| `resolve-vue-tsc-version.sh`         | Read installed vue-tsc version from bun's global install root              | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                                                           |
-| `verify-manifest-tools.py`           | Verify tools in image match manifest versions                              | `python scripts/ci/verify-manifest-tools.py --help`                                                                        |
-| `verify-image-manifest-tools.sh`     | Run verify-manifest-tools.py inside a container image vs the manifest      | `IMAGE=py-lintro:latest scripts/ci/verify-image-manifest-tools.sh`                                                         |
-| `compute-new-manifest-tools.sh`      | Print tool names a PR adds vs the merge-base (fails closed to empty)       | `BASE_REF=main scripts/ci/compute-new-manifest-tools.sh`                                                                   |
-| `compute-new-manifest-tools.py`      | Diff tool names between an old and new manifest (added names)              | `python scripts/ci/compute-new-manifest-tools.py --help`                                                                   |
-| `generate-tool-versions.py`          | Generate `_generated_versions.py` and sync `manifest.json` versions        | `python scripts/ci/generate-tool-versions.py [--check]`                                                                    |
-| `compile-semgrep-lock.sh`            | Recompile hash-pinned `requirements-semgrep.txt` from the `.in` pin        | `./scripts/ci/compile-semgrep-lock.sh`                                                                                     |
-| `generate-builtin-tool-index.py`     | Generate `lintro/plugins/_builtin_index.py` from the definitions dir       | `python scripts/ci/generate-builtin-tool-index.py [--check]`                                                               |
-| `smoke-test-binary.py`               | Assert a built binary's tool registry is populated (`#2006`)               | `python scripts/ci/smoke-test-binary.py dist/nuitka/lintro`                                                                |
-| `stage-python-coverage-html.sh`      | Stage flat HTML coverage for GitHub Pages bundling                         | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                                                                |
-| `render-coverage-json-html.py`       | Render a simple HTML index from CI `coverage.json` for Pages bundling      | `python scripts/ci/testing/render-coverage-json-html.py --help`                                                            |
+| Script                                      | Purpose                                                                                                                          | Usage                                                                                                                      |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `post-pr-delete-previous.sh`                | Delete previous PR comments by marker                                                                                            | `./scripts/ci/post-pr-delete-previous.sh --help`                                                                           |
+| `lintro-report-generate.sh`                 | Generate comprehensive Lintro reports                                                                                            | `./scripts/ci/lintro-report-generate.sh`                                                                                   |
+| `pull-lintro-image.sh`                      | Pull lintro Docker image from GHCR and log digest                                                                                | `./scripts/ci/testing/pull-lintro-image.sh`                                                                                |
+| `resolve-lintro-image.sh`                   | Resolve GHCR image for scheduled lintro analysis with sha fallback                                                               | `LINTRO_SHA=<sha> ./scripts/ci/testing/resolve-lintro-image.sh`                                                            |
+| `maintenance/delete-ci-ghcr-tags.sh`        | Manually delete a specific ephemeral CI GHCR tag (sole-tag versions)                                                             | `CI_TAG=<tag> ./scripts/ci/maintenance/delete-ci-ghcr-tags.sh`                                                             |
+| `maintenance/sweep-ci-ghcr-tags.sh`         | Age-based sweep of ephemeral `ci-*` GHCR tags (weekly ghcr-cleanup)                                                              | `./scripts/ci/maintenance/sweep-ci-ghcr-tags.sh`                                                                           |
+| `promote-ci-docker-images.sh`               | Promote CI-validated image to release tags by digest retag                                                                       | `./scripts/ci/promote-ci-docker-images.sh --help`                                                                          |
+| `resolve-docker-rolling-tags.sh`            | Allow rolling Docker tags only for the current remote default-branch tip                                                         | `./scripts/ci/resolve-docker-rolling-tags.sh --help`                                                                       |
+| `github_api.py`                             | Shared JSON helper for authenticated GitHub API calls                                                                            | Imported by scripts under `scripts/ci/`                                                                                    |
+| `smoke-test-ai-tools.sh`                    | Run every baked agent CLI in the ai-tools staging image                                                                          | `IMAGE=<ref> PLATFORM=linux/arm64 ./scripts/ci/smoke-test-ai-tools.sh`                                                     |
+| `cosign-sign-images.sh`                     | Sign promoted image digests with Cosign keyless OIDC                                                                             | `./scripts/ci/cosign-sign-images.sh --help`                                                                                |
+| `coverage-badge-update.sh`                  | Generate and update coverage badge                                                                                               | `./scripts/ci/coverage-badge-update.sh --help`                                                                             |
+| `egress-audit-lite.sh`                      | Audit reachability of allowed endpoints                                                                                          | `./scripts/ci/egress-audit-lite.sh --help`                                                                                 |
+| `detect-fork-pr.sh`                         | Detect fork PRs and set `is-fork` output for conditional steps                                                                   | `EVENT_NAME=pull_request ./scripts/ci/detect-fork-pr.sh`                                                                   |
+| `resolve-pipeline-relevance.sh`             | Resolve heavy-pipeline path relevance and set `pipeline` output                                                                  | `./scripts/ci/resolve-pipeline-relevance.sh --help`                                                                        |
+| `release-bump-only.sh`                      | Classify automated version-bump PRs via diff allowlist (#1362)                                                                   | `./scripts/ci/release-bump-only.sh --help`                                                                                 |
+| `dogfood-changed-files.sh`                  | Lint only PR-changed files via lintro Docker (full-repo fallback)                                                                | `./scripts/ci/dogfood-changed-files.sh --help`                                                                             |
+| `dogfood-skip-gate.sh`                      | Fail dogfood CI on non-allowlisted skipped tools                                                                                 | `LINTRO_IMAGE=<image> ./scripts/ci/dogfood-skip-gate.sh`                                                                   |
+| `check-dogfood-skips.py`                    | Validate dogfood skip JSON against the committed allowlist                                                                       | `python3 scripts/ci/check-dogfood-skips.py --help`                                                                         |
+| `import_matrix.py`                          | Report lintro's package import matrix and two-way cycles (#2290)                                                                 | `uv run python scripts/ci/import_matrix.py`                                                                                |
+| `classify-lint-timeout.py`                  | Classify a lintro JSON report as a tool-execution-timeout flake (#1653)                                                          | `python3 scripts/ci/classify-lint-timeout.py --help`                                                                       |
+| `classify-nightly-dogfood-failure.py`       | Decide whether a nightly dogfood failure pings the tracker (#2246)                                                               | `python3 scripts/ci/classify-nightly-dogfood-failure.py`                                                                   |
+| `evaluate-test-gate.sh`                     | Evaluate upstream compat/coverage results for required-check gate                                                                | `COMPAT_RESULT=success COVERAGE_RESULT=success ./scripts/ci/evaluate-test-gate.sh`                                         |
+| `evaluate-code-quality-gate.sh`             | Select effective dogfooding lint attempt for code-quality gate                                                                   | `./scripts/ci/evaluate-code-quality-gate.sh --help`                                                                        |
+| `run-code-quality-gate.sh`                  | Evaluate + assert docker-ci code-quality gate for required rollup                                                                | `./scripts/ci/run-code-quality-gate.sh --help`                                                                             |
+| `assert-required-check.sh`                  | Fail required check unless upstream reported a passing lint verdict                                                              | `./scripts/ci/assert-required-check.sh --help`                                                                             |
+| `is-infra-flake-failure.sh`                 | Classify infra flakes (exit 143, cancelled, passed lint, tool timeout)                                                           | `./scripts/ci/is-infra-flake-failure.sh --help`                                                                            |
+| `summarize-code-quality-gate.sh`            | Explain an infra-flaked code-quality gate in the job summary (#2296)                                                             | `./scripts/ci/summarize-code-quality-gate.sh --help`                                                                       |
+| `fail-on-security-audit.sh`                 | Fail CI when security audit finds vulnerabilities                                                                                | `./scripts/ci/fail-on-security-audit.sh`                                                                                   |
+| `free-disk-space.sh`                        | Free disk space on CI runner for Docker builds                                                                                   | `./scripts/ci/free-disk-space.sh`                                                                                          |
+| `memory-sampler.sh`                         | Background vmstat/free memory sampler around binary builds (#1707)                                                               | `./scripts/ci/memory-sampler.sh start <log> <pid-file>`                                                                    |
+| `run-with-memory-trace.sh`                  | Run a command with a live memory trace streamed to the job log (#1761)                                                           | `./scripts/ci/run-with-memory-trace.sh <command> [args...]`                                                                |
+| `collect-oom-evidence.sh`                   | Best-effort dmesg/journal OOM-killer evidence after a failed build (#1707)                                                       | `./scripts/ci/collect-oom-evidence.sh <output-file>`                                                                       |
+| `validate-docker-backfill-inputs.sh`        | Validate workflow-dispatch backfill version/ref inputs                                                                           | `BACKFILL_VERSION=<ver> BACKFILL_REF=<ref> ./scripts/ci/validate-docker-backfill-inputs.sh`                                |
+| `resolve-allowed-endpoints.sh`              | Flatten the shared harden-runner egress allowlist into a job output                                                              | `./scripts/ci/resolve-allowed-endpoints.sh --help`                                                                         |
+| `security-comment.sh`                       | Run osv-scanner via lintro in Docker and generate security PR comment                                                            | `./scripts/ci/security-comment.sh --help`                                                                                  |
+| `install-osv-scanner.sh`                    | Download and verify osv-scanner with curl exit-23 retries                                                                        | `./scripts/ci/security/install-osv-scanner.sh`                                                                             |
+| `check-vuln-suppressions.sh`                | Verbose wrapper for lgtm-ci vulnerability suppression check                                                                      | `./scripts/ci/security/check-vuln-suppressions.sh`                                                                         |
+| `run-ai-review.sh`                          | Dogfood `lintro review` on a PR using trusted base-branch lintro                                                                 | `PR_NUMBER=123 ./scripts/ci/run-ai-review.sh`                                                                              |
+| `review_state_artifacts.py`                 | Locate a prior AI-review state artifact run across Actions (#2158)                                                               | `python3 scripts/ci/review_state_artifacts.py locate`                                                                      |
+| `classify_review_outcome.py`                | Decide whether a `lintro review` run actually produced a review (#1826)                                                          | `python3 scripts/ci/classify_review_outcome.py --status 2 --output-file review.log`                                        |
+| `run-ai-contract-tests.sh`                  | Run a tier of the agent-CLI contract suite in the ai-tools image (#1614)                                                         | `IMAGE=<ref> TIER=1 ./scripts/ci/run-ai-contract-tests.sh`                                                                 |
+| `ai_tools_image_pin.py`                     | Resolve the digest-pinned lintro-ai-tools image from the root Dockerfile                                                         | `python3 scripts/ci/ai_tools_image_pin.py`                                                                                 |
+| `ai_tools_arg_pin.py`                       | Resolve a pinned agent-CLI/Node version ARG from the ai-tools Dockerfile                                                         | `python3 scripts/ci/ai_tools_arg_pin.py CLAUDE_CODE_VERSION`                                                               |
+| `install-claude-cli.sh`                     | Install the pinned `@anthropic-ai/claude-code` CLI on a CI runner (#1894)                                                        | `CLAUDE_CODE_VERSION=$(python3 scripts/ci/ai_tools_arg_pin.py CLAUDE_CODE_VERSION) ./scripts/ci/install-claude-cli.sh`     |
+| `install-cursor-agent.sh`                   | Install the pinned Cursor `agent` CLI on a CI runner (#1971)                                                                     | `CURSOR_AGENT_VERSION=$(python3 scripts/ci/ai_tools_arg_pin.py CURSOR_AGENT_VERSION) ./scripts/ci/install-cursor-agent.sh` |
+| `install-codex-cli.sh`                      | Install the pinned `@openai/codex` CLI on a CI runner (#2472)                                                                    | `CODEX_VERSION=$(python3 scripts/ci/ai_tools_arg_pin.py CODEX_VERSION) ./scripts/ci/install-codex-cli.sh`                  |
+| `restore-codex-session.sh`                  | Restore the Codex ChatGPT-plan session (~/.codex/auth.json) from the CODEX_AUTH_JSON secret (#2472)                              | `CODEX_AUTH_JSON=<base64> ./scripts/ci/restore-codex-session.sh`                                                           |
+| `classify-osv-results.py`                   | Classify osv_scanner JSON as ok, vulns, or error for CI status                                                                   | `python3 scripts/ci/classify-osv-results.py osv-results.json`                                                              |
+| `check-release-version-skew.py`             | Alarm on post-release PyPI/npm/Homebrew version skew (#1712)                                                                     | `python3 scripts/ci/check-release-version-skew.py --help`                                                                  |
+| `sync-pinned-release-image.py`              | Point the pinned release image at the newest published release (#1590)                                                           | `uv run python scripts/ci/sync-pinned-release-image.py --help`                                                             |
+| `classify-release-tag.py`                   | Classify a release tag as stable or prerelease for publish gating                                                                | `python3 scripts/ci/classify-release-tag.py v1.2.3`                                                                        |
+| `format-security-comment.py`                | Format lintro osv_scanner JSON as security PR comment markdown                                                                   | `python3 scripts/ci/format-security-comment.py osv-results.json`                                                           |
+| `format-changelog.py`                       | Reflow generated `CHANGELOG.md` to lintro 88-col markdown                                                                        | `python3 scripts/ci/format-changelog.py CHANGELOG.md`                                                                      |
+| `update-security-support.py`                | Stamp `SECURITY.md` support table to the current `major.minor` line                                                              | `python3 scripts/ci/update-security-support.py 0.81.0`                                                                     |
+| `finalize-version-pr.py`                    | Finalize the release Version-PR (reflow CHANGELOG + stamp SECURITY)                                                              | `python3 scripts/ci/finalize-version-pr.py`                                                                                |
+| `test-install-package.sh`                   | Install and verify built package in isolated venv                                                                                | `./scripts/ci/test-install-package.sh wheel`                                                                               |
+| `test-built-package-integration.sh`         | Run integration tests for built package in isolated venv                                                                         | `./scripts/ci/test-built-package-integration.sh`                                                                           |
+| `test-venv-setup.sh`                        | Create isolated Python 3.13 virtual environment                                                                                  | `./scripts/ci/test-venv-setup.sh`                                                                                          |
+| `test-verify-cli.sh`                        | Verify lintro CLI entry points in installed package                                                                              | `./scripts/ci/test-verify-cli.sh`                                                                                          |
+| `test-verify-imports.sh`                    | Verify critical package imports in installed lintro                                                                              | `./scripts/ci/test-verify-imports.sh wheel`                                                                                |
+| `extract-test-summary.sh`                   | Extract pytest test summary to JSON for PR comments                                                                              | `./scripts/ci/testing/extract-test-summary.sh <log> <out.json>`                                                            |
+| `load-ci-docker-images.sh`                  | Load Docker images from CI tarball artifact                                                                                      | `./scripts/ci/testing/load-ci-docker-images.sh`                                                                            |
+| `pull-ci-docker-images.sh`                  | Pull CI Docker images from GHCR for testing                                                                                      | `./scripts/ci/testing/pull-ci-docker-images.sh`                                                                            |
+| `resolve-vue-tsc-version.sh`                | Read installed vue-tsc version from bun's global install root                                                                    | `./scripts/ci/resolve-vue-tsc-version.sh --help`                                                                           |
+| `verify-manifest-tools.py`                  | Verify tools in image match manifest versions                                                                                    | `python scripts/ci/verify-manifest-tools.py --help`                                                                        |
+| `verify-image-manifest-tools.sh`            | Run verify-manifest-tools.py inside a container image vs the manifest; newly-added tools must be bridged (#2192)                 | `IMAGE=py-lintro:latest scripts/ci/verify-image-manifest-tools.sh`                                                         |
+| `compute-new-manifest-tools.sh`             | Print tool names a PR adds vs the merge-base (fails closed to empty)                                                             | `BASE_REF=main scripts/ci/compute-new-manifest-tools.sh`                                                                   |
+| `compute-new-manifest-tools.py`             | Diff tool names between an old and new manifest (added names)                                                                    | `python scripts/ci/compute-new-manifest-tools.py --help`                                                                   |
+| `generate-tool-versions.py`                 | Generate the gitignored `_generated_versions.py` and render `manifest.json` from `manifest.src.json` (shim over `lintro_build/`) | `python3 scripts/ci/generate-tool-versions.py [--check]`                                                                   |
+| `compile-semgrep-lock.sh`                   | Recompile hash-pinned `requirements-semgrep.txt` from the `.in` pin                                                              | `./scripts/ci/compile-semgrep-lock.sh`                                                                                     |
+| `check-semgrep-lock.sh`                     | Fail when the committed `requirements-semgrep.txt` drifted from the `.in` pin (docker-ci `semgrep-lock` gate)                    | `./scripts/ci/check-semgrep-lock.sh`                                                                                       |
+| `semgrep-lock-lib.sh`                       | Shared compile invocation sourced by the two semgrep lockfile scripts (library; running it prints help)                          | `source scripts/ci/semgrep-lock-lib.sh`                                                                                    |
+| `generate-builtin-tool-index.py`            | Generate the gitignored `lintro/plugins/_builtin_index.py` from the per-tool packages (shim over `lintro_build/`)                | `python3 scripts/ci/generate-builtin-tool-index.py [--check]`                                                              |
+| `smoke-test-binary.py`                      | Assert a built binary's tool registry is populated (`#2006`)                                                                     | `python scripts/ci/smoke-test-binary.py dist/nuitka/lintro`                                                                |
+| `stage-python-coverage-html.sh`             | Stage flat HTML coverage for GitHub Pages bundling                                                                               | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                                                                |
+| `render-coverage-json-html.py`              | Render a simple HTML index from CI `coverage.json` for Pages bundling                                                            | `python scripts/ci/testing/render-coverage-json-html.py --help`                                                            |
+| `scan_duplicate_test_bodies.py`             | Report test functions sharing a normalised body and module context (#2315)                                                       | `python scripts/ci/testing/scan_duplicate_test_bodies.py`                                                                  |
+| `scan_mock_only_tests.py`                   | Report tests whose only assertions read mock call bookkeeping (#2315)                                                            | `python scripts/ci/testing/scan_mock_only_tests.py`                                                                        |
+| `update-tools-image-digest.py`              | Update both Renovate candidate `lintro-tools` Dockerfile digest pins                                                             | `python3 scripts/ci/update-tools-image-digest.py --help`                                                                   |
+| `resolve-renovate-pr.py`                    | Resolve the open in-repository Renovate PR and candidate image tag                                                               | `python3 scripts/ci/resolve-renovate-pr.py`                                                                                |
+| `promote-tools-candidate.py`                | Classify main update and resolve the newest Renovate candidate                                                                   | `python3 scripts/ci/promote-tools-candidate.py`                                                                            |
+| `maintenance/sweep-tools-candidate-tags.py` | Delete closed-unmerged or 14-day-old tools candidate versions                                                                    | `python3 scripts/ci/maintenance/sweep-tools-candidate-tags.py`                                                             |
 
 #### Documentation Site Scripts (`ci/site/`)
 
@@ -174,6 +201,7 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | Script                          | Purpose                                                    | Usage                                                    |
 | ------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------- |
 | `build.sh`                      | Build the docs site for GitHub Pages                       | `./scripts/ci/site/build.sh --help`                      |
+| `dev.sh`                        | Run the docs site Astro dev server                         | `./scripts/ci/site/dev.sh --help`                        |
 | `check.sh`                      | Run Astro type-check (`astro check`)                       | `./scripts/ci/site/check.sh --help`                      |
 | `test.sh`                       | Run Vitest with coverage in `apps/site`                    | `./scripts/ci/site/test.sh --help`                       |
 | `test-python.sh`                | Run pytest for site maintenance scripts                    | `./scripts/ci/site/test-python.sh --help`                |
@@ -182,7 +210,6 @@ Scripts for building, testing, and deploying the Astro documentation site at
 | `preview-pages-local.sh`        | Build Pages-like dist with optional local coverage bundles | `./scripts/ci/site/preview-pages-local.sh --help`        |
 | `prepare-lychee-action-args.sh` | Prepare lychee-action args for post-build link checking    | `./scripts/ci/site/prepare-lychee-action-args.sh --help` |
 | `migrate-docs-content.py`       | Copy `docs/` into `apps/site/src/content/docs/`            | `uv run python scripts/ci/site/migrate-docs-content.py`  |
-| `fix-markdown-docs.py`          | Fix markdownlint issues in migrated Astro docs content     | `uv run python scripts/ci/site/fix-markdown-docs.py`     |
 
 #### Homebrew Scripts (`ci/homebrew/`)
 
@@ -241,15 +268,12 @@ Shared utilities and helper scripts.
 | `merge_pr_comment.py`                | Merge-update PR comment body, collapsing history      | `python scripts/utils/merge_pr_comment.py --help`                       |
 | `extract-coverage.py`                | Extract coverage from XML files                       | `python scripts/utils/extract-coverage.py`                              |
 | `extract_comment_body.py`            | Extract comment body from GitHub API JSON by ID       | `python scripts/utils/extract_comment_body.py <json> <comment_id>`      |
-| `extract-version.py`                 | Print `version=X.Y.Z` from TOML                       | `python scripts/utils/extract-version.py`                               |
 | `find_comment_with_marker.py`        | Find GitHub comment ID containing a specific marker   | `python scripts/utils/find_comment_with_marker.py <json> <marker>`      |
-| `generate_docs.py`                   | Generate documentation from docstrings                | `python scripts/utils/generate_docs.py`                                 |
 | `install-ai-tools.sh`                | Install the AI agent CLIs (claude, codex, agent)      | `./scripts/utils/install-ai-tools.sh --help`                            |
 | `install-semgrep.sh`                 | Install lockfile-pinned semgrep into an isolated venv | `./scripts/utils/install-semgrep.sh --help`                             |
 | `install-tools.sh`                   | Install external tools (hadolint, prettier, etc.)     | `./scripts/utils/install-tools.sh [--dry-run] [--verbose] --local`      |
 | `install.sh`                         | Install Lintro with dependencies                      | `./scripts/utils/install.sh`                                            |
 | `json_encode_body.py`                | JSON encode comment body for GitHub API requests      | `python scripts/utils/json_encode_body.py <file_or_stdin>`              |
-| `update-version.py`                  | Update version in pyproject.toml                      | `python scripts/utils/update-version.py <version>`                      |
 | `utils.sh`                           | Shared utilities for other scripts                    | Sourced by other scripts                                                |
 | `bootstrap-env.sh`                   | Bootstrap CI env with uv and tools                    | `./scripts/utils/bootstrap-env.sh [--dry-run] [--verbose] --help`       |
 | `install-uv.sh`                      | Install uv from GitHub Releases                       | `./scripts/utils/install-uv.sh [--dry-run] [--verbose]`                 |
@@ -331,50 +355,6 @@ export TEST_PASSED=100 TEST_FAILED=0 TEST_TOTAL=100
 
 `test-ci.yml` uses lgtm-ci `reusable-test-python.yml` for coverage PR comments. The JSON
 format uses single-space after colons for compatibility with grep-based parsers.
-
-#### `sbom-generate.sh`
-
-Generate and export SBOMs using `bomctl` with optional merge and multiple output formats
-(CycloneDX/SPDX). Supports dry-run planning. The script requires the `bomctl` binary to
-be installed (no container fallback).
-
-Features:
-
-- Fetch from GitHub dependency graph (public repos) via `bomctl fetch`
-- Import local SBOM files and optionally merge them
-- Export CycloneDX (1.5/1.6) JSON/XML and SPDX 2.3 JSON files
-- Dry-run mode to preview actions; optional `--netrc` for private repos
-
-Usage:
-
-```bash
-# Show help
-./scripts/ci/sbom-generate.sh --help
-
-# Basic: fetch current repo and export CycloneDX 1.5 JSON to dist/sbom/
-./scripts/ci/sbom-generate.sh
-
-# Multiple formats and XML encoding for CycloneDX
-./scripts/ci/sbom-generate.sh \
-  --format cyclonedx-1.6 --format spdx-2.3 \
-  --encoding xml \
-  --output-dir dist/sbom
-
-# Import additional SBOMs and merge
-./scripts/ci/sbom-generate.sh \
-  --skip-fetch \
-  --import sboms/app.cdx.json \
-  --import sboms/image.cdx.json \
-  --alias combined --name lintro-sbom
-
-# Dry run to preview commands
-./scripts/ci/sbom-generate.sh --dry-run
-```
-
-Notes:
-
-- For private GitHub repos, use `--netrc` with a configured `~/.netrc`.
-- Outputs are written under `dist/sbom/` by default.
 
 ### Docker Scripts
 
@@ -502,7 +482,27 @@ Installs the lockfile-pinned semgrep into an isolated venv and symlinks `semgrep
 ```bash
 ./scripts/utils/install-semgrep.sh --local
 ./scripts/utils/install-semgrep.sh --docker
+```
+
+#### `compile-semgrep-lock.sh` / `check-semgrep-lock.sh`
+
+`compile-semgrep-lock.sh` re-resolves `requirements-semgrep.txt` from the
+`requirements-semgrep.in` pin (hash-pinned, Python 3.11 floor). Run it by hand whenever
+the `.in` pin changes and commit the result — nothing regenerates it automatically, and
+the Mend-hosted Renovate app never executed the `postUpgradeTasks` that once claimed
+otherwise (#2436).
+
+`check-semgrep-lock.sh` is the CI enforcement: the `semgrep-lock` job in `docker-ci.yml`
+re-resolves into a temporary file through the same shared helper, diffs it against the
+committed lockfile ignoring uv's generated header comments, and fails with the diff plus
+the recompile command. The named check goes red and `publish` will not promote an image;
+the image build itself still reports, because it is a required check.
+
+**Usage:**
+
+```bash
 ./scripts/ci/compile-semgrep-lock.sh
+./scripts/ci/check-semgrep-lock.sh
 ```
 
 #### `install-tools.sh`

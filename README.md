@@ -48,7 +48,7 @@ bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
 
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
-lintro badge                       # shields.io health-score badge
+lintro badge                       # shields.io issue-count badge
 lintro check --output-format grid  # Beautiful output
 ```
 
@@ -107,6 +107,12 @@ system.
 <td><code>bun add -D @commitlint/cli @commitlint/config-conventional</code><br><code>npm install -D @commitlint/cli @commitlint/config-conventional</code></td>
 </tr>
 <tr>
+<td><a href="https://cppcheck.sourceforge.io/"><img src="https://img.shields.io/badge/Cppcheck-00599C?logo=cplusplus&logoColor=white" alt="Cppcheck"></a></td>
+<td>🔧 C/C++</td>
+<td>-</td>
+<td><code>brew install cppcheck</code><br><code>apt-get install cppcheck</code></td>
+</tr>
+<tr>
 <td><a href="https://github.com/golangci/golangci-lint"><img src="https://img.shields.io/badge/golangci--lint-00ADD8?logo=go&logoColor=white" alt="golangci-lint"></a></td>
 <td>🐹 Go</td>
 <td>✅</td>
@@ -123,6 +129,12 @@ system.
 <td>🌐 HTML</td>
 <td>-</td>
 <td><code>bun add -D html-validate</code><br><code>npm install -D html-validate</code></td>
+</tr>
+<tr>
+<td><a href="https://github.com/seddonym/import-linter"><img src="https://img.shields.io/badge/import--linter-3776AB?logo=python&logoColor=white" alt="import-linter"></a></td>
+<td>🐍 Python</td>
+<td>-</td>
+<td>📦</td>
 </tr>
 <tr>
 <td><a href="https://github.com/DavidAnson/markdownlint-cli2"><img src="https://img.shields.io/badge/Markdownlint--cli2-000000?logo=markdown&logoColor=white" alt="Markdownlint"></a></td>
@@ -149,6 +161,12 @@ system.
 <td>📦</td>
 </tr>
 <tr>
+<td><a href="https://github.com/pylint-dev/pylint"><img src="https://img.shields.io/badge/pylint-3776AB?logo=python&logoColor=white" alt="pylint"></a></td>
+<td>🐍 Python</td>
+<td>-</td>
+<td>📦</td>
+</tr>
+<tr>
 <td><a href="https://rubocop.org/"><img src="https://img.shields.io/badge/RuboCop-CC342D?logo=ruby&logoColor=white" alt="RuboCop"></a></td>
 <td>💎 Ruby</td>
 <td>✅</td>
@@ -159,6 +177,12 @@ system.
 <td>🐚 Shell Scripts</td>
 <td>-</td>
 <td><code>brew install shellcheck</code><br><a href="https://github.com/koalaman/shellcheck/releases">GitHub Releases</a></td>
+</tr>
+<tr>
+<td><a href="https://stoplight.io/open-source/spectral"><img src="https://img.shields.io/badge/Spectral-6C2FF2?logo=openapiinitiative&logoColor=white" alt="Spectral"></a></td>
+<td>📘 OpenAPI/AsyncAPI/JSON Schema</td>
+<td>-</td>
+<td><code>bun add -D @stoplight/spectral-cli</code><br><code>npm install -D @stoplight/spectral-cli</code></td>
 </tr>
 <tr>
 <td><a href="https://github.com/adrienverge/yamllint"><img src="https://img.shields.io/badge/Yamllint-cb171e?logo=yaml&logoColor=white" alt="Yamllint"></a></td>
@@ -199,6 +223,12 @@ system.
 </tr>
 <tr><th colspan="4">Lint + Format</th></tr>
 <tr>
+<td><a href="https://buf.build/"><img src="https://img.shields.io/badge/buf-161b22?logo=buffer&logoColor=white" alt="buf"></a></td>
+<td>🧩 Protobuf</td>
+<td>✅</td>
+<td><code>brew install bufbuild/buf/buf</code><br><a href="https://github.com/bufbuild/buf/releases">GitHub Releases</a></td>
+</tr>
+<tr>
 <td><a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/badge/Ruff-000?logo=ruff&logoColor=white" alt="Ruff"></a></td>
 <td>🐍 Python</td>
 <td>✅</td>
@@ -227,6 +257,12 @@ system.
 <td>🎨 CSS/SCSS/Sass/Less</td>
 <td>✅</td>
 <td><code>bun add -D stylelint</code><br><code>npm install -D stylelint</code></td>
+</tr>
+<tr>
+<td><a href="https://github.com/crate-ci/typos"><img src="https://img.shields.io/badge/typos-000000?logo=rust&logoColor=white" alt="typos"></a></td>
+<td>🔤 Spelling</td>
+<td>✅</td>
+<td><code>brew install typos-cli</code><br><code>cargo install typos-cli</code></td>
 </tr>
 <tr><th colspan="4">Type Checkers</th></tr>
 <tr>
@@ -363,7 +399,8 @@ See the [AI Features Guide](docs/ai-features.md) for full documentation.
 uv pip install lintro
 brew tap lgtm-hq/tap && brew install lintro
 
-# Full (bundled Python tools: ruff, black, mypy, bandit, pydoclint, yamllint)
+# Full (bundled Python tools: ruff, black, mypy, bandit, import-linter,
+# pydoclint, pylint, yamllint)
 uv pip install 'lintro[full]'
 brew tap lgtm-hq/tap && brew install lintro-full
 

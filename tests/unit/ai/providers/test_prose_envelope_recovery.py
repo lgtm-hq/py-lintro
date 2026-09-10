@@ -19,10 +19,10 @@ from assertpy import assert_that
 
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import AIProviderError
-from lintro.ai.providers.anthropic import AnthropicProvider
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.base import BaseAIProvider
-from lintro.ai.providers.cursor import CursorProvider
-from lintro.ai.providers.openai import OpenAIProvider
+from lintro.ai.providers.cursor.provider import CursorProvider
+from lintro.ai.providers.openai.provider import OpenAIProvider
 from lintro.ai.raw_response import RAW_RESPONSE_DIR
 from tests.unit.ai.conftest import patch_cli_exec
 
@@ -52,15 +52,15 @@ def _binaries_on_path() -> Iterator[None]:
     """
     with (
         patch(
-            "lintro.ai.providers.anthropic._find_claude",
+            "lintro.ai.providers.anthropic.provider._find_claude",
             return_value="/usr/local/bin/claude",
         ),
         patch(
-            "lintro.ai.providers.cursor._find_agent",
+            "lintro.ai.providers.cursor.provider._find_agent",
             return_value="/usr/local/bin/agent",
         ),
         patch(
-            "lintro.ai.providers.openai._find_codex",
+            "lintro.ai.providers.openai.provider._find_codex",
             return_value="/usr/local/bin/codex",
         ),
     ):
@@ -90,7 +90,10 @@ def _providers() -> dict[str, BaseAIProvider]:
             transport=AITransport.CLI,
             cli_bare=CliBareMode.NEVER,
         ),
-        "cursor": CursorProvider(transport=AITransport.CLI),
+        "cursor": CursorProvider(
+            transport=AITransport.CLI,
+            cursor_trust_workspace=True,
+        ),
         "openai": OpenAIProvider(transport=AITransport.CLI),
     }
 

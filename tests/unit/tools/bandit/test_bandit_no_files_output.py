@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.bandit import BanditPlugin
+from lintro.tools.bandit.definition import BanditPlugin
 
 
 def test_check_no_python_files_returns_empty_output(tmp_path: Path) -> None:
@@ -40,7 +40,7 @@ def test_check_no_python_files_returns_empty_output(tmp_path: Path) -> None:
             return_value=None,
         ),
         patch(
-            "lintro.tools.definitions.bandit.subprocess.run",
+            "lintro.tools.bandit.definition.subprocess.run",
             return_value=completed,
         ),
     ):
@@ -75,7 +75,7 @@ def test_check_empty_output_clean_pass_has_empty_output(tmp_path: Path) -> None:
             return_value=None,
         ),
         patch(
-            "lintro.tools.definitions.bandit.subprocess.run",
+            "lintro.tools.bandit.definition.subprocess.run",
             return_value=completed,
         ),
     ):

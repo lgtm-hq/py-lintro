@@ -1,0 +1,2 @@
+This is a clean fixture with no spelling mistakes.
+We separate the words to keep the spell checker quiet.

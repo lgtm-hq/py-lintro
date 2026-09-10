@@ -14,7 +14,7 @@ caller instead of swallowing them.
 
 The ``*_run`` variants return the full
 :class:`~lintro.models.core.run_artifact.RunArtifact` instead of an exit code,
-so callers can inspect per-tool results, totals, and the health score without
+so callers can inspect per-tool results, totals, and severity tallies without
 re-parsing lintro's own output (issue #1823)::
 
     from lintro.api import check_run

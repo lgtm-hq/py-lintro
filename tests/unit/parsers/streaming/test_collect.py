@@ -33,7 +33,7 @@ def test_empty_generator_returns_empty_list() -> None:
 
     def gen() -> Generator[SimpleIssue, None, None]:
         return
-        yield  # noqa: B901
+        yield
 
     results: list[SimpleIssue] = collect_streaming_results(gen())
 

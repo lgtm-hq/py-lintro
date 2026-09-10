@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from lintro.tools.definitions.stylelint import StylelintPlugin
+from lintro.tools.stylelint.definition import StylelintPlugin
 
 
 @pytest.fixture

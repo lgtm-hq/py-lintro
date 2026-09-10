@@ -4,8 +4,8 @@
 # =============================================================================
 # Pre-built external linting toolchains (Rust, Node/bun, ~40 linter binaries).
 # Published as ghcr.io/lgtm-hq/lintro-tools by
-# .github/workflows/docker-tools-publish.yml (weekly + on changes to this file
-# or the pinned tool versions).
+# .github/workflows/docker-tools-publish.yml (weekly maintenance rebuilds) and
+# .github/workflows/docker-tools-candidate.yml (Renovate tool-version bumps).
 #
 # Once the first image is published, the root Dockerfile will consume it via
 # a digest-pinned FROM so the slow, rarely-changing tools layer stays off the
@@ -20,18 +20,24 @@
 # root Dockerfile until the FROM flip lands (see issue #1360).
 # =============================================================================
 
-FROM python:3.14-slim@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4 AS tools
+FROM python:3.14-slim@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 AS tools
 
-ARG BUN_VERSION=1.3.14
-ARG UV_VERSION=0.12.5
-ARG GO_VERSION=1.26.7
+ARG BUN_VERSION=1.4.2
+ARG UV_VERSION=0.12.11
+ARG GO_VERSION=1.27.1
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
 LABEL org.opencontainers.image.description="Pre-built tools layer for lintro"
 LABEL org.opencontainers.image.licenses="MIT"
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# LINTRO_TOOLS_IMAGE marks the image whose whole point is carrying every
+# wrapped tool: the integration suite fails instead of skipping when one of
+# them is missing here (#465). The name is defined in Python as
+# tests/integration/_tools.py::TOOLS_IMAGE_ENV and repeated in
+# docker-compose.yml; tests/unit/test_workflow_wiring.py pins all three.
+ENV LINTRO_TOOLS_IMAGE=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_SYSTEM_PYTHON=1 \
     BUN_INSTALL="/opt/bun" \
@@ -51,6 +57,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     curl \
     ca-certificates \
     build-essential \
+    cppcheck \
     git \
     libssl-dev \
     pkg-config \
@@ -116,9 +123,19 @@ RUN ARCH=$(uname -m) && \
     rm -rf /tmp/go*
 
 COPY lintro/ /app/lintro/
+COPY lintro_build/ /app/lintro_build/
 COPY scripts/ /app/scripts/
 COPY package.json /app/package.json
+COPY pyproject.toml /app/pyproject.toml
 COPY requirements-semgrep.txt /app/requirements-semgrep.txt
+
+# Regenerate the version artifacts from their sources so the image build is
+# self-contained (#2179): install-tools.sh hard-imports
+# lintro._generated_versions with no fallback. A no-op while the artifacts
+# are committed (regeneration reproduces identical bytes); load-bearing once
+# they stop being committed (epic #2176 phase 4).
+RUN python3 scripts/ci/generate-tool-versions.py && \
+    python3 scripts/ci/generate-builtin-tool-index.py
 
 RUN groupadd -r tools && \
     mkdir -p /opt/bun /opt/cargo /opt/rustup
@@ -126,18 +143,17 @@ RUN groupadd -r tools && \
 # Keep rustup's bundled HTML doc trees (rust-docs component) out of the
 # image: generated Rust API docs have no runtime use here, they add tens of
 # thousands of small files per toolchain, and Trivy's secret scanner walked
-# them until it hit its timeout (#1703). Install the stable toolchain with
-# --profile minimal (no rust-docs download; clippy/rustfmt added explicitly)
-# and rm any remaining share/doc trees — e.g. from the pinned toolchain
-# install-tools.sh installs with the default profile — in the same layer so
-# they never reach the committed image.
+# them until it hit its timeout (#1703). install-tools.sh installs the
+# rustc pin with --profile minimal (no rust-docs; clippy/rustfmt added
+# explicitly). Do not rustup-default "stable" afterwards — that floats
+# rustc to whatever stable is today and fails verify-manifest on main
+# (#2139, #2220). Strip any leftover share/doc trees in the same layer
+# so they never reach the committed image.
 RUN --mount=type=cache,target=/opt/cargo/registry,sharing=locked \
     --mount=type=cache,target=/opt/cargo/git,sharing=locked \
     --mount=type=cache,target=/root/.cache/uv,sharing=locked \
     find /app/scripts -type f -name "*.sh" -exec chmod +x {} \; && \
     /app/scripts/utils/install-tools.sh --docker && \
-    rustup toolchain install stable --profile minimal --component clippy,rustfmt && \
-    rustup default stable && \
     rm -rf /opt/rustup/toolchains/*/share/doc
 
 RUN chgrp -R tools /opt/cargo /opt/rustup /opt/bun /opt/semgrep-venv && \
@@ -149,18 +165,21 @@ RUN echo "=== Verifying all tools ===" && \
     cargo --version && rustc --version && \
     rustfmt --version && cargo clippy --version && cargo audit --version && \
     cargo deny --version && actionlint --version && bandit --version && \
-    black --version && commitlint --version && gitleaks version && \
+    black --version && buf --version && commitlint --version && \
+    cppcheck --version && gitleaks version && \
     golangci-lint version && \
     hadolint --version && \
     markdownlint-cli2 --version && mypy --version && osv-scanner --version && \
     oxfmt --version && oxlint --version && prettier --version && \
-    pydoclint --version && rubocop --version && ruff --version && \
+    pydoclint --version && pylint --version && rubocop --version && \
+    ruff --version && \
     semgrep --version && \
-    pip-audit --version && \
-    shellcheck --version && shfmt --version && sqlfluff --version && \
+    pip-audit --version && lint-imports --version && \
+    shellcheck --version && shfmt --version && spectral --version && \
+    sqlfluff --version && \
     dotenv-linter --version && \
     stylelint --version && \
     taplo --version && tsc --version && astro --version && \
     svelte-check --version && vue-tsc --version && yamllint --version && \
-    vale --version && \
+    vale --version && typos --version && \
     echo "=== All tools verified! ==="

@@ -98,8 +98,7 @@ async def _generate_all_suggestions(
             budget.check()
 
         loguru_logger.debug(
-            f"AI fix: {tool_name} has {len(issues)} issues, "
-            f"budget={remaining_budget}",
+            f"AI fix: {tool_name} has {len(issues)} issues, budget={remaining_budget}",
         )
 
         fix_params = FixGenParams(
@@ -216,7 +215,7 @@ def _report_checkpoints(
             continue
         try:
             changed = diff_undo(state)
-        except Exception as exc:  # noqa: BLE001 - reporting must never fail a run
+        except Exception as exc:
             loguru_logger.debug(f"Checkpoint diff unavailable: {exc}")
             continue
         if not changed.strip():

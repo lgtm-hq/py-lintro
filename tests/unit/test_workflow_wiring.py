@@ -16,6 +16,10 @@ import yaml
 from assertpy import assert_that
 from pathspec import GitIgnoreSpec
 
+from lintro._tool_versions import TOOL_VERSIONS
+from lintro.enums.tool_name import ToolName
+from tests.integration._tools import ALLOW_VERSION_LAG_ENV, TOOLS_IMAGE_ENV
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LINTRO_REPORT_SCRIPT = (
     _REPO_ROOT / "scripts" / "ci" / "testing" / "lintro-report-generate.sh"
@@ -358,18 +362,99 @@ def test_docker_ci_heavy_jobs_log_skip_reason() -> None:
             step
             for step in job["steps"]
             if step.get("if") == "needs.changes.outputs.pipeline == 'false'"
-            and "ci-log.sh" in step.get("run", "")
+            and "skipped:" in step.get("run", "")
         ]
         assert_that(skip_steps).described_as(job_name).is_length(1)
         skip_step = skip_steps[0]
-        assert_that(skip_step["run"]).contains('"skipped:"')
+        # Inlined (#2297): ci-log.sh only ever ran `echo "$*"`.
+        assert_that(skip_step["run"]).starts_with("echo ")
+        # Double-quoted, not bare: skip reasons contain spaces ("version-bump
+        # PR", "docs-only change"), so an unquoted expansion would word-split
+        # the reason across echo arguments.
+        assert_that(skip_step["run"]).contains('"skipped: $SKIP_REASON')
         assert_that(skip_step["env"]["SKIP_REASON"]).contains(
             "needs.changes.outputs.skip-reason",
         )
 
 
-def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
-    """Dogfooding lint depends on manifest-sync and allows draft-PR skips."""
+def test_docker_ci_gates_semgrep_lockfile_drift_before_the_builds() -> None:
+    """The semgrep lockfile gate runs on the full-lint filter, before builds.
+
+    #2436: nothing regenerates requirements-semgrep.txt automatically, so a
+    stale lockfile has to fail one named check early instead of a dozen
+    downstream jobs. Both requirements-semgrep files live in the changes
+    job's ``full-lint`` path filter, which is what lint-scope reports.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["semgrep-lock"]
+    condition = _normalize_github_expr(gate["if"])
+
+    assert_that(gate["needs"]).is_equal_to(["changes"])
+    assert_that(condition).contains("!cancelled()")
+    assert_that(condition).contains("needs.changes.outputs.pipeline != 'false'")
+    assert_that(condition).contains("needs.changes.outputs.lint-scope != 'changed'")
+
+    steps = gate["steps"]
+    assert_that(steps[0]["name"]).is_equal_to("Harden Runner")
+    endpoints = steps[0]["with"]["allowed-endpoints"].split()
+    assert_that(endpoints).contains("pypi.org:443", "files.pythonhosted.org:443")
+    assert_that([step.get("run") for step in steps]).contains(
+        "scripts/ci/check-semgrep-lock.sh",
+    )
+
+    # Only the scripts and the two requirements files are checked out.
+    checkout = next(step for step in steps if step.get("name") == "Checkout")
+    sparse = checkout["with"]["sparse-checkout"].split()
+    assert_that(sparse).contains(
+        "scripts/ci/check-semgrep-lock.sh",
+        "scripts/ci/semgrep-lock-lib.sh",
+        "requirements-semgrep.in",
+        "requirements-semgrep.txt",
+    )
+
+    # Exact uv pin plus the retry pair (#1487): `latest` resolves through the
+    # astral-sh/versions manifest, and an install flake here would skip
+    # publish, which needs this job.
+    assert_that(gate["env"]["UV_VERSION"]).is_equal_to(_tools_dockerfile_uv_version())
+    setup_uv = [
+        step for step in steps if "astral-sh/setup-uv@" in (step.get("uses") or "")
+    ]
+    assert_that(setup_uv).is_length(2)
+    for step in setup_uv:
+        assert_that(step["with"]["version"]).contains("env.UV_VERSION")
+        assert_that(step["with"]["version"]).does_not_contain("latest")
+    assert_that(setup_uv[0]["continue-on-error"]).is_true()
+    assert_that(setup_uv[1]["if"]).contains("steps.setup-uv.outcome == 'failure'")
+    assert_that(endpoints).contains("github-releases.githubusercontent.com:443")
+
+    # The gate is upstream of the image builds, so drift is red in under a
+    # minute, and upstream of publish, so a drifted lockfile never ships.
+    assert_that(docker_ci["jobs"]["docker-build"]["needs"]).contains("semgrep-lock")
+    assert_that(docker_ci["jobs"]["publish"]["needs"]).contains("semgrep-lock")
+    # docker-build now depends on a job that is skipped on docs-only and
+    # lint-scope=changed PRs, so its `!cancelled()` is load-bearing: without it
+    # the required 🐳 Build Docker Images check would be skipped on those PRs
+    # and merges would deadlock. publish must NOT carry it, so a red gate
+    # skips the GHCR promotion.
+    build_condition = _normalize_github_expr(docker_ci["jobs"]["docker-build"]["if"])
+    assert_that(build_condition).contains("!cancelled()")
+    publish_condition = _normalize_github_expr(docker_ci["jobs"]["publish"]["if"])
+    assert_that(publish_condition).does_not_contain("!cancelled()")
+    assert_that(publish_condition).does_not_contain("always()")
+
+    # The path filter the gate leans on still lists both lockfile paths.
+    detect = next(
+        step
+        for step in docker_ci["jobs"]["changes"]["steps"]
+        if step.get("id") == "detect"
+    )
+    filters = detect["with"]["filters"]
+    assert_that(filters).contains("'requirements-semgrep.in'")
+    assert_that(filters).contains("'requirements-semgrep.txt'")
+
+
+def test_docker_ci_dogfooding_lint_waits_on_docker_build() -> None:
+    """Dogfooding lint depends on the docker build (#2180: no manifest-sync)."""
     docker_ci = _load_workflow(name="docker-ci.yml")
     lint_job = docker_ci["jobs"]["dogfooding-lint"]
     comment_job = docker_ci["jobs"]["dogfooding-pr-comment"]
@@ -377,13 +462,12 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
     lint_condition = lint_job["if"]
     comment_condition = comment_job["if"]
 
-    assert_that(lint_needs).contains("changes", "docker-build", "manifest-sync")
+    assert_that(lint_needs).contains("changes", "docker-build")
+    assert_that(lint_needs).does_not_contain("manifest-sync")
     assert_that(lint_condition).contains("always()")
     assert_that(lint_condition).contains("!cancelled()")
     assert_that(lint_condition).contains("needs.changes.outputs.pipeline != 'false'")
     assert_that(lint_condition).contains("needs.docker-build.result == 'success'")
-    assert_that(lint_condition).contains("manifest-sync.result == 'skipped'")
-    assert_that(lint_condition).contains("manifest-sync.result == 'success'")
     assert_that(comment_condition).contains("always()")
     assert_that(comment_condition).contains("!cancelled()")
     assert_that(comment_condition).contains(
@@ -408,26 +492,23 @@ def test_docker_ci_dogfooding_lint_waits_on_manifest_sync() -> None:
         "pipeline",
         "lint_scope",
         "docker_build",
-        "manifest_sync",
         "cancelled",
         "expected",
     ),
     [
-        ("true", "full", "success", "success", False, True),
-        ("true", "full", "success", "skipped", False, True),
-        ("true", "full", "success", "failure", False, False),
-        ("true", "full", "failure", "success", False, False),
-        ("true", "full", "success", "success", True, False),
+        ("true", "full", "success", False, True),
+        ("true", "full", "failure", False, False),
+        ("true", "full", "success", True, False),
         # Changed-files PR (#1361): the full-repo lint hands off to
         # dogfooding-lint-changed.
-        ("true", "changed", "success", "success", False, False),
-        # Docs-only PR: docker-build early-exits green and manifest-sync is
-        # path-skipped; dogfooding-lint must not run (no CI image pushed).
-        ("false", "changed", "success", "skipped", False, False),
+        ("true", "changed", "success", False, False),
+        # Docs-only PR: docker-build early-exits green; dogfooding-lint must
+        # not run (no CI image pushed).
+        ("false", "changed", "success", False, False),
         # Broken changes job fails open: pipeline and lint-scope outputs are
         # empty (not 'false'/'changed'), the full build ran, so the full
         # lint runs too.
-        ("", "", "success", "success", False, True),
+        ("", "", "success", False, True),
     ],
 )
 def test_docker_ci_lint_condition_semantics(
@@ -435,11 +516,10 @@ def test_docker_ci_lint_condition_semantics(
     pipeline: str,
     lint_scope: str,
     docker_build: str,
-    manifest_sync: str,
     cancelled: bool,
     expected: bool,
 ) -> None:
-    """Lint job ``if:`` runs only when docker-build succeeds and manifest-sync is ok."""
+    """Lint job ``if:`` runs only when docker-build succeeds."""
     docker_ci = _load_workflow(name="docker-ci.yml")
     lint_condition = docker_ci["jobs"]["dogfooding-lint"]["if"]
 
@@ -447,10 +527,7 @@ def test_docker_ci_lint_condition_semantics(
         _evaluate_github_if(
             lint_condition,
             cancelled=cancelled,
-            results={
-                "docker-build": docker_build,
-                "manifest-sync": manifest_sync,
-            },
+            results={"docker-build": docker_build},
             outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
         ),
     ).is_equal_to(expected)
@@ -461,25 +538,22 @@ def test_docker_ci_lint_condition_semantics(
         "pipeline",
         "lint_scope",
         "docker_build",
-        "manifest_sync",
         "cancelled",
         "expected",
     ),
     [
         # Changed-scope PR with a green build runs the changed-files lint.
-        ("true", "changed", "success", "success", False, True),
-        ("true", "changed", "success", "skipped", False, True),
-        ("true", "changed", "success", "failure", False, False),
-        ("true", "changed", "failure", "success", False, False),
-        ("true", "changed", "success", "success", True, False),
+        ("true", "changed", "success", False, True),
+        ("true", "changed", "failure", False, False),
+        ("true", "changed", "success", True, False),
         # Full-scope runs (global-impact PRs, merge_group, pushes) belong to
         # dogfooding-lint, not this job.
-        ("true", "full", "success", "success", False, False),
+        ("true", "full", "success", False, False),
         # Docs-only PR: nothing was built, nothing to lint.
-        ("false", "changed", "success", "skipped", False, False),
+        ("false", "changed", "success", False, False),
         # Broken changes job fails open to the FULL lint job: empty
         # lint-scope is != 'changed', so this job stays skipped.
-        ("", "", "success", "success", False, False),
+        ("", "", "success", False, False),
     ],
 )
 def test_docker_ci_lint_changed_condition_semantics(
@@ -487,7 +561,6 @@ def test_docker_ci_lint_changed_condition_semantics(
     pipeline: str,
     lint_scope: str,
     docker_build: str,
-    manifest_sync: str,
     cancelled: bool,
     expected: bool,
 ) -> None:
@@ -499,10 +572,7 @@ def test_docker_ci_lint_changed_condition_semantics(
         _evaluate_github_if(
             lint_condition,
             cancelled=cancelled,
-            results={
-                "docker-build": docker_build,
-                "manifest-sync": manifest_sync,
-            },
+            results={"docker-build": docker_build},
             outputs={"changes": {"pipeline": pipeline, "lint-scope": lint_scope}},
         ),
     ).is_equal_to(expected)
@@ -695,7 +765,6 @@ def test_docker_ci_lintro_code_quality_wires_upstream_jobs() -> None:
     assert_that(gate_job["needs"]).contains(
         "changes",
         "docker-build",
-        "manifest-sync",
         "dogfooding-lint",
         "dogfooding-lint-changed",
         "dogfooding_lint_retry",
@@ -768,23 +837,140 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
 
     assert_that(retry_job["needs"]).contains(
         "docker-build",
-        "manifest-sync",
         "dogfooding-lint",
     )
     assert_that(retry_condition).contains("needs.dogfooding-lint.result == 'failure'")
     assert_that(retry_condition).contains("needs.docker-build.result == 'success'")
 
 
+@pytest.mark.parametrize("job_id", ["dogfooding-lint", "dogfooding_lint_retry"])
+def test_dogfood_lint_callers_allow_the_hosted_runner_watchdog(job_id: str) -> None:
+    """Dogfood lint callers must allow GitHub's hosted-runner watchdog (#2352).
+
+    harden-runner block mode denied `hosted-compute-watchdog-*.githubapp.com`
+    and `hosted-compute-request-orchestrator-*.githubapp.com`, and long jobs
+    were reclaimed mid-run with exit 143. The reusable workflow's enforcing
+    harden-runner step reads `allowed-endpoints` verbatim, so the caller must
+    carry the whole baseline plus the watchdog entry — asserting a couple of
+    baseline hosts keeps a future edit from shrinking the list to one entry.
+
+    Args:
+        job_id: Dogfooding lint caller whose egress allowlist is under test.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    job_with = docker_ci["jobs"][job_id]["with"]
+    allowed = set(str(job_with["allowed-endpoints"]).split())
+
+    assert_that(job_with["egress-policy"]).is_equal_to("block")
+    assert_that(job_with["allowed-endpoints-mode"]).is_equal_to("append")
+    assert_that(allowed).contains("*.githubapp.com:443")
+    assert_that(allowed).contains(
+        "github.com:443",
+        "api.github.com:443",
+        "ghcr.io:443",
+        "pypi.org:443",
+    )
+
+
+def test_dogfood_lint_callers_share_one_egress_allowlist() -> None:
+    """Both dogfood lint callers must carry the identical allowlist (#2352).
+
+    The reusable workflow's enforcing harden-runner step reads the caller's
+    `allowed-endpoints` verbatim, so each caller repeats the whole baseline.
+    Two hand-maintained copies drift silently — a host added for the primary
+    and forgotten on the retry fails only on the retry, during an incident.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    primary = str(docker_ci["jobs"]["dogfooding-lint"]["with"]["allowed-endpoints"])
+    retry = str(
+        docker_ci["jobs"]["dogfooding_lint_retry"]["with"]["allowed-endpoints"],
+    )
+
+    assert_that(primary.split()).is_equal_to(retry.split())
+    assert_that(primary.split()).does_not_contain_duplicates()
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        "docker-build",
+        "dogfooding-lint-changed",
+        "dogfood-skip-gate",
+        "security-audit",
+        "integration-test",
+        "publish",
+    ],
+)
+def test_long_docker_ci_jobs_allow_the_hosted_runner_watchdog(job_id: str) -> None:
+    """Every long in-repo Docker CI job allows the watchdog endpoints (#2352).
+
+    Jobs whose budget exceeds ~10 minutes are the ones observed dying with
+    "The runner has received a shutdown signal" while harden-runner blocked
+    GitHub's hosted-compute watchdog and request-orchestrator hosts.
+
+    Args:
+        job_id: Docker CI job whose harden-runner allowlist is under test.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    job = docker_ci["jobs"][job_id]
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    allowed = set(str(harden["with"]["allowed-endpoints"]).split())
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    assert_that(job["timeout-minutes"]).is_greater_than(10)
+    assert_that(allowed).contains("*.githubapp.com:443")
+
+
+def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
+    """Full-repo skip checks wait for retry and consume its final report."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate = docker_ci["jobs"]["dogfood-skip-gate"]
+
+    assert_that(gate["needs"]).contains(
+        "changes",
+        "docker-build",
+        "dogfooding-lint",
+        "dogfooding-lint-changed",
+        "dogfooding_lint_retry",
+    )
+
+    download = next(
+        step
+        for step in gate["steps"]
+        if step.get("name") == "Download authoritative lint JSON report"
+    )
+    assert_that(download["if"]).contains(
+        "needs.changes.outputs.lint-scope != 'changed'",
+    )
+    assert_that(download["uses"]).contains(
+        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+    )
+    assert_that(download["with"]).is_equal_to(
+        {"name": "linting-json-report", "path": ".lintro/artifacts/json"},
+    )
+
+    check = next(step for step in gate["steps"] if step.get("id") == "skips")
+    report_expr = _normalize_github_expr(check["env"]["REPORT_JSON"])
+    assert_that(report_expr).contains(
+        "needs.changes.outputs.lint-scope != 'changed'",
+    )
+    assert_that(report_expr).contains(".lintro/artifacts/json/results.json")
+    assert_that(report_expr).contains("|| ''")
+
+
 def test_dogfood_skip_gate_has_bounded_timeout() -> None:
     """The no-silent-skip gate must fail predictably on a stall (#1704).
 
-    The gate's healthy range is 10–17 min (median ~14), but its hosted
-    runner can be terminated mid-run with no diagnostic signal. A bounded
-    ``timeout-minutes`` — above the observed healthy max so healthy runs
-    never trip it, at most ~2x the median so a stall fails fast instead of
-    lingering until the runner dies — keeps the failure mode predictable.
+    The gate's hosted runner can be terminated mid-run with no diagnostic
+    signal. A bounded ``timeout-minutes`` gives healthy runs room to complete
+    while still failing a stalled run fast, keeping the failure mode
+    predictable.
     Applies to both copies of the gate (docker-ci.yml and
-    dogfood-nightly.yml); the owner-approved value is 20.
+    dogfood-nightly.yml); the owner-approved value is 30.
     """
     for workflow_name in ("docker-ci.yml", "dogfood-nightly.yml"):
         workflow = _load_workflow(name=workflow_name)
@@ -795,44 +981,62 @@ def test_dogfood_skip_gate_has_bounded_timeout() -> None:
             timeout,
             f"{workflow_name} dogfood-skip-gate must set timeout-minutes",
         ).is_not_none()
-        # Above the 17 min observed healthy max; at most ~2x the ~14 median.
-        # Upper bound 28 so the previous 30-minute configuration this PR
-        # removes would fail the contract.
-        assert_that(timeout).is_between(18, 28)
+        # Provides headroom for healthy runs while bounding stalled runs.
+        assert_that(timeout).is_equal_to(30)
 
 
-def test_test_ci_changes_job_resolves_pipeline_relevance() -> None:
-    """test-ci classifies PR diffs before calling the reusable matrix (#1359)."""
+def test_test_ci_has_no_path_classification_surface() -> None:
+    """test-ci must not reintroduce a pipeline classifier (#2108, #2297).
+
+    The Python matrix can never path-skip: ``pipeline-skip`` is hard-false
+    because a skipped reusable ``test`` job publishes the uninterpolated
+    check name and deadlocks required-check merges. The former ``changes``
+    job therefore computed a ``pipeline`` output whose only consumer
+    (``stage-coverage-html``) is push-only, while
+    ``resolve-pipeline-relevance.sh`` resolves ``pipeline=false`` on
+    ``pull_request`` alone — the condition could never be false. Guard the
+    whole surface, not just the job name, so it cannot creep back.
+    """
     test_ci = _load_workflow(name="test-ci.yml")
-    changes_job = test_ci["jobs"]["changes"]
-    steps = {step.get("id"): step for step in changes_job["steps"] if "id" in step}
-
-    assert_that(changes_job["outputs"]["pipeline"]).contains(
-        "steps.result.outputs.pipeline",
-    )
-    assert_that(changes_job["outputs"]["skip-reason"]).contains(
-        "steps.result.outputs.skip-reason",
+    raw = (_REPO_ROOT / ".github" / "workflows" / "test-ci.yml").read_text(
+        encoding="utf-8",
     )
 
-    bump_step = steps["bump"]
-    assert_that(bump_step["if"]).contains(_github_event_name_is_pull_request_token())
-    assert_that(bump_step["run"]).is_equal_to("scripts/ci/release-bump-only.sh")
+    assert_that(test_ci["jobs"]).does_not_contain_key("changes")
+    assert_that(raw).does_not_contain("resolve-pipeline-relevance.sh")
+    assert_that(raw).does_not_contain("needs.changes.")
 
-    resolve_step = steps["result"]
-    assert_that(resolve_step["run"]).is_equal_to(
-        "scripts/ci/resolve-pipeline-relevance.sh",
-    )
-    assert_that(resolve_step["env"]["RELEASE_BUMP"]).contains(
-        "steps.bump.outputs.release-bump",
-    )
+    # Exact dependency lists, not a "does not contain 'changes'" subset check:
+    # a classifier reintroduced under any other job id would slip past a
+    # name-shaped assertion. These are the only edges test-ci may have.
+    expected_needs: dict[str, list[str]] = {
+        "test-compat": [],
+        "test-coverage": [],
+        "test-gate": ["test-compat", "test-coverage"],
+        "test-suite-coverage": ["test-gate"],
+        "stage-coverage-html": ["test-coverage"],
+    }
+    assert_that(set(test_ci["jobs"])).is_equal_to(set(expected_needs))
+    for job_id, expected in expected_needs.items():
+        assert_that(test_ci["jobs"][job_id].get("needs") or []).described_as(
+            job_id,
+        ).is_equal_to(expected)
+    # on.<event>.paths collapses nested required contexts (#1359).
+    triggers = test_ci["on"]
+    assert_that(triggers).is_not_empty()
+    for trigger in triggers.values():
+        if isinstance(trigger, dict):
+            assert_that(trigger).does_not_contain_key("paths")
+            assert_that(trigger).does_not_contain_key("paths-ignore")
 
 
 def test_test_ci_reusables_never_path_skip() -> None:
-    """Reusable callers fail-open on changes failure and never path-skip.
+    """Reusable callers always run the matrix and never path-skip.
 
-    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: a failed
-    changes job must still run the matrix (empty pipeline != 'false')
-    instead of collapsing to skipped → false green.
+    ``if: '!cancelled()'`` mirrors docker-ci's docker-build gate: the matrix
+    runs unless the whole workflow is cancelled, instead of collapsing to
+    skipped → false green. With the classifier gone (#2297) the callers
+    have no upstream dependency at all, so nothing can skip them.
 
     ``pipeline-skip`` stays hard-false (#2108): lgtm-ci's skipped ``test``
     job publishes as ``test-compat / inputs.job-name`` rather than the
@@ -847,10 +1051,87 @@ def test_test_ci_reusables_never_path_skip() -> None:
     test_ci = _load_workflow(name="test-ci.yml")
     for job_name, published_name in expected_job_names.items():
         job = test_ci["jobs"][job_name]
-        assert_that(job["needs"]).contains("changes")
+        assert_that(job.get("needs") or []).is_empty()
         assert_that(job["if"]).is_equal_to("!cancelled()")
         assert_that(job["with"]["pipeline-skip"]).is_false()
         assert_that(job["with"]["job-name"]).is_equal_to(published_name)
+
+
+def test_tools_image_switch_is_declared_where_the_suite_runs() -> None:
+    """The Docker side declares the exact variable the gate reads (#465).
+
+    ``LINTRO_TOOLS_IMAGE`` is what turns a missing wrapped tool from a skip
+    into a failure. Its name lives in Python as
+    ``tests.integration._tools.TOOLS_IMAGE_ENV`` but has to be repeated as a
+    plain string in the Dockerfile and in docker-compose.yml, which neither
+    can import. A rename on one side would silently degrade the required
+    Docker integration check back to a rubber stamp, so pin all three.
+    """
+    switch = f"{TOOLS_IMAGE_ENV}=1"
+
+    dockerfile = (_REPO_ROOT / "docker" / "tools.Dockerfile").read_text(
+        encoding="utf-8",
+    )
+    # Match the ENV instruction itself: a bare substring would also be
+    # satisfied by the surrounding comment or by a RUN line, neither of which
+    # puts the variable in the test process's environment.
+    env_instruction = re.search(
+        rf"(?m)^\s*ENV\s+{re.escape(switch)}(?:\s|$)",
+        dockerfile,
+    )
+    assert_that(env_instruction).described_as(
+        "docker/tools.Dockerfile ENV instruction",
+    ).is_not_none()
+
+    compose = yaml.safe_load(
+        (_REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8"),
+    )
+    environment = compose["services"]["test-integration"]["environment"]
+    assert_that(environment).described_as("test-integration service").contains(switch)
+
+    # The hosted matrix is the other half of the lockstep: it runs the same
+    # modules on a toolless runner, so copying the switch onto the reusable
+    # would turn every absent wrapped tool into a collection failure there.
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job_text = yaml.safe_dump(test_ci["jobs"][job_name])
+        assert_that(job_text).described_as(job_name).does_not_contain(
+            TOOLS_IMAGE_ENV,
+        )
+
+
+def test_version_lag_env_matches_the_plugin_contract() -> None:
+    """The gate reads the same env var the plugins do (#1582).
+
+    ``tests/integration/_tools.py`` mirrors lintro's version-lag allowance so
+    an allow-listed lagging binary keeps collecting its module. The name is
+    spelled once per side; a rename in either would silently re-introduce the
+    skip the allowance exists to prevent.
+    """
+    from lintro.plugins.execution_preparation import _ALLOW_VERSION_LAG_ENV
+
+    assert_that(ALLOW_VERSION_LAG_ENV).is_equal_to(_ALLOW_VERSION_LAG_ENV)
+
+
+def test_test_ci_matrix_collects_the_integration_suite() -> None:
+    """The Python matrix runs tests/integration instead of ignoring it (#465).
+
+    Every integration module gates on ``tests/integration/_tools.py``, which
+    skips on a toolless runner and only fails inside the tools image, so the
+    hosted matrix can collect the suite without installing any wrapped tool.
+    """
+    test_ci = _load_workflow(name="test-ci.yml")
+    for job_name in ("test-compat", "test-coverage"):
+        job = test_ci["jobs"][job_name]
+        assert_that(job["with"]["test-path"]).described_as(job_name).is_equal_to(
+            "tests",
+        )
+        # Assert the absence of *any* ignore, not just this path spelling:
+        # "--ignore=tests" or "--ignore tests/integration" would exclude the
+        # suite again while still passing a substring check for the path.
+        assert_that(job["with"]["extra-args"]).described_as(
+            job_name,
+        ).does_not_contain("--ignore", "tests/integration")
 
 
 def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
@@ -862,10 +1143,8 @@ def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
     test_ci = _load_workflow(name="test-ci.yml")
     gate = test_ci["jobs"]["test-suite-coverage"]
 
-    assert_that(gate["needs"]).contains(
-        "changes",
-        "test-gate",
-    )
+    assert_that(gate["needs"]).is_equal_to(["test-gate"])
+    assert_that(gate["with"]).does_not_contain_key("pipeline-skip")
     assert_that(gate["with"]["upstream-result"]).is_equal_to(
         "${{ needs.test-gate.outputs.result }}",
     )
@@ -927,7 +1206,9 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         ".pre-commit-hooks.yaml",
         ".prettierignore",
         ".prettierrc.json",
+        ".spectral.yaml",
         ".stylelintrc.json",
+        ".typos.toml",
         ".vale.ini",
         ".yamllint",
         "apps",
@@ -937,14 +1218,15 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "docker",
         "docker-compose.yml",
         "Dockerfile",
+        "evals",  # offline review-efficacy harness (#2147): linted Python
+        "justfile",
         "LICENSE",
         "lintro",
-        "Makefile",
+        "lintro_build",
         "MANIFEST.in",
         "npm",
         "package.json",
         "pyproject.toml",
-        "pytest.ini",
         "renovate.json",
         "requirements-semgrep.in",
         "requirements-semgrep.txt",
@@ -953,7 +1235,6 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         "test_samples",
         "tests",
         "tools",
-        "tox.ini",
         "uv.lock",
     },
 )
@@ -1046,6 +1327,8 @@ def test_docker_ci_detect_step_has_no_pipeline_allow_list() -> None:
     filters = detect_step["with"]["filters"]
     filter_names = re.findall(r"^([^#\s][^:]*):\s*$", filters, re.M)
     assert_that(filter_names).is_equal_to(["full-lint"])
+    assert_that(filters).contains("- 'justfile'")
+    assert_that(filters).does_not_contain("- 'Makefile'")
 
     resolve_step = steps["result"]
     assert_that(resolve_step["run"]).is_equal_to(
@@ -1091,6 +1374,7 @@ def test_lintro_report_scheduled_workflow_shares_single_run_output() -> None:
     """The scheduled workflow wires one analysis step to the report artifact."""
     workflow = _load_workflow(name="lintro-report-scheduled.yml")
     report_job = workflow["jobs"]["lintro-report"]
+    assert_that(report_job["timeout-minutes"]).is_equal_to(30)
 
     # Concurrency guard for the report ref must remain intact.
     assert_that(report_job["concurrency"]["group"]).is_equal_to(
@@ -1148,6 +1432,172 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     ).is_not_none()
     assert publish_step is not None  # narrow type for mypy
     assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
+
+
+def test_publish_npm_refuses_untrusted_entry_before_the_npm_environment() -> None:
+    """A run that cannot authenticate fails before the npm approval is spent.
+
+    npm trusted publishing only authenticates the tag-pipeline entry path
+    (issue #2247), so a live direct dispatch can never publish. The guard must
+    run in its own job that carries no ``environment:`` and that the
+    environment-gated publish job ``needs``, otherwise the doomed run burns an
+    ``npm`` deployment approval before failing.
+    """
+    workflow = _load_workflow(name="publish-npm.yml")
+    jobs = workflow["jobs"]
+
+    guard = jobs["guard"]
+    assert_that(guard).does_not_contain_key("environment")
+
+    publish_needs = jobs["publish"]["needs"]
+    if isinstance(publish_needs, str):
+        publish_needs = [publish_needs]
+    assert_that(publish_needs).contains("guard")
+    assert_that(jobs["publish"]["environment"]).is_equal_to("npm")
+
+    guard_step = next(
+        (
+            step
+            for step in guard["steps"]
+            if step.get("run", "").strip().endswith("assert_dispatch_allowed.sh")
+        ),
+        None,
+    )
+    assert_that(guard_step).described_as("guard step not found").is_not_none()
+    assert guard_step is not None  # narrow type for mypy
+    # The decision logic lives in the script, not inline in the workflow.
+    assert_that(guard_step["run"].strip()).is_equal_to(
+        "scripts/ci/npm/assert_dispatch_allowed.sh",
+    )
+    # Both inputs the guard decides on must reach the script: the entry
+    # workflow (the OIDC subject) and dry_run.
+    assert_that(guard_step["env"]["WORKFLOW_REF"]).contains("github.workflow_ref")
+    assert_that(guard_step["env"]["DRY_RUN"]).contains("inputs.dry_run")
+
+
+def _guard_allowlisted_workflow() -> str:
+    """Return the workflow filename the npm guard allowlists.
+
+    Returns:
+        The basename of the entry workflow named in
+        ``TRUSTED_ENTRY_WORKFLOW`` inside ``assert_dispatch_allowed.sh``.
+    """
+    script = (
+        _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
+    ).read_text(encoding="utf-8")
+    match = re.search(
+        r"^readonly TRUSTED_ENTRY_WORKFLOW='/\.github/workflows/([^']+)@'",
+        script,
+        flags=re.MULTILINE,
+    )
+    assert_that(match).described_as("TRUSTED_ENTRY_WORKFLOW not found").is_not_none()
+    assert match is not None  # narrow type for mypy
+    return match.group(1)
+
+
+def test_publish_npm_guard_allowlists_a_workflow_that_calls_it() -> None:
+    """The allowlisted entry workflow exists and really calls publish-npm.yml.
+
+    The guard is an allowlist keyed on a workflow *filename*, so a rename on
+    either side would silently lock out every publish (or, with a denylist,
+    let an unauthenticable one through). Pin both halves: the named workflow
+    is on disk, and it is the one that invokes publish-npm.yml.
+    """
+    allowlisted = _guard_allowlisted_workflow()
+    entry_path = _REPO_ROOT / ".github" / "workflows" / allowlisted
+    assert_that(entry_path.is_file()).described_as(str(entry_path)).is_true()
+
+    entry_workflow = _load_workflow(name=allowlisted)
+    callers = [
+        job
+        for job in entry_workflow["jobs"].values()
+        if isinstance(job, dict)
+        and str(job.get("uses", "")).endswith("publish-npm.yml")
+    ]
+    assert_that(callers).described_as(
+        f"{allowlisted} must call publish-npm.yml",
+    ).is_not_empty()
+
+
+def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> None:
+    """Only the tag pipeline may run a live publish; everything else fails.
+
+    ``github.event_name`` cannot substitute for the entry workflow: a
+    ``workflow_call`` run reports the *caller's* event, so a dispatched
+    tag-pipeline run and a dispatched publish-npm.yml run look identical. And
+    the check is an allowlist, so an unknown or renamed caller is refused
+    rather than waved through. The runner's own ``GITHUB_WORKFLOW_REF`` is the
+    fallback, so a dropped ``env:`` mapping still gates the publish.
+    """
+    script = _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
+    workflows = "lgtm-hq/py-lintro/.github/workflows"
+    trusted = _guard_allowlisted_workflow()
+    tag_pipeline_ref = f"{workflows}/{trusted}@refs/tags/v1.2.3"
+    dispatch_ref = f"{workflows}/publish-npm.yml@refs/heads/main"
+    unset = "<unset>"
+    cases: list[tuple[dict[str, str], int]] = [
+        # The trusted entry workflow, on any ref: allowed.
+        ({"WORKFLOW_REF": tag_pipeline_ref}, 0),
+        # An absent or empty DRY_RUN is a live publish, not a dry run: a
+        # dispatch must still be refused, or a dropped input would open the gate.
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": unset}, 1),
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": ""}, 1),
+        ({"WORKFLOW_REF": f"{workflows}/{trusted}@refs/heads/main"}, 0),
+        # Direct dispatch of this workflow: refused unless it is a dry run.
+        ({"WORKFLOW_REF": dispatch_ref}, 1),
+        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": "true"}, 0),
+        # An unknown caller is not on the allowlist.
+        ({"WORKFLOW_REF": f"{workflows}/some-other-pipeline.yml@refs/tags/v1"}, 1),
+        # With no WORKFLOW_REF mapping, the runner's own GITHUB_WORKFLOW_REF
+        # still gates: a dropped `env:` in the workflow must not open the gate.
+        ({"GITHUB_WORKFLOW_REF": tag_pipeline_ref}, 0),
+        ({"GITHUB_WORKFLOW_REF": dispatch_ref}, 1),
+        # No entry path at all proves nothing: fail closed.
+        ({}, 1),
+    ]
+    for env, expected_code in cases:
+        merged = {"PATH": "/usr/bin:/bin", "DRY_RUN": "false", **env}
+        merged = {key: value for key, value in merged.items() if value != unset}
+        result = subprocess.run(  # nosec B603 - fixed in-repo script
+            [str(script)],
+            env=merged,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert_that(result.returncode).described_as(str(env)).is_equal_to(
+            expected_code,
+        )
+
+
+def test_publish_npm_classifies_e404_as_non_retryable() -> None:
+    """publish_packages.sh classifies npm's masked-auth E404 as fatal.
+
+    npm reports an unauthorized publish as ``E404 Not Found`` (issue #2247).
+    Retrying it burns three attempts per package on a permanent condition, so
+    E404 belongs in the non-retryable class, not the transient one. This is a
+    wiring assertion on the two classification patterns; the behaviour (one
+    attempt, no retry) is covered by
+    ``tests/bats/unit/npm/test_publish_packages_e404.bats``.
+    """
+    script = (_REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh").read_text(
+        encoding="utf-8",
+    )
+    non_retryable = re.search(
+        r"^NON_RETRYABLE_ERROR_RE='([^']*)'",
+        script,
+        flags=re.MULTILINE,
+    )
+    transient = re.search(
+        r"^TRANSIENT_ERROR_RE='([^']*)'",
+        script,
+        flags=re.MULTILINE,
+    )
+    assert_that(non_retryable).is_not_none()
+    assert_that(transient).is_not_none()
+    assert non_retryable is not None and transient is not None  # narrow for mypy
+    assert_that(non_retryable.group(1).split("|")).contains("E404")
+    assert_that(transient.group(1)).does_not_contain("E404")
 
 
 def test_publish_npm_delegates_publish_to_hardened_script() -> None:
@@ -1259,6 +1709,22 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
         "no Renovate customManager targets build-binary.yml",
     ).is_not_empty()
 
+    # The docker-ci semgrep-lock job carries the same pin (#2436); the same
+    # manager must cover it or the second site would rot.
+    uv_managers = [
+        manager
+        for manager in matching
+        if any("UV_VERSION" in pattern for pattern in manager.get("matchStrings", []))
+    ]
+    assert_that(uv_managers).is_not_empty()
+    assert_that(
+        [
+            pattern
+            for manager in uv_managers
+            for pattern in manager["managerFilePatterns"]
+        ],
+    ).contains(".github/workflows/docker-ci.yml")
+
     for manager in matching:
         assert_that(manager["packageNameTemplate"]).is_equal_to("astral-sh/uv")
         for match_string in manager["matchStrings"]:
@@ -1269,6 +1735,34 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
             assert_that(found).described_as(
                 f"matchString {match_string!r} does not match build-binary.yml",
             ).is_not_none()
+
+
+def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
+    """golangci-lint pin bumps must not automerge independently of the tools digest.
+
+    The regex manager writes only ``ToolName.GOLANGCI_LINT`` in
+    ``_tool_versions.py``. The app image copies binaries from the
+    digest-pinned ``lintro-tools`` image, so a versions-only merge fails
+    Docker verify (#2139, #2220). Automerge stays off so the pin and the
+    matching digest can land together.
+    """
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    managers = [
+        manager
+        for manager in config["customManagers"]
+        if manager.get("packageNameTemplate") == "golangci/golangci-lint"
+    ]
+    assert_that(managers).is_not_empty()
+
+    rules = [
+        rule
+        for rule in config.get("packageRules", [])
+        if "golangci/golangci-lint" in (rule.get("matchPackageNames") or [])
+        and rule.get("automerge") is False
+    ]
+    assert_that(rules).described_as(
+        "no packageRule disables automerge for golangci/golangci-lint",
+    ).is_not_empty()
 
 
 def test_build_binary_retries_setup_uv_on_failure() -> None:
@@ -1357,6 +1851,57 @@ def test_binary_jobs_never_install_the_dev_group() -> None:
             ).contains("--no-default-groups")
 
 
+def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
+    """The Linux binary build must allow GitHub's hosted-runner watchdog.
+
+    harden-runner block mode denied ``hosted-compute-watchdog-*.githubapp.com``
+    and ``hosted-compute-request-orchestrator-*.githubapp.com``, and the x64
+    build was reclaimed mid-run on every attempt for v0.147.7 with "The runner
+    has received a shutdown signal" (#1761, #2339). The arm64 sibling runs the
+    same source on the same runner class and has never been observed dying that
+    way, which leaves the enforced egress allowlist as the lead.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    job = workflow["jobs"]["build-linux"]
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+    )
+    endpoints = str(harden["with"]["allowed-endpoints"]).split()
+
+    assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+    # Exact hosts by owner decision (#2339): every hosted-compute shard
+    # observed in this repo's job logs, for both control-plane families, plus
+    # the results receiver. The agreed fallback if a new shard appears is a
+    # revert to the `*.githubapp.com:443` wildcard in a follow-up PR, so this
+    # test pins the literals but does not forbid that wildcard.
+    for family in ("hosted-compute-watchdog", "hosted-compute-request-orchestrator"):
+        for shard in ("iad-01", "iad-02", "eus-01", "eus-02"):
+            assert_that(endpoints).contains(
+                f"{family}-prod-{shard}.githubapp.com:443",
+            )
+    assert_that(endpoints).contains(
+        "actions-results-receiver-production.githubapp.com:443",
+    )
+    # The job must still carry its baseline: build-binary.yml is read from
+    # the tag, so a shrunk list passes every PR and fails at the release.
+    assert_that(endpoints).contains(
+        "pypi.org:443",
+        "files.pythonhosted.org:443",
+        "nuitka.net:443",
+        "release-assets.githubusercontent.com:443",
+    )
+    assert_that(endpoints).does_not_contain_duplicates()
+    # Any other glob would silently widen the block policy; the agreed
+    # revert-to-wildcard fallback is the single form permitted here.
+    for endpoint in endpoints:
+        if "*" in endpoint:
+            assert_that(endpoint).described_as(
+                f"{endpoint}: only the agreed *.githubapp.com:443 fallback may glob",
+            ).is_equal_to("*.githubapp.com:443")
+
+
 def test_auto_rerun_covers_tag_publish_workflows() -> None:
     """Auto-rerun must watch publish workflows and not filter to main only.
 
@@ -1393,6 +1938,14 @@ def test_auto_rerun_covers_tag_publish_workflows() -> None:
     assert_that(rerun_if).contains(
         "github.event.workflow_run.conclusion == 'failure'",
     )
+
+
+def test_auto_rerun_allows_three_reruns() -> None:
+    """Persistent runner-loss failures may receive up to three reruns (#2237)."""
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    rerun_inputs = workflow["jobs"]["rerun"]["with"]
+
+    assert_that(rerun_inputs["max-reruns"]).is_equal_to("3")
 
 
 _DELIBERATELY_UNWATCHED = frozenset(
@@ -1553,8 +2106,7 @@ def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
                     continue
                 if with_block.get("ref") != canonical:
                     offenders.append(
-                        f"{path.name}:{job_id}: checkout ref "
-                        f"{with_block.get('ref')!r}",
+                        f"{path.name}:{job_id}: checkout ref {with_block.get('ref')!r}",
                     )
 
     assert_that(offenders).is_empty()
@@ -1673,6 +2225,8 @@ def test_stage_coverage_html_allows_setup_uv_manifest_host() -> None:
     assert_that(allowed).contains("raw.githubusercontent.com:443")
     assert_that(allowed).contains("astral.sh:443")
     assert_that(allowed).contains("releases.astral.sh:443")
+    assert_that(allowed).contains("release-assets.githubusercontent.com:443")
+    assert_that(allowed).contains("github-releases.githubusercontent.com:443")
 
 
 @pytest.mark.parametrize("job_id", ["test-compat", "test-coverage"])
@@ -1697,6 +2251,26 @@ def test_test_jobs_omit_pypi_publish_endpoints(job_id: str) -> None:
     assert_that(allowed).does_not_contain("test.pypi.org:443")
     assert_that(allowed).does_not_contain("upload.pypi.org:443")
     assert_that(allowed).does_not_contain("upload.test.pypi.org:443")
+
+
+@pytest.mark.parametrize("job_id", ["test-compat", "test-coverage"])
+def test_test_jobs_allow_setup_uv_github_release_fallback(job_id: str) -> None:
+    """Test jobs must allow setup-uv fallback while the Astral mirror lags.
+
+    The explicit allowlist uses replace semantics. When a newly published uv
+    version is not yet mirrored at releases.astral.sh, setup-uv falls back to
+    GitHub Releases and follows redirects to the release-asset hosts.
+
+    Args:
+        job_id: Test job whose egress allowlist is under test.
+    """
+    workflow = _load_workflow(name="test-ci.yml")
+    allowed = set(workflow["jobs"][job_id]["with"]["allowed-endpoints"].split())
+
+    assert_that(allowed).contains(
+        "release-assets.githubusercontent.com:443",
+        "github-releases.githubusercontent.com:443",
+    )
 
 
 def test_deploy_pages_pins_bundler_with_github_token() -> None:
@@ -1729,6 +2303,52 @@ def test_deploy_pages_pins_bundler_with_github_token() -> None:
 # fails loudly instead of surfacing as a silent dogfooding SKIP (#1505). The
 # freshly built CI image is gated in docker-ci.yml; the pinned release digest
 # (fork-PR / nightly fallback) is gated in dogfood-nightly.yml.
+
+
+def _regenerate_step_index(steps: list[dict[str, object]]) -> int:
+    """Return the index of the version-artifact regeneration step.
+
+    Args:
+        steps: A workflow job's step list.
+
+    Returns:
+        Index of the step running ``generate-tool-versions.py``.
+    """
+    for index, step in enumerate(steps):
+        if "generate-tool-versions.py" in str(step.get("run", "")):
+            return index
+    pytest.fail("no generate-tool-versions.py step found")
+
+
+def test_docker_ci_regenerates_manifest_before_verify() -> None:
+    """The manifest gate regenerates the artifacts before verifying (#2179).
+
+    Once the artifacts stop being committed (epic #2176 phase 4), a missing
+    or reordered regeneration step would only fail in live CI; this locks
+    the wiring at unit-test time.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    steps = docker_ci["jobs"]["integration-test"]["steps"]
+    regen_index = _regenerate_step_index(steps)
+    verify_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
+    )
+    assert_that(regen_index).is_less_than(verify_index)
+
+
+def test_dogfood_nightly_regenerates_manifest_before_verify() -> None:
+    """The nightly pinned-digest gate regenerates before verifying (#2179)."""
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    steps = nightly["jobs"]["verify-pinned-image-tools"]["steps"]
+    regen_index = _regenerate_step_index(steps)
+    verify_index = next(
+        index
+        for index, step in enumerate(steps)
+        if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
+    )
+    assert_that(regen_index).is_less_than(verify_index)
 
 
 def test_docker_ci_integration_verifies_ci_image_tools() -> None:
@@ -1785,8 +2405,12 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
         r"ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}",
     )
 
-    # A pinned-digest failure must reach the deduplicated failure notifier.
-    assert_that(jobs["notify-failure"]["needs"]).contains("verify-pinned-image-tools")
+    # A pinned-digest failure must still reach the deduplicated failure
+    # notifier — now through the classifier that gates it (#2246).
+    assert_that(jobs["notify-failure"]["needs"]).contains("classify-failure")
+    assert_that(jobs["classify-failure"]["needs"]).contains(
+        "verify-pinned-image-tools",
+    )
 
 
 def test_docker_ci_defers_ci_tag_cleanup() -> None:
@@ -1903,6 +2527,148 @@ def test_sbom_callers_grant_contents_read_only(workflow_name: str) -> None:
     assert_that(permissions).contains_entry({"attestations": "write"})
 
 
+# --- Mirror release automation (#1171) ---------------------------------------
+
+_SHA_PIN_RE = re.compile(r"@[0-9a-f]{40}$")
+
+
+def _job_steps(workflow: dict[str, Any], *, job: str) -> list[dict[str, Any]]:
+    """Return the ordered steps of a workflow job.
+
+    Args:
+        workflow: Parsed workflow document.
+        job: Job key.
+
+    Returns:
+        The job's ``steps`` list.
+    """
+    return cast(list[dict[str, Any]], workflow["jobs"][job]["steps"])
+
+
+def test_mirror_release_serializes_with_global_concurrency() -> None:
+    """Only one mirror bump runs at a time to avoid clobbering newer pins."""
+    workflow = _load_workflow(name="mirror-release.yml")
+
+    assert_that(workflow["concurrency"]["group"]).is_equal_to("mirror-release")
+    assert_that(workflow["concurrency"]["cancel-in-progress"]).is_false()
+
+
+def test_mirror_release_job_has_timeout() -> None:
+    """Mirror bump inherits a bounded job timeout instead of the 6-hour default."""
+    workflow = _load_workflow(name="mirror-release.yml")
+
+    timeout = workflow["jobs"]["mirror-bump"]["timeout-minutes"]
+    assert_that(timeout).is_instance_of(int)
+    assert_that(timeout).is_equal_to(20)
+
+
+def test_mirror_release_triggers_on_published_release() -> None:
+    """Mirror bump runs on release publish plus a manual dispatch fallback."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    triggers = workflow["on"]
+
+    assert_that(triggers).contains_key("release", "workflow_dispatch")
+    assert_that(triggers["release"]["types"]).contains("published")
+    assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("release_tag")
+
+
+def test_mirror_release_job_is_read_only_in_source_repo() -> None:
+    """Cross-repo writes use MIRROR_REPO_TOKEN; source-repo perms stay read-only."""
+    workflow = _load_workflow(name="mirror-release.yml")
+
+    assert_that(workflow["permissions"]).is_equal_to({})
+    assert_that(workflow["jobs"]["mirror-bump"]["permissions"]).is_equal_to(
+        {"contents": "read"},
+    )
+
+
+def test_mirror_release_hardens_runner_with_blocked_egress() -> None:
+    """First step hardens the runner and blocks egress to an allowlist."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    first = _job_steps(workflow, job="mirror-bump")[0]
+
+    assert_that(first["uses"]).starts_with("step-security/harden-runner@")
+    assert_that(first["with"]["egress-policy"]).is_equal_to("block")
+    endpoints = first["with"]["allowed-endpoints"]
+    assert_that(endpoints).contains("pypi.org:443")
+    assert_that(endpoints).contains("files.pythonhosted.org:443")
+    assert_that(endpoints).contains("api.github.com:443")
+
+
+def test_mirror_release_actions_are_sha_pinned() -> None:
+    """Every third-party action in the mirror workflow is pinned to a commit SHA."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    uses = [
+        step["uses"]
+        for step in _job_steps(workflow, job="mirror-bump")
+        if "uses" in step
+    ]
+
+    assert_that(uses).is_not_empty()
+    for ref in uses:
+        assert_that(_SHA_PIN_RE.search(ref)).described_as(ref).is_not_none()
+
+
+def test_mirror_release_uses_cross_repo_token() -> None:
+    """The mirror checkout and publish step authenticate with MIRROR_REPO_TOKEN."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    steps = _job_steps(workflow, job="mirror-bump")
+
+    checkout = next(
+        step
+        for step in steps
+        if step.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
+    )
+    assert_that(checkout["with"]["token"]).contains("secrets.MIRROR_REPO_TOKEN")
+
+    publish = next(
+        step for step in steps if "publish-mirror-release.sh" in step.get("run", "")
+    )
+    assert_that(publish["env"]["GH_TOKEN"]).contains("secrets.MIRROR_REPO_TOKEN")
+
+
+def test_mirror_release_skips_prereleases() -> None:
+    """Wheel-dependent steps are guarded on stable, non-prerelease releases."""
+    workflow = _load_workflow(name="mirror-release.yml")
+    steps = _job_steps(workflow, job="mirror-bump")
+    guard = "steps.resolve.outputs.is_prerelease == 'false'"
+    github_guard = "!github.event.release.prerelease"
+
+    for needle in ("wait-for-pypi-wheel.sh", "publish-mirror-release.sh"):
+        step = next(s for s in steps if needle in s.get("run", ""))
+        assert_that(step["if"]).contains(guard)
+        assert_that(step["if"]).contains(github_guard)
+        assert_that(step.get("env", {})).contains_key("LINTRO_VERSION")
+
+    mirror_checkout = next(
+        s
+        for s in steps
+        if s.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
+    )
+    assert_that(mirror_checkout["if"]).contains(guard)
+    assert_that(mirror_checkout["if"]).contains(github_guard)
+
+    setup_python = [
+        s for s in steps if s.get("uses", "").startswith("actions/setup-python@")
+    ]
+    assert_that(setup_python).is_empty()
+
+
+def test_mirror_release_scripts_are_executable() -> None:
+    """The CI scripts referenced by the mirror workflow exist and are executable."""
+    scripts = (
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "resolve-version.sh",
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "wait-for-pypi-wheel.sh",
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "publish-mirror-release.sh",
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "bump_pin.py",
+    )
+    for script in scripts:
+        assert_that(script.exists()).described_as(str(script)).is_true()
+        assert_that(script.stat().st_mode & 0o111).described_as(
+            f"{script} is not executable",
+        ).is_not_zero()
+
+
 # --- Binary build job timeouts (#1702) ---------------------------------------
 #
 # No job in build-binary.yml set timeout-minutes, so every binary build
@@ -2008,9 +2774,27 @@ def test_create_universal_binary_smoke_tests_the_post_lipo_artifact() -> None:
     )
 
     checkout = by_name["Checkout scripts"]
-    sparse = checkout["with"]["sparse-checkout"]
+    # Split into paths: ``contains`` on the raw block is a substring match, so
+    # it would keep passing for a now-deleted sibling path such as the old
+    # ``lintro/tools/definitions`` (#2428).
+    sparse = checkout["with"]["sparse-checkout"].split()
     assert_that(sparse).contains("scripts")
     assert_that(sparse).contains("lintro/plugins")
+    # #2202: the builtin index is generated, not committed (#2180), and this
+    # job never builds the package — the checkout must carry the generator's
+    # inputs and the generate step must run between checkout and smoke test.
+    assert_that(sparse).contains("lintro/tools")
+    assert_that(sparse).contains("lintro_build")
+    generate = by_name["Generate builtin tool index"]
+    assert_that(generate["run"]).is_equal_to(
+        "python3 scripts/ci/generate-builtin-tool-index.py",
+    )
+    assert_that(names.index("Checkout scripts")).is_less_than(
+        names.index("Generate builtin tool index"),
+    )
+    assert_that(names.index("Generate builtin tool index")).is_less_than(
+        names.index("Smoke-test tool registry"),
+    )
 
     assert_that(
         job["timeout-minutes"] - smoke["timeout-minutes"],
@@ -2075,6 +2859,196 @@ def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:
     ).is_true()
 
 
+# --- Idempotent binary release jobs (#2435) ----------------------------------
+#
+# A rerun used to rebuild from scratch and then delete the published asset
+# before uploading its replacement; a runner kill in that window stripped
+# lintro-linux-x64 off v0.147.3. The jobs now reuse a checksum-verified asset
+# and swap uploads instead of overwriting them.
+
+_REUSE_GUARD = "steps.reuse.outputs.reuse != 'true'"
+_REUSE_SKIPPED_STEPS = (
+    "Build binary",
+    "Verify binary",
+    "Smoke-test tool registry",
+    "Finalize binary",
+)
+# These must keep running on reuse so a later attempt still finds the binary
+# and its checksum among the run artifacts.
+_REUSE_UNGATED_STEPS = (
+    "Upload artifact",
+    "Save SHA256 to file",
+    "Upload SHA256 file",
+)
+
+
+def test_build_binary_checks_for_a_reusable_release_asset() -> None:
+    """Both per-arch jobs consult the release before compiling.
+
+    The check runs before ``Build binary`` and passes the platform's asset
+    name, the same-run checksum artifact, and the finalized destination path.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    expected_args = {
+        "build-macos": (
+            "lintro-macos-$BUILD_ARCH",
+            "sha256-$BUILD_ARCH",
+            "dist/nuitka/lintro-macos-$BUILD_ARCH",
+        ),
+        "build-linux": (
+            "lintro-linux-$BUILD_ARCH",
+            "sha256-linux-$BUILD_ARCH",
+            "dist/nuitka/lintro-linux-$BUILD_ARCH",
+        ),
+    }
+    for job_id, (asset, artifact, dest) in expected_args.items():
+        steps = workflow["jobs"][job_id]["steps"]
+        names = [step.get("name") for step in steps]
+        by_name = {step.get("name"): step for step in steps}
+
+        check = by_name["Check for reusable release asset"]
+        assert_that(check["id"]).described_as(job_id).is_equal_to("reuse")
+        assert_that(check["run"]).described_as(job_id).contains(
+            "scripts/build/reuse_release_asset.sh",
+        )
+        for token in (asset, artifact, dest):
+            assert_that(check["run"]).described_as(job_id).contains(token)
+        assert_that(check["env"]).described_as(job_id).contains_key(
+            "GH_TOKEN",
+            "RELEASE_TAG",
+            "BUILD_ARCH",
+        )
+        assert_that(names.index("Check for reusable release asset")).described_as(
+            job_id,
+        ).is_less_than(names.index("Build binary"))
+
+
+def test_build_binary_skips_the_rebuild_when_the_asset_is_reused() -> None:
+    """Reuse skips build/verify/smoke/finalize but never the artifact uploads.
+
+    Verify and smoke-test are safe to skip only because the checksum that
+    authorised the reuse came from a same-run artifact written after those two
+    steps passed on an earlier attempt of the same job.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
+        for step_name in _REUSE_SKIPPED_STEPS:
+            assert_that(_normalize_github_expr(by_name[step_name]["if"])).described_as(
+                f"{job_id}:{step_name}",
+            ).is_equal_to(_REUSE_GUARD)
+        for step_name in _REUSE_UNGATED_STEPS:
+            assert_that(by_name[step_name].get("if")).described_as(
+                f"{job_id}:{step_name}",
+            ).is_none()
+
+
+def test_build_binary_save_sha256_falls_back_to_the_reused_checksum() -> None:
+    """Finalize binary is skipped on reuse, so its output cannot be the only source."""
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
+        sha_env = by_name["Save SHA256 to file"]["env"]["SHA256"]
+        # The exact expression, not just both names: the order matters (the
+        # freshly built checksum wins) and `||` is what makes the reuse value a
+        # fallback rather than an override.
+        assert_that(_normalize_github_expr(sha_env)).described_as(
+            job_id,
+        ).is_equal_to(
+            "${{ steps.sha256.outputs.sha256 || steps.reuse.outputs.sha256 }}",
+        )
+
+
+def test_build_binary_release_upload_swaps_instead_of_overwriting() -> None:
+    """The release upload never deletes the live asset before the new one lands.
+
+    ``softprops/action-gh-release`` (and ``gh release upload --clobber``)
+    delete first, which loses the binary when the runner dies mid-upload.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id, binary in (
+        ("build-macos", "dist/nuitka/lintro-macos-$BUILD_ARCH"),
+        ("build-linux", "dist/nuitka/lintro-linux-$BUILD_ARCH"),
+    ):
+        steps = workflow["jobs"][job_id]["steps"]
+        by_name = {step.get("name"): step for step in steps}
+        upload = by_name["Upload to release"]
+
+        assert_that(upload.get("uses")).described_as(job_id).is_none()
+        assert_that(upload["run"]).described_as(job_id).contains(
+            "scripts/build/upload_release_asset.sh",
+        )
+        assert_that(upload["run"]).described_as(job_id).contains(binary)
+        assert_that(upload["env"]).described_as(job_id).contains_key("GH_TOKEN")
+
+        guard = _normalize_github_expr(upload["if"])
+        assert_that(guard).described_as(job_id).contains(
+            "needs.get-release-info.outputs.release_tag != ''",
+        )
+        assert_that(guard).described_as(job_id).contains(_REUSE_GUARD)
+
+        # No step in these jobs may reintroduce a delete-then-upload overwrite.
+        for step in steps:
+            assert_that(step.get("with", {}) or {}).described_as(
+                f"{job_id}:{step.get('name')}",
+            ).does_not_contain_key("overwrite_files")
+            assert_that(step.get("run", "")).described_as(
+                f"{job_id}:{step.get('name')}",
+            ).does_not_contain("--clobber")
+
+
+def test_build_binary_jobs_may_read_their_own_run_artifacts() -> None:
+    """The reuse check needs the release (contents) and the run's artifacts."""
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        permissions = workflow["jobs"][job_id]["permissions"]
+        assert_that(permissions).described_as(job_id).contains_entry(
+            {"contents": "write"},
+        )
+        assert_that(permissions).described_as(job_id).contains_entry(
+            {"actions": "read"},
+        )
+
+
+def test_binary_release_scripts_are_executable() -> None:
+    """The #2435 scripts referenced by build-binary.yml exist and are executable."""
+    scripts = (
+        _REPO_ROOT / "scripts" / "build" / "reuse_release_asset.sh",
+        _REPO_ROOT / "scripts" / "build" / "upload_release_asset.sh",
+    )
+    for script in scripts:
+        assert_that(script.exists()).described_as(str(script)).is_true()
+        assert_that(script.stat().st_mode & 0o111).described_as(
+            f"{script} is not executable",
+        ).is_not_zero()
+
+
+def test_memory_sampler_tees_its_output_into_the_step_log() -> None:
+    """Sampler evidence reaches stdout, not only the failure-only artifact.
+
+    ``start`` tees a baseline snapshot into its own step log, so a runner kill
+    still leaves the memory state the compile began from. The interval samples
+    reach a human only through ``Stop memory sampler`` (``if: always()``, which
+    replays the log) or the ``if: failure()`` artifact, neither of which runs
+    when the runner itself is killed. Both steps must therefore stay wired, and
+    the artifact upload must stay failure-only rather than becoming the sole
+    channel.
+    """
+    # What actually reaches stdout is asserted against the running script in
+    # tests/scripts/test_memory_sampler.py; this only pins the workflow side,
+    # where the sampler steps must stay wired and the artifact upload must stay
+    # failure-only rather than becoming the sole channel.
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        by_name = {step.get("name"): step for step in workflow["jobs"][job_id]["steps"]}
+        assert_that(by_name["Upload memory diagnostics"]["if"]).described_as(
+            job_id,
+        ).is_equal_to("failure()")
+        assert_that(by_name["Stop memory sampler"]["if"]).described_as(
+            job_id,
+        ).is_equal_to("always()")
+
+
 _PUSH_SHA_TERNARY = "github.event_name == 'push' && github.sha || github.ref"
 
 # Job-level concurrency groups that legitimately key on ``github.ref`` even
@@ -2090,6 +3064,65 @@ _REF_KEYED_PUSH_GROUP_EXEMPTIONS: dict[str, str] = {
         "workflow-level group already serializes main pushes"
     ),
 }
+
+
+def test_docker_ci_queues_main_without_changing_pr_supersession() -> None:
+    """Docker CI must retain main runs while PR pushes supersede stale work."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    workflow_concurrency = docker_ci["concurrency"]
+    assert_that(workflow_concurrency["group"]).is_equal_to(
+        "docker-ci-${{ github.ref }}",
+    )
+    assert_that(_normalize_github_expr(workflow_concurrency["queue"])).is_equal_to(
+        "${{ github.ref == 'refs/heads/main' && 'max' || 'single' }}",
+    )
+    expected_cancel = "${{ github.ref != 'refs/heads/main' }}"
+    assert_that(
+        _normalize_github_expr(workflow_concurrency["cancel-in-progress"]),
+    ).is_equal_to(expected_cancel)
+
+    docker_build_concurrency = docker_ci["jobs"]["docker-build"]["concurrency"]
+    assert_that(docker_build_concurrency["group"]).is_equal_to(
+        "docker-build-${{ github.ref }}",
+    )
+    assert_that(
+        _normalize_github_expr(docker_build_concurrency["cancel-in-progress"]),
+    ).is_equal_to(expected_cancel)
+
+
+def test_docker_ci_only_current_main_tip_updates_rolling_image_tags() -> None:
+    """Stale queued runs keep immutable SHA tags but cannot move branch tags."""
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    steps = docker_ci["jobs"]["publish"]["steps"]
+    rolling_index, rolling = next(
+        (index, step)
+        for index, step in enumerate(steps)
+        if step.get("id") == "rolling-tags"
+    )
+    assert_that(rolling["run"]).is_equal_to(
+        "scripts/ci/resolve-docker-rolling-tags.sh",
+    )
+    assert_that(rolling["env"]).is_equal_to(
+        {
+            "DEFAULT_BRANCH": "${{ github.event.repository.default_branch }}",
+            "RUN_SHA": "${{ github.sha }}",
+        },
+    )
+
+    metadata_steps = [
+        (index, step)
+        for index, step in enumerate(steps)
+        if step.get("uses", "").startswith("docker/metadata-action@")
+    ]
+    assert_that(metadata_steps).is_length(2)
+    for metadata_index, step in metadata_steps:
+        assert_that(rolling_index).is_less_than(metadata_index)
+        tag_lines = {line.strip() for line in step["with"]["tags"].splitlines()}
+        assert_that(tag_lines).contains(
+            "type=ref,event=branch,enable=${{ "
+            "steps.rolling-tags.outputs.rolling-tags-enabled }}",
+        )
+        assert_that(tag_lines).contains("type=sha,prefix=sha-,format=long")
 
 
 def _render_concurrency_group(
@@ -2545,13 +3578,118 @@ def _renovate_pinned_image_manager() -> dict[str, Any]:
     return cast(dict[str, Any], covering[0])
 
 
+_BUNDLED_RUST_COMPONENT_PACKAGES = (
+    "rust-lang/rust-clippy",
+    "rust-lang/rustfmt",
+)
+
+
+def test_renovate_does_not_track_rustfmt_or_clippy_independently() -> None:
+    """rustfmt/clippy pins are toolchain readouts, not Renovate knobs (#2205).
+
+    Independent managers open unmergeable PRs (#1605) because those tags are
+    source milestones, not installable artifacts. rustc remains the single
+    rust-family manager; component records bump in the same toolchain PR.
+    """
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    managers = config.get("customManagers") or []
+    tracked = {
+        manager.get("packageNameTemplate")
+        for manager in managers
+        if manager.get("packageNameTemplate")
+    }
+    for package in _BUNDLED_RUST_COMPONENT_PACKAGES:
+        assert_that(tracked).does_not_contain(package)
+
+    rustc = [
+        manager
+        for manager in managers
+        if manager.get("packageNameTemplate") == "rust-lang/rust"
+    ]
+    assert_that(rustc).is_length(1)
+    assert_that(rustc[0]["description"]).contains("#2205")
+
+    grouped_components = [
+        package
+        for package in _BUNDLED_RUST_COMPONENT_PACKAGES
+        if any(
+            package in (rule.get("matchPackageNames") or [])
+            for rule in config.get("packageRules") or []
+        )
+    ]
+    assert_that(grouped_components).is_empty()
+
+    match_strings = " ".join(
+        " ".join(manager.get("matchStrings") or []) for manager in managers
+    )
+    assert_that(match_strings).does_not_contain("ToolName.CLIPPY")
+    assert_that(match_strings).does_not_contain("ToolName.RUSTFMT")
+
+    assert_that(TOOL_VERSIONS[ToolName.CLIPPY]).is_equal_to(
+        TOOL_VERSIONS[ToolName.RUSTC],
+    )
+
+    versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(versions).contains("bump only alongside rustc (#2205)")
+
+
+def test_renovate_does_not_track_cppcheck() -> None:
+    """The cppcheck pin follows Debian's package, not upstream's tags.
+
+    Cppcheck ships no portable single binary, so both the tools image and the
+    app-image ``install-tools.sh`` bridge install Debian's package. The
+    manifest-vs-image gate requires the installed version to *equal* the
+    manifest version, so a Renovate-driven bump to an upstream tag apt cannot
+    supply would fail CI permanently rather than merely lag. The pin moves
+    only when the ``python:3.14-slim`` base image changes Debian release.
+    """
+    config = json.loads(
+        (_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"),
+    )
+    managers = config.get("customManagers") or []
+
+    tracked = {
+        manager.get("packageNameTemplate")
+        for manager in managers
+        if manager.get("packageNameTemplate")
+    }
+    assert_that(tracked).does_not_contain("danmar/cppcheck")
+
+    match_strings = " ".join(
+        " ".join(manager.get("matchStrings") or []) for manager in managers
+    )
+    assert_that(match_strings).does_not_contain("ToolName.CPPCHECK")
+
+    grouped = [
+        package
+        for package in ("cppcheck", "danmar/cppcheck")
+        if any(
+            package in (rule.get("matchPackageNames") or [])
+            for rule in config.get("packageRules") or []
+        )
+    ]
+    assert_that(grouped).is_empty()
+
+    versions = (_REPO_ROOT / "lintro" / "_tool_versions.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(versions).contains("NOT Renovate-managed")
+
+
 # Every workflow file carrying a pinned release reference, and how many sites
 # it must carry. Hard-coding the counts is deliberate: asserting only that the
 # surviving references agree would stay green if a refactor deleted all but one
 # pin, which is exactly the drift this guard exists to catch (#1751).
 _PINNED_IMAGE_SITES = {
-    "dogfood-nightly.yml": 3,
-    "docker-ci.yml": 4,
+    "dogfood-nightly.yml": 5,
+    # One: docker-ci carries the pin in a single workflow-level
+    # `env: LINTRO_FORK_FALLBACK_IMAGE` that every fork-fallback consumer
+    # reads (#2297).
+    "docker-ci.yml": 1,
 }
 
 
@@ -2583,6 +3721,122 @@ def test_pinned_release_image_sites_share_one_reference() -> None:
         references.update(matches)
 
     assert_that(references).is_length(1)
+
+
+def test_docker_ci_fork_fallback_resolves_through_one_env() -> None:
+    """Every docker-ci fork-fallback consumer reads the one workflow-level pin.
+
+    The pin used to be copy-pasted at four consumers, which is how it drifted
+    four releases behind the published image (#2297). It now lives once in
+    ``env.LINTRO_FORK_FALLBACK_IMAGE``. Two consumers read that context
+    directly; the two reusable-workflow callers cannot, because ``env`` is not
+    an available context in ``jobs.<id>.with`` — they go through
+    ``needs.docker-build.outputs.fork-fallback-image``, which republishes the
+    same env. This asserts no consumer reverted to its own literal and that
+    every caller still declares the ``docker-build`` dependency that
+    indirection needs.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    pin = docker_ci["env"]["LINTRO_FORK_FALLBACK_IMAGE"].strip()
+
+    assert_that(pin).matches(
+        r"^ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}$",
+    )
+    # Published from a step, not interpolated straight from `env`, so the
+    # output can never be empty — an empty middle operand is falsy in the
+    # consumers' ternary and would silently select a never-pushed ci- tag.
+    build = docker_ci["jobs"]["docker-build"]
+    assert_that(build["outputs"]).contains_entry(
+        {"fork-fallback-image": "${{ steps.fork-fallback.outputs.image }}"},
+    )
+    publish_steps = [
+        step for step in build["steps"] if step.get("id") == "fork-fallback"
+    ]
+    assert_that(publish_steps).is_length(1)
+    publish = publish_steps[0]
+    # The exact write, not just a mention of the variable: a step that merely
+    # logged the pin, or wrote it under a different key, would leave the
+    # output empty — and empty is falsy in the consumers' ternary, silently
+    # selecting a ci- tag that fork runs never push.
+    assert_that(publish["run"].strip()).is_equal_to(
+        'echo "image=$LINTRO_FORK_FALLBACK_IMAGE" >> "$GITHUB_OUTPUT"',
+    )
+    # The key written above must be the key the job output reads back.
+    assert_that(build["outputs"]["fork-fallback-image"]).contains(
+        f"steps.{publish['id']}.outputs.image",
+    )
+    # Unconditional: the output must exist for every event, not just the ones
+    # that reach the heavy build steps.
+    assert_that(publish).does_not_contain_key("if")
+
+    # job id -> the expression carrying the fork-fallback selection.
+    reusable_callers = ("dogfooding-lint", "dogfooding_lint_retry")
+    step_consumers = {
+        "dogfooding-lint-changed": "LINTRO_IMAGE",
+        "dogfood-skip-gate": "LINTRO_IMAGE",
+    }
+    expressions: list[str] = []
+    # Reusable callers must go through the job output and must NOT use `env`:
+    # `env` is not an available context in `jobs.<id>.with`, so accepting it
+    # here would let an invalid workflow pass this test.
+    for job_id in reusable_callers:
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        expression = job["with"]["lintro-image"]
+        assert_that(expression).described_as(job_id).contains(
+            "needs.docker-build.outputs.fork-fallback-image",
+        )
+        assert_that(expression).described_as(job_id).does_not_contain(
+            "env.LINTRO_FORK_FALLBACK_IMAGE",
+        )
+        expressions.append(expression)
+    # Step-level consumers read the workflow env directly.
+    for job_id, env_key in step_consumers.items():
+        job = docker_ci["jobs"][job_id]
+        assert_that(job["needs"]).contains("docker-build")
+        values = [
+            step["env"][env_key]
+            for step in job["steps"]
+            if env_key in (step.get("env") or {})
+        ]
+        assert_that(values).described_as(job_id).is_length(1)
+        assert_that(values[0]).described_as(job_id).contains(
+            "env.LINTRO_FORK_FALLBACK_IMAGE",
+        )
+        expressions.append(values[0])
+
+    assert_that(expressions).is_length(4)
+    for expression in expressions:
+        # No consumer may carry its own literal digest again.
+        assert_that(expression).described_as(expression).does_not_contain("sha256:")
+        # The fork-vs-same-repo selection the pin exists for must survive,
+        # including its polarity: the pin is the `&&` branch (fork) and the
+        # run-scoped CI tag the `||` branch (same repo). Asserting only that
+        # both fragments appear would accept an inverted ternary, which would
+        # hand fork PRs a ci- tag that fork runs never push.
+        collapsed = " ".join(expression.split())
+        condition = "needs.docker-build.outputs.is-fork == 'true'"
+        ci_tag = "format('ghcr.io/lgtm-hq/py-lintro:ci-{0}', github.run_id)"
+        assert_that(collapsed).described_as(expression).contains(condition)
+        assert_that(collapsed).described_as(expression).contains(ci_tag)
+        pin_token = next(
+            token
+            for token in (
+                "needs.docker-build.outputs.fork-fallback-image",
+                "env.LINTRO_FORK_FALLBACK_IMAGE",
+            )
+            if token in collapsed
+        )
+        # condition ... && <pin> ... || <ci tag>
+        assert_that(collapsed.index(condition)).described_as(
+            expression,
+        ).is_less_than(collapsed.index(pin_token))
+        assert_that(collapsed.index(pin_token)).described_as(
+            expression,
+        ).is_less_than(collapsed.index("||"))
+        assert_that(collapsed.index("||")).described_as(
+            expression,
+        ).is_less_than(collapsed.index(ci_tag))
 
 
 def test_pinned_release_image_manager_covers_both_workflows() -> None:
@@ -2813,17 +4067,17 @@ def test_dogfood_skip_gate_publishes_timeout_flake_outputs() -> None:
     assert_that(step_ids).contains("skips")
 
 
-def test_code_quality_gate_does_not_consume_the_timeout_verdict() -> None:
-    """The timeout verdict must stay diagnostic, never a gate input.
+def test_code_quality_gate_ignores_the_skip_gate_diagnostic_verdict() -> None:
+    """The skip gate's own timeout verdict must never reach the gate.
 
     ``dogfood-skip-gate`` always lints the full repo, so its verdict is not
-    evidence about the authoritative lint run: under ``lint-scope == 'changed'``
-    that run lints only changed files, and a tool that times out reports zero
-    findings precisely because it did not finish. Wiring the verdict into the
-    gate lets a genuine finding be absorbed and the required check turn green.
+    evidence about the authoritative lint run: under ``lint-scope ==
+    'changed'`` that run lints only changed files, and a tool that times out
+    reports zero findings precisely because it did not finish. Wiring that
+    verdict into the gate lets a genuine finding be absorbed.
 
-    A sound implementation needs the authoritative run's own structured report,
-    which the upstream reusable lint workflow does not publish (lgtm-ci#746).
+    The gate consumes the reusable lint workflow's outputs instead, which are
+    computed from the authoritative run's own report (#2242, lgtm-ci#746).
     """
     docker_ci = _load_workflow(name="docker-ci.yml")
     gate_job = docker_ci["jobs"]["code-quality-gate"]
@@ -2831,7 +4085,85 @@ def test_code_quality_gate_does_not_consume_the_timeout_verdict() -> None:
     assert_that(gate_job["needs"]).does_not_contain("dogfood-skip-gate")
 
     gate_step = next(step for step in gate_job["steps"] if step.get("id") == "gate")
-    assert_that(gate_step.get("env") or {}).does_not_contain_key("TIMEOUT_FLAKE")
+    env = gate_step.get("env") or {}
+    for value in env.values():
+        assert_that(_normalize_github_expr(str(value))).does_not_contain(
+            "dogfood-skip-gate",
+        )
+
+
+def test_code_quality_gate_consumes_authoritative_timeout_outputs() -> None:
+    """The gate reads timeout evidence from the authoritative lint attempts.
+
+    Both attempts that call ``reusable-quality-lint.yml`` expose
+    ``timeout-flake`` / ``timed-out-tools`` from their own JSON report, and
+    the gate script pairs each with the verdict of the same attempt (#2242).
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_step = next(
+        step
+        for step in docker_ci["jobs"]["code-quality-gate"]["steps"]
+        if step.get("id") == "gate"
+    )
+    env = gate_step["env"]
+
+    for key in (
+        "PRIMARY_LINT_TIMEOUT_FLAKE",
+        "PRIMARY_LINT_TIMED_OUT_TOOLS",
+        "RETRY_LINT_TIMEOUT_FLAKE",
+        "RETRY_LINT_TIMED_OUT_TOOLS",
+    ):
+        assert_that(env).contains_key(key)
+
+    assert_that(_normalize_github_expr(env["PRIMARY_LINT_TIMEOUT_FLAKE"])).contains(
+        "needs.dogfooding-lint.outputs.timeout-flake",
+    )
+    assert_that(_normalize_github_expr(env["RETRY_LINT_TIMEOUT_FLAKE"])).contains(
+        "needs.dogfooding_lint_retry.outputs.timeout-flake",
+    )
+
+
+def test_code_quality_gate_leaves_changed_scope_timeout_fail_closed() -> None:
+    """Changed scope must resolve the timeout flag to the empty string.
+
+    ``dogfooding-lint-changed`` is a local job with no JSON report and no
+    timeout verdict, so the expression is inverted relative to the
+    status/exit-code pairs: ``''`` is falsy in a GitHub ternary and a
+    ``scope == 'changed' && '' || <full>`` form would leak the full run's
+    value into changed scope.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_step = next(
+        step
+        for step in docker_ci["jobs"]["code-quality-gate"]["steps"]
+        if step.get("id") == "gate"
+    )
+    changed_job_outputs = docker_ci["jobs"]["dogfooding-lint-changed"]["outputs"]
+    assert_that(changed_job_outputs).does_not_contain_key("timeout-flake")
+
+    for key in ("PRIMARY_LINT_TIMEOUT_FLAKE", "PRIMARY_LINT_TIMED_OUT_TOOLS"):
+        expression = _normalize_github_expr(gate_step["env"][key])
+        assert_that(expression).contains(
+            "needs.changes.outputs.lint-scope != 'changed'",
+        )
+        assert_that(expression).does_not_contain("dogfooding-lint-changed")
+        assert_that(expression).ends_with("|| '' }}")
+
+
+def test_lint_timeout_classifier_note_matches_the_wired_gate() -> None:
+    """The classifier's scope warning must not claim the gate ignores it.
+
+    The lgtm-ci#746 precondition is met at the pinned ``v0.63.7``, so the
+    stale "the code-quality gate therefore does not consume it" note was
+    replaced by the narrower, still-true statement about the skip gate.
+    """
+    classifier = (_REPO_ROOT / "scripts" / "ci" / "classify-lint-timeout.py").read_text(
+        encoding="utf-8",
+    )
+    assert_that(classifier).does_not_contain(
+        "The code-quality gate therefore does not consume it",
+    )
+    assert_that(classifier).contains("reusable lint workflow")
 
 
 def test_dogfood_skip_gate_checks_out_the_timeout_classifier() -> None:
@@ -2860,8 +4192,44 @@ def test_code_quality_gate_sparse_checkout_covers_gate_scripts() -> None:
         "scripts/ci/evaluate-code-quality-gate.sh",
         "scripts/ci/assert-required-check.sh",
         "scripts/ci/is-infra-flake-failure.sh",
+        "scripts/ci/summarize-code-quality-gate.sh",
     ):
         assert_that(sparse).contains(script)
+
+
+def test_code_quality_gate_explains_an_infra_flake_in_the_summary() -> None:
+    """A fail-closed gate must say whether the red was runner loss (#2296).
+
+    The summary step has to survive the gate step's own failure, so it is
+    guarded by ``always()`` — that failure is exactly what it explains.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    gate_job = docker_ci["jobs"]["code-quality-gate"]
+
+    summary_step = next(
+        step
+        for step in gate_job["steps"]
+        if "summarize-code-quality-gate.sh" in str(step.get("run", ""))
+    )
+    assert_that(str(summary_step["run"]).strip()).is_equal_to(
+        "scripts/ci/summarize-code-quality-gate.sh",
+    )
+
+    condition = _normalize_github_expr(str(summary_step["if"]))
+    assert_that(condition).contains("always()")
+    assert_that(condition).contains("steps.gate.outputs.infra-flake == 'true'")
+
+    # The script branches on GATE_STATUS and quotes MAX_RERUNS, and refuses to
+    # write anything unless GATE_INFRA_FLAKE is the literal 'true'. A missing
+    # key would silently fall back to a default and print the wrong story.
+    env = summary_step["env"]
+    assert_that(_normalize_github_expr(str(env["GATE_INFRA_FLAKE"]))).is_equal_to(
+        "${{ steps.gate.outputs.infra-flake }}",
+    )
+    assert_that(_normalize_github_expr(str(env["GATE_STATUS"]))).is_equal_to(
+        "${{ steps.gate.outputs.status }}",
+    )
+    assert_that(str(env["MAX_RERUNS"])).is_equal_to("3")
 
 
 # --- Release version-skew audit wiring (#1712) ------------------------------
@@ -2895,7 +4263,7 @@ def test_version_skew_audit_invokes_the_checked_in_script() -> None:
     # Alarm, not gate: the audit must not be wired into any release job's
     # ``needs:`` chain, and must not carry write permissions.
     assert_that(workflow["jobs"]["audit"]["permissions"]).is_equal_to(
-        {"contents": "read"},
+        {"contents": "read", "actions": "read"},
     )
 
 
@@ -3034,3 +4402,211 @@ def test_docker_allowlist_file_keeps_the_baseline_and_signing_hosts() -> None:
         "token.actions.githubusercontent.com:443",
     ):
         assert_that(endpoints).contains(endpoint)
+
+
+_DOGFOOD_TOOL_OPTIONS_RE = re.compile(
+    r"pydoclint:timeout=\d+,[^\s]+osv_scanner:check_suppressions=[^\s,]+",
+)
+_EXPECTED_DOGFOOD_TOOL_OPTIONS = (
+    "pydoclint:timeout=120,black:timeout=120,bandit:timeout=120,prettier:timeout=120,"
+    "mypy:timeout=120,gitleaks:timeout=120,typos:timeout=120,semgrep:timeout=600,"
+    "osv_scanner:check_suppressions=false"
+)
+
+
+def test_dogfood_tool_options_are_identical_and_give_gitleaks_a_timeout() -> None:
+    """Every dogfood options string must match and include ``gitleaks:timeout=120``.
+
+    ``dogfooding-lint`` (docker-ci) and ``dogfood-full`` (dogfood-nightly),
+    their bounded retries and both skip gates share one
+    ``lintro-tool-options`` / ``TOOL_OPTIONS`` value. A drift lets one job keep
+    the 60s gitleaks default (#2206) while the others get the 120s floor.
+    """
+    texts = [
+        (_REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        for name in ("docker-ci.yml", "dogfood-nightly.yml")
+    ]
+    found = [
+        match.group(0)
+        for text in texts
+        for match in _DOGFOOD_TOOL_OPTIONS_RE.finditer(text)
+    ]
+
+    assert_that(found).is_length(8)
+    assert_that(set(found)).is_equal_to({_EXPECTED_DOGFOOD_TOOL_OPTIONS})
+    assert_that(_EXPECTED_DOGFOOD_TOOL_OPTIONS).contains("gitleaks:timeout=120")
+
+
+def test_tools_publish_no_cache_covers_schedule_and_force_publish() -> None:
+    """Weekly and force-publish rebuilds must bypass the registry cache.
+
+    A cache hit on ``force_publish`` republishes stale tool binaries even
+    after installer pin fixes (#2220, #2221). Keep the expression folded
+    so yamllint ``line-length`` (88) stays green in dogfood.
+    """
+    path = _REPO_ROOT / ".github" / "workflows" / "docker-tools-publish.yml"
+    workflow = _load_workflow(name="docker-tools-publish.yml")
+    no_cache = _normalize_github_expr(
+        str(workflow["jobs"]["tools-image"]["with"]["no-cache"]),
+    )
+
+    assert_that(no_cache).contains("github.event_name == 'schedule'")
+    assert_that(no_cache).contains(
+        "github.event_name == 'workflow_dispatch' && inputs.force_publish == 'true'",
+    )
+
+    for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if line.lstrip().startswith("#"):
+            continue
+        if "no-cache" not in line and "force_publish" not in line:
+            continue
+        assert_that(len(line)).described_as(
+            f"{path.name}:{lineno} exceeds yamllint line-length 88",
+        ).is_less_than_or_equal_to(88)
+
+
+def test_dogfood_nightly_retries_killed_lint_without_a_verdict() -> None:
+    """The nightly full lint gets one bounded retry on a no-verdict kill (#2246).
+
+    Mirrors ``dogfooding_lint_retry`` in docker-ci.yml, with one extra guard:
+    a primary attempt that published a genuine verdict is never re-run, so a
+    real regression reaches the tracker the same night instead of paying for
+    a second twenty-minute lint that can only agree.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    retry = nightly["jobs"]["dogfood_full_retry"]
+    condition = _normalize_github_expr(retry["if"])
+
+    assert_that(retry["needs"]).contains("dogfood-full")
+    assert_that(condition).contains("needs.dogfood-full.result == 'failure'")
+    assert_that(condition).contains("needs.dogfood-full.result == 'cancelled'")
+    # Runner shutdown makes lintro exit 143; that stays retryable even when a
+    # dying run wrote status=failed on its way out.
+    assert_that(condition).contains("needs.dogfood-full.outputs.exit-code == '143'")
+    # A tool-execution timeout publishes status=failed/exit-code=1 from the
+    # attempt's own report; the shared classifier calls that infra, so the
+    # retry must run for it or the classifier would fail closed and ping.
+    assert_that(condition).contains(
+        "needs.dogfood-full.outputs.timeout-flake == 'true'",
+    )
+    assert_that(condition).contains("needs.dogfood-full.outputs.status != 'failed'")
+    assert_that(condition).contains("needs.dogfood-full.outputs.exit-code != '1'")
+
+    # Exactly one attempt: the retry must not depend on itself or chain.
+    assert_that(nightly["jobs"]).does_not_contain_key("dogfood_full_retry_retry")
+    assert_that(retry["with"]["job-name"]).contains("retry")
+
+
+def test_dogfood_nightly_skip_gate_publishes_and_retries_its_verdict() -> None:
+    """The nightly skip gate publishes a verdict and retries when it has none.
+
+    The gate's ``status``/``exit-code`` outputs come from
+    ``scripts/ci/dogfood-skip-gate.sh`` and exist only once the skip check
+    completes, so their absence is what distinguishes a runner kill from a
+    real non-allowlisted skip (#2246).
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    gate = nightly["jobs"]["dogfood-skip-gate"]
+    retry = nightly["jobs"]["dogfood_skip_gate_retry"]
+
+    for job in (gate, retry):
+        assert_that(job["outputs"]["status"]).is_equal_to(
+            "${{ steps.skips.outputs.status }}",
+        )
+        assert_that(job["outputs"]["exit-code"]).is_equal_to(
+            "${{ steps.skips.outputs.exit-code }}",
+        )
+        check = next(step for step in job["steps"] if step.get("id") == "skips")
+        assert_that(check["run"]).contains("scripts/ci/dogfood-skip-gate.sh")
+
+    condition = _normalize_github_expr(retry["if"])
+    assert_that(retry["needs"]).contains("dogfood-skip-gate")
+    assert_that(condition).contains("needs.dogfood-skip-gate.result == 'failure'")
+    assert_that(condition).contains("needs.dogfood-skip-gate.result == 'cancelled'")
+    # Only a gate that never reached a verdict is retried.
+    assert_that(condition).contains("needs.dogfood-skip-gate.outputs.status == ''")
+
+
+def test_dogfood_nightly_skip_gate_retry_is_a_lockstep_copy() -> None:
+    """The skip-gate retry must run exactly what the primary ran (#2246).
+
+    GitHub has no job-level retry, so the retry job is a copy of the primary;
+    every input that decides what the gate checks (egress allowlist, image,
+    timeout budget, the gate script invocation) must stay identical or the
+    retry answers a different question than the attempt it retries.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    gate = nightly["jobs"]["dogfood-skip-gate"]
+    retry = nightly["jobs"]["dogfood_skip_gate_retry"]
+
+    def _facts(job: dict[str, Any]) -> dict[str, Any]:
+        harden = next(
+            step
+            for step in job["steps"]
+            if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+        )
+        check = next(step for step in job["steps"] if step.get("id") == "skips")
+        return {
+            "timeout-minutes": job.get("timeout-minutes"),
+            "allowed-endpoints": harden["with"]["allowed-endpoints"].split(),
+            "egress-policy": harden["with"].get("egress-policy"),
+            "image": (check.get("env") or {}).get("LINTRO_IMAGE"),
+            "run": check["run"],
+        }
+
+    assert_that(_facts(retry)).is_equal_to(_facts(gate))
+
+
+def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
+    """notify-failure consumes the effective post-retry verdict (#2246).
+
+    The tracker is a human triage queue, so the notifier must key off the
+    classifier's decision rather than ``failure()``, and the classifier must
+    see every job that can fail plus its retry.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    classify = nightly["jobs"]["classify-failure"]
+    notify = nightly["jobs"]["notify-failure"]
+
+    assert_that(classify["needs"]).contains(
+        "dogfood-full",
+        "dogfood_full_retry",
+        "verify-pinned-image-tools",
+        "dogfood-skip-gate",
+        "dogfood_skip_gate_retry",
+    )
+    step = next(step for step in classify["steps"] if step.get("id") == "classify")
+    assert_that(step["run"]).contains(
+        "scripts/ci/classify-nightly-dogfood-failure.py",
+    )
+    # Both attempts of both retried jobs must reach the classifier.
+    env = step["env"]
+    for prefix in ("LINT", "LINT_RETRY"):
+        for suffix in (
+            "RESULT",
+            "STATUS",
+            "EXIT_CODE",
+            "TIMEOUT_FLAKE",
+            "TIMED_OUT_TOOLS",
+        ):
+            assert_that(env).contains_key(f"{prefix}_{suffix}")
+    for prefix in ("SKIP_GATE", "SKIP_GATE_RETRY"):
+        for suffix in ("RESULT", "STATUS", "EXIT_CODE"):
+            assert_that(env).contains_key(f"{prefix}_{suffix}")
+    assert_that(env).contains_key("VERIFY_RESULT")
+    # The classifier reuses the PR path's signatures instead of copying them.
+    checkout = next(
+        item
+        for item in classify["steps"]
+        if "sparse-checkout" in (item.get("with") or {})
+    )
+    assert_that(checkout["with"]["sparse-checkout"]).contains(
+        "scripts/ci/is-infra-flake-failure.sh",
+    )
+
+    condition = _normalize_github_expr(notify["if"])
+    assert_that(notify["needs"]).is_equal_to(["classify-failure"])
+    assert_that(condition).contains("github.ref == 'refs/heads/main'")
+    assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
+    # Fail closed: a classifier that did not succeed still pings.
+    assert_that(condition).contains("needs.classify-failure.result != 'success'")

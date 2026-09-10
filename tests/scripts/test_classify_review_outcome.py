@@ -18,11 +18,24 @@ from types import ModuleType
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.error_contract import (
     REVIEW_ERROR_EXIT_CODE,
     render_error_contract_json,
 )
 from lintro.ai.review.errors_taxonomy import ReviewErrorKind
+from lintro.ai.review.github_notes import format_inline_post_cause
+from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+from lintro.ai.review.models.inline_post_failure import InlinePostFailure
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.output import (
+    CONVERGED_ENVELOPE_KEY,
+    CONVERGED_OUTCOME,
+    INLINE_POST_FAILURE_KEY,
+    finding_to_dict,
+    render_convergence_outcome_json,
+    render_inline_post_failure_json,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "classify_review_outcome.py"
@@ -98,6 +111,122 @@ def test_clean_review_passes(classifier: ModuleType) -> None:
     assert_that(report.transport).is_equal_to("cli")
 
 
+def _incomplete_envelope(*, stopped_reason: str = "cost cap") -> str:
+    """Return a persist JSON envelope with incomplete coverage.
+
+    Args:
+        stopped_reason: Why the review stopped early.
+
+    Returns:
+        Captured-output text containing the coverage envelope.
+    """
+    return json.dumps(
+        {
+            "readiness_verdict": "incomplete",
+            "coverage": {
+                "reviewed": 2,
+                "carried": 0,
+                "awaiting": 5,
+                "invalidated": 0,
+                "eligible": 7,
+                "covered_at_head": 2,
+                "complete": False,
+            },
+            "stopped_reason": stopped_reason,
+            "partial": True,
+        },
+    )
+
+
+def test_incomplete_coverage_reddens_the_check(classifier: ModuleType) -> None:
+    """A produced review with incomplete coverage must fail the check (#2154)."""
+    report = classifier.classify(status=0, output=_incomplete_envelope())
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.headline).contains("2/7 files covered at HEAD")
+
+
+def test_sigterm_status_with_persist_envelope_is_incomplete(
+    classifier: ModuleType,
+) -> None:
+    """``wait`` 143 after a SIGTERM persist must not read as unexpected (#2166)."""
+    report = classifier.classify(
+        status=classifier.SIGTERM_STATUS,
+        output=_incomplete_envelope(stopped_reason="timeout (SIGTERM)"),
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.headline).contains("2/7 files covered at HEAD")
+    assert_that(report.headline).does_not_contain("unexpected status")
+    assert_that(report.detail).contains("SIGTERM")
+
+
+def test_error_status_with_persist_envelope_is_incomplete(
+    classifier: ModuleType,
+) -> None:
+    """A persist envelope beats an error status so resume is not discarded."""
+    report = classifier.classify(
+        status=classifier.REVIEW_STATUS_ERROR,
+        output=_incomplete_envelope(stopped_reason="timeout (SIGTERM)"),
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.INCOMPLETE)
+    assert_that(report.headline).does_not_contain("nothing was reviewed")
+
+
+def test_sigterm_status_with_complete_envelope_is_reviewed(
+    classifier: ModuleType,
+) -> None:
+    """A finished envelope must stay REVIEWED when wait reports SIGTERM."""
+    output = json.dumps(
+        {
+            "readiness_verdict": "ready",
+            "coverage": {
+                "reviewed": 3,
+                "carried": 0,
+                "awaiting": 0,
+                "invalidated": 0,
+                "eligible": 3,
+                "covered_at_head": 3,
+                "complete": True,
+            },
+        },
+    )
+    report = classifier.classify(status=classifier.SIGTERM_STATUS, output=output)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).does_not_contain("unexpected status")
+    assert_that(report.headline).contains("no P1 findings")
+
+
+def test_sigterm_status_with_complete_p1_envelope_names_findings(
+    classifier: ModuleType,
+) -> None:
+    """A finished P1 envelope must not be labelled clean after SIGTERM."""
+    output = json.dumps(
+        {
+            "readiness_verdict": "ready",
+            "coverage": {
+                "reviewed": 3,
+                "carried": 0,
+                "awaiting": 0,
+                "invalidated": 0,
+                "eligible": 3,
+                "covered_at_head": 3,
+                "complete": True,
+            },
+            "findings": [{"severity": "P1", "title": "bug"}],
+        },
+    )
+    report = classifier.classify(status=classifier.SIGTERM_STATUS, output=output)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.headline).contains("P1 findings posted")
+
+
 def test_review_with_findings_still_passes(classifier: ModuleType) -> None:
     """Findings mean the review worked; they must not redden an advisory check.
 
@@ -109,6 +238,124 @@ def test_review_with_findings_still_passes(classifier: ModuleType) -> None:
     assert_that(report.outcome.produced_review).is_true()
     assert_that(report.exit_code).is_equal_to(0)
     assert_that(report.headline).contains("P1 findings")
+
+
+def _inline_failure_log(*, kind: str, status: int) -> str:
+    """Render the inline-post failure envelope as lintro logs it.
+
+    Args:
+        kind: Classified failure kind.
+        status: HTTP status GitHub answered the review POST with.
+
+    Returns:
+        Captured-output text containing the envelope.
+    """
+    failure_kind = InlinePostFailureKind(kind)
+    payload = {
+        INLINE_POST_FAILURE_KEY: {
+            "kind": failure_kind.value,
+            "count": 94,
+            "reason": format_inline_post_cause(kind=failure_kind, status=status),
+            "status": status,
+        },
+    }
+    return f"log line\ninline comments were not posted: {json.dumps(payload)}\n"
+
+
+def test_rejected_inline_batch_is_reported_as_sticky_only(
+    classifier: ModuleType,
+) -> None:
+    """A round GitHub throttled must not claim its findings went up inline.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_inline_failure_log(kind="rate_limited", status=403),
+    )
+
+    assert_that(report.outcome.produced_review).is_true()
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("sticky comment only")
+    assert_that(report.headline).contains("rate_limited")
+    assert_that(report.headline).does_not_contain("P1 findings posted")
+    assert_that(report.detail).contains("rate limit")
+
+
+def test_clean_round_with_a_rejected_inline_batch_is_still_sticky_only(
+    classifier: ModuleType,
+) -> None:
+    """The fallback is named even when no P1 finding was raised.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=_inline_failure_log(kind="line_mapping", status=422),
+    )
+
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("sticky comment only (line_mapping)")
+
+
+def test_real_envelope_round_trips_from_lintro_to_the_classifier(
+    classifier: ModuleType,
+) -> None:
+    """The envelope lintro renders is the one the classifier reads.
+
+    Producer and consumer are wired through the real serializer rather than
+    a hand-built log line, so a wrapped or renamed envelope on either side
+    breaks this test instead of silently restoring "P1 findings posted".
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    finding = ReviewFinding(
+        severity=Severity.P1,
+        category="logic-bug",
+        file="lintro/a.py",
+        line=3,
+        title="Off by one",
+        description="The loop stops early.",
+        cause="",
+        fix="",
+        confidence="high",
+    )
+    failure = InlinePostFailure(
+        reason=format_inline_post_cause(
+            kind=InlinePostFailureKind.RATE_LIMITED,
+            status=429,
+        ),
+        findings=(finding,),
+        kind=InlinePostFailureKind.RATE_LIMITED,
+        status=429,
+    )
+    output = (
+        "review log line\n"
+        "Inline review comments were not posted; this round's findings "
+        f"reached the sticky comment only: {render_inline_post_failure_json(failure=failure)}\n"
+    )
+
+    report = classifier.classify(status=1, output=output)
+
+    assert_that(report.headline).contains("sticky comment only (rate_limited)")
+    assert_that(report.headline).does_not_contain("P1 findings posted")
+    assert_that(report.detail).contains("HTTP 429")
+
+
+def test_inline_post_failure_key_matches_the_lintro_payload(
+    classifier: ModuleType,
+) -> None:
+    """The classifier's copy of the envelope key cannot drift from lintro's.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    assert_that(classifier.INLINE_POST_FAILURE_KEY).is_equal_to(
+        INLINE_POST_FAILURE_KEY,
+    )
 
 
 def test_depleted_balance_never_reports_success(classifier: ModuleType) -> None:
@@ -659,3 +906,440 @@ def test_main_transport_flag_reaches_summary_and_labels(
     assert_that(summary).contains("AI Review (api)")
     assert_that(summary).contains("auth_failed:key")
     assert_that(capsys.readouterr().out).contains("[api]")
+
+
+# --- converged rounds (#2099) ------------------------------------------------
+
+
+def _converged_output(*, round_number: int = 3) -> str:
+    """Render what ``lintro review`` prints when the stop rule fires.
+
+    Built by lintro's own renderer rather than hand-written JSON, so the
+    classifier is tested against the envelope actually emitted.
+
+    Args:
+        round_number: Round the stop rule skipped.
+
+    Returns:
+        Captured-output text containing the envelope.
+    """
+    decision = ConvergenceDecision(
+        converged=True,
+        round_number=round_number,
+        score=0.5,
+        threshold=3.0,
+        stable_rounds=2,
+        trajectory=(1.0, 0.5),
+    )
+    return f"some log line\n{render_convergence_outcome_json(decision=decision)}"
+
+
+def test_converged_envelope_is_its_own_green_outcome(classifier: ModuleType) -> None:
+    """A deliberately skipped round is neither a review nor a failure.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_converged_output())
+
+    assert_that(str(report.outcome)).is_equal_to("converged")
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.outcome.produced_review).is_false()
+    assert_that(report.outcome.review_unavailable).is_false()
+
+
+def test_converged_headline_names_the_skipped_round(classifier: ModuleType) -> None:
+    """CI states which round was skipped and on what evidence.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_converged_output(round_number=7))
+
+    assert_that(report.headline).contains("converged")
+    assert_that(report.headline).contains("round 7")
+    assert_that(report.headline).contains("2 stable rounds")
+    assert_that(report.detail).contains("score 0.50 < threshold 3.00")
+
+
+def test_converged_summary_does_not_tell_reviewers_to_fall_back(
+    classifier: ModuleType,
+) -> None:
+    """The un-reviewed advice belongs to failures, not to a chosen stop.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(status=0, output=_converged_output())
+
+    summary = classifier.render_summary(report=report)
+
+    assert_that(summary).contains("No provider call was made")
+    assert_that(summary).does_not_contain("fall back to CodeRabbit")
+
+
+def test_converged_envelope_key_matches_the_producer(classifier: ModuleType) -> None:
+    """The classifier keys on the exact key and discriminator lintro writes.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    assert_that(classifier.CONVERGED_ENVELOPE_KEY).is_equal_to(CONVERGED_ENVELOPE_KEY)
+    assert_that(classifier.CONVERGED_OUTCOME).is_equal_to(CONVERGED_OUTCOME)
+
+
+def test_a_nested_converged_object_does_not_classify_a_real_review_as_a_skip(
+    classifier: ModuleType,
+) -> None:
+    """A finding that merely mentions ``converged`` is not the stop envelope.
+
+    The shared JSON scan tries every ``{``, so nested objects are yielded too.
+    Without the top-level ``outcome`` discriminator, a reviewed round carrying
+    a nested ``converged`` mapping would be reported as a skipped one — a
+    review that really ran would vanish from CI (#2099 review).
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    output = json.dumps(
+        {
+            "readiness_verdict": "blocked",
+            "findings": [
+                {"title": "x", "meta": {"converged": {"round": 9, "open_p1": 0}}},
+            ],
+        },
+    )
+
+    report = classifier.classify(status=1, output=output)
+
+    assert_that(str(report.outcome)).is_equal_to("reviewed")
+    assert_that(report.headline).contains("P1 findings")
+
+
+def test_the_converged_envelope_is_still_found_after_leading_log_lines(
+    classifier: ModuleType,
+) -> None:
+    """The discriminator did not cost the parser its real envelope.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    output = f"INFO starting review\n{{ not json\n{_converged_output()}"
+
+    report = classifier.classify(status=0, output=output)
+
+    assert_that(str(report.outcome)).is_equal_to("converged")
+
+
+def test_a_normal_review_is_still_classified_as_reviewed(
+    classifier: ModuleType,
+) -> None:
+    """The converged branch does not swallow ordinary review output.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=json.dumps({"readiness_verdict": "ready", "findings": []}),
+    )
+
+    assert_that(str(report.outcome)).is_equal_to("reviewed")
+    assert_that(report.exit_code).is_equal_to(0)
+
+
+def _converged_envelope(*, open_p1: int = 0) -> str:
+    """Render the envelope exactly as ``lintro review`` emits it.
+
+    Args:
+        open_p1: Open P1 findings the last real round left in force.
+
+    Returns:
+        The JSON text the producer writes on a converged skip.
+    """
+    from lintro.ai.review.models.convergence_decision import ConvergenceDecision
+    from lintro.ai.review.output import render_convergence_outcome_json
+
+    decision = ConvergenceDecision(
+        converged=True,
+        round_number=3,
+        score=0.5,
+        threshold=3.0,
+        stable_rounds=2,
+        trajectory=(1.0, 0.5),
+    )
+    return render_convergence_outcome_json(decision=decision, open_p1=open_p1)
+
+
+def test_converged_report_annotates_as_notice_and_main_exits_zero(
+    classifier: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A skipped-because-converged round is green end to end.
+
+    Args:
+        classifier: Loaded classifier module.
+        tmp_path: Directory holding the captured-output file.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Captured stdout/stderr.
+    """
+    output_file = tmp_path / "review.log"
+    output_file.write_text(_converged_envelope(), encoding="utf-8")
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+
+    code = classifier.main(
+        argv=["--status", "0", "--output-file", str(output_file), "--transport", "cli"],
+    )
+    out = capsys.readouterr().out
+
+    assert_that(code).is_equal_to(0)
+    assert_that(out).contains("::notice")
+    assert_that(out).does_not_contain("::error")
+    summary = summary_file.read_text(encoding="utf-8")
+    assert_that(summary).contains("🔁")
+    assert_that(summary).does_not_contain("CodeRabbit")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [None, True, "P1", 1.5, -1, [], {}],
+    ids=["missing", "boolean", "string", "fraction", "negative", "list", "dict"],
+)
+def test_an_unreadable_open_p1_fails_the_skip_gate_closed(
+    classifier: ModuleType,
+    bad: object,
+) -> None:
+    """A count that cannot be read must not become a green check.
+
+    ``open_p1`` is the entire readiness gate for a skipped round. Degrading
+    an unreadable value to zero would turn a malformed envelope into a clean
+    pass — the silent success this module exists to prevent.
+
+    Args:
+        classifier: Loaded classifier module.
+        bad: Unusable ``open_p1`` value under test.
+    """
+    payload = json.loads(_converged_envelope())
+    if bad is None:
+        del payload[CONVERGED_ENVELOPE_KEY]["open_p1"]
+    else:
+        payload[CONVERGED_ENVELOPE_KEY]["open_p1"] = bad
+
+    report = classifier.classify(
+        status=0,
+        output=json.dumps(payload),
+        transport="cli",
+    )
+
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.outcome.review_unavailable).is_true()
+    assert_that(report.headline).contains("unreadable")
+
+
+@pytest.mark.parametrize(
+    ("raw", "reported"),
+    [("2", True), (2.0, True), ("0", False), (0.0, False)],
+    ids=["numeric string", "whole float", "string zero", "float zero"],
+)
+def test_a_numeric_open_p1_is_read_as_a_count(
+    classifier: ModuleType,
+    raw: object,
+    reported: bool,
+) -> None:
+    """A count a JSON producer spelled as a string or float is still a count.
+
+    Args:
+        classifier: Loaded classifier module.
+        raw: ``open_p1`` value under test.
+        reported: Whether the headline should name leftover P1s.
+    """
+    payload = json.loads(_converged_envelope())
+    payload[CONVERGED_ENVELOPE_KEY]["open_p1"] = raw
+
+    report = classifier.classify(
+        status=0,
+        output=json.dumps(payload),
+        transport="cli",
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONVERGED)
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that("open P1" in report.headline).is_equal_to(reported)
+
+
+def test_a_hard_failure_after_the_skip_envelope_is_not_hidden_by_it(
+    classifier: ModuleType,
+) -> None:
+    """An error following a converged envelope wins over the skip.
+
+    The stop rule exits 0 or 1 and never 2, so status 2 alongside a converged
+    envelope means something broke after the envelope was printed. Reporting
+    the skip would bury that failure behind a green-looking outcome.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    from lintro.ai.exceptions import AIProviderError
+
+    rendered = render_error_contract_json(
+        provider="anthropic",
+        error=AIProviderError(
+            "Anthropic API error: Error code: 400 - Your credit balance is too low",
+        ),
+    )
+    output = f"{_converged_envelope()}\n{rendered}\n"
+
+    report = classifier.classify(
+        status=REVIEW_ERROR_EXIT_CODE,
+        output=output,
+        transport="cli",
+    )
+
+    assert_that(report.outcome).is_not_equal_to(classifier.ReviewOutcome.CONVERGED)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.outcome.review_unavailable).is_true()
+
+
+def test_a_skip_with_leftover_p1s_surfaces_them_through_main_end_to_end(
+    classifier: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The leftover count reaches the annotation and summary, not just classify().
+
+    Exit stays 0 — the check does not redden for findings on either path — so
+    the annotation and job summary are the only places a reader can learn
+    that something is still open. If the count silently vanished from them,
+    the skip really would look clean.
+
+    Args:
+        classifier: Loaded classifier module.
+        tmp_path: Directory holding the captured-output file.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Captured stdout/stderr.
+    """
+    output_file = tmp_path / "review.log"
+    output_file.write_text(_converged_envelope(open_p1=2), encoding="utf-8")
+    summary_file = tmp_path / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_file))
+
+    code = classifier.main(
+        argv=["--status", "1", "--output-file", str(output_file), "--transport", "cli"],
+    )
+    out = capsys.readouterr().out
+
+    assert_that(code).is_equal_to(0)
+    assert_that(out).contains("skipped: 2 open P1 findings remain")
+    assert_that(out).does_not_contain("::error")
+    summary = summary_file.read_text(encoding="utf-8")
+    assert_that(summary).contains("skipped: 2 open P1 findings remain")
+    # A skip is a decision, not an outage: never the fall-back-to-CodeRabbit copy.
+    assert_that(summary).does_not_contain("CodeRabbit")
+
+
+def test_a_p1_question_does_not_redden_the_recovered_review(
+    classifier: ModuleType,
+) -> None:
+    """The CI P1 gate excludes questions exactly as the CLI one does.
+
+    Otherwise the CLI would exit 0 for a round of P1 questions while the
+    check summary announced P1 findings on the same output.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    from lintro.ai.review.enums.finding_kind import FindingKind
+
+    payload = {
+        "readiness_verdict": "ready",
+        "coverage": {"complete": True, "covered_at_head": 1, "eligible": 1},
+        "findings": [
+            finding_to_dict(
+                finding=ReviewFinding(
+                    severity=Severity.P1,
+                    category="clarification",
+                    file="a.py",
+                    line=1,
+                    title="Why is this here?",
+                    description="d",
+                    cause="c",
+                    fix="f",
+                    confidence="high",
+                    kind=FindingKind.QUESTION,
+                ),
+            ),
+        ],
+    }
+
+    report = classifier.classify(
+        status=143,
+        output=json.dumps(payload),
+        transport="cli",
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.headline).contains("no P1 findings")
+
+
+def test_converged_skip_with_an_open_p1_reports_but_does_not_redden(
+    classifier: ModuleType,
+) -> None:
+    """Leftover P1s are named on the headline, not turned into a red check.
+
+    The check reports a REVIEWED round's P1 findings without reddening for
+    them (``test_review_with_findings_still_passes``), so a skipped round
+    must not be stricter about the same findings than the round that found
+    them. The readiness gate is informational at check level on both paths —
+    which is exactly why the count has to be visible in the headline.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_converged_envelope(open_p1=2),
+        transport="cli",
+    )
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONVERGED)
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).contains("skipped: 2 open P1 findings remain")
+    # A skip is a decision, not an outage: never the fall-back advice.
+    assert_that(report.outcome.review_unavailable).is_false()
+
+
+def test_a_single_leftover_p1_is_named_in_the_singular(
+    classifier: ModuleType,
+) -> None:
+    """The headline reads as English for the common one-finding case.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=1,
+        output=_converged_envelope(open_p1=1),
+        transport="cli",
+    )
+
+    assert_that(report.headline).contains("skipped: 1 open P1 finding remain")
+
+
+def test_a_clean_skip_says_nothing_about_p1s(classifier: ModuleType) -> None:
+    """With nothing open the headline carries no leftover clause at all.
+
+    Args:
+        classifier: Loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=_converged_envelope(open_p1=0),
+        transport="cli",
+    )
+
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.headline).does_not_contain("open P1")

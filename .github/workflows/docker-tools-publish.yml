@@ -9,7 +9,7 @@ name: Build - Lintro Tools Image
 # from then on (see renovate.json and issue #1360).
 #
 # Triggers:
-#   - push (main) / pull_request touching the tools Dockerfile, the pinned
+#   - pull_request touching the tools Dockerfile, the pinned
 #     tool versions, or the installer script. PR runs validate only (no push).
 #     Not a required check, so on.<event>.paths filtering is safe here (see
 #     docker-ci.yml header for the required-check deadlock caveat).
@@ -19,18 +19,6 @@ name: Build - Lintro Tools Image
 #     from a branch (e.g. seeding the first image before the FROM flip).
 
 'on':
-  push:
-    branches: [main]
-    paths:
-      - 'docker/tools.Dockerfile'
-      - '.github/workflows/docker-tools-publish.yml'
-      - 'lintro/_tool_versions.py'
-      - 'lintro/tools/manifest.json'
-      - 'scripts/utils/install-tools.sh'
-      - 'scripts/utils/install-semgrep.sh'
-      - 'scripts/utils/utils.sh'
-      - 'package.json'
-      - 'requirements-semgrep.txt'
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
@@ -38,11 +26,14 @@ name: Build - Lintro Tools Image
       - 'docker/tools.Dockerfile'
       - '.github/workflows/docker-tools-publish.yml'
       - 'lintro/_tool_versions.py'
-      - 'lintro/tools/manifest.json'
+      - 'lintro/tools/manifest.src.json'
+      - 'lintro/_tool_packages.py'
+      - 'lintro_build/**'
       - 'scripts/utils/install-tools.sh'
       - 'scripts/utils/install-semgrep.sh'
       - 'scripts/utils/utils.sh'
       - 'package.json'
+      - 'pyproject.toml'
       - 'requirements-semgrep.txt'
   schedule:
     # Weekly rebuild (Monday 03:17 UTC) for CVE freshness in tool binaries.
@@ -58,14 +49,18 @@ permissions:
   contents: read
 
 concurrency:
-  group: docker-tools-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # PR runs only validate; keeping them out of the registry group stops a
+  # synchronize from evicting a pending scheduled publish (a group holds one
+  # pending run, so a third arrival cancels the waiting one).
+  # yamllint disable-line rule:line-length
+  group: ${{ github.event_name == 'pull_request' && format('docker-tools-{0}', github.ref) || 'lintro-tools-registry' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   tools-image:
     name: 🐳 Lintro Tools Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f8ce689b2453b7520a41b617d1a72051bfb1c1c0 # v0.63.7
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36 # v0.69.8
     permissions:
       contents: read
       packages: write # push image, cache, and staging tags to GHCR
@@ -80,10 +75,9 @@ jobs:
       # Dockerfile).
       tags: latest
       push: >-
-        ${{ github.event_name != 'pull_request'
-        && (github.ref == 'refs/heads/main'
+        ${{ github.event_name == 'schedule'
         || (github.event_name == 'workflow_dispatch'
-        && inputs.force_publish == 'true')) }}
+        && inputs.force_publish == 'true') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       # Build-time RUN steps already verify every bundled tool; the smoke
@@ -93,13 +87,16 @@ jobs:
       cache-registry-ref: ghcr.io/lgtm-hq/lintro-tools:cache
       # Scheduled rebuilds must not reuse cached layers, otherwise the
       # weekly CVE-freshness rebuild is a no-op cache hit.
-      no-cache: ${{ github.event_name == 'schedule' }}
+      no-cache: >-
+        ${{ github.event_name == 'schedule'
+        || (github.event_name == 'workflow_dispatch'
+        && inputs.force_publish == 'true') }}
       provenance: true
       sbom: true
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: 'f8ce689b2453b7520a41b617d1a72051bfb1c1c0' # v0.63.7
+      tooling-ref: 'f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36' # v0.69.8
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes

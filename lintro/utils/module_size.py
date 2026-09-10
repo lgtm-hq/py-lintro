@@ -3,8 +3,8 @@
 This module implements a lightweight, warn-level guard against the
 oversized-module pattern that has repeatedly recurred in Lintro's codebase
 (see issue #1052). Ruff does not ship a file-length rule, so this check is
-wired into the existing post-check pipeline (``lintro/utils/post_checks.py``)
-rather than a dedicated linter.
+wired into the run-level gate phase (``lintro/utils/gates.py``) rather than a
+dedicated linter.
 
 Behaviour:
     * Counts physical lines per Python module under the scanned paths.
@@ -53,10 +53,7 @@ DEFAULT_MODULE_SIZE_EXCLUDES: tuple[str, ...] = (
 # #1052). Remove entries here as the modules are refactored below the
 # threshold. Paths are matched against each discovered file's path suffix, so
 # repo-relative POSIX paths are used.
-DEFAULT_MODULE_SIZE_BASELINE: tuple[str, ...] = (
-    "lintro/ai/review/orchestrator.py",
-    "lintro/cli_utils/commands/doctor.py",
-)
+DEFAULT_MODULE_SIZE_BASELINE: tuple[str, ...] = ("lintro/cli_utils/commands/doctor.py",)
 
 
 def _coerce_threshold(

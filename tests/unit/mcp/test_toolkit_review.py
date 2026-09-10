@@ -4,17 +4,22 @@ Every call goes through a real :class:`mcp.client.Client` over in-memory
 streams, so the schema validation, the workspace path guard, and the error
 envelope under test are the ones the stdio server actually applies.
 
-The AI provider is always mocked. The orchestrator is stubbed at
-``lintro.ai.review.orchestrator.run_review`` (the toolkit imports it lazily,
-inside the handler, so patching the module attribute is what the handler sees),
-which keeps the tests free of network calls, credentials, and cost while still
-exercising context collection, budget resolution, and payload shaping for real.
+The AI provider is always mocked. Since #2300 the handler reaches the
+orchestrator through ``lintro.ai.review.preparation.execute_review``, so the
+orchestrator is stubbed at ``lintro.ai.review.preparation.run_review`` — that
+module holds the ``from``-import the shared path actually calls. The lint
+helpers are stubbed on ``lintro.ai.review.preparation_resolvers`` for the same
+reason: since #2301 that is the module whose globals the digest builder reads.
+That keeps the tests free of
+network calls, credentials, and cost while still exercising context
+collection, budget resolution, and payload shaping for real.
 """
 
 from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess runs fixed git argv in a temp repo
 from collections.abc import Awaitable, Callable
+from dataclasses import fields
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -26,6 +31,7 @@ from mcp.types import CallToolResult, Tool
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.mcp.enums.mcp_error_code import McpErrorCode
 from lintro.mcp.toolkits.review import (
     REVIEW_TIMEOUT_SECONDS,
@@ -49,6 +55,11 @@ _CONFIG_REVIEW_OFF = """ai:
   enabled: true
   review: false
   provider: anthropic
+"""
+
+_CONFIG_NO_PROVIDER = """ai:
+  enabled: true
+  review: true
 """
 
 
@@ -218,6 +229,39 @@ def _result(
     )
 
 
+def test_finding_dict_carries_suggestion_drop_state() -> None:
+    """The MCP finding payload distinguishes dropped from validated patches.
+
+    ``suggested_code`` is the only patch carrier MCP serializes, so a finding
+    that survived validation must still show it, and a dropped one must show
+    the reason with the patch cleared (#2101).
+    """
+    from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
+    from lintro.mcp.toolkits.review import _finding_to_dict
+
+    kept = _result().findings[0]
+    dropped = ReviewFinding(
+        severity=Severity.P2,
+        category="correctness",
+        file="app.py",
+        line=9,
+        title="Stale patch",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+        suggestion_dropped=SuggestionDropReason.STALE_ANCHOR,
+    )
+
+    kept_payload = _finding_to_dict(finding=kept)
+    dropped_payload = _finding_to_dict(finding=dropped)
+
+    assert_that(kept_payload["suggested_code"]).is_equal_to("i += 1")
+    assert_that(kept_payload["suggestion_dropped"]).is_equal_to("")
+    assert_that(dropped_payload["suggested_code"]).is_equal_to("")
+    assert_that(dropped_payload["suggestion_dropped"]).is_equal_to("stale_anchor")
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     """Create a git workspace with one committed change to review.
@@ -252,11 +296,12 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
 
     Returns:
         Callable: Installs a stubbed ``run_review`` and returns the list the
-        AI configs it was called with are recorded in.
+        session options it was called with are recorded in, flattened field by
+        field so a caller can assert on one setting at a time.
     """
     import lintro.ai.availability as availability
     import lintro.ai.providers as providers
-    import lintro.ai.review.orchestrator as orchestrator
+    import lintro.ai.review.preparation as preparation
 
     monkeypatch.setattr(availability, "is_ai_available", lambda: True)
     monkeypatch.setattr(
@@ -272,13 +317,25 @@ def stub_ai(monkeypatch: pytest.MonkeyPatch) -> Callable[..., list[Any]]:
     ) -> list[Any]:
         calls: list[Any] = []
 
-        def _run_review(context: Any, **kwargs: Any) -> ReviewResult:
-            calls.append({"context": context, **kwargs})
+        def _run_review(
+            context: Any,
+            *,
+            options: ReviewSessionOptions,
+        ) -> ReviewResult:
+            calls.append(
+                {
+                    "context": context,
+                    **{
+                        item.name: getattr(options, item.name)
+                        for item in fields(ReviewSessionOptions)
+                    },
+                },
+            )
             if error is not None:
                 raise error
             return result if result is not None else _result()
 
-        monkeypatch.setattr(orchestrator, "run_review", _run_review)
+        monkeypatch.setattr(preparation, "run_review", _run_review)
         return calls
 
     return install
@@ -344,10 +401,10 @@ def test_budget_detection_matches_the_engine_stop_reason() -> None:
     one string both sides depend on; reword it there and this fails rather than
     the tool silently reporting a capped run as a complete one.
     """
-    from lintro.ai.review.orchestrator import _cost_cap_reason
+    from lintro.ai.review.session import cost_cap_reason
     from lintro.mcp.toolkits.review import _stopped_on_budget
 
-    metadata = _metadata(partial=True, stopped_reason=_cost_cap_reason(cap=1.0))
+    metadata = _metadata(partial=True, stopped_reason=cost_cap_reason(cap=1.0))
 
     assert_that(_stopped_on_budget(metadata=metadata)).is_true()
 
@@ -405,6 +462,10 @@ def test_review_returns_findings_and_run_metadata(
 
     assert_that(result.is_error).is_false()
     assert_that(payload["summary"]).is_equal_to("One blocking issue.")
+    # #2003: a completed, uncapped review reports full findings coverage at
+    # the top level and in the run block.
+    assert_that(payload["findings_coverage_complete"]).is_true()
+    assert_that(payload["run"]["findings_coverage_complete"]).is_true()
     finding = payload["findings"][0]
     assert_that(finding).contains_key(
         "file",
@@ -435,6 +496,49 @@ def test_review_returns_findings_and_run_metadata(
     assert_that(run["chunks"]).is_equal_to({"total": 2, "reviewed": 1})
     assert_that(run["partial"]).is_false()
     assert_that(payload["budget"]["exceeded"]).is_false()
+
+
+def test_review_labels_the_transcript_with_its_own_command(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCP call site names the verb the transcript file is written under.
+
+    ``get_provider`` defaults ``transcript_command`` to ``None``, so dropping
+    the kwarg here would silently rename every MCP transcript. Asserting the
+    label inside :mod:`lintro.ai.transcript` cannot catch that; only the call
+    site can.
+
+    Args:
+        repo: Temporary workspace with a reviewable diff.
+        stub_ai: Installs the stubbed orchestrator.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.ai.providers as providers
+
+    stub_ai()
+    provider_kwargs: list[dict[str, Any]] = []
+
+    def _record(config: Any, **kwargs: Any) -> Any:
+        """Record the provider construction kwargs and return the fake.
+
+        Args:
+            config: AI config the toolkit passes positionally.
+            **kwargs: Keyword arguments under test.
+
+        Returns:
+            Any: The fake provider the stub would have returned.
+        """
+        provider_kwargs.append(kwargs)
+        return _FakeProvider()
+
+    monkeypatch.setattr(providers, "get_provider", _record)
+
+    result, _payload_body = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.is_error).is_false()
+    assert_that(provider_kwargs[0]).contains_entry({"transcript_command": "review"})
 
 
 def test_review_passes_depth_and_strictness_through(
@@ -637,6 +741,36 @@ def test_review_maps_a_too_large_diff_to_invalid_input(
     )
 
 
+def test_review_only_mode_without_agents_is_invalid_input(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """``review.custom_agents: only`` with no agent file reviews nothing.
+
+    In ``only`` mode the built-in checklist is skipped, so an empty agents
+    directory would otherwise report a clean review with nothing checked. The
+    MCP surface answers with ``INVALID_INPUT`` and a ``no_reviewable_work``
+    reason instead, and never calls the provider.
+    """
+    calls = stub_ai()
+    (repo / ".lintro-config.yaml").write_text(
+        _CONFIG + "review:\n  custom_agents: only\n",
+        encoding="utf-8",
+    )
+    (repo / ".lintro" / "review-agents").mkdir(parents=True)
+
+    result, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.is_error).is_true()
+    assert_that(payload["error"]["code"]).is_equal_to(
+        McpErrorCode.INVALID_INPUT.value,
+    )
+    assert_that(payload["error"]["detail"]["reason"]).is_equal_to(
+        "no_reviewable_work",
+    )
+    assert_that(calls).is_empty()
+
+
 def test_review_is_unavailable_without_the_ai_extra(
     repo: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -653,6 +787,33 @@ def test_review_is_unavailable_without_the_ai_extra(
         McpErrorCode.TOOL_UNAVAILABLE.value,
     )
     assert_that(payload["error"]["detail"]["reason"]).is_equal_to("ai_unavailable")
+
+
+def test_review_is_unavailable_when_provider_is_unset(
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An enabled review without ``ai.provider`` is unavailable, even on empty diffs."""
+    import lintro.ai.availability as availability
+
+    monkeypatch.setattr(availability, "is_ai_available", lambda: True)
+    (repo / ".lintro-config.yaml").write_text(_CONFIG_NO_PROVIDER, encoding="utf-8")
+
+    empty_result, empty_payload = _call(workspace=repo, arguments={"base": "feature"})
+    changed_result, changed_payload = _call(workspace=repo, arguments={"base": "main"})
+
+    for result, payload in (
+        (empty_result, empty_payload),
+        (changed_result, changed_payload),
+    ):
+        assert_that(result.is_error).is_true()
+        assert_that(payload["error"]["code"]).is_equal_to(
+            McpErrorCode.TOOL_UNAVAILABLE.value,
+        )
+        assert_that(payload["error"]["detail"]["reason"]).is_equal_to(
+            "provider_unavailable",
+        )
+        assert_that(payload["error"]["message"]).contains("ai.provider")
 
 
 def test_review_is_unavailable_when_the_workspace_disables_it(
@@ -672,6 +833,8 @@ def test_review_is_unavailable_when_the_workspace_disables_it(
         McpErrorCode.TOOL_UNAVAILABLE.value,
     )
     assert_that(payload["error"]["detail"]["reason"]).is_equal_to("review_disabled")
+    assert_that(payload["error"]["message"]).contains("LINTRO_AI_ENABLED=1")
+    assert_that(payload["error"]["message"]).contains("LINTRO_AI_REVIEW=1")
 
 
 def test_review_rejects_a_depth_outside_the_supported_range(repo: Path) -> None:
@@ -727,15 +890,15 @@ def test_review_includes_a_lint_digest_when_asked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """``with_lint`` feeds the deterministic linters' digest into the prompt."""
-    import lintro.ai.review.lint_bridge as lint_bridge
+    import lintro.ai.review.preparation_resolvers as resolvers
 
     monkeypatch.setattr(
-        lint_bridge,
+        resolvers,
         "run_lint_on_changed_files",
         lambda **_kwargs: [],
     )
     monkeypatch.setattr(
-        lint_bridge,
+        resolvers,
         "format_lint_results_for_prompt",
         lambda **_kwargs: "ruff: 1 issue",
     )
@@ -778,4 +941,152 @@ def test_review_reports_no_changes_for_a_path_matching_nothing(
 
     assert_that(result.is_error).is_false()
     assert_that(payload["findings"]).is_empty()
+    # #2003: an empty run is trivially complete and carries the same key.
+    assert_that(payload["findings_coverage_complete"]).is_true()
     assert_that(calls).is_empty()
+
+
+def _synthesis_result(
+    *,
+    findings_added: int = 1,
+    truncated: bool = False,
+    failed: bool = False,
+) -> ReviewResult:
+    """Build a stubbed result for a run whose synthesis pass ran.
+
+    The chunk finding is always left untagged and a synthesis-origin finding
+    is appended only when the pass actually contributed one, so a serializer
+    that stamped ``origin`` on every finding whenever ``metadata.synthesis``
+    was set could not pass.
+
+    Args:
+        findings_added: Findings the pass contributed. Zero leaves the result
+            carrying only the untagged chunk finding.
+        truncated: Whether the pass saw less than its whole prompt input.
+        failed: Whether the pass produced no usable answer.
+
+    Returns:
+        ReviewResult: A result carrying the recorded synthesis outcome.
+    """
+    from dataclasses import replace as dataclass_replace
+
+    from lintro.ai.review.enums.finding_origin import FindingOrigin
+    from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
+
+    base = _result()
+    chunk_finding = base.findings[0]
+    synthesized = tuple(
+        dataclass_replace(
+            chunk_finding,
+            title=f"Cross-file mismatch {index}",
+            origin=FindingOrigin.SYNTHESIS,
+        )
+        for index in range(findings_added)
+    )
+    return dataclass_replace(
+        base,
+        findings=(chunk_finding, *synthesized),
+        metadata=dataclass_replace(
+            base.metadata,
+            synthesis=SynthesisOutcome(
+                findings_added=findings_added,
+                truncated=truncated,
+                failed=failed,
+            ),
+        ),
+    )
+
+
+def test_review_payload_omits_synthesis_keys_on_a_default_run(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A run without the pass is byte-identical to one from before it existed.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_result())
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload).does_not_contain_key("synthesis")
+    assert_that(payload["findings"][0]).does_not_contain_key("origin")
+
+
+def test_review_payload_carries_synthesis_origin_and_block(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """Provenance and the pass outcome survive the whole handler (#2269).
+
+    Driven through the public tool rather than the serializers so the patch
+    validation the handler runs first is in the path too: a rewrite there that
+    rebuilt findings without ``origin`` would fail this.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_synthesis_result(truncated=True))
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    # A mixed list: the chunk finding keeps no origin, only the synthesized
+    # one carries it, so a blanket stamp cannot pass.
+    assert_that(payload["findings"][0]).does_not_contain_key("origin")
+    assert_that(payload["findings"][1]["origin"]).is_equal_to("synthesis")
+    assert_that(payload["synthesis"]).is_equal_to(
+        {
+            "enabled": True,
+            "findings_added": 1,
+            "truncated": True,
+            "failed": False,
+        },
+    )
+
+
+def test_review_payload_reports_a_failed_synthesis_pass(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A failed pass is distinguishable from one that found nothing.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_synthesis_result(findings_added=0, failed=True))
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload["synthesis"]["failed"]).is_true()
+    assert_that(payload["synthesis"]["findings_added"]).is_equal_to(0)
+    assert_that(payload["synthesis"]["truncated"]).is_false()
+    # A pass that contributed nothing leaves every surviving finding untagged.
+    for finding in payload["findings"]:
+        assert_that(finding).does_not_contain_key("origin")
+
+
+def test_review_payload_reports_an_empty_successful_synthesis_pass(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """A pass that found nothing is a success and tags no finding.
+
+    The twin of the failed case: both report ``findings_added: 0``, and
+    ``failed`` is the only thing that tells them apart.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    stub_ai(result=_synthesis_result(findings_added=0, failed=False))
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload["synthesis"]["failed"]).is_false()
+    assert_that(payload["synthesis"]["findings_added"]).is_equal_to(0)
+    for finding in payload["findings"]:
+        assert_that(finding).does_not_contain_key("origin")

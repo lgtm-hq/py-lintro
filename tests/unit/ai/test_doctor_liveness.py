@@ -19,6 +19,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.doctor_checks import check_ai_liveness
 from lintro.ai.enums import AITransport
 from lintro.ai.liveness import LivenessResult, LivenessState
+from lintro.ai.registry import AIProvider
 from lintro.cli import cli
 from lintro.enums.tool_status import ToolStatus
 
@@ -54,7 +55,16 @@ def test_liveness_is_skipped_when_ai_is_disabled() -> None:
 
 def test_liveness_is_skipped_without_a_transport() -> None:
     """Transport resolution is a prerequisite; doctor reports that separately."""
-    assert_that(check_ai_liveness(AIConfig(enabled=True))).is_empty()
+    assert_that(
+        check_ai_liveness(AIConfig(enabled=True, provider=AIProvider.ANTHROPIC)),
+    ).is_empty()
+
+
+def test_liveness_is_skipped_without_a_provider() -> None:
+    """Provider resolution is a prerequisite; doctor reports that separately."""
+    assert_that(
+        check_ai_liveness(AIConfig(enabled=True, transport=AITransport.API)),
+    ).is_empty()
 
 
 @pytest.mark.parametrize(
@@ -89,7 +99,11 @@ def test_liveness_states_map_to_doctor_statuses(
     )
 
     results = check_ai_liveness(
-        AIConfig(enabled=True, transport=AITransport.API),
+        AIConfig(
+            enabled=True,
+            provider=AIProvider.ANTHROPIC,
+            transport=AITransport.API,
+        ),
     )
 
     assert_that(results).is_length(1)
@@ -141,7 +155,12 @@ def test_doctor_probes_when_the_flag_is_given(monkeypatch: Any) -> None:
     )
     monkeypatch.setattr(
         "lintro.cli_utils.commands.doctor.resolve_ai_config",
-        lambda config: AIConfig(enabled=True, review=True, transport=AITransport.API),
+        lambda config: AIConfig(
+            enabled=True,
+            review=True,
+            provider=AIProvider.ANTHROPIC,
+            transport=AITransport.API,
+        ),
     )
 
     CliRunner().invoke(cli, ["doctor", "--tools", "ruff"])
@@ -211,7 +230,12 @@ def test_report_mode_renders_the_liveness_result(
     )
     monkeypatch.setattr(
         "lintro.cli_utils.commands.doctor.resolve_ai_config",
-        lambda config: AIConfig(enabled=True, review=True, transport=AITransport.API),
+        lambda config: AIConfig(
+            enabled=True,
+            review=True,
+            provider=AIProvider.ANTHROPIC,
+            transport=AITransport.API,
+        ),
     )
 
     result = CliRunner().invoke(

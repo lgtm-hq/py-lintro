@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.sqlfluff import SqlfluffPlugin
+from lintro.tools.sqlfluff.definition import SqlfluffPlugin
 from tests.test_samples_helpers import copy_sample
 
 SQLFLUFF_LINT_OUTPUT_WITH_ISSUES = """[

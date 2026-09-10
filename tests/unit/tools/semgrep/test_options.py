@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.semgrep import (
+from lintro.tools.semgrep.definition import (
     SEMGREP_DEFAULT_CONFIG,
     SEMGREP_DEFAULT_TIMEOUT,
     SemgrepPlugin,

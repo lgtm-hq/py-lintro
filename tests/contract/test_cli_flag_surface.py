@@ -40,8 +40,7 @@ def _require_surface(provider: AIProvider) -> CliSurfaceReport:
     report = probe_cli_surface_sync(provider=provider)
     if not report.binary_present:
         unmet_precondition(
-            f"{report.contract.binary} is not on PATH "
-            f"({report.contract.upgrade_hint})",
+            f"{report.contract.binary} is not on PATH ({report.contract.upgrade_hint})",
         )
     if not report.help_readable:
         unmet_precondition(

@@ -10,7 +10,6 @@ gate weeks later. These tests pin the same contract against the live CLI.
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +18,7 @@ from assertpy import assert_that
 from click.testing import CliRunner
 
 from lintro.cli import cli
-from lintro.plugins._builtin_index import REGISTERING_TOOL_MODULES
+from lintro.plugins._builtin_index import REGISTERING_TOOL_PACKAGES
 from lintro.plugins.discovery import discover_builtin_tools
 from lintro.plugins.registry import ToolRegistry
 
@@ -40,26 +39,6 @@ def cli_runner() -> CliRunner:
         CliRunner: A Click test runner instance.
     """
     return CliRunner()
-
-
-@pytest.fixture(autouse=True)
-def isolated_registry() -> Generator[None]:
-    """Snapshot and restore the full registry, including origins.
-
-    Yields:
-        None: Registry snapshot for the test duration.
-    """
-    with ToolRegistry._lock:
-        original_tools = dict(ToolRegistry._tools)
-        original_instances = dict(ToolRegistry._instances)
-        original_origins = dict(ToolRegistry._origins)
-    try:
-        yield
-    finally:
-        with ToolRegistry._lock:
-            ToolRegistry._tools = original_tools
-            ToolRegistry._instances = original_instances
-            ToolRegistry._origins = original_origins
 
 
 def _require_discovered_builtin_origins() -> None:
@@ -195,7 +174,7 @@ def test_list_tools_json_stdout_is_a_single_document(
 ) -> None:
     """``list-tools --json`` stdout is one JSON object of every builtin.
 
-    The smoke test requires every ``REGISTERING_TOOL_MODULES`` name to
+    The smoke test requires every ``REGISTERING_TOOL_PACKAGES`` name to
     appear as ``origin==builtin``, not merely a non-empty builtin set.
 
     Args:
@@ -214,7 +193,7 @@ def test_list_tools_json_stdout_is_a_single_document(
     reported = {name.replace("-", "_") for name in builtins}
     missing = [
         name
-        for name in REGISTERING_TOOL_MODULES
+        for name in REGISTERING_TOOL_PACKAGES
         if name.replace("-", "_") not in reported
     ]
     assert_that(missing).is_empty()
@@ -256,7 +235,7 @@ def test_check_json_stdout_is_a_single_document(
 
     The smoke gate runs the default all-tools argv (300s timeout) on
     ``sample.py`` + ``sample.yaml``. This test keeps ``--tools ruff`` because
-    ``pytest.ini`` caps each test at 120s; list-tools above pins builtin
+    ``pyproject.toml`` caps each test at 120s; list-tools above pins builtin
     completeness instead. Chdirs into the fixture tree so repo config is
     not loaded.
 
@@ -331,7 +310,7 @@ def test_check_json_default_argv_stdout_is_a_single_document(
             f"{name} should skip without PATH or python -m tools",
         ).is_true()
     reported = {name.replace("-", "_") for name in by_tool}
-    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_MODULES}
+    expected = {name.replace("-", "_") for name in REGISTERING_TOOL_PACKAGES}
     assert_that(reported & expected).is_not_empty()
 
 

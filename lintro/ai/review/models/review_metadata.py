@@ -4,7 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
+from lintro.ai.review.models.review_timings import ReviewTimings
 from lintro.ai.review.models.skipped_file import SkippedFile
+from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
+
+#: Degradation reasons whose ``findings_cap`` is a real per-call ceiling.
+#: Reasons outside this set carry a placeholder and are excluded from
+#: :attr:`ReviewMetadata.findings_cap_applied`.
+_CAP_REASONS: frozenset[CoverageDegradationReason] = frozenset(
+    {
+        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+        CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+    },
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +76,11 @@ class ReviewMetadata:
         phase_timings (dict[str, float]): Per-phase wall-clock seconds for
             regression visibility. Keys include ``context_collection``,
             ``provider`` (chunk + custom-agent provider calls), and
-            ``parse_merge``.
+            ``parse_merge``. Kept as a flat mapping for backward
+            compatibility; ``timings`` carries the full breakdown.
+        timings (ReviewTimings | None): Full per-phase timing breakdown
+            (ordered spans plus per-chunk queued/in-flight detail, #2148).
+            ``None`` on legacy records and merge-only placeholders.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -69,6 +89,17 @@ class ReviewMetadata:
             actually looked at, in sorted order.
         skipped_files (tuple[SkippedFile, ...]): Changed files excluded from
             the review, each carrying the reason it was excluded (#1910).
+        coverage_degradations (tuple[CoverageDegradation, ...]): Chunk-level
+            limits that may have suppressed findings (#2003), one entry per
+            limit event — a CLI per-call findings cap, or an
+            output-exhaustion retry at a tighter cap — so one chunk can
+            contribute both. Every chunk was still reviewed, so this is a
+            *depth* limit and deliberately distinct from ``partial``, which
+            means chunks went unreviewed. Empty for a fully uncapped run.
+        synthesis (SynthesisOutcome | None): What the final cross-chunk
+            synthesis pass did (#2269), or ``None`` when the pass did not
+            run — which is the default, and every run before the pass
+            existed. Surfaces render nothing at all for ``None``.
     """
 
     model: str
@@ -100,7 +131,63 @@ class ReviewMetadata:
     max_cost_usd: float | None = None
     max_cost_usd_source: str = ""
     phase_timings: dict[str, float] = field(default_factory=dict)
+    timings: ReviewTimings | None = None
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)
     skipped_files: tuple[SkippedFile, ...] = field(default_factory=tuple)
+    coverage_degradations: tuple[CoverageDegradation, ...] = field(
+        default_factory=tuple,
+    )
+    synthesis: SynthesisOutcome | None = None
+
+    @property
+    def findings_coverage_complete(self) -> bool:
+        """Return whether the run's finding depth was limited in any way.
+
+        "Complete" means the run recorded no coverage degradation of any kind
+        — not a per-chunk findings cap, not a tightened output-exhaustion
+        retry, and not a cross-chunk synthesis pass that was truncated or did
+        not complete (#2269). Any entry in ``coverage_degradations`` makes
+        this false, including a whole-run one that carries no per-call
+        ceiling; ``findings_cap_applied`` is the narrower signal that stays
+        ``None`` for a run degraded only by the synthesis pass.
+
+        Returns:
+            True when ``coverage_degradations`` is empty. ``partial`` is a
+            separate axis: a run can be complete in coverage depth and still
+            have stopped early.
+        """
+        return not self.coverage_degradations
+
+    @property
+    def findings_cap_applied(self) -> int | None:
+        """Return the tightest findings ceiling any chunk ran under.
+
+        Only the two cap-carrying reasons contribute: a degradation that
+        records no per-call ceiling (the synthesis reasons, #2269) reports
+        ``findings_cap`` as a placeholder and must never be read as the
+        tightest ceiling a chunk ran under.
+
+        Returns:
+            The smallest recorded cap, or ``None`` when no cap was applied.
+        """
+        caps = [
+            item.findings_cap
+            for item in self.coverage_degradations
+            if item.reason in _CAP_REASONS
+        ]
+        return min(caps) if caps else None
+
+    @property
+    def output_exhaustion_retried(self) -> bool:
+        """Return whether any chunk was retried after output exhaustion.
+
+        Returns:
+            True when at least one chunk hit the provider output-token
+            ceiling and was re-run under a tighter findings cap.
+        """
+        return any(
+            item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
+            for item in self.coverage_degradations
+        )

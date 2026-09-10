@@ -15,8 +15,8 @@ from assertpy import assert_that
 from loguru import logger
 
 from lintro.ai.config import AIConfig
-from lintro.ai.display.status import render_ai_status
 from lintro.ai.enums import AITransport
+from lintro.ai.interface import render_ai_status
 from lintro.ai.registry import AIProvider
 
 
@@ -60,6 +60,33 @@ def test_render_ai_status_disabled() -> None:
     assert_that(render_ai_status(ai_config=ai_config, is_ci=False)).is_equal_to(
         ["[dim]disabled[/dim]"],
     )
+
+
+def test_render_ai_status_unset_provider() -> None:
+    """An enabled config with no provider names the three-way migration path."""
+    lines = render_ai_status(
+        ai_config=AIConfig(enabled=True, lint=True, review=False),
+        is_ci=False,
+    )
+
+    assert_that(lines[0]).is_equal_to("[yellow]enabled (provider unset)[/yellow]")
+    assert_that(lines[1]).contains("`ai.provider` in config")
+    assert_that(lines[1]).contains("LINTRO_AI_PROVIDER")
+    assert_that(lines[1]).contains("--provider")
+    assert_that(lines[1]).contains("anthropic, cursor, openai")
+    assert_that(lines).contains("  provider: unset")
+
+
+def test_render_ai_status_unset_provider_without_features() -> None:
+    """Master on with both features off is informational, not a migration error."""
+    lines = render_ai_status(
+        ai_config=AIConfig(enabled=True, lint=False, review=False),
+        is_ci=False,
+    )
+
+    assert_that(lines[0]).is_equal_to("[yellow]enabled (provider unset)[/yellow]")
+    assert_that("".join(lines)).does_not_contain("ai.provider is required")
+    assert_that(lines).contains("  provider: unset")
 
 
 def test_render_ai_status_unknown_provider() -> None:

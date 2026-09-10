@@ -19,7 +19,12 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.providers import get_provider
-from lintro.ai.providers.cursor import CURSOR_MIN_TIMEOUT, CursorProvider, _find_agent
+from lintro.ai.providers.cursor.config import CursorConfig
+from lintro.ai.providers.cursor.provider import (
+    CURSOR_MIN_TIMEOUT,
+    CursorProvider,
+    _find_agent,
+)
 from lintro.ai.registry import AIProvider
 from tests.unit.ai.conftest import HANG, patch_cli_exec
 
@@ -28,7 +33,7 @@ from tests.unit.ai.conftest import HANG, patch_cli_exec
 def _mock_agent_on_path():
     """Patch shutil.which to report ``agent`` as available."""
     with patch(
-        "lintro.ai.providers.cursor._find_agent",
+        "lintro.ai.providers.cursor.provider._find_agent",
         return_value="/usr/local/bin/agent",
     ):
         yield
@@ -36,8 +41,8 @@ def _mock_agent_on_path():
 
 @pytest.fixture()
 def provider(_mock_agent_on_path):
-    """Create a CursorProvider with a mocked agent binary."""
-    return CursorProvider()
+    """Create a CursorProvider with a mocked agent binary and trust opted out."""
+    return CursorProvider(cursor_trust_workspace=False)
 
 
 def _cli_json(
@@ -120,16 +125,20 @@ def _fake_run_with_probes(
 def _completion_calls(mock_run: MagicMock) -> list[list[str]]:
     """Return only the argv lists of real completion calls.
 
+    Reads the recorder's plain ``transport_calls`` list rather than mock call
+    bookkeeping, so the assertions built on it describe real captured argv
+    (#2315).
+
     Args:
-        mock_run: The patched ``subprocess.run`` mock.
+        mock_run: The recorder yielded by :func:`patch_cli_exec`.
 
     Returns:
         Argv lists with ``--version`` / ``--help`` probes filtered out.
     """
     return [
-        list(call.args[0])
-        for call in mock_run.call_args_list
-        if "--version" not in call.args[0] and "--help" not in call.args[0]
+        list(call.cmd)
+        for call in mock_run.transport_calls
+        if "--version" not in call.cmd and "--help" not in call.cmd
     ]
 
 
@@ -155,12 +164,25 @@ def test_cursor_provider_raises_when_agent_missing():
     """Raise AINotAvailableError when agent CLI is missing."""
     with (
         patch(
-            "lintro.ai.providers.cursor._find_agent",
+            "lintro.ai.providers.cursor.provider._find_agent",
             return_value=None,
         ),
         pytest.raises(AINotAvailableError, match="agent"),
     ):
-        CursorProvider()
+        CursorProvider(cursor_trust_workspace=False)
+
+
+def test_cursor_provider_requires_explicit_workspace_trust(
+    _mock_agent_on_path: object,
+) -> None:
+    """Omitting ``cursor_trust_workspace`` is a TypeError, not a silent default.
+
+    ``ai.providers.cursor.trust_workspace`` is the single default site
+    (#2041, #2309), so
+    the constructor deliberately carries no default of its own.
+    """
+    with pytest.raises(TypeError, match="cursor_trust_workspace"):
+        CursorProvider()  # type: ignore[call-arg]
 
 
 def test_cursor_provider_default_model(provider):
@@ -171,7 +193,10 @@ def test_cursor_provider_default_model(provider):
 @pytest.mark.usefixtures("_mock_agent_on_path")
 def test_cursor_provider_custom_model():
     """Accept a custom model override."""
-    p = CursorProvider(model="claude-opus-4-8-thinking-high")
+    p = CursorProvider(
+        model="claude-opus-4-8-thinking-high",
+        cursor_trust_workspace=False,
+    )
     assert_that(p.model_name).is_equal_to("claude-opus-4-8-thinking-high")
 
 
@@ -224,13 +249,14 @@ async def test_complete_one_shot_skips_resume(provider):
             stderr="",
         )
         provider.begin_durable_session(repo_root="/tmp/repo")
-        await provider.complete(
+        response = await provider.complete(
             "chunk",
             repo_root="/tmp/repo",
             use_one_shot=True,
         )
-        cmd = mock_run.call_args.args[0]
-        assert_that(cmd).does_not_contain("--resume")
+
+    assert_that(response.content).is_equal_to("ok")
+    assert_that(_completion_calls(mock_run)[-1]).does_not_contain("--resume")
 
 
 async def test_timeout_floor_is_six_hundred_seconds(provider):
@@ -286,7 +312,7 @@ async def test_complete_raises_on_subprocess_timeout(provider):
     with (
         # The agent CLI enforces a 600s floor (covered separately), so the
         # floor is lowered here to keep the timeout path fast.
-        patch("lintro.ai.providers.cursor.CURSOR_MIN_TIMEOUT", 0.01),
+        patch("lintro.ai.providers.cursor.provider.CURSOR_MIN_TIMEOUT", 0.01),
         patch_cli_exec(side_effect=_hang_completion),
         pytest.raises(AIProviderError, match="timed out"),
     ):
@@ -446,10 +472,10 @@ async def test_cursor_cost_accrues_into_budget(provider):
     assert_that(budget.spent).is_greater_than(0.0)
 
 
-async def test_complete_omits_trust_flag_when_constructed_directly(
+async def test_complete_omits_trust_flag_when_trust_opted_out(
     provider: CursorProvider,
 ) -> None:
-    """CursorProvider constructed without config omits '--trust'."""
+    """CursorProvider built with cursor_trust_workspace=False omits '--trust'."""
     stdout = _cli_json(result="ok")
     with patch_cli_exec() as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
@@ -458,9 +484,10 @@ async def test_complete_omits_trust_flag_when_constructed_directly(
             stdout=stdout,
             stderr="",
         )
-        await provider.complete("Hello", repo_root="/tmp/repo")
-    cmd = mock_run.call_args.args[0]
-    assert_that(cmd).does_not_contain("--trust")
+        response = await provider.complete("Hello", repo_root="/tmp/repo")
+
+    assert_that(response.content).is_equal_to("ok")
+    assert_that(_completion_calls(mock_run)[-1]).does_not_contain("--trust")
 
 
 async def test_complete_includes_trust_flag_when_constructed_with_trust(
@@ -498,7 +525,7 @@ async def test_complete_omits_trust_flag_when_opted_out(
     config = AIConfig(
         provider=AIProvider.CURSOR,
         transport=AITransport.CLI,
-        cursor_trust_workspace=False,
+        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=False)},
     )
     cursor = get_provider(config)
     stdout = _cli_json(result="ok")

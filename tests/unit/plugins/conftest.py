@@ -64,49 +64,13 @@ def fake_tool_plugin() -> FakeToolPlugin:
 
 
 @pytest.fixture
-def clean_registry() -> Generator[None]:
-    """Save and restore registry state for test isolation.
+def empty_registry() -> None:
+    """Clear the plugin registry for the duration of one test.
 
-    This fixture saves the current registry state before the test
-    and restores it after, ensuring tests don't pollute each other.
-
-    Yields:
-        None: Saves and restores registry state.
+    The root ``_isolate_plugin_registry`` autouse fixture restores the registry
+    afterwards (#2315), so this fixture only has to empty it.
     """
-    with ToolRegistry._lock:
-        original_tools = dict(ToolRegistry._tools)
-        original_instances = dict(ToolRegistry._instances)
-        original_origins = dict(ToolRegistry._origins)
-    try:
-        yield
-    finally:
-        with ToolRegistry._lock:
-            ToolRegistry._tools = original_tools
-            ToolRegistry._instances = original_instances
-            ToolRegistry._origins = original_origins
-
-
-@pytest.fixture
-def empty_registry() -> Generator[None]:
-    """Provide an empty registry for testing.
-
-    Clears the registry before the test and restores it after.
-
-    Yields:
-        None: Clears and restores registry state.
-    """
-    with ToolRegistry._lock:
-        original_tools = dict(ToolRegistry._tools)
-        original_instances = dict(ToolRegistry._instances)
-        original_origins = dict(ToolRegistry._origins)
-        ToolRegistry.clear()
-    try:
-        yield
-    finally:
-        with ToolRegistry._lock:
-            ToolRegistry._tools = original_tools
-            ToolRegistry._instances = original_instances
-            ToolRegistry._origins = original_origins
+    ToolRegistry.clear()
 
 
 @pytest.fixture

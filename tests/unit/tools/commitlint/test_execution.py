@@ -12,7 +12,7 @@ from lintro.enums.doc_url_template import DocUrlTemplate
 from lintro.enums.tool_type import ToolType
 from lintro.parsers.commitlint.commitlint_issue import CommitlintIssue
 from lintro.plugins.subprocess_executor import SubprocessResult
-from lintro.tools.definitions.commitlint import CommitlintPlugin
+from lintro.tools.commitlint.definition import CommitlintPlugin
 
 _ERROR_REPORT = (
     "⧗   --- input ---\n"

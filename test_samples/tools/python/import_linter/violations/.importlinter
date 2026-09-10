@@ -1,0 +1,10 @@
+[importlinter]
+root_package = layered
+
+[importlinter:contract:layers]
+name = Layered architecture
+type = layers
+layers =
+    layered.api
+    layered.services
+    layered.storage

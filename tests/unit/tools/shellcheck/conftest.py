@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from lintro.tools.definitions.shellcheck import ShellcheckPlugin
+from lintro.tools.shellcheck.definition import ShellcheckPlugin
 
 
 @pytest.fixture

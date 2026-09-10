@@ -37,7 +37,7 @@ compares Lintro's wrapper with the upstream `markdownlint-cli2` behavior.
 
 ### 🚀 Enhancements
 
-- Centralized priority (`DEFAULT_TOOL_PRIORITIES["markdownlint"]`, default 30) keeps
+- Execution order derived from claims (`CHECK` on `*.md`, after prettier) keeps
   formatters ahead of linters
 - Automatic temp config injection for MD013 line length when no native config is present
 - Unified `ToolResult` with normalized issues from `markdownlint_parser`

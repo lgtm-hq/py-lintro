@@ -14,9 +14,12 @@ import pytest
 from assertpy import assert_that
 
 from lintro.plugins import ToolRegistry
+from tests.integration._tools import require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
+
+pytestmark = require_tool("mypy")
 
 
 @pytest.fixture(autouse=True)
@@ -58,8 +61,6 @@ def mypy_violation_file() -> Iterator[str]:
     src = (
         repo_root / "test_samples" / "tools" / "python" / "mypy" / "mypy_violations.py"
     )
-    if not src.exists():
-        pytest.skip(f"Sample file {src} does not exist")
     with tempfile.TemporaryDirectory() as tmpdir:
         dst = os.path.join(tmpdir, "mypy_violations.py")
         shutil.copy(src, dst)

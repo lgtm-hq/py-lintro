@@ -1,0 +1,21 @@
+"""Astro-check tool package.
+
+Everything the ``astro-check`` tool owns lives here: the plugin and its
+:class:`~lintro.plugins.protocol.ToolDefinition` in
+:mod:`lintro.tools.astro_check.definition`. Plugin discovery enters the package
+through that module (#2311).
+"""
+
+from lintro.tools.astro_check.definition import (
+    ASTRO_CHECK_DEFAULT_TIMEOUT,
+    ASTRO_CHECK_FILE_PATTERNS,
+    ASTRO_CHECK_OPTION_TYPES,
+    AstroCheckPlugin,
+)
+
+__all__ = [
+    "ASTRO_CHECK_DEFAULT_TIMEOUT",
+    "ASTRO_CHECK_FILE_PATTERNS",
+    "ASTRO_CHECK_OPTION_TYPES",
+    "AstroCheckPlugin",
+]

@@ -7,12 +7,20 @@ import re
 from lintro.ai.review.models.review_finding import Severity
 
 STICKY_MARKER = "<!-- lintro-ai-review -->"
+ARCHIVE_MARKER = "<!-- lintro-ai-review-archive -->"
+# Split history into a second comment before GitHub's hard cap.
+PRIMARY_SOFT_LIMIT = 56_000
 STATE_MARKER_PREFIX = "<!-- lintro-ai-review-state:"
 STATE_MARKER_SUFFIX = "-->"
-# Current review-state schema version. v2 adds per-run statistics and
-# per-finding identity records on top of v1's run aggregates (issue #1906).
-STATE_VERSION = 2
-STATE_VERSION_V1 = 1
+# Current review-state schema version. v2 added per-run statistics and
+# per-finding identity records on top of v1's run aggregates (issue #1906);
+# v3 adds the per-round convergence score and the per-finding evidence style
+# it is computed from (issue #2099). Both v3 additions are written only when
+# present, so a v2 blob re-encodes with only the version restamped. v1 is no
+# longer a readable version: #2305 retired its migration, so a v1 blob decodes
+# as no state at all and the round starts fresh.
+STATE_VERSION = 3
+STATE_VERSION_V2 = 2
 
 # GitHub rejects comment bodies over 65,536 characters.
 GITHUB_COMMENT_HARD_LIMIT = 65_536
@@ -39,8 +47,9 @@ _FOOTER = (
 #: One-line footer of the v5 sticky comment (#1909). Names where finding detail
 #: actually lives, so the sticky is read as an index rather than a duplicate.
 STICKY_FOOTER = (
-    "<sub>🤖 lintro · finding details on inline comments · updates in place on "
-    "every push · `~` = estimated locally (provider did not report usage)</sub>"
+    "<sub>🤖 lintro review · findings are commented inline · "
+    "[how to read this report](https://github.com/lgtm-hq/py-lintro/blob/main/"
+    "docs/ai-review-report.md)</sub>"
 )
 
 _MENTION_RE = re.compile(r"(?<![\w/@.-])@(?=[A-Za-z0-9])")

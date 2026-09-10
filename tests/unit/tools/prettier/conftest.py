@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.definitions.prettier import PrettierPlugin
+from lintro.tools.prettier.definition import PrettierPlugin
 
 
 @pytest.fixture

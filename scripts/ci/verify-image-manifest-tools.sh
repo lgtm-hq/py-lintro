@@ -21,6 +21,14 @@ set -euo pipefail
 #     re-copied into the runtime image, so the checkout must be mounted to run
 #     the current code path.
 #
+# Newly-added binary tools (#2192): docker-ci builds the app image from the
+# PR's Dockerfile (digest-pinned tools FROM + the install-tools.sh --docker
+# --tools bridge). A tool the PR adds to the manifest must be present in that
+# image — either already in the digest, or installed by the bridge. The
+# wrapper still computes the added set (fail-closed to empty) so a miss can
+# name the bridge fix, but it does NOT pass those names as --allow-missing.
+# An empty added set means full enforcement, never a skip.
+#
 # The version_command subprocesses resolve their binaries from the image's own
 # PATH (the entrypoint is bypassed with `python3` so the container's baked
 # ENV — PATH, BUN_INSTALL, CARGO_HOME — is used as-is and no gosu redirect
@@ -45,16 +53,24 @@ Environment:
                  (default: tools).
   MANIFEST       Optional. Manifest path relative to the repo root
                  (default: lintro/tools/manifest.json).
+  MANIFEST_SRC   Optional. Hand-authored manifest source used for the
+                 added-tool diff (#2178)
+                 (default: lintro/tools/manifest.src.json). Set it alongside
+                 MANIFEST when pointing the gate at custom manifests.
   BASE_REF       Optional. PR base branch (github.base_ref). When set, tools
                  the PR newly adds to the manifest are computed (diff vs the
-                 merge-base) and passed as --allow-missing, so their absent
-                 binary in the digest-pinned base image downgrades to a
-                 warning instead of failing the gate (#1565). Tools whose
-                 manifest *version* the PR bumps are likewise computed and
-                 passed as --allow-version-lag (#1582). Unset on main/nightly
-                 -> empty allowlists -> full enforcement.
-  ALLOW_MISSING  Optional. Explicit comma-separated allow-missing tool names.
-                 Overrides the BASE_REF-derived set (used by unit tests).
+                 merge-base) and verified like every other tool (#2192). A
+                 miss fails with a hint to add the tool to the
+                 install-tools.sh --docker --tools bridge in the root
+                 Dockerfile. Tools whose manifest *version* the PR bumps are
+                 computed and passed as --allow-version-lag (#1582). Unset on
+                 main/nightly -> empty added/lag sets -> full enforcement.
+  ADDED_TOOLS    Optional. Explicit comma-separated newly-added tool names.
+                 Overrides the BASE_REF-derived added set (unit tests).
+                 These names are verified, not tolerated.
+  ALLOW_MISSING  Optional. Explicit comma-separated allow-missing tool names
+                 for install types the app image cannot carry. Fail-closed:
+                 empty unless set. Not derived from newly-added tools.
   ALLOW_VERSION_LAG  Optional. Explicit comma-separated allow-version-lag
                  tool names. Overrides the BASE_REF-derived set (unit tests).
   DRY_RUN        Optional. When "1"/"true", print the docker command and exit 0
@@ -75,7 +91,9 @@ fi
 : "${IMAGE:?IMAGE is required (e.g. ghcr.io/lgtm-hq/py-lintro:ci-123)}"
 : "${TIERS:=tools}"
 : "${MANIFEST:=lintro/tools/manifest.json}"
+: "${MANIFEST_SRC:=lintro/tools/manifest.src.json}"
 : "${BASE_REF:=}"
+: "${ADDED_TOOLS:=}"
 : "${ALLOW_MISSING:=}"
 : "${ALLOW_VERSION_LAG:=}"
 : "${DRY_RUN:=}"
@@ -95,14 +113,18 @@ fi
 
 if [[ ! -f "${repo_root}/${MANIFEST}" ]]; then
 	log_error "Manifest not found: ${repo_root}/${MANIFEST}"
+	log_error "Generate it with: python3 scripts/ci/generate-tool-versions.py"
 	exit 2
 fi
 
-# Compute allowlists (#1565 / #1582). Explicit ALLOW_* wins (tests); otherwise
-# derive from BASE_REF via the fail-closed helper. On main/nightly (no
-# BASE_REF) the helper returns empty -> full enforcement.
-if [[ -z "$ALLOW_MISSING" ]]; then
-	ALLOW_MISSING="$(BASE_REF="$BASE_REF" MANIFEST="$MANIFEST" EMIT=added \
+# Compute the added-tool set (#2192) and the version-lag allowlist (#1582).
+# Explicit ADDED_TOOLS / ALLOW_* win (tests); otherwise derive from BASE_REF
+# via the fail-closed helper. An empty added set means full enforcement,
+# never a skip. EMIT=added diffs the hand-authored MANIFEST_SRC (names only,
+# #2178); EMIT=version-changed needs the rendered version fields, so it
+# keeps this script's MANIFEST.
+if [[ -z "$ADDED_TOOLS" ]]; then
+	ADDED_TOOLS="$(BASE_REF="$BASE_REF" MANIFEST="$MANIFEST_SRC" EMIT=added \
 		"${script_dir}/compute-new-manifest-tools.sh")"
 fi
 if [[ -z "$ALLOW_VERSION_LAG" ]]; then
@@ -125,6 +147,7 @@ declare -a docker_args=(
 	--entrypoint python3
 	-e SEMGREP_SEND_METRICS=off
 	-e SEMGREP_ENABLE_VERSION_CHECK=0
+	-e "LINTRO_IMAGE_REF=${IMAGE}"
 	-v "${repo_root}:/repo:ro"
 	-w /repo
 	"$IMAGE"
@@ -132,13 +155,18 @@ declare -a docker_args=(
 	--manifest "$MANIFEST"
 	--tiers "$TIERS"
 )
+# Explicit allowlist only — install types the app image cannot carry. None
+# are known today; this stays fail-closed unless a caller sets it.
 if [[ -n "$ALLOW_MISSING" ]]; then
 	docker_args+=(--allow-missing "$ALLOW_MISSING")
-	log_info "Tolerating newly-added tool(s): ${ALLOW_MISSING}"
+	log_info "Allow-missing (explicit allowlist): ${ALLOW_MISSING}"
 fi
 if [[ -n "$ALLOW_VERSION_LAG" ]]; then
 	docker_args+=(--allow-version-lag "$ALLOW_VERSION_LAG")
 	log_info "Tolerating version-lag tool(s): ${ALLOW_VERSION_LAG}"
+fi
+if [[ -n "$ADDED_TOOLS" ]]; then
+	log_info "Newly-added tool(s) verified in the app image (must be bridged if the pinned digest lacks them): ${ADDED_TOOLS}"
 fi
 
 if [[ "$DRY_RUN" == "1" || "$DRY_RUN" == "true" ]]; then
@@ -149,4 +177,12 @@ fi
 log_info "Verifying image tools against manifest (tiers: ${TIERS})"
 log_info "Image:    ${IMAGE}"
 log_info "Manifest: ${MANIFEST}"
-"${docker_args[@]}"
+if "${docker_args[@]}"; then
+	exit 0
+else
+	status=$?
+	if [[ -n "$ADDED_TOOLS" ]]; then
+		log_error "If this failure is a missing newly-added tool (${ADDED_TOOLS}), add it to the install-tools.sh --docker --tools bridge in the root Dockerfile (see the bridge comment block)."
+	fi
+	exit "${status}"
+fi

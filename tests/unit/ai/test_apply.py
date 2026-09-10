@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -499,8 +500,16 @@ def test_apply_fixes_forwards_search_radius(tmp_path):
     assert_that(f.read_text()).contains("target")
 
 
-def test_apply_fixes_forwards_auto_apply(tmp_path):
-    """apply_fixes passes auto_apply through to _apply_fix."""
+def test_apply_fixes_rewrites_the_target_file(tmp_path: Path) -> None:
+    """apply_fixes rewrites the target file with the suggested code.
+
+    ``auto_apply`` is passed through but is reserved for API compatibility and
+    gates nothing today: the write happens whenever the line match succeeds.
+    The assertion is on the file, not on the flag.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
     f = tmp_path / "test.py"
     f.write_text("old code\nline 2\n")
 
@@ -513,10 +522,10 @@ def test_apply_fixes_forwards_auto_apply(tmp_path):
         ),
     ]
 
-    with patch("lintro.ai.apply._apply_fix", return_value=True) as mock:
-        apply_fixes(fixes, auto_apply=True, workspace_root=tmp_path)
-        mock.assert_called_once()
-        assert_that(mock.call_args.kwargs["auto_apply"]).is_true()
+    applied = apply_fixes(fixes, auto_apply=True, workspace_root=tmp_path)
+
+    assert_that(applied).is_length(1)
+    assert_that(f.read_text()).is_equal_to("new code\nline 2\n")
 
 
 # ---------------------------------------------------------------------------

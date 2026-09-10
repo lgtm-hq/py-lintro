@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.implementations.ruff.fix import _temporary_option
+from lintro.tools.ruff.fix import _temporary_option
 
 
 def test_temporary_option_sets_and_restores_value(

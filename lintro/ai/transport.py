@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from lintro.ai.config_overrides import apply_cli_overrides
 from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.providers.anthropic.config import anthropic_settings
 from lintro.ai.providers.claude_auth import should_send_bare
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
@@ -19,9 +19,7 @@ __all__ = [
     "DEFAULT_API_TIMEOUT",
     "DEFAULT_CLI_TIMEOUT",
     "ResolvedTransportSettings",
-    "apply_cli_overrides",
     "apply_resolved_transport",
-    "apply_transport_override",
     "format_resolved_profile_log",
     "resolve_cost_basis",
     "resolve_max_cost_with_source",
@@ -29,7 +27,7 @@ __all__ = [
 ]
 
 DEFAULT_API_TIMEOUT = 60.0
-DEFAULT_CLI_TIMEOUT = 900.0
+DEFAULT_CLI_TIMEOUT = 1800.0
 
 AuthMode = Literal["api_key", "subscription", "unknown"]
 
@@ -40,7 +38,7 @@ class ResolvedTransportSettings:
 
     Attributes:
         transport: Active transport.
-        timeout: Per-call / whole-turn timeout in seconds.
+        timeout: Per-call / per-chunk timeout in seconds.
         max_cost_usd: Enforced or advisory cost ceiling (None = unlimited).
         cost_is_advisory: True when the cap cannot enforce spend (CLI/subscription).
         auth_mode: How the transport authenticates.
@@ -78,28 +76,25 @@ def resolve_cost_basis(*, auth_mode: str, estimated: bool) -> CostBasis | None:
     return None
 
 
-def apply_transport_override(
-    ai_config: AIConfig,
-    transport: str | AITransport | None,
-) -> AIConfig:
-    """Apply a CLI transport override on top of config.
+def _profile_max_cost(ai_config: AIConfig) -> float | None:
+    """Return the active transport profile's cost cap, if the profile sets one.
+
+    Single source for the profile-cap rule shared by
+    :func:`resolve_transport_settings` and
+    :func:`resolve_max_cost_with_source`: the CLI profile carries an
+    advisory cap, the API profile an enforced one.
 
     Args:
-        ai_config: Loaded AI configuration.
-        transport: Optional ``api`` or ``cli`` override from the CLI flag.
+        ai_config: AI configuration (transport may be None; defaults to api).
 
     Returns:
-        Config unchanged when *transport* is ``None``, otherwise a copy
-        with ``transport`` replaced.
+        The profile cap, or None when the active profile omits it.
     """
-    if transport is None:
-        return ai_config
-    transport_enum = (
-        transport
-        if isinstance(transport, AITransport)
-        else AITransport(str(transport).lower())
-    )
-    return ai_config.model_copy(update={"transport": transport_enum})
+    transport = ai_config.transport or AITransport.API
+    profiles = ai_config.transports
+    if transport is AITransport.CLI:
+        return profiles.cli.max_cost_usd_advisory
+    return profiles.api.max_cost_usd
 
 
 def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings:
@@ -120,24 +115,21 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
 
     if transport is AITransport.CLI:
         # Legacy ``ai.api_timeout`` is API-sized (60s default) and must not
-        # silently become the CLI whole-turn budget. CLI falls back to the
-        # CLI built-in (900s) when the profile omits timeout (#1923).
+        # silently become the CLI per-chunk budget. CLI falls back to the
+        # CLI built-in (1800s) when the profile omits timeout (#1923).
         timeout = (
             profiles.cli.timeout
             if profiles.cli.timeout is not None
             else DEFAULT_CLI_TIMEOUT
         )
-        max_cost = (
-            profiles.cli.max_cost_usd_advisory
-            if profiles.cli.max_cost_usd_advisory is not None
-            else ai_config.max_cost_usd
-        )
+        profile_cap = _profile_max_cost(ai_config)
+        max_cost = profile_cap if profile_cap is not None else ai_config.max_cost_usd
         # Anthropic's CLI switches to --bare when an API key is reachable
         # (CliBareMode.AUTO, #1859): the call then bills the key, not the
         # subscription, so report api_key/estimated instead of claiming
         # subscription/unpriceable (#1923 cost provenance).
         bare_billing = ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
-            configured=ai_config.cli_bare,
+            configured=anthropic_settings(ai_config).cli_bare,
         )
         return ResolvedTransportSettings(
             transport=transport,
@@ -153,11 +145,8 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
         if profiles.api.timeout is not None
         else ai_config.api_timeout
     )
-    max_cost = (
-        profiles.api.max_cost_usd
-        if profiles.api.max_cost_usd is not None
-        else ai_config.max_cost_usd
-    )
+    profile_cap = _profile_max_cost(ai_config)
+    max_cost = profile_cap if profile_cap is not None else ai_config.max_cost_usd
     return ResolvedTransportSettings(
         transport=transport,
         timeout=timeout if timeout is not None else DEFAULT_API_TIMEOUT,
@@ -185,21 +174,11 @@ def resolve_max_cost_with_source(
         ``(cap, source)`` after transport-profile resolution.
     """
     source = resolved.source_of("max_cost_usd")
-    settings = resolve_transport_settings(resolved.config)
-    if source in (ConfigSource.FLAG, ConfigSource.ENV):
-        return settings.max_cost_usd, source
-
-    config = resolved.config
-    transport = config.transport or AITransport.API
-    profiles = config.transports
-    profile_cap = (
-        profiles.cli.max_cost_usd_advisory
-        if transport is AITransport.CLI
-        else profiles.api.max_cost_usd
-    )
-    if profile_cap is not None:
-        return profile_cap, ConfigSource.CONFIG
-    return settings.max_cost_usd, source
+    if source not in (ConfigSource.FLAG, ConfigSource.ENV):
+        profile_cap = _profile_max_cost(resolved.config)
+        if profile_cap is not None:
+            return profile_cap, ConfigSource.CONFIG
+    return resolve_transport_settings(resolved.config).max_cost_usd, source
 
 
 def apply_resolved_transport(ai_config: AIConfig) -> AIConfig:

@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
+from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models._coerce import coerce_int
 from lintro.ai.review.models.finding_occurrence import (
@@ -56,6 +59,25 @@ class FindingRecord:
             ``addressed / total`` even after some locations are fixed.
         severity_downgraded: True when the P1 evidence gate downgraded the
             severity at the most recent sighting.
+        cross_chunk_contradiction: Why the cross-chunk guard tagged this
+            finding at the most recent sighting, persisted so a replayed
+            finding keeps its tag and is never guarded a second time (#2265).
+        description: Finding body text, persisted so a SIGTERM resume can
+            still post an actionable inline comment.
+        cause: Root-cause text from the most recent sighting.
+        fix: Fix suggestion from the most recent sighting.
+        confidence: Model confidence from the most recent sighting.
+        origin: Which non-chunk pass first reported the finding, or
+            ``None`` for an ordinary chunk finding (#2269). Persisted only
+            when set, so a blob written without the synthesis pass is
+            byte-identical to one written before it existed.
+        evidence_style: Self-reported evidence basis from the most recent
+            sighting (#2099). Persisted so the convergence score of a carried
+            finding is identical to the score it had when first reported — a
+            round-to-round jump in the score would be indistinguishable from
+            real movement in the review. Serialized only when it differs from
+            the ``diff_local`` default, so a record written before the field
+            existed round-trips byte-identically.
     """
 
     fingerprint: str
@@ -76,6 +98,13 @@ class FindingRecord:
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     occurrences_total: int = 0
     severity_downgraded: bool = False
+    cross_chunk_contradiction: CrossChunkContradiction | None = None
+    description: str = ""
+    cause: str = ""
+    fix: str = ""
+    confidence: str = ""
+    origin: FindingOrigin | None = None
+    evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
 
     @property
     def key(self) -> str:
@@ -156,6 +185,20 @@ class FindingRecord:
             payload["occurrences_total"] = self.occurrence_total
         if self.severity_downgraded:
             payload["severity_downgraded"] = True
+        if self.cross_chunk_contradiction is not None:
+            payload["cross_chunk_contradiction"] = self.cross_chunk_contradiction.value
+        if self.description:
+            payload["description"] = self.description
+        if self.cause:
+            payload["cause"] = self.cause
+        if self.fix:
+            payload["fix"] = self.fix
+        if self.confidence:
+            payload["confidence"] = self.confidence
+        if self.origin is not None:
+            payload["origin"] = str(self.origin)
+        if self.evidence_style is not EvidenceStyle.DIFF_LOCAL:
+            payload["evidence_style"] = str(self.evidence_style)
         return payload
 
     @classmethod
@@ -196,7 +239,35 @@ class FindingRecord:
             occurrences=parse_occurrences(payload.get("occurrences")),
             occurrences_total=coerce_int(payload.get("occurrences_total")),
             severity_downgraded=bool(payload.get("severity_downgraded", False)),
+            cross_chunk_contradiction=_contradiction_from_payload(
+                payload.get("cross_chunk_contradiction"),
+            ),
+            description=str(payload.get("description", "")),
+            cause=str(payload.get("cause", "")),
+            fix=str(payload.get("fix", "")),
+            confidence=str(payload.get("confidence", "")),
+            origin=_parse_origin(payload.get("origin")),
+            evidence_style=_parse_evidence_style(payload.get("evidence_style")),
         )
+
+
+def _parse_origin(value: Any) -> FindingOrigin | None:
+    """Parse a finding origin label from an untrusted state blob.
+
+    Args:
+        value: Raw origin value decoded from the state blob.
+
+    Returns:
+        The matching member, or ``None`` when the key is absent or carries a
+        label this version does not know. An unrecognized origin degrades to
+        "ordinary chunk finding", which only loses a display tag.
+    """
+    if value is None:
+        return None
+    try:
+        return FindingOrigin(str(value).lower())
+    except ValueError:
+        return None
 
 
 def _parse_checklist_ids(value: Any) -> tuple[int, ...]:
@@ -249,9 +320,44 @@ def _parse_kind(value: Any) -> FindingKind:
         return FindingKind.FINDING
 
 
+def _parse_evidence_style(value: Any) -> EvidenceStyle:
+    """Parse an evidence-style label from an untrusted state blob.
+
+    Args:
+        value: Raw evidence_style value decoded from the state blob.
+
+    Returns:
+        The parsed style, defaulting to :data:`EvidenceStyle.DIFF_LOCAL` when
+        absent or unrecognized. A v2 record carries no such key, and the
+        default is the *highest* likelihood in the convergence score, so a
+        missing label can never deflate a PR toward an early stop. Parsing
+        goes through :meth:`EvidenceStyle.coerce`, the same helper the
+        model-response normalizer uses, so the blob decoder and the parser
+        cannot drift apart on whitespace, case, or the unknown-label default.
+    """
+    return EvidenceStyle.coerce(value)
+
+
 def _parse_status(value: Any) -> FindingStatus:
     """Parse a finding status label, defaulting to open for unknown input."""
     try:
         return FindingStatus(str(value).lower())
     except ValueError:
         return FindingStatus.OPEN
+
+
+def _contradiction_from_payload(value: object) -> CrossChunkContradiction | None:
+    """Parse a persisted cross-chunk tag, tolerating older states without one.
+
+    Args:
+        value: Raw payload value, ``None`` for states written before the tag.
+
+    Returns:
+        The tag, or ``None`` when absent or unrecognized.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return CrossChunkContradiction(value)
+    except ValueError:
+        return None

@@ -53,4 +53,18 @@ describe('groupSectionDocs', () => {
     const { groups } = groupSectionDocs('tools', docs);
     expect(groups[0]?.docs[0]?.id).toBe('tools/ruff');
   });
+
+  it('groups spectral under config without frontmatter', () => {
+    const docs = [
+      { id: 'tools', data: { title: 'tools', order: 5 } },
+      {
+        id: 'tools/spectral',
+        data: { title: 'spectral', order: 20 },
+      },
+    ];
+
+    const { groups } = groupSectionDocs('tools', docs);
+    const config = groups.find((group) => group.key === 'config');
+    expect(config?.docs.map((doc) => doc.id)).toContain('tools/spectral');
+  });
 });

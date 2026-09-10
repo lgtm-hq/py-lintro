@@ -1,0 +1,17 @@
+{
+  "headline": "Session gate now fails closed, but a hardcoded key landed with it. Token decoding gained an unverified fast path.",
+  "walkthrough": [
+    {
+      "text": "is_active rejects the expired status explicitly.",
+      "finding_ref": "src/auth/session.py:6"
+    },
+    {
+      "text": "A module-level API key constant was added.",
+      "finding_ref": "src/auth/session.py:3"
+    },
+    {
+      "text": "decode accepts a verify flag that defaults to skipping verification.",
+      "finding_ref": "src/auth/tokens.py:1"
+    }
+  ]
+}

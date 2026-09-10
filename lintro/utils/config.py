@@ -26,8 +26,6 @@ __all__ = [
     # Lintro config loading
     "load_lintro_global_config",
     "load_lintro_tool_config",
-    "get_tool_order_config",
-    "load_post_checks_config",
     "load_module_size_config",
     # Tool-specific loaders
     "load_ruff_config",
@@ -80,7 +78,7 @@ def _find_pyproject(start_path: Path | None = None) -> Path | None:
     key = start_path.resolve()
     if key in _pyproject_path_cache:
         return _pyproject_path_cache[key]
-    for parent in [start_path, *start_path.parents]:
+    for parent in [key, *key.parents]:
         candidate = parent / "pyproject.toml"
         if candidate.exists():
             _pyproject_path_cache[key] = candidate
@@ -152,20 +150,17 @@ def _get_lintro_section() -> dict[str, Any]:
 # returned by ``load_lintro_global_config``.
 STRUCTURAL_SECTIONS: frozenset[str] = frozenset(
     {
-        "post_checks",
         "module_size",
         "versions",
     },
 )
 
-# Legacy/alternate section names that do not match a ``ToolName`` value
-# directly but have historically been treated as tool sections (e.g. the
-# underlying binary name rather than the canonical tool name).
-_LEGACY_TOOL_SECTION_ALIASES: frozenset[str] = frozenset(
-    {
-        "markdownlint-cli2",
-    },
-)
+# Legacy/alternate section names mapped to the canonical ``ToolName`` value.
+# These do not match a ``ToolName`` spelling directly (e.g. the underlying
+# binary name rather than the canonical tool name) but are accepted in config.
+LEGACY_TOOL_SECTION_ALIASES: dict[str, str] = {
+    "markdownlint-cli2": "markdownlint",
+}
 
 
 def _get_tool_sections() -> frozenset[str]:
@@ -189,7 +184,7 @@ def _get_tool_sections() -> frozenset[str]:
 
     tool_sections = {tool.value for tool in ToolName}
     tool_sections |= {tool.value.replace("_", "-") for tool in ToolName}
-    tool_sections |= _LEGACY_TOOL_SECTION_ALIASES
+    tool_sections |= set(LEGACY_TOOL_SECTION_ALIASES)
     return frozenset(tool_sections)
 
 
@@ -218,40 +213,6 @@ def load_lintro_tool_config(tool_name: str) -> dict[str, Any]:
     lintro_config = _get_lintro_section()
     tool_config = lintro_config.get(tool_name, {})
     return tool_config if isinstance(tool_config, dict) else {}
-
-
-def get_tool_order_config() -> dict[str, Any]:
-    """Get tool ordering configuration from [tool.lintro].
-
-    Returns:
-        Tool ordering configuration with keys:
-        - strategy: "priority", "alphabetical", or "custom"
-        - custom_order: list of tool names (for custom strategy)
-        - priority_overrides: dict of tool -> priority (for priority strategy)
-    """
-    global_config = load_lintro_global_config()
-
-    return {
-        "strategy": global_config.get("tool_order", "priority"),
-        "custom_order": global_config.get("tool_order_custom", []),
-        "priority_overrides": global_config.get("tool_priorities", {}),
-    }
-
-
-def load_post_checks_config() -> dict[str, Any]:
-    """Load post-checks configuration from pyproject.
-
-    Returns:
-        Dict with keys like:
-            - enabled: bool
-            - tools: list[str]
-            - enforce_failure: bool
-    """
-    cfg = _get_lintro_section()
-    section = cfg.get("post_checks", {})
-    if isinstance(section, dict):
-        return section
-    return {}
 
 
 def load_module_size_config() -> dict[str, Any]:

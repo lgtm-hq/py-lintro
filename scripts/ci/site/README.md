@@ -4,6 +4,7 @@
 | ------------------------------- | -------------------------------------------------------------------------- |
 | `migrate-docs-content.py`       | Copy repo-root `docs/` into `apps/site/src/content/docs/` with frontmatter |
 | `build.sh`                      | Build Astro site (`ASTRO_BASE` defaults from `defaults.env`)               |
+| `dev.sh`                        | Astro dev server (`ASTRO_BASE` defaults from `defaults.env`)               |
 | `check.sh`                      | `astro check` and dependency install                                       |
 | `test.sh`                       | Vitest with coverage                                                       |
 | `test-python.sh`                | Pytest for `tests/scripts/ci/`                                             |
@@ -15,12 +16,12 @@
 ## Astro base path
 
 [`defaults.env`](defaults.env) defines `ASTRO_BASE_DEFAULT` (currently `/py-lintro/`).
-[`build.sh`](build.sh) and the root [`Makefile`](../../../Makefile) `SITE_ASTRO_BASE`
-target read that value — do not duplicate the path elsewhere.
+[`build.sh`](build.sh) and [`dev.sh`](dev.sh) read that value — do not duplicate the
+path elsewhere.
 
 | Context                              | `ASTRO_BASE`                             |
 | ------------------------------------ | ---------------------------------------- |
-| Local `make site-dev` / `site-build` | `ASTRO_BASE_DEFAULT` from `defaults.env` |
+| Local `just site-dev` / `site-build` | `ASTRO_BASE_DEFAULT` from `defaults.env` |
 | `site-quality.yml` link check build  | `/` (root-relative hrefs under `dist/`)  |
 | `deploy-pages.yml` production deploy | `ASTRO_BASE_DEFAULT` via `build.sh`      |
 

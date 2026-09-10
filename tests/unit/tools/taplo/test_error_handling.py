@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from assertpy import assert_that
 
-from lintro.tools.definitions.taplo import TaploPlugin
+from lintro.tools.taplo.definition import TaploPlugin
 from tests.test_samples_helpers import copy_sample
 
 # Tests for timeout handling in check method

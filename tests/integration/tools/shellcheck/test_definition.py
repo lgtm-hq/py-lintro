@@ -5,20 +5,18 @@ These tests verify the plugin definition has correct metadata and configuration.
 
 from __future__ import annotations
 
-import shutil
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import pytest
 from assertpy import assert_that
 
+from tests.integration._tools import require_tool
+
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("shellcheck") is None,
-    reason="shellcheck not installed",
-)
+pytestmark = require_tool("shellcheck")
 
 
 @pytest.mark.parametrize(

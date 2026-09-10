@@ -144,8 +144,8 @@ def _iter_tools(
 
 # Exit code returned by `_run` when the binary itself cannot be found on PATH
 # (FileNotFoundError). This is the ONLY failure mode tolerated for an
-# allow-missing tool: the tool the PR introduces is not yet baked into the
-# digest-pinned base image, so its binary is simply absent. Any other non-zero
+# explicit --allow-missing tool (install types the app image cannot carry).
+# Newly-added tools are verified, not tolerated (#2192). Any other non-zero
 # exit means the binary IS present but misbehaving, which stays a hard failure
 # even for an allow-missing tool.
 _MISSING_BINARY_EXIT = 127
@@ -240,6 +240,44 @@ def _is_image_older_than_manifest(*, expected: str, actual: str) -> bool:
     return actual_padded < expected_padded
 
 
+def _is_image_newer_than_manifest(*, expected: str, actual: str) -> bool:
+    """Return True when the installed version is strictly newer than expected.
+
+    Args:
+        expected: Manifest-declared version.
+        actual: Version parsed from the installed binary.
+
+    Returns:
+        True when ``actual > expected`` under numeric segment comparison.
+        False when equal, older, or either side cannot be parsed.
+    """
+    return _is_image_older_than_manifest(expected=actual, actual=expected)
+
+
+def _versions_compare_equal(*, expected: str, actual: str) -> bool:
+    """Return True when two unequal version strings compare numerically equal.
+
+    ``7.1`` and ``7.1.0`` are the same release written two ways. Neither the
+    older nor the newer check fires for such a pair, so report the mismatch as
+    a manifest-string alignment rather than as unorderable versions.
+
+    Args:
+        expected: Manifest-declared version.
+        actual: Version parsed from the installed binary.
+
+    Returns:
+        True when both sides parse and compare equal under numeric padding.
+    """
+    expected_parts = _version_tuple(expected)
+    actual_parts = _version_tuple(actual)
+    if not expected_parts or not actual_parts:
+        return False
+    width = max(len(expected_parts), len(actual_parts))
+    return expected_parts + (0,) * (width - len(expected_parts)) == actual_parts + (
+        0,
+    ) * (width - len(actual_parts))
+
+
 def main() -> int:
     """Verify tools in manifest.json are installed with correct versions."""
     parser = argparse.ArgumentParser()
@@ -259,10 +297,11 @@ def main() -> int:
         default=None,
         help=(
             "Tool name(s) whose missing binary downgrades to a warning instead "
-            "of failing. Repeatable and/or comma-separated. Intended for the "
-            "tool a PR introduces, which is not yet in the digest-pinned base "
-            "image. An allow-missing tool that IS present must still "
-            "version-match; every other tool keeps hard-fail behavior."
+            "of failing. Repeatable and/or comma-separated. Explicit allowlist "
+            "only — install types the app image cannot carry (#2192). Newly "
+            "added tools are verified, not listed here. An allow-missing tool "
+            "that IS present must still version-match; every other tool keeps "
+            "hard-fail behavior."
         ),
     )
     parser.add_argument(
@@ -279,6 +318,7 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    image_ref = os.environ.get("LINTRO_IMAGE_REF", "<image>")
 
     tiers = [t.strip() for t in args.tiers.split(",")]
     allow_missing = _parse_allow_missing(args.allow_missing)
@@ -331,17 +371,14 @@ def main() -> int:
                 continue
         if code != 0:
             cmd_str = " ".join(cmd)
-            # Tolerate ONLY a genuinely-absent binary (127) for a tool the PR
-            # introduces: the digest-pinned base image cannot yet contain it,
-            # so downgrade to a loud warning instead of a hard failure. The
-            # post-merge tools-image republish + digest bump restores full
-            # coverage. Any other exit code means the binary is present but
-            # broken, which stays a failure even for an allow-missing tool.
+            # Tolerate ONLY a genuinely-absent binary (127) for an explicit
+            # allow-missing name. Newly-added tools are not placed on this
+            # list (#2192). Any other exit code means the binary is present
+            # but broken, which stays a failure even for an allow-missing tool.
             if name in allow_missing and code == _MISSING_BINARY_EXIT:
                 warnings.append(
                     f"{name}: binary not found in image ({cmd_str}); tolerated "
-                    f"because this tool is newly added by the PR and is not yet "
-                    f"in the digest-pinned base image",
+                    f"because this tool is on the explicit allow-missing list",
                 )
                 continue
             diagnostic = output.strip()
@@ -371,8 +408,25 @@ def main() -> int:
                     f"digest-pinned base image has not republished yet",
                 )
                 continue
+            if _is_image_older_than_manifest(expected=expected, actual=actual):
+                guidance = f"digest-bump required: image {image_ref} lags the manifest"
+            elif _is_image_newer_than_manifest(expected=expected, actual=actual):
+                guidance = (
+                    f"manifest bump required: image {image_ref} is newer than "
+                    f"the manifest; update the manifest to {actual}"
+                )
+            elif _versions_compare_equal(expected=expected, actual=actual):
+                guidance = (
+                    f"align the manifest string to the installed version {actual}"
+                )
+            else:
+                guidance = (
+                    "version ordering unavailable; inspect the manifest and "
+                    "image versions for a mismatch"
+                )
             failures.append(
-                f"{name}: version mismatch (expected {expected}, got {actual})",
+                f"{name}: version mismatch (expected {expected}, got {actual}); "
+                f"{guidance}",
             )
 
     if notices:
@@ -384,10 +438,10 @@ def main() -> int:
     if warnings:
         # GitHub Actions annotation (::warning::) plus a human-readable block so
         # the tolerated tool is prominent in both the checks UI and raw logs.
-        print("::warning::Tool verification tolerated digest-lag tool(s):")
+        print("::warning::Tool verification tolerated tool(s):")
         for item in warnings:
             print(f"::warning::{item}")
-        print("Tolerated tool(s) (newly added or version-bumped by this PR):")
+        print("Tolerated tool(s) (explicit allow-missing or version-lag):")
         for item in warnings:
             print(f"  - {item}")
 
@@ -400,7 +454,7 @@ def main() -> int:
     tiers_str = ", ".join(tiers)
     summary = f"Verified {len(tools)} tool(s) against manifest tiers: {tiers_str}"
     if warnings:
-        summary = f"{summary} ({len(warnings)} digest-lag tool(s) tolerated)"
+        summary = f"{summary} ({len(warnings)} tolerated tool(s))"
     print(summary)
     return 0
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from lintro.tools.definitions.oxlint import OxlintPlugin
+from lintro.tools.oxlint.definition import OxlintPlugin
 
 
 @pytest.fixture

@@ -8,6 +8,8 @@ from typing import cast
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.config import AIConfig
+from lintro.ai.provider_enum import AIProvider
 from lintro.config.lintro_config import LintroConfig, LintroToolConfig
 from lintro.enums.execution_class import (
     ExecutionClass,
@@ -19,6 +21,7 @@ from lintro.utils.execution import advisory as advisory_module
 from lintro.utils.execution.advisory import (
     advisory_findings_count,
     advisory_results_to_payload,
+    advisory_tools_errored,
     get_advisory_tool_names,
     render_advisory_results,
     resolve_advisory_tools,
@@ -131,6 +134,33 @@ def test_run_advisory_tools_reports_tool_failures(
     assert_that(results[0].output).contains("provider exploded")
 
 
+def test_run_advisory_tools_forwards_ai_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The CLI-resolved AIConfig is passed into each tool's check() options."""
+    captured: dict[str, object] = {}
+
+    class _Capture:
+        def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
+            captured.update(options)
+            return ToolResult(name="idiom-review", success=True)
+
+    monkeypatch.setattr(
+        advisory_module,
+        "configure_tool_for_execution",
+        lambda **_kwargs: _Capture(),
+    )
+    ai_config = AIConfig(provider=AIProvider.OPENAI)
+    run_advisory_tools(
+        paths=[str(tmp_path)],
+        tool_names=["idiom-review"],
+        ai_config=ai_config,
+    )
+
+    assert_that(captured["ai_config"]).is_equal_to(ai_config)
+
+
 def test_advisory_findings_count_ignores_skipped_results() -> None:
     """Skipped advisory tools contribute no findings."""
     results = [
@@ -144,6 +174,24 @@ def test_advisory_findings_count_ignores_skipped_results() -> None:
     ]
 
     assert_that(advisory_findings_count(results)).is_equal_to(2)
+
+
+def test_advisory_tools_errored_ignores_findings_and_skips() -> None:
+    """Findings and skips are not execution errors; a bare failure is."""
+    findings = ToolResult(name="b", success=False, issues_count=2)
+    skipped = ToolResult(
+        name="a",
+        skipped=True,
+        skip_reason="opt-in required",
+    )
+    failed = ToolResult(
+        name="idiom-review",
+        success=False,
+        output="ai.provider is required",
+    )
+
+    assert_that(advisory_tools_errored([findings, skipped])).is_false()
+    assert_that(advisory_tools_errored([findings, skipped, failed])).is_true()
 
 
 def test_render_advisory_results_reports_skip_reason() -> None:
@@ -190,6 +238,8 @@ def test_advisory_results_to_payload_is_json_shaped() -> None:
 
     assert_that(payload).is_length(1)
     assert_that(payload[0]["tool"]).is_equal_to("idiom-review")
+    assert_that(payload[0]["success"]).is_false()
+    assert_that(payload[0]["output"]).is_none()
     assert_that(payload[0]["issues_count"]).is_equal_to(1)
     issues = cast("list[dict[str, str]]", payload[0]["issues"])
     assert_that(issues[0]["file"]).is_equal_to("a.py")

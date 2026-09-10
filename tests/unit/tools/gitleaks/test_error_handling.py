@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.gitleaks import GitleaksPlugin
+from lintro.tools.gitleaks.definition import GitleaksPlugin
 from tests.test_samples_helpers import copy_sample
 
 

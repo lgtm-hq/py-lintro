@@ -19,7 +19,11 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum, auto
 
-from lintro.ai.exceptions import AIAuthenticationError, AIRateLimitError
+from lintro.ai.exceptions import (
+    AIAuthenticationError,
+    AIProviderRequiredError,
+    AIRateLimitError,
+)
 
 
 class ReviewErrorKind(StrEnum):
@@ -38,6 +42,8 @@ class ReviewErrorKind(StrEnum):
         INVALID_RESPONSE: The model returned a malformed/unparseable response
             (a lintro-side parse/validation failure, not a provider transport
             error).
+        PROVIDER_UNAVAILABLE: No provider is configured, so the review never
+            reached a model. Distinct from a malformed response.
         UNKNOWN: No signature matched; the surfaced cause text is shown as-is.
     """
 
@@ -49,6 +55,7 @@ class ReviewErrorKind(StrEnum):
     SERVER_ERROR = auto()
     TIMEOUT = auto()
     INVALID_RESPONSE = auto()
+    PROVIDER_UNAVAILABLE = auto()
     UNKNOWN = auto()
 
 
@@ -98,11 +105,34 @@ _KIND_PRIORITY: tuple[ReviewErrorKind, ...] = (
 )
 
 
+# The claude CLI reports an exhausted subscription usage window as
+# "You've hit your session limit · resets 9:40am (UTC)" while tagging the
+# same envelope ``"terminal_reason":"api_error"`` — which read as a provider
+# outage before #2470. This pattern only *extracts* the reset clock for the
+# error sticky; it never classifies on its own, because "rate limit resets
+# 25s" is a rate limit, not an exhausted quota. The limit phrase below is the
+# discriminator.
+RESET_TIME_PATTERN: re.Pattern[str] = re.compile(
+    r"resets\s+(?:at\s+)?"
+    r"(?P<when>\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?(?:\s*\([^)\n]{1,24}\))?)",
+    re.IGNORECASE,
+)
+
+# Usage-window wording, shared by the claude CLI and the fallback set
+# ("session limit" subsumes "you've hit your session limit").
+_USAGE_WINDOW_SUBSTRINGS: tuple[str, ...] = ("session limit", "usage limit")
+
+
 PROVIDER_ERROR_SIGNATURES: dict[str, dict[ReviewErrorKind, ErrorMatcher]] = {
     "anthropic": {
         # Depleted credits: HTTP 400 invalid_request_error, NOT 402/429.
         ReviewErrorKind.INSUFFICIENT_CREDITS: ErrorMatcher(
             substrings=("credit balance is too low", "credit balance"),
+        ),
+        # Subscription usage window exhausted (claude CLI): a plan quota with a
+        # known reset time, not a depleted balance and not an outage (#2470).
+        ReviewErrorKind.QUOTA_EXCEEDED: ErrorMatcher(
+            substrings=_USAGE_WINDOW_SUBSTRINGS,
         ),
         ReviewErrorKind.RATE_LIMITED: ErrorMatcher(
             substrings=("rate_limit_error", "rate limit"),
@@ -214,7 +244,11 @@ _SHARED_SIGNATURES: dict[ReviewErrorKind, ErrorMatcher] = {
         statuses=(402,),
     ),
     ReviewErrorKind.QUOTA_EXCEEDED: ErrorMatcher(
-        substrings=("quota exceeded", "exceeded your current quota", "usage limit"),
+        substrings=(
+            "quota exceeded",
+            "exceeded your current quota",
+            *_USAGE_WINDOW_SUBSTRINGS,
+        ),
     ),
     ReviewErrorKind.AUTH_FAILED: ErrorMatcher(
         substrings=(
@@ -294,6 +328,10 @@ KIND_COPY: dict[ReviewErrorKind, tuple[str, str]] = {
         "Retry the review — model output may have been malformed — or try a "
         "different model via `ai.model`.",
     ),
+    ReviewErrorKind.PROVIDER_UNAVAILABLE: (
+        "no AI provider is configured",
+        "Set `ai.provider` in config, LINTRO_AI_PROVIDER, or --provider.",
+    ),
     ReviewErrorKind.UNKNOWN: (
         "the review could not be completed",
         "See the cause above and the workflow logs; retry if it looks transient.",
@@ -344,7 +382,11 @@ def resolve_cause_text(*, error: Exception) -> str:
         return error.cause_message
     cause = error.__cause__
     if isinstance(cause, BaseException):
-        return str(cause)
+        cause_text = str(cause).strip()
+        if cause_text:
+            return cause_text
+        # asyncio.TimeoutError() stringifies to "" — keep the wrapper
+        # message so "CLI timed out after Ns" still classifies (#2156).
     return str(error)
 
 
@@ -356,15 +398,44 @@ def _resolve_cause_exception(*, error: Exception) -> BaseException:
     return current
 
 
+def _iter_cause_chain(*, error: BaseException) -> tuple[BaseException, ...]:
+    """Return the exception and each chained ``__cause__``."""
+    chain: list[BaseException] = []
+    current: BaseException | None = error
+    while current is not None:
+        chain.append(current)
+        cause = current.__cause__
+        current = cause if isinstance(cause, BaseException) else None
+    return tuple(chain)
+
+
+def _typed_kind(*, error: Exception) -> ReviewErrorKind | None:
+    """Return a kind from a typed lintro AI exception anywhere in the chain."""
+    for current in _iter_cause_chain(error=error):
+        if isinstance(current, AIAuthenticationError):
+            return ReviewErrorKind.AUTH_FAILED
+        if isinstance(current, AIRateLimitError):
+            return ReviewErrorKind.RATE_LIMITED
+        if isinstance(current, AIProviderRequiredError):
+            return ReviewErrorKind.PROVIDER_UNAVAILABLE
+    return None
+
+
+def _chain_has(*, error: Exception, typ: type[BaseException]) -> bool:
+    """Return whether *typ* appears anywhere in the exception chain."""
+    return any(isinstance(current, typ) for current in _iter_cause_chain(error=error))
+
+
 def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKind:
     """Classify a review error into a canonical :class:`ReviewErrorKind`.
 
     Resolves the underlying provider cause (unwrapping any
     ``ReviewExecutionError`` wrapper), then tests it against the provider's
-    signature map, the lintro AI exception hierarchy, and finally a shared
-    fallback set before defaulting to :attr:`ReviewErrorKind.UNKNOWN`. When the
-    error already carries a resolved kind (attached by the orchestrator), that
-    kind is authoritative.
+    signature map (so credit/quota needles beat a typed rate-limit), the
+    lintro AI exception hierarchy, TimeoutError, SERVER_ERROR, and finally a
+    shared fallback set before defaulting to :attr:`ReviewErrorKind.UNKNOWN`.
+    When the error already carries a resolved kind (attached by the
+    orchestrator), that kind is authoritative.
 
     Args:
         provider: Provider identifier (e.g. ``"anthropic"``); case-insensitive.
@@ -384,16 +455,28 @@ def classify_provider_error(*, provider: str, error: Exception) -> ReviewErrorKi
 
     signatures = PROVIDER_ERROR_SIGNATURES.get((provider or "").lower(), {})
     for kind in _KIND_PRIORITY:
+        if kind is ReviewErrorKind.SERVER_ERROR:
+            continue
         matcher = signatures.get(kind)
         if matcher is not None and matcher.matches(status=status, text=text):
             return kind
 
-    # Subsume the existing lintro AI exception hierarchy: a typed auth/rate-limit
-    # error is authoritative even when its text carries no matching substring.
-    if isinstance(cause_exc, AIAuthenticationError):
-        return ReviewErrorKind.AUTH_FAILED
-    if isinstance(cause_exc, AIRateLimitError):
-        return ReviewErrorKind.RATE_LIMITED
+    # Typed AI exceptions win over TimeoutError / SERVER_ERROR, but credit,
+    # auth, and quota signatures above still win so OpenAI's RateLimitError
+    # wrapping insufficient_quota classifies as INSUFFICIENT_CREDITS (#2156).
+    typed = _typed_kind(error=error)
+    if typed is not None:
+        return typed
+
+    # A chained TimeoutError is a timeout even when the wrapper text looks
+    # like an HTTP 504 / server error. Specific credit/auth/quota signatures
+    # and typed exceptions above still win (#2156).
+    if _chain_has(error=error, typ=TimeoutError):
+        return ReviewErrorKind.TIMEOUT
+
+    matcher = signatures.get(ReviewErrorKind.SERVER_ERROR)
+    if matcher is not None and matcher.matches(status=status, text=text):
+        return ReviewErrorKind.SERVER_ERROR
 
     # A bare ``ValueError`` cause is a lintro-side parse/validation failure of
     # the model response, not a provider transport error — surface it as such

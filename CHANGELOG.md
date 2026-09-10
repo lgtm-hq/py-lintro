@@ -21,6 +21,726 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.9] - 2026-09-09
+
+### Changed
+
+- **tests**: keep assertpy with an import guard and a designated fallback (#2468)
+  (223f76f)
+
+### Fixed
+
+- **ai/review**: classify the claude cli session-limit error as quota, not
+  `server_error` (#2529) (d84f0e7)
+- **ai/providers**: pass model through the CLI streaming fallback and default cursor to
+  cli transport (#2527) (648ac4d)
+
+## [0.152.8] - 2026-09-09
+
+### Changed
+
+- **tsc**: restore the `set_options` validation tests removed by #2427 (#2525) (a382c9c)
+
+### Fixed
+
+- **deps**: restore astro 7.2.9 in the docs site (#2526) (32b7115)
+
+## [0.152.7] - 2026-09-09
+
+### Changed
+
+- **deps**: override smol-toml to 1.8.0 to clear GHSA-7w5x-hrqm-74c2 (#2520) (c0297e5)
+
+### Fixed
+
+- **release**: grant actions: read on the homebrew-tap caller job (#2518) (3e37ec7)
+
+## [0.152.6] - 2026-09-09
+
+### Fixed
+
+- **ci**: give the AI Review job a 120-minute budget for large diffs (#2508) (f51c971)
+
+## [0.152.5] - 2026-09-09
+
+### Changed
+
+- **deps**: update lintro-ai-tools docker digest to 5dfda12 (#2496) (2e3e2bd)
+- allow the hosted-compute watchdog hosts on the linux binary job (#2487) (5d5572a)
+
+### Fixed
+
+- **ci**: grant actions:read at the publish caller; upgrade httpx2 (#2503) (4522f34)
+
+## [0.152.4] - 2026-09-09
+
+### Changed
+
+- **deps**: renovate bump (#2486) (af2d97b)
+- **deps**: update rust-lang/rust to 1.98.1 (#2465) (cbe03f5)
+
+### Fixed
+
+- **ci**: pin the lintro-tools image built from main's rustc 1.98.1 manifest (#2499)
+  (e8d2293)
+
+## [0.152.3] - 2026-09-09
+
+### Changed
+
+- **deps**: update svelte to 5.57.0 (#2474) (65ef998)
+- **deps**: renovate bump (#2463) (0e250b8)
+- **deps**: renovate bump (#2462) (8dc9d05)
+- **deps**: renovate bump (#2469) (2f89251)
+
+### Fixed
+
+- **deps**: update dependency astro to 7.2.8 (patch) [security] (#2483) (54c5a5e)
+
+## [0.152.2] - 2026-09-08
+
+### Fixed
+
+- **ai**: normalize the codex review schema for OpenAI strict mode (#2480) (79acce7)
+
+## [0.152.1] - 2026-09-08
+
+### Changed
+
+- **ai**: close out the #2473 dogfood review test gaps (#2477) (06727fa)
+- **ai**: invoke the codex installer and session restore steps (#2476) (1db5c04)
+
+### Fixed
+
+- **ai**: pass the codex review schema as a file path (#2478) (63ec662)
+
+## [0.152.0] - 2026-09-08
+
+### Added
+
+- **ci**: add Codex subscription and z.ai GLM lanes to dogfood AI review (#2473)
+  (f758656)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.147.7 (patch) (#2467)
+  (6595048)
+- **deps**: update lintro-ai-tools docker digest to b5f7f65 (#2466) (527b6cc)
+- **deps**: update lintro-ai-tools docker digest to b5f7f65 (#2466) (6cb9930)
+- **deps**: renovate bump (#2461) (930b30f)
+- **deps**: renovate bump (#2460) (a66be9f)
+- **ai/providers**: make plugin metadata the single source for doctor, pricing and
+  validation (#2453) (83a21e0)
+- **deps**: update devalue to 5.9.2 (#2459) (5164734)
+- **deps**: tools digest bump (#2458) (08bc361)
+- **deps**: update astral-sh/uv to 0.12.10 (#2457) (c6e3f3f)
+- **deps**: renovate bump (#2454) (e1ff951)
+- **deps**: renovate bump (#2448) (4afd6ae)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.69.8 (patch) (#2455) (000634e)
+- **deps**: renovate bump (#2423) (1857c96)
+- **deps**: renovate bump (#2451) (573acc3)
+- **deps**: renovate bump (#2424) (3df2c20)
+- **deps**: renovate bump (#2234) (f8ea406)
+
+## [0.151.4] - 2026-09-07
+
+### Changed
+
+- **ai/providers**: migrate providers behind the registry (#2425) (ebd532f)
+
+### Fixed
+
+- **deps**: update linting tools (#2232) (2c40d98)
+
+## [0.151.3] - 2026-09-07
+
+### Fixed
+
+- **ci**: refuse live npm dispatches that cannot authenticate and stop retrying e404
+  (#2443) (6544350)
+
+## [0.151.2] - 2026-09-07
+
+### Changed
+
+- **deps**: pin lintro-tools image digest to c46c3aea (#2445) (762fc2c)
+
+### Fixed
+
+- **ci**: make the binary release jobs idempotent and the asset swap atomic (#2440)
+  (452302c)
+- **ci**: give the dogfood gate's version probe 120s (#2444) (a41e739)
+
+## [0.151.1] - 2026-09-07
+
+### Fixed
+
+- **ci**: gate semgrep lockfile drift in ci and drop the dead renovate tasks (#2439)
+  (f7ee955)
+
+## [0.151.0] - 2026-09-07
+
+### Added
+
+- **core**: make derived DAG ordering authoritative, delete priority scalars (#2427)
+  (d9d49e2)
+
+### Changed
+
+- **ai/review**: decompose RunRecord into nested value objects (#2419) (e2c2541)
+
+## [0.150.0] - 2026-09-07
+
+### Added
+
+- **tools**: add cppcheck for C/C++ static analysis (#1157) (65ca506)
+
+### Changed
+
+- **ai/review**: single comment-lifecycle owner, v1 state paths retired (#2412)
+  (ad046a1)
+
+## [0.149.0] - 2026-09-07
+
+### Added
+
+- **core**: shadow-mode diff of derived vs current tool order (#2422) (6aacad4)
+
+## [0.148.1] - 2026-09-07
+
+### Changed
+
+- bump harden-runner to v2.21.1 and lgtm-ci to v0.69.6 (#2431) (ccdca32)
+
+### Fixed
+
+- **review**: address retro AI review findings from the Cursor outage (#2429) (d50415b)
+
+## [0.148.0] - 2026-09-07
+
+### Added
+
+- **plugins**: declare claims, capabilities and scope on all tools (#2420) (d80f0c3)
+
+### Changed
+
+- **ai/providers**: provider plugin contract and adr (#2421) (e14e9d7)
+- **tools**: delete the definition shims, discover per-tool packages (PR K) (#2409)
+  (e0f3786)
+- **ai/review**: one body-assembly pipeline for github comments (#2411) (33c5501)
+
+## [0.147.7] - 2026-09-07
+
+### Changed
+
+- **tools**: move the last 7 definitions and the ts-checker family (PR J) (#2408)
+  (92d5476)
+- **ai**: split the CLI capability guard out of `cli_transport` (#2414) (2a6e5a0)
+- **ai/review**: one contract module for github comment invariants (#2407) (6ce23df)
+- **ai**: drop argv command inference from transcript filenames (#2415) (65918df)
+- **ai**: reconcile manifest-name vocabularies in chunker and classifier (#2413)
+  (e2e9391)
+- **tools**: move 10 more definitions into per-tool packages (PR I) (#2406) (6ce6325)
+- **ai**: the review session owns provider lifetime and closes it once (#2405) (a11b64a)
+- **tools**: move 12 more definitions into per-tool packages (PR H) (#2402) (28295b4)
+- **ai**: split the last oversized review modules and ratchet the size (#2401) (6e2ed12)
+- **tools**: move 12 definitions into per-tool packages (PR G) (#2397) (de1c09a)
+- **ai**: extract the chunk runner and drop the orchestrator baselines (#2398) (cf533ba)
+
+### Fixed
+
+- **ci**: extend typos and black timeouts in the dogfood runs (#2404) (89b7c25)
+
+## [0.147.6] - 2026-09-06
+
+### Changed
+
+- **ai**: move per-chunk review passes out of the orchestrator (#2394) (480ba92)
+- **tools**: fold ruff and pytest implementations into tool packages (#2392) (a4c6ed6)
+- **ai**: move cross-chunk review merge out of the orchestrator (#2388) (f4b822e)
+- **unit**: registry isolation, split leftovers, and randomised order (#2375) (49e4efb)
+- **tools**: share cargo-root and `node_modules` helpers (PR F) (#2389) (97487c1)
+
+### Fixed
+
+- **golangci-lint**: allow parallel runners so findings never vanish (#2396) (2cb6fcd)
+
+## [0.147.5] - 2026-09-06
+
+### Changed
+
+- **tools**: add `run_batch_check` and migrate 14 definitions (PR E) (#2385) (dfb53d6)
+- **ai**: move review prompt construction out of the orchestrator (#2384) (4d0fe5d)
+- **ai**: carry review run settings in a session options object (#2383) (8f3eccc)
+- **tools**: add `run_per_file_check` and migrate 6 definitions (PR D) (#2382) (50ce56d)
+- **ai**: step 3 — shared review preparation consumed by the CLI and MCP adapters
+  (#2377) (45a37ba)
+- **tools**: add `run_per_file_fix` and migrate 3 definitions (PR B) (#2380) (06bb54c)
+- **tools**: factor the shared check/fix scaffolding out of the 45 tool definitions — PR
+  A (#2376) (9f70219)
+- **ai**: step 2 — one effective-config resolver for every AI surface (#2373) (060f616)
+- **cli**: cut cold-start via lazy imports (#2372) (088a7ac)
+- **quality**: close the phase 0 checkpoint follow-ups (#2370) (52a4dcf)
+- **ai**: add characterization gap list and golden tests before the review decomposition
+  (#2363) (7ffbba4)
+- **packaging**: find packages, ship py.typed, trim the sdist (#2364) (638f8ce)
+- **core**: delete the setup command and the health score (#2362) (61df25b)
+- **deps**: one dev dependency list, delete tox, widen the matrix (#2361) (90d4214)
+
+### Fixed
+
+- **deps**: keep pydoclint importable against docstring-parser (#2381) (c26ca50)
+
+## [0.147.4] - 2026-09-06
+
+### Fixed
+
+- **ci**: let the duplicate-code guard tolerate environment-dependent pylint counts
+  (#2366) (c38e3f6)
+
+## [0.147.3] - 2026-09-05
+
+### Changed
+
+- **ci**: pin the fork-fallback image once and delete orphaned scripts (#2322) (16da987)
+- **ci**: delete the dead changes job from test-ci (#2320) (b539ee0)
+- **ci**: integration suite in the required gate; missing tool is a failure inside
+  Docker (#2326) (7d75401)
+- **ci**: drop fail-fast from CI test runs so a red run reports every failure (#2319)
+  (4f68973)
+
+### Fixed
+
+- **ci**: fail-closed required lint check when the lint job produces no verdict (#2324)
+  (9f4a1d6)
+
+## [0.147.2] - 2026-09-05
+
+### Changed
+
+- **ci**: make coverage blocking repo-side (#2321) (e6a6dd7)
+
+### Fixed
+
+- **post-checks**: honour --tool-options for post-check tools (#2357) (30f341a)
+
+## [0.147.1] - 2026-09-05
+
+### Changed
+
+- **quality**: ratcheting duplicate-code gate on tool definitions (#2354) (9f45637)
+
+### Fixed
+
+- **ci**: allow hosted-runner watchdog egress on long-running jobs (#2353) (8162c56)
+
+## [0.147.0] - 2026-09-05
+
+### Added
+
+- **tools**: add pylint tool plugin (#2334) (7736c09)
+
+### Changed
+
+- **quality**: enable ruff structural families with a per-file baseline (#2323)
+  (b301132)
+- **quality**: import-layering contract with a ratcheting baseline (#2333) (6e253d2)
+
+## [0.146.0] - 2026-09-05
+
+### Added
+
+- **tools**: add import-linter tool plugin (#2325) (da4f15f)
+
+## [0.145.0] - 2026-09-05
+
+### Added
+
+- **evals**: add a cross-provider review agreement matrix harness (#2276) (a4cb90c)
+
+## [0.144.0] - 2026-09-05
+
+### Added
+
+- **ai**: add a numeric convergence score as a deterministic re-review stop signal
+  (#2263) (1fd2356)
+
+## [0.143.0] - 2026-09-04
+
+### Added
+
+- **ai**: add an off-by-default cross-chunk synthesis pass to the review finalize step
+  (#2316) (1881aff)
+
+### Changed
+
+- **ai**: polish the cost-cap override docs, blank-flag handling, precedence and labels
+  (#2282) (0d123a1)
+
+## [0.142.1] - 2026-09-04
+
+### Fixed
+
+- **ai**: make cursor workspace trust a required provider argument with AIConfig as the
+  only default (#2285) (6155cf0)
+
+## [0.142.0] - 2026-09-04
+
+### Added
+
+- **ai**: downgrade findings that claim a changed file is untouched (#2268) (1c5c81d)
+
+## [0.141.4] - 2026-09-04
+
+### Fixed
+
+- **ci**: classify nightly dogfood runner-loss kills before pinging the tracker (#2279)
+  (9362ad0)
+
+## [0.141.3] - 2026-09-04
+
+### Fixed
+
+- **release**: npm publish stuck in waiting — npm lags a released version, tripping the
+  skew audit (#2251) (3ac3500)
+
+## [0.141.2] - 2026-09-03
+
+### Fixed
+
+- **ai**: report the real inline-post failure instead of a line-mapping guess (#2273)
+  (c6b193d)
+
+## [0.141.1] - 2026-09-03
+
+### Fixed
+
+- **ai**: pair tests with hyphenated or non-mirrored sources in the review chunker
+  (#2270) (13aef16)
+
+## [0.141.0] - 2026-09-03
+
+### Added
+
+- **ci**: consume authoritative timeout-flake in the code quality gate (#2267) (266e216)
+
+## [0.140.1] - 2026-09-03
+
+### Changed
+
+- **ci**: drop the duplicated full-repo lintro run in the no-silent-skip gate (#2258)
+  (dac996b)
+
+### Fixed
+
+- **ci**: renovate tool bumps redden main until the tools-image digest republishes —
+  close the manifest-image ordering gap (#2252) (bd6a25d)
+
+## [0.140.0] - 2026-09-03
+
+### Added
+
+- **ai**: surface findings-cap and output-exhaustion as incomplete coverage (#2261)
+  (412c195)
+
+## [0.139.0] - 2026-09-02
+
+### Added
+
+- **ai**: add per-phase timing instrumentation to lintro review (#2255) (58488b5)
+
+## [0.138.1] - 2026-09-02
+
+### Fixed
+
+- **ci**: stop displacement-cancelling queued main CI - Docker runs (#2254) (41870aa)
+
+## [0.138.0] - 2026-09-02
+
+### Added
+
+- **ai**: validate suggested patches against head file contents before posting (#2256)
+  (3a2d447)
+
+## [0.137.7] - 2026-09-02
+
+### Changed
+
+- **ci**: raise auto-rerun max-reruns for runner-loss failures (#2249) (04a63ca)
+
+### Fixed
+
+- **ci**: raise full-repo lint job timeout budgets before duration creep crosses 20
+  minutes (#2250) (03c275d)
+
+## [0.137.6] - 2026-09-01
+
+### Changed
+
+- **deps**: update dependency rust-lang/rust to 1.98.0 (minor) (#2137) (d131ed9)
+- **deps**: update test-tools to 4.1.11 (patch) (#2231) (350bf72)
+- **renovate**: couple rustfmt and clippy pins to the rustc toolchain (#2213) (56c7267)
+- **deps**: update dependency svelte to 5.56.10 (patch) (#2230) (41dcdda)
+- **deps**: update dependency oven-sh/bun to 1.4.0 (minor) (#2136) (052bba1)
+- **deps**: update dependency sharp to 0.35.4 (patch) (#2227) (62c1002)
+
+### Fixed
+
+- **deps**: pin Rust 1.98 tools image digest (#2235) (0d7443b)
+
+## [0.137.5] - 2026-08-30
+
+### Changed
+
+- **deps**: update dependency fast-uri to 4.1.3 (patch) (#2225) (5509a6f)
+- **deps**: update dependency devalue to 5.9.1 (patch) (#2224) (2daa9c5)
+- **deps**: update dependency astral-sh/uv to 0.12.7 (patch) (#2223) (2076b04)
+- **deps**: update softprops/action-gh-release digest to efb3536 (#2222) (be7109b)
+- **deps**: update python:3.14-slim docker digest to cae66f2 (#2219) (2fdb0f9)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to d9605c7
+  (#2140) (4fbb1a3)
+- restore golangci-lint 2.13.0 pin until tools image ships 2.13.2 (#2218) (fc6187b)
+- **deps**: update dependency golangci/golangci-lint to 2.13.2 (patch) (#2139) (b4ee88b)
+
+### Fixed
+
+- **deps**: apply golangci-lint 2.13.2 with matching tools digest (#2221) (128fdc5)
+
+## [0.137.4] - 2026-08-30
+
+### Fixed
+
+- **ci**: enforce app-image bridge coverage for newly-added binary tools (#2209)
+  (793b04a)
+
+## [0.137.3] - 2026-08-29
+
+### Fixed
+
+- **ci**: give gitleaks an explicit timeout in dogfooding lint jobs (#2211) (d229a18)
+
+## [0.137.2] - 2026-08-29
+
+### Fixed
+
+- **ci**: bump pinned py-lintro image to 0.137.0 for build-time artifact self-heal
+  (#2208) (224eee5)
+
+## [0.137.1] - 2026-08-29
+
+### Changed
+
+- update contributor guidance for build-time artifact generation (#2199) (a7f80d9)
+- **tools**: align per-tool test layout with `tests/unit/tools/<tool>` convention
+  (#1277) (2cd448c)
+- **tests**: align per-tool test layout with `tests/unit/tools/<tool>` convention
+  (#1277)
+
+### Fixed
+
+- **ci**: regenerate builtin index before the universal-binary smoke test (#2203)
+  (11643c5)
+
+## [0.137.0] - 2026-08-29
+
+### Added
+
+- **config**: add user-level global config with project-override precedence (#1273)
+  (631a245)
+
+### Changed
+
+- **build**: generate version artifacts at package build time (#2197) (a3dfc0a)
+- **cli**: clear caches only on config change (#1272) (dcd2d03)
+- regenerate version artifacts explicitly in checkout-time consumers (#2195) (c6728df)
+- **cli**: clear discovery/config caches only when cwd, PATH, or Lintro config inputs
+  change; set `LINTRO_NO_CACHE=1` to force a clear (#1272)
+
+### Fixed
+
+- **cli**: invalidate in-process caches when PATH or a parent `.lintro-config.yaml` /
+  `.lintro-ignore` changes (#1272)
+
+## [0.136.0] - 2026-08-28
+
+### Added
+
+- **deps**: add dependency version policy validation (#1177) (1f846b0)
+
+### Changed
+
+- **tools**: split manifest.json into committed source and generated output (#2194)
+  (6ddbdab)
+- **release**: automate lintro-pre-commit mirror version bumps (#1176) (74fe1ef)
+- **scripts**: consolidate artifact generators into an importable build package (#2189)
+  (db0815c)
+
+## [0.135.1] - 2026-08-28
+
+### Fixed
+
+- **docker**: bridge buf into app image until next tools digest (#2190) (4e318c6)
+
+## [0.135.0] - 2026-08-28
+
+### Added
+
+- **cli**: add per-tool performance profiling (--profile) (#1161) (386920e)
+- **cli**: `--profile` reports per-tool timing. Timing is always captured; the flag only
+  controls rendering. JSON uses `files_with_issues` (distinct issue paths) and the same
+  issue merge as `results[]`. Crashed tools keep their duration in the table.
+
+## [0.134.0] - 2026-08-28
+
+### Added
+
+- **tools**: add buf for Protocol Buffer linting and formatting (#1155) (8b30d03)
+
+## [0.133.0] - 2026-08-27
+
+### Added
+
+- **cli**: add watch mode for continuous linting (#1168) (2f09fd4)
+- **cli**: add `lintro watch` / `w` for debounced continuous linting on file changes
+  (#1168)
+
+## [0.132.0] - 2026-08-27
+
+### Added
+
+- **tools**: add spectral for OpenAPI/AsyncAPI/JSON Schema linting (#1154) (7aa4e9a)
+
+## [0.131.5] - 2026-08-25
+
+### Fixed
+
+- **ci**: retry locate and seed older review-state (#2175) (71a0cf5)
+- **ci**: retry and log prior-state locate failures, skip runs with a missing
+  `created_at` instead of aborting the walk, and seed the immediately older same-PR
+  persist so an empty-restart artifact cannot hide richer coverage (#2156)
+
+## [0.131.4] - 2026-08-25
+
+### Fixed
+
+- **ci**: persist review-state across runner cancel (#2173) (4442681)
+
+## [0.131.3] - 2026-08-25
+
+### Fixed
+
+- **ai-review**: persist coverage when the runner sends SIGTERM (#2171) (68a9f42)
+
+## [0.131.2] - 2026-08-25
+
+### Fixed
+
+- **ai-review**: persist coverage on timeout and raise CLI budget (#2167) (6a1ed22)
+- **ai-review**: persist coverage and this-run findings when a chunk times out, and
+  write incremental artifact parts after each finished chunk so a later SIGTERM can
+  resume and still post those issues (#2156)
+
+## [0.131.1] - 2026-08-24
+
+### Changed
+
+- **ai**: drop committed cost cap for uncapped dogfood (#2164) (e377c06)
+- **ai-review**: remove the committed `ai.max_cost_usd: 2.00` dogfood cap so CI can
+  overlay `LINTRO_AI_MAX_COST_USD=uncapped` (#2156)
+- **ai**: raise the default CLI review timeout from 900s to 1800s so a large semantic
+  chunk can finish under serial dogfood (#2156)
+
+### Fixed
+
+- **ai**: raise default CLI timeout to 1800s (#2168) (4f32c84)
+
+## [0.131.0] - 2026-08-24
+
+### Added
+
+- **ai-review**: file-level resume, INCOMPLETE verdict, artifact-backed state, and
+  sticky redesign (#2154, #2157)
+
+### Changed
+
+- **ai**: file-level review resume and sticky redesign (82d2ccb)
+- **ai-review**: add inert artifact plumbing for review state (#2161) (99348bc)
+
+### Removed
+
+- **ai**: overlay `0` for `LINTRO_AI_MAX_COST_USD` / `--max-cost-usd` is rejected. Use
+  `uncapped`. YAML `0` remains a literal $0 cap.
+
+## [0.130.0] - 2026-08-24
+
+### Added
+
+- **ai**: add `LINTRO_AI_REVIEW` invocation override (#2159) (956547b)
+
+### Changed
+
+- **ai-review**: forward `LINTRO_AI_MAX_COST_USD` repo variable (#2155) (adb7315)
+
+## [0.129.0] - 2026-08-22
+
+### Added
+
+- **cli**: add config validate and config init/show subcommands (6ebec28)
+- **cli**: add `config validate` plus `config init` / `config show` subcommands (#1165)
+
+### Fixed
+
+- **config**: auto-detect `config validate` ignores non-mapping YAML the same way
+  `load_config` does and continues to `[tool.lintro]`; a null `enforce` / `execution` /
+  `defaults` / `tools` section or a non-string `tools:` key raises `ConfigurationError`
+  instead of crashing (#1165)
+
+## [0.128.0] - 2026-08-22
+
+### Added
+
+- **ai**: calibrate review P2 vs P3 severity to stabilize verdicts (#2146) (a4c937d)
+- **review**: P2 vs P3 severity rubric in the review prompt so borderline findings stay
+  nits instead of flipping the derived verdict (#1968)
+
+## [0.127.0] - 2026-08-22
+
+### Changed
+
+- **ai**: require an explicit AI provider (#2144) (a14a558)
+
+## [0.126.0] - 2026-08-21
+
+### Added
+
+- **doctor**: tool update advisories with per-tool update-channel resolver (#1480)
+  (63bec8d)
+
+## [0.125.0] - 2026-08-21
+
+### Added
+
+- **build**: replace Makefile with just command runner (#1174) (d9c1ba1)
+
+### Changed
+
+- **bench**: add hyperfine CLI overhead benchmark suite (#1572) (280e783)
+
+## [0.124.0] - 2026-08-20
+
+### Added
+
+- **tools**: add typos spell-checker plugin (#1146) (1a61c40)
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/lintro-tools:latest docker digest to 61d1c91 (#2121)
+  (62921d3)
+- **deps**: update dependency golangci/golangci-lint to 2.13.0 (minor) (#2133) (2721d88)
+- **deps**: update dependency html-validate to 11.8.0 (minor) (#2135) (1998b82)
+- **deps**: update dependency golang to 1.27.0 (minor) (#2129) (f625245)
+- **docker**: repin setup-buildx-action to v4.3.0 tag SHA (#2134) (9153b88)
+
 ## [0.123.3] - 2026-08-20
 
 ### Fixed

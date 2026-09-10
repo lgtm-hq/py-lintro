@@ -5,13 +5,17 @@ set -euo pipefail
 
 # compute-new-manifest-tools.sh
 #
-# Print the comma-separated set of tool names a PR changes in
-# lintro/tools/manifest.json, computed as a git diff against the merge-base
-# with the PR base branch. The manifest-vs-image gate
-# (verify-image-manifest-tools.sh) feeds this to verify-manifest-tools.py:
+# Print the comma-separated set of tool names a PR changes in the manifest,
+# computed as a git diff against the merge-base with the PR base branch.
+# EMIT=added diffs the hand-authored lintro/tools/manifest.src.json (#2178);
+# EMIT=version-changed diffs the rendered lintro/tools/manifest.json, which
+# carries the version fields. The manifest-vs-image gate
+# (verify-image-manifest-tools.sh) consumes this as:
 #
-#   EMIT=added (default) → --allow-missing: a newly-added tool's absent binary
-#     in the digest-pinned base image downgrades to a warning (#1565).
+#   EMIT=added (default) → the newly-added tool set (#2192). Those names are
+#     verified in the app image like every other tool (the PR Dockerfile
+#     bridge must install them if the pinned digest lacks them). An empty
+#     set means full enforcement, never a skip.
 #   EMIT=version-changed → --allow-version-lag: a baked tool whose manifest
 #     version the PR bumps may still be older in the digest-pinned base image;
 #     a version mismatch (image older than manifest) downgrades to a warning
@@ -44,8 +48,11 @@ the merge-base with the base branch. Fails closed (empty output) on any error.
 Environment:
   BASE_REF   Optional. PR base branch (github.base_ref), e.g. main. When unset
              or empty (main / nightly runs), the emitted set is empty.
-  MANIFEST   Optional. Manifest path relative to the repo root
-             (default: lintro/tools/manifest.json).
+  MANIFEST   Optional. Manifest path relative to the repo root. Defaults to
+             lintro/tools/manifest.src.json for EMIT=added (new-tool detection
+             needs only names, and the src file is the committed truth after
+             #2178) and lintro/tools/manifest.json for EMIT=version-changed
+             (version diffs need the rendered version fields).
   EMIT       Optional. ``added`` (default) or ``version-changed``. Selects
              which name set the Python helper prints.
 
@@ -63,8 +70,17 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 : "${BASE_REF:=}"
-: "${MANIFEST:=lintro/tools/manifest.json}"
 : "${EMIT:=added}"
+
+# EMIT=added diffs names only, so it reads the committed hand-authored
+# manifest.src.json (#2178) — which still exists at merge-bases after the
+# rendered manifest stops being committed. EMIT=version-changed diffs the
+# rendered version fields, which only manifest.json carries.
+default_manifest="lintro/tools/manifest.src.json"
+if [[ "$EMIT" == "version-changed" ]]; then
+	default_manifest="lintro/tools/manifest.json"
+fi
+: "${MANIFEST:=$default_manifest}"
 
 log_info() { echo "[INFO] $*" >&2; }
 log_warn() { echo "[WARN] $*" >&2; }
@@ -117,9 +133,42 @@ trap 'rm -f "$old_manifest"' EXIT
 # The manifest may not have existed at the merge-base (brand-new manifest); an
 # empty old blob makes compute-new-manifest-tools.py treat every current tool
 # as added, which is the correct fail-open-to-tolerance for that rare case.
+# Transition window (#2178): a merge-base predating the manifest split has no
+# manifest.src.json, so the added diff falls back to the rendered manifest
+# there — names are identical in both files.
+# Render the rendered manifest for a historic commit from that commit's own
+# committed sources and generator (#2180: manifest.json is no longer
+# committed, so version-changed diffs cannot ``git show`` it at the base).
+# Prints the rendered manifest to the given output path; non-zero on any
+# trouble (caller falls back).
+render_manifest_at_ref() {
+	local ref="$1"
+	local out_path="$2"
+	local worktree
+	worktree="$(mktemp -d)"
+	# Expand worktree now, not at EXIT time.
+	# shellcheck disable=SC2064
+	trap "rm -rf '$worktree'; rm -f '$old_manifest'" EXIT
+	git archive "$ref" \
+		lintro lintro_build scripts/ci \
+		package.json pyproject.toml requirements-semgrep.txt \
+		2>/dev/null | tar -x -C "$worktree" || return 1
+	python3 "${worktree}/scripts/ci/generate-tool-versions.py" >/dev/null 2>&1 ||
+		return 1
+	cp "${worktree}/lintro/tools/manifest.json" "$out_path"
+}
+
 if ! git show "${merge_base}:${MANIFEST}" >"$old_manifest" 2>/dev/null; then
-	log_info "No manifest at merge-base ${merge_base}; treating all tools as new"
-	rm -f "$old_manifest"
+	if [[ "$EMIT" == "added" && "$MANIFEST" == "lintro/tools/manifest.src.json" ]] &&
+		git show "${merge_base}:lintro/tools/manifest.json" >"$old_manifest" 2>/dev/null; then
+		log_info "No ${MANIFEST} at merge-base ${merge_base}; using manifest.json (pre-split base)"
+	elif [[ "$EMIT" == "version-changed" && "$MANIFEST" == "lintro/tools/manifest.json" ]] &&
+		render_manifest_at_ref "$merge_base" "$old_manifest"; then
+		log_info "Rendered merge-base manifest from ${merge_base} sources"
+	else
+		log_info "No manifest at merge-base ${merge_base}; treating all tools as new"
+		rm -f "$old_manifest"
+	fi
 fi
 
 names=""

@@ -19,28 +19,30 @@
     "@astrojs/check": "0.9.10",
     "@commitlint/cli": "21.2.2",
     "@commitlint/config-conventional": "21.2.2",
-    "astro": "7.2.2",
-    "html-validate": "11.6.2",
+    "@stoplight/spectral-cli": "6.16.3",
+    "astro": "7.2.9",
+    "html-validate": "11.11.0",
     "markdownlint-cli2": "0.23.2",
-    "oxfmt": "0.63.0",
-    "oxlint": "1.78.0",
+    "oxfmt": "0.65.0",
+    "oxlint": "1.80.0",
     "prettier": "3.9.4",
     "prettier-plugin-astro": "0.14.1",
     "stylelint": "17.14.1",
-    "svelte": "5.56.9",
+    "svelte": "5.57.0",
     "svelte-check": "4.7.6",
     "typescript": "6.0.3",
-    "vue-tsc": "3.3.10"
+    "vue-tsc": "3.3.11"
   },
   "overrides": {
     "defu": "6.1.7",
-    "devalue": "5.9.0",
+    "devalue": "5.9.2",
     "esbuild": "^0.28.1",
-    "fast-uri": "4.1.2",
+    "fast-uri": "4.1.4",
     "postcss": "^8.5.18",
     "svgo": "^4.0.2",
     "vite": "^8.0.16",
     "yaml": "2.9.0",
-    "sharp": "0.35.3"
+    "sharp": "0.35.4",
+    "smol-toml": "1.8.0"
   }
 }

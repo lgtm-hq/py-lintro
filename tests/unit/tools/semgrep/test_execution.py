@@ -11,7 +11,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.parsers.semgrep.semgrep_issue import SemgrepIssue
-from lintro.tools.definitions.semgrep import SemgrepPlugin
+from lintro.tools.semgrep.definition import SemgrepPlugin
 from tests.test_samples_helpers import copy_sample
 
 # =============================================================================

@@ -102,6 +102,25 @@ if [ -d "/code" ] && [ "$(ls -A /code 2>/dev/null)" ]; then
 	cd /code
 fi
 
+# The mounted workspace may be the lintro source tree itself (dogfooding CI
+# lints this repo with the PR's own code: ``python -m lintro`` resolves the
+# package from cwd, shadowing the image's install). Since #2180 the derived
+# version artifacts are not committed, so regenerate them from the
+# workspace's own sources when they are absent. Inert for every other
+# mounted project.
+if [ -f "lintro/tools/manifest.src.json" ] &&
+	[ -f "scripts/ci/generate-tool-versions.py" ]; then
+	if [ ! -f "lintro/_generated_versions.py" ] ||
+		[ ! -f "lintro/tools/manifest.json" ] ||
+		[ ! -f "lintro/plugins/_builtin_index.py" ]; then
+		echo "[lintro] Regenerating version artifacts for the mounted lintro source tree..."
+		if ! "$VENV_PYTHON" scripts/ci/generate-tool-versions.py ||
+			! "$VENV_PYTHON" scripts/ci/generate-builtin-tool-index.py >/dev/null; then
+			echo "[lintro] Warning: artifact regeneration failed (read-only mount?)"
+		fi
+	fi
+fi
+
 # Auto-install Node.js dependencies if explicitly enabled via environment variable
 # This enables seamless tsc support in Docker without manual intervention
 # Security: Requires explicit opt-in via LINTRO_AUTO_INSTALL_DEPS=1

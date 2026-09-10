@@ -48,8 +48,8 @@ html-validate is a Node.js tool. Lintro resolves the executable in this order:
 bun add -g html-validate        # or: npm install -g html-validate
 ```
 
-The pinned version lives in `package.json` and is mirrored into
-`lintro/tools/manifest.json` by the tool-version generator; Renovate bumps it there. The
+The pinned version lives in `package.json`; the build-time generator renders it into
+`lintro/tools/manifest.json` (not committed). Renovate bumps `package.json`. The
 registry fallback is always version-pinned — `@latest` is never resolved at runtime, so
 a broken upstream release cannot take every consumer down at once.
 
@@ -119,6 +119,6 @@ the native parser avoids all of that.
 
 ### Enhancements
 
-- Centralized execution priority (default 30, alongside other linters)
+- Execution order derived from claims (`CHECK` on `*.html`, after prettier)
 - Unified issue formatting (rule, severity, selector, doc URL) shared with all tools
 - stdout/stderr separation so stderr diagnostics never corrupt JSON parsing

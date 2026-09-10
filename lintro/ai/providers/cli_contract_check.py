@@ -28,14 +28,15 @@ import shutil
 from dataclasses import dataclass
 
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.cli_capabilities import PROBE_TIMEOUT
 from lintro.ai.providers.cli_contracts import (
-    CLI_CONTRACTS,
     CliContract,
     cli_contract_for,
+    cli_contracts,
     format_version,
     unadvertised_flags,
 )
-from lintro.ai.providers.cli_transport import PROBE_TIMEOUT, CliTransport
+from lintro.ai.providers.cli_transport import CliTransport
 
 __all__ = [
     "CliSurfaceReport",
@@ -138,8 +139,7 @@ class CliSurfaceReport:
         state = "; ".join(self.violations) if self.violations else "contract satisfied"
         help_note = "" if self.help_readable else " (help unreadable)"
         return (
-            f"{self.contract.binary} {format_version(self.version)}"
-            f"{help_note}: {state}"
+            f"{self.contract.binary} {format_version(self.version)}{help_note}: {state}"
         )
 
 
@@ -287,4 +287,4 @@ def declared_cli_providers() -> tuple[AIProvider, ...]:
         Providers in declaration order, so a newly declared contract is picked up
         by the contract tests without editing them.
     """
-    return tuple(CLI_CONTRACTS)
+    return tuple(cli_contracts())

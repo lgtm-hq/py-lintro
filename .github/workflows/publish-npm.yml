@@ -10,6 +10,12 @@ name: Publish - npm
 # environment approval). The platform binaries are downloaded from the
 # GitHub release created earlier in the tag pipeline, so this workflow must
 # run after build-binary.yml has uploaded them.
+#
+# A LIVE direct `workflow_dispatch` of this workflow is refused by the `guard`
+# job: trusted publishing only matches the tag-pipeline entry path
+# (publish-pypi-on-tag.yml @ refs/tags/v*). Publish or backfill a tag by
+# approving / re-running that run instead. See #2247 and
+# docs/npm-distribution.md.
 
 'on':
   workflow_call:
@@ -56,8 +62,49 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Runs BEFORE the environment-gated publish job and carries no
+  # `environment:`, so a run that cannot authenticate fails without consuming
+  # an `npm` approval. npm trusted publishing matches exactly one entry
+  # workflow (publish-pypi-on-tag.yml); any other entry path — a direct
+  # dispatch of this workflow, say — presents a different OIDC identity and the
+  # registry masks the rejection as E404 (see #2247).
+  guard:
+    name: Check entry path
+    runs-on: ubuntu-24.04
+    permissions:
+      # read: checkout, to run the guard script from the repository
+      contents: read
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Refuse runs that cannot authenticate to npm
+        # workflow_ref is the run's *entry* workflow — the OIDC subject npm
+        # matches on. The script allowlists the one workflow npm trusts;
+        # event_name cannot substitute for it, because a workflow_call run
+        # reports the caller's event and so cannot distinguish a dispatch of
+        # this workflow from a dispatch of the tag pipeline that calls it.
+        env:
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: scripts/ci/npm/assert_dispatch_allowed.sh
+
   publish:
     name: Package and publish
+    needs: guard
     runs-on: ubuntu-24.04
     environment: npm
     permissions:
@@ -69,7 +116,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >

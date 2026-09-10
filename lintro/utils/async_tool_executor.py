@@ -162,6 +162,38 @@ class AsyncToolExecutor:
         """
         options = options_per_tool or {}
 
+        from lintro.models.core.tool_result import ToolResult
+
+        def _make_failed_result(
+            name: str,
+            message: str,
+            *,
+            duration_seconds: float,
+        ) -> tuple[str, ToolResult]:
+            """Build a failed ``ToolResult`` entry for the given tool.
+
+            Args:
+                name: Name of the tool the result belongs to.
+                message: Human-readable failure description.
+                duration_seconds: Elapsed time before the failure, so crashed
+                    tools still appear in the ``--profile`` table/JSON.
+
+            Returns:
+                A ``(tool_name, ToolResult)`` tuple with ``success=False``.
+            """
+            return (
+                name,
+                ToolResult(
+                    name=name,
+                    success=False,
+                    output=message,
+                    issues_count=0,
+                    duration_seconds=duration_seconds,
+                ),
+            )
+
+        started_at: dict[str, float] = {}
+
         async def run_with_name(
             name: str,
             tool: BaseToolPlugin,
@@ -174,15 +206,32 @@ class AsyncToolExecutor:
 
             Returns:
                 Tuple of (tool_name, ToolResult).
+
+            Raises:
+                KeyboardInterrupt: Re-raised so the process can abort.
+                SystemExit: Re-raised so process exit is not swallowed.
+                asyncio.CancelledError: Re-raised so task cancellation is not
+                    treated as a tool failure.
             """
+            started_at[name] = time.monotonic()
             tool_opts = options.get(name, {})
-            result = await self.run_tool_async(
-                tool,
-                paths,
-                action,
-                tool_opts,
-                max_fix_retries=max_fix_retries,
-            )
+            try:
+                result = await self.run_tool_async(
+                    tool,
+                    paths,
+                    action,
+                    tool_opts,
+                    max_fix_retries=max_fix_retries,
+                )
+            except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as exc:
+                logger.error(f"Tool {name} failed with exception: {exc}")
+                return _make_failed_result(
+                    name=name,
+                    message=f"Parallel execution failed: {exc}",
+                    duration_seconds=time.monotonic() - started_at[name],
+                )
             if on_result:
                 on_result(name, result)
             return (name, result)
@@ -190,30 +239,11 @@ class AsyncToolExecutor:
         tasks = [run_with_name(name, tool) for name, tool in tools]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        from lintro.models.core.tool_result import ToolResult
-
-        def _make_failed_result(
-            name: str,
-            message: str,
-        ) -> tuple[str, ToolResult]:
-            """Build a failed ``ToolResult`` entry for the given tool.
-
-            Args:
-                name: Name of the tool the result belongs to.
-                message: Human-readable failure description.
-
-            Returns:
-                A ``(tool_name, ToolResult)`` tuple with ``success=False``.
-            """
-            return (
-                name,
-                ToolResult(
-                    name=name,
-                    success=False,
-                    output=message,
-                    issues_count=0,
-                ),
-            )
+        def _elapsed(name: str) -> float:
+            started = started_at.get(name)
+            if started is None:
+                return 0.0
+            return time.monotonic() - started
 
         # ``asyncio.gather(return_exceptions=True)`` aggregates *any* raised
         # value, including ``BaseException`` subclasses that are not
@@ -247,6 +277,7 @@ class AsyncToolExecutor:
                     _make_failed_result(
                         name=tool_name,
                         message=f"Parallel execution failed: {result}",
+                        duration_seconds=_elapsed(tool_name),
                     ),
                 )
                 continue
@@ -270,6 +301,7 @@ class AsyncToolExecutor:
                             "Parallel execution produced a malformed result: "
                             f"{result!r}"
                         ),
+                        duration_seconds=_elapsed(tool_name),
                     ),
                 )
 
@@ -280,68 +312,3 @@ class AsyncToolExecutor:
         if self._executor:
             self._executor.shutdown(wait=True)
             self._executor = None
-
-
-def get_parallel_batches(
-    tools: list[str],
-    tool_manager: Any,
-) -> list[list[str]]:
-    """Group tools into batches that can run in parallel.
-
-    Tools with conflicts (e.g., Black and Ruff formatter) must run in separate
-    batches to avoid race conditions on the same files.
-
-    Args:
-        tools: List of tool names to batch.
-        tool_manager: Tool manager instance to query tool definitions.
-
-    Returns:
-        List of batches, where each batch is a list of tool names that can
-        run in parallel.
-    """
-    if not tools:
-        return []
-
-    # Build conflict graph
-    conflict_graph: dict[str, set[str]] = {name: set() for name in tools}
-
-    for tool_name in tools:
-        try:
-            tool_instance = tool_manager.get_tool(tool_name)
-            for conflict in tool_instance.definition.conflicts_with:
-                conflict_lower = conflict.lower()
-                if conflict_lower in tools:
-                    conflict_graph[tool_name].add(conflict_lower)
-                    conflict_graph[conflict_lower].add(tool_name)
-        except (KeyError, AttributeError):
-            # Tool not found or has no conflicts
-            pass
-
-    # Greedy batching: add tools to current batch if they don't conflict
-    # with any tool already in the batch
-    batches: list[list[str]] = []
-    remaining = set(tools)
-
-    while remaining:
-        batch: list[str] = []
-        batch_conflicts: set[str] = set()
-
-        for tool_name in tools:  # Iterate in original order for determinism
-            if tool_name not in remaining:
-                continue
-
-            # Check if this tool conflicts with anything in current batch
-            if tool_name not in batch_conflicts:
-                batch.append(tool_name)
-                remaining.remove(tool_name)
-                # Add this tool's conflicts to the set
-                batch_conflicts.update(conflict_graph[tool_name])
-                batch_conflicts.add(tool_name)
-
-        if batch:
-            batches.append(batch)
-        else:
-            # Safety: if we couldn't add anything, break to avoid infinite loop
-            break
-
-    return batches

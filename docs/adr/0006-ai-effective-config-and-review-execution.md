@@ -13,9 +13,11 @@ not those foundations.
 
 Today:
 
-- `resolve_ai_config()` returns only `AIConfig`. Invocation overrides then apply
-  independently via `apply_transport_override()` / `model_copy()`, and display code can
-  reparse the raw `ai:` mapping.
+- `resolve_ai_config()` returned only `AIConfig`. Invocation overrides then applied
+  independently via a post-resolution `model_copy()`, and display code could reparse the
+  raw `ai:` mapping. [#2299](https://github.com/lgtm-hq/py-lintro/issues/2299) removed
+  both: `lintro.ai.effective_config.resolve_effective_ai_config` is now the one
+  resolver, and it is the only production caller of `AIConfig.resolve_from_mapping`.
 - The `lintro review` CLI and the MCP `lintro_review` toolkit each perform largely the
   same preparation (resolve config, collect context, classify files, select checklist,
   optional lint digest, sensitivity, provider, `run_review`) with adapter-specific
@@ -23,8 +25,9 @@ Today:
 - `lintro/ai/review/orchestrator.py` owns sync/async boundary, session/budget lifetime,
   chunk planning, prompts/passes, response recovery, merge/filter, and metadata
   finalization in one module.
-- Provider HTTP clients have no `close`/`aclose` yet (#1885); once that API exists,
-  call-site ownership must still be decided (#1972 Phase 5).
+- Provider HTTP clients had no `close`/`aclose` (#1885); once that API existed,
+  call-site ownership still had to be decided (#1972 Phase 5, settled by #2302 — see
+  section D).
 
 Epic #1972 coordinates structural work around the existing AI backlog. It does **not**
 absorb #1970 (env/CLI overrides + provenance), #1923 (transport profiles), #1885
@@ -40,17 +43,21 @@ Existing suites already pin large parts of review behavior
 `tests/unit/cli/test_review_command.py`). Phase 1 therefore adds only the gaps below
 rather than re-testing those topics:
 
-| Gap                          | Why it matters                                                                                     | Phase 1 lock                                 |
-| ---------------------------- | -------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| AC10 core → AI import edge   | `#724` boundary; `test_package_imports.py` only checks importability                               | `tests/unit/test_core_ai_import_boundary.py` |
-| Shared preparation call set  | CLI/MCP can drift before Phase 3 extracts `prepare_review`                                         | preparation characterization tests           |
-| Effective-config seam parity | MCP via `resolve_ai_config`; CLI review via `resolve_from_mapping` + `apply_cli_overrides` (#1970) | config parity tests                          |
-| Review exit 0 / 1 / 2 matrix | Exit 1 for successful P1 findings was under-locked vs exit 0/2                                     | exit semantics tests                         |
-| Error-contract sharing       | CLI JSON and MCP must keep one diagnosis shape                                                     | error-mapping characterization               |
-| MCP run-metadata key set     | Agents depend on a stable `run` object                                                             | metadata key characterization                |
+| Gap                          | Why it matters                                                                                             | Phase 1 lock                                 |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| AC10 core → AI import edge   | `#724` boundary; `test_package_imports.py` only checks importability                                       | `tests/unit/test_core_ai_import_boundary.py` |
+| Shared preparation call set  | CLI/MCP can drift before Phase 3 extracts `prepare_review`                                                 | preparation characterization tests           |
+| Effective-config seam parity | MCP via `resolve_ai_config`; CLI review via `resolve_from_mapping` + CLI overlay (#1970); unified by #2299 | config parity tests                          |
+| Review exit 0 / 1 / 2 matrix | Exit 1 for successful P1 findings was under-locked vs exit 0/2                                             | exit semantics tests                         |
+| Error-contract sharing       | CLI JSON and MCP must keep one diagnosis shape                                                             | error-mapping characterization               |
+| MCP run-metadata key set     | Agents depend on a stable `run` object                                                                     | metadata key characterization                |
 
-Prompt golden fixtures, orchestrator phase isolation, and provider lifecycle wiring are
-deferred to Phases 3–5 (and coordinated with #1884 / #1885).
+Prompt golden fixtures landed in Phase 1 after all —
+[ADR-0008](0008-ai-review-architecture-invariants.md) records the invariants and #2298
+adds the suite under `tests/unit/ai/review/golden/`. Orchestrator phase isolation and
+provider lifecycle wiring remain deferred to Phases 3–5, coordinated with
+[#1884](https://github.com/lgtm-hq/py-lintro/issues/1884) and
+[#1885](https://github.com/lgtm-hq/py-lintro/issues/1885).
 
 ## Decision
 
@@ -78,27 +85,46 @@ Contract invariants:
 - Be consumed by execution, doctor/status, terminal review output, PR rendering, MCP,
   and advisory tools without reparsing the raw `ai:` mapping.
 - CLI and env overlays may raise or lift `ai.max_cost_usd` (`LINTRO_AI_MAX_COST_USD` /
-  `lintro review --max-cost-usd`; literal `0` = uncapped, mapped to `None`) (#2024).
-  Overlays beat transport profile caps as well as the legacy scalar; YAML `0` remains a
-  $0 cap. MCP's per-call `max_cost_usd` argument remains a monotonic clamp: it may lower
-  the effective ceiling, never raise it.
+  `lintro review --max-cost-usd`; overlay `uncapped` lifts the ceiling; overlay `0` is
+  rejected as ambiguous). Overlays beat transport profile caps as well as the legacy
+  scalar; YAML `0` remains a $0 cap. MCP's per-call `max_cost_usd` argument remains a
+  monotonic clamp: it may lower the effective ceiling, never raise it. #2024 originally
+  mapped overlay `0` to uncapped; #2154 / ADR-0007 superseded that.
 
-Issue #1970 implements the initial resolver (`AIConfig.resolve_from_mapping` returning
-`ResolvedAIConfig`). This epic must not introduce a second resolver. CLI review applies
-`--provider`/`--model`/`--transport`/`--max-cost-usd` on that object via
-`apply_cli_overrides`; other surfaces consume `resolve_ai_config()` which unwraps the
-same env-aware parse.
+Issue #1970 implemented the initial parse (`AIConfig.resolve_from_mapping` returning
+`ResolvedAIConfig`); #2299 put one function in front of it,
+`lintro.ai.effective_config.resolve_effective_ai_config(mapping, *, cli_overrides, diagnostics)`.
+This epic must not introduce a second resolver. CLI review passes
+`--provider`/`--model`/`--transport`/`--max-cost-usd` as `AICliOverrides`; the `check`
+CLI and the lint API pass `--transport` the same way, and `fmt` uses the same resolver
+with no flag of its own; other surfaces pass none and consume the same value, with
+`resolve_ai_config()` as the values-only unwrap.
 
 ### B. Shared review domain request and preparation
 
-Introduce domain-level inputs/outputs (names illustrative) in a later phase:
+Domain-level inputs/outputs, landed by
+[#2300](https://github.com/lgtm-hq/py-lintro/issues/2300) in
+`lintro/ai/review/preparation.py`:
 
 ```python
-ReviewRunRequest
-PreparedReview
-prepare_review(...)
-execute_review(...)
+ReviewRunRequest              # typed inputs, built by each adapter
+prepare_review(request, *, resolved) -> PreparedReview   # deterministic, no provider
+execute_review(prepared, *, provider, policy) -> ReviewResult
 ```
+
+`prepare_review` is provider-free: it applies the run's timeout and transport profile,
+collects the diff context, classifies files, selects and formats the checklist, builds
+the optional lint digest, resolves sensitivity, and resolves custom agents. Two adapters
+that build equal requests over one workspace must produce **equal** `PreparedReview`
+values; `tests/unit/ai/review/test_cli_mcp_parity.py` asserts that equality.
+
+`ReviewExecutionPolicy` carries the remaining adapter-only knobs (progress,
+`--context-window`, resume state, `--full`, the CLI cost-cap gate) into `execute_review`
+as a frozen value object — it may hold an optional progress callback, but it is not a
+hook or plugin seam. MCP runs on the default policy, whose values are `run_review`'s own
+defaults. MCP's `max_cost_usd` clamp is applied to the prepared review
+(`PreparedReview.with_max_cost_usd`) after preparation, keeping the clamp monotonic and
+adapter-owned.
 
 The shared layer owns deterministic preparation and review execution. Thin adapters
 retain surface policy:
@@ -127,21 +153,31 @@ All provider invocations continue through `call_ai`. Prompt redaction remains a
 mandatory choke point. No prompt, finding, severity, or exit-code behavior may change as
 part of file movement.
 
-### D. Explicit provider/session ownership (after #1885)
+### D. Explicit provider/session ownership (settled by #2302)
 
 Issue #1885 owns the **provider-side API only** (`aclose()` on base + providers,
-stale-loop client handling). Phase 5 of #1972 owns **all call-site wiring**: which layer
-calls `aclose()`, exactly-once semantics on failure/cancellation, and closing the 1+N
-providers in `custom_agent_runner.py`'s `provider_cache`.
+stale-loop client handling). Phase 5 of #1972
+([#2302](https://github.com/lgtm-hq/py-lintro/issues/2302)) settled **all call-site
+wiring** for the review run.
 
-The top-level AI run/session owns provider lifetime and closes it exactly once. Do not
-add a competing lifecycle abstraction (for example a second context-manager layer)
-before or beside #1885.
+`ReviewSession` in `lintro/ai/review/session.py` is the owner. `run_review_async` enters
+it once per run, so the provider the adapter constructed and every provider a custom
+agent's `model` override adds to `custom_agent_runner.py`'s `provider_cache` are closed
+exactly once — on completion, on a provider failure, on a cost-cap or timeout stop, and
+on cancellation. Closing is idempotent and never stops early: one provider whose
+teardown raises does not orphan the rest, the failure is logged, and it is re-raised
+only when the run itself succeeded (a failing run keeps its own exception). Outside
+`lintro/ai/providers/`, which defines the API, `session.py` is the only module in
+`lintro` that calls `aclose()`; a test asserts that. Do not add a competing lifecycle
+abstraction (for example a second context-manager layer) beside it.
 
-Providers are constructed at five sites today (`cli_utils/commands/review.py`,
-`mcp/toolkits/review.py`, `tools/definitions/idiom_review.py`, `ai/orchestrator.py`,
-`ai/liveness.py`). Closing inside the review orchestrator would be a use-after-close
-hazard for MCP session reuse; ownership stays with the constructing run/session.
+Adapters still _construct_ the provider (`cli_utils/commands/review.py`,
+`mcp/toolkits/review.py`) so each labels its own construction failure, but they must not
+reuse it after `execute_review` returns. The MCP use-after-close hazard this ADR
+originally recorded does not arise: `get_provider` caches nothing, so every MCP call
+builds its own provider. The three non-review construction sites
+(`tools/idiom_review/definition.py`, `ai/orchestrator.py`, `ai/liveness.py`) are not
+review runs and keep their own lifetimes; #2302 did not widen its scope to them.
 
 ### Exit semantics (unchanged)
 
@@ -165,14 +201,35 @@ time.
 
 ## Consequences
 
+### Migration (#2299)
+
+Three internal entry points were removed when the resolver was unified. None was part of
+the public `lintro` API, so this is not a breaking change for CLI or `lintro.api`
+consumers; code reaching into `lintro.ai` internals moves as follows:
+
+| Removed                                                | Use instead                                                                       |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `AIConfig.from_mapping(data)`                          | `resolve_effective_ai_config(data).config`                                        |
+| `lintro.ai.transport.apply_transport_override(cfg, t)` | `resolve_effective_ai_config(mapping, cli_overrides=AICliOverrides(transport=t))` |
+| `lintro.ai.transport.apply_cli_overrides` (re-export)  | `lintro.ai.config_overrides.apply_cli_overrides`, or the resolver                 |
+
+`AIConfig.resolve_from_mapping` still exists but is the project + environment half only;
+surfaces call `resolve_effective_ai_config` rather than reaching past it.
+
 - #1970 / #1923 / #1235 extend one resolver contract instead of inventing parallel
   override layers.
-- Phase 3 can extract shared preparation behind characterization locks without changing
-  adapter policy.
+- Phase 3 extracted shared preparation behind the characterization locks without
+  changing adapter policy (#2300). One deliberate behaviour change came with it:
+  `ai.exclude_paths` now shapes the MCP review's context as well as the CLI's, because
+  preparation reads the exclusion from the resolved AI config. That was the single
+  context axis the two surfaces disagreed on, and it closed in the CLI's direction.
+  `review.custom_agents` closed the same way: MCP forwards the configured mode instead
+  of hard-coding "built-in checklist only", so a workspace's user-defined agents now run
+  for both surfaces.
 - Phase 4 can split the orchestrator behind `run_review` without changing product
   behavior.
-- Phase 5 can wire `aclose()` at construction sites after #1885 without a competing
-  lifecycle design.
+- Phase 5 wired `aclose()` into the run session after #1885 without a competing
+  lifecycle design (#2302).
 - Characterization tests added in Phase 1 document the current seams; they must stay
   green across later phases unless an explicit product change is accepted.
 
@@ -183,14 +240,18 @@ time.
 - [#1970](https://github.com/lgtm-hq/py-lintro/issues/1970) — env/CLI override layer and
   provenance (owns `ResolvedAIConfig` implementation).
 - [#2024](https://github.com/lgtm-hq/py-lintro/issues/2024) — cost-cap overlay
-  (`LINTRO_AI_MAX_COST_USD` / `--max-cost-usd`; `0` = uncapped). Overturns the #1970
-  non-goal that forbade raising `ai.max_cost_usd`.
+  (`LINTRO_AI_MAX_COST_USD` / `--max-cost-usd`). Overturns the #1970 non-goal that
+  forbade raising `ai.max_cost_usd`. Overlay `0` = uncapped here is superseded by
+  [#2154](https://github.com/lgtm-hq/py-lintro/issues/2154) / ADR-0007 (`uncapped`
+  sentinel; overlay `0` rejected).
 - [#1923](https://github.com/lgtm-hq/py-lintro/issues/1923) — transport profiles must
   extend the same resolver.
 - [#1885](https://github.com/lgtm-hq/py-lintro/issues/1885) — provider-side `aclose()`
   API only.
 - [#724](https://github.com/lgtm-hq/py-lintro/issues/724) — core/AI import separation.
 - `lintro/ai/interface.py` — `resolve_ai_config` seam.
+- `lintro/ai/review/preparation.py` — shared review request, preparation, and execution
+  (#2300).
 - `lintro/cli_utils/commands/review.py` — CLI review adapter.
 - `lintro/mcp/toolkits/review.py` — MCP review adapter.
 - `lintro/ai/review/orchestrator.py` — stable `run_review` facade.

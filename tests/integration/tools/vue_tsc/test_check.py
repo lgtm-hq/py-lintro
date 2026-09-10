@@ -13,15 +13,18 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from tests.integration.tools.vue_tsc.conftest import vue_tsc_is_available
+from tests.integration._tools import NO_MIN_VERSION, require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
 
-# Skip all tests if vue-tsc is not installed or not working
-pytestmark = pytest.mark.skipif(
-    not vue_tsc_is_available(),
-    reason="vue-tsc not installed or not working",
+# `vue-tsc --version` prints the bundled TypeScript version, not vue-tsc's
+# (which is why the manifest resolves it through a script), so there is no
+# meaningful floor to compare the output against.
+pytestmark = require_tool(
+    "vue-tsc",
+    launchers=(("bunx",), ("npx",)),
+    min_version=NO_MIN_VERSION,
 )
 
 

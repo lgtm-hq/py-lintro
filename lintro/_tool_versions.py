@@ -7,7 +7,8 @@ Version sources (in priority order):
        ``package.json``, ``pyproject.toml``, and ``requirements-semgrep.txt``
        sources.
     3. ``TOOL_VERSIONS`` below — non-npm/non-pypi tools (binaries, cargo,
-       rustup) updated by Renovate via custom regex managers.
+       rustup), mostly updated by Renovate via custom regex managers. See
+       "Adding a new tool" for the entries that deliberately have none.
 
 Single-source-of-truth structure:
 
@@ -32,7 +33,14 @@ Adding a new tool:
     - npm or pypi: add a ToolName, edit ``lintro/_tool_packages.py``, pin in
       package.json or pyproject.toml, run the generator.
     - Other (binary/cargo/rustup): add to ``TOOL_VERSIONS`` below and add a
-      Renovate ``customManager`` entry.
+      Renovate ``customManager`` entry. Two kinds of entry are deliberately
+      unmanaged, so do not add managers for them:
+        - rustfmt and clippy, bundled with ``ToolName.RUSTC`` — bump their
+          records only alongside rustc (#2205).
+        - cppcheck, installed from Debian's package because upstream ships no
+          portable binary — its pin tracks the base image's distro release,
+          and the manifest-vs-image gate requires equality, so an upstream
+          tag apt cannot supply would fail CI permanently.
 
 For shell scripts:
     python3 -c "from lintro._tool_versions import get_tool_version; \\
@@ -58,26 +66,42 @@ _logger = logging.getLogger(__name__)
 _MANIFEST_PATH = Path(__file__).parent / "tools" / "manifest.json"
 
 # Non-npm/non-pypi external tools — updated by Renovate via custom regex
-# managers. Tools managed via npm or pypi live in ``_tool_packages.py``
-# (seeds) and ``_generated_versions.py`` (versions).
+# managers, except rustfmt/clippy which record what the rustc toolchain
+# ships (bump only alongside ToolName.RUSTC; see #2205). Tools managed via
+# npm or pypi live in ``_tool_packages.py`` (seeds) and
+# ``_generated_versions.py`` (versions).
 TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.ACTIONLINT: "1.7.12",
+    ToolName.BUF: "1.72.0",
     ToolName.CARGO_AUDIT: "0.22.0",
     ToolName.CARGO_DENY: "0.20.0",
-    ToolName.CLIPPY: "1.97.1",
+    # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
+    ToolName.CLIPPY: "1.98.1",
+    # cppcheck ships no portable single binary, so both the tools image and the
+    # app-image install-tools.sh bridge install Debian's package. This pin
+    # therefore tracks the version in the python base image's Debian release
+    # (trixie ships 2.17.1), not upstream's latest tag: the manifest-vs-image
+    # gate requires the installed version to equal this one, so a pin apt
+    # cannot supply can never pass. Bump it only when the base image moves to a
+    # new Debian release. Deliberately NOT Renovate-managed (see the exclusion
+    # test in tests/unit/test_workflow_wiring.py); the supported floor stays
+    # the lower ``min_version`` in manifest.src.json.
+    ToolName.CPPCHECK: "2.17.1",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
-    ToolName.GOLANGCI_LINT: "2.12.2",
+    ToolName.GOLANGCI_LINT: "2.13.2",
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.5.1",
     ToolName.RUBOCOP: "1.88.1",
-    ToolName.RUSTC: "1.97.1",
+    ToolName.RUSTC: "1.98.1",
+    # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.RUSTFMT: "1.9.0",
     ToolName.SHELLCHECK: "0.11.0",
-    ToolName.SHFMT: "3.13.1",
+    ToolName.SHFMT: "3.14.0",
     ToolName.TAPLO: "0.10.0",
-    ToolName.TRUFFLEHOG: "3.97.0",
-    ToolName.VALE: "3.17.1",
+    ToolName.TRUFFLEHOG: "3.97.3",
+    ToolName.TYPOS: "1.49.0",
+    ToolName.VALE: "3.20.0",
 }
 
 _NPM_PACKAGE_TO_TOOL: dict[str, ToolName] = {

@@ -1,7 +1,10 @@
 """Tool manager for Lintro.
 
-This module provides the ToolManager class for managing tool registration,
-conflict resolution, and execution ordering using the plugin registry system.
+This module provides the ToolManager class for managing tool registration and
+execution ordering using the plugin registry system. Ordering is derived from
+the claims each tool declares (:mod:`lintro.tools.core.scheduler`, #1742); the
+scalar ``priority`` system and the unused ``conflicts_with`` machinery it
+replaced are gone.
 """
 
 from __future__ import annotations
@@ -9,11 +12,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from loguru import logger
-
 from lintro.plugins.discovery import discover_all_tools
 from lintro.plugins.registry import ToolRegistry
-from lintro.utils.unified_config import get_ordered_tools
+from lintro.tools.core.scheduler import (
+    build_order_report,
+    derive_execution_order,
+)
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
@@ -25,14 +29,13 @@ class ToolManager:
 
     This class is responsible for:
     - Tool discovery and registration via plugin registry
-    - Tool conflict resolution
-    - Tool execution order (priority-based, alphabetical, or custom)
+    - Tool execution order, derived from declared claims
     - Tool configuration management
 
-    Tool ordering is controlled by [tool.lintro].tool_order in pyproject.toml:
-    - "priority" (default): Formatters run before linters based on priority values
-    - "alphabetical": Tools run in alphabetical order by name
-    - "custom": Tools run in order specified by [tool.lintro].tool_order_custom
+    Execution order is not configurable: it is derived from what each tool
+    declares it touches and what it does to it (``FIX`` -> ``FORMAT`` ->
+    ``CHECK`` per pattern), so it is complete, verifiable and identical
+    everywhere it is reported.
     """
 
     _initialized: bool = field(default=False, init=False)
@@ -62,36 +65,62 @@ class ToolManager:
     ) -> list[str]:
         """Get the order in which tools should be executed.
 
-        Tool ordering is controlled by [tool.lintro].tool_order in pyproject.toml:
-        - "priority" (default): Formatters run before linters based on priority
-        - "alphabetical": Tools run in alphabetical order by name
-        - "custom": Tools run in order specified by [tool.lintro].tool_order_custom
-
-        This method also handles:
-        - Tool conflicts (unless ignore_conflicts is True)
+        The order is derived from the claims each tool declares: for every
+        glob pattern, ``FIX`` runs before ``FORMAT`` runs before ``CHECK``,
+        the per-pattern edges union into one DAG, each tool is invoked once,
+        and ties break alphabetically. See
+        :mod:`lintro.tools.core.scheduler`.
 
         Args:
             tool_names: List of tool names to order.
-            ignore_conflicts: If True, skip conflict checking.
+            ignore_conflicts: Accepted for call-site compatibility and
+                ignored. Derived ordering demotes rather than drops, so no
+                tool is ever removed from a run.
+
+        A duplicate name, or one that resolves to no registered tool, raises
+        ``ValueError`` — normalisation and registry resolution both happen
+        before the scheduler reads any claim.
 
         Returns:
-            List of tool names in execution order based on configured strategy.
+            List of tool names in derived execution order. Every requested
+            tool appears exactly once.
+        """
+        del ignore_conflicts
+        if not tool_names:
+            return []
+
+        normalized_names = self._normalize_tool_names(tool_names)
+
+        # Resolving each tool proves it is registered before the scheduler
+        # reads its claims, so an unknown name still fails loudly here. Only
+        # the ordering entry point does this: batching must stay tolerant so a
+        # tool that cannot be resolved becomes a failed result in the executor
+        # rather than aborting the whole run.
+        for name in normalized_names:
+            self.get_tool(name)
+
+        return derive_execution_order(normalized_names)
+
+    @staticmethod
+    def _normalize_tool_names(tool_names: list[str]) -> list[str]:
+        """Lowercase tool names and reject duplicates.
+
+        Shared by :meth:`get_tool_execution_order` and
+        :meth:`get_parallel_batches` so both entry points agree on what a name
+        means before the scheduler reads its claims — derived edges are always
+        lowercase, so a mixed-case name would otherwise never match one.
+
+        Args:
+            tool_names: Tool names as the caller supplied them.
+
+        Returns:
+            The same names, lowercased, in the order given.
 
         Raises:
             ValueError: If duplicate tools are found in tool_names.
         """
-        if not tool_names:
-            return []
-
-        # Normalize names to lowercase
         normalized_names = [name.lower() for name in tool_names]
 
-        # Get tool instances
-        tools: dict[str, BaseToolPlugin] = {
-            name: self.get_tool(name) for name in normalized_names
-        }
-
-        # Validate for duplicate tools
         seen_names: set[str] = set()
         duplicates: list[str] = []
         for name in normalized_names:
@@ -104,45 +133,66 @@ class ToolManager:
                 f"Duplicate tools found in tool_names: {', '.join(duplicates)}",
             )
 
-        # Get ordered tool names from unified config
-        ordered_names = get_ordered_tools(normalized_names)
+        return normalized_names
 
-        # Validate that all requested tools are preserved
-        original_set = set(normalized_names)
-        sorted_set = set(ordered_names)
-        missing_tools = original_set - sorted_set
-        if missing_tools:
-            # Append missing tools in their original order
-            missing_list = [n for n in normalized_names if n in missing_tools]
-            ordered_names.extend(missing_list)
-            logger.warning(
-                f"Some tools were not found in ordered list and appended: "
-                f"{missing_list}",
-            )
+    def get_parallel_batches(self, tool_names: list[str]) -> list[list[str]]:
+        """Group tools into batches that may run concurrently.
 
-        if ignore_conflicts:
-            return ordered_names
+        Batches come from the same derived DAG that orders a sequential run:
+        a tool sits in the batch after every tool that must precede it, so two
+        tools never share a batch when one is required to observe the other's
+        writes (ruff before black on ``*.py``). Tools with no derived relation
+        share a batch, which is a proven independence rather than an unstated
+        assumption.
 
-        # Build conflict graph
-        conflict_graph: dict[str, set[str]] = {name: set() for name in normalized_names}
-        for tool_name in normalized_names:
-            tool_instance = tools[tool_name]
-            for conflict in tool_instance.definition.conflicts_with:
-                conflict_lower = conflict.lower()
-                # Only add to conflict graph if conflict is in our tool list
-                if conflict_lower in normalized_names:
-                    conflict_graph[tool_name].add(conflict_lower)
-                    conflict_graph[conflict_lower].add(tool_name)
+        Names are lowercased and de-duplicated the same way
+        :meth:`get_tool_execution_order` does them, so neither entry point can
+        be handed a mixed-case name the derived edges (always lowercase) would
+        fail to match. Unlike that method this one does not resolve names
+        against the registry: an unresolvable tool must reach the executor and
+        become a failed result rather than abort the run.
 
-        # Resolve conflicts by keeping the first tool in ordered sequence
-        result: list[str] = []
-        for tool_name in ordered_names:
-            # Check if this tool conflicts with any already selected tools
-            conflicts = conflict_graph[tool_name] & set(result)
-            if not conflicts:
-                result.append(tool_name)
+        Args:
+            tool_names: Tool names to batch, in derived execution order.
 
-        return result
+        Returns:
+            Batches of normalised tool names, in derived execution order.
+        """
+        if not tool_names:
+            return []
+
+        normalized_names = self._normalize_tool_names(tool_names)
+        predecessors: dict[str, set[str]] = {name: set() for name in normalized_names}
+        for edge in build_order_report(normalized_names).edges:
+            predecessors[edge.after].add(edge.before)
+
+        level: dict[str, int] = {}
+        remaining = list(normalized_names)
+        while remaining:
+            ready = [name for name in remaining if predecessors[name] <= level.keys()]
+            if not ready:
+                # A derived cycle stalls the assignment. Break exactly one
+                # node the way ``_linearize`` does — the alphabetically first
+                # remaining tool — then resume, so the tools still waiting on
+                # it keep waiting. Dumping the whole remainder at once would
+                # let a successor share a batch with, or precede, a cycle
+                # member it must observe.
+                stalled = min(remaining)
+                # Strictly after everything already levelled, so nothing that
+                # was waiting on it can share its batch or precede it.
+                level[stalled] = max(level.values(), default=-1) + 1
+            else:
+                for name in ready:
+                    level[name] = max(
+                        (level[dep] + 1 for dep in predecessors[name]),
+                        default=0,
+                    )
+            remaining = [name for name in remaining if name not in level]
+
+        return [
+            [name for name in normalized_names if level[name] == depth]
+            for depth in sorted(set(level.values()))
+        ]
 
     def set_tool_options(
         self,
