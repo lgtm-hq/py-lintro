@@ -104,20 +104,31 @@ def test_guard_paths_exist_in_the_repository() -> None:
         assert_that((_REPO_ROOT / path).exists()).described_as(path).is_true()
 
 
-def _render_step_copy_sources() -> list[str]:
-    """Return the paths ``docker/tools.Dockerfile`` copies before rendering.
+def _render_step_copy_sources(dockerfile: Path = _TOOLS_DOCKERFILE) -> list[str]:
+    """Return the paths *dockerfile* copies in before rendering the manifest.
+
+    Flags are skipped so a ``COPY --chmod=0755 src dst`` is parsed like any
+    other; ``COPY --from=<stage>`` is dropped entirely because its sources
+    name a build stage, not repository paths.
+
+    Args:
+        dockerfile: Dockerfile to parse (the tools image recipe by default).
 
     Returns:
         Repository-relative COPY sources preceding the ``RUN`` that invokes
         the version generator.
     """
     sources: list[str] = []
-    for line in _TOOLS_DOCKERFILE.read_text(encoding="utf-8").splitlines():
+    for line in dockerfile.read_text(encoding="utf-8").splitlines():
         stripped = line.strip()
         if stripped.startswith("COPY "):
-            parts = stripped.split()
-            if len(parts) >= 3 and not parts[1].startswith("--"):
-                sources.append(parts[1])
+            parts = stripped.split()[1:]
+            flags = [part for part in parts if part.startswith("--")]
+            if any(flag.startswith("--from=") for flag in flags):
+                continue
+            operands = [part for part in parts if not part.startswith("--")]
+            # The last operand is the destination inside the image.
+            sources.extend(operands[:-1])
         elif _GENERATE_SCRIPT in stripped:
             break
     assert_that(sources).is_not_empty()
@@ -143,3 +154,26 @@ def test_guard_covers_every_path_the_render_step_copies() -> None:
             for path in watched
         )
         assert_that(covered).described_as(f"{source} is unwatched").is_true()
+
+
+def test_copy_parser_reads_flagged_and_multi_source_copies(tmp_path: Path) -> None:
+    """Flags must not hide a COPY source from the coverage check.
+
+    Args:
+        tmp_path: Temporary directory holding the fixture Dockerfile.
+    """
+    dockerfile = tmp_path / "tools.Dockerfile"
+    dockerfile.write_text(
+        "FROM debian\n"
+        "COPY lintro/ /app/lintro/\n"
+        "COPY --chmod=0755 scripts/ /app/scripts/\n"
+        "COPY --from=builder /out/bin /usr/local/bin\n"
+        "COPY package.json pyproject.toml /app/\n"
+        f"RUN python3 {_GENERATE_SCRIPT}\n"
+        "COPY after/ /app/after/\n",
+        encoding="utf-8",
+    )
+
+    assert_that(_render_step_copy_sources(dockerfile)).is_equal_to(
+        ["lintro/", "scripts/", "package.json", "pyproject.toml"],
+    )

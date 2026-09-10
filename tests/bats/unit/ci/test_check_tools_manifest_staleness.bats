@@ -193,6 +193,38 @@ run_guard() {
 	assert_output --partial "CANDIDATE_FETCH_ATTEMPTS must be a positive integer"
 }
 
+@test "refuses from a subdirectory of the checkout" {
+	# Bare pathspecs would resolve against the cwd, so a run from a
+	# subdirectory must still compare the repository-relative inputs.
+	printf 'RUFF = "0.3.0"\n' >lintro/_tool_versions.py
+	git add -A
+	git commit --quiet -m 'chore(deps): bump ruff again (#2)'
+	main_sha="$(git rev-parse main)"
+	mkdir -p sub/dir
+	cd sub/dir || return 1
+
+	run env CANDIDATE_SHA="${CANDIDATE_ABBREV}" \
+		CANDIDATE_PR="${CANDIDATE_PR_NUMBER}" \
+		MAIN_SHA="$main_sha" \
+		CANDIDATE_FETCH_DELAY_SECONDS=0 \
+		GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary" "$SCRIPT"
+	assert_failure
+	assert_output --partial "refusing to promote: main has newer tool manifest commits"
+	assert_output --partial "lintro/_tool_versions.py"
+}
+
+@test "outside a git repository the guard is a usage error" {
+	cd "${BATS_TEST_TMPDIR}" || return 1
+	mkdir -p not-a-repo
+	cd not-a-repo || return 1
+
+	run env CANDIDATE_SHA="${CANDIDATE_ABBREV}" MAIN_SHA="${CANDIDATE_FULL}" \
+		"$SCRIPT"
+	assert_failure
+	assert_equal "2" "$status"
+	assert_output --partial "not inside a git repository"
+}
+
 @test "refusal is written to the step summary" {
 	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary"
 	: >"$GITHUB_STEP_SUMMARY"

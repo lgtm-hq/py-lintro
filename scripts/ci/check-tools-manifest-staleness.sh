@@ -66,6 +66,9 @@ Environment:
   CANDIDATE_FETCH_DELAY_SECONDS  Seconds between fetch attempts (default: 2).
   GITHUB_STEP_SUMMARY  When set, the refusal message is appended to it.
 
+The guard anchors itself to the repository root, so it can be run from any
+directory inside the checkout.
+
 Exit codes:
   0  candidate manifest inputs match main (or the guard was skipped)
   1  main has newer tool manifest commits, or staleness cannot be determined
@@ -145,6 +148,16 @@ if [[ -z "$main_sha" ]]; then
 	echo "MAIN_SHA is required when CANDIDATE_SHA is set" >&2
 	exit 2
 fi
+
+# Pathspecs below are repository-relative, so anchor to the repository root:
+# run from a subdirectory, bare pathspecs would resolve against the cwd and
+# quietly compare nothing.
+if ! repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" ||
+	[[ -z "$repo_root" ]]; then
+	echo "not inside a git repository; cannot check tool manifest staleness" >&2
+	exit 2
+fi
+cd "$repo_root" || exit 2
 
 read -r -a manifest_paths <<<"$(echo "${MANIFEST_PATHS:-$DEFAULT_MANIFEST_PATHS}" | tr '\n' ' ')"
 
