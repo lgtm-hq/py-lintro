@@ -121,17 +121,64 @@ def _default_shaped_values(tree: ast.AST) -> list[tuple[int, str, ast.expr]]:
         elif isinstance(node, ast.Call):
             found.extend(_call_defaults(node=node))
         elif isinstance(node, ast.Assign):
-            names = [
-                target.id for target in node.targets if isinstance(target, ast.Name)
-            ]
-            if any("default" in name.lower() for name in names):
-                found.append((node.lineno, "default constant", node.value))
+            if any(_names_a_default(target=target) for target in node.targets):
+                found.extend(
+                    (node.lineno, "default constant", value)
+                    for value in _unpack_containers(value=node.value)
+                )
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            if (
-                isinstance(node.target, ast.Name)
-                and "default" in node.target.id.lower()
-            ):
-                found.append((node.lineno, "default constant", node.value))
+            if _names_a_default(target=node.target):
+                found.extend(
+                    (node.lineno, "default constant", value)
+                    for value in _unpack_containers(value=node.value)
+                )
+    return found
+
+
+def _names_a_default(*, target: ast.expr) -> bool:
+    """Report whether an assignment target reads as a default.
+
+    A subscript or attribute target is as much a default as a bare name —
+    ``DEFAULTS["provider"] = "anthropic"`` binds one just as plainly as
+    ``DEFAULT_PROVIDER = "anthropic"`` — so the printed target is matched
+    rather than only ``ast.Name.id``.
+
+    Args:
+        target: Assignment target.
+
+    Returns:
+        True when the printed target contains ``default``.
+    """
+    if not isinstance(target, ast.Name | ast.Attribute | ast.Subscript):
+        return False
+    return "default" in ast.unparse(target).lower()
+
+
+def _unpack_containers(*, value: ast.expr) -> list[ast.expr]:
+    """Return *value* together with the members of any container it builds.
+
+    A default is no less a default for sitting inside a literal container:
+    ``DEFAULTS = {"provider": "anthropic"}`` and
+    ``DEFAULT_ORDER = ("anthropic", "cursor")`` both name a vendor. Dict
+    **keys** are deliberately not unpacked — a table keyed by provider is
+    per-provider dispatch, not a default.
+
+    Args:
+        value: Expression bound in a default-shaped position.
+
+    Returns:
+        *value* and, recursively, the values of dict literals and the
+        elements of tuple/list/set literals.
+    """
+    found = [value]
+    if isinstance(value, ast.Dict):
+        members: list[ast.expr] = [item for item in value.values if item is not None]
+    elif isinstance(value, ast.Tuple | ast.List | ast.Set):
+        members = list(value.elts)
+    else:
+        return found
+    for member in members:
+        found.extend(_unpack_containers(value=member))
     return found
 
 
@@ -206,6 +253,10 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         'provider = Field("openai")',
         'provider = pydantic.Field("openai")',
         'DEFAULT_PROVIDER = "cursor"',
+        'DEFAULTS = {"provider": "anthropic"}',
+        'DEFAULT_ORDER = ("cursor", "openai")',
+        'DEFAULTS["provider"] = "anthropic"',
+        'DEFAULT_PROVIDER: str = "cursor"',
         'provider = explicit if explicit else "anthropic"',
         'provider = "anthropic" if provider is None else provider',
         'provider = explicit or "cursor" or fallback',
@@ -220,6 +271,10 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "pydantic-field-positional-default",
         "pydantic-qualified-field-positional-default",
         "default-constant",
+        "default-constant-in-a-dict",
+        "default-constant-in-a-tuple",
+        "default-constant-via-a-subscript-target",
+        "annotated-default-constant",
         "conditional-fallback",
         "conditional-fallback-in-body",
         "or-fallback-mid-chain",
@@ -277,6 +332,7 @@ def test_ratchet_ignores_provider_names_outside_defaults() -> None:
     source = (
         '"""Talks to anthropic, cursor and openai."""\n'
         'TAXONOMY = {"anthropic": (), "cursor": (), "openai": ()}\n'
+        'DEFAULT_TIMEOUTS = {"anthropic": 30, "cursor": 30, "openai": 30}\n'
         "def is_bare(provider): return provider is AIProvider.ANTHROPIC\n"
     )
     flagged = [
