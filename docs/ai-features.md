@@ -365,7 +365,10 @@ A capped CLI review is **not a guaranteed full finding set**. Under `--transport
 every chunk prompt carries the `ai.cli_max_findings_per_call` ceiling, and a chunk that
 still exhausts the provider's output-token cap is retried once at a tighter ceiling. In
 both cases every chunk is still reviewed — but the model was told to stop at N findings,
-so lower-severity issues beyond the cap may exist and go unreported.
+so lower-severity issues beyond the cap may exist and go unreported. A configured
+ceiling is only recorded as a coverage degradation once a chunk's answer actually
+reaches it, so a CLI run whose chunks all came back under the cap is coverage-complete
+and renders exactly like an uncapped one.
 
 That is recorded and surfaced rather than left silent:
 
