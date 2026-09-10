@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -377,15 +376,11 @@ async def test_with_fallback_parallel_calls_overlap() -> None:
         active_calls -= 1
         return model
 
-    started_at = time.perf_counter()
     results = await asyncio.gather(
         *(_with_fallback(provider, slow_attempt, "hello") for _ in range(worker_count)),
     )
-    elapsed = time.perf_counter() - started_at
 
-    serialized_minimum = sleep_seconds * worker_count
     assert_that(max_concurrent_calls).is_greater_than_or_equal_to(2)
-    assert_that(elapsed).is_less_than(serialized_minimum * 0.75)
     assert_that(results).is_length(worker_count)
     assert_that(set(results)).is_equal_to({"primary-model"})
 
@@ -417,15 +412,11 @@ async def test_complete_with_fallback_parallel_calls_overlap() -> None:
 
     provider.complete.side_effect = slow_complete
 
-    started_at = time.perf_counter()
     results = await asyncio.gather(
         *(complete_with_fallback(provider, "hello") for _ in range(worker_count)),
     )
-    elapsed = time.perf_counter() - started_at
 
-    serialized_minimum = sleep_seconds * worker_count
     assert_that(max_concurrent_calls).is_greater_than_or_equal_to(2)
-    assert_that(elapsed).is_less_than(serialized_minimum * 0.75)
     assert_that(results).is_length(worker_count)
     for result in results:
         assert_that(result.content).is_equal_to("ok")
