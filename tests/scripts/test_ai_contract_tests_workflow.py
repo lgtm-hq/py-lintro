@@ -627,7 +627,7 @@ def test_forwarded_env_tuple_matches_the_script_forwarding_loop() -> None:
         text,
     )
     assert_that(loops).described_as(
-        "forwarding loop in run-ai-contract-tests.sh"
+        "forwarding loop in run-ai-contract-tests.sh",
     ).is_not_empty()
     forwarded = tuple(re.findall(r"[A-Z][A-Z0-9_]+", loops[0]))
 
