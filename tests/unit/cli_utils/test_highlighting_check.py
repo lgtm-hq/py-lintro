@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import re
+import ast
 from pathlib import Path
 
 import pytest
@@ -42,19 +42,56 @@ def test_the_diff_lexer_the_binary_actually_uses_is_checked() -> None:
     assert_that(result.details[0]).starts_with("diff: DiffLexer,")
 
 
+def test_every_checked_language_has_its_own_snippet() -> None:
+    """``CHECKED_LANGUAGES`` and ``_SNIPPETS`` are one list, kept in lockstep.
+
+    ``check_syntax_highlighting`` falls back to a generic ``x = 1`` snippet
+    for a language with no entry, which is right for an ad-hoc
+    ``languages=`` argument and wrong for a shipped one: the gate would
+    either pass without exercising realistic input, or fail spuriously
+    because the generic snippet renders as plain text under that lexer
+    (#2514).
+    """
+    from lintro.cli_utils.highlighting_check import _SNIPPETS
+
+    assert_that(set(_SNIPPETS)).described_as(
+        "every checked language needs a representative snippet",
+    ).is_equal_to(set(CHECKED_LANGUAGES))
+
+
 def test_the_checked_language_of_the_interactive_call_site_is_not_drifted() -> None:
     """The language literal in the AI review renderer stays in the checked set.
 
     Guards the pairing itself: if the renderer is ever switched to another
     lexer, this fails until the self-check follows it.
+
+    The source is parsed rather than searched. A regex over raw text takes
+    the first match anywhere in the file, so a comment quoting the call --
+    and this repo's comments do quote it -- could satisfy the guard while
+    the real call had moved to another lexer (#2514).
     """
     source = (
         Path(__file__).resolve().parents[3] / "lintro" / "ai" / "interactive.py"
     ).read_text(encoding="utf-8")
-    call = re.search(r"Syntax\(\s*fix\.diff,\s*\"(?P<language>[a-z]+)\"", source)
-    assert_that(call).is_not_none()
-    assert call is not None  # narrow type for mypy
-    assert_that(CHECKED_LANGUAGES).contains(call.group("language"))
+
+    languages = [
+        node.args[1].value
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Syntax"
+        and len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    ]
+
+    assert_that(languages).described_as(
+        "no Syntax(...) call with a literal language found in interactive.py",
+    ).is_not_empty()
+    for language in languages:
+        assert_that(CHECKED_LANGUAGES).described_as(
+            f"interactive.py highlights {language!r}, which the gate never checks",
+        ).contains(language)
 
 
 def test_an_unknown_language_is_reported_as_a_failure() -> None:

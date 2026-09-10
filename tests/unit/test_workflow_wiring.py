@@ -69,9 +69,14 @@ def _collect_python_version_pins(*, node: Any) -> list[str]:
     out of the sweep. A comma-joined multi-version string is split the same
     way, for the same reason.
 
-    ``${{ }}`` expressions are the one thing still skipped: they name another
-    pin rather than stating one, and the pin they resolve to is covered where
-    it is declared.
+    A workflow-level ``env: PYTHON_VERSION:`` declaration counts as a pin too.
+    That is the shape #2514 introduced in build-binary.yml, and collecting it
+    keeps the workflow inside the sweep instead of exempt by shape.
+
+    ``${{ }}`` expressions are the one thing skipped: they name another pin
+    rather than stating one, and the pin they resolve to is collected where it
+    is declared -- either at a ``python-version:`` key or at the ``env`` entry
+    the expression reads.
 
     Args:
         node: Parsed YAML fragment to walk.
@@ -82,7 +87,7 @@ def _collect_python_version_pins(*, node: Any) -> list[str]:
     found: list[str] = []
     if isinstance(node, dict):
         for key, value in node.items():
-            if key == "python-version":
+            if key in {"python-version", "PYTHON_VERSION"}:
                 elements = value if isinstance(value, list) else [value]
                 for element in elements:
                     if not isinstance(element, str | int | float):
@@ -2585,6 +2590,19 @@ def test_binary_jobs_never_install_the_dev_group() -> None:
             ).contains("--no-default-groups")
 
 
+#: Hosts ``actions/cache`` contacts, asserted identically on both compile jobs.
+#: v4 talks to the Actions Results API (``results-receiver``) and streams entry
+#: payloads from Azure blob storage; ``actions.githubusercontent.com`` is the
+#: older cache API the client still falls back to. The two jobs run the same
+#: action, so a per-OS subset here would be an untested claim about the client
+#: rather than about the workflow (#2514).
+_ACTIONS_CACHE_ENDPOINTS = (
+    "results-receiver.actions.githubusercontent.com:443",
+    "actions.githubusercontent.com:443",
+    "*.blob.core.windows.net:443",
+)
+
+
 def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
     """The Linux binary build must allow GitHub's hosted-runner watchdog.
 
@@ -2625,12 +2643,11 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
         "files.pythonhosted.org:443",
         "nuitka.net:443",
         "release-assets.githubusercontent.com:443",
-        # #2484: the Nuitka cache restore/save steps talk to the cache service
-        # and stream entry payloads from Azure blob storage. Without both the
-        # compile jobs run cold behind the block policy.
-        "actions.githubusercontent.com:443",
-        "*.blob.core.windows.net:443",
     )
+    # The Nuitka cache restore/save steps are continue-on-error, so a host
+    # missing here degrades to a silent ~1500-file cold compile rather than a
+    # failure. Both jobs assert the same set.
+    assert_that(endpoints).contains(*_ACTIONS_CACHE_ENDPOINTS)
     assert_that(endpoints).does_not_contain_duplicates()
     # Any other glob would silently widen the block policy. Two whole-label
     # subdomain wildcards are permitted: the agreed revert-to-wildcard
@@ -2673,11 +2690,8 @@ def test_build_macos_egress_allowlist_stays_pinned() -> None:
         "release-assets.githubusercontent.com:443",
         "uploads.github.com:443",
     )
-    # #2484: the cache service and the blob store its entries live in.
-    assert_that(endpoints).contains(
-        "results-receiver.actions.githubusercontent.com:443",
-        "*.blob.core.windows.net:443",
-    )
+    # The same cache hosts the Linux job asserts; see _ACTIONS_CACHE_ENDPOINTS.
+    assert_that(endpoints).contains(*_ACTIONS_CACHE_ENDPOINTS)
     assert_that(endpoints).does_not_contain_duplicates()
     permitted_globs = ("*.blob.core.windows.net:443",)
     for endpoint in endpoints:
@@ -5671,34 +5685,103 @@ def parsed_workflows(workflow_files: list[Path]) -> dict[str, dict[str, Any]]:
     return {path.name: _load_workflow(name=path.name) for path in workflow_files}
 
 
-def _security_permission_rows() -> dict[str, str]:
-    """Return the workflow-level permission claim of each SECURITY.md row.
+_PERMISSION_CLAIM_RE = re.compile(r"`([a-z-]+):\s*([a-z]+)`")
+_PUBLISH_ON_TAG_WORKFLOW = "publish-pypi-on-tag.yml"
+
+
+def _security_permission_rows() -> dict[str, tuple[str, str]]:
+    """Return each SECURITY.md row's workflow-level and per-job claims.
 
     Returns:
-        Workflow file name mapped to the leading claim of its ``Permissions``
-        cell, with any ``+ per-job ...`` remainder dropped.
+        Workflow file name mapped to the two halves of its ``Permissions``
+        cell, split on the ``+ per-job`` marker. The per-job half is the empty
+        string when the row states none.
     """
     table = (_REPO_ROOT / ".github" / "SECURITY.md").read_text(encoding="utf-8")
-    rows: dict[str, str] = {}
+    rows: dict[str, tuple[str, str]] = {}
     for line in table.splitlines():
-        match = re.match(r"\|\s*`([\w.-]+\.yml)`\s*\|([^|]*)\|", line)
+        match = re.match(r"\|\s*`([\w.-]+\.ya?ml)`\s*\|([^|]*)\|", line)
         if match is None:
             continue
-        rows[match.group(1)] = re.split(r"\(?\+\s*per-job", match.group(2))[0].strip()
+        halves = re.split(r"\(?\+\s*per-job", match.group(2), maxsplit=1)
+        rows[match.group(1)] = (
+            halves[0].strip(),
+            halves[1].strip() if len(halves) > 1 else "",
+        )
     return rows
+
+
+def _documented_scopes(claim: str) -> dict[str, str]:
+    """Return the ``scope: level`` pairs a table cell half names.
+
+    Args:
+        claim: One half of a ``Permissions`` cell.
+
+    Returns:
+        The pairs found, as a mapping.
+    """
+    return dict(_PERMISSION_CLAIM_RE.findall(claim))
+
+
+def _declared_job_scopes(workflow: dict[str, Any]) -> dict[str, str]:
+    """Return the union of a workflow's job-level grants, at their highest level.
+
+    ``uses:`` jobs are not included: a remote callee's requests are declared in
+    another repository, and a local callee has its own row.
+
+    Args:
+        workflow: One parsed workflow.
+
+    Returns:
+        Scope mapped to the highest level any job in this file grants it.
+    """
+    highest: dict[str, str] = {}
+    for job in (workflow.get("jobs") or {}).values():
+        if not isinstance(job, dict):
+            continue
+        for scope, level in (job.get("permissions") or {}).items():
+            if _PERMISSION_LEVELS.get(str(level), 0) > _PERMISSION_LEVELS.get(
+                highest.get(scope, "none"),
+                0,
+            ):
+                highest[scope] = str(level)
+    return highest
+
+
+def _security_table_scope(parsed_workflows: dict[str, dict[str, Any]]) -> set[str]:
+    """Return the workflows SECURITY.md's preamble claims the table covers.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+
+    Returns:
+        The release-path workflows plus the two main CI workflows.
+    """
+    covered = {"docker-ci.yml", "test-ci.yml", _PUBLISH_ON_TAG_WORKFLOW}
+    pending = [_PUBLISH_ON_TAG_WORKFLOW]
+    while pending:
+        name = pending.pop()
+        workflow = parsed_workflows.get(name)
+        if workflow is None:
+            continue
+        for _, _, callee in _local_workflow_calls(workflow=workflow):
+            if callee not in covered:
+                covered.add(callee)
+                pending.append(callee)
+    return covered
 
 
 def test_security_md_permission_rows_match_the_workflows(
     parsed_workflows: dict[str, dict[str, Any]],
 ) -> None:
-    """Each documented row states the workflow-level block the YAML declares.
+    """Each documented row states the grants its workflow actually declares.
 
     The table is the repo's security-facing inventory of the release path, and
-    it drifted twice: #2440 and #2524 changed the workflows without it. Rows
-    are hand-written prose, so this asserts only the half that is mechanical —
-    the workflow-level ``permissions:`` block, spelled as `` `{}` `` or as
-    backticked ``scope: level`` pairs before any ``+ per-job`` remainder
-    (#2514).
+    it drifted twice before a guard existed: #2440 and #2524 changed the
+    workflows without it. Both halves of the cell are mechanical, so both are
+    asserted -- the workflow-level block verbatim, and the union of the
+    job-level grants at their highest level. Understating an escalation such
+    as the cosign ``id-token: write`` is the failure this prevents (#2514).
 
     Args:
         parsed_workflows: Every workflow in the repository, parsed.
@@ -5707,24 +5790,50 @@ def test_security_md_permission_rows_match_the_workflows(
     assert_that(rows).described_as(
         "no permission rows parsed out of SECURITY.md",
     ).is_not_empty()
-    assert_that(len(rows)).is_greater_than_or_equal_to(5)
 
-    for name, claim in rows.items():
+    for name, (top_claim, job_claim) in rows.items():
         assert_that(parsed_workflows).described_as(
             f"SECURITY.md names {name}, which no longer exists",
         ).contains_key(name)
-        declared = parsed_workflows[name].get("permissions")
-        if "`{}`" in claim:
-            documented: dict[str, str] = {}
-        else:
-            documented = dict(re.findall(r"`([a-z-]+):\s*([a-z]+)`", claim))
-            assert_that(documented).described_as(
-                f"{name}: unparseable workflow-level claim {claim!r}",
+        workflow = parsed_workflows[name]
+
+        documented_top = {} if "`{}`" in top_claim else _documented_scopes(top_claim)
+        if "`{}`" not in top_claim:
+            assert_that(documented_top).described_as(
+                f"{name}: unparseable workflow-level claim {top_claim!r}",
             ).is_not_empty()
-        assert_that(declared or {}).described_as(
-            f"{name}: SECURITY.md documents {documented} but the workflow "
-            f"declares {declared}",
-        ).is_equal_to(documented)
+        assert_that(workflow.get("permissions") or {}).described_as(
+            f"{name}: SECURITY.md documents workflow-level {documented_top}",
+        ).is_equal_to(documented_top)
+
+        assert_that(_documented_scopes(job_claim)).described_as(
+            f"{name}: SECURITY.md's per-job list disagrees with the jobs",
+        ).is_equal_to(_declared_job_scopes(workflow))
+
+
+def test_security_md_covers_every_workflow_in_its_stated_scope(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """Every workflow the preamble claims to cover has a row.
+
+    The row-by-row check above is one-directional: it keeps the rows honest
+    but lets a new release-path workflow stay out of the inventory entirely.
+    The scope is derived, not listed -- the release path is walked from
+    ``publish-pypi-on-tag.yml`` through its local ``uses:`` callees -- so a
+    workflow added to the tag pipeline is required to appear (#2514).
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    expected = _security_table_scope(parsed_workflows)
+    assert_that(expected).described_as(
+        "the release-path walk found nothing; the scope would be vacuous",
+    ).contains(_BUILD_BINARY_WORKFLOW)
+
+    missing = sorted(expected - set(_security_permission_rows()))
+    assert_that(missing).described_as(
+        "workflows in SECURITY.md's stated scope with no permission row",
+    ).is_empty()
 
 
 def test_reusable_workflow_callers_grant_what_callees_request(

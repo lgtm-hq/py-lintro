@@ -145,17 +145,20 @@ permissions:
 
 ## Permission Scopes by Workflow
 
-The release path and the two main CI workflows, not every workflow in the repo. The
-`Permissions` column states the **workflow-level** block verbatim, then the per-job
-escalations; a wiring test asserts the workflow-level half against the YAML.
+The release path -- `publish-pypi-on-tag.yml` and the local workflows it calls -- plus
+the two main CI workflows. Not every workflow in the repo. The `Permissions` column
+states the **workflow-level** block verbatim, then the complete union of the **per-job**
+grants at their highest level. A wiring test asserts both halves against the YAML, and
+asserts that every workflow in the scope above has a row.
 
-| Workflow                   | Permissions                                                                                             | Justification                          |
-| -------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `docker-ci.yml`            | `{}` + per-job `contents: read`/`packages: write`/`pull-requests: write`                                | CI pipeline + quality                  |
-| `test-ci.yml`              | `{}` + per-job `contents: read`/`actions: write`/`pull-requests: write`                                 | Unit tests                             |
-| `publish-pypi-on-tag.yml`  | `{}` + per-job `contents`/`id-token`/`attestations`/`security-events`/`actions: read`/`packages: write` | Release, OIDC, SBOM, GHCR, asset reuse |
-| `build-binary.yml`         | `{}` + per-job `contents: write, actions: read`                                                         | Release assets; asset reuse check      |
-| `docker-build-publish.yml` | `contents: read` + per-job `packages`/`id-token`/`attestations`/`security-events: write`                | Push to GHCR                           |
+| Workflow                   | Permissions                                                                                                                         | Justification                          |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `docker-ci.yml`            | `{}` + per-job `contents: read`/`id-token: write`/`packages: write`/`pull-requests: write`                                          | CI pipeline, quality, cosign OIDC      |
+| `test-ci.yml`              | `{}` + per-job `actions: write`/`contents: read`/`pull-requests: write`                                                             | Unit tests, rerun control, PR comments |
+| `publish-pypi-on-tag.yml`  | `{}` + per-job `actions: read`/`attestations: write`/`contents: write`/`id-token: write`/`packages: write`/`security-events: write` | Release, OIDC, SBOM, GHCR, asset reuse |
+| `build-binary.yml`         | `{}` + per-job `actions: read`/`contents: write`                                                                                    | Release assets; asset reuse check      |
+| `publish-npm.yml`          | `{}` + per-job `contents: read`/`id-token: write`                                                                                   | npm publish with OIDC provenance       |
+| `docker-build-publish.yml` | `contents: read` + per-job `attestations: write`/`contents: read`/`id-token: write`/`packages: write`/`security-events: write`      | Push to GHCR                           |
 
 ## Supply Chain Security
 

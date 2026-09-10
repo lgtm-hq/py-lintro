@@ -34,7 +34,11 @@ _SNIPPETS: dict[str, str] = {
     "json": '{"name": "lintro", "ok": true}\n',
 }
 
-#: Lexer class name pygments falls back to when it recognises nothing.
+#: Lexer class name that means nothing was recognised. pygments itself
+#: raises ``ClassNotFound`` for an alias it cannot resolve (handled by the
+#: lookup branch below); it is ``rich.syntax`` that substitutes ``TextLexer``
+#: when it catches that. So this guard is defence in depth for the shipped
+#: languages, and the live branch for a literal ``text`` language.
 _FALLBACK_LEXER = "TextLexer"
 
 
@@ -76,6 +80,8 @@ def check_syntax_highlighting(
     details: list[str] = []
     failures: list[str] = []
     for language in languages:
+        # Every name in CHECKED_LANGUAGES has an entry; a test asserts the two
+        # key sets are equal. The default serves ad-hoc ``languages=`` callers.
         snippet = _SNIPPETS.get(language, "x = 1\n")
         try:
             lexer = get_lexer_by_name(language)
