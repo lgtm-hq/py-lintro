@@ -36,6 +36,7 @@ from lintro.ai.review.github_badges import (
 from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
+    format_partial_review_label,
     format_synthesis_note_line,
     format_timings_note,
 )
@@ -178,11 +179,18 @@ def _header(
     round_number: int,
     head_sha: str,
 ) -> str:
-    """Render the one-line findings header with the resolved delta.
+    """Render the findings header with the resolved delta.
 
     The resolved segment is rendered on every round after the first, even at
     zero: omitting it would make "nothing was fixed since last round" and
     "there was no last round" look identical.
+
+    A round whose finding depth was degraded leads with "Partial review"
+    instead of "Lintro review" and carries the coverage-limited warning right
+    here, under the header line rather than down in the run stats (#2395). The
+    header is the only line a scanning reader is guaranteed to read, so it is
+    where a partial finding set has to be announced -- matching the
+    ``degraded`` outcome the CI check reports for the same condition.
 
     Args:
         result: This round's review result.
@@ -196,9 +204,10 @@ def _header(
     """
     head = _short(head_sha or result.metadata.head_ref)
     base = _short(_prior_sha(prior_state=prior_state) or result.metadata.base_ref)
+    partial = format_partial_review_label(metadata=result.metadata)
+    lead = f"⚠️ **{partial}" if partial else "🔎 **Lintro review"
     parts = [
-        f"🔎 **Lintro review — {_plural(count=len(result.findings), noun='finding')} "
-        "posted**",
+        f"{lead} — {_plural(count=len(result.findings), noun='finding')} posted**",
     ]
     if round_number > 1:
         parts.append(
@@ -207,7 +216,9 @@ def _header(
     parts.append(f"round {round_number}")
     if base and head:
         parts.append(f"commits `{base}..{head}`")
-    return " · ".join(parts)
+    line = " · ".join(parts)
+    warning = format_coverage_limited_warning(metadata=result.metadata)
+    return f"{line}\n\n{warning}" if warning else line
 
 
 def _prompt_section(
@@ -315,11 +326,10 @@ def _run_stats_section(
 
     lines = ["**📊 Run stats**", ""]
     lines.extend(format_badge_tables(rows=[primary, secondary]))
-    coverage_warning = format_coverage_limited_warning(metadata=metadata)
-    if coverage_warning:
-        # Parity with the cost-cap partial warning: a findings-cap run says so
-        # in the run-stats block, where the reader looks for run mechanics.
-        lines.extend(["", coverage_warning])
+    # The coverage-limited warning used to sit here, beside the run
+    # mechanics. It now renders under the header line instead (#2395), where
+    # a scanning reader meets it; repeating it here would put the same
+    # sentence in one comment twice.
     cross_chunk_note = format_cross_chunk_note(findings=result.findings)
     if cross_chunk_note:
         # A guard-driven downgrade is run mechanics too: the reader needs to
