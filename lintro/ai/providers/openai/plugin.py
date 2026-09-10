@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.enums import AITransport
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.openai.config import OpenAIConfig
 from lintro.ai.providers.openai.metadata import OPENAI_METADATA
 
 if TYPE_CHECKING:
@@ -58,11 +59,21 @@ class OpenAIPlugin:
         """
         return OPENAI_METADATA
 
+    @property
+    def config_model(self) -> type[OpenAIConfig]:
+        """Return the model for the ``ai.providers.openai`` block.
+
+        Returns:
+            :class:`~lintro.ai.providers.openai.config.OpenAIConfig`.
+        """
+        return OpenAIConfig
+
     def build(self, config: AIConfig) -> BaseAIProvider:
         """Construct the OpenAI provider described by *config*.
 
         OpenAI takes no vendor-specific knobs today, so this reads only the
-        shared transport and budget fields.
+        shared transport and budget fields; its ``ai.providers.openai`` block
+        is declared but empty (#2309).
 
         Args:
             config: Effective AI configuration for this run.

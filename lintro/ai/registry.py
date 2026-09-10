@@ -27,6 +27,7 @@ from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
 
 if TYPE_CHECKING:
+    from lintro.ai.provider_config import ProviderConfig
     from lintro.ai.providers.protocol import ProviderMetadata
 
 __all__ = [
@@ -34,10 +35,12 @@ __all__ = [
     "DEFAULT_PRICING",
     "ModelPricing",
     "all_metadata",
+    "config_model_for",
     "default_api_key_envs",
     "default_models",
     "metadata_for",
     "model_pricing",
+    "provider_config_models",
 ]
 
 #: Fallback pricing for a model no provider publishes a price for.
@@ -115,3 +118,42 @@ def default_api_key_envs() -> dict[AIProvider, str]:
         provider: metadata.default_api_key_env
         for provider, metadata in all_metadata().items()
     }
+
+
+def provider_config_models() -> dict[AIProvider, type[ProviderConfig]]:
+    """Return each provider's ``ai.providers.<name>`` block model.
+
+    The models are declared in the provider packages, so this facade is the
+    only thing the config layer needs to know about them (#2309): no central
+    table maps a vendor-only key to the vendor that owns it.
+
+    Returns:
+        Block model keyed by provider, in :class:`AIProvider` declaration
+        order.
+    """
+    from lintro.ai.providers.builtins import load_builtin_providers
+    from lintro.ai.providers.registry import all_providers
+
+    load_builtin_providers()
+    return {
+        provider: plugin.config_model for provider, plugin in all_providers().items()
+    }
+
+
+def config_model_for(provider: AIProvider | str) -> type[ProviderConfig]:
+    """Return one provider's ``ai.providers.<name>`` block model.
+
+    Args:
+        provider: Provider enum member, or the string a user typed.
+
+    Returns:
+        The provider's :class:`~lintro.ai.provider_config.ProviderConfig`
+        subclass. :class:`~lintro.ai.exceptions.AIProviderNotRegisteredError`
+        propagates from the registry lookup when *provider* is unknown, or is
+        known but has no registered plugin.
+    """
+    from lintro.ai.providers.builtins import load_builtin_providers
+    from lintro.ai.providers.registry import get_registered
+
+    load_builtin_providers()
+    return get_registered(provider).config_model

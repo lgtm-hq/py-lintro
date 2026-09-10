@@ -9,6 +9,8 @@ from pydantic import ValidationError
 from lintro.ai.config import AIConfig
 from lintro.ai.effective_config import resolve_effective_ai_config
 from lintro.ai.enums import AITransport, CliBareMode
+from lintro.ai.providers.anthropic.config import anthropic_settings
+from lintro.ai.providers.cursor.config import cursor_settings
 from lintro.ai.registry import AIProvider
 
 # -- Defaults --------------------------------------------------------------
@@ -35,32 +37,38 @@ def test_default_config_optional_fields() -> None:
 
 def test_cursor_trust_workspace_defaults_true() -> None:
     """Cursor workspace trust is granted by default."""
-    config = AIConfig()
-    assert_that(config.cursor_trust_workspace).is_true()
+    config = AIConfig(provider=AIProvider.CURSOR)
+    assert_that(cursor_settings(config).trust_workspace).is_true()
 
 
 def test_cursor_trust_workspace_opt_out() -> None:
     """Cursor workspace trust can be explicitly disabled via config."""
-    config = AIConfig(cursor_trust_workspace=False)
-    assert_that(config.cursor_trust_workspace).is_false()
+    config = resolve_effective_ai_config(
+        {"providers": {"cursor": {"trust_workspace": False}}},
+    ).config
+    assert_that(cursor_settings(config).trust_workspace).is_false()
 
 
 def test_cli_bare_defaults_to_auto() -> None:
     """The Claude CLI bare-mode policy auto-detects by default."""
-    config = AIConfig()
-    assert_that(config.cli_bare).is_equal_to(CliBareMode.AUTO)
+    config = AIConfig(provider=AIProvider.ANTHROPIC)
+    assert_that(anthropic_settings(config).cli_bare).is_equal_to(CliBareMode.AUTO)
 
 
 def test_cli_bare_accepts_explicit_override() -> None:
     """The bare-mode policy is settable from a plain config string."""
-    config = resolve_effective_ai_config({"cli_bare": "never"}).config
-    assert_that(config.cli_bare).is_equal_to(CliBareMode.NEVER)
+    config = resolve_effective_ai_config(
+        {"providers": {"anthropic": {"cli_bare": "never"}}},
+    ).config
+    assert_that(anthropic_settings(config).cli_bare).is_equal_to(CliBareMode.NEVER)
 
 
 def test_cli_bare_rejects_unknown_value() -> None:
     """An unrecognised bare-mode value is a config error, not a guess."""
     with pytest.raises(ValidationError):
-        AIConfig(cli_bare="sometimes")  # type: ignore[arg-type]
+        AIConfig(
+            providers={"anthropic": {"cli_bare": "sometimes"}},  # type: ignore[dict-item]
+        )
 
 
 def test_default_config_numeric_fields() -> None:

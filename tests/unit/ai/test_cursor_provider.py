@@ -19,6 +19,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.providers import get_provider
+from lintro.ai.providers.cursor.config import CursorConfig
 from lintro.ai.providers.cursor.provider import (
     CURSOR_MIN_TIMEOUT,
     CursorProvider,
@@ -176,7 +177,8 @@ def test_cursor_provider_requires_explicit_workspace_trust(
 ) -> None:
     """Omitting ``cursor_trust_workspace`` is a TypeError, not a silent default.
 
-    ``AIConfig.cursor_trust_workspace`` is the single default site (#2041), so
+    ``ai.providers.cursor.trust_workspace`` is the single default site
+    (#2041, #2309), so
     the constructor deliberately carries no default of its own.
     """
     with pytest.raises(TypeError, match="cursor_trust_workspace"):
@@ -523,7 +525,7 @@ async def test_complete_omits_trust_flag_when_opted_out(
     config = AIConfig(
         provider=AIProvider.CURSOR,
         transport=AITransport.CLI,
-        cursor_trust_workspace=False,
+        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=False)},
     )
     cursor = get_provider(config)
     stdout = _cli_json(result="ok")
