@@ -151,14 +151,14 @@ states the **workflow-level** block verbatim, then the complete union of the **p
 grants at their highest level. A wiring test asserts both halves against the YAML, and
 asserts that every workflow in the scope above has a row.
 
-| Workflow                   | Permissions                                                                                                                         | Justification                          |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `docker-ci.yml`            | `{}` + per-job `contents: read`/`id-token: write`/`packages: write`/`pull-requests: write`                                          | CI pipeline, quality, cosign OIDC      |
-| `test-ci.yml`              | `{}` + per-job `actions: write`/`contents: read`/`pull-requests: write`                                                             | Unit tests, rerun control, PR comments |
-| `publish-pypi-on-tag.yml`  | `{}` + per-job `actions: read`/`attestations: write`/`contents: write`/`id-token: write`/`packages: write`/`security-events: write` | Release, OIDC, SBOM, GHCR, asset reuse |
-| `build-binary.yml`         | `{}` + per-job `actions: read`/`contents: write`                                                                                    | Release assets; asset reuse check      |
-| `publish-npm.yml`          | `{}` + per-job `contents: read`/`id-token: write`                                                                                   | npm publish with OIDC provenance       |
-| `docker-build-publish.yml` | `contents: read` + per-job `attestations: write`/`contents: read`/`id-token: write`/`packages: write`/`security-events: write`      | Push to GHCR                           |
+| Workflow                   | Permissions                                                                                                                         | Justification                                                                |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `docker-ci.yml`            | `{}` + per-job `contents: read`/`id-token: write`/`packages: write`/`pull-requests: write`                                          | CI pipeline, quality, cosign OIDC                                            |
+| `test-ci.yml`              | `{}` + per-job `actions: write`/`contents: read`/`pull-requests: write`                                                             | Unit tests; `actions: write` aggregates the multi-version matrix's artifacts |
+| `publish-pypi-on-tag.yml`  | `{}` + per-job `actions: read`/`attestations: write`/`contents: write`/`id-token: write`/`packages: write`/`security-events: write` | Release, OIDC, SBOM, GHCR, asset reuse                                       |
+| `build-binary.yml`         | `{}` + per-job `actions: read`/`contents: write`                                                                                    | Release assets; asset reuse check                                            |
+| `publish-npm.yml`          | `{}` + per-job `contents: read`/`id-token: write`                                                                                   | npm publish with OIDC provenance                                             |
+| `docker-build-publish.yml` | `contents: read` + per-job `attestations: write`/`contents: read`/`id-token: write`/`packages: write`/`security-events: write`      | Push to GHCR                                                                 |
 
 ## Supply Chain Security
 

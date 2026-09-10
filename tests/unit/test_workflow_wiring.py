@@ -61,13 +61,17 @@ def _normalize_github_expr(expr: str) -> str:
 def _collect_python_version_pins(*, node: Any) -> list[str]:
     """Return every literal ``python-version`` value nested under a node.
 
-    Scalars are coerced to text: an unquoted ``python-version: 3.14`` loads as
-    a float, and dropping it would quietly remove that workflow from the
-    repo-wide drift sweep. A list is a matrix, so every element is returned as
-    a pin in its own right and compared individually — a workflow that widens
-    to a matrix has to earn its place in the exemption list rather than fall
-    out of the sweep. A comma-joined multi-version string is split the same
-    way, for the same reason.
+    A scalar pin must be a quoted YAML string, and an unquoted one raises
+    rather than being coerced. ``python-version: 3.10`` unquoted loads as the
+    float ``3.1``, so coercion would compare a wrong value and either pass by
+    luck or fail with a baffling message; quoting is the repo convention and
+    every pin in the tree already follows it (#2514).
+
+    A list is a matrix, so every element is returned as a pin in its own right
+    and compared individually -- a workflow that widens to a matrix has to earn
+    its place in the exemption list rather than fall out of the sweep. A
+    comma-joined multi-version string is split the same way, for the same
+    reason.
 
     A workflow-level ``env: PYTHON_VERSION:`` declaration counts as a pin too.
     That is the shape #2514 introduced in build-binary.yml, and collecting it
@@ -83,6 +87,9 @@ def _collect_python_version_pins(*, node: Any) -> list[str]:
 
     Returns:
         The literal pins found, in document order.
+
+    Raises:
+        ValueError: When a pin is not a quoted string.
     """
     found: list[str] = []
     if isinstance(node, dict):
@@ -90,13 +97,17 @@ def _collect_python_version_pins(*, node: Any) -> list[str]:
             if key in {"python-version", "PYTHON_VERSION"}:
                 elements = value if isinstance(value, list) else [value]
                 for element in elements:
-                    if not isinstance(element, str | int | float):
-                        continue
-                    text = str(element)
-                    if "${{" in text:
+                    if not isinstance(element, str):
+                        msg = (
+                            f"{key}: {element!r} must be a quoted string. An "
+                            "unquoted 3.10 loads as the float 3.1, so the pin "
+                            "would be compared as '3.1'."
+                        )
+                        raise ValueError(msg)
+                    if "${{" in element:
                         continue
                     found.extend(
-                        part.strip() for part in text.split(",") if part.strip()
+                        part.strip() for part in element.split(",") if part.strip()
                     )
                 continue
             found.extend(_collect_python_version_pins(node=value))
@@ -2140,22 +2151,26 @@ def test_every_workflow_shares_the_build_binary_python_pin(
         ).is_not_empty()
 
 
-def test_python_pin_collector_coerces_unquoted_scalars() -> None:
-    """An unquoted pin still counts, because YAML makes it a float.
+def test_python_pin_collector_rejects_an_unquoted_scalar() -> None:
+    """An unquoted pin fails the sweep instead of being coerced.
 
-    ``python-version: 3.14`` without quotes loads as ``3.14`` the float. The
-    collector used to require a ``str``, so such a workflow contributed no
-    pins and left the repo-wide sweep without ever being named as exempt
-    (#2514).
+    ``python-version: 3.10`` without quotes loads as the float ``3.1``, so
+    coercing it to text would compare the wrong value: a workflow pinned to
+    3.10 would read as pinned to 3.1 and either pass by luck against a 3.1
+    reference or fail with a message pointing nowhere useful. Quoting is the
+    repo convention and every pin in the tree follows it, so the collector
+    says so rather than guessing (#2514).
     """
-    assert_that(
-        _collect_python_version_pins(node={"python-version": 3.14}),
-    ).is_equal_to(
-        ["3.14"],
-    )
-    assert_that(_collect_python_version_pins(node={"python-version": 3})).is_equal_to(
-        ["3"],
-    )
+    for unquoted in (3.10, 3.14, 3):
+        with pytest.raises(ValueError, match="must be a quoted string"):
+            _collect_python_version_pins(node={"python-version": unquoted})
+
+    # The 3.10 case is the one that silently lies: YAML has already discarded
+    # the trailing zero by the time the collector sees the value.
+    assert_that(str(3.10)).is_equal_to("3.1")
+
+    with pytest.raises(ValueError, match="must be a quoted string"):
+        _collect_python_version_pins(node={"env": {"PYTHON_VERSION": 3.14}})
 
 
 def test_python_pin_collector_expands_matrix_shapes() -> None:
@@ -5726,8 +5741,12 @@ def _documented_scopes(claim: str) -> dict[str, str]:
 def _declared_job_scopes(workflow: dict[str, Any]) -> dict[str, str]:
     """Return the union of a workflow's job-level grants, at their highest level.
 
-    ``uses:`` jobs are not included: a remote callee's requests are declared in
-    another repository, and a local callee has its own row.
+    Every job with a ``permissions:`` block counts, ``uses:`` jobs included.
+    That block is declared in this file and is exactly what GitHub hands the
+    called workflow, so a caller job granting ``packages: write`` to a reusable
+    workflow has granted it here -- which is what the security table records.
+    Excluding those jobs would empty ``docker-build-publish.yml``'s row and
+    drop ``test-ci.yml``'s ``actions: write``, both real grants (#2514).
 
     Args:
         workflow: One parsed workflow.
