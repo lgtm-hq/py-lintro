@@ -77,7 +77,8 @@ def _format_error(error: AIError | ValueError) -> tuple[str, str, list[str]]:
                 ),
                 (
                     "CLI transports may authenticate from a login session "
-                    "instead of a key — see docs/ai-review-transports.md"
+                    "instead of a key — see https://github.com/lgtm-hq/py-lintro/"
+                    "blob/main/docs/ai-review-transports.md"
                 ),
             ],
         )
