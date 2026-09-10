@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.1] - 2026-09-10
+
+### Changed
+
+- **ai/providers**: add the registry parity suite and per-provider test packages (#2538)
+  (f2e8215)
+
+### Fixed
+
+- **release**: skip the version PR only when the last tag publish failed at startup
+  (#2551) (0568fa1)
+
 ## [0.153.0] - 2026-09-10
 
 ### Added
