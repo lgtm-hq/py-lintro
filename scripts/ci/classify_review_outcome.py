@@ -5,9 +5,16 @@ The dogfood AI review check reported ``success`` on every pull request while
 producing no review at all: a depleted Anthropic balance made every run abort,
 the wrapper swallowed the exit code, and ``AI Review ✓`` in the check list meant
 nothing (#1826). This module is the decision point that fixes that — it maps a
-``lintro review`` invocation to one of four outcomes:
+``lintro review`` invocation to one of these outcomes:
 
 * **reviewed** -- a review was produced (with or without P1 findings). Green.
+* **degraded** -- a review was produced and posted, and every eligible file was
+  reviewed, but not at full depth: the envelope's
+  ``findings_coverage_complete`` is false, so a per-call findings cap, an
+  output-exhaustion retry, an incomplete cross-chunk synthesis pass, or a
+  failed depth-2/3 pass may have suppressed findings (#2395). The findings are
+  kept; the check goes red and the annotation names every recorded reason,
+  because a partial finding set must never read as a clean pass.
 * **converged** -- the deterministic convergence stop rule (#2099) skipped the
   round before any provider call, because the last N rounds all scored below
   the configured threshold. Nothing was reviewed, but nothing needed to be, and
@@ -34,6 +41,11 @@ not re-implemented here. Only the exit-code contract is local knowledge:
     0  reviewed, no P1 findings
     1  reviewed, P1 findings present
     2  review could not be produced (provider error or lintro-side failure)
+
+The classifier's own exit code is separate: 0 only when a complete review (or
+a deliberate convergence skip) answered the question, and 1 for every outcome
+where it did not -- including a review that was produced but is incomplete on
+the file axis or degraded on the depth axis.
 
 Transport-aware refinement (#1923): shared outcomes keep their names; API-only
 and CLI-only failure vocabularies are distinguished so a subscription-CLI kill
@@ -103,6 +115,16 @@ CONVERGED_ENVELOPE_KEY: Final[str] = "converged"
 # lintro.ai.review.output.CONVERGED_OUTCOME; a contract test pins the pair.
 CONVERGED_OUTCOME: Final[str] = "converged"
 
+# Top-level keys `lintro review` writes for the finding-depth axis (#2003 /
+# #2395). Mirror lintro.ai.review.output.review_result_to_dict; a contract
+# test in tests/scripts/test_classify_review_outcome.py pins the names.
+# ``findings_coverage_complete`` is false whenever the run recorded any
+# coverage degradation -- a per-call findings cap, an output-exhaustion retry,
+# an incomplete cross-chunk synthesis pass, or a depth-2/3 pass that failed
+# and left the chunk on its main-pass result.
+DEPTH_COMPLETE_KEY: Final[str] = "findings_coverage_complete"
+DEPTH_DEGRADATIONS_KEY: Final[str] = "coverage_degradations"
+
 # Kind labels refined for the active transport. Shared kinds stay as-is;
 # transport-specific labels make CI summaries self-diagnosing (#1923).
 _API_KIND_LABELS: Final[dict[str, str]] = {
@@ -146,6 +168,8 @@ class ReviewOutcome(StrEnum):
     Members:
         REVIEWED: A review was produced; findings may or may not be present.
         INCOMPLETE: A review was produced but coverage-at-HEAD is not 100%.
+        DEGRADED: Every eligible file was reviewed, but not at full depth --
+            the envelope's ``findings_coverage_complete`` is false (#2395).
         CONVERGED: The round was deliberately skipped by the convergence stop
             rule before any provider call (#2099).
         NO_CREDENTIAL: No provider credential was available to review with.
@@ -155,6 +179,7 @@ class ReviewOutcome(StrEnum):
 
     REVIEWED = auto()
     INCOMPLETE = auto()
+    DEGRADED = auto()
     CONVERGED = auto()
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
@@ -165,10 +190,29 @@ class ReviewOutcome(StrEnum):
         """Return whether a review actually reached the pull request.
 
         Returns:
-            True for :attr:`REVIEWED` and :attr:`INCOMPLETE` (a partial
-            review was produced).
+            True for :attr:`REVIEWED`, :attr:`INCOMPLETE` and
+            :attr:`DEGRADED` (a partial review was produced).
         """
-        return self in {ReviewOutcome.REVIEWED, ReviewOutcome.INCOMPLETE}
+        return self in {
+            ReviewOutcome.REVIEWED,
+            ReviewOutcome.INCOMPLETE,
+            ReviewOutcome.DEGRADED,
+        }
+
+    @property
+    def partial_review(self) -> bool:
+        """Return whether a review reached the PR but is not a full one.
+
+        Both members here posted their findings and both exit non-zero: the
+        check must never read as a clean pass over a diff the reviewer only
+        partly covered. :attr:`INCOMPLETE` is the file axis (some files were
+        never reviewed) and :attr:`DEGRADED` the depth axis (every file was
+        reviewed, but a limit or a failed pass may have suppressed findings).
+
+        Returns:
+            True for :attr:`INCOMPLETE` and :attr:`DEGRADED`.
+        """
+        return self in {ReviewOutcome.INCOMPLETE, ReviewOutcome.DEGRADED}
 
     @property
     def review_unavailable(self) -> bool:
@@ -301,6 +345,90 @@ def _parse_coverage_envelope(*, text: str) -> dict[str, Any] | None:
                 **extras,
             }
     return None
+
+
+def _parse_degraded_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the finding-depth block from a review JSON envelope.
+
+    Keyed off ``readiness_verdict`` like :func:`_parse_coverage_envelope`, so
+    a nested object carrying the same field names can never be mistaken for
+    the envelope. A run that reported full depth, and an older envelope that
+    predates the key, both return ``None``: absence is never degradation.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        A mapping with the recorded degradation reasons, or ``None`` when the
+        run's finding depth was complete.
+    """
+    for payload in _iter_json_objects(text=text):
+        if "readiness_verdict" not in payload:
+            continue
+        if payload.get(DEPTH_COMPLETE_KEY, True):
+            continue
+        raw = payload.get(DEPTH_DEGRADATIONS_KEY)
+        reasons: list[str] = []
+        if isinstance(raw, list):
+            for item in raw:
+                if not isinstance(item, Mapping):
+                    continue
+                reason = str(item.get("reason") or "").strip()
+                if reason and reason not in reasons:
+                    reasons.append(reason)
+        return {
+            "reasons": reasons,
+            "has_p1_findings": _payload_has_p1_findings(payload),
+        }
+    return None
+
+
+def _degraded_report(
+    *,
+    status: int,
+    output: str,
+    transport: str,
+) -> OutcomeReport | None:
+    """Build the DEGRADED outcome for a review that ran at reduced depth.
+
+    The review itself is kept: its findings are already posted to the PR and
+    the sticky comment. What changes is the verdict this check reports --
+    ``findings_coverage_complete == false`` means the finding set is not a
+    guaranteed full one, so the check must not read as a clean pass (#2395).
+
+    Nothing is reported at :data:`REVIEW_STATUS_ERROR`, for the same reason
+    the converged branch stands down there: something broke after the
+    envelope was printed, and that failure is the news.
+
+    Args:
+        status: Exit status from ``lintro review``.
+        output: Combined stdout/stderr captured from the run.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Report that reddens the check and names every recorded reason, or
+        ``None`` when the run's finding depth was complete.
+    """
+    if status == REVIEW_STATUS_ERROR:
+        return None
+    degraded = _parse_degraded_envelope(text=output)
+    if degraded is None:
+        return None
+    reasons = [str(reason) for reason in degraded.get("reasons") or []]
+    named = ", ".join(reasons) if reasons else "reason not recorded"
+    return OutcomeReport(
+        outcome=ReviewOutcome.DEGRADED,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                "partial review — finding depth was limited; "
+                "not a guaranteed full finding set"
+            ),
+        ),
+        detail=f"Coverage degradations: {named}.",
+        exit_code=1,
+        transport=transport,
+    )
 
 
 def _parse_inline_post_failure(*, text: str) -> dict[str, Any] | None:
@@ -688,6 +816,14 @@ def classify(
     if coverage is not None and not coverage.get("complete", True):
         return _incomplete_report(coverage=coverage, transport=transport)
 
+    # Depth degradation is checked after the file axis: a run that left files
+    # unreviewed *and* ran short on depth is reported as INCOMPLETE, because
+    # resuming the missing files is the actionable news. Both exit 1, so the
+    # check is red either way.
+    degraded = _degraded_report(status=status, output=output, transport=transport)
+    if degraded is not None:
+        return degraded
+
     if status in (REVIEW_STATUS_CLEAN, REVIEW_STATUS_FINDINGS):
         return _reviewed_report(
             findings=status == REVIEW_STATUS_FINDINGS,
@@ -785,7 +921,7 @@ def render_summary(*, report: OutcomeReport) -> str:
     Returns:
         Markdown text ending in a newline.
     """
-    if report.outcome is ReviewOutcome.INCOMPLETE:
+    if report.outcome.partial_review:
         icon = "⚠️"
     elif report.outcome is ReviewOutcome.CONVERGED:
         icon = "🔁"
@@ -804,6 +940,17 @@ def render_summary(*, report: OutcomeReport) -> str:
                 "The next round resumes with unreviewed files first. "
                 "P1 findings still pass this check; an unfinished review "
                 "does not.",
+                "",
+            ],
+        )
+    if report.outcome is ReviewOutcome.DEGRADED:
+        lines.extend(
+            [
+                "Every eligible file was reviewed, but not at full depth: the "
+                "run recorded a coverage degradation, so findings may have "
+                "gone unreported. The review and its findings are posted as "
+                "usual — this check is red because the finding set is not a "
+                "guaranteed complete one.",
                 "",
             ],
         )
@@ -838,7 +985,14 @@ def _emit(*, report: OutcomeReport) -> None:
     Args:
         report: The classified outcome.
     """
-    annotation = "error" if report.outcome.review_unavailable else "notice"
+    if report.outcome.review_unavailable:
+        annotation = "error"
+    elif report.outcome is ReviewOutcome.DEGRADED:
+        # A warning, not a notice: the review is on the PR, but the check is
+        # red and the annotation must say why at a glance (#2395).
+        annotation = "warning"
+    else:
+        annotation = "notice"
     title = f"AI Review ({report.transport})"
     body = report.headline
     if report.detail:
@@ -862,14 +1016,17 @@ def main(*, argv: list[str] | None = None) -> int:
 
     Returns:
         Exit code for the wrapper. ``0`` means the review question was
-        answered: a review ran, or the convergence stop rule deliberately
-        skipped the round. Open P1 findings do not change that on either
-        path — they are reported in the headline and summary, never reddened,
-        because this check is informational and not required. ``1`` means no
-        review was produced at all (no credential, dead credential, depleted
-        balance, unreachable provider, a lintro-side failure, or an
-        unreadable envelope). Exit ``0`` is therefore not a promise that a
-        review ran, and exit ``1`` is never about findings.
+        answered: a complete review ran, or the convergence stop rule
+        deliberately skipped the round. Open P1 findings do not change that on
+        either path — they are reported in the headline and summary, never
+        reddened, because this check is informational and not required. ``1``
+        means either that no review was produced at all (no credential, dead
+        credential, depleted balance, unreachable provider, a lintro-side
+        failure, or an unreadable envelope) or that the review that *was*
+        produced is not a full one — files left uncovered at HEAD, or a
+        finding depth the run itself recorded as degraded (#2395). Exit ``0``
+        is therefore not a promise that a review ran, and exit ``1`` is never
+        about findings.
     """
     parser = argparse.ArgumentParser(description="Classify an AI review run.")
     parser.add_argument(

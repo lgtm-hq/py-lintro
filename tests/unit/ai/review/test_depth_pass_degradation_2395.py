@@ -11,8 +11,12 @@ cost-cap stop -- are unchanged.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
+from dataclasses import replace
 from pathlib import Path
+from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from assertpy import assert_that
@@ -22,17 +26,26 @@ from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.coverage_degradation import (
+    PARTIAL_REVIEW_LABEL,
     describe_coverage_degradations,
 )
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review_async
+from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.session import ReviewSessionOptions
+from lintro.ai.review.sticky import build_sticky_comment
 
 _TIMEOUT_TEXT = "Claude CLI timed out after 600s"
 
@@ -403,3 +416,207 @@ async def test_a_clean_depth_three_run_records_no_degradation(
 
     assert_that(result.metadata.findings_coverage_complete).is_true()
     assert_that(result.metadata.partial).is_false()
+
+
+def _classifier() -> ModuleType:
+    """Load the CI outcome classifier as an importable module.
+
+    Returns:
+        The loaded ``scripts/ci/classify_review_outcome.py`` module.
+
+    Raises:
+        RuntimeError: When the module spec cannot be created.
+    """
+    script = (
+        Path(__file__).resolve().parents[4]
+        / "scripts"
+        / "ci"
+        / "classify_review_outcome.py"
+    )
+    spec = importlib.util.spec_from_file_location("classify_review_outcome", script)
+    if spec is None or spec.loader is None:
+        msg = f"Unable to load module from {script}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["classify_review_outcome"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+async def test_a_degraded_run_reddens_the_ai_review_check(
+    tmp_path: Path,
+) -> None:
+    """The recorded envelope of a degraded run classifies as non-success.
+
+    End-to-end on the axis this PR adds: the run degrades, lintro serializes
+    ``findings_coverage_complete: false``, and the CI classifier turns that
+    into a red check that still names the review as produced.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    result = await _run(
+        tmp_path=tmp_path,
+        depth=3,
+        call_ai=_adversarial_timeout_seam(),
+    )
+    envelope = review_result_to_dict(result=result)
+    classifier = _classifier()
+
+    report = classifier.classify(status=0, output=json.dumps(envelope))
+
+    assert_that(envelope["findings_coverage_complete"]).is_false()
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.DEGRADED)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.detail).contains("adversarial_sweep_failed")
+    # The findings were still posted: this is not an "un-reviewed diff".
+    assert_that(report.outcome.review_unavailable).is_false()
+
+
+async def test_a_clean_run_envelope_still_passes_the_check(
+    tmp_path: Path,
+) -> None:
+    """The same pipeline with no degradation keeps the check green.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    responses = [
+        _questions_response(),
+        _main_pass_response(),
+        _response(content=json.dumps({"findings": []})),
+    ]
+
+    async def _call(**_kwargs: object) -> AIResponse:
+        """Answer every scripted call in order.
+
+        Args:
+            **_kwargs: Provider-call keywords the seam ignores.
+
+        Returns:
+            The next scripted response.
+        """
+        return responses.pop(0)
+
+    result = await _run(
+        tmp_path=tmp_path,
+        depth=3,
+        call_ai=AsyncMock(side_effect=_call),
+    )
+    envelope = review_result_to_dict(result=result)
+    classifier = _classifier()
+
+    report = classifier.classify(status=0, output=json.dumps(envelope))
+
+    assert_that(envelope["findings_coverage_complete"]).is_true()
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.exit_code).is_equal_to(0)
+
+
+def _degraded_metadata() -> ReviewMetadata:
+    """Build metadata for a round whose adversarial sweep failed.
+
+    Returns:
+        Metadata carrying one depth-pass coverage degradation.
+    """
+    return ReviewMetadata(
+        model="claude-sonnet-4-6",
+        provider="anthropic",
+        context_window=200_000,
+        depth=3,
+        chunks_total=1,
+        chunks_current=1,
+        files_reviewed=1,
+        files_total=1,
+        checklist_items=0,
+        coverage_degradations=(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
+                chunk_index=0,
+                findings_cap=0,
+            ),
+        ),
+    )
+
+
+def _rendered_body(*, result: ReviewResult) -> str:
+    """Render the per-round GitHub review body through the public builder.
+
+    Args:
+        result: Review result to render.
+
+    Returns:
+        The rendered Markdown body.
+    """
+    prior_state = ReviewState()
+    return build_review_body(
+        result=result,
+        prior_state=prior_state,
+        match=match_findings(
+            previous=prior_state,
+            findings=result.findings,
+            round_number=prior_state.next_round,
+            head_sha="fb740b2",
+        ),
+        head_sha="fb740b2",
+        transport="cli",
+        auth_mode="subscription",
+    )
+
+
+def test_the_review_header_announces_a_partial_review(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The header line itself says partial and lists the reason.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = replace(sample_review_result, metadata=_degraded_metadata())
+
+    header = _rendered_body(result=result).splitlines()[0]
+
+    assert_that(header).contains(PARTIAL_REVIEW_LABEL)
+    assert_that(header).does_not_contain("Lintro review")
+    assert_that(_rendered_body(result=result)).contains(
+        "the depth-3 adversarial sweep failed",
+    )
+
+
+def test_a_complete_review_header_is_unchanged(
+    sample_review_result: ReviewResult,
+) -> None:
+    """An undegraded round keeps its original header line.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    header = _rendered_body(result=sample_review_result).splitlines()[0]
+
+    assert_that(header).contains("Lintro review")
+    assert_that(header).does_not_contain(PARTIAL_REVIEW_LABEL)
+
+
+def test_the_sticky_header_announces_a_partial_review(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The sticky board's title line says partial too.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = replace(sample_review_result, metadata=_degraded_metadata())
+
+    sticky = build_sticky_comment(
+        request=StickyRequest(
+            result=result,
+            transport="cli",
+            auth_mode="subscription",
+        ),
+    )
+    title = next(
+        line for line in sticky.splitlines() if line.startswith("## 🔎 Lintro Review")
+    )
+
+    assert_that(title).contains(PARTIAL_REVIEW_LABEL)
+    assert_that(sticky).contains("the depth-3 adversarial sweep failed")

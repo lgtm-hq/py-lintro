@@ -19,11 +19,18 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COVERAGE_LIMITED_HEADLINE",
+    "PARTIAL_REVIEW_LABEL",
     "describe_coverage_degradations",
 ]
 
 #: Short label reused as the bold lead-in on the posted GitHub surfaces.
 COVERAGE_LIMITED_HEADLINE = "Coverage limited — not a guaranteed full finding set"
+
+#: What a degraded run is called in the *header* of each posted surface
+#: (#2395). The warning below it explains why; the header exists so a reader
+#: who never scrolls past the first line still learns the review is partial,
+#: and so it matches the ``degraded`` outcome the CI check reports.
+PARTIAL_REVIEW_LABEL = "Partial review"
 
 #: How each depth >= 2 pass failure is named in the sentence (#2395). These
 #: are per-chunk reasons that carry no per-call ceiling, so they get their own

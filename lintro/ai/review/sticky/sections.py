@@ -42,13 +42,21 @@ def _header(
     round_number: int,
     head_sha: str,
     verdict: ReviewVerdict = ReviewVerdict.READY,
+    partial: str = "",
 ) -> str:
     """Render the sticky comment's title line.
+
+    A degraded round names itself partial in the title (#2395), so the board's
+    first line never presents a limited finding set as a full one. The reasons
+    stay in :func:`_coverage_limited_row` directly below. A board re-rendered
+    from state alone carries no metadata to judge this from and passes no
+    label, so its title is unchanged.
 
     Args:
         round_number: 1-based round number for this run.
         head_sha: Head commit sha reviewed in this round, possibly empty.
         verdict: Derived readiness verdict, including INCOMPLETE.
+        partial: Partial-review label for a degraded round, or empty.
 
     Returns:
         The Markdown heading line with the verdict in the title.
@@ -56,7 +64,8 @@ def _header(
     del round_number, head_sha
     emoji = VERDICT_EMOJI[verdict]
     label = verdict_label(verdict=verdict)
-    return f"## 🔎 Lintro Review — {emoji} {label}"
+    suffix = f" · ⚠️ {partial}" if partial else ""
+    return f"## 🔎 Lintro Review — {emoji} {label}{suffix}"
 
 
 def _incomplete_banner(*, result: ReviewResult, verdict: ReviewVerdict) -> str:
