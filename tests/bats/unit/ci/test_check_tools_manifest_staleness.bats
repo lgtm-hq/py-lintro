@@ -79,6 +79,11 @@ run_guard() {
 	run "$SCRIPT" --help
 	assert_success
 	assert_output --partial "Refuse promotion of a tools-image candidate"
+	# Every environment knob the guard reads is documented.
+	for name in CANDIDATE_SHA CANDIDATE_PR MAIN_SHA FORCE_PUBLISH \
+		MANIFEST_PATHS GIT_REMOTE CANDIDATE_FETCH_REF GITHUB_STEP_SUMMARY; do
+		assert_output --partial "$name"
+	done
 }
 
 @test "an abbreviated candidate SHA resolves through the PR head fetch" {
@@ -202,6 +207,41 @@ run_guard() {
 		MAIN_SHA="$(git rev-parse main)" "$SCRIPT"
 	assert_failure
 	assert_output --partial "refusing to promote: candidate commit ${CANDIDATE_ABBREV} is not available"
+}
+
+@test "an empty MANIFEST_PATHS is a usage error" {
+	run run_guard env MANIFEST_PATHS=" "
+	assert_failure
+	assert_equal "2" "$status"
+	assert_output --partial "MANIFEST_PATHS did not contain any paths"
+}
+
+@test "a full 40-hex candidate SHA is fetched without the PR head" {
+	# GitHub serves a reachable commit by its full object id; a stock upload-pack
+	# refuses that, so the fixture upstream opts in the way GitHub does.
+	git -C "$UPSTREAM" config uploadpack.allowAnySHA1InWant true
+
+	run env CANDIDATE_SHA="${CANDIDATE_FULL}" \
+		MAIN_SHA="$(git rev-parse main)" \
+		GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary" "$SCRIPT"
+	assert_success
+	assert_output --partial "match candidate commit ${CANDIDATE_FULL}"
+	# The PR-head fetch destination must stay untouched on this path.
+	run git rev-parse --verify --quiet refs/lintro/tools-candidate
+	assert_failure
+}
+
+@test "GIT_REMOTE selects the remote the candidate is fetched from" {
+	git remote rename origin upstream
+
+	# Without the override the default remote does not exist any more.
+	run run_guard env
+	assert_failure
+	assert_output --partial "is not available in this checkout"
+
+	run run_guard env GIT_REMOTE=upstream
+	assert_success
+	assert_output --partial "match candidate commit ${CANDIDATE_FULL}"
 }
 
 @test "fails closed when the abbreviation is ambiguous" {

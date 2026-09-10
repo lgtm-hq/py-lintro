@@ -59,6 +59,9 @@ Environment:
                   manifest inputs compared between the two commits.
   GIT_REMOTE      Remote used to fetch a candidate commit that is not present
                   locally (default: origin).
+  CANDIDATE_FETCH_REF  Local ref the fetched refs/pull/<n>/head is written to
+                  (default: refs/lintro/tools-candidate). Only the objects it
+                  brings in matter; the ref itself is a fetch destination.
   GITHUB_STEP_SUMMARY  When set, the refusal message is appended to it.
 
 Exit codes:
