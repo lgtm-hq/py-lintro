@@ -4738,6 +4738,11 @@ def test_tools_promote_passes_manifest_staleness_shas() -> None:
     assert_that(resolve["outputs"]["candidate-sha"]).contains(
         "steps.candidate.outputs.candidate-sha",
     )
+    # The tag's SHA is abbreviated; the PR number is what makes it fetchable.
+    assert_that(resolve["outputs"]).contains_key("candidate-pr")
+    assert_that(resolve["outputs"]["candidate-pr"]).contains(
+        "steps.candidate.outputs.candidate-pr",
+    )
 
     promote = workflow["jobs"]["promote"]
     checkout = next(
@@ -4755,6 +4760,7 @@ def test_tools_promote_passes_manifest_staleness_shas() -> None:
     )
     env = step["env"]
     assert_that(env["CANDIDATE_SHA"]).contains("needs.resolve.outputs.candidate-sha")
+    assert_that(env["CANDIDATE_PR"]).contains("needs.resolve.outputs.candidate-pr")
     assert_that(env["MAIN_SHA"]).contains("github.sha")
 
     promote_script = (

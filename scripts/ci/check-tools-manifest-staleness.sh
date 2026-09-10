@@ -25,8 +25,13 @@ set -euo pipefail
 #
 # Where the candidate commit comes from: the candidate tag
 # (tools-candidate-pr<N>-<sha12>) embeds the Renovate branch head SHA the
-# image was built from, and scripts/ci/promote-tools-candidate.py exports it
-# as `candidate-sha`. The build also records the same commit as the
+# image was built from — abbreviated to 12 characters — plus the PR number,
+# and scripts/ci/promote-tools-candidate.py exports both as `candidate-sha`
+# and `candidate-pr`. The PR number matters: git cannot fetch by an
+# abbreviated object id, so the guard fetches refs/pull/<N>/head and resolves
+# the abbreviation against the objects that brings in.
+#
+# The build also records the same commit as the
 # org.opencontainers.image.revision OCI label (docker/metadata-action's
 # default label set in the lgtm-ci reusable), but that label lives on the
 # per-platform child configs of the published index, so reading it would cost
@@ -41,8 +46,12 @@ Usage:
     scripts/ci/check-tools-manifest-staleness.sh
 
 Environment:
-  CANDIDATE_SHA   Commit the candidate image was built from. When empty the
-                  guard is skipped (callers that promote non-tools images).
+  CANDIDATE_SHA   Commit the candidate image was built from, possibly
+                  abbreviated. When empty the guard is skipped (callers that
+                  promote non-tools images).
+  CANDIDATE_PR    Pull request the candidate was built from. Used to fetch
+                  refs/pull/<n>/head so an abbreviated CANDIDATE_SHA resolves
+                  after the candidate branch is deleted.
   MAIN_SHA        Current main commit being promoted onto (required when
                   CANDIDATE_SHA is set).
   FORCE_PUBLISH   When "true", skip the guard and note it in the summary.
@@ -76,9 +85,11 @@ docker/tools.Dockerfile
 '
 
 candidate_sha="${CANDIDATE_SHA:-}"
+candidate_pr="${CANDIDATE_PR:-}"
 main_sha="${MAIN_SHA:-}"
 force_publish="${FORCE_PUBLISH:-}"
 git_remote="${GIT_REMOTE:-origin}"
+candidate_fetch_ref="${CANDIDATE_FETCH_REF:-refs/lintro/tools-candidate}"
 
 summary() {
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
@@ -110,13 +121,6 @@ if [[ ${#manifest_paths[@]} -eq 0 ]]; then
 	exit 2
 fi
 
-# The candidate branch is deleted on merge, so its head commit may not be in
-# the checkout's refs. GitHub still serves it (refs/pull/<n>/head keeps it
-# reachable), so a targeted fetch by SHA is enough.
-if ! git cat-file -e "${candidate_sha}^{commit}" 2>/dev/null; then
-	git fetch --no-tags --quiet "$git_remote" "$candidate_sha" 2>/dev/null || true
-fi
-
 fail_closed() {
 	local message="$1"
 	echo "$message" >&2
@@ -124,25 +128,79 @@ fail_closed() {
 	exit 1
 }
 
-if ! git cat-file -e "${candidate_sha}^{commit}" 2>/dev/null; then
-	fail_closed "refusing to promote: candidate commit ${candidate_sha} is not available in this checkout; rebuild from main with force_publish=true"
+# resolve_commit <rev>
+#
+# Echo the full commit SHA for <rev>, or return 1 (unknown) / 2 (ambiguous
+# abbreviation). The candidate SHA arrives abbreviated to 12 characters (the
+# candidate tag embeds `sha[:12]`), so resolution has to go through rev-parse
+# rather than a bare object-existence check.
+resolve_commit() {
+	local rev="$1" err out status
+	err="$(mktemp)"
+	if out="$(git rev-parse --verify "${rev}^{commit}" 2>"$err")"; then
+		rm -f "$err"
+		printf '%s' "$out"
+		return 0
+	fi
+	status=1
+	grep -qi 'ambiguous' "$err" && status=2
+	rm -f "$err"
+	return "$status"
+}
+
+# The candidate branch is deleted on merge, so its head commit is usually not
+# in the checkout's objects. It stays reachable on GitHub as
+# refs/pull/<n>/head, which is what the guard fetches: fetching by the
+# abbreviated SHA the candidate tag carries is not possible (git can only
+# fetch a full object id), so the PR number is the way in.
+if ! candidate_full="$(resolve_commit "$candidate_sha")"; then
+	if [[ -n "$candidate_pr" ]]; then
+		git fetch --no-tags --quiet "$git_remote" \
+			"refs/pull/${candidate_pr}/head:${candidate_fetch_ref}" 2>/dev/null || true
+	elif [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]; then
+		# A full object id can be fetched directly; no PR number needed.
+		git fetch --no-tags --quiet "$git_remote" "$candidate_sha" 2>/dev/null || true
+	fi
+	candidate_full="$(resolve_commit "$candidate_sha")" || case $? in
+	2)
+		fail_closed "refusing to promote: candidate commit ${candidate_sha} is an ambiguous abbreviation in this checkout; rebuild from main with force_publish=true"
+		;;
+	*)
+		fail_closed "refusing to promote: candidate commit ${candidate_sha} is not available in this checkout${candidate_pr:+ (fetched refs/pull/${candidate_pr}/head)}; rebuild from main with force_publish=true"
+		;;
+	esac
 fi
-if ! git cat-file -e "${main_sha}^{commit}" 2>/dev/null; then
+
+# rev-parse already guarantees the prefix, but the candidate tag and the
+# fetched PR head are independent inputs: assert they agree rather than
+# comparing manifests against some other commit.
+if [[ "$candidate_full" != "$candidate_sha"* ]]; then
+	fail_closed "refusing to promote: candidate commit ${candidate_sha} resolved to ${candidate_full}; rebuild from main with force_publish=true"
+fi
+
+if ! main_full="$(resolve_commit "$main_sha")"; then
 	fail_closed "refusing to promote: main commit ${main_sha} is not available in this checkout; rebuild from main with force_publish=true"
 fi
 
-changed_paths="$(git diff --name-only "$candidate_sha" "$main_sha" -- "${manifest_paths[@]}")"
+changed_paths="$(git diff --name-only "$candidate_full" "$main_full" -- "${manifest_paths[@]}")"
 
 if [[ -z "$changed_paths" ]]; then
-	echo "Manifest inputs at ${main_sha} match candidate commit ${candidate_sha}."
+	echo "Manifest inputs at ${main_full} match candidate commit ${candidate_full}."
 	exit 0
 fi
 
-commits="$(git log --format=%H "${candidate_sha}..${main_sha}" -- "${manifest_paths[@]}" | tr '\n' ' ')"
+commits="$(git log --format=%H "${candidate_full}..${main_full}" -- "${manifest_paths[@]}" | tr '\n' ' ')"
 commits="${commits% }"
-[[ -z "$commits" ]] && commits="$main_sha"
 
-message="refusing to promote: main has newer tool manifest commits ${commits}; rebuild from main with force_publish=true"
+if [[ -n "$commits" ]]; then
+	message="refusing to promote: main has newer tool manifest commits ${commits}; rebuild from main with force_publish=true"
+else
+	# No manifest-touching commit sits between the two, yet the content
+	# differs: the candidate branch itself diverged (an amended or rebased
+	# manifest change that never landed on main in that form).
+	message="refusing to promote: tool manifest inputs differ between candidate commit ${candidate_full} and main ${main_full}, but no manifest-touching commit lies between them (candidate-side divergence); rebuild from main with force_publish=true"
+fi
+
 echo "$message" >&2
 echo "Changed manifest paths: $(echo "$changed_paths" | tr '\n' ' ')" >&2
 summary "$message"

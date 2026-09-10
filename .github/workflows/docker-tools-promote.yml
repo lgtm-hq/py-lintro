@@ -49,6 +49,7 @@ jobs:
       action: ${{ steps.candidate.outputs.action }}
       candidate-tag: ${{ steps.candidate.outputs.candidate-tag }}
       candidate-sha: ${{ steps.candidate.outputs.candidate-sha }}
+      candidate-pr: ${{ steps.candidate.outputs.candidate-pr }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -130,6 +131,9 @@ jobs:
           # Staleness guard inputs (#2497): refuse to retag a candidate whose
           # manifest inputs no longer match main.
           CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate-sha }}
+          # The tag carries an abbreviated SHA, so the guard resolves it
+          # against refs/pull/<n>/head rather than fetching by object id.
+          CANDIDATE_PR: ${{ needs.resolve.outputs.candidate-pr }}
           MAIN_SHA: ${{ github.sha }}
         run: scripts/ci/promote-ci-docker-images.sh
 

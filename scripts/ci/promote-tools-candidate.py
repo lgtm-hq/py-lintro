@@ -257,6 +257,26 @@ def resolve_main_action(
     return "promote", tag
 
 
+def candidate_pr(tag: str | None) -> str:
+    """Return the pull request number a candidate tag embeds.
+
+    The promote step needs it to fetch ``refs/pull/<number>/head``: the tag
+    carries only an abbreviated build SHA, and git cannot fetch by an
+    abbreviated object id (#2497).
+
+    Args:
+        tag: Candidate tag, or ``None`` when there is nothing to promote.
+
+    Returns:
+        The embedded pull request number, or an empty string when *tag* is
+        absent or does not match the candidate tag shape.
+    """
+    if not tag:
+        return ""
+    match = CANDIDATE_RE.fullmatch(tag)
+    return match.group("number") if match else ""
+
+
 def candidate_sha(tag: str | None) -> str:
     """Return the build commit a candidate tag embeds.
 
@@ -303,6 +323,7 @@ def main() -> int:
             output_file.write(f"action={action}\n")
             output_file.write(f"candidate-tag={tag or ''}\n")
             output_file.write(f"candidate-sha={candidate_sha(tag)}\n")
+            output_file.write(f"candidate-pr={candidate_pr(tag)}\n")
     return 0
 
 
