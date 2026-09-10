@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.6] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: fit the sticky archive and count pruned fixed rows honestly (#2544)
+  (79a6640)
+
 ## [0.153.5] - 2026-09-10
 
 ### Fixed
