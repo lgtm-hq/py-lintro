@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - only referenced to build a TimeoutExpired object
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -189,3 +190,158 @@ def test_collect_only_returns_special_mode(
     sample_pytest_plugin.set_options(collect_only=True)
     mode = sample_pytest_plugin.pytest_config.get_special_mode()
     assert_that(mode).is_equal_to(PytestSpecialMode.COLLECT_ONLY.value)
+
+
+# =============================================================================
+# Tests for per-invocation option overrides (#2393)
+# =============================================================================
+
+
+def test_check_options_override_reaches_the_pytest_argv(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """A per-invocation option override reaches the built pytest argv.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    executed: list[list[str]] = []
+
+    def record_command(cmd: list[str]) -> tuple[bool, str, int]:
+        """Record the argv pytest would be launched with.
+
+        Args:
+            cmd: Command line built for the pytest subprocess.
+
+        Returns:
+            tuple[bool, str, int]: A successful, empty execution result.
+        """
+        executed.append(cmd)
+        return True, "10 passed", 0
+
+    with (
+        patch.object(
+            sample_pytest_plugin,
+            "_verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            sample_pytest_plugin,
+            "_get_executable_command",
+            return_value=["pytest"],
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "prepare_test_execution",
+            return_value=10,
+        ),
+        patch.object(sample_pytest_plugin, "_parse_output", return_value=[]),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            new=record_command,
+        ),
+    ):
+        sample_pytest_plugin.check(["tests"], {"maxfail": 3})
+
+    cmd = executed[0]
+    assert_that(cmd).contains("--maxfail")
+    assert_that(cmd[cmd.index("--maxfail") + 1]).is_equal_to("3")
+
+
+def test_check_options_override_does_not_mutate_persisted_options(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """A per-invocation override leaves the plugin's persisted options alone.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    options_before = dict(sample_pytest_plugin.options)
+
+    with (
+        patch.object(
+            sample_pytest_plugin,
+            "_verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            sample_pytest_plugin,
+            "_get_executable_command",
+            return_value=["pytest"],
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "prepare_test_execution",
+            return_value=10,
+        ),
+        patch.object(sample_pytest_plugin, "_parse_output", return_value=[]),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            return_value=(True, "10 passed", 0),
+        ),
+    ):
+        sample_pytest_plugin.check(["tests"], {"maxfail": 3})
+
+    assert_that(sample_pytest_plugin.options).is_equal_to(options_before)
+    assert_that(sample_pytest_plugin.options.get("maxfail")).is_none()
+
+
+def test_build_check_command_defaults_to_the_persisted_plugin_options(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """Omitting the options argument keeps reading the plugin's own options.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    from lintro.tools.pytest.pytest_command_builder import build_check_command
+
+    sample_pytest_plugin.options["maxfail"] = 7
+
+    with patch.object(
+        sample_pytest_plugin,
+        "_get_executable_command",
+        return_value=["pytest"],
+    ):
+        cmd, _ = build_check_command(sample_pytest_plugin, ["tests"])
+
+    assert_that(cmd).contains("--maxfail")
+    assert_that(cmd[cmd.index("--maxfail") + 1]).is_equal_to("7")
+
+
+def test_check_timeout_message_uses_the_overridden_timeout(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """The timeout error reports the per-invocation timeout override.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    with (
+        patch.object(
+            sample_pytest_plugin,
+            "_verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            sample_pytest_plugin,
+            "_get_executable_command",
+            return_value=["pytest"],
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "prepare_test_execution",
+            return_value=10,
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            side_effect=subprocess.TimeoutExpired(cmd="pytest", timeout=600),
+        ),
+    ):
+        result = sample_pytest_plugin.check(["tests"], {"timeout": 600})
+
+    assert_that(result.timed_out).is_true()
+    assert_that(result.output).contains("600")

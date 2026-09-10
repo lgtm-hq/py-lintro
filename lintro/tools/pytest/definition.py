@@ -312,7 +312,12 @@ class PytestPlugin(BaseToolPlugin):
                 return handle_parametrize_help(self)
 
         # Normal test execution
-        cmd, auto_junitxml_path = build_check_command(self, target_files, fix=False)
+        cmd, auto_junitxml_path = build_check_command(
+            self,
+            target_files,
+            fix=False,
+            options=merged_options,
+        )
 
         logger.debug(f"Running pytest with command: {' '.join(cmd)}")
         logger.debug(f"Target files: {target_files}")
@@ -373,7 +378,7 @@ class PytestPlugin(BaseToolPlugin):
             )
 
         except subprocess.TimeoutExpired:
-            timeout_opt = self.options.get("timeout", PYTEST_DEFAULT_TIMEOUT)
+            timeout_opt = merged_options.get("timeout", PYTEST_DEFAULT_TIMEOUT)
             if isinstance(timeout_opt, int):
                 timeout_val = timeout_opt
             elif timeout_opt is not None:
