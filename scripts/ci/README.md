@@ -39,9 +39,11 @@ scripts/ci/
 
 Release versioning and auto-tagging use lgtm-ci reusable workflows
 (`release-version-pr.yml`, `release-auto-tag.yml`). `release-version-pr.yml` gates that
-reusable call on `check-last-publish-green.py`, which reports `publish_green=false` when
-the last version-tag run of `publish-pypi-on-tag.yml` did not succeed (#2516). The gate
-is a skip, never a failure: it also reports green when its own API read fails.
+reusable call on `check-last-publish-green.py`, which reports `publish_green=false` only
+when the newest version-tag run of `publish-pypi-on-tag.yml` — by `created_at`, whatever
+its status — concluded `startup_failure`; every other conclusion, and any run still
+queued or in flight, is green (#2516, #2550). The gate is a skip, never a failure: it
+also reports green when its own API read fails.
 
 ## GHCR Cache Tags
 

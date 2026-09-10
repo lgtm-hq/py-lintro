@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
-"""Report whether the most recent tag publish succeeded (#2516).
+"""Report whether the last tag publish failed at startup (#2516, #2550).
 
 ``release-version-pr.yml`` opens a version PR on every push to ``main`` with
 ``auto-merge: true``, and ``release-auto-tag.yml`` tags the merge. When the tag
@@ -12,9 +12,24 @@ were burned that way between 2026-09-07 and 2026-09-09 while PyPI stayed on
 
 This script is the gate in front of that loop. It lists ``push`` runs of the
 tag publish workflow, keeps the ones whose ``head_branch`` looks like a version
-tag (``v`` followed by digits, e.g. ``v0.152.7``), takes the most recent
-*completed* one, and reports ``publish_green=true`` only when it concluded
-``success``.
+tag (``v`` followed by digits, e.g. ``v0.152.7``), takes the most recent one by
+``created_at``, and reports ``publish_green=false`` only when that run
+concluded ``startup_failure`` (#2550).
+
+**Only a startup failure gates.** ``startup_failure`` is GitHub's verdict for a
+run that never started — unparsable YAML, a missing reusable workflow, a
+permissions block the runner rejects. That is the publish pipeline being
+broken, and every further tag would hit the same wall. Every other conclusion
+(``success``, ``failure``, ``cancelled``, ``timed_out``, ``action_required``,
+or none recorded) belongs to a run that did start: a flaky PyPI upload, a
+cancelled run or a timeout is a one-off that the next tag may well clear, and
+freezing the release train on it costs more than the version it saves.
+
+**The newest run wins, in flight or not.** The gate reads the newest tag run by
+``created_at`` regardless of status, not the newest *completed* one. A queued,
+waiting or in-progress run has no startup failure to show, so it is green — and
+picking it deliberately means an in-flight publish neither resurrects an older
+verdict nor blocks the version PR behind it.
 
 **The gate is a skip, not an error.** It never fails the job: every path exits
 0 and the verdict travels in the ``publish_green`` output, which the workflow
@@ -30,8 +45,8 @@ wrong red is a stalled release train nobody is watching.
 Other benign-by-design cases, all reported green:
 
     - No tag runs at all (a fresh repository, or a renamed workflow).
-    - The newest tag run is still in progress: the newest **completed** tag run
-      is the signal, and if none has completed there is nothing to judge.
+    - The newest tag run is queued, waiting or in progress: it has not failed
+      at startup, so there is nothing to gate on.
     - ``--force``: the manual override for the first release after a fix.
 
 Usage:
@@ -73,8 +88,9 @@ EXIT_OK = 0
 #: candidate tag such as ``tools-candidate-…``) is not this pipeline's signal.
 _VERSION_TAG = re.compile(r"^v\d+(?:\.\d+)*$")
 
-_COMPLETED = "completed"
-_SUCCESS = "success"
+#: The only conclusion that gates. GitHub reports it when the run never
+#: started, which is the "the publish workflow itself is broken" signal.
+_STARTUP_FAILURE = "startup_failure"
 
 
 class TextFetcher(Protocol):
@@ -223,6 +239,9 @@ def evaluate(
 ) -> GateVerdict:
     """Decide whether the version PR may proceed.
 
+    Not green only when the newest version-tag run — by ``created_at``,
+    whatever its status — concluded ``startup_failure``.
+
     Never raises: every failure below the gate — an unreachable API, a
     malformed payload, an exception type nobody anticipated — becomes a green
     verdict carrying the error in its summary, so the gate cannot redden or
@@ -271,36 +290,40 @@ def evaluate(
                 "unchecked."
             ),
         )
-    completed = [run for run in runs if str(run.get("status", "")) == _COMPLETED]
-    if not completed:
+    if not runs:
         return GateVerdict(
             green=True,
             summary=(
                 "## Publish gate: green\n\n"
-                f"No completed `{workflow}` run on a version tag was found, so "
-                "there is no failed publish to gate on."
+                f"No `{workflow}` run on a version tag was found, so there is "
+                "no broken publish to gate on."
             ),
         )
-    latest = completed[0]
-    conclusion = str(latest.get("conclusion") or "unknown")
+    latest = runs[0]
+    status = str(latest.get("status", "")).strip() or "unknown"
+    conclusion = str(latest.get("conclusion") or "none")
     tag = str(latest.get("head_branch", "")).strip() or "unknown tag"
     run_url = str(latest.get("html_url", "")).strip() or "unknown run"
-    if conclusion == _SUCCESS:
+    if conclusion != _STARTUP_FAILURE:
         return GateVerdict(
             green=True,
             summary=(
                 "## Publish gate: green\n\n"
-                f"The last tag publish (`{tag}`) succeeded: {run_url}"
+                f"The last tag publish (`{tag}`) is `{status}` with conclusion "
+                f"`{conclusion}`, which is not a startup failure, so the "
+                f"version PR proceeds: {run_url}"
             ),
         )
     return GateVerdict(
         green=False,
         summary=(
             "## Publish gate: version PR skipped\n\n"
-            f"The last tag publish (`{tag}`) concluded `{conclusion}`: "
-            f"{run_url}\n\nNo version PR is opened while the publish pipeline "
-            "is broken, so merges to `main` stop burning versions (#2516). "
-            "Fix the publish, then re-run this workflow with `force: true`."
+            f"The version PR is skipped because the last tag publish (`{tag}`) "
+            f"failed at startup: {run_url}\n\nA `startup_failure` means the "
+            "publish workflow never ran, so every further tag would hit the "
+            "same wall and merges to `main` would keep burning versions "
+            "(#2516). Fix the workflow, then re-run this one with "
+            "`force: true`."
         ),
     )
 
@@ -343,7 +366,7 @@ def build_parser() -> argparse.ArgumentParser:
         The configured parser.
     """
     parser = argparse.ArgumentParser(
-        description="Report whether the most recent tag publish succeeded.",
+        description="Report whether the last tag publish failed at startup.",
         epilog="Always exits 0; the verdict is the publish_green output.",
     )
     parser.add_argument(
