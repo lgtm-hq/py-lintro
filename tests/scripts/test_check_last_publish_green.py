@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import json
 import sys
@@ -105,7 +106,8 @@ def _invoke(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     runs: list[dict[str, Any]] | None = None,
-    error: Exception | None = None,
+    body: str | None = None,
+    error: BaseException | None = None,
     argv: list[str] | None = None,
 ) -> GateRun:
     """Run the gate against a stubbed GitHub API and capture its side effects.
@@ -116,6 +118,7 @@ def _invoke(
         tmp_path: Temporary directory for the Actions output files.
         capsys: Capture fixture for stdout.
         runs: Workflow runs the stubbed API returns.
+        body: Raw response body, overriding ``runs`` when given.
         error: Exception the stubbed fetch raises instead of answering.
         argv: Command-line arguments passed to ``main``.
 
@@ -133,6 +136,8 @@ def _invoke(
         assert_that(url).contains("event=push")
         if error is not None:
             raise error
+        if body is not None:
+            return body
         return json.dumps({"workflow_runs": runs or []})
 
     monkeypatch.setattr(module, "fetch_text", _fetch)
@@ -351,6 +356,73 @@ def test_empty_flag_word_from_the_workflow_is_ignored(
     assert_that(result.code).is_equal_to(0)
     assert_that(result.output).contains("publish_green=false")
     assert_that(result.summary).contains("`cancelled`")
+
+
+def test_unexpected_exception_class_fails_open(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An exception outside the named classes still reports green.
+
+    ``http.client`` errors are neither ``OSError`` nor ``ValueError``, so an
+    exception list is not a contract; the boundary has to be total.
+    """
+    result = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        error=http.client.IncompleteRead(b"partial"),
+    )
+
+    assert_that(result.code).is_equal_to(0)
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("IncompleteRead")
+    assert_that(result.summary).contains("could not be evaluated")
+
+
+def test_non_dict_payload_fails_open(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A JSON payload that is not an object reports green, not an error."""
+    result = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        body=json.dumps(["not", "an", "object"]),
+    )
+
+    assert_that(result.code).is_equal_to(0)
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("Publish gate: not evaluated")
+    assert_that(result.summary).contains("expected a top-level JSON object")
+
+
+def test_missing_workflow_runs_key_fails_open(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A payload without ``workflow_runs`` reports green, not an error."""
+    result = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        body=json.dumps({"total_count": 0}),
+    )
+
+    assert_that(result.code).is_equal_to(0)
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("workflow_runs missing")
+    assert_that(result.summary).contains("could not be evaluated")
 
 
 def test_version_tag_recognition(module: Any) -> None:

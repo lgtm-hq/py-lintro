@@ -257,13 +257,26 @@ def test_version_pr_is_gated_on_a_green_tag_publish() -> None:
     )
     gate_script = "scripts/ci/check-last-publish-green.py"
     assert_that((_REPO_ROOT / gate_script).is_file()).is_true()
-    assert_that(
-        [step for step in gate["steps"] if gate_script in str(step.get("run", ""))],
-    ).is_length(1)
+    gate_steps = [
+        step for step in gate["steps"] if gate_script in str(step.get("run", ""))
+    ]
+    assert_that(gate_steps).is_length(1)
 
     force_input = workflow["on"]["workflow_dispatch"]["inputs"]["force"]
     assert_that(force_input["type"]).is_equal_to("boolean")
     assert_that(force_input["default"]).is_false()
+
+    # The force decision stays in the workflow expression and reaches the
+    # script as one quoted word, so no conditional logic lives in inline
+    # shell and an unset input cannot smuggle a second argument through.
+    gate_step = gate_steps[0]
+    force_flag = _normalize_github_expr(str(gate_step["env"]["FORCE_FLAG"]))
+    assert_that(force_flag).is_equal_to(
+        "${{ inputs.force && '--force' || '' }}",
+    )
+    assert_that(_normalize_github_expr(str(gate_step["run"]))).is_equal_to(
+        f'python3 {gate_script} "${{FORCE_FLAG}}"',
+    )
 
 
 def test_version_pr_finalizes_docs_via_dedicated_script() -> None:

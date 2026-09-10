@@ -19,8 +19,9 @@ tag (``v`` followed by digits, e.g. ``v0.152.7``), takes the most recent
 **The gate is a skip, not an error.** It never fails the job: every path exits
 0 and the verdict travels in the ``publish_green`` output, which the workflow
 feeds to the ``if:`` on the version-PR job. That includes the failure modes of
-the gate itself — an unreachable or unparseable GitHub API reports *green* with
-a summary line saying the gate could not be evaluated. Fail-open is deliberate:
+the gate itself — *any* error while reading the GitHub API, whatever its
+exception class, reports green with a summary line naming the error and saying
+the gate could not be evaluated. Fail-open is deliberate:
 a gate that fails closed on an API hiccup would silently freeze releases, and
 the condition it guards (a broken publish) is loud and already reported
 elsewhere. The cost of a wrong green is one extra burned version; the cost of a
@@ -181,6 +182,15 @@ def list_tag_runs(
         raise RuntimeError(
             f"GitHub API unreachable: {type(exc).__name__}: {exc}",
         ) from exc
+    except Exception as exc:
+        # Total by design. The named cases above carry the clearer message,
+        # but the fetch-and-parse boundary must swallow *everything* else too
+        # (``http.client`` exceptions such as ``IncompleteRead`` are neither
+        # ``OSError`` nor ``ValueError``), because the caller turns any failure
+        # here into a green verdict rather than a red job.
+        raise RuntimeError(
+            f"GitHub API read failed: {type(exc).__name__}: {exc}",
+        ) from exc
     if not isinstance(payload, dict):
         raise RuntimeError(
             "Unexpected GitHub API payload: expected a top-level JSON object",
@@ -209,6 +219,11 @@ def evaluate(
 ) -> GateVerdict:
     """Decide whether the version PR may proceed.
 
+    Never raises: every failure below the gate — an unreachable API, a
+    malformed payload, an exception type nobody anticipated — becomes a green
+    verdict carrying the error in its summary, so the gate cannot redden or
+    stall a release on its own.
+
     Args:
         repo: Repository in ``owner/name`` form.
         workflow: Publish workflow file name.
@@ -229,14 +244,22 @@ def evaluate(
         )
     try:
         runs = list_tag_runs(repo=repo, workflow=workflow, fetch=fetch)
-    except RuntimeError as exc:
+    except Exception as exc:
+        # Deliberately blind: the gate's whole contract is that it never fails
+        # the job, so an unforeseen exception class must not escape either.
+        detail = (
+            str(exc)
+            if isinstance(exc, RuntimeError)
+            else f"{type(exc).__name__}: {exc}"
+        )
         return GateVerdict(
             green=True,
             summary=(
                 "## Publish gate: not evaluated\n\n"
-                f"The last `{workflow}` tag run could not be read ({exc}), so "
-                "the gate could not be evaluated and the version PR proceeds "
-                "(the gate never fails the release train on its own errors)."
+                f"The last `{workflow}` tag run could not be read ({detail}), "
+                "so the gate could not be evaluated and the version PR "
+                "proceeds (the gate never fails the release train on its own "
+                "errors)."
             ),
         )
     completed = [run for run in runs if str(run.get("status", "")) == _COMPLETED]
