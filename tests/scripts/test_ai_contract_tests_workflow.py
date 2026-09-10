@@ -14,6 +14,7 @@ glance, and each of them has bitten this repo before:
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -261,6 +262,7 @@ FORWARDED_TIER2_ENV = (
     "ANTHROPIC_API_KEY",
     "CODEX_API_KEY",
     "CURSOR_API_KEY",
+    "LINTRO_AI_MODEL",
     "LINTRO_CLI_BARE",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
     "DISABLE_AUTOUPDATER",
@@ -364,7 +366,7 @@ def test_every_tier2_workflow_credential_is_forwarded_into_the_container(
     credentials = sorted(
         name
         for name, value in step["env"].items()
-        if "secrets." in str(value) or "vars.ZAI_BASE_URL" in str(value)
+        if "secrets." in str(value) or "vars." in str(value)
     )
 
     assert_that(credentials).described_as("tier-2 workflow credentials").is_not_empty()
@@ -608,3 +610,17 @@ def test_workflow_uses_pinned_actions(*, action: str) -> None:
     """
     assert_that(actions_used_in(WORKFLOW)).contains(action)
     assert_that(WORKFLOW.read_text(encoding="utf-8")).contains(action_pin(action))
+
+
+def test_forwarded_env_tuple_matches_the_script_forwarding_loop() -> None:
+    """The pinned tuple lists exactly the variables the runner forwards.
+
+    Derived from the script's own forwarding loop, so a variable added to or
+    dropped from the loop fails here instead of silently escaping the pins.
+    """
+    text = RUNNER.read_text(encoding="utf-8")
+    start = text.index("for secret in")
+    block = text[start : text.index("; do", start)]
+    forwarded = tuple(re.findall(r"\b([A-Z][A-Z0-9_]+)\b", block.split("in", 1)[1]))
+
+    assert_that(forwarded).is_equal_to(FORWARDED_TIER2_ENV)
