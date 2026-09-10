@@ -25,6 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
         "scripts/ci/is-infra-flake-failure.sh",
         "scripts/ci/resolve-docker-rolling-tags.sh",
         "scripts/ci/promote-ci-docker-images.sh",
+        "scripts/ci/check-tools-manifest-staleness.sh",
         "scripts/ci/cosign-sign-images.sh",
         "scripts/ci/testing/pull-ci-docker-images.sh",
         "scripts/ci/testing/load-ci-docker-images.sh",

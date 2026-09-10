@@ -48,6 +48,7 @@ jobs:
     outputs:
       action: ${{ steps.candidate.outputs.action }}
       candidate-tag: ${{ steps.candidate.outputs.candidate-tag }}
+      candidate-sha: ${{ steps.candidate.outputs.candidate-sha }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -104,7 +105,10 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          # Full history: the manifest staleness guard walks main back to the
+          # candidate's branch point. The candidate commit itself is fetched
+          # by SHA inside the guard (its branch is deleted on merge).
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up Docker Buildx
         # yamllint disable-line rule:line-length
@@ -123,6 +127,10 @@ jobs:
           SOURCE_IMAGE: ghcr.io/lgtm-hq/lintro-tools
           CI_TAG: ${{ needs.resolve.outputs.candidate-tag }}
           TAGS: ghcr.io/lgtm-hq/lintro-tools:latest
+          # Staleness guard inputs (#2497): refuse to retag a candidate whose
+          # manifest inputs no longer match main.
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate-sha }}
+          MAIN_SHA: ${{ github.sha }}
         run: scripts/ci/promote-ci-docker-images.sh
 
   publish-fallback:

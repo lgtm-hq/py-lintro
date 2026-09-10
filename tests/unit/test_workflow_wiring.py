@@ -4721,3 +4721,43 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
     # Fail closed: a classifier that did not succeed still pings.
     assert_that(condition).contains("needs.classify-failure.result != 'success'")
+
+
+def test_tools_promote_passes_manifest_staleness_shas() -> None:
+    """The promote step must feed the staleness guard both commits (#2497).
+
+    A candidate image built before a tool manifest change landed on main must
+    not be retagged as ``:latest``. The guard inside
+    ``scripts/ci/promote-ci-docker-images.sh`` compares the candidate's build
+    commit with main, so the workflow has to pass both SHAs and check out
+    enough history for that comparison.
+    """
+    workflow = _load_workflow(name="docker-tools-promote.yml")
+    resolve = workflow["jobs"]["resolve"]
+    assert_that(resolve["outputs"]).contains_key("candidate-sha")
+    assert_that(resolve["outputs"]["candidate-sha"]).contains(
+        "steps.candidate.outputs.candidate-sha",
+    )
+
+    promote = workflow["jobs"]["promote"]
+    checkout = next(
+        step
+        for step in promote["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    # fetch-depth: 0 - the guard walks main back to the candidate branch point.
+    assert_that(checkout["with"]["fetch-depth"]).is_equal_to(0)
+
+    step = next(
+        step
+        for step in promote["steps"]
+        if "scripts/ci/promote-ci-docker-images.sh" in str(step.get("run", ""))
+    )
+    env = step["env"]
+    assert_that(env["CANDIDATE_SHA"]).contains("needs.resolve.outputs.candidate-sha")
+    assert_that(env["MAIN_SHA"]).contains("github.sha")
+
+    promote_script = (
+        _REPO_ROOT / "scripts" / "ci" / "promote-ci-docker-images.sh"
+    ).read_text(encoding="utf-8")
+    assert_that(promote_script).contains("check-tools-manifest-staleness.sh")

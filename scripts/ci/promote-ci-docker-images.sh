@@ -28,6 +28,11 @@ Environment:
   CI_TAG         Ephemeral CI tag to promote, e.g. ci-123456789 (required)
   TAGS           Whitespace/newline-separated destination refs, e.g. the
                  docker/metadata-action tags output (required)
+  CANDIDATE_SHA  Commit the candidate image was built from. When set, the
+                 manifest staleness guard runs before any retag (#2497)
+  MAIN_SHA       Current main commit, compared against CANDIDATE_SHA by the
+                 staleness guard (required when CANDIDATE_SHA is set)
+  FORCE_PUBLISH  When "true", the staleness guard is skipped
   GITHUB_OUTPUT  When set, `digest=<sha256:...>` is appended for
                  downstream steps (e.g. cosign signing)
 EOF
@@ -112,6 +117,12 @@ if [[ -z "$tags" ]]; then
 	echo "TAGS is required" >&2
 	exit 2
 fi
+
+# Refuse a candidate built before a tool manifest change landed on main
+# (#2497). Runs before any registry work so a stale candidate fails fast; a
+# no-op unless CANDIDATE_SHA is set, so non-tools promotions are unaffected.
+_promote_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${_promote_script_dir}/check-tools-manifest-staleness.sh"
 
 source_ref="${source_image}:${ci_tag}"
 
