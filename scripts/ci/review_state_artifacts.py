@@ -3,9 +3,12 @@
 
 Cross-run download is not ``download-artifact``'s default. This helper lists
 completed trusted runs of ``ai-review.yml`` and prints the newest run that
-carries a valid ``lintro-review-state-pr-<N>-*`` artifact. The current run is
-excluded. Conclusion is irrelevant: an INCOMPLETE (red) round is exactly the
-run to resume from (#2154).
+carries a valid ``lintro-review-state-pr-<N>-*`` artifact. Conclusion is
+irrelevant: an INCOMPLETE (red) round is exactly the run to resume from
+(#2154). The current run is excluded from that walk, with one exception: on
+a rerun (``GITHUB_RUN_ATTEMPT > 1``) whose earlier attempt already uploaded
+state artifacts, the current run id is selected so the rerun resumes its own
+cancelled attempt instead of re-reviewing the whole diff (#2506).
 
 ``upload`` writes the current ``ai-review-state/`` directory through the
 Actions artifact service from inside ``run-ai-review.sh``. A cancelled job
@@ -52,6 +55,9 @@ WORKFLOW_EVENT: Final[str] = "pull_request_target"
 STATE_ARTIFACT_PREFIX: Final[str] = "lintro-review-state-pr-"
 _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
+)
+_STATE_ATTEMPT_RE: Final[re.Pattern[str]] = re.compile(
+    rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-attempt-(\d+)-",
 )
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
 _GH_API_ATTEMPTS: Final[int] = 3
@@ -180,6 +186,52 @@ def has_valid_state_artifact(
     )
 
 
+def state_artifact_attempt(name: str, *, pr_number: int) -> int | None:
+    """Return the run attempt encoded in a state artifact name.
+
+    Names are built by :func:`state_artifact_name`, which embeds
+    ``-attempt-<a>-``.
+
+    Args:
+        name: Artifact name.
+        pr_number: Pull request that must own the artifact.
+
+    Returns:
+        The attempt number, or ``None`` when the name is not a state
+        artifact for that PR or carries no attempt segment.
+    """
+    match = _STATE_ATTEMPT_RE.match(name)
+    if match is None or int(match.group(1)) != pr_number:
+        return None
+    return int(match.group(2))
+
+
+def has_earlier_attempt_state_artifact(
+    artifacts: Sequence[Artifact],
+    *,
+    pr_number: int,
+    attempt: int,
+) -> bool:
+    """Return whether an earlier attempt of this run left usable state.
+
+    Args:
+        artifacts: Artifacts attached to the current run.
+        pr_number: Pull request that must own the artifact.
+        attempt: ``GITHUB_RUN_ATTEMPT`` of the running attempt.
+
+    Returns:
+        True when a non-expired state artifact was uploaded by an
+        attempt strictly older than ``attempt``.
+    """
+    for artifact in artifacts:
+        if artifact.expired:
+            continue
+        uploaded = state_artifact_attempt(artifact.name, pr_number=pr_number)
+        if uploaded is not None and uploaded < attempt:
+            return True
+    return False
+
+
 def is_within_retention(run: WorkflowRun, *, now: datetime) -> bool:
     """Return whether ``run`` can still hold a non-expired state artifact.
 
@@ -215,6 +267,21 @@ def mentions_other_pr(run: WorkflowRun, *, pr_number: int) -> bool:
     return bool(run.pull_request_numbers) and pr_number not in run.pull_request_numbers
 
 
+def is_trusted_review_run(run: WorkflowRun) -> bool:
+    """Return whether ``run`` is a trusted AI-review run, ignoring status.
+
+    Status is excluded so the *current* (in-progress) run can be trust
+    checked when resuming its own previous attempt (#2506).
+
+    Args:
+        run: Candidate workflow run.
+
+    Returns:
+        True when event and workflow path both match.
+    """
+    return run.event == WORKFLOW_EVENT and Path(run.path).name == WORKFLOW_FILENAME
+
+
 def is_trusted_completed_run(run: WorkflowRun) -> bool:
     """Return whether ``run`` is a completed trusted AI-review run.
 
@@ -224,12 +291,7 @@ def is_trusted_completed_run(run: WorkflowRun) -> bool:
     Returns:
         True when event, status, and workflow path all match.
     """
-    path_name = Path(run.path).name
-    return (
-        run.status == "completed"
-        and run.event == WORKFLOW_EVENT
-        and path_name == WORKFLOW_FILENAME
-    )
+    return run.status == "completed" and is_trusted_review_run(run)
 
 
 def select_prior_run_id(
@@ -578,11 +640,81 @@ def fetch_artifacts(
     return artifacts
 
 
+def fetch_run(
+    repo: str,
+    run_id: int,
+    *,
+    gh_api: GhApi = _gh_api,
+) -> WorkflowRun | None:
+    """Fetch one workflow run.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        run_id: Actions run id.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The parsed run, or ``None`` when the call or the payload fails.
+    """
+    payload = gh_api(f"repos/{repo}/actions/runs/{run_id}")
+    if not isinstance(payload, Mapping):
+        return None
+    return parse_workflow_run(payload)
+
+
+def can_resume_own_prior_attempt(
+    *,
+    repo: str,
+    pr_number: int,
+    run_id: int,
+    attempt: int,
+    gh_api: GhApi = _gh_api,
+) -> bool:
+    """Return whether this run's previous attempt left resumable state.
+
+    A rerun keeps ``GITHUB_RUN_ID`` and bumps ``GITHUB_RUN_ATTEMPT``, and
+    the artifacts an earlier attempt uploaded stay attached to the same
+    run. Before #2506 the locator excluded the current run outright and
+    walked only *completed* runs, so a review cancelled at the job budget
+    re-reviewed the whole diff on every rerun. The same trust rules apply
+    as to any other resume source: the run must be a
+    ``pull_request_target`` run of this workflow and must not belong to a
+    different pull request. Only ``status == "completed"`` is dropped —
+    the run is by definition still in progress.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        pr_number: Pull request whose state is being resumed.
+        run_id: ``GITHUB_RUN_ID`` of the running attempt.
+        attempt: ``GITHUB_RUN_ATTEMPT`` of the running attempt.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        True when the current run may be used as its own resume source.
+    """
+    if attempt <= 1:
+        return False
+    run = fetch_run(repo, run_id, gh_api=gh_api)
+    if run is None or not is_trusted_review_run(run):
+        _log_locate(f"own-attempt resume rejected: run-id={run_id} not trusted")
+        return False
+    if mentions_other_pr(run, pr_number=pr_number):
+        _log_locate(f"own-attempt resume rejected: run-id={run_id} other PR")
+        return False
+    artifacts = fetch_artifacts(repo, run_id, gh_api=gh_api)
+    return has_earlier_attempt_state_artifact(
+        artifacts,
+        pr_number=pr_number,
+        attempt=attempt,
+    )
+
+
 def locate_prior_state(
     *,
     repo: str,
     pr_number: int,
     current_run_id: int | None,
+    run_attempt: int | None = None,
     gh_api: GhApi = _gh_api,
     now: datetime | None = None,
 ) -> LocatedPrior:
@@ -601,6 +733,10 @@ def locate_prior_state(
         repo: ``owner/name`` repository slug.
         pr_number: Pull request whose state is being resumed.
         current_run_id: Run to exclude, if known.
+        run_attempt: ``GITHUB_RUN_ATTEMPT`` of the running attempt. On a
+            rerun (``> 1``) whose earlier attempt left state artifacts the
+            current run is selected instead, so a rerun resumes itself
+            (#2506).
         gh_api: Injectable GitHub API caller.
         now: Clock used for the retention cutoff; defaults to UTC now.
 
@@ -608,6 +744,20 @@ def locate_prior_state(
         Newest eligible run and optional older same-PR seed.
     """
     clock = now if now is not None else datetime.now(tz=UTC)
+    if current_run_id is not None and run_attempt is not None:
+        own = can_resume_own_prior_attempt(
+            repo=repo,
+            pr_number=pr_number,
+            run_id=current_run_id,
+            attempt=run_attempt,
+            gh_api=gh_api,
+        )
+        if own:
+            _log_locate(
+                f"selected run-id={current_run_id}: own attempt "
+                f"{run_attempt - 1} state",
+            )
+            return LocatedPrior(run_id=current_run_id)
     path = (
         f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
         f"?event={WORKFLOW_EVENT}&status=completed"
@@ -735,11 +885,13 @@ def locate_state_from_env(
     if not repo or pr_number is None or pr_number <= 0:
         return LocatedPrior(run_id=None)
     current_run_id = _parse_optional_int(env.get("GITHUB_RUN_ID"))
+    run_attempt = _parse_optional_int(env.get("GITHUB_RUN_ATTEMPT"))
     try:
         return locate_prior_state(
             repo=repo,
             pr_number=pr_number,
             current_run_id=current_run_id,
+            run_attempt=run_attempt,
             gh_api=gh_api,
             now=now,
         )

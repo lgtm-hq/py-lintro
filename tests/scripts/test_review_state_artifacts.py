@@ -1198,3 +1198,219 @@ def test_inline_suffix_uses_the_cancel_budget_by_default(
     assert_that(artifacts._CHECKPOINT_UPLOAD_BUDGET_SECONDS).is_greater_than(
         artifacts._CANCEL_UPLOAD_BUDGET_SECONDS,
     )
+
+
+def _own_attempt_gh_api(
+    *,
+    current_run_artifacts: list[dict[str, Any]],
+    run_event: str = "pull_request_target",
+    run_prs: list[dict[str, int]] | None = None,
+) -> Any:
+    """Build a ``gh api`` fake for the rerun-resume tests (#2506).
+
+    Run 500 is the current run; run 200 is an older completed run that
+    still carries state, so a fall-back selection is observable.
+
+    Args:
+        current_run_artifacts: Artifacts attached to run 500.
+        run_event: Trigger event reported for run 500.
+        run_prs: ``pull_requests`` reported for run 500.
+
+    Returns:
+        A callable accepting a REST path and returning a JSON mapping.
+    """
+
+    def gh_api(path: str) -> dict[str, Any]:
+        if path == "repos/lgtm-hq/py-lintro/actions/runs/500":
+            return {
+                "id": 500,
+                "event": run_event,
+                "status": "in_progress",
+                "path": ".github/workflows/ai-review.yml",
+                "created_at": "2026-08-24T04:00:00Z",
+                "pull_requests": run_prs if run_prs is not None else [{"number": 15}],
+            }
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 200,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": "2026-08-24T02:00:00Z",
+                        "pull_requests": [{"number": 15}],
+                    },
+                ],
+            }
+        if "runs/500/artifacts" in path:
+            return {"artifacts": current_run_artifacts}
+        if "runs/200/artifacts" in path:
+            return {
+                "artifacts": [
+                    {
+                        "id": 2,
+                        "name": "lintro-review-state-pr-15-attempt-1-inline",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    return gh_api
+
+
+def _rerun_env(*, attempt: str) -> dict[str, str]:
+    """Return the locator environment for one attempt of run 500.
+
+    Args:
+        attempt: ``GITHUB_RUN_ATTEMPT`` value.
+
+    Returns:
+        Environment mapping for ``locate_state_from_env``.
+    """
+    return {
+        "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+        "PR_NUMBER": "15",
+        "GITHUB_RUN_ID": "500",
+        "GITHUB_RUN_ATTEMPT": attempt,
+    }
+
+
+def test_rerun_resumes_its_own_previous_attempt(artifacts: ModuleType) -> None:
+    """Attempt 2 selects its own run id when attempt 1 left state (#2506)."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-ckpt-15",
+                "expired": False,
+            },
+        ],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(500)
+
+
+def test_first_attempt_never_resumes_the_current_run(artifacts: ModuleType) -> None:
+    """Attempt 1 falls back to the newest completed run."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-ckpt-15",
+                "expired": False,
+            },
+        ],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="1"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_without_own_state_falls_back(artifacts: ModuleType) -> None:
+    """Attempt 2 with no earlier-attempt artifact keeps the old behaviour."""
+    gh_api = _own_attempt_gh_api(current_run_artifacts=[])
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_ignores_expired_and_same_attempt_state(artifacts: ModuleType) -> None:
+    """Only a strictly older, non-expired attempt counts as resumable."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": True,
+            },
+            {
+                "id": 2,
+                "name": "lintro-review-state-pr-15-attempt-2-ckpt-3",
+                "expired": False,
+            },
+        ],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_resume_requires_a_trusted_current_run(artifacts: ModuleType) -> None:
+    """An untrusted trigger on the current run disqualifies self-resume."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": False,
+            },
+        ],
+        run_event="workflow_dispatch",
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_resume_rejects_a_current_run_for_another_pr(
+    artifacts: ModuleType,
+) -> None:
+    """A current run that lists a different PR is not a resume source."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": False,
+            },
+        ],
+        run_prs=[{"number": 99}],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_state_artifact_attempt_parses_the_generated_name(
+    artifacts: ModuleType,
+) -> None:
+    """``state_artifact_name`` round-trips through the attempt parser."""
+    name = artifacts.state_artifact_name(pr_number=15, attempt=4, suffix="ckpt-2")
+
+    assert_that(artifacts.state_artifact_attempt(name, pr_number=15)).is_equal_to(4)
+    assert_that(artifacts.state_artifact_attempt(name, pr_number=1)).is_none()
+    legacy = "lintro-review-state-pr-15-inline"
+    assert_that(artifacts.state_artifact_attempt(legacy, pr_number=15)).is_none()
