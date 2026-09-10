@@ -26,7 +26,6 @@ from lintro.parsers.rubocop.rubocop_parser import parse_rubocop_output
 from lintro.plugins.base import BaseToolPlugin, ExecutionContext
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.plugins.subprocess_executor import SubprocessResult
 from lintro.tools.core.batch_runner import (
     BatchCheckPolicy,
     BatchOutput,
@@ -116,6 +115,20 @@ _EXTENSION_DOC_PROJECTS: dict[str, str] = {
     "Rails": "rubocop-rails",
     "ThreadSafety": "rubocop-thread_safety",
 }
+
+
+def _error_text(*, stdout: str, stderr: str, fallback: str) -> str:
+    """Pick the most informative diagnostic text from a failed run.
+
+    Args:
+        stdout: Standard output captured from the command.
+        stderr: Standard error captured from the command.
+        fallback: Text to use when both streams are empty.
+
+    Returns:
+        The stderr notice, else the raw stdout, else ``fallback``.
+    """
+    return stderr.strip() or stdout.strip() or fallback
 
 
 @register_tool
@@ -255,7 +268,7 @@ class RubocopPlugin(BaseToolPlugin):
         self,
         cmd: list[str],
         ctx: ExecutionContext,
-    ) -> SubprocessResult:
+    ) -> tuple[bool, str, str]:
         """Run one RuboCop invocation, keeping stdout separate from stderr.
 
         RuboCop writes its JSON report to stdout but emits "new cops not
@@ -264,31 +277,23 @@ class RubocopPlugin(BaseToolPlugin):
         the batch helpers by hand instead of using ``run_batch_check`` /
         ``run_batch_fix``, both of which read the combined display output.
 
+        The streams are unpacked here rather than handed back as the base
+        class's result object, so this module needs no import from
+        ``lintro.plugins`` beyond the three the layers contract allows.
+
         Args:
             cmd: Fully built command line.
             ctx: Prepared execution context supplying timeout and cwd.
 
         Returns:
-            SubprocessResult with the separated streams.
+            Tuple of (exited zero, stdout, stderr).
         """
-        return self._run_subprocess_result(
+        result = self._run_subprocess_result(
             cmd=cmd,
             timeout=ctx.timeout,
             cwd=ctx.cwd,
         )
-
-    @staticmethod
-    def _error_text(result: SubprocessResult, *, fallback: str) -> str:
-        """Pick the most informative diagnostic text from a failed run.
-
-        Args:
-            result: The finished subprocess result.
-            fallback: Text to use when both streams are empty.
-
-        Returns:
-            The stderr notice, else the raw stdout, else ``fallback``.
-        """
-        return result.stderr.strip() or result.stdout.strip() or fallback
+        return result.success, result.stdout, result.stderr
 
     def check(self, paths: list[str], options: dict[str, object]) -> ToolResult:
         """Check Ruby files with RuboCop.
@@ -308,7 +313,7 @@ class RubocopPlugin(BaseToolPlugin):
         cmd = self._build_check_command(ctx.rel_files)
         logger.debug(f"[RubocopPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
         try:
-            result = self._run_json(cmd, ctx)
+            exit_success, stdout, stderr = self._run_json(cmd, ctx)
         except subprocess.TimeoutExpired:
             return batch_timeout_result(
                 plugin=self,
@@ -318,14 +323,15 @@ class RubocopPlugin(BaseToolPlugin):
                 issues=[],
             )
 
-        issues = parse_rubocop_output(output=result.stdout)
+        issues = parse_rubocop_output(output=stdout)
         return batch_check_result(
             plugin=self,
-            exit_success=result.success,
+            exit_success=exit_success,
             # Surface the diagnostic streams only; the JSON report is already
             # represented by the parsed issues.
-            output=self._error_text(
-                result,
+            output=_error_text(
+                stdout=stdout,
+                stderr=stderr,
                 fallback="RuboCop exited with an error and no results.",
             ),
             issues=issues,
@@ -358,7 +364,10 @@ class RubocopPlugin(BaseToolPlugin):
 
         check_cmd = self._build_check_command(ctx.rel_files)
         try:
-            initial_result = self._run_json(check_cmd, ctx)
+            initial_ok, initial_stdout, initial_stderr = self._run_json(
+                check_cmd,
+                ctx,
+            )
         except subprocess.TimeoutExpired:
             return batch_fix_timeout_result(
                 plugin=self,
@@ -367,14 +376,15 @@ class RubocopPlugin(BaseToolPlugin):
                 cmd=check_cmd,
                 cwd=ctx.cwd,
             )
-        initial_issues = parse_rubocop_output(output=initial_result.stdout)
+        initial_issues = parse_rubocop_output(output=initial_stdout)
         # A non-zero exit with nothing parsed is a config/runtime error, not a
         # clean file: autocorrecting on top of it would rewrite sources RuboCop
         # never managed to inspect.
-        if not initial_result.success and not initial_issues:
+        if not initial_ok and not initial_issues:
             return self._fix_failure_result(
-                output=self._error_text(
-                    initial_result,
+                output=_error_text(
+                    stdout=initial_stdout,
+                    stderr=initial_stderr,
                     fallback="RuboCop check exited with an error.",
                 ),
                 initial_issues=[],
@@ -384,7 +394,7 @@ class RubocopPlugin(BaseToolPlugin):
         fix_cmd = self._build_fix_command(ctx.rel_files)
         logger.debug(f"[RubocopPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
         try:
-            fix_result = self._run_json(fix_cmd, ctx)
+            fix_ok, fix_stdout, fix_stderr = self._run_json(fix_cmd, ctx)
         except subprocess.TimeoutExpired:
             return batch_fix_timeout_result(
                 plugin=self,
@@ -398,12 +408,11 @@ class RubocopPlugin(BaseToolPlugin):
         # JSON report parses below via the re-check); anything else with no
         # parseable report is a crash that must surface, not read as a fix
         # pass with leftovers.
-        if not fix_result.success and not parse_rubocop_output(
-            output=fix_result.stdout,
-        ):
+        if not fix_ok and not parse_rubocop_output(output=fix_stdout):
             return self._fix_failure_result(
-                output=self._error_text(
-                    fix_result,
+                output=_error_text(
+                    stdout=fix_stdout,
+                    stderr=fix_stderr,
                     fallback="RuboCop autocorrect exited with an error.",
                 ),
                 initial_issues=initial_issues,
@@ -411,7 +420,10 @@ class RubocopPlugin(BaseToolPlugin):
             )
 
         try:
-            remaining_result = self._run_json(check_cmd, ctx)
+            remaining_ok, remaining_stdout, remaining_stderr = self._run_json(
+                check_cmd,
+                ctx,
+            )
         except subprocess.TimeoutExpired:
             return batch_fix_timeout_result(
                 plugin=self,
@@ -420,13 +432,14 @@ class RubocopPlugin(BaseToolPlugin):
                 cmd=check_cmd,
                 cwd=ctx.cwd,
             )
-        remaining_issues = parse_rubocop_output(output=remaining_result.stdout)
+        remaining_issues = parse_rubocop_output(output=remaining_stdout)
         # Same fail-closed rule for the verification run: an unparseable
         # failure is not proof that every offense was corrected.
-        if not remaining_result.success and not remaining_issues:
+        if not remaining_ok and not remaining_issues:
             return self._fix_failure_result(
-                output=self._error_text(
-                    remaining_result,
+                output=_error_text(
+                    stdout=remaining_stdout,
+                    stderr=remaining_stderr,
                     fallback="RuboCop verification exited with an error.",
                 ),
                 initial_issues=initial_issues,
