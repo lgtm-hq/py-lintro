@@ -2028,12 +2028,48 @@ def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
     The input description alone is only visible once the dispatch form is
     open; an operator reaching for a manual build reads the README first, and
     the repair path is the part that has to be written down (#2484).
+
+    ``upload_to_release`` alone is not a full repair: ``arch`` decides which
+    binaries are rebuilt and its dispatch default is ``arm64``, so a repair
+    left on the default never produces the macOS x86_64 asset, never runs
+    ``create-universal-binary`` and never re-pings the tap - both jobs are
+    gated on ``inputs.arch == 'universal'``. The README has to name both
+    inputs, so pin that here rather than trusting prose to stay complete.
     """
     readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
         encoding="utf-8",
     )
     assert_that(readme).contains("upload_to_release")
     assert_that(readme).contains("build-binary.yml")
+
+    section = readme.partition("### Dispatching `build-binary.yml` by hand")[2]
+    assert_that(section).described_as(
+        "the dispatch runbook section must exist to document the repair path",
+    ).is_not_empty()
+    repair = section.partition("- **Repair dispatch**")[2].partition("\n- **The tag")[0]
+    assert_that(repair).described_as(
+        "the repair bullet must name both inputs a full repair needs",
+    ).is_not_empty()
+    for token in ("upload_to_release", "arch", "universal", "arm64"):
+        assert_that(repair).described_as(
+            f"the repair path must mention {token}",
+        ).contains(token)
+
+    # The arch prerequisite is only true while the two jobs stay gated on it.
+    workflow = _load_workflow(name="build-binary.yml")
+    for job_id in ("create-universal-binary", "homebrew-dispatch"):
+        gate = _normalize_github_expr(str(workflow["jobs"][job_id]["if"]))
+        assert_that(gate).described_as(
+            f"{job_id} gates the documented arch prerequisite",
+        ).contains("inputs.arch == 'universal'")
+
+    arch_defaults = {
+        trigger: str(workflow["on"][trigger]["inputs"]["arch"]["default"])
+        for trigger in ("workflow_dispatch", "workflow_call")
+    }
+    assert_that(arch_defaults).described_as(
+        "the README warns about the dispatch default; a change must update it",
+    ).is_equal_to({"workflow_dispatch": "arm64", "workflow_call": "universal"})
 
 
 def test_renovate_manages_build_binary_uv_pin() -> None:

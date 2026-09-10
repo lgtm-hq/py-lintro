@@ -187,10 +187,17 @@ step and the `homebrew-dispatch` job are now gated on
 - **Plain dispatch** (leave `upload_to_release` off): builds, verifies and uploads run
   artifacts only. Nothing on any release is touched. This is the safe way to test a
   build from a branch.
-- **Repair dispatch** (`upload_to_release: true`): republishes the built binaries onto
-  the release `get-release-info` resolves. Use it only to restore assets a broken run
-  left behind; download the artifacts from the tag run first if you want to compare
-  checksums.
+- **Repair dispatch** (`upload_to_release: true` **and** `arch: universal`): republishes
+  the built binaries onto the release `get-release-info` resolves. Use it only to
+  restore assets a broken run left behind; download the artifacts from the tag run first
+  if you want to compare checksums.
+  - **`arch` decides what gets rebuilt, and its dispatch default is `arm64`, not
+    `universal`.** A repair left on the default rebuilds only the macOS arm64 binary
+    (both Linux arches build unconditionally); the macOS x86_64 asset is never produced,
+    `create-universal-binary` and `homebrew-dispatch` are both gated on
+    `inputs.arch == 'universal'`, so the universal binary is not restored and the tap is
+    never re-pinged. Set `arch: universal` for a full repair. The `workflow_call` path
+    is not affected — its own `arch` input defaults to `universal`.
 - **The tag pipeline is unaffected.** `publish-pypi-on-tag.yml` calls this workflow with
   `release_tag`, which satisfies the first disjunct; `upload_to_release` is a
   dispatch-only input and never reaches the `workflow_call` path.
