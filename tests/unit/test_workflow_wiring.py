@@ -1971,6 +1971,20 @@ def test_build_binary_dispatch_uploads_are_opt_in() -> None:
     assert_that(upload_input["default"]).is_false()
     assert_that(upload_input["description"]).contains("repair")
 
+    # ``upload_to_release`` is dispatch-only by design, and that asymmetry is
+    # what makes the gate's workflow_call payload correct: the tag pipeline
+    # cannot pass the input, so it evaluates to the empty string there and the
+    # gate has to publish on ``release_tag`` alone. Pin both halves, because a
+    # later ``upload_to_release`` added under workflow_call would silently
+    # invalidate the payload the evaluator below asserts against.
+    call_inputs = workflow["on"]["workflow_call"]["inputs"]
+    assert_that(call_inputs).described_as(
+        "upload_to_release is a dispatch-only repair input",
+    ).does_not_contain_key("upload_to_release")
+    assert_that(call_inputs["release_tag"]["required"]).described_as(
+        "the workflow_call path must always carry a release tag",
+    ).is_true()
+
     upload_steps = tuple(
         (job_id, str(step.get("name")))
         for job_id, job in workflow["jobs"].items()
@@ -2035,6 +2049,62 @@ def test_build_binary_jobs_share_one_python_version() -> None:
     assert_that(str(workflow["env"]["PYTHON_VERSION"])).described_as(
         "build-binary.yml must build on the released interpreter",
     ).is_equal_to(next(iter(published_pins)))
+
+
+# Workflows deliberately off the release interpreter. The site toolchain is
+# pinned independently of the package the release pipeline builds, so it is
+# named here rather than silently swept into the equality below.
+_PYTHON_PIN_EXEMPT_WORKFLOWS = frozenset({"site-quality.yml"})
+
+
+def test_every_workflow_shares_the_build_binary_python_pin(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """One interpreter pin across the repo, whichever key spells it.
+
+    #2484 hoisted the binary build's pin into ``env.PYTHON_VERSION``, which a
+    repo-wide ``python-version:`` bump sweep does not touch. Comparing
+    build-binary.yml against publish-pypi-on-tag.yml alone leaves the rest of
+    the pins free to move first, so a partial bump would compile the released
+    binaries on a different interpreter than the wheels and only show up at the
+    tag. Assert the whole set instead, so any half-done bump fails in CI.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    pinned = str(_load_workflow(name=_BUILD_BINARY_WORKFLOW)["env"]["PYTHON_VERSION"])
+    assert_that(pinned).matches(r"^\d+\.\d+$")
+
+    drifted: dict[str, list[str]] = {}
+    covered: list[str] = []
+    for name, workflow in parsed_workflows.items():
+        if name in _PYTHON_PIN_EXEMPT_WORKFLOWS:
+            continue
+        pins = _collect_python_version_pins(node=workflow)
+        if not pins:
+            continue
+        covered.append(name)
+        off_pin = sorted({pin for pin in pins if pin != pinned})
+        if off_pin:
+            drifted[name] = off_pin
+
+    assert_that(covered).described_as(
+        "no workflow pins python-version; the comparison would be vacuous",
+    ).is_not_empty()
+    assert_that(drifted).described_as(
+        f"every python-version pin must equal build-binary.yml's {pinned!r}",
+    ).is_empty()
+
+    # The exemption list is a claim about the repo, not a free pass: a named
+    # workflow that stops existing (or stops pinning Python) must be removed
+    # from it rather than left to hide a future drift.
+    for name in _PYTHON_PIN_EXEMPT_WORKFLOWS:
+        assert_that(parsed_workflows).contains_key(name)
+        assert_that(
+            _collect_python_version_pins(node=parsed_workflows[name]),
+        ).described_as(
+            f"{name} is exempt but no longer pins python-version",
+        ).is_not_empty()
 
 
 def test_verify_built_binary_uses_a_registered_doctor_flag() -> None:
@@ -2159,6 +2229,144 @@ def test_renovate_manages_build_binary_python_pin() -> None:
         assert_that(found.group("currentValue")).is_equal_to(
             _load_workflow(name=_BUILD_BINARY_WORKFLOW)["env"]["PYTHON_VERSION"],
         )
+
+    # The ``python-version`` datasource publishes three-component releases
+    # (``3.14.1``), but this pin — and the Nuitka cache key built from it — is
+    # two-component. Without a truncating ``extractVersionTemplate`` the first
+    # accepted bump writes a value the manager's own regex can no longer match,
+    # and the pin silently drops out of Renovate's reach.
+    extract_template = manager.get("extractVersionTemplate", "")
+    assert_that(extract_template).described_as(
+        "the python pin needs extractVersionTemplate to keep its X.Y shape",
+    ).is_not_empty()
+    truncation = re.compile(re.sub(r"\(\?<(\w+)>", r"(?P<\1>", extract_template))
+    truncated = truncation.match("3.99.7")
+    if truncated is None:
+        pytest.fail(
+            f"extractVersionTemplate {extract_template!r} does not match "
+            "an X.Y.Z release",
+        )
+    assert_that(truncated.group("version")).described_as(
+        "a three-component release must be written back as X.Y",
+    ).is_equal_to("3.99")
+    # And the truncated value must still satisfy the manager's own matchStrings,
+    # so the next extraction pass finds the pin again.
+    for match_string in manager["matchStrings"]:
+        pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
+        assert_that(
+            re.search(pattern, f"  PYTHON_VERSION: '{truncated.group('version')}'"),
+        ).described_as(
+            f"matchString {match_string!r} must match the value Renovate writes",
+        ).is_not_none()
+
+
+def test_workflows_readme_documents_the_real_nuitka_cache_settings() -> None:
+    """The cache prose must state the values build-binary.yml actually uses.
+
+    ``.github/workflows/README.md`` is the only place the caching design is
+    explained, and it quotes concrete values — the key template, the ccache
+    budget, the cache root and the compile step's timeout. Those are exactly
+    the knobs a later tuning pass moves, and stale numbers here send the next
+    person debugging a cold build to the wrong place (#2484).
+    """
+    readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
+        encoding="utf-8",
+    )
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    workflow_env = workflow["env"]
+
+    assert_that(readme).described_as("ccache budget").contains(
+        f"`CCACHE_MAXSIZE` is set to `{workflow_env['CCACHE_MAXSIZE']}`",
+    )
+    cache_root = str(workflow_env["NUITKA_CACHE_DIR"]).rsplit("/", 1)[-1]
+    assert_that(readme).described_as("pinned cache root").contains(f"`{cache_root}`")
+
+    cache_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps") or []
+        if str(step.get("uses", "")).startswith("actions/cache/")
+    ]
+    assert_that(cache_steps).is_not_empty()
+    keys = {str((step.get("with") or {})["key"]) for step in cache_steps}
+    assert_that(keys).described_as("both compile jobs share one key").is_length(1)
+    key = next(iter(keys))
+    for segment in ("nuitka-", "py", "nuitka", "github.run_id", "github.run_attempt"):
+        assert_that(key).contains(segment)
+    # The README spells the same template in prose; assert each of its parts.
+    for documented in (
+        "nuitka-<os>-<arch>-py<PYTHON_VERSION>",
+        "<run id>-<run attempt>",
+    ):
+        assert_that(readme).described_as("documented cache key template").contains(
+            documented,
+        )
+
+    build_timeouts = {
+        int(step["timeout-minutes"])
+        for job in workflow["jobs"].values()
+        for step in job.get("steps") or []
+        if str(step.get("name", "")) == "Build binary" and "timeout-minutes" in step
+    }
+    assert_that(build_timeouts).described_as(
+        "both compile steps share one timeout",
+    ).is_length(1)
+    assert_that(readme).described_as("documented compile-step timeout").contains(
+        f"{next(iter(build_timeouts))}-minute step timeout",
+    )
+
+
+def test_nuitka_version_output_name_matches_the_workflow_reference() -> None:
+    """The resolver's output key, the step id and the cache key must agree.
+
+    ``scripts/ci/resolve-nuitka-version.py`` writes ``nuitka-version=<v>`` to
+    ``GITHUB_OUTPUT`` and the cache key reads it back as
+    ``steps.<id>.outputs.<key>``. Nothing in GitHub Actions fails when those
+    names disagree — the expression just expands to the empty string, and the
+    cache key silently loses its Nuitka component, so every build after a
+    Nuitka bump reuses stale objects (#2484).
+    """
+    script_text = (
+        _REPO_ROOT / "scripts" / "ci" / "resolve-nuitka-version.py"
+    ).read_text(encoding="utf-8")
+    emitted = re.findall(r'f?"(?P<key>[a-z0-9-]+)=\{version\}"', script_text)
+    assert_that(emitted).described_as(
+        "resolve-nuitka-version.py must emit exactly one GITHUB_OUTPUT key",
+    ).is_length(1)
+    output_key = emitted[0]
+
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    resolver_steps = [
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps") or []
+        if "resolve-nuitka-version.py" in str(step.get("run", ""))
+    ]
+    assert_that(resolver_steps).described_as(
+        "no job resolves the locked Nuitka version",
+    ).is_not_empty()
+
+    workflow_text = (
+        _REPO_ROOT / ".github" / "workflows" / _BUILD_BINARY_WORKFLOW
+    ).read_text(encoding="utf-8")
+    for step in resolver_steps:
+        step_id = str(step.get("id", ""))
+        assert_that(step_id).described_as(
+            "the resolver step needs an id for its output to be referenced",
+        ).is_not_empty()
+        assert_that(workflow_text).described_as(
+            "the cache key must read the id and key the script actually emits",
+        ).contains(f"steps.{step_id}.outputs.{output_key}")
+
+    # And no reference may name a step or output that does not exist.
+    for referenced_id, referenced_key in re.findall(
+        r"steps\.([\w-]+)\.outputs\.(nuitka[\w-]*)",
+        workflow_text,
+    ):
+        assert_that(referenced_id).is_in(
+            *{str(step["id"]) for step in resolver_steps},
+        )
+        assert_that(referenced_key).is_equal_to(output_key)
 
 
 def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
@@ -2315,6 +2523,11 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
         "files.pythonhosted.org:443",
         "nuitka.net:443",
         "release-assets.githubusercontent.com:443",
+        # #2484: the Nuitka cache restore/save steps talk to the cache service
+        # and stream entry payloads from Azure blob storage. Without both the
+        # compile jobs run cold behind the block policy.
+        "actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
     )
     assert_that(endpoints).does_not_contain_duplicates()
     # Any other glob would silently widen the block policy. Two whole-label
