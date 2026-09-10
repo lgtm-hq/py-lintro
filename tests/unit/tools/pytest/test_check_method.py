@@ -207,11 +207,15 @@ def test_check_options_override_reaches_the_pytest_argv(
     """
     executed: list[list[str]] = []
 
-    def record_command(cmd: list[str]) -> tuple[bool, str, int]:
+    def record_command(
+        cmd: list[str],
+        timeout: int | float | None = None,
+    ) -> tuple[bool, str, int]:
         """Record the argv pytest would be launched with.
 
         Args:
             cmd: Command line built for the pytest subprocess.
+            timeout: Seconds allowed before the subprocess is killed.
 
         Returns:
             tuple[bool, str, int]: A successful, empty execution result.
@@ -309,6 +313,60 @@ def test_build_check_command_defaults_to_the_persisted_plugin_options(
 
     assert_that(cmd).contains("--maxfail")
     assert_that(cmd[cmd.index("--maxfail") + 1]).is_equal_to("7")
+
+
+def test_check_enforces_the_overridden_timeout_on_the_subprocess(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """The subprocess is killed at the per-invocation timeout override.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    enforced: list[float | int | None] = []
+
+    def record_timeout(
+        cmd: list[str],
+        timeout: int | float | None = None,
+    ) -> tuple[bool, str]:
+        """Record the timeout the subprocess would be run under.
+
+        Args:
+            cmd: Command line built for the pytest subprocess.
+            timeout: Seconds allowed before the subprocess is killed.
+
+        Returns:
+            tuple[bool, str]: A successful, empty subprocess result.
+        """
+        enforced.append(timeout)
+        return True, "10 passed"
+
+    with (
+        patch.object(
+            sample_pytest_plugin,
+            "_verify_tool_version",
+            return_value=None,
+        ),
+        patch.object(
+            sample_pytest_plugin,
+            "_get_executable_command",
+            return_value=["pytest"],
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "prepare_test_execution",
+            return_value=10,
+        ),
+        patch.object(sample_pytest_plugin, "_parse_output", return_value=[]),
+        patch.object(
+            sample_pytest_plugin,
+            "_run_subprocess",
+            new=record_timeout,
+        ),
+    ):
+        sample_pytest_plugin.check(["tests"], {"timeout": 600})
+
+    assert_that(enforced).is_equal_to([600])
 
 
 def test_check_timeout_message_uses_the_overridden_timeout(

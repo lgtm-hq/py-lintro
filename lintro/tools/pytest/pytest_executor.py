@@ -64,11 +64,15 @@ class PytestExecutor:
     def execute_tests(
         self,
         cmd: list[str],
+        timeout: int | float | None = None,
     ) -> tuple[bool, str, int]:
         """Execute pytest tests and parse output.
 
         Args:
             cmd: Command to execute.
+            timeout: Seconds to allow the subprocess before killing it. When
+                omitted the tool falls back to its own persisted options, so a
+                caller that resolved a per-invocation override must pass it.
 
         Raises:
             ValueError: If tool reference is not set.
@@ -79,7 +83,7 @@ class PytestExecutor:
         if self.tool is None:
             raise ValueError("Tool reference not set on executor")
 
-        success, output = self.tool._run_subprocess(cmd)
+        success, output = self.tool._run_subprocess(cmd, timeout)
         # Parse output with actual success status
         # (pytest returns non-zero on failures)
         return_code = 0 if success else 1

@@ -46,6 +46,31 @@ PYTEST_DEFAULT_TIMEOUT: int = 300  # 5 minutes for test runs
 PYTEST_FILE_PATTERNS: list[str] = ["test_*.py", "*_test.py"]
 
 
+def resolve_timeout_seconds(options: dict[str, Any]) -> int:
+    """Resolve the pytest subprocess timeout from an options mapping.
+
+    Args:
+        options: Effective options for one invocation.
+
+    Returns:
+        int: Timeout in seconds, falling back to the pytest default when the
+            option is absent, ``None``, or not coercible to an integer.
+    """
+    raw = options.get("timeout", PYTEST_DEFAULT_TIMEOUT)
+    if isinstance(raw, int):
+        return raw
+    if raw is None:
+        return PYTEST_DEFAULT_TIMEOUT
+    try:
+        return int(str(raw))
+    except (TypeError, ValueError):
+        logger.warning(
+            f"Invalid timeout value {raw!r}; using default "
+            f"{PYTEST_DEFAULT_TIMEOUT}s",
+        )
+        return PYTEST_DEFAULT_TIMEOUT
+
+
 @register_tool
 @dataclass
 class PytestPlugin(BaseToolPlugin):
@@ -336,6 +361,10 @@ class PytestPlugin(BaseToolPlugin):
         # Display run configuration summary
         self.executor.display_run_config(total_available_tests, target_files)
 
+        # Resolve the timeout once from the merged options so the value the
+        # subprocess is killed at is the value reported when it times out.
+        timeout_val = resolve_timeout_seconds(merged_options)
+
         try:
             # Record start time to filter out stale junitxml files
             import time
@@ -343,7 +372,10 @@ class PytestPlugin(BaseToolPlugin):
             subprocess_start_time = time.time()
 
             # Execute tests using executor
-            success, output, return_code = self.executor.execute_tests(cmd)
+            success, output, return_code = self.executor.execute_tests(
+                cmd,
+                timeout=timeout_val,
+            )
 
             # Parse output
             issues = self._parse_output(
@@ -378,14 +410,6 @@ class PytestPlugin(BaseToolPlugin):
             )
 
         except subprocess.TimeoutExpired:
-            timeout_opt = merged_options.get("timeout", PYTEST_DEFAULT_TIMEOUT)
-            if isinstance(timeout_opt, int):
-                timeout_val = timeout_opt
-            elif timeout_opt is not None:
-                timeout_val = int(str(timeout_opt))
-            else:
-                timeout_val = PYTEST_DEFAULT_TIMEOUT
-
             if self.error_handler is None:
                 return ToolResult(
                     name=self.definition.name,
