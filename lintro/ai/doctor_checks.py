@@ -13,6 +13,7 @@ from lintro.ai.availability import (
     provider_cli_binary,
 )
 from lintro.ai.config import AIConfig
+from lintro.ai.config_overrides import ENV_PROVIDER_BLOCK_PREFIX
 from lintro.ai.enums import AITransport
 from lintro.ai.liveness import LivenessState, check_liveness_sync
 from lintro.ai.paths import resolve_workspace_root
@@ -291,8 +292,8 @@ def _check_provider_block(*, config: AIConfig) -> AICheckResult | None:
         message=f"{provider.value} provider settings: {rendered}",
         hint=(
             f"Set under `ai.providers.{provider.value}` in config, "
-            f"LINTRO_AI_PROVIDERS__{provider.value.upper()}__<FIELD>, or "
-            f"--provider-option"
+            f"{ENV_PROVIDER_BLOCK_PREFIX}{provider.value.upper()}__<FIELD>, "
+            f"or --provider-option"
         ),
     )
 

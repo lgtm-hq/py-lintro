@@ -16,7 +16,15 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from lintro.ai.config import AIConfig
-from lintro.ai.config_overrides import ENV_PROVIDER_BLOCK_PREFIX
+from lintro.ai.config_overrides import (
+    ENV_ENABLED,
+    ENV_MAX_COST_USD,
+    ENV_MODEL,
+    ENV_PROVIDER,
+    ENV_PROVIDER_BLOCK_PREFIX,
+    ENV_REVIEW,
+    ENV_TRANSPORT,
+)
 from lintro.ai.enums import AITransport
 from lintro.ai.models import AIFixSuggestion
 from lintro.ai.providers.base import AIResponse, BaseAIProvider
@@ -392,22 +400,39 @@ class MockIssue(BaseIssue):
 
 @pytest.fixture(autouse=True)
 def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Unset the env overrides that would skew any AI-suite assertion.
+    """Unset every env override that would skew an AI-suite assertion.
 
-    Every ``LINTRO_AI_PROVIDERS__*`` variable is resolved for any config
-    parse, so one exported in the developer's shell would silently change what
-    an assertion about a provider block observes (#2309). ``LINTRO_CLI_BARE``
-    is cleared for the same reason: it supersedes the resolved ``cli_bare``
-    inside ``should_send_bare()``, so an exported ``never`` would drop
-    ``--bare`` from the CLI completion tests. The remaining flat ``LINTRO_AI_*``
-    overrides are left alone: tests that care set them explicitly.
+    All three layers a config parse reads from the environment are cleared,
+    because one exported in the developer's shell outranks the project file
+    and silently changes what an assertion observes (#2309):
+
+    - every ``LINTRO_AI_PROVIDERS__*`` block override;
+    - the flat ``LINTRO_AI_*`` overrides, of which ``LINTRO_AI_PROVIDER`` is
+      the one that most skews this suite: it resolves a provider for tests
+      that assert on there being none, and displaces the project's provider
+      in the ``lintro config`` tests;
+    - ``LINTRO_CLI_BARE``, which supersedes the resolved ``cli_bare`` inside
+      ``should_send_bare()``, so an exported ``never`` would drop ``--bare``
+      from the CLI completion tests.
+
+    A test that wants one of these sets it with ``monkeypatch.setenv`` in its
+    own body, which runs after this fixture and is undone before it.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
     """
     for name in [n for n in os.environ if n.startswith(ENV_PROVIDER_BLOCK_PREFIX)]:
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
+    for name in (
+        ENV_ENABLED,
+        ENV_MAX_COST_USD,
+        ENV_MODEL,
+        ENV_PROVIDER,
+        ENV_REVIEW,
+        ENV_TRANSPORT,
+        "LINTRO_CLI_BARE",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture

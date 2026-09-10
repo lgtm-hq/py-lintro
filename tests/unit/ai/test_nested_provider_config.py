@@ -604,8 +604,13 @@ def test_review_rejects_an_unknown_provider_option() -> None:
         )
 
     assert_that(result.exit_code).is_equal_to(2)
-    assert_that(result.output).contains("trust_workspace")
-    assert_that(result.output).does_not_contain("Traceback")
+    output = " ".join(result.output.split())
+    # ``trust_workspace`` is a substring of the typed ``trust_workspaces``, so
+    # only the accepted-names phrase proves the error lists what is settable
+    # rather than merely echoing the input back.
+    assert_that(output).contains("has no setting 'trust_workspaces'")
+    assert_that(output).contains("accepted: trust_workspace")
+    assert_that(output).does_not_contain("Traceback")
 
 
 # -- AC3: the legacy shim --------------------------------------------------
