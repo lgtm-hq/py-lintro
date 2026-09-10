@@ -331,23 +331,37 @@ def test_runner_forwards_no_credentials_on_the_free_tier() -> None:
         assert_that(args).described_as(name).does_not_contain(name)
 
 
+def _codex_session(root: Path) -> Path:
+    """Create a restored codex session under a stand-in home.
+
+    Args:
+        root: The stand-in home directory.
+
+    Returns:
+        The session directory holding an auth.json.
+    """
+    session = root / ".codex"
+    session.mkdir()
+    (session / "auth.json").write_text("{}", encoding="utf-8")
+    return session
+
+
 def test_runner_mounts_a_restored_codex_session_outside_the_container_home(
     tmp_path: Path,
 ) -> None:
-    """The codex lane's session is bind-mounted and named by CODEX_HOME.
+    """On a runner the restored session itself is mounted, named by CODEX_HOME.
 
     Args:
         tmp_path: Stand-in for the runner's restored session directory.
     """
-    session = tmp_path / ".codex"
-    session.mkdir()
-    (session / "auth.json").write_text("{}", encoding="utf-8")
+    session = _codex_session(tmp_path)
 
     args = _runner_docker_args(
         env={
             "IMAGE": "example.invalid/img@sha256:0",
             "TIER": "2",
             "HOME": str(tmp_path),
+            "GITHUB_ACTIONS": "true",
         },
     )
 
@@ -398,6 +412,35 @@ def test_runner_honours_an_explicit_codex_session_dir(tmp_path: Path) -> None:
     )
 
     assert_that(args).contains(f"{override}:{CODEX_MOUNT_TARGET}")
+
+
+def test_runner_copies_the_default_session_for_a_local_run(tmp_path: Path) -> None:
+    """Off a runner, the caller's own codex login must not be the mount source.
+
+    The container writes as root and codex may refresh the session in place, so
+    mounting a developer's real ``$HOME/.codex`` read-write could leave it
+    root-owned and their ``codex`` logged out. A local run gets a disposable
+    copy; the CI path (asserted above) is unchanged.
+
+    Args:
+        tmp_path: Stand-in home holding the developer's session.
+    """
+    session = _codex_session(tmp_path)
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": str(tmp_path),
+        },
+    )
+
+    mounts = [arg for arg in args if arg.endswith(f":{CODEX_MOUNT_TARGET}")]
+    assert_that(mounts).described_as("the session is still mounted").is_length(1)
+    assert_that(args).contains(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that(mounts[0]).described_as(
+        "a local run must not mount the caller's own session directory",
+    ).is_not_equal_to(f"{session}:{CODEX_MOUNT_TARGET}")
 
 
 def test_runner_help_exits_zero() -> None:

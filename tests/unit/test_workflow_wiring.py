@@ -4017,6 +4017,13 @@ _ANTHROPIC_CREDENTIAL_ENV = (
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
 )
+#: CLI-behaviour env vars Tier 2 copies verbatim from the review step. Plain
+#: literals, so they are compared as-is rather than rewritten.
+_MIRRORED_CLI_BEHAVIOUR_ENV = (
+    "LINTRO_CLI_BARE",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+    "DISABLE_AUTOUPDATER",
+)
 #: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
 #: the dogfood job's per-provider egress expressions.
 _EGRESS_ENDPOINT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.*-]*:\d+")
@@ -4240,6 +4247,19 @@ def test_ai_contract_tier2_mirrors_the_dogfood_anthropic_credential_choice() -> 
         assert_that(_normalize_github_expr(str(tier2_env[name]))).described_as(
             name,
         ).is_equal_to(expected)
+
+    # The CLI-behaviour settings are copied verbatim, not rewritten, and one of
+    # them decides what the anthropic lane proves: `LINTRO_CLI_BARE: never` is
+    # what keeps the CLI on its OAuth session instead of authenticating with an
+    # API key. If dogfood changed its copy and Tier 2 kept its own, Tier 2
+    # would go on proving a mode the review no longer runs in.
+    for name in _MIRRORED_CLI_BEHAVIOUR_ENV:
+        assert_that(dogfood_env).described_as("dogfood CLI behaviour env").contains_key(
+            name,
+        )
+        assert_that(str(tier2_env[name])).described_as(name).is_equal_to(
+            dogfood_env[name],
+        )
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

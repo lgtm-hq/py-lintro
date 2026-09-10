@@ -112,6 +112,14 @@ jobs:
     # head would then evaluate to false and every secret below resolves to ''.
     # Job-level env carries only this boolean — never a secret — so the
     # credentials stay scoped to the two steps that need them.
+    #
+    # Deliberately NOT pinned to refs/heads/main. `schedule` only ever runs
+    # the default branch, and `workflow_dispatch` requires write access, so
+    # neither event can be reached from a fork or by an untrusted actor. A
+    # branch dispatch is the point: #2481 requires a green Tier 2 on the PR
+    # branch before the wiring merges, and main-only would make dispatch a
+    # no-op tier that can never prove a change. The trust boundary here is
+    # write access, which is the same boundary that governs main itself.
     env:
       # yamllint disable-line rule:line-length
       AI_CONTRACT_SECRETS_ALLOWED: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}

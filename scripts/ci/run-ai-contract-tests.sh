@@ -47,7 +47,10 @@ set -euo pipefail
 #   LINTRO_CLI_BARE           Forwarded for tier 2 (optional)
 #   CODEX_SESSION_DIR         Codex session directory mounted as CODEX_HOME
 #                             (default: $HOME/.codex; mounted only when it
-#                             holds an auth.json)
+#                             holds an auth.json. Off a runner the default is
+#                             copied to a temp dir first, so a container-side
+#                             session refresh cannot touch the caller's own
+#                             codex login; an explicit value is mounted as-is)
 #   LINTRO_CONTRACT_PRINT_DOCKER_ARGS
 #                             Print the docker argv and exit 0 without
 #                             running anything (test hook)
@@ -156,6 +159,22 @@ if [ "$TIER" = "2" ]; then
 	# unauthenticated lane rather than a pass.
 	codex_session_dir="${CODEX_SESSION_DIR:-${HOME:-}/.codex}"
 	if [ -f "${codex_session_dir}/auth.json" ]; then
+		# Off a runner, the default source is the developer's own codex
+		# login. The container writes as root and codex may refresh the
+		# session in place, so an unlucky local run could leave the caller's
+		# real auth.json root-owned and their `codex` logged out. A local run
+		# therefore mounts a disposable copy. CI keeps mounting the restored
+		# directory itself: the runner is ephemeral, the session was written
+		# for this job alone, and a copy would only add a step that can fail.
+		# An explicit CODEX_SESSION_DIR is taken at face value in both — the
+		# caller named the directory they meant.
+		if [ -z "${CODEX_SESSION_DIR:-}" ] && [ -z "${GITHUB_ACTIONS:-}" ]; then
+			codex_session_copy="$(mktemp -d)"
+			trap 'rm -rf "${codex_session_copy}"' EXIT
+			chmod 700 "${codex_session_copy}"
+			cp -R "${codex_session_dir}/." "${codex_session_copy}/"
+			codex_session_dir="${codex_session_copy}"
+		fi
 		docker_args+=(
 			--volume "${codex_session_dir}:/opt/codex-home"
 			--env "CODEX_HOME=/opt/codex-home"
