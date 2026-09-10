@@ -114,10 +114,12 @@ among the evaluation's SARIF-native candidates.
   evaluate relations between resources, so a resource defined in one file and referenced
   from another must be visible in a single invocation; sharding the file list would
   silently drop those findings.
-- **Parser:** `lintro/parsers/checkov/` — `parse_checkov_output()` surfaces only
-  `results.failed_checks`, tolerates both the single-object (one framework) and
-  list-of-objects (multi-framework) JSON shapes, and is defensive against malformed
-  input.
+- **Parser:** `lintro/parsers/checkov/` — `parse_checkov_output()` surfaces
+  `results.failed_checks` plus one synthetic `CKV_PARSE_ERROR` issue per
+  `results.parsing_errors` entry (see
+  [Files checkov cannot parse](#files-checkov-cannot-parse)), tolerates both the
+  single-object (one framework) and list-of-objects (multi-framework) JSON shapes, and
+  is defensive against malformed input.
 - **Issue model:** `CheckovIssue(BaseIssue)` carries `check_id`, `check_name`,
   `resource`, `check_class`, native `severity`, `guideline`, and `end_line`. The display
   message includes the resource address; the `guideline` URL, when present, becomes the

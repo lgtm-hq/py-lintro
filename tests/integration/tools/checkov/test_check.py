@@ -10,22 +10,10 @@ from assertpy import assert_that
 
 from lintro.parsers.checkov.checkov_issue import CheckovIssue
 from lintro.tools.checkov.definition import CHECKOV_FILE_PATTERNS
-from tests.integration._tools import require_tool
+from tests.integration._tools import CHECKOV_PROBE_TIMEOUT, require_tool
 
 if TYPE_CHECKING:
     from lintro.plugins.base import BaseToolPlugin
-
-#: Seconds allowed for the ``checkov --version`` probe, well above the 10s
-#: default. Checkov is the heaviest Python import in the tool set (boto3,
-#: cyclonedx, spdx-tools, rustworkx), and every xdist worker runs this probe
-#: at collection time, so four interpreters start concurrently on a cold
-#: container filesystem. At the default the probe timed out on three of four
-#: workers while the fourth collected the module, which surfaces as an
-#: xdist "different tests were collected" error rather than an honest skip.
-#: Lintro's own production version check allows 30s
-#: (``VERSION_CHECK_TIMEOUT``), so the default was stricter than the code
-#: under test; this matches the module's existing slow-path budget.
-CHECKOV_PROBE_TIMEOUT: float = 60.0
 
 pytestmark = require_tool("checkov", timeout=CHECKOV_PROBE_TIMEOUT)
 
@@ -197,11 +185,12 @@ def test_check_empty_directory(
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).starts_with("No ")
     assert_that(result.output).contains("found to check")
-    # Every claimed extension is named, not just a prefix that ``.tf`` alone
-    # would satisfy: the message is what tells a user why nothing ran.
-    # Literal extensions, not a loop over the same constant the message is
-    # built from: deriving the expectation from the source of truth would pass
-    # even if both drifted together.
-    assert_that(result.output).contains(".tf")
+    # Every claimed extension is named, and independently: ``contains(".tf")``
+    # alone is satisfied by ``.tf.json``, so the bare extension is asserted
+    # against a copy with the JSON one removed. Literal extensions, not a loop
+    # over the same constant the message is built from: deriving the
+    # expectation from the source of truth would pass even if both drifted
+    # together.
     assert_that(result.output).contains(".tf.json")
+    assert_that((result.output or "").replace(".tf.json", "")).contains(".tf")
     assert_that(sorted(CHECKOV_FILE_PATTERNS)).is_equal_to(["*.tf", "*.tf.json"])

@@ -16,7 +16,10 @@ from lintro._tool_versions import get_min_version, get_tool_version
 from lintro.enums.tool_name import ToolName
 from lintro.tools.core.install_hints import CHECKOV_ISOLATED_INSTALL_HINT
 from lintro.tools.core.version_checking import get_install_hints
-from tests.integration._tools import DEFAULT_TIMEOUT_SECONDS
+from tests.integration._tools import (
+    CHECKOV_PROBE_TIMEOUT,
+    DEFAULT_TIMEOUT_SECONDS,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
@@ -37,12 +40,15 @@ def _production_version_timeout() -> float:
     from source keeps the floor from going stale when it changes.
 
     Returns:
-        The default timeout in seconds, falling back to 30.0 when the literal
-        cannot be located.
+        The default timeout in seconds.
     """
     source = _VERSION_CHECKING.read_text(encoding="utf-8")
     match = re.search(r"default_timeout = ([0-9.]+)", source)
-    return float(match.group(1)) if match else 30.0
+    # Fail loudly rather than defaulting: treating "literal not found" as
+    # "the value is 30.0" would keep this green through a reformat while the
+    # invariant it exists to pin stopped being enforced.
+    assert_that(match).described_as("_get_version_timeout default").is_not_none()
+    return float(match.group(1))  # type: ignore[union-attr]
 
 
 #: lintro's own default version-probe budget, from ``_get_version_timeout``.
@@ -337,14 +343,14 @@ def test_integration_probe_allows_for_checkov_startup() -> None:
         _REPO_ROOT / "tests" / "integration" / "tools" / "checkov" / "test_check.py"
     ).read_text(encoding="utf-8")
 
+    # The budget itself is imported, so the two consumers share one
+    # definition. Only the wiring is read as text: importing the integration
+    # module would evaluate its ``pytestmark`` and run the very probe under
+    # test during unit-test collection.
     assert_that(module).contains(
         'require_tool("checkov", timeout=CHECKOV_PROBE_TIMEOUT)',
     )
-    # Read the literal rather than importing the module: importing it would
-    # run the very probe under test inside the unit suite.
-    match = re.search(r"CHECKOV_PROBE_TIMEOUT: float = ([0-9.]+)", module)
-    assert_that(match).is_not_none()
-    budget = float(match.group(1))  # type: ignore[union-attr]
+    budget = CHECKOV_PROBE_TIMEOUT
 
     assert_that(budget).is_greater_than(DEFAULT_TIMEOUT_SECONDS)
     assert_that(budget).is_greater_than_or_equal_to(_PRODUCTION_VERSION_TIMEOUT)

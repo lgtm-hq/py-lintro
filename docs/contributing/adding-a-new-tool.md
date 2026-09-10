@@ -321,9 +321,11 @@ Choose the path that matches the tool's distribution mechanism.
    `/root/.local/share/uv/tools`, unreadable to the image's non-root `lintro` user). So
    Step 10 has extra work for it, beyond what the "npm/bun tools only" wording there
    says: point `UV_TOOL_DIR` at a world-readable location under `/opt` (checkov uses
-   `/opt/uv-tools`, next to `/opt/semgrep-venv`), add that directory to the permission
-   block in **both** Dockerfiles, and add the tool to the non-root verification block —
-   root being able to run the shim says nothing about whether `lintro` can reach the
+   `/opt/uv-tools`, next to `/opt/semgrep-venv`), add that directory to the
+   `chgrp`/`chmod` block over `/opt/*` that follows the `useradd lintro` line in
+   **both** Dockerfiles (`Dockerfile` and `docker/tools.Dockerfile`; `/opt/semgrep-venv`
+   is the worked example), and add the tool to the non-root verification block — root
+   being able to run the shim says nothing about whether `lintro` can reach the
    interpreter behind it. The checklist's "binary tools only" Renovate line applies to
    this path too: the pin lives in `TOOL_VERSIONS`, so it needs a custom manager, with
    `pypi` as the datasource rather than `github-releases`.

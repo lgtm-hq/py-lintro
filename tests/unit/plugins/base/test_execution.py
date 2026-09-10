@@ -15,6 +15,7 @@ from lintro.plugins.base import (
     DEFAULT_TIMEOUT,
     ExecutionContext,
 )
+from lintro.utils.project_detection import _VENDOR_SKIP_DIRS
 
 from .conftest import NoFixPlugin
 
@@ -701,6 +702,10 @@ def test_get_executable_command_unknown_tool(fake_tool_plugin: FakeToolPlugin) -
         pytest.param(".git", id="git_directory"),
         pytest.param("__pycache__", id="pycache_directory"),
         pytest.param("*.pyc", id="pyc_files"),
+        # `terraform init` vendors provider plugins and remote modules under
+        # .terraform. Dropping it would hand third-party .tf downloads to
+        # checkov, reporting findings nobody in the repository can fix.
+        pytest.param(".terraform", id="terraform_vendor_directory"),
     ],
 )
 def test_default_exclude_patterns_contains_expected_patterns(pattern: str) -> None:
@@ -715,6 +720,18 @@ def test_default_exclude_patterns_contains_expected_patterns(pattern: str) -> No
 def test_default_exclude_patterns_is_not_empty() -> None:
     """Verify DEFAULT_EXCLUDE_PATTERNS is not empty."""
     assert_that(DEFAULT_EXCLUDE_PATTERNS).is_not_empty()
+
+
+def test_vendored_terraform_is_pruned_by_discovery_and_detection() -> None:
+    """Both prune sets name ``.terraform``; neither alone is sufficient.
+
+    Detection decides whether an IaC tool is selected at all, discovery
+    decides which files reach its argv, so a vendored ``terraform init``
+    download is only kept away from checkov when both name the directory.
+    The requirement was previously carried by a comment alone.
+    """
+    assert_that(DEFAULT_EXCLUDE_PATTERNS).contains(".terraform")
+    assert_that(_VENDOR_SKIP_DIRS).contains(".terraform")
 
 
 # =============================================================================

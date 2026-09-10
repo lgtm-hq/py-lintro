@@ -439,3 +439,37 @@ def test_documented_option_defaults_match_the_definition(
     for option in ("checks", "skip_checks"):
         assert_that(defaults[option]).is_none()
         assert_that(_documented_default(section, option)).is_equal_to("-")
+
+
+def test_offline_flags_survive_hostile_tool_options(
+    checkov_plugin: CheckovPlugin,
+) -> None:
+    """No ``--tool-options`` value can turn an offline flag off.
+
+    ``--download-external-modules`` takes a value, so the hermetic guarantee
+    documented in ``docs/configuration.md`` depends on argv assembly rather
+    than on argparse's last-wins behaviour. It holds because the builder
+    consults three named keys only: an unrecognised option is stored but never
+    read, and a value smuggled into ``checks`` stays one argv element (the
+    subprocess runs ``shell=False``) so it cannot become a flag of its own.
+
+    Args:
+        checkov_plugin: The plugin under test.
+    """
+    smuggled: dict[str, Any] = {
+        "download_external_modules": True,
+        "skip_download": False,
+    }
+    checkov_plugin.set_options(
+        checks=["CKV_AWS_18 --download-external-modules True"],
+        **smuggled,
+    )
+    cmd = checkov_plugin._build_command(files=["main.tf"])
+
+    assert_that(cmd.count("--download-external-modules")).is_equal_to(1)
+    assert_that(cmd[cmd.index("--download-external-modules") + 1]).is_equal_to("False")
+    assert_that(cmd).contains("--skip-download", "--skip-results-upload")
+    # The smuggled text stays inside the --check value.
+    assert_that(cmd[cmd.index("--check") + 1]).contains(
+        "--download-external-modules True",
+    )

@@ -150,6 +150,50 @@ def test_check_attaches_doc_urls_and_prefers_a_native_guideline(
     assert_that(urls["CKV_AWS_1"]).is_equal_to(GUIDELINE_URL)
 
 
+def test_check_fails_on_a_zero_exit_that_still_reports_failed_checks(
+    checkov_plugin: CheckovPlugin,
+    tmp_path: Path,
+) -> None:
+    """Soft-fail output — exit 0 with findings — is reported, never a pass.
+
+    ``soft-fail: true`` in a native ``.checkov.yaml`` suppresses the non-zero
+    exit code but not the JSON report, and the plugin honours those configs.
+    The verdict must therefore come from the report content, not the exit
+    status: a clean exit alongside a populated ``failed_checks`` has to
+    surface the findings and fail the tool result.
+
+    Args:
+        checkov_plugin: The plugin under test.
+        tmp_path: Temporary directory path.
+    """
+    source = tmp_path / "main.tf"
+    source.write_text('resource "aws_s3_bucket" "b" {}\n')
+
+    with (
+        patch.object(checkov_plugin, "prepare") as mock_prepare,
+        patch.object(
+            checkov_plugin,
+            "_run_subprocess",
+            return_value=(True, ISSUE_JSON),
+        ),
+    ):
+        mock_prepare.return_value = _ctx(tmp_path, source)
+        result = checkov_plugin.check([str(source)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    # The finding survives, rather than the run being failed on the exit code
+    # alone with an empty report.
+    codes = {
+        issue.check_id
+        for issue in (result.issues or [])
+        if isinstance(issue, CheckovIssue)
+    }
+    assert_that(codes).is_equal_to({"CKV_AWS_260"})
+    # Not the no-report fail-closed branch: that one sets parse_failures_count.
+    assert_that(result.parse_failures_count).is_none()
+
+
 def test_check_clean(checkov_plugin: CheckovPlugin, tmp_path: Path) -> None:
     """Check returns success with no issues for a clean report.
 

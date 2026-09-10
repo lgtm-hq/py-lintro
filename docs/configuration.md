@@ -3231,7 +3231,13 @@ lintro check --tools checkov --tool-options "checkov:skip_checks=CKV_AWS_18|CKV_
 lintro check --tools checkov --tool-options "checkov:checks=CKV_AWS_260"
 ```
 
-> Note: Checkov's own `severity` and `guideline` fields come from platform metadata it
+> Note: Only the `terraform` and `terraform_json` frameworks run — lintro pins
+> `--framework terraform,terraform_json` so checkov's secrets framework does not
+> double-report what gitleaks and trufflehog own. `checks` and `skip_checks` can
+> therefore only select Terraform policies; another framework's ID (say `CKV_SECRET_6`)
+> matches nothing and reports a clean scan.
+>
+> Checkov's own `severity` and `guideline` fields come from platform metadata it
 > downloads, which `--skip-download` suppresses on every lintro run. Findings therefore
 > normalize to lintro's default severity and link to the Checkov policy index. The
 > parser still reads both fields so nothing is lost if that ever changes.
