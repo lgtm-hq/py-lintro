@@ -8,7 +8,8 @@ fail here rather than at a user's first review.
 The suite is parametrised over
 :func:`~lintro.ai.providers.registry.all_providers`, so a provider added later
 is covered the moment its package registers — nothing lists the three vendors
-by name. Each rule is a module-level ``check_*`` function rather than an
+by name, not even the stubs that let a build run on a machine with no vendor
+SDK and no agent binary installed (see :func:`_backend_available`). Each rule is a module-level ``check_*`` function rather than an
 inline assertion block, and the negative tests at the bottom run those very
 functions against :class:`FakeIncompleteProvider`. A check that stopped
 asserting would therefore stop failing on the fake too, which is the failure
@@ -48,6 +49,7 @@ from lintro.ai.providers.base import BaseAIProvider
 from lintro.ai.providers.builtins import load_builtin_providers
 from lintro.ai.providers.cli_auth_probe import CliAuthProbe
 from lintro.ai.providers.cli_contracts import cli_contracts
+from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.providers.protocol import ProviderMetadata
 from lintro.ai.providers.registry import all_providers, get_registered
 
@@ -62,26 +64,6 @@ _DOC = Path(__file__).resolve().parents[4] / "docs" / "ai-features.md"
 
 #: Fenced YAML blocks in that document.
 _YAML_FENCE = re.compile(r"^```yaml\n(?P<body>.*?)^```", re.MULTILINE | re.DOTALL)
-
-#: Where each provider's CLI-binary lookup lives, so a CLI-transport build can
-#: proceed on a machine where the agent binary is not installed.
-_BINARY_FINDERS: Mapping[AIProvider, str] = MappingProxyType(
-    {
-        AIProvider.ANTHROPIC: "lintro.ai.providers.anthropic.provider._find_claude",
-        AIProvider.OPENAI: "lintro.ai.providers.openai.provider._find_codex",
-        AIProvider.CURSOR: "lintro.ai.providers.cursor.provider._find_agent",
-    },
-)
-
-#: Where each SDK-backed provider records whether its vendor SDK imported. The
-#: optional ``ai`` extra is not installed in every environment, so an
-#: API-transport build says the SDK is present rather than requiring it.
-_SDK_FLAGS: Mapping[AIProvider, str] = MappingProxyType(
-    {
-        AIProvider.ANTHROPIC: "lintro.ai.providers.anthropic.provider._has_anthropic",
-        AIProvider.OPENAI: "lintro.ai.providers.openai.provider._has_openai",
-    },
-)
 
 
 def registered_providers() -> list[AIProvider]:
@@ -135,38 +117,63 @@ def documented_provider_examples() -> Mapping[str, tuple[Mapping[str, Any], ...]
     return MappingProxyType({name: tuple(blocks) for name, blocks in collected.items()})
 
 
-@contextmanager
-def _transport_available(
-    provider: AIProvider,
-    transport: AITransport,
-) -> Iterator[None]:
-    """Pretend the backend *transport* needs is installed.
-
-    A parity check is about the plugin contract, not about what this machine
-    has on ``PATH`` or in its site-packages, so the vendor SDK flag and the
-    CLI binary lookup are stubbed for the duration of the build. A provider
-    with no known stub site (a test double) is yielded unchanged.
+def _stub_binary(name: str) -> str:
+    """Answer a CLI-binary lookup as though the executable were installed.
 
     Args:
-        provider: The provider being built.
-        transport: The transport being built for.
+        name: Executable name the provider looked up.
+
+    Returns:
+        A plausible absolute path for *name*.
+    """
+    return f"/usr/local/bin/{name}"
+
+
+@contextmanager
+def _backend_available() -> Iterator[None]:
+    """Pretend every provider's backend is installed, for any provider.
+
+    A parity check is about the plugin contract, not about what this machine
+    has on ``PATH`` or in its site-packages, so both backends are stubbed for
+    the duration of a build. Both stubs are the *shared* seam rather than a
+    per-vendor patch site, which is what lets this suite cover a provider it
+    has never heard of:
+
+    * every provider's CLI-binary lookup delegates to the one
+      :meth:`~lintro.ai.providers.cli_transport.CliTransport.find_binary`, a
+      ``shutil.which`` wrapper; and
+    * every SDK-backed provider funnels its "did the vendor SDK import" flag
+      into the one :class:`~lintro.ai.providers.base.BaseAIProvider`
+      constructor, which is where a missing SDK is rejected. Forcing the flag
+      there covers any vendor without naming its module-level import guard.
+      Nothing else in a build touches the SDK: the client is created lazily on
+      the first call.
 
     Yields:
-        None: While the backend looks available.
+        None: While both backends look available.
     """
-    if transport is AITransport.API:
-        sdk_flag = _SDK_FLAGS.get(provider)
-        if sdk_flag is None:
-            yield
-            return
-        with patch(sdk_flag, True):
-            yield
-        return
-    finder = _BINARY_FINDERS.get(provider)
-    if finder is None:
-        yield
-        return
-    with patch(finder, return_value="/usr/local/bin/fake"):
+    original_init = BaseAIProvider.__init__
+
+    def _init_with_sdk(
+        self: BaseAIProvider,
+        *,
+        has_sdk: bool,
+        **kwargs: Any,
+    ) -> None:
+        """Run the real constructor with the SDK reported as importable.
+
+        Args:
+            self: The provider being initialised.
+            has_sdk: What the provider detected; discarded.
+            **kwargs: Every other shared constructor argument, forwarded.
+        """
+        del has_sdk
+        original_init(self, has_sdk=True, **kwargs)
+
+    with (
+        patch.object(CliTransport, "find_binary", staticmethod(_stub_binary)),
+        patch.object(BaseAIProvider, "__init__", _init_with_sdk),
+    ):
         yield
 
 
@@ -188,9 +195,14 @@ def check_metadata_fields_are_populated(plugin: ProviderPlugin) -> None:
     """Assert every :class:`ProviderMetadata` field a plugin must fill is set.
 
     The always-required fields are the identity ones. The rest are required
-    *conditionally on the transports the provider declares*: a CLI-only vendor
-    has no SDK distribution to name, and an API-only one has no binary, so
-    demanding both would force a lie into the record.
+    *conditionally*: on the transports the provider declares — a CLI-only
+    vendor has no SDK distribution to name, and an API-only one has no binary,
+    so demanding both would force a lie into the record — and, for
+    ``default_api_key_env``, on whether a
+    :class:`~lintro.ai.providers.cli_auth_probe.CliAuthProbe` declares the
+    credential instead. That last rule is the one
+    :func:`check_credentials_are_declared` enforces, restated here so the two
+    checks cannot disagree about whether a blank key env is legal.
 
     Fails when a required field is unset, blank, or describes a different
     provider than the plugin builds.
@@ -203,12 +215,26 @@ def check_metadata_fields_are_populated(plugin: ProviderPlugin) -> None:
     assert_that(metadata.provider).described_as(
         f"{label} metadata.provider",
     ).is_equal_to(plugin.name)
-    for name in ("display_name", "default_model", "default_api_key_env"):
+    for name in ("display_name", "default_model"):
         value = getattr(metadata, name)
         assert_that(value).described_as(f"{label} metadata.{name}").is_instance_of(str)
         assert_that(value.strip()).described_as(
             f"{label} metadata.{name} is blank",
         ).is_not_empty()
+    key_env = metadata.default_api_key_env
+    assert_that(key_env).described_as(
+        f"{label} metadata.default_api_key_env",
+    ).is_instance_of(str)
+    if not key_env.strip():
+        # A CLI-only vendor whose binary carries its own login has no API-key
+        # variable to name, and inventing one would make doctor report on a
+        # credential the CLI never reads. The probe is the substitute
+        # declaration, so the rule is "one of the two", exactly as
+        # ``check_credentials_are_declared`` states it.
+        assert_that(metadata.cli_auth_probe).described_as(
+            f"{label} metadata.default_api_key_env is blank and no "
+            "cli_auth_probe declares how it authenticates instead",
+        ).is_not_none()
     assert_that(
         sorted(item.value for item in metadata.supported_transports),
     ).described_as(
@@ -318,7 +344,7 @@ def check_declared_transports_build(plugin: ProviderPlugin) -> None:
     for transport in AITransport:
         declared = transport in plugin.transports
         config = _config_for(plugin.name, transport)
-        with _transport_available(plugin.name, transport):
+        with _backend_available():
             if declared:
                 try:
                     built = plugin.build(config)
@@ -364,7 +390,7 @@ async def check_aclose_is_idempotent(plugin: ProviderPlugin) -> None:
     """
     label = plugin.name.value
     transport = plugin.metadata.default_transport
-    with _transport_available(plugin.name, transport):
+    with _backend_available():
         built = plugin.build(_config_for(plugin.name, transport))
     aclose = getattr(built, "aclose", None)
     if not callable(aclose):
@@ -570,6 +596,14 @@ class _NoCloseProvider:
     """
 
 
+#: A minimal auth probe, for the fakes that declare one instead of a key env.
+_PROBE = CliAuthProbe(
+    configured_message="configured",
+    unverified_message="unverified",
+    hint="log in",
+)
+
+
 def fake_metadata(
     *,
     display_name: str = "Fake",
@@ -741,10 +775,13 @@ def test_pricing_check_fails_on_an_empty_table(
     assert_that(str(excinfo.value)).contains("declares no model")
 
 
-def test_credentials_check_fails_without_a_key_env_or_probe(
+def test_both_credential_checks_fail_without_a_key_env_or_probe(
     incomplete_provider: Callable[..., FakeIncompleteProvider],
 ) -> None:
     """Neither an API-key variable nor an auth probe is a contract breach.
+
+    Blanking the key env is legal only because a probe stands in for it, so
+    removing both must fail the metadata check as well as the credentials one.
 
     Args:
         incomplete_provider: Factory for the incomplete plugin.
@@ -753,18 +790,26 @@ def test_credentials_check_fails_without_a_key_env_or_probe(
         metadata=fake_metadata(default_api_key_env="", cli_auth_probe=None),
     )
 
-    with pytest.raises(AssertionError) as excinfo:
+    with pytest.raises(AssertionError) as metadata_failure:
+        check_metadata_fields_are_populated(plugin)
+    with pytest.raises(AssertionError) as credentials_failure:
         check_credentials_are_declared(plugin)
 
-    assert_that(str(excinfo.value)).contains(
+    assert_that(str(metadata_failure.value)).contains(
+        "default_api_key_env is blank and no cli_auth_probe",
+    )
+    assert_that(str(credentials_failure.value)).contains(
         "declares neither default_api_key_env nor cli_auth_probe",
     )
 
 
-def test_credentials_check_passes_on_a_probe_alone(
+def test_a_probe_only_provider_passes_both_credential_checks(
     incomplete_provider: Callable[..., FakeIncompleteProvider],
 ) -> None:
-    """An explicit auth probe satisfies the credentials rule on its own.
+    """An auth probe alone satisfies the metadata *and* credentials rules.
+
+    A vendor whose CLI carries its own login has no API-key variable to name.
+    Both checks read that the same way, so neither may reject it.
 
     Args:
         incomplete_provider: Factory for the incomplete plugin.
@@ -772,14 +817,11 @@ def test_credentials_check_passes_on_a_probe_alone(
     plugin = incomplete_provider(
         metadata=fake_metadata(
             default_api_key_env="",
-            cli_auth_probe=CliAuthProbe(
-                configured_message="configured",
-                unverified_message="unverified",
-                hint="log in",
-            ),
+            cli_auth_probe=_PROBE,
         ),
     )
 
+    check_metadata_fields_are_populated(plugin)
     check_credentials_are_declared(plugin)
 
 
