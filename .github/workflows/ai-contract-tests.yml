@@ -169,6 +169,17 @@ jobs:
           echo "ref=$(python3 scripts/ci/ai_tools_image_pin.py)" >>"$GITHUB_OUTPUT"
 
       - name: Restore Codex subscription session
+        id: codex-session
+        # A corrupt secret must cost one lane, not three. The script rejects a
+        # CODEX_AUTH_JSON that is not valid base64 of a JSON object and exits
+        # 1, deleting the partial file; without continue-on-error that step
+        # failure ends the job, and the anthropic and cursor lanes never run.
+        # With it, the run reaches the smoke step with no session, the codex
+        # lane reports link 3 of 3 unauthenticated, and the job still goes red
+        # — the verdict stays with the step that owns it. This is the one
+        # step here allowed to swallow its own failure, asserted as such in
+        # tests/scripts/test_ai_contract_tests_workflow.py.
+        continue-on-error: true
         # Same credential and the same script as the dogfood openai lane
         # (#2472): decode CODEX_AUTH_JSON into $HOME/.codex/auth.json. Codex
         # has no OAuth-token env var, and CODEX_API_KEY would bill metered API
@@ -220,6 +231,14 @@ jobs:
           # binary this tier exists to verify.
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
+          # The dogfood review's model overlay (#2471/#1971), mirrored so a
+          # `gh variable set LINTRO_AI_MODEL` experiment reaches both jobs and
+          # Tier 2 exercises the model the review will actually run on rather
+          # than only each provider's default. Empty when the variable is
+          # unset, which is the default and leaves every lane on the default
+          # the provider resolves for its credential (#2537).
+          # yamllint disable-line rule:line-length
+          LINTRO_AI_MODEL: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.LINTRO_AI_MODEL || '' }}
           # cursor: the same API key the dogfood cursor lane uses.
           # yamllint disable-line rule:line-length
           CURSOR_API_KEY: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && secrets.CURSOR_API_KEY || '' }}

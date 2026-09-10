@@ -34,6 +34,10 @@ DOCKERFILE = REPO_ROOT / "Dockerfile"
 TIER1_JOB = "tier1-flag-surface"
 TIER2_JOB = "tier2-invocation-smoke"
 
+#: Step id of the codex session restore — the one step allowed to fail without
+#: ending the job, so a corrupt secret costs the codex lane and not all three.
+CODEX_RESTORE_STEP_ID = "codex-session"
+
 
 @pytest.fixture
 def workflow() -> Any:
@@ -114,15 +118,47 @@ def test_tier2_waits_on_the_free_tier(workflow: Any) -> None:
 def test_neither_tier_swallows_its_own_failure(workflow: Any) -> None:
     """A contract gate with continue-on-error is not a gate.
 
+    The codex session restore is the single exception, asserted separately
+    below: it is setup for one lane, not a verdict about any of them.
+
     Args:
         workflow: The parsed workflow mapping.
     """
     for name, job in workflow["jobs"].items():
         assert_that(job).described_as(name).does_not_contain_key("continue-on-error")
         for step in job["steps"]:
+            if step.get("id") == CODEX_RESTORE_STEP_ID:
+                continue
             assert_that(step).described_as(
                 f"{name} / {step.get('name')}",
             ).does_not_contain_key("continue-on-error")
+
+
+def test_a_corrupt_codex_secret_costs_one_lane_not_three(workflow: Any) -> None:
+    """A failed session restore must not take the other two lanes with it.
+
+    ``restore-codex-session.sh`` exits 1 on a CODEX_AUTH_JSON that is not
+    base64 of a JSON object, and deletes the partial file. Without
+    continue-on-error that step failure ends the job before the smoke runs, so
+    a mistyped codex secret would also hide whether anthropic and cursor can
+    authenticate. With it, the run reaches the smoke with no session and the
+    codex lane fails there as unauthenticated — a red job either way, but one
+    that still reports the other two lanes.
+
+    Args:
+        workflow: The parsed workflow mapping.
+    """
+    steps = workflow["jobs"][TIER2_JOB]["steps"]
+    restore = next(step for step in steps if step.get("id") == CODEX_RESTORE_STEP_ID)
+    assert_that(restore["continue-on-error"]).is_true()
+    assert_that(str(restore["run"])).contains("restore-codex-session.sh")
+
+    # The verdict stays with the step that owns it: the smoke must still be
+    # able to redden the job.
+    smoke = next(
+        step for step in steps if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+    assert_that(smoke).does_not_contain_key("continue-on-error")
 
 
 def test_both_tiers_are_bounded_by_a_timeout(workflow: Any) -> None:

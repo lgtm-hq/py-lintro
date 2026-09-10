@@ -287,6 +287,49 @@ def test_an_unreadable_session_file_is_not_a_subscription() -> None:
     assert_that(uses_subscription_session()).is_false()
 
 
+@pytest.mark.parametrize(
+    "payload",
+    ["[]", '"a string"', "42", "null"],
+    ids=["list", "string", "number", "null"],
+)
+def test_a_session_file_that_is_not_an_object_is_not_a_session(payload: str) -> None:
+    """Valid JSON of the wrong shape must not be read as a plan session.
+
+    codex writes an object. A list, string or number parses cleanly and would
+    sail past a decode-only check, so the shape is what decides — guessing
+    "subscription" from a file codex itself could not read would be a decision
+    with no evidence behind it.
+
+    Args:
+        payload: A JSON document that is not an object.
+    """
+    auth_file = codex_auth_file()
+    auth_file.parent.mkdir(parents=True, exist_ok=True)
+    auth_file.write_text(payload, encoding="utf-8")
+
+    assert_that(uses_subscription_session()).is_false()
+
+
+def test_an_empty_codex_home_falls_back_to_the_home_directory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``CODEX_HOME=""`` must not resolve against the working directory.
+
+    A bare ``Path("")`` is the current directory, so an empty value would make
+    the lookup depend on where lintro happened to be invoked from — and could
+    read a stray ``auth.json`` out of a repository checkout.
+
+    Args:
+        monkeypatch: Environment patcher.
+    """
+    monkeypatch.setenv(CODEX_HOME_ENV, "")
+
+    resolved = codex_auth_file()
+
+    assert_that(str(resolved)).starts_with(str(Path.home()))
+    assert_that(resolved).is_equal_to(Path.home() / ".codex" / "auth.json")
+
+
 def test_codex_home_overrides_the_home_relative_location() -> None:
     """CI restores the session outside $HOME, so CODEX_HOME must win.
 

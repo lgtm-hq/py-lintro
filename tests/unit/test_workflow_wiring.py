@@ -4137,19 +4137,38 @@ _AI_CONTRACT_GATE_ENV = "AI_CONTRACT_SECRETS_ALLOWED"
 _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE = (
     "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
 )
-#: Anthropic env vars whose Tier 2 expression is derived from the review's.
-_ANTHROPIC_CREDENTIAL_ENV = (
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_AUTH_TOKEN",
-)
-#: CLI-behaviour env vars Tier 2 copies verbatim from the review step. Plain
-#: literals, so they are compared as-is rather than rewritten.
-_MIRRORED_CLI_BEHAVIOUR_ENV = (
-    "LINTRO_CLI_BARE",
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
-    "DISABLE_AUTOUPDATER",
-)
+#: Names of the CLI-behaviour flags the review pins for the agent binaries.
+#: Matched by shape rather than listed, so a fourth flag is mirrored without
+#: anyone remembering to extend a tuple.
+_CLI_BEHAVIOUR_NAME_RE = re.compile(r"^(LINTRO_CLI_|CLAUDE_CODE_|DISABLE_)")
+
+#: The ``secrets.X`` / ``vars.X`` names an expression reads. Tier 2 must read
+#: the same ones, whatever gating it wraps around them.
+_EXPRESSION_REFERENCE_RE = re.compile(r"\b(?:secrets|vars)\.[A-Za-z_][A-Za-z0-9_]*")
+
+#: Dogfood env the smoke deliberately does not mirror, each because Tier 2 does
+#: not do the thing it configures. Kept explicit: a *new* credential or
+#: variable in the review step is not on this list, so it fails the mirror test
+#: until someone either wires it into Tier 2 or records why it stays here.
+_DOGFOOD_ONLY_ENV = {
+    # `gh` fetches the PR diff for the review; Tier 2 fetches no diff.
+    "GH_TOKEN",
+    # The App token `--post` writes the review comment with; Tier 2 posts
+    # nothing.
+    "GITHUB_TOKEN",
+    # Review orchestration. The contract suite builds each provider itself and
+    # drives all three lanes in one run, so it has no provider to select, no
+    # master switch to flip and no transport to choose.
+    "LINTRO_AI_ENABLED",
+    "LINTRO_AI_PROVIDER",
+    "LINTRO_AI_TRANSPORT",
+    # A spend ceiling for a whole review; the smoke is one trivial prompt per
+    # lane.
+    "LINTRO_AI_MAX_COST_USD",
+    # Review-state artifact upload (#2173); the smoke persists nothing.
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_RESULTS_URL",
+}
 #: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
 #: the dogfood job's per-provider egress expressions.
 _EGRESS_ENDPOINT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.*-]*:\d+")
@@ -4264,6 +4283,34 @@ def _dogfood_review_step_env() -> dict[str, str]:
     return {name: str(value) for name, value in step["env"].items()}
 
 
+def _mirrored_dogfood_env(env: dict[str, str]) -> dict[str, str]:
+    """Return the dogfood env Tier 2 has to carry too.
+
+    Derived by shape rather than listed: anything the review authenticates or
+    configures its agent binaries with — a secret, a repo variable, or one of
+    the CLI-behaviour flags — is something the smoke must mirror if it is to
+    prove the credential and the mode the review actually runs on. Everything
+    the review needs for work Tier 2 does not do is named in
+    :data:`_DOGFOOD_ONLY_ENV` with its reason.
+
+    Args:
+        env: The dogfood review step's env mapping.
+
+    Returns:
+        The subset of *env* Tier 2 must mirror, by name.
+    """
+    return {
+        name: value
+        for name, value in env.items()
+        if name not in _DOGFOOD_ONLY_ENV
+        and (
+            "secrets." in value
+            or "vars." in value
+            or _CLI_BEHAVIOUR_NAME_RE.match(name)
+        )
+    }
+
+
 def _tier2_expression_from_dogfood(expression: str) -> str:
     """Rewrite a dogfood anthropic expression into its Tier 2 equivalent.
 
@@ -4336,20 +4383,25 @@ def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> Non
         )
 
 
-def test_ai_contract_tier2_mirrors_the_dogfood_anthropic_credential_choice() -> None:
-    """Tier 2's anthropic lane must pick its credential exactly as dogfood does.
+def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() -> None:
+    """Tier 2 must carry the review's credentials and CLI settings, unchanged.
 
-    The review has two anthropic configurations and selects between them on
-    ``ZAI_BASE_URL``: empty means the subscription OAuth token against
-    api.anthropic.com, set means the z.ai gateway with ``ZAI_AUTH_TOKEN``
-    instead (#2472 lane 2). A Tier 2 that only ever forwarded the OAuth token
-    would prove a credential the review is not using whenever the gateway is
-    switched on, which is the same false confidence #2481 exists to remove.
+    A green Tier 2 is only evidence about the review if the two jobs drive the
+    binaries the same way. Three shapes of mirror are checked, all derived from
+    ai-review.yml rather than restated here, so a new dogfood env var fails
+    this test until Tier 2 mirrors it or :data:`_DOGFOOD_ONLY_ENV` records why
+    it should not:
 
-    Both expressions are read from the workflows, so the assertion is that the
-    two stay identical modulo the one documented difference — dogfood selects
-    on its provider variable, Tier 2 (which drives every lane, always) puts
-    its trusted-event gate in that position.
+    * The anthropic credential expressions select between the subscription
+      token and the z.ai gateway on ``ZAI_BASE_URL`` (#2472 lane 2). Tier 2
+      repeats the whole selection with one substitution — dogfood picks on its
+      provider variable, Tier 2 (which always drives every lane) puts its
+      trusted-event gate in that position.
+    * The CLI-behaviour flags are plain literals — ``LINTRO_CLI_BARE: never``
+      decides whether the anthropic lane proves an OAuth session or an API key
+      — so they must match exactly.
+    * Everything else carrying a secret or a variable must at least name the
+      same one and ride the gate.
     """
     dogfood_env = _dogfood_review_step_env()
     tier2_env = next(
@@ -4358,34 +4410,32 @@ def test_ai_contract_tier2_mirrors_the_dogfood_anthropic_credential_choice() -> 
         if "run-ai-contract-tests.sh" in str(step.get("run", ""))
     )
 
-    for name in _ANTHROPIC_CREDENTIAL_ENV:
-        assert_that(dogfood_env).described_as("dogfood anthropic env").contains_key(
-            name,
-        )
-        expected = _tier2_expression_from_dogfood(
-            _normalize_github_expr(dogfood_env[name]),
-        )
-        # The rewrite must have found the provider clause; otherwise the
-        # comparison below would silently assert dogfood equals itself.
-        assert_that(expected).described_as(name).does_not_contain(
-            _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
-        )
-        assert_that(_normalize_github_expr(str(tier2_env[name]))).described_as(
-            name,
-        ).is_equal_to(expected)
+    mirrored = _mirrored_dogfood_env(dogfood_env)
+    assert_that(mirrored).described_as("derived dogfood mirror set").is_not_empty()
 
-    # The CLI-behaviour settings are copied verbatim, not rewritten, and one of
-    # them decides what the anthropic lane proves: `LINTRO_CLI_BARE: never` is
-    # what keeps the CLI on its OAuth session instead of authenticating with an
-    # API key. If dogfood changed its copy and Tier 2 kept its own, Tier 2
-    # would go on proving a mode the review no longer runs in.
-    for name in _MIRRORED_CLI_BEHAVIOUR_ENV:
-        assert_that(dogfood_env).described_as("dogfood CLI behaviour env").contains_key(
-            name,
-        )
-        assert_that(str(tier2_env[name])).described_as(name).is_equal_to(
-            dogfood_env[name],
-        )
+    for name, dogfood_value in mirrored.items():
+        assert_that(tier2_env).described_as(
+            f"Tier 2 must mirror the dogfood env var {name}",
+        ).contains_key(name)
+        tier2_value = _normalize_github_expr(str(tier2_env[name]))
+        normalized = _normalize_github_expr(dogfood_value)
+
+        if _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE in normalized:
+            expected = _tier2_expression_from_dogfood(normalized)
+            # The rewrite must have found the provider clause; otherwise the
+            # comparison would silently assert dogfood equals itself.
+            assert_that(expected).described_as(name).does_not_contain(
+                _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
+            )
+            assert_that(tier2_value).described_as(name).is_equal_to(expected)
+        elif "${{" not in normalized:
+            assert_that(tier2_value).described_as(name).is_equal_to(normalized)
+        else:
+            for reference in _EXPRESSION_REFERENCE_RE.findall(normalized):
+                assert_that(tier2_value).described_as(name).contains(reference)
+            assert_that(tier2_value).described_as(name).contains(
+                f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
+            )
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

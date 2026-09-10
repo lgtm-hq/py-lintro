@@ -44,6 +44,8 @@ set -euo pipefail
 #   ANTHROPIC_API_KEY         Forwarded for tier 2 (optional)
 #   CODEX_API_KEY             Forwarded for tier 2 (optional)
 #   CURSOR_API_KEY            Forwarded for tier 2 (optional)
+#   LINTRO_AI_MODEL           Forwarded for tier 2 (optional; mirrors the
+#                             dogfood review's model overlay)
 #   LINTRO_CLI_BARE           Forwarded for tier 2 (optional)
 #   CODEX_SESSION_DIR         Codex session directory mounted as CODEX_HOME
 #                             (default: $HOME/.codex; mounted only when it
@@ -74,6 +76,7 @@ Environment:
   ANTHROPIC_API_KEY        Forwarded to tier 2              (optional)
   CODEX_API_KEY            Forwarded to tier 2              (optional)
   CURSOR_API_KEY           Forwarded to tier 2              (optional)
+  LINTRO_AI_MODEL          Forwarded to tier 2              (optional)
   LINTRO_CLI_BARE          Forwarded to tier 2              (optional)
   CODEX_SESSION_DIR        Codex session dir to mount       (optional)
   LINTRO_CONTRACT_PRINT_DOCKER_ARGS
@@ -140,6 +143,7 @@ if [ "$TIER" = "2" ]; then
 		ANTHROPIC_API_KEY \
 		CODEX_API_KEY \
 		CURSOR_API_KEY \
+		LINTRO_AI_MODEL \
 		LINTRO_CLI_BARE \
 		CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC \
 		DISABLE_AUTOUPDATER; do

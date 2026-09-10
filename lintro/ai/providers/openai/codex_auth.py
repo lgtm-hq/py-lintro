@@ -49,7 +49,9 @@ def codex_auth_file() -> Path:
 
     Returns:
         ``$CODEX_HOME/auth.json`` when the variable is set and non-empty,
-        otherwise ``~/.codex/auth.json``.
+        otherwise ``~/.codex/auth.json``. An empty ``CODEX_HOME`` falls back
+        rather than resolving against the process's working directory, which
+        is what a bare ``Path("")`` would do.
     """
     codex_home = os.environ.get(CODEX_HOME_ENV)
     if codex_home:
@@ -60,15 +62,20 @@ def codex_auth_file() -> Path:
 def uses_subscription_session() -> bool:
     """Report whether codex will authenticate with a ChatGPT-plan session.
 
-    Deliberately permissive about the file's shape: the question being answered
-    is which *default model* is safe to ask for, and the fallback is the
-    API-catalogue default that has always been sent. A stored session whose
-    layout changed should keep being treated as a subscription rather than
-    silently reintroduce the unsupported-model failure.
+    Permissive about the *contents* of the object, strict about it being one.
+    The question being answered is which default model is safe to ask for, and
+    the fallback is the API-catalogue default that has always been sent, so a
+    session whose fields were renamed should keep counting as a subscription
+    rather than silently reintroduce the unsupported-model failure. A file that
+    is not a JSON object at all is a different matter: codex writes an object,
+    so a list, string or number is not a session it could read, and treating it
+    as one would be a guess with no evidence behind it.
 
     Returns:
-        True when a stored session exists, carries no embedded API key, and no
-        API-key variable is set in the environment.
+        True when the stored session is a JSON object carrying no embedded API
+        key, and no API-key variable is set in the environment. False when the
+        file is absent, unreadable, not JSON, not a JSON object, holds an
+        embedded key, or ``CODEX_API_KEY`` is set.
     """
     if os.environ.get(CODEX_API_KEY_ENV):
         return False
