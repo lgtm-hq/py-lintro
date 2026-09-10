@@ -629,6 +629,58 @@ def test_workflow_concurrency_keys_on_the_pr_number() -> None:
     assert_that(concurrency["cancel-in-progress"]).is_true()
 
 
+def test_workflow_serializes_ai_review_repo_wide() -> None:
+    """A second, repo-wide group queues reviews instead of cancelling them.
+
+    The workflow-level group is per-PR with ``cancel-in-progress``, so a
+    push supersedes its own review. That alone lets every open PR review
+    at once and pile onto the same provider rate limit, and a cancelled
+    review is exactly the case #2506 is trying to stop paying for. The
+    job-level group is a fixed name with ``cancel-in-progress: false``:
+    one review job at a time across the repo, and the queued ones wait.
+
+    ``queue: max`` is required there, not optional. The default
+    ``queue: single`` holds at most one pending run per group and cancels
+    it when a third arrives, so a burst of pushes across PRs would drop
+    the middle review - and ``AI Review`` is absent from
+    ``auto-rerun-on-infra-failure.yml``, so nothing reruns it. The
+    per-PR group must NOT carry it: there, replacing a stale pending
+    review of the same PR is the wanted behaviour.
+
+    Both levels are asserted because both apply. A job-level group does
+    not opt its job out of the workflow-level one: the workflow-level
+    group cancels the *run* (GitHub cancels "a workflow run, including
+    all jobs and steps"), while the job-level group only gates when the
+    *job* starts and whether a competitor in its own group cancels it.
+    No GitHub documentation makes a job carrying its own group exempt.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    job_concurrency = loaded["jobs"]["ai-review"]["concurrency"]
+    assert_that(job_concurrency["group"]).is_equal_to("ai-review-repo-wide")
+    assert_that(job_concurrency["cancel-in-progress"]).is_false()
+    assert_that(job_concurrency["queue"]).is_equal_to("max")
+    assert_that(job_concurrency["group"]).does_not_contain("${{")
+    assert_that(loaded["concurrency"]).does_not_contain_key("queue")
+
+
+def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
+    """The job budget is pinned at 38 minutes (#2506).
+
+    38 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
+    allows with the 1800 s per-chunk CLI timeout: ceil(1800 / 60) + 7 min setup
+    + 1 min posting margin. Measured review durations over the last 40 runs are
+    median 10 to 14 min and p75 21 min, so the ceiling is not what a healthy
+    review needs — it bounds the tail. The long tail that previously argued for
+    120 was reruns restarting from scratch, which #2506 fixed by resuming the
+    run's own prior attempt. Raising this number is a decision about the CLI
+    timeout, not about this line: bump both together.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(38)
+
+
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
     """The pull_request_target trigger carries no ``paths`` filter (#1902).
 
@@ -1565,6 +1617,9 @@ def test_workflow_locates_prior_state_via_existing_script() -> None:
     assert_that(env["PR_NUMBER"]).is_equal_to("${{ github.event.number }}")
     assert_that(env["GITHUB_REPOSITORY"]).is_equal_to("${{ github.repository }}")
     assert_that(env["GITHUB_RUN_ID"]).is_equal_to("${{ github.run_id }}")
+    # A rerun keeps run_id and bumps run_attempt; the locator needs both to
+    # resume this run's own cancelled attempt (#2506).
+    assert_that(env["GITHUB_RUN_ATTEMPT"]).is_equal_to("${{ github.run_attempt }}")
     assert_that(env["GH_TOKEN"]).is_equal_to("${{ secrets.GITHUB_TOKEN }}")
     for credential_env in PROVIDER_CREDENTIAL_ENVS:
         assert_that(env).does_not_contain_key(credential_env)

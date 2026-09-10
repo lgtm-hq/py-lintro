@@ -117,6 +117,33 @@ def test_map_errors_rate_limit(fake_anthropic_sdk: SimpleNamespace) -> None:
             raise _FakeRateLimitError("slow down")
 
 
+def test_map_errors_rate_limit_carries_retry_after(
+    fake_anthropic_sdk: SimpleNamespace,
+) -> None:
+    """The SDK's ``Retry-After`` header reaches the retry loop (#2506)."""
+    error = _FakeRateLimitError("slow down")
+    error.response = SimpleNamespace(  # type: ignore[attr-defined]
+        headers={"retry-after": "4"},
+    )
+
+    with pytest.raises(AIRateLimitError) as excinfo:
+        with AnthropicProvider._map_errors():
+            raise error
+
+    assert_that(excinfo.value.retry_after).is_equal_to(4.0)
+
+
+def test_map_errors_rate_limit_without_retry_after(
+    fake_anthropic_sdk: SimpleNamespace,
+) -> None:
+    """No header leaves ``retry_after`` unset so backoff still applies."""
+    with pytest.raises(AIRateLimitError) as excinfo:
+        with AnthropicProvider._map_errors():
+            raise _FakeRateLimitError("slow down")
+
+    assert_that(excinfo.value.retry_after).is_none()
+
+
 def test_map_errors_timeout(fake_anthropic_sdk: SimpleNamespace) -> None:
     """SDK APITimeoutError maps to the generic AIProviderError."""
     with pytest.raises(AIProviderError):

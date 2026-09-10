@@ -874,6 +874,16 @@ ai:
   # Max retries for transient API errors. (int 0–10, default: 2)
   max_retries: 2
 
+  # Retries for HTTP 429 (rate limit) only; other transient failures keep
+  # max_retries. When the provider sends Retry-After, lintro waits that long
+  # instead of its backoff, capped at a fixed, non-configurable 300 seconds:
+  # a longer advertised wait is clamped to 300 seconds and still honored.
+  # Only a malformed or already-elapsed Retry-After falls back to the
+  # exponential backoff. Exhausting this budget fails with a message naming
+  # the rate limit and asking for a rerun.
+  # (int 0–20, default: 6)
+  rate_limit_max_retries: 6
+
   # API request timeout in seconds. (float >= 1.0, default: 60.0)
   api_timeout: 60.0
 
