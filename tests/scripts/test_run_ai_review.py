@@ -50,7 +50,21 @@ _ZAI_EGRESS_HOSTS = ("api.z.ai:443",)
 #: Derived from the workflow files (#2432) so a Renovate action bump cannot
 #: fail these tests on its own: Renovate rewrites `uses:` refs and cannot see
 #: a literal in a test module.
-_PINNED_CHECKOUT = action_pin("actions/checkout")
+
+
+def _pinned_checkout() -> str:
+    """Return the repo-wide ``actions/checkout`` pin, resolved lazily.
+
+    Resolving at call time keeps the repo-wide pin scan out of module import,
+    so a pin regression fails the tests that assert it instead of erroring the
+    whole module at collection.
+
+    Returns:
+        str: The ``actions/checkout@<sha>`` reference every workflow uses.
+    """
+    return action_pin("actions/checkout")
+
+
 _HEAD_REF_RE = re.compile(
     r"github\.event\.pull_request\.head\.(?:sha|ref|name)\b"
     r"|github\.(?:head_ref|sha|ref_name|ref)\b",
@@ -749,13 +763,13 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
 @pytest.mark.parametrize(
     ("uses", "expected"),
     [
-        (_PINNED_CHECKOUT, True),
+        ("pin:actions/checkout", True),
         ("evil/checkout@deadbeef", True),
         ("acme/checkout-action@1", True),
         ("acme/pr-checkout@1", True),
         ("acme/pr-checkout-action@1", True),
-        (action_pin("actions/setup-node"), False),
-        (action_pin("astral-sh/setup-uv"), False),
+        ("pin:actions/setup-node", False),
+        ("pin:astral-sh/setup-uv", False),
     ],
     ids=[
         "pinned-actions-checkout",
@@ -774,6 +788,8 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
         uses: A workflow ``uses`` pin.
         expected: Whether the pin is checkout-like.
     """
+    if uses.startswith("pin:"):
+        uses = action_pin(uses.removeprefix("pin:"))
     assert_that(_is_checkout_like_action(uses)).is_equal_to(expected)
 
 
@@ -892,7 +908,7 @@ def test_workflow_forbids_head_ref_fetches() -> None:
         if isinstance(uses, str) and _is_checkout_like_action(uses):
             pin = uses.split("#", 1)[0].strip()
             checkout_uses.append(pin)
-            assert_that(pin).is_equal_to(_PINNED_CHECKOUT)
+            assert_that(pin).is_equal_to(_pinned_checkout())
 
         with_block = step.get("with") or {}
         ref = str(with_block.get("ref", ""))
@@ -923,7 +939,7 @@ def test_workflow_forbids_head_ref_fetches() -> None:
             f"step {step.get('name')!r} must not use pull_request.head sha/ref",
         ).is_none()
 
-    assert_that(checkout_uses).is_equal_to([_PINNED_CHECKOUT])
+    assert_that(checkout_uses).is_equal_to([_pinned_checkout()])
 
 
 def test_workflow_does_not_patch_cursor_workspace_trust() -> None:
