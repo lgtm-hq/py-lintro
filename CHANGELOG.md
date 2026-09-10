@@ -21,6 +21,30 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.152.9] - 2026-09-09
+
+### Changed
+
+- **tests**: keep assertpy with an import guard and a designated fallback (#2468)
+  (223f76f)
+
+### Fixed
+
+- **ai/review**: classify the claude cli session-limit error as quota, not
+  `server_error` (#2529) (d84f0e7)
+- **ai/providers**: pass model through the CLI streaming fallback and default cursor to
+  cli transport (#2527) (648ac4d)
+
+## [0.152.8] - 2026-09-09
+
+### Changed
+
+- **tsc**: restore the `set_options` validation tests removed by #2427 (#2525) (a382c9c)
+
+### Fixed
+
+- **deps**: restore astro 7.2.9 in the docs site (#2526) (32b7115)
+
 ## [0.152.7] - 2026-09-09
 
 ### Changed

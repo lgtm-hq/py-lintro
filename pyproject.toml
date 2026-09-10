@@ -8,7 +8,7 @@ backend-path = ["."]
 
 [project]
 name = "lintro"
-version = "0.152.7"
+version = "0.152.9"
 description = "A unified CLI tool for code formatting, linting, and quality assurance"
 keywords = [
   "linting",
@@ -422,6 +422,7 @@ include = [
   "lintro/tools/buf",
   "lintro/tools/cargo_audit",
   "lintro/tools/cargo_deny",
+  "lintro/tools/checkov",
   "lintro/tools/clippy",
   "lintro/tools/commitlint",
   "lintro/tools/cppcheck",
@@ -714,6 +715,9 @@ ignore_imports = [
   "lintro.tools.cargo_deny.definition -> lintro.plugins.base",                      # owned by #2410
   "lintro.tools.cargo_deny.definition -> lintro.plugins.protocol",                  # owned by #2410
   "lintro.tools.cargo_deny.definition -> lintro.plugins.registry",                  # owned by #2410
+  "lintro.tools.checkov.definition -> lintro.plugins.base",                         # owned by #2410
+  "lintro.tools.checkov.definition -> lintro.plugins.protocol",                     # owned by #2410
+  "lintro.tools.checkov.definition -> lintro.plugins.registry",                     # owned by #2410
   "lintro.tools.clippy.definition -> lintro.plugins.base",                          # owned by #2410
   "lintro.tools.clippy.definition -> lintro.plugins.protocol",                      # owned by #2410
   "lintro.tools.clippy.definition -> lintro.plugins.registry",                      # owned by #2410

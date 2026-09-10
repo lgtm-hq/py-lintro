@@ -1008,20 +1008,26 @@ ai:
   # Max cached entries before eviction. (int >= 1, default: 1000)
   cache_max_entries: 1000
 
-  # ── Anthropic CLI transport ───────────────────────────────────
-  # Whether to pass "--bare" to the "claude" binary. "--bare" drops the CLI's
-  # agentic tool surface but also disables OAuth session login, so it only
-  # authenticates against an API key. "auto" sends it only when a key is
-  # reachable (ANTHROPIC_API_KEY or an apiKeyHelper), so a subscription login
-  # keeps working. Override per run with LINTRO_CLI_BARE.
-  # (auto | always | never, default: auto)
-  cli_bare: auto
-
-  # ── Cursor workspace trust ──
-  # Choosing provider: cursor grants workspace trust (passes "--trust" to the
-  # agent CLI). Set false to restore the agent's interactive trust prompt.
-  # (bool, default: true)
-  cursor_trust_workspace: true
+  # ── Provider-specific settings ────────────────────────────────
+  # Knobs only one provider reads live under the provider that reads them,
+  # never in the shared namespace above. See "Provider-specific settings".
+  providers:
+    anthropic:
+      # Whether to pass "--bare" to the "claude" binary. "--bare" drops the
+      # CLI's agentic tool surface but also disables OAuth session login, so
+      # it only authenticates against an API key. "auto" sends it only when a
+      # key is reachable (ANTHROPIC_API_KEY or an apiKeyHelper), so a
+      # subscription login keeps working. Override per run with
+      # LINTRO_CLI_BARE. (auto | always | never, default: auto)
+      cli_bare: auto
+    cursor:
+      # Choosing provider: cursor grants workspace trust (passes "--trust" to
+      # the agent CLI). Set false to restore the agent's interactive trust
+      # prompt. (bool, default: true)
+      trust_workspace: true
+    # OpenAI reads no vendor-only setting today; the block is recognized so
+    # a future one has a home.
+    openai: {}
 
   # ── Advanced / trust (leave off unless you understand the risk) ──
   # Let the git-native (CLI transport) review path delegate diff retrieval to
@@ -1031,9 +1037,89 @@ ai:
   review_allow_unredacted_git_native: false
 ```
 
+### Provider-specific settings
+
+Settings every provider honours — `provider`, `transport`, `model`, `max_cost_usd`, the
+budget and output knobs — stay at the top of the `ai:` block. A setting **only one
+vendor understands** lives under that vendor instead:
+
+```yaml
+ai:
+  provider: cursor
+  transport: cli
+  providers:
+    cursor:
+      trust_workspace: false
+    anthropic:
+      cli_bare: never
+```
+
+Each block is declared and validated by the provider's own plugin
+(`lintro/ai/providers/<name>/config.py`), so switching providers never means re-reading
+which top-level keys still apply. Two kinds of key you might get wrong are treated
+differently, and the split is by **what** is unrecognized, not by which layer you wrote
+it on:
+
+- **An unknown field inside a block lintro knows** fails the config load on every layer,
+  including `.lintro-config.yaml`. The message names the full path you wrote —
+  `ai.providers.cursor.workspace_trust: Extra inputs are not permitted`. A vendor's own
+  block is a closed set of settings, so a typo there means the setting you wanted is not
+  applied, and failing loudly beats a silent default.
+- **A block for a provider lintro does not know** is dropped from a config file with a
+  warning naming it, matching how an unrecognized top-level `ai:` key is treated: a
+  stale `providers.<vendor>` block must not break every run. On an **override**
+  (`LINTRO_AI_PROVIDERS__…` or `--provider-option`) an unknown provider is a hard error
+  instead, because an override typed for one invocation that silently does nothing is
+  worse than one that stops the run.
+
+An empty block means "this provider, all defaults": `cursor:` with nothing under it and
+an empty `providers:` section are both accepted. Blocks for providers you are not using
+are kept but not applied; `lintro config` shows only the selected provider's block and a
+one-line count of the rest.
+
+Nested settings resolve on exactly the same layers as the shared ones — **flag > env >
+project config > user config > default** — and carry the same per-field provenance,
+which `lintro config` prints in parentheses.
+
+| Layer   | Spelling                                                                                                                                         |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Flag    | `lintro review --provider-option trust_workspace=false` (repeatable; applies to the provider the run resolves to)                                |
+| Env     | `LINTRO_AI_PROVIDERS__CURSOR__TRUST_WORKSPACE=false` — the prefix, the provider, and the field, upper-cased and joined by **double** underscores |
+| Project | `ai.providers.cursor.trust_workspace` in `.lintro-config.yaml`                                                                                   |
+| User    | the same key in the user-level `~/.lintro-config.yaml`, overridden per project                                                                   |
+
+> **One exception — `LINTRO_CLI_BARE`.** The Anthropic CLI transport reads
+> `LINTRO_CLI_BARE` itself, _after_ resolution, so it outranks every layer above for
+> `ai.providers.anthropic.cli_bare` — config, `LINTRO_AI_PROVIDERS__ANTHROPIC__CLI_BARE`
+> and `--provider-option cli_bare=…` alike. `lintro config` reports the resolved value
+> and its provenance, which is therefore not the value the run uses when that variable
+> is set. It predates the nested block
+> ([#1838](https://github.com/lgtm-hq/py-lintro/issues/1838)); no other provider setting
+> has a second path.
+
+The available settings today:
+
+| Setting           | Provider    | Values                      | Default |
+| ----------------- | ----------- | --------------------------- | ------- |
+| `trust_workspace` | `cursor`    | `true` / `false`            | `true`  |
+| `cli_bare`        | `anthropic` | `auto` / `always` / `never` | `auto`  |
+
+#### Migrating from the top-level spellings
+
+Before this layout both settings sat on the flat `ai:` block. The old spellings are
+still accepted **for one release** — they are mapped into the nested block and warned
+about once per run, naming the new path — and are then removed
+([#2464](https://github.com/lgtm-hq/py-lintro/issues/2464)). When both are present, the
+nested value wins.
+
+| Old                         | New                                   |
+| --------------------------- | ------------------------------------- |
+| `ai.cursor_trust_workspace` | `ai.providers.cursor.trust_workspace` |
+| `ai.cli_bare`               | `ai.providers.anthropic.cli_bare`     |
+
 ### Cursor workspace trust
 
-> **Note — `ai.cursor_trust_workspace` grants workspace trust by default.**
+> **Note — `ai.providers.cursor.trust_workspace` grants workspace trust by default.**
 >
 > Choosing `provider: cursor` is the consent, so lintro passes `--trust` to the `agent`
 > CLI by default rather than stalling on its interactive trust prompt. The residual risk
@@ -1041,13 +1127,13 @@ ai:
 > run embeds the diff of an arbitrary fork PR, and an injected instruction in that diff
 > is then read by an agent operating with full workspace trust. Lintro redacts secrets
 > and scans prompts for injection patterns, but neither is a guarantee. Set
-> `cursor_trust_workspace: false` to restore the agent's interactive trust prompt if you
-> want that posture; reviewing untrusted fork PRs with the Cursor provider is the case
-> that most warrants it.
+> `trust_workspace: false` to restore the agent's interactive trust prompt if you want
+> that posture; reviewing untrusted fork PRs with the Cursor provider is the case that
+> most warrants it.
 
-`ai.cursor_trust_workspace` is the **only** default site for this flag: `CursorProvider`
-takes it as a required argument, and the provider factory always forwards the resolved
-config value.
+`ai.providers.cursor.trust_workspace` is the **only** default site for this flag:
+`CursorProvider` takes it as a required argument, and the Cursor plugin always forwards
+the resolved block value.
 
 ### Config Defaults for CLI Flags
 
@@ -1084,11 +1170,11 @@ CI runs the same test, so a metadata change without the paste-back fails the bui
 
 <!-- END SNAPSHOT: provider-table -->
 
-`(default)` marks the transport lintro documents and `lintro doctor` steers you to; it
-is **not** a fallback for an omitted `ai.transport`. That fallback is `api` for every
-provider, Cursor included — which is why leaving `ai.transport` unset with
-`provider: cursor` fails with `cursor provider only supports transport: cli`. Set
-`ai.transport` explicitly.
+`(default)` marks the transport lintro documents and `lintro doctor` steers you to. It
+is also the fallback for an omitted `ai.transport`: `api` for `anthropic` and `openai`,
+`cli` for `cursor`, the only transport Cursor serves (#2449). An explicit
+`transport: api` with `provider: cursor` still fails with
+`cursor provider only supports transport: cli`. Set `ai.transport` explicitly anyway.
 
 Prices are USD per million tokens, as lintro uses them for `ai.max_cost_usd` and the
 reported `$` figures. A model priced at zero is billed elsewhere (the Cursor
@@ -1197,13 +1283,13 @@ Timeouts, cost caps, failure vocabulary, and the meaning of reported `$` figures
 decision table and `ai.transports.*` profiles (#1923).
 
 `ai.transport` has **no default**, so set it explicitly whenever `ai.lint` or
-`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility. Whether
-the run then still works depends on the provider: the factory falls back to `api` for
-every provider, which keeps `anthropic` and `openai` going but is **fatal for
-`cursor`**, where it surfaces as `cursor provider only supports transport: cli`. That
-fallback exists for backward compatibility — legacy configs that set only
-`ai.enabled: true` (which implicitly switches `lint` and `review` on) rely on it — and
-is not something to depend on in new config.
+`ai.review` is enabled. Omitting it is always a `lintro doctor` incompatibility, but the
+run still works: each provider plugin falls back to the transport it documents — `api`
+for `anthropic` and `openai`, `cli` for `cursor` (#2449). That fallback exists for
+backward compatibility — legacy configs that set only `ai.enabled: true` (which
+implicitly switches `lint` and `review` on) rely on it — and is not something to depend
+on in new config. Asking Cursor for `transport: api` explicitly is still fatal:
+`cursor provider only supports transport: cli`.
 
 `cursor` is a CLI-only provider: pair it with `transport: cli`. `anthropic` and `openai`
 support both transports.
@@ -1218,19 +1304,24 @@ ai:
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
 config for a single invocation. `lintro review` also accepts `--provider`, `--model`,
-`--review/--no-review`, and `--max-cost-usd`. Environment variables
-(`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`, `LINTRO_AI_TRANSPORT`, `LINTRO_AI_ENABLED`,
-`LINTRO_AI_REVIEW`, `LINTRO_AI_MAX_COST_USD`) apply to every AI surface and lose to CLI
+`--review/--no-review`, `--max-cost-usd`, and the repeatable
+`--provider-option NAME=VALUE` for one `ai.providers.<provider>.<field>` setting.
+Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`, `LINTRO_AI_TRANSPORT`,
+`LINTRO_AI_ENABLED`, `LINTRO_AI_REVIEW`, `LINTRO_AI_MAX_COST_USD`, and
+`LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`) apply to every AI surface and lose to CLI
 flags. There is no `--enabled` flag.
 
 ### Invocation overrides
 
-Resolution order for `provider`, `model`, `transport`, `enabled`, `review`, and
-`max_cost_usd` is:
+Resolution order for `provider`, `model`, `transport`, `enabled`, `review`,
+`max_cost_usd`, and every `ai.providers.<provider>.<field>` setting is:
 
 ```text
-CLI flag > environment variable > .lintro-config.yaml > built-in default
+CLI flag > environment variable > .lintro-config.yaml > user ~/.lintro-config.yaml > built-in default
 ```
+
+One resolver produces all of it, so nested provider settings carry the same per-field
+provenance the shared ones do — see "Provider-specific settings".
 
 Overlays replace the active transport profile's cost cap
 (`ai.transports.api.max_cost_usd` / `ai.transports.cli.max_cost_usd_advisory`) as well
@@ -1296,7 +1387,8 @@ else.
 >
 > `claude --bare` runs the CLI without its agentic tool surface, but it also disables
 > OAuth session login — in bare mode the binary authenticates only against an API key.
-> Lintro therefore chooses the flag per invocation (`ai.cli_bare`, default `auto`):
+> Lintro therefore chooses the flag per invocation (`ai.providers.anthropic.cli_bare`,
+> default `auto`):
 >
 > - An API key is reachable (`ANTHROPIC_API_KEY` is set, or a Claude Code settings file
 >   declares an `apiKeyHelper`) → lintro sends `--bare`, and the call bills that key
@@ -1304,10 +1396,10 @@ else.
 > - No API key is reachable → lintro omits `--bare`, and the call uses your `claude`
 >   login session, billed to that subscription.
 >
-> Force either mode explicitly with `ai.cli_bare: always|never` in config, or with the
-> `LINTRO_CLI_BARE=always|never` environment variable (the environment wins). Codex and
-> Cursor are unaffected — both accept a CLI login session. See
-> [#1838](https://github.com/lgtm-hq/py-lintro/issues/1838).
+> Force either mode explicitly with `ai.providers.anthropic.cli_bare: always|never` in
+> config, or with the `LINTRO_CLI_BARE=always|never` environment variable (the
+> environment wins). Codex and Cursor are unaffected — both accept a CLI login session.
+> See [#1838](https://github.com/lgtm-hq/py-lintro/issues/1838).
 
 ### Failures are visible, never a green no-op
 

@@ -22,10 +22,10 @@ providers authenticate with their own logins and keys — `codex login` / `CODEX
 for `openai`, `agent login` / `CURSOR_API_KEY` for `cursor` — see `docs/ai-features.md`,
 which also covers Claude's settings-file `apiKeyHelper` as a reachable API credential.
 
-**Bare-billing exception:** under `cli` with Anthropic, when `ai.cli_bare` resolves to
-sending `--bare` (`auto` with a reachable `ANTHROPIC_API_KEY`, or `always`, #1859), the
-call bills the API key — the run records `auth_mode=api_key` and `cost_basis=estimated`
-instead of the subscription column above.
+**Bare-billing exception:** under `cli` with Anthropic, when
+`ai.providers.anthropic.cli_bare` resolves to sending `--bare` (`auto` with a reachable
+`ANTHROPIC_API_KEY`, or `always`, #1859), the call bills the API key — the run records
+`auth_mode=api_key` and `cost_basis=estimated` instead of the subscription column above.
 
 **Advisory means estimate-based, not unenforced:** the CLI advisory cap still stops the
 run (finalizing a partial review) when _locally estimated_ cost reaches it. It is
@@ -67,11 +67,11 @@ ai:
 
 ## Credentials and `LINTRO_CLI_BARE`
 
-| Variable / setting                | Transport                    | Role                                                   |
-| --------------------------------- | ---------------------------- | ------------------------------------------------------ |
-| `ANTHROPIC_API_KEY`               | api (required); cli optional | Metered API / bare-mode auth                           |
-| `CLAUDE_CODE_OAUTH_TOKEN`         | cli                          | Subscription OAuth session for `claude`                |
-| `ai.cli_bare` / `LINTRO_CLI_BARE` | cli                          | `auto` / `always` / `never` — whether to pass `--bare` |
+| Variable / setting                                    | Transport                    | Role                                                   |
+| ----------------------------------------------------- | ---------------------------- | ------------------------------------------------------ |
+| `ANTHROPIC_API_KEY`                                   | api (required); cli optional | Metered API / bare-mode auth                           |
+| `CLAUDE_CODE_OAUTH_TOKEN`                             | cli                          | Subscription OAuth session for `claude`                |
+| `ai.providers.anthropic.cli_bare` / `LINTRO_CLI_BARE` | cli                          | `auto` / `always` / `never` — whether to pass `--bare` |
 
 `--bare` disables OAuth session login and authenticates only against an API key
 (#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out

@@ -182,11 +182,11 @@ class CursorProvider(BaseAIProvider):
                 passed to the ``agent`` CLI, granting Cursor workspace trust;
                 when False, the flag is omitted and the ``agent`` CLI keeps
                 its interactive trust prompt. This constructor carries no
-                default on purpose: ``AIConfig.cursor_trust_workspace`` is the
-                single default site (``True``, because choosing
-                ``provider: cursor`` is the consent), and
-                :func:`lintro.ai.providers.get_provider` always forwards the
-                resolved config value. See "Cursor workspace trust" in
+                default on purpose:
+                ``ai.providers.cursor.trust_workspace`` is the single default
+                site (``True``, because choosing ``provider: cursor`` is the
+                consent), and :func:`lintro.ai.providers.get_provider` always
+                forwards the resolved block value. See "Cursor workspace trust" in
                 ``docs/ai-features.md`` for the residual injection risk.
 
         Raises:

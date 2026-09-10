@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - CompletedProcess fixtures only; no process spawn
 from collections.abc import AsyncIterator
+from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.enums import AITransport
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.base import (
     AIResponse,
     AIStreamResult,
@@ -15,6 +19,17 @@ from lintro.ai.providers.base import (
     BaseAIProvider,
 )
 from lintro.ai.providers.constants import DEFAULT_PER_CALL_MAX_TOKENS, DEFAULT_TIMEOUT
+from lintro.ai.providers.openai.provider import OpenAIProvider
+from tests.unit.ai.conftest import patch_cli_exec
+
+#: Claude CLI stdout for a successful one-shot completion.
+_CLAUDE_STDOUT = '{"result":"ok","usage":{"input_tokens":1,"output_tokens":1}}'
+
+#: Codex CLI stdout for a successful ``codex exec --json`` run.
+_CODEX_STDOUT = (
+    '{"type":"item.completed","item":{"type":"agent_message","text":"ok"}}\n'
+    '{"type":"turn.completed","usage":{"input_tokens":1,"output_tokens":1}}\n'
+)
 
 
 class _StubProvider(BaseAIProvider):
@@ -311,3 +326,55 @@ async def test_async_stream_result_collect_raises_on_double_call() -> None:
 
     with pytest.raises(RuntimeError, match="already consumed"):
         await result.collect()
+
+
+@pytest.mark.parametrize(
+    ("finder", "provider_class", "binary", "stdout"),
+    [
+        pytest.param(
+            "lintro.ai.providers.anthropic.provider._find_claude",
+            AnthropicProvider,
+            "/usr/local/bin/claude",
+            _CLAUDE_STDOUT,
+            id="anthropic",
+        ),
+        pytest.param(
+            "lintro.ai.providers.openai.provider._find_codex",
+            OpenAIProvider,
+            "/usr/local/bin/codex",
+            _CODEX_STDOUT,
+            id="openai",
+        ),
+    ],
+)
+async def test_cli_stream_fallback_forwards_the_per_call_model(
+    finder: str,
+    provider_class: type[AnthropicProvider] | type[OpenAIProvider],
+    binary: str,
+    stdout: str,
+) -> None:
+    """Streaming under CLI transport sends the per-call model override (#2449).
+
+    Args:
+        finder: Import path of the provider's CLI binary lookup.
+        provider_class: Provider class under test.
+        binary: Fake path the binary lookup returns.
+        stdout: CLI stdout the fake subprocess replays.
+    """
+    with patch(finder, return_value=binary):
+        provider = provider_class(transport=AITransport.CLI)
+
+    with patch_cli_exec() as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        result = await provider.stream_complete("hi", model="override")
+        collected = await result.collect()
+
+    cmd = mock_run.transport_calls[-1].cmd
+    assert_that(cmd).contains("--model")
+    assert_that(cmd[cmd.index("--model") + 1]).is_equal_to("override")
+    assert_that(collected.content).is_equal_to("ok")

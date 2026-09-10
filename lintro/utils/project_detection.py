@@ -38,6 +38,9 @@ _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
         ".ruff_cache",
         ".pytest_cache",
         "htmlcov",
+        # `terraform init` vendors provider plugins and remote modules here;
+        # their .tf files are third-party and must not select checkov.
+        ".terraform",
     },
 )
 
@@ -263,6 +266,7 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
 
     Checks for Python, JavaScript/TypeScript (including Astro, Svelte, Vue),
     Rust, Go, Ruby, C/C++, Shell, Docker, GitHub Actions, SQL, Protocol Buffers,
+    Terraform,
     YAML, Markdown, TOML, HTML, CSS, and dotenv files by inspecting manifests,
     directories, and source-file extensions. Language tools still run in
     source-only trees that have no ``pyproject.toml`` / ``package.json`` /
@@ -379,6 +383,12 @@ def detect_project_languages(*, root: Path | None = None) -> list[str]:
     # Protocol Buffers
     if _has_source_files(cwd, ".proto"):
         langs.add("protobuf")
+
+    # Terraform — HCL and its JSON form, matching CHECKOV_FILE_PATTERNS.
+    # ``_has_source_files`` falls back to a case-insensitive name match, which
+    # is what catches ``.tf.json`` (whose Path.suffix is ``.json``).
+    if _has_source_files(cwd, ".tf", ".tf.json"):
+        langs.add("terraform")
 
     # YAML (beyond compose / lintro config / Actions workflows).
     if _has_project_file(cwd, match=_is_yaml_content):

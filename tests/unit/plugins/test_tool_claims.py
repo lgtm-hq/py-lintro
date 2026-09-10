@@ -28,7 +28,7 @@ from lintro.tools.core.tool_manager import ToolManager
 UNCLAIMED_TOOL: str = "commitlint"
 
 #: Number of builtin tool plugins the registry must expose.
-EXPECTED_TOOL_COUNT: int = 43
+EXPECTED_TOOL_COUNT: int = 44
 
 
 def _definitions() -> dict[str, ToolDefinition]:

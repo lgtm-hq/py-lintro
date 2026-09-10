@@ -11,6 +11,11 @@ Fields are logically grouped into three areas:
 
 The flat attribute API (``config.provider``, ``config.max_tokens``, …)
 is the primary interface; the grouping is for documentation only.
+
+Every flat field is shared: read by the pipeline, or by two or more provider
+backends. A knob only one vendor understands lives on that provider's own
+``ai.providers.<name>`` block instead, reached through
+:meth:`AIConfig.provider_settings` (#2309).
 """
 
 from __future__ import annotations
@@ -22,16 +27,31 @@ from contextvars import ContextVar
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializeAsAny,
+    ValidationError,
+    model_validator,
+)
 
 from lintro.ai.config_views import AIBudgetConfig, AIOutputConfig, AIProviderConfig
 from lintro.ai.enums import (
     AITransport,
-    CliBareMode,
     ConfidenceLevel,
     SanitizeMode,
 )
 from lintro.ai.enums.config_source import ConfigSource
+from lintro.ai.provider_blocks import (
+    describe_block_error,
+    nested_sources,
+    provider_label,
+)
+from lintro.ai.provider_config import (
+    ProviderConfig,
+    migrate_legacy_provider_keys,
+)
 from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
@@ -175,6 +195,18 @@ class AIConfig(BaseModel):
             "→ built-in default (api: 60s; cli: 1800s)."
         ),
     )
+    providers: dict[AIProvider, SerializeAsAny[ProviderConfig]] = Field(
+        default_factory=dict,
+        description=(
+            "Provider-specific settings, nested under the provider that reads "
+            "them: `ai.providers.<name>.<field>`. Each block is validated by "
+            "the model that provider's plugin declares, so a knob only one "
+            "vendor understands never lands in the shared namespace (#2309). "
+            "Override one field per run with "
+            "LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD> or "
+            "`--provider-option <field>=<value>`."
+        ),
+    )
     model: str | None = None
     api_key_env: str | None = None
     api_base_url: str | None = Field(
@@ -300,30 +332,6 @@ class AIConfig(BaseModel):
             "'off' disables detection."
         ),
     )
-    cli_bare: CliBareMode = Field(
-        default=CliBareMode.AUTO,
-        description=(
-            "Whether the anthropic CLI transport passes '--bare' to the "
-            "'claude' binary. '--bare' drops the CLI's agentic tool surface "
-            "but also disables OAuth session login, so it only authenticates "
-            "against an API key. 'auto' (default) sends it only when an API "
-            "key is reachable (ANTHROPIC_API_KEY or a configured "
-            "apiKeyHelper), so subscription logins keep working; 'always' and "
-            "'never' force the choice. Overridable per run with the "
-            "LINTRO_CLI_BARE environment variable."
-        ),
-    )
-
-    cursor_trust_workspace: bool = Field(
-        default=True,
-        description=(
-            "Pass '--trust' to the Cursor 'agent' CLI, granting it workspace "
-            "trust. Trust follows from choosing provider: cursor, so this "
-            "defaults to True. Set false to restore the Cursor agent's "
-            "interactive trust prompt."
-        ),
-    )
-
     checkpoint_retention: int = Field(
         default=10,
         ge=0,
@@ -407,6 +415,95 @@ class AIConfig(BaseModel):
             "new transcript writer starts."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _build_provider_blocks(cls, data: Any) -> Any:
+        """Fold legacy keys in and validate each ``providers`` block.
+
+        The annotation is ``dict[AIProvider, ProviderConfig]``, and the base
+        class declares no fields, so pydantic alone would validate every
+        nested mapping against the empty base and reject the vendor's own
+        keys. Each block is therefore built here by the model its plugin
+        declares (#2309). A block already given as a model instance is left
+        alone — that is how ``model_copy``/``model_dump`` round-trips through
+        the overlay path stay lossless.
+
+        Args:
+            data: Raw input to validation. Non-mappings are passed through for
+                pydantic to reject with its own message.
+
+        Returns:
+            The input with ``providers`` normalized to block instances.
+
+        Raises:
+            ValueError: If a block fails its provider's own validation, or is
+                given as a model instance belonging to another provider. The
+                message names the full ``ai.providers.<name>.<field>`` path so
+                the diagnostic matches the key the user wrote.
+        """
+        if not isinstance(data, Mapping):
+            return data
+        migrated = dict(data)
+        # Only a key this model does not declare can be a legacy provider
+        # spelling, and only then is the plugin registry worth loading. A
+        # well-formed config never pays for the shim.
+        if set(migrated) - set(cls.model_fields):
+            migrated = migrate_legacy_provider_keys(
+                migrated,
+                diagnostics=not _SUPPRESS_DIAGNOSTICS.get(),
+            )
+        raw_blocks = migrated.get("providers")
+        if raw_blocks is None and "providers" in migrated:
+            # ``providers:`` with nothing under it is an empty YAML section,
+            # the same "this key, all defaults" spelling an empty inner block
+            # already gets. Only a non-null non-mapping is left for pydantic.
+            migrated["providers"] = {}
+            return migrated
+        if not isinstance(raw_blocks, Mapping) or not raw_blocks:
+            return migrated
+
+        from lintro.ai.exceptions import AIProviderNotRegisteredError
+        from lintro.ai.registry import config_model_for
+
+        blocks: dict[Any, Any] = {}
+        for name, value in raw_blocks.items():
+            try:
+                model = config_model_for(name)
+            except (AIProviderNotRegisteredError, ValueError):
+                # Same pair the env-override path catches: a non-member name
+                # may surface as a bare ValueError from the enum lookup.
+                if not _SUPPRESS_DIAGNOSTICS.get():
+                    logger.warning(
+                        "Unknown AI provider block ignored: ai.providers.{}",
+                        name,
+                    )
+                continue
+            if isinstance(value, ProviderConfig):
+                if not isinstance(value, model):
+                    raise ValueError(
+                        f"ai.providers.{provider_label(name)} must be a "
+                        f"{model.__name__}, got {type(value).__name__}",
+                    )
+                blocks[name] = value
+                continue
+            if value is None:
+                # ``cursor:`` with nothing under it is an empty YAML mapping,
+                # which is how a user writes "this provider, all defaults".
+                value = {}
+            if not isinstance(value, Mapping):
+                raise ValueError(
+                    f"ai.providers.{provider_label(name)} must be a mapping "
+                    f"of settings, got {type(value).__name__}",
+                )
+            try:
+                blocks[name] = model.model_validate(dict(value))
+            except ValidationError as exc:
+                raise ValueError(
+                    describe_block_error(name=name, exc=exc),
+                ) from exc
+        migrated["providers"] = blocks
+        return migrated
 
     @model_validator(mode="after")
     def _apply_legacy_enabled_default(self) -> AIConfig:
@@ -494,10 +591,12 @@ class AIConfig(BaseModel):
             OVERRIDE_FIELDS,
             apply_env_overrides,
         )
+        from lintro.ai.provider_config import legacy_key_field_paths
 
+        legacy_paths = legacy_key_field_paths()
         filtered: dict[str, Any] = {}
         if data:
-            known_fields = set(cls.model_fields)
+            known_fields = set(cls.model_fields) | set(legacy_paths)
             unknown = set(data) - known_fields
             if unknown and diagnostics:
                 logger.warning(
@@ -516,6 +615,9 @@ class AIConfig(BaseModel):
             field: (ConfigSource.CONFIG if field in filtered else ConfigSource.DEFAULT)
             for field in OVERRIDE_FIELDS
         }
+        sources.update(
+            nested_sources(raw=filtered, legacy_paths=legacy_paths),
+        )
         config, sources = apply_env_overrides(config, sources)
         return ResolvedAIConfig(config=config, sources=sources)
 
@@ -548,6 +650,56 @@ class AIConfig(BaseModel):
         """
         return self.lint_enabled or self.review_enabled
 
+    # -- Provider-specific settings ----------------------------------------
+
+    def provider_settings(
+        self,
+        provider: AIProvider | None = None,
+    ) -> ProviderConfig:
+        """Return the effective ``ai.providers.<name>`` block for *provider*.
+
+        Never returns None: a provider with no block in the config gets a
+        default-valued instance of its own model, so a plugin reads one shape
+        whether or not the user wrote the section. Each provider package
+        exposes a typed wrapper around this (``cursor_settings`` and friends)
+        so callers get the concrete model rather than the base class.
+
+        Args:
+            provider: Provider whose block to read. Defaults to the configured
+                :attr:`provider`.
+
+        Returns:
+            The resolved block, or a default-valued one when the config
+            declares none. An unregistered or unset provider yields a bare
+            :class:`~lintro.ai.provider_config.ProviderConfig`, which carries
+            no fields — the caller's own typed wrapper substitutes its default
+            model in that case.
+        """
+        from lintro.ai.exceptions import AIProviderNotRegisteredError
+        from lintro.ai.registry import config_model_for
+
+        target = provider if provider is not None else self.provider
+        if target is None:
+            return ProviderConfig()
+        block = self.providers.get(target)
+        if block is not None:
+            return block
+        try:
+            return config_model_for(target)()
+        except AIProviderNotRegisteredError:
+            return ProviderConfig()
+
+    def other_provider_block_count(self) -> int:
+        """Count configured blocks that are not the selected provider's.
+
+        ``lintro config`` reports this as one line rather than rendering
+        every vendor's settings at once (#2309).
+
+        Returns:
+            Number of ``ai.providers`` entries other than :attr:`provider`.
+        """
+        return sum(1 for name in self.providers if name is not self.provider)
+
     # -- Grouped views -----------------------------------------------------
 
     @property
@@ -556,7 +708,6 @@ class AIConfig(BaseModel):
         return AIProviderConfig(
             provider=self.provider,
             transport=self.transport,
-            cli_bare=self.cli_bare,
             model=self.model,
             api_key_env=self.api_key_env,
             api_base_url=self.api_base_url,
