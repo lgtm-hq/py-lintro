@@ -3437,7 +3437,7 @@ ai:
 | `max_fix_attempts`       | int    | `20`           | Max issues to attempt fixing per run                                                         |
 | `max_parallel_calls`     | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
 | `max_retries`            | int    | `2`            | Max retries for transient errors (0-10)                                                      |
-| `rate_limit_max_retries` | int    | `6`            | Retries for HTTP 429 only (0-20); waits `Retry-After` up to 300 s, else backoff              |
+| `rate_limit_max_retries` | int    | `6`            | Retries for HTTP 429 only (0-20); waits `Retry-After` clamped to 300 s                       |
 | `max_cost_usd`           | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `uncapped` lifts; overlay `0` is an error           |
 | `api_timeout`            | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
 | `transports`             | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |

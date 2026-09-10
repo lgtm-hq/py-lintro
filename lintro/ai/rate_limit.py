@@ -6,22 +6,31 @@ header on 429. Honouring it is strictly better than exponential backoff:
 the server knows when the bucket refills, and a shorter guessed delay only
 burns another retry slot.
 
-The parsing is deliberately defensive — a missing, malformed, or negative
-header degrades to ``None``, which leaves the caller on its own backoff.
+The value is honoured up to :data:`MAX_RETRY_AFTER_SECONDS` — a longer wait
+is capped to it, not discarded. The parsing is otherwise defensive: a
+missing, malformed, or already-elapsed header degrades to ``None``, which
+leaves the caller on its own backoff.
 """
 
 from __future__ import annotations
 
 import math
+import re
 import time
 from email.utils import parsedate_to_datetime
-from typing import Any
+from typing import Any, Final
 
-# Cap on an honoured Retry-After. A vendor asking for longer than this has
-# effectively taken the account offline for the run; waiting it out would
-# blow past any job budget, so the caller falls back to its own backoff and
-# exhausts its retries with the rate-limit message instead.
+# Ceiling on an honoured Retry-After. A longer advertised wait is clamped
+# to this, not rejected: a provider saying "wait 10 minutes" is better
+# served by waiting 5 than by a one-second backoff that will 429 again.
+# The clamp keeps a single wait from blowing past the job budget on its
+# own, while the retry budget still bounds how many such waits happen.
 MAX_RETRY_AFTER_SECONDS: float = 300.0
+
+# RFC 9110 §10.2.3: ``delay-seconds = 1*DIGIT``. No sign, no decimal
+# point, no exponent, no unit suffix — so "1.5", "1e2" and "+3" are
+# malformed, however happily ``float()`` would take them.
+_DELTA_SECONDS_RE: Final[re.Pattern[str]] = re.compile(r"^[0-9]+$")
 
 
 def parse_retry_after(
@@ -40,9 +49,10 @@ def parse_retry_after(
             HTTP-date. Defaults to the current time.
 
     Returns:
-        A non-negative, finite delay in seconds capped at
-        :data:`MAX_RETRY_AFTER_SECONDS`, or ``None`` when the value is
-        absent, malformed, non-finite, or already in the past.
+        A non-negative, finite delay in seconds, clamped to
+        :data:`MAX_RETRY_AFTER_SECONDS` when the header asks for longer,
+        or ``None`` when the value is absent, malformed, non-finite, or
+        already in the past.
     """
     if raw is None:
         return None
@@ -52,9 +62,10 @@ def parse_retry_after(
     seconds = _parse_delta_seconds(text)
     if seconds is None:
         seconds = _parse_http_date_delta(text, now_timestamp=now_timestamp)
-    # ``float()`` accepts "nan" and "inf", which RFC 9110 delta-seconds
-    # never are. ``nan`` evades the negative test and survives ``min``,
-    # and ``asyncio.sleep(nan)`` raises rather than backing off.
+    # A digit run longer than a float can hold still overflows to ``inf``,
+    # and an HTTP-date can land outside the float range too. ``nan``/
+    # ``inf`` evade the negative test and survive ``min``, and
+    # ``asyncio.sleep(nan)`` raises rather than backing off.
     if seconds is None or not math.isfinite(seconds) or seconds < 0:
         return None
     return min(seconds, MAX_RETRY_AFTER_SECONDS)
@@ -63,15 +74,23 @@ def parse_retry_after(
 def _parse_delta_seconds(text: str) -> float | None:
     """Parse the delta-seconds form of ``Retry-After``.
 
+    Only the RFC 9110 grammar is accepted, ``1*DIGIT``. ``float()`` alone
+    would take "1.5", "1e2", "+3", "nan" and "inf", none of which a
+    conforming server sends.
+
     Args:
         text: Stripped header value.
 
     Returns:
-        The delay in seconds, or ``None`` when the value is not numeric.
+        The delay in seconds, or ``None`` when the value is not a run of
+        ASCII digits. A digit run too long for a float still yields
+        ``inf``; the finite check in :func:`parse_retry_after` rejects it.
     """
+    if _DELTA_SECONDS_RE.match(text) is None:
+        return None
     try:
         return float(text)
-    except ValueError:
+    except ValueError:  # pragma: no cover - digits always parse
         return None
 
 

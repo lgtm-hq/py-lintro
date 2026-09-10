@@ -28,6 +28,10 @@ from lintro.ai.rate_limit import (
         ("nan", None),
         ("inf", None),
         ("-inf", None),
+        ("1.5", None),
+        ("1e2", None),
+        ("+3", None),
+        ("3s", None),
     ],
 )
 def test_parse_retry_after_reads_delta_seconds(
@@ -71,8 +75,36 @@ def test_parse_retry_after_drops_a_past_http_date() -> None:
 
 
 def test_parse_retry_after_caps_an_absurd_wait() -> None:
-    """A multi-hour wait is capped so a job budget cannot be blown."""
+    """A multi-hour wait is clamped, not discarded.
+
+    A provider asking for an hour is better served by waiting five
+    minutes than by a one-second backoff that will 429 again, so the
+    value is honored at the ceiling rather than falling back.
+    """
     assert_that(parse_retry_after("86400")).is_equal_to(MAX_RETRY_AFTER_SECONDS)
+
+
+def test_only_the_rfc_delay_seconds_grammar_is_accepted() -> None:
+    """RFC 9110 §10.2.3 is ``delay-seconds = 1*DIGIT``.
+
+    ``float()`` would take every form below; a conforming server sends
+    none of them, and honoring one risks sleeping on a value that only
+    looks like seconds.
+    """
+    for raw in ("1.5", "1e2", "+3", " 3.0", "3s", "0x10", "３"):
+        assert_that(parse_retry_after(raw)).described_as(raw).is_none()
+
+    assert_that(parse_retry_after("0")).is_equal_to(0.0)
+    assert_that(parse_retry_after("007")).is_equal_to(7.0)
+
+
+def test_a_digit_run_too_long_for_a_float_is_rejected() -> None:
+    """Digits alone are not enough: a huge run overflows to ``inf``.
+
+    This is why the finite check survives the grammar check rather than
+    being made redundant by it.
+    """
+    assert_that(parse_retry_after("9" * 400)).is_none()
 
 
 def test_retry_after_from_exception_reads_the_sdk_response() -> None:

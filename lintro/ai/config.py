@@ -254,11 +254,12 @@ class AIConfig(BaseModel):
             "Retry attempts for HTTP 429 (rate limit) only; other transient "
             "failures keep max_retries. A rate limit clears on its own, and "
             "providers advertise the wait through Retry-After, which lintro "
-            "waits instead of its exponential backoff — up to a fixed, "
-            "non-configurable 300 second cap. A Retry-After above 300 "
-            "seconds, or one that is malformed or already in the past, "
-            "falls back to the exponential backoff. Exhausting this budget "
-            "fails with a message naming the rate limit."
+            "waits instead of its exponential backoff, capped at a fixed, "
+            "non-configurable 300 seconds — a longer advertised wait is "
+            "clamped to 300 seconds and still honored. Only a malformed or "
+            "already-elapsed Retry-After falls back to the exponential "
+            "backoff. Exhausting this budget fails with a message naming "
+            "the rate limit."
         ),
     )
     api_timeout: float = Field(default=60.0, ge=1.0)

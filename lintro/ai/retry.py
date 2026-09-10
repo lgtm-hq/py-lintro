@@ -49,9 +49,10 @@ def _retry_delay(
 ) -> float:
     """Return the wait before the next attempt.
 
-    A 429 carrying ``Retry-After`` is honoured verbatim: the provider named
-    the instant its window resets, so jittering or truncating it only
-    guarantees another 429 (#2506). Everything else uses the exponential
+    A 429 carrying ``Retry-After`` waits that value unjittered: the
+    provider named the instant its window resets, so jittering it only
+    guarantees another 429 (#2506). ``parse_retry_after`` has already
+    clamped it to five minutes. Everything else uses the exponential
     backoff, jittered ±20 % to keep concurrent lintro processes from
     retrying in lockstep.
 
@@ -133,8 +134,9 @@ def with_retry(
     attempts rather than ``max_retries``, counted on its own counter so
     neither budget can be spent by the other error type, and when the
     provider sent a
-    ``Retry-After`` header the wait is exactly that value — unjittered,
-    because the server named the instant its bucket refills. Exhausting
+    ``Retry-After`` header the wait is that value unjittered, clamped to
+    five minutes, because the server named the instant its bucket
+    refills. Exhausting
     the 429 budget raises an ``AIRateLimitError`` whose message names the
     rate limit and asks for a rerun.
 
