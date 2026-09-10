@@ -186,7 +186,6 @@ def test_offline_flags_cannot_be_disabled_by_options(
     assert_that(cmd).contains("--skip-download", "--skip-results-upload")
     assert_that(" ".join(cmd)).contains(f"--framework {CHECKOV_FRAMEWORKS}")
     assert_that(" ".join(cmd)).contains("--download-external-modules False")
-    assert_that(" ".join(cmd)).contains("--download-external-modules False")
     assert_that(cmd).does_not_contain("--compact")
 
 
