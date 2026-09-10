@@ -78,10 +78,12 @@ Providers are listed alphabetically; the order carries no recommendation.
 | `openai`    | `api`     | `OPENAI_API_KEY`                                      |
 | `openai`    | `cli`     | `CODEX_API_KEY` or a `codex login` session            |
 
-`cursor` serves no `api` transport, so it has no API row. `ai.api_key_env` overrides the
-**API-transport** variable name only; a CLI binary reads whatever variable it is built
-to read (the `codex` CLI always reads `CODEX_API_KEY`, never `OPENAI_API_KEY`), which is
-why openai's plugin declares `honors_api_key_env=False`.
+`cursor` serves no `api` transport, so it has no API row. `ai.api_key_env` renames the
+variable for the `api` transport, and for the `cli` transport it is honoured wherever
+the provider's auth probe declares `honors_api_key_env=True` — anthropic's and cursor's
+CLIs both do, because each reads its own API-key variable directly. openai's declares
+`honors_api_key_env=False`: the `codex` CLI always reads `CODEX_API_KEY`, never
+`OPENAI_API_KEY`, so renaming the variable cannot reach it.
 
 | Variable / setting                | Transport       | Role                                                   |
 | --------------------------------- | --------------- | ------------------------------------------------------ |

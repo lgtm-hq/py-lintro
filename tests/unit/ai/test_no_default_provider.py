@@ -137,8 +137,8 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
 
     Returns:
         ``(line, shape, expression)`` triples for ``Field(default=...)`` and
-        pydantic's positional ``Field("openai")`` form,
-        ``getattr``/``os.environ.get``-style two-argument lookups and any
+        pydantic's positional ``Field("openai")`` form, ``os.environ.get`` /
+        ``os.getenv`` two-argument lookups, three-argument ``getattr`` and any
         keyword literally named ``default``.
     """
     found: list[tuple[int, str, ast.expr]] = []
@@ -151,9 +151,16 @@ def _call_defaults(*, node: ast.Call) -> list[tuple[int, str, ast.expr]]:
     )
     if is_field and node.args:
         found.append((node.lineno, "positional `Field()` default", node.args[0]))
+    # ``getattr`` takes the fallback third, after the object and the attribute
+    # name; ``.get``/``getenv`` take it second, after the key.
+    is_getattr = isinstance(func, ast.Name) and func.id == "getattr"
+    if is_getattr:
+        if len(node.args) >= 3:
+            found.append((node.lineno, "lookup fallback", node.args[2]))
+        return found
     is_get = isinstance(func, ast.Attribute) and func.attr in {"get", "getenv"}
-    is_getattr = isinstance(func, ast.Name) and func.id in {"getattr", "getenv"}
-    if (is_get or is_getattr) and len(node.args) >= 2:
+    is_getenv = isinstance(func, ast.Name) and func.id == "getenv"
+    if (is_get or is_getenv) and len(node.args) >= 2:
         found.append((node.lineno, "lookup fallback", node.args[1]))
     return found
 
@@ -188,6 +195,7 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "def build(*, provider: str = AIProvider.OPENAI) -> None: ...",
         'provider = config.provider or "cursor"',
         'provider = os.environ.get("LINTRO_AI_PROVIDER", "anthropic")',
+        'provider = getattr(cfg, "provider", "anthropic")',
         'provider = Field(default="openai")',
         'provider = Field("openai")',
         'provider = pydantic.Field("openai")',
@@ -201,6 +209,7 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "keyword-only-enum-default",
         "or-fallback",
         "env-lookup-fallback",
+        "getattr-fallback",
         "pydantic-field-default",
         "pydantic-field-positional-default",
         "pydantic-qualified-field-positional-default",
@@ -225,6 +234,32 @@ def test_ratchet_catches_a_default_provider(source: str) -> None:
         if _is_provider_literal(value)
     ]
     assert_that(flagged).described_as(source).is_not_empty()
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'provider = getattr(cfg, "provider")',
+        'provider = getattr(cfg, "anthropic")',
+    ],
+    ids=["getattr-without-a-fallback", "getattr-whose-attribute-is-a-vendor"],
+)
+def test_ratchet_ignores_a_getattr_with_no_fallback(source: str) -> None:
+    """Assert a two-argument ``getattr`` is not read as a default.
+
+    ``getattr`` puts its fallback third, so the second argument is the
+    attribute name. Reading it as the fallback both missed real defaults and
+    would fire on an attribute that happens to be named for a vendor.
+
+    Args:
+        source: A one-line module with a ``getattr`` that has no fallback.
+    """
+    flagged = [
+        shape
+        for _, shape, value in _default_shaped_values(ast.parse(source))
+        if _is_provider_literal(value)
+    ]
+    assert_that(flagged).described_as(source).is_empty()
 
 
 def test_ratchet_ignores_provider_names_outside_defaults() -> None:
