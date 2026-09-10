@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 from assertpy import assert_that
 
 from lintro.parsers.checkov.checkov_issue import CheckovIssue
+from lintro.parsers.checkov.checkov_parser import CHECKOV_PARSE_ERROR_CODE
 from lintro.tools.checkov.definition import CHECKOV_FILE_PATTERNS
 from tests.integration._tools import CHECKOV_PROBE_TIMEOUT, require_tool
 
@@ -161,6 +162,81 @@ def test_json_syntax_terraform_is_scanned(
     # nothing out of Terraform's JSON syntax.
     assert_that(result.issues_count).is_greater_than(0)
     assert_that(result.output or "").does_not_contain("found to check")
+
+
+#: Truncated HCL: the resource block is never closed, so checkov's Terraform
+#: parser cannot read the file and lists it under ``results.parsing_errors``.
+_UNPARSEABLE_HCL = 'resource "aws_s3_bucket" "broken" {\n  bucket = "x"\n'
+
+
+def test_unparseable_file_fails_the_run_and_keeps_real_findings(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    checkov_violation_file: str,
+    tmp_path: Path,
+) -> None:
+    """A file checkov cannot read is reported, and does not hide the rest.
+
+    The synthetic parser tests assert lintro's handling of a
+    ``results.parsing_errors`` payload; this locks the empirical premise that
+    the real binary emits one for truncated HCL, and that surfacing it does
+    not cost the findings from the files that did parse.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        checkov_violation_file: Path to the seeded-misconfiguration fixture.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    broken = tmp_path / "broken.tf"
+    broken.write_text(_UNPARSEABLE_HCL)
+    plugin = get_plugin("checkov")
+
+    result = plugin.check([str(broken), checkov_violation_file], {})
+
+    assert_that(result.success).is_false()
+    codes = {str(getattr(issue, "check_id", "")) for issue in (result.issues or [])}
+    assert_that(codes).contains(CHECKOV_PARSE_ERROR_CODE)
+    parse_issues = [
+        issue
+        for issue in (result.issues or [])
+        if getattr(issue, "check_id", "") == CHECKOV_PARSE_ERROR_CODE
+    ]
+    assert_that(parse_issues).is_not_empty()
+    assert_that(any("broken.tf" in issue.file for issue in parse_issues)).is_true()
+    # The seeded fixture's real policy failures are still reported.
+    assert_that([code for code in codes if code.startswith("CKV_AWS_")]).is_not_empty()
+
+
+def test_unparseable_file_fails_a_run_checkov_exits_zero_on(
+    get_plugin: Callable[[str], BaseToolPlugin],
+    checkov_clean_file: str,
+    tmp_path: Path,
+) -> None:
+    """Exit 0 with only a parsing error must not read as a clean scan.
+
+    Checkov derives its exit code from failed checks alone, so an unreadable
+    file alongside a clean one produces exit 0, an empty ``failed_checks`` and
+    a populated ``parsing_errors`` — the fail-open shape this plugin exists to
+    close. Verified against the real binary rather than a synthetic payload.
+
+    Args:
+        get_plugin: Fixture factory to get plugin instances.
+        checkov_clean_file: Path to the clean fixture.
+        tmp_path: Pytest fixture providing a temporary directory.
+    """
+    broken = tmp_path / "truncated.tf"
+    broken.write_text(_UNPARSEABLE_HCL)
+    plugin = get_plugin("checkov")
+
+    result = plugin.check([str(broken), checkov_clean_file], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.issues_count).is_equal_to(1)
+    issues = [
+        issue for issue in (result.issues or []) if isinstance(issue, CheckovIssue)
+    ]
+    assert_that(issues).is_length(1)
+    assert_that(issues[0].check_id).is_equal_to(CHECKOV_PARSE_ERROR_CODE)
+    assert_that(issues[0].file).contains("truncated.tf")
 
 
 def test_check_empty_directory(

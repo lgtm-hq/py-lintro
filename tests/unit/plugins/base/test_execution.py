@@ -15,7 +15,8 @@ from lintro.plugins.base import (
     DEFAULT_TIMEOUT,
     ExecutionContext,
 )
-from lintro.utils.project_detection import _VENDOR_SKIP_DIRS
+from lintro.utils.path_filtering import walk_files_with_excludes
+from lintro.utils.project_detection import _VENDOR_SKIP_DIRS, _iter_project_files
 
 from .conftest import NoFixPlugin
 
@@ -722,14 +723,40 @@ def test_default_exclude_patterns_is_not_empty() -> None:
     assert_that(DEFAULT_EXCLUDE_PATTERNS).is_not_empty()
 
 
-def test_vendored_terraform_is_pruned_by_discovery_and_detection() -> None:
-    """Both prune sets name ``.terraform``; neither alone is sufficient.
+def test_vendored_terraform_is_pruned_by_discovery_and_detection(
+    tmp_path: Path,
+) -> None:
+    """Neither walk reaches a ``.terraform`` download; both must prune it.
 
     Detection decides whether an IaC tool is selected at all, discovery
     decides which files reach its argv, so a vendored ``terraform init``
-    download is only kept away from checkov when both name the directory.
-    The requirement was previously carried by a comment alone.
+    download is only kept away from checkov when both walks skip it. Asserted
+    by running the walks rather than by comparing the two constants: a
+    refactor that stopped consulting either set would leave a membership
+    assertion green while vendored ``.tf`` files reached the scanner.
+
+    Args:
+        tmp_path: Temporary project directory.
     """
+    vendored = tmp_path / ".terraform" / "modules" / "x"
+    vendored.mkdir(parents=True)
+    (vendored / "vendored.tf").write_text('resource "aws_s3_bucket" "v" {}\n')
+    own = tmp_path / "main.tf"
+    own.write_text('output "noop" {\n  value = "ok"\n}\n')
+
+    discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*.tf"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    detected = [str(path) for path in _iter_project_files(tmp_path)]
+
+    assert_that(discovered).is_length(1)
+    assert_that(discovered[0]).ends_with("main.tf")
+    assert_that([path for path in detected if "vendored.tf" in path]).is_empty()
+    assert_that([path for path in detected if path.endswith("main.tf")]).is_length(1)
+    # Fast tripwires alongside the behavioural assertions above: these name the
+    # exact entry a future edit would have to remove.
     assert_that(DEFAULT_EXCLUDE_PATTERNS).contains(".terraform")
     assert_that(_VENDOR_SKIP_DIRS).contains(".terraform")
 

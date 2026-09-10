@@ -43,12 +43,19 @@ def _production_version_timeout() -> float:
         The default timeout in seconds.
     """
     source = _VERSION_CHECKING.read_text(encoding="utf-8")
-    match = re.search(r"default_timeout = ([0-9.]+)", source)
-    # Fail loudly rather than defaulting: treating "literal not found" as
-    # "the value is 30.0" would keep this green through a reformat while the
-    # invariant it exists to pin stopped being enforced.
-    assert_that(match).described_as("_get_version_timeout default").is_not_none()
-    return float(match.group(1))  # type: ignore[union-attr]
+    # Anchored to the named function's body, not the whole module: an
+    # unanchored search binds to whatever ``default_timeout`` literal happens
+    # to come first in the file, so a later same-named assignment elsewhere
+    # would silently rebind the floor this test enforces.
+    start = source.index("def _get_version_timeout")
+    body = source[start:]
+    next_def = body.find("\ndef ", 1)
+    if next_def != -1:
+        body = body[:next_def]
+    matches = re.findall(r"default_timeout = ([0-9.]+)", body)
+    # Exactly one, so a second literal fails loudly instead of picking one.
+    assert_that(matches).described_as("_get_version_timeout default").is_length(1)
+    return float(matches[0])
 
 
 #: lintro's own default version-probe budget, from ``_get_version_timeout``.

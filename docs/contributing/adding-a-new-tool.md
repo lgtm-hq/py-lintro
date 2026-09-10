@@ -321,14 +321,17 @@ Choose the path that matches the tool's distribution mechanism.
    `/root/.local/share/uv/tools`, unreadable to the image's non-root `lintro` user). So
    Step 10 has extra work for it, beyond what the "npm/bun tools only" wording there
    says: point `UV_TOOL_DIR` at a world-readable location under `/opt` (checkov uses
-   `/opt/uv-tools`, next to `/opt/semgrep-venv`), add that directory to the
-   `chgrp`/`chmod` block over `/opt/*` that follows the `useradd lintro` line in
-   **both** Dockerfiles (`Dockerfile` and `docker/tools.Dockerfile`; `/opt/semgrep-venv`
-   is the worked example), and add the tool to the non-root verification block — root
-   being able to run the shim says nothing about whether `lintro` can reach the
-   interpreter behind it. The checklist's "binary tools only" Renovate line applies to
-   this path too: the pin lives in `TOOL_VERSIONS`, so it needs a custom manager, with
-   `pypi` as the datasource rather than `github-releases`.
+   `/opt/uv-tools`, next to `/opt/semgrep-venv`), and add that directory to the
+   `chgrp`/`chmod` block that enumerates the `/opt` tool directories in **both**
+   Dockerfiles. In `Dockerfile` that block is part of the `RUN` that also does
+   `useradd lintro`; in `docker/tools.Dockerfile` it is a standalone
+   `RUN chgrp -R tools /opt/...` after the `install-tools.sh --docker` step (that image
+   creates no `lintro` user). `/opt/semgrep-venv` is the worked example in both. Then
+   add the tool to the non-root verification block — root being able to run the shim
+   says nothing about whether `lintro` can reach the interpreter behind it. The
+   checklist's "binary tools only" Renovate line applies to this path too: the pin lives
+   in `TOOL_VERSIONS`, so it needs a custom manager, with `pypi` as the datasource
+   rather than `github-releases`.
 
 3. **`lintro/tools/manifest.src.json`** — add the tool entry with `install.type = "pip"`
    and `install.package = "<pypi-package>"`, and **no `version` key**; the generator
