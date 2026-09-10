@@ -459,6 +459,56 @@ def test_runner_honours_an_explicit_codex_session_dir(tmp_path: Path) -> None:
     assert_that(args).contains(f"{override}:{CODEX_MOUNT_TARGET}")
 
 
+def test_runner_skips_the_mount_when_an_explicit_dir_holds_no_session(
+    tmp_path: Path,
+) -> None:
+    """An override is still gated on the session actually being there.
+
+    ``CODEX_SESSION_DIR`` names where to look, not a promise that the restore
+    succeeded; mounting an empty directory would hand codex a CODEX_HOME with
+    no auth.json and turn a missing credential into a confusing CLI error.
+
+    Args:
+        tmp_path: An existing but empty override directory.
+    """
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "2",
+            "HOME": "/nonexistent",
+            "CODEX_SESSION_DIR": str(tmp_path),
+        },
+    )
+
+    assert_that(args).does_not_contain(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that([arg for arg in args if CODEX_MOUNT_TARGET in arg]).is_empty()
+
+
+def test_runner_never_mounts_a_session_on_the_free_tier(tmp_path: Path) -> None:
+    """Tier 1 runs help probes only, so a session must not reach it.
+
+    The mount lives inside the tier-2 branch. Tier 1 spends no quota and needs
+    no credential, and handing it one would widen what a cheap always-on gate
+    can touch.
+
+    Args:
+        tmp_path: Stand-in home holding a restored session.
+    """
+    _codex_session(tmp_path)
+
+    args = _runner_docker_args(
+        env={
+            "IMAGE": "example.invalid/img@sha256:0",
+            "TIER": "1",
+            "HOME": str(tmp_path),
+            "GITHUB_ACTIONS": "true",
+        },
+    )
+
+    assert_that(args).does_not_contain(f"CODEX_HOME={CODEX_MOUNT_TARGET}")
+    assert_that([arg for arg in args if CODEX_MOUNT_TARGET in arg]).is_empty()
+
+
 def test_runner_copies_the_default_session_for_a_local_run(tmp_path: Path) -> None:
     """Off a runner, the caller's own codex login must not be the mount source.
 
