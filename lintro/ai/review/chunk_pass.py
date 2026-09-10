@@ -10,6 +10,12 @@ the passes in :mod:`lintro.ai.review.response_pipeline`,
 :mod:`lintro.ai.review.checklist_pass` and
 :mod:`lintro.ai.review.adversarial_pass`, which decide what each call asks.
 
+Only the main call is load-bearing. The two optional passes run through
+:func:`~lintro.ai.review.depth_degradation.run_degradable_depth_pass`, so an
+``AIError`` from either degrades the chunk to its main-pass result and records
+a coverage degradation instead of discarding findings the run already paid for
+(#2395). A cost-cap stop still aborts, as it does everywhere else.
+
 Every provider call below goes through
 :mod:`lintro.ai.review.provider_call`, the single seam tests replace.
 """
@@ -23,6 +29,10 @@ from lintro.ai.enums import AITransport
 from lintro.ai.review.adversarial_pass import run_adversarial_pass
 from lintro.ai.review.checklist_pass import generate_extra_checklist
 from lintro.ai.review.cli_limits import resolve_cli_findings_cap
+from lintro.ai.review.depth_degradation import run_degradable_depth_pass
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.merge import ChunkReviewPartial, merge_findings
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.progress import NullReviewProgress, StepTrackingProgress
@@ -36,6 +46,7 @@ from lintro.ai.review.session import aborted_before_completion, is_cost_cap_stop
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 
 if TYPE_CHECKING:
+    from lintro.ai.review.models.coverage_degradation import CoverageDegradation
     from lintro.ai.review.models.review_chunk import ReviewChunk
     from lintro.ai.review.session import ChunkRunPlan
 
@@ -49,6 +60,11 @@ async def review_chunk(
     plan: ChunkRunPlan,
 ) -> tuple[ChunkReviewPartial, int]:
     """Run depth-controlled review for a single chunk.
+
+    A failed depth-2 or depth-3 pass degrades the chunk rather than ending it:
+    the partial keeps the main pass's findings and carries the recorded
+    :class:`~lintro.ai.review.models.coverage_degradation.CoverageDegradation`
+    (#2395).
 
     Args:
         chunk: The chunk to review.
@@ -68,23 +84,31 @@ async def review_chunk(
     )
     extra_checklist = ""
     extra_checklist_usage: ChunkReviewPartial | None = None
+    depth_degradations: tuple[CoverageDegradation, ...] = ()
     if plan.depth >= 2:
         tracker.on_step(chunk_index=chunk_index, step="generating questions")
         with recorder.phase(name=ReviewPhase.GENERATED_QUESTIONS):
+            generated, depth_degradations = await run_degradable_depth_pass(
+                call=generate_extra_checklist(
+                    chunk=chunk,
+                    context=plan.context,
+                    provider=plan.provider,
+                    ai_config=ai_config,
+                    budget=plan.budget,
+                    next_generated_checklist_id=next_generated_checklist_id,
+                    repo_root=plan.repo_root,
+                    use_one_shot=plan.use_one_shot,
+                ),
+                reason=CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
+                chunk_index=chunk_index,
+                label="depth-2 generated-questions pass",
+            )
+        if generated is not None:
             (
                 extra_checklist,
                 next_generated_checklist_id,
                 extra_checklist_usage,
-            ) = await generate_extra_checklist(
-                chunk=chunk,
-                context=plan.context,
-                provider=plan.provider,
-                ai_config=ai_config,
-                budget=plan.budget,
-                next_generated_checklist_id=next_generated_checklist_id,
-                repo_root=plan.repo_root,
-                use_one_shot=plan.use_one_shot,
-            )
+            ) = generated
 
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
     # Gate before the main provider call so intra-chunk (depth-2/3) work
@@ -126,7 +150,7 @@ async def review_chunk(
     partial = replace(
         payload_to_partial(response=response, payload=payload),
         files=tuple(chunk.files),
-        coverage_degradations=chunk_degradations,
+        coverage_degradations=(*depth_degradations, *chunk_degradations),
     )
 
     if extra_checklist_usage is not None:
@@ -135,21 +159,35 @@ async def review_chunk(
     if plan.depth >= 3:
         tracker.on_step(chunk_index=chunk_index, step="adversarial sweep")
         with recorder.phase(name=ReviewPhase.ADVERSARIAL):
-            adversarial = await run_adversarial_pass(
-                chunk=chunk,
-                provider=plan.provider,
-                ai_config=ai_config,
-                prior_findings=partial.findings,
-                budget=plan.budget,
-                repo_root=plan.repo_root,
-                use_one_shot=plan.use_one_shot,
+            adversarial, sweep_degradations = await run_degradable_depth_pass(
+                call=run_adversarial_pass(
+                    chunk=chunk,
+                    provider=plan.provider,
+                    ai_config=ai_config,
+                    prior_findings=partial.findings,
+                    budget=plan.budget,
+                    repo_root=plan.repo_root,
+                    use_one_shot=plan.use_one_shot,
+                ),
+                reason=CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
+                chunk_index=chunk_index,
+                label="depth-3 adversarial sweep",
             )
-        partial = replace(
-            _add_usage(partial=partial, extra=adversarial),
-            findings=merge_findings(
-                findings_groups=[partial.findings, adversarial.findings],
-            ),
-        )
+        if sweep_degradations:
+            partial = replace(
+                partial,
+                coverage_degradations=(
+                    *partial.coverage_degradations,
+                    *sweep_degradations,
+                ),
+            )
+        if adversarial is not None:
+            partial = replace(
+                _add_usage(partial=partial, extra=adversarial),
+                findings=merge_findings(
+                    findings_groups=[partial.findings, adversarial.findings],
+                ),
+            )
 
     return partial, next_generated_checklist_id
 

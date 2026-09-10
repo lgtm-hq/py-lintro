@@ -16,6 +16,7 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_constants import STICKY_FOOTER, STICKY_MARKER
 from lintro.ai.review.github_contract import RenderLimits
+from lintro.ai.review.github_notes import format_partial_review_label
 from lintro.ai.review.github_render import (
     Section,
     _format_checklist_appendix_markdown,
@@ -152,6 +153,7 @@ def round_sections(
                 round_number=plan.round_number,
                 head_sha=plan.head_sha,
                 verdict=plan.verdict,
+                partial=format_partial_review_label(metadata=result.metadata),
             ),
         ),
         Section(

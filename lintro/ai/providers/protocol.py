@@ -100,6 +100,14 @@ class ProviderMetadata:
             every provider, including CLI-only ones, so an unset transport
             still produces the pre-plugin error text (see
             :meth:`lintro.ai.providers.cursor.plugin.CursorPlugin.build`).
+        cli_default_model: Model sent on CLI transport when the user names none
+            and the CLI is authenticated by a subscription session rather than
+            an API key. ``None`` — the default, and what OpenAI declares —
+            means send no model flag at all and let the binary pick its own,
+            which is the only choice guaranteed to be one the plan offers
+            (#2537). A provider whose subscription catalogue is stable may name
+            a model here instead. Ignored by API transport, which always
+            resolves to *default_model*.
         sdk_package: Distribution installed for API transport, or ``None``
             when the provider has no API transport (CLI-only vendors).
         cli_binary: Executable looked up on ``PATH`` for CLI transport, or
@@ -127,6 +135,7 @@ class ProviderMetadata:
     default_api_key_env: str
     supported_transports: frozenset[AITransport]
     default_transport: AITransport
+    cli_default_model: str | None = None
     sdk_package: str | None = None
     cli_binary: str | None = None
     cli_contract_id: str | None = None
