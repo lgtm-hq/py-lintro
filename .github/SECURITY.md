@@ -145,13 +145,13 @@ permissions:
 
 ## Permission Scopes by Workflow
 
-| Workflow                   | Permissions                                                                           | Justification                     |
-| -------------------------- | ------------------------------------------------------------------------------------- | --------------------------------- |
-| `docker-ci.yml`            | `contents: read` (+ per-job)                                                          | CI pipeline + quality             |
-| `test-ci.yml`              | `contents: read` (+ per-job)                                                          | Unit tests                        |
-| `publish-pypi-on-tag.yml`  | `{}` + per-job `contents`/`id-token`/`attestations`/`security-events`/`actions: read` | Release, OIDC, SBOM, asset reuse  |
-| `build-binary.yml`         | `{}` + per-job `contents: write, actions: read`                                       | Release assets; asset reuse check |
-| `docker-build-publish.yml` | `contents: read, packages: write`                                                     | Push to GHCR                      |
+| Workflow                   | Permissions                                                                                             | Justification                          |
+| -------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `docker-ci.yml`            | `contents: read` (+ per-job)                                                                            | CI pipeline + quality                  |
+| `test-ci.yml`              | `contents: read` (+ per-job)                                                                            | Unit tests                             |
+| `publish-pypi-on-tag.yml`  | `{}` + per-job `contents`/`id-token`/`attestations`/`security-events`/`actions: read`/`packages: write` | Release, OIDC, SBOM, GHCR, asset reuse |
+| `build-binary.yml`         | `{}` + per-job `contents: write, actions: read`                                                         | Release assets; asset reuse check      |
+| `docker-build-publish.yml` | `contents: read, packages: write`                                                                       | Push to GHCR                           |
 
 ## Supply Chain Security
 

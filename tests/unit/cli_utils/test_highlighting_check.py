@@ -1,4 +1,4 @@
-"""Tests for the syntax-highlighting build self-check (#2484)."""
+"""Tests for the syntax-highlighting build self-check (#2514)."""
 
 from __future__ import annotations
 
@@ -92,6 +92,36 @@ def test_doctor_self_check_flag_exits_zero_and_skips_the_probes() -> None:
     assert_that(result.output).contains("syntax highlighting python")
     # A tool probe would render the category headings; none may appear.
     assert_that(result.output).does_not_contain("Bundled Python tools")
+
+
+def test_doctor_self_check_flag_exits_nonzero_when_the_check_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A degraded lexer fails the gate through the CLI, not just in the check.
+
+    Every other CLI test here drives the passing path, which is also all CI
+    ever sees, so nothing proved that a real ``ok=False`` reaches the process
+    exit code. That mapping is the whole contract
+    ``scripts/build/verify_built_binary.sh`` relies on: without it a binary
+    shipping unhighlighted output would verify green (#2514).
+
+    Args:
+        monkeypatch: pytest attribute patcher.
+    """
+    from pygments.lexers.special import TextLexer
+
+    monkeypatch.setattr(
+        "pygments.lexers.get_lexer_by_name",
+        lambda *args, **kwargs: TextLexer(),
+    )
+    runner = CliRunner()
+    result = runner.invoke(doctor_command, ["--self-check-highlighting"])
+
+    assert_that(result.exit_code).described_as(
+        "a degraded lexer must fail the build gate",
+    ).is_equal_to(1)
+    assert_that(result.output).contains("FAIL syntax highlighting")
+    assert_that(result.output).contains("plain-text fallback lexer")
 
 
 def test_doctor_self_check_flag_is_hidden_from_help() -> None:

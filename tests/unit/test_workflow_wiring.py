@@ -1891,8 +1891,17 @@ def _evaluate_upload_gate(
     ):
         expr = expr.replace(token, repr(value))
     expr = expr.replace("&&", " and ").replace("||", " or ")
+    # A parenthesised inversion is the other shape an inverted rewrite takes,
+    # and the token table above cannot reach it. Map it onto Python's ``not``,
+    # which the restricted AST evaluator already understands, so such a rewrite
+    # also fails on semantics rather than on tokenisation.
+    expr = re.sub(r"!\s*\(", "not (", expr)
 
-    residue = re.sub(r"\bTrue\b|\bFalse\b|\band\b|\bor\b|[()\s]", "", expr)
+    residue = re.sub(
+        r"\bTrue\b|\bFalse\b|\bnot\b|\band\b|\bor\b|[()\s]",
+        "",
+        expr,
+    )
     assert_that(residue).described_as(
         f"unrecognised operand in {condition!r} (reduced to {expr!r})",
     ).is_empty()
@@ -2249,6 +2258,15 @@ def test_renovate_manages_build_binary_python_pin() -> None:
     assert_that(truncated.group("version")).described_as(
         "a three-component release must be written back as X.Y",
     ).is_equal_to("3.99")
+    # Truncation happens before Renovate's versioning sees the string, so an
+    # unanchored template would turn a prerelease feed entry into a
+    # stable-looking X.Y and offer the binary build an rc interpreter. The
+    # template must decline those entries instead, which drops them from the
+    # release list rather than extracting them.
+    for prerelease in ("3.99.0rc1", "3.99.0a1", "3.99.0b2"):
+        assert_that(truncation.match(prerelease)).described_as(
+            f"extractVersionTemplate must not extract a version from {prerelease}",
+        ).is_none()
     # And the truncated value must still satisfy the manager's own matchStrings,
     # so the next extraction pass finds the pin again.
     for match_string in manager["matchStrings"]:
@@ -5652,6 +5670,42 @@ def test_permission_shortfalls_detects_a_withheld_scope(
     assert_that(shortfalls).is_length(1)
     assert_that(shortfalls[0]).contains("actions=none")
     assert_that(shortfalls[0]).contains("requests actions=read")
+
+
+def test_permission_shortfalls_detects_a_read_grant_against_a_write_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller granting read against a write request is reported as a gap.
+
+    The withheld-scope test above only exercises the ``none``/``read`` corner
+    of the message. The ``read``/``write`` rendering is the shape a callee
+    bumping a scope to write produces, and it is the one that startup-fails a
+    tag run, so it needs its own synthetic case; with it both level ternaries
+    in the detector are covered (#2514).
+
+    Args:
+        monkeypatch: pytest attribute patcher, used to substitute a synthetic
+            callee workflow for the on-disk one.
+    """
+    callee = {
+        "permissions": {},
+        "jobs": {
+            "compile": {"permissions": {"actions": "write"}},
+        },
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: callee,
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="caller.yml::calls",
+        caller_grant=_normalize_permissions({"actions": "read"}) or {},
+        callee_name="callee.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_length(1)
+    assert_that(shortfalls[0]).contains("grants actions=read")
+    assert_that(shortfalls[0]).contains("requests actions=write")
 
 
 def test_permission_shortfalls_is_silent_when_the_grant_covers_the_callee(

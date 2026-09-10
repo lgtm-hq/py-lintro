@@ -1139,14 +1139,14 @@ def test_doctor_order_lines_are_empty_when_selection_fails() -> None:
     assert_that(lines).is_empty()
 
 
-# ── #2484 highlighting self-check ────────────────────────────────────
+# ── #2514 highlighting self-check ────────────────────────────────────
 
 
 def test_doctor_self_check_highlighting_reports_ok_and_skips_probes() -> None:
     """The hidden build-check flag renders OK lines and exits 0 without probing.
 
     The release pipeline runs this against the frozen binary, where no external
-    tool is installed, so the tool probe must never run (#2484).
+    tool is installed, so the tool probe must never run (#2514).
     """
     result_ok = HighlightingCheckResult(
         ok=True,
@@ -1154,8 +1154,11 @@ def test_doctor_self_check_highlighting_reports_ok_and_skips_probes() -> None:
         failures=(),
     )
     runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
 
     with (
+        p1,
+        p2,
         patch(
             "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
             return_value=result_ok,
@@ -1186,8 +1189,11 @@ def test_doctor_self_check_highlighting_fails_with_exit_one() -> None:
         failures=("python fell back to TextLexer",),
     )
     runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
 
     with (
+        p1,
+        p2,
         patch(
             "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
             return_value=result_fail,
@@ -1219,16 +1225,31 @@ def test_doctor_self_check_highlighting_rejects_other_output_flags(
 
     ``--fix`` matters most: the self-check branch exits before ``_run_fix``,
     so a combined invocation would install nothing and still report success
-    (#2484).
+    (#2514).
+
+    ``check_ai_liveness`` is patched and asserted unused so the guard's
+    *placement* is pinned, not only its verdict: exit 2 is produced wherever
+    the guard sits, so a guard moved below the AI checks would keep every
+    other assertion green while spending a real provider call on an
+    invocation that was always going to be rejected.
 
     Args:
         conflicting_flag: The flag combined with ``--self-check-highlighting``.
     """
     runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
 
-    with patch(
-        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
-    ) as mock_check:
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+        ) as mock_check,
+        patch(
+            "lintro.cli_utils.commands.doctor.check_ai_liveness",
+            return_value=[],
+        ) as mock_liveness,
+    ):
         result = runner.invoke(
             doctor_command,
             ["--self-check-highlighting", conflicting_flag],
@@ -1237,6 +1258,9 @@ def test_doctor_self_check_highlighting_rejects_other_output_flags(
     assert_that(result.exit_code).is_equal_to(2)
     assert_that(result.output).contains("--self-check-highlighting cannot be combined")
     assert_that(mock_check.call_count).is_equal_to(0)
+    assert_that(mock_liveness.call_count).described_as(
+        "a rejected invocation must not spend the provider call first",
+    ).is_equal_to(0)
 
 
 def test_doctor_self_check_highlighting_fails_closed_on_stray_failures() -> None:
@@ -1246,7 +1270,7 @@ def test_doctor_self_check_highlighting_fails_closed_on_stray_failures() -> None
     agree today. This is a release gate run against the frozen binary, so the
     exit code is pinned to fail closed: a future result type that lets the two
     fields disagree must not turn a recorded failure into a green build
-    (#2484).
+    (#2514).
     """
     inconsistent = HighlightingCheckResult(
         ok=True,
@@ -1254,10 +1278,15 @@ def test_doctor_self_check_highlighting_fails_closed_on_stray_failures() -> None
         failures=("python fell back to TextLexer",),
     )
     runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
 
-    with patch(
-        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
-        return_value=inconsistent,
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+            return_value=inconsistent,
+        ),
     ):
         result = runner.invoke(doctor_command, ["--self-check-highlighting"])
 
@@ -1265,6 +1294,33 @@ def test_doctor_self_check_highlighting_fails_closed_on_stray_failures() -> None
     assert_that(result.output).contains(
         "FAIL syntax highlighting python fell back to TextLexer",
     )
+
+
+def test_doctor_self_check_highlighting_fails_closed_on_a_silent_not_ok() -> None:
+    """``ok=False`` with no recorded failure still exits non-zero.
+
+    The sibling test above pins one half of the disagreement. This pins the
+    other: an exit condition reading ``result.failures`` alone would green the
+    release gate on a producer that cleared ``ok`` without appending a line.
+    Together the two fix the predicate as ``failures or not ok`` (#2514).
+    """
+    silent = HighlightingCheckResult(ok=False, details=(), failures=())
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+            return_value=silent,
+        ),
+    ):
+        result = runner.invoke(doctor_command, ["--self-check-highlighting"])
+
+    assert_that(result.exit_code).described_as(
+        "a check that is not ok must fail the gate even with no failure line",
+    ).is_equal_to(1)
 
 
 def test_doctor_self_check_highlighting_escapes_rich_markup() -> None:
@@ -1281,10 +1337,15 @@ def test_doctor_self_check_highlighting_escapes_rich_markup() -> None:
         failures=("[not-a-tag] boom",),
     )
     runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
 
-    with patch(
-        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
-        return_value=bracketed,
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+            return_value=bracketed,
+        ),
     ):
         result = runner.invoke(doctor_command, ["--self-check-highlighting"])
 
@@ -1295,10 +1356,15 @@ def test_doctor_self_check_highlighting_escapes_rich_markup() -> None:
 def test_doctor_self_check_highlighting_still_rejects_unknown_tools() -> None:
     """``--tools`` is validated before the self-check short-circuits."""
     runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
 
-    with patch(
-        "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
-    ) as mock_check:
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.cli_utils.commands.doctor.check_syntax_highlighting",
+        ) as mock_check,
+    ):
         result = runner.invoke(
             doctor_command,
             ["--self-check-highlighting", "--tools", "definitely-not-a-tool"],
