@@ -245,3 +245,26 @@ def test_archived_fit_does_not_iterate_the_history_stage(
     assert_that(primary).contains("Per-round expanders live on the archive comment")
     assert_that(seen).is_not_empty()
     assert_that([limit for limit in seen if limit is not None]).is_empty()
+
+
+def test_nothing_open_branch_still_marks_pruned_fixed_rows() -> None:
+    """A round that fixed everything still says which fixed rows went.
+
+    ``limits.resolved=0`` is the state ``fit_body`` reaches at its open-finding
+    stage. With nothing open, the section takes its "Nothing open" branch,
+    which is the one path that renders no table at all — and so the one most
+    likely to lose the marker along with the rows.
+    """
+    records = _resolved_records(count=4, round_number=2)
+    plan = StickyPlan(
+        match=FindingMatchResult(records=records),
+        verdict=ReviewVerdict.READY,
+        round_number=2,
+    )
+
+    section = _findings_round_section(plan=plan, limits=RenderLimits(resolved=0))
+
+    assert_that(section).contains("0 open · 4 fixed this round")
+    assert_that(section).contains("✅ Nothing open.")
+    assert_that(section).contains("4 more fixed findings not listed**")
+    assert_that(section).does_not_contain("~~Fixed thing")

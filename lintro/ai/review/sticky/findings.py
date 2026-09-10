@@ -38,6 +38,27 @@ from lintro.ai.review.sticky.cells import (
 from lintro.ai.review.sticky.constants import _QUESTION_EMOJI, _TITLE_LIMIT
 
 
+def _open_pruning_marker(*, dropped: int) -> str:
+    """Return the one marker naming open findings the size budget dropped.
+
+    Both surfaces that can shrink an open-findings table — the round's Δ table
+    and the standalone index — say the same thing when they drop rows, so they
+    say it from one place (#2418).
+
+    Args:
+        dropped: Open findings not rendered.
+
+    Returns:
+        str: The blockquote marker line.
+    """
+    return (
+        f"> ✂️ **{dropped} more open "
+        f"{_plural(count=dropped, noun='finding')} not listed** to fit "
+        "GitHub's size limit — see the inline comments and the workflow "
+        "run log."
+    )
+
+
 def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
     """Render the Findings heading, the convergence note, and the Δ table.
 
@@ -139,15 +160,7 @@ def _pruning_markers(*, dropped_open: int, dropped_fixed: int) -> list[str]:
     """
     markers: list[str] = []
     if dropped_open > 0:
-        markers.extend(
-            [
-                "",
-                f"> ✂️ **{dropped_open} more open "
-                f"{_plural(count=dropped_open, noun='finding')} not listed** to fit "
-                "GitHub's size limit — see the inline comments and the workflow "
-                "run log.",
-            ],
-        )
+        markers.extend(["", _open_pruning_marker(dropped=dropped_open)])
     if dropped_fixed > 0:
         markers.extend(
             [
@@ -219,15 +232,7 @@ def _open_findings_section(
         )
     dropped = total - len(records)
     if dropped > 0:
-        lines.extend(
-            [
-                "",
-                f"> ✂️ **{dropped} more open "
-                f"{_plural(count=dropped, noun='finding')} not listed** to fit "
-                "GitHub's size limit — see the inline comments and the workflow "
-                "run log.",
-            ],
-        )
+        lines.extend(["", _open_pruning_marker(dropped=dropped)])
     return "\n".join(lines)
 
 
