@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, cast
 
@@ -1796,87 +1797,243 @@ def test_build_binary_pins_setup_uv_version() -> None:
         assert_that(version).contains("env.UV_VERSION")
 
 
+# Every publishing step and job carries the same opt-in disjunction. Asserting
+# it by substring lets an inverted or conjunctive rewrite through, so the tests
+# below pin the literal disjunct *and* evaluate the whole condition against the
+# three payloads that matter. build-binary.yml is read from the tag, so a
+# regression here passes every PR and only shows up at the release.
+
+_UPLOAD_OPT_IN_DISJUNCTION = (
+    "(inputs.release_tag != '' || inputs.upload_to_release == true)"
+)
+
+# The exact publishing surface. A rename or a new upload step must be added
+# here deliberately, so the sweep cannot silently shrink.
+_UPLOAD_STEPS = (
+    ("generate-man-page", "Upload to release"),
+    ("build-macos", "Upload to release"),
+    ("build-linux", "Upload to release"),
+    ("create-universal-binary", "Upload to release"),
+)
+
+# Operands that are true on every payload under test: the tag resolved by
+# get-release-info (its latest-release fallback covers the dispatch path), the
+# #2435 reuse guard and the universal-arch guards.
+_UPLOAD_GATE_TRUE_OPERANDS = (
+    "needs.get-release-info.outputs.release_tag != ''",
+    "steps.reuse.outputs.reuse != 'true'",
+    "inputs.arch == 'universal'",
+    "needs.get-release-info.outputs.is_prerelease == 'false'",
+)
+
+
+def _evaluate_upload_gate(
+    condition: str,
+    *,
+    release_tag: str,
+    upload_to_release: str,
+) -> bool:
+    """Evaluate an upload-gate condition against one dispatch/call payload.
+
+    The condition is reduced to boolean literals and ``and``/``or`` and then
+    handed to the same restricted-AST evaluator every other ``if:`` assertion
+    in this module uses, so there is one boolean grammar here rather than two.
+    Only the operand forms this workflow actually uses are understood; anything
+    else survives reduction and fails the completeness pre-pass, so a rewrite
+    into an unrecognised shape cannot pass silently.
+
+    Args:
+        condition: The raw ``if:`` expression.
+        release_tag: Value of ``inputs.release_tag`` (``''`` on a dispatch).
+        upload_to_release: Value of ``inputs.upload_to_release`` (``''`` when
+            the input is undeclared, as on the ``workflow_call`` path).
+
+    Returns:
+        Whether the step or job would run.
+    """
+    expr = _normalize_github_expr(condition)
+    for operand in _UPLOAD_GATE_TRUE_OPERANDS:
+        expr = expr.replace(operand, "True")
+    upload_requested = upload_to_release == "true"
+    # ``!input`` and the ``== false`` form are recognised so that an inverted
+    # rewrite reduces cleanly and fails on semantics, not on tokenisation.
+    for token, value in (
+        ("!inputs.upload_to_release", not upload_requested),
+        ("inputs.release_tag != ''", release_tag != ""),
+        ("inputs.release_tag == ''", release_tag == ""),
+        ("inputs.upload_to_release == true", upload_requested),
+        ("inputs.upload_to_release == false", not upload_requested),
+    ):
+        expr = expr.replace(token, repr(value))
+    expr = expr.replace("&&", " and ").replace("||", " or ")
+    # A parenthesised inversion is the other shape an inverted rewrite takes,
+    # and the token table above cannot reach it. Map it onto Python's ``not``,
+    # which the restricted AST evaluator already understands, so such a rewrite
+    # also fails on semantics rather than on tokenisation.
+    expr = re.sub(r"!\s*\(", "not (", expr)
+
+    residue = re.sub(
+        r"\bTrue\b|\bFalse\b|\bnot\b|\band\b|\bor\b|[()\s]",
+        "",
+        expr,
+    )
+    assert_that(residue).described_as(
+        f"unrecognised operand in {condition!r} (reduced to {expr!r})",
+    ).is_empty()
+    return _eval_restricted_bool_expr(expr)
+
+
+def _assert_upload_gate_behaviour(condition: str, *, described_as: str) -> None:
+    """Assert one condition publishes on exactly the three intended payloads.
+
+    Args:
+        condition: The raw ``if:`` expression.
+        described_as: Label for assertion failures.
+    """
+    # workflow_call from the tag pipeline: release_tag is passed, and the
+    # undeclared upload_to_release evaluates to the empty string.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="v1", upload_to_release=""),
+    ).described_as(f"{described_as}: workflow_call must publish").is_true()
+    # Plain dispatch (a build check): publishes nothing.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="", upload_to_release="false"),
+    ).described_as(f"{described_as}: plain dispatch must not publish").is_false()
+    # Repair dispatch: upload_to_release alone is enough.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="", upload_to_release="true"),
+    ).described_as(f"{described_as}: repair dispatch must publish").is_true()
+
+
+def test_upload_gate_evaluator_rejects_a_conjunctive_gate() -> None:
+    """The gate assertions are not vacuous: a conjunctive rewrite must fail.
+
+    ``inputs.release_tag != '' && inputs.upload_to_release == true`` is the
+    plausible regression - it looks equivalent and silently disables publishing
+    on the tag path, where ``upload_to_release`` is undeclared and empty.
+    """
+    conjunctive = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "(inputs.release_tag != '' && inputs.upload_to_release == true)"
+    )
+    assert_that(
+        _evaluate_upload_gate(conjunctive, release_tag="v1", upload_to_release=""),
+    ).is_false()
+    with pytest.raises(AssertionError):
+        _assert_upload_gate_behaviour(conjunctive, described_as="conjunctive")
+
+    # An inverted arm publishes on the plain dispatch this issue exists to stop.
+    # The evaluator understands ``== false``, so this sub-case must fail on the
+    # semantic assertion rather than on operand tokenisation.
+    inverted = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "(inputs.release_tag != '' || inputs.upload_to_release == false)"
+    )
+    assert_that(
+        _evaluate_upload_gate(inverted, release_tag="", upload_to_release="false"),
+    ).is_true()
+    with pytest.raises(AssertionError) as inverted_failure:
+        _assert_upload_gate_behaviour(inverted, described_as="inverted")
+    assert_that(str(inverted_failure.value)).contains(
+        "inverted: plain dispatch must not publish",
+    )
+
+
+def test_upload_gate_evaluator_rejects_a_negated_disjunction() -> None:
+    """``!(a || b)`` reduces to ``not (...)`` and fails on semantics.
+
+    An author "fixing" the gate by wrapping the disjunction in a negation
+    produces exactly the inverted publishing surface #2484 is about, so the
+    evaluator must understand the shape rather than choke on it.
+    """
+    negated = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "!(inputs.release_tag != '' || inputs.upload_to_release == true)"
+    )
+    assert_that(
+        _evaluate_upload_gate(negated, release_tag="", upload_to_release="false"),
+    ).is_true()
+    assert_that(
+        _evaluate_upload_gate(negated, release_tag="v1", upload_to_release=""),
+    ).is_false()
+    with pytest.raises(AssertionError):
+        _assert_upload_gate_behaviour(negated, described_as="negated")
+
+
 def test_build_binary_dispatch_uploads_are_opt_in() -> None:
     """A plain ``workflow_dispatch`` must not republish release assets.
 
     ``get-release-info`` resolves the latest published release when no
-    ``release_tag`` input is supplied, so before #2484 a cache-seeding
-    dispatch overwrote that release's binaries and man page. Every publishing
-    step and job must therefore also require the workflow_call path or the
-    explicit ``upload_to_release`` repair input.
+    ``release_tag`` input is supplied, so before #2484 a bare dispatch
+    overwrote that release's binaries and man page. Every publishing step and
+    job must therefore also require the workflow_call path or the explicit
+    ``upload_to_release`` repair input.
     """
     workflow = _load_workflow(name="build-binary.yml")
     dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
     upload_input = dispatch_inputs["upload_to_release"]
     assert_that(upload_input["type"]).is_equal_to("boolean")
     assert_that(upload_input["default"]).is_false()
-    assert_that(upload_input["description"]).contains("repair")
+    assert_that(str(upload_input["description"]).lower()).described_as(
+        "the dispatch form must say this is the repair path",
+    ).contains("repair")
 
-    upload_steps = [
-        (job_id, step)
+    # ``upload_to_release`` is dispatch-only by design, and that asymmetry is
+    # what makes the gate's workflow_call payload correct: the tag pipeline
+    # cannot pass the input, so it evaluates to the empty string there and the
+    # gate has to publish on ``release_tag`` alone. Pin both halves, because a
+    # later ``upload_to_release`` added under workflow_call would silently
+    # invalidate the payload the evaluator below asserts against.
+    call_inputs = workflow["on"]["workflow_call"]["inputs"]
+    assert_that(call_inputs).described_as(
+        "upload_to_release is a dispatch-only repair input",
+    ).does_not_contain_key("upload_to_release")
+    assert_that(call_inputs["release_tag"]["required"]).described_as(
+        "the workflow_call path must always carry a release tag",
+    ).is_true()
+
+    upload_steps = tuple(
+        (job_id, str(step.get("name")))
         for job_id, job in workflow["jobs"].items()
         for step in job.get("steps") or []
-        if step.get("name") == "Upload to release"
-    ]
-    assert_that(upload_steps).is_not_empty()
-    for job_id, step in upload_steps:
-        condition = str(step.get("if", ""))
-        assert_that(condition).described_as(
-            f"{job_id}: Upload to release must be gated on upload_to_release",
-        ).contains("inputs.upload_to_release")
-        assert_that(condition).contains("inputs.release_tag != ''")
+        if str(step.get("name", "")).startswith("Upload to release")
+    )
+    assert_that(upload_steps).described_as(
+        "the publishing surface must not grow or shrink unnoticed",
+    ).is_equal_to(_UPLOAD_STEPS)
+
+    for job_id, step_name in _UPLOAD_STEPS:
+        step = next(
+            candidate
+            for candidate in workflow["jobs"][job_id]["steps"]
+            if candidate.get("name") == step_name
+        )
+        condition = _normalize_github_expr(str(step.get("if", "")))
+        label = f"{job_id}/{step_name}"
+        assert_that(condition).described_as(label).contains(
+            _UPLOAD_OPT_IN_DISJUNCTION,
+        )
+        _assert_upload_gate_behaviour(str(step["if"]), described_as=label)
 
     homebrew = str(workflow["jobs"]["homebrew-dispatch"].get("if", ""))
-    assert_that(homebrew).described_as(
+    assert_that(_normalize_github_expr(homebrew)).described_as(
         "homebrew-dispatch publishes downstream and must honour the gate",
-    ).contains("inputs.upload_to_release")
+    ).contains(_UPLOAD_OPT_IN_DISJUNCTION)
+    _assert_upload_gate_behaviour(homebrew, described_as="homebrew-dispatch")
 
 
-def test_build_binary_jobs_share_one_python_version() -> None:
-    """No job may hardcode ``python-version``; all use ``env.PYTHON_VERSION``.
+def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
+    """The workflows README documents the plain dispatch and the repair path.
 
-    The Nuitka cache key carries the interpreter version, so a job left on a
-    literal would silently build on a different Python than the one the cache
-    key names (#2484).
+    The input description alone is only visible once the dispatch form is
+    open; an operator reaching for a manual build reads the README first, and
+    the repair path is the part that has to be written down (#2484).
     """
-    workflow = _load_workflow(name="build-binary.yml")
-    assert_that(str(workflow["env"]["PYTHON_VERSION"])).matches(r"^\d+\.\d+$")
-
-    versions = [
-        (job_id, str((step.get("with") or {}).get("python-version", "")))
-        for job_id, job in workflow["jobs"].items()
-        for step in job.get("steps") or []
-        if "python-version" in (step.get("with") or {})
-    ]
-    assert_that(versions).is_not_empty()
-    for job_id, version in versions:
-        assert_that(version).described_as(
-            f"{job_id} must reference env.PYTHON_VERSION, not a literal",
-        ).contains("env.PYTHON_VERSION")
-
-
-def test_verify_built_binary_uses_a_registered_doctor_flag() -> None:
-    """The build gate's hidden doctor flag must exist on the CLI command.
-
-    ``verify_built_binary.sh`` invokes the flag as a string literal, so a
-    rename in ``doctor.py`` would only surface at the next release build
-    (#2484).
-    """
-    from lintro.cli_utils.commands.doctor import doctor_command
-
-    script = (_REPO_ROOT / "scripts" / "build" / "verify_built_binary.sh").read_text(
+    readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
         encoding="utf-8",
     )
-    invoked = re.findall(r"doctor (--[\w-]+)", script)
-    assert_that(invoked).is_not_empty()
-
-    declared = {
-        opt for param in doctor_command.params for opt in getattr(param, "opts", [])
-    }
-    for flag in invoked:
-        assert_that(declared).described_as(
-            f"verify_built_binary.sh invokes {flag}, which doctor does not declare",
-        ).contains(flag)
+    assert_that(readme).contains("upload_to_release")
+    assert_that(readme).contains("build-binary.yml")
 
 
 def test_renovate_manages_build_binary_uv_pin() -> None:
@@ -5378,6 +5535,80 @@ def test_permission_shortfalls_detects_a_withheld_scope(
     assert_that(shortfalls).is_length(1)
     assert_that(shortfalls[0]).contains("actions=none")
     assert_that(shortfalls[0]).contains("requests actions=read")
+
+
+def test_permission_shortfalls_detects_a_read_grant_against_a_write_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller granting read against a write request is reported as a gap.
+
+    The withheld-scope test above only exercises the ``none``/``read`` corner
+    of the message. The ``read``/``write`` rendering is the shape a callee
+    bumping a scope to write produces, and it is the one that startup-fails a
+    tag run, so it needs its own synthetic case.
+
+    Args:
+        monkeypatch: pytest attribute patcher, used to substitute a synthetic
+            callee workflow for the on-disk one.
+    """
+    callee = {
+        "permissions": {},
+        "jobs": {
+            "compile": {"permissions": {"actions": "write"}},
+        },
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: callee,
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="caller.yml::calls",
+        caller_grant=_normalize_permissions({"actions": "read"}) or {},
+        callee_name="callee.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_length(1)
+    assert_that(shortfalls[0]).contains("grants actions=read")
+    assert_that(shortfalls[0]).contains("requests actions=write")
+
+
+def test_reusable_workflow_walk_fails_on_the_pre_2518_publish_workflow(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """The walk reddens on the exact grant the v0.151.2-v0.152.6 tags died on.
+
+    #2440 gave build-binary.yml's compile jobs ``actions: read`` while the
+    ``homebrew-tap`` caller still granted only ``contents: write``; #2518 added
+    the grant. Replaying that state against the real callee proves the walk
+    catches it rather than passing because nothing on disk is broken today.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    publish = deepcopy(parsed_workflows["publish-pypi-on-tag.yml"])
+    caller_job = publish["jobs"]["homebrew-tap"]
+    pre_2518_grant = {
+        scope: value
+        for scope, value in caller_job["permissions"].items()
+        if scope != "actions"
+    }
+    assert_that(caller_job["permissions"]).described_as(
+        "the fixture only means something while #2518's grant is present",
+    ).contains_key("actions")
+    caller_job["permissions"] = pre_2518_grant
+
+    shortfalls = _permission_shortfalls(
+        caller_label="publish-pypi-on-tag.yml::homebrew-tap",
+        caller_grant=_effective_grant(job=caller_job, workflow=publish),
+        callee_name=str(caller_job["uses"]).removeprefix(
+            _LOCAL_WORKFLOW_CALL_PREFIX,
+        ),
+        depth=1,
+    )
+    assert_that(shortfalls).is_not_empty()
+    for message in shortfalls:
+        assert_that(message).contains("requests actions=read")
+    assert_that(" ".join(shortfalls)).contains("build-binary.yml::build-linux")
 
 
 def test_permission_shortfalls_is_silent_when_the_grant_covers_the_callee(

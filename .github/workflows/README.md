@@ -175,6 +175,26 @@ Consequences for operators:
   `softprops/action-gh-release`; their assets are regenerated cheaply, so the swap was
   not extended to them.
 
+### Dispatching `build-binary.yml` by hand
+
+`get-release-info` resolves the latest published release whenever no `release_tag` input
+is supplied, so before #2484 a bare `workflow_dispatch` republished main-HEAD binaries,
+the man page and the universal binary onto a shipped release — three such dispatches
+overwrote four `v0.151.1` assets and broke the Homebrew arm64 checksum. Every publishing
+step and the `homebrew-dispatch` job are now gated on
+`inputs.release_tag != '' || inputs.upload_to_release == true`.
+
+- **Plain dispatch** (leave `upload_to_release` off): builds, verifies and uploads run
+  artifacts only. Nothing on any release is touched. This is the safe way to test a
+  build from a branch.
+- **Repair dispatch** (`upload_to_release: true`): republishes the built binaries onto
+  the release `get-release-info` resolves. Use it only to restore assets a broken run
+  left behind; download the artifacts from the tag run first if you want to compare
+  checksums.
+- **The tag pipeline is unaffected.** `publish-pypi-on-tag.yml` calls this workflow with
+  `release_tag`, which satisfies the first disjunct; `upload_to_release` is a
+  dispatch-only input and never reaches the `workflow_call` path.
+
 ## Token patterns
 
 - **`secrets.GITHUB_TOKEN`** — CI, PR comments, artifacts
