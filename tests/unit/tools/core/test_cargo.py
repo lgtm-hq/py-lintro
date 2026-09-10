@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.tools.core.cargo import find_cargo_root
@@ -229,17 +230,41 @@ def test_a_malformed_ancestor_manifest_is_not_treated_as_a_workspace(
     assert_that(find_cargo_root([str(first), str(second)])).is_none()
 
 
-def test_the_upward_walk_stops_at_a_repository_boundary(tmp_path: Path) -> None:
+@pytest.mark.parametrize("marker_is_file", [False, True], ids=["dir", "file"])
+def test_the_upward_walk_stops_at_a_repository_boundary(
+    tmp_path: Path,
+    marker_is_file: bool,
+) -> None:
     """A workspace manifest outside the repository is not adopted.
+
+    Worktrees and submodules represent ``.git`` as a file, so both marker
+    shapes must stop the walk.
 
     Args:
         tmp_path: Temporary directory holding the outer manifest.
+        marker_is_file: Whether ``.git`` is a file (worktree) or a directory.
     """
     (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["repo/a"]\n')
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / ".git").mkdir()
+    if marker_is_file:
+        (repo / ".git").write_text("gitdir: /elsewhere/.git/worktrees/repo\n")
+    else:
+        (repo / ".git").mkdir()
     first = _package(repo, "a")
     second = _package(repo, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_none()
+
+
+def test_a_non_utf8_ancestor_manifest_is_not_a_workspace(tmp_path: Path) -> None:
+    """Invalid UTF-8 in a manifest is treated as "not a workspace", not raised.
+
+    Args:
+        tmp_path: Temporary directory holding the manifests.
+    """
+    (tmp_path / "Cargo.toml").write_bytes(b'[workspace]\nname = "\xff\xfe"\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
 
     assert_that(find_cargo_root([str(first), str(second)])).is_none()

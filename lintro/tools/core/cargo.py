@@ -44,7 +44,7 @@ def _declares_workspace(manifest: Path) -> bool:
     try:
         with manifest.open("rb") as handle:
             data = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
         logger.debug("Could not read Cargo manifest {}: {}", manifest, exc)
         return False
     return "workspace" in data
