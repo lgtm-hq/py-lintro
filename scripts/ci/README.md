@@ -43,7 +43,8 @@ reusable call on `check-last-publish-green.py`, which reports `publish_green=fal
 when the newest version-tag run of `publish-pypi-on-tag.yml` — by `created_at`, whatever
 its status — concluded `startup_failure`; every other conclusion, and any run still
 queued or in flight, is green (#2516, #2550). The gate is a skip, never a failure: it
-also reports green when its own API read fails.
+also reports green — with a `::warning::` annotation — when its own API read fails or
+the run reports a conclusion the script does not know.
 
 ## GHCR Cache Tags
 

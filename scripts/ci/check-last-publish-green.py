@@ -25,6 +25,12 @@ or none recorded) belongs to a run that did start: a flaky PyPI upload, a
 cancelled run or a timeout is a one-off that the next tag may well clear, and
 freezing the release train on it costs more than the version it saves.
 
+**An unrecognised conclusion is not a verdict.** Exactly one value gates, so
+a conclusion GitHub renames or adds would quietly read as "not a startup
+failure" and green the gate forever. Conclusions outside ``_KNOWN_CONCLUSIONS``
+are therefore treated like an API error: still green, but with a
+``::warning::`` annotation and a summary line naming the unknown value.
+
 **The newest run wins, in flight or not.** The gate reads the newest tag run by
 ``created_at`` regardless of status, not the newest *completed* one. A queued,
 waiting or in-progress run has no startup failure to show, so it is green — and
@@ -91,6 +97,28 @@ _VERSION_TAG = re.compile(r"^v\d+(?:\.\d+)*$")
 #: The only conclusion that gates. GitHub reports it when the run never
 #: started, which is the "the publish workflow itself is broken" signal.
 _STARTUP_FAILURE = "startup_failure"
+
+#: Rendering of a JSON ``null`` conclusion — a run that has not concluded.
+_NO_CONCLUSION = "none"
+
+#: Every conclusion the Actions API documents today, plus ``null``. Because
+#: exactly one member gates, an undocumented or renamed value would otherwise
+#: read as "not a startup failure" and green the gate forever without a trace.
+#: A value outside this set is therefore not evaluated: still green, but loud.
+_KNOWN_CONCLUSIONS = frozenset(
+    {
+        "success",
+        "failure",
+        "cancelled",
+        "skipped",
+        "timed_out",
+        "action_required",
+        "neutral",
+        "stale",
+        _STARTUP_FAILURE,
+        _NO_CONCLUSION,
+    },
+)
 
 
 class TextFetcher(Protocol):
@@ -301,9 +329,26 @@ def evaluate(
         )
     latest = runs[0]
     status = str(latest.get("status", "")).strip() or "unknown"
-    conclusion = str(latest.get("conclusion") or "none")
+    conclusion = str(latest.get("conclusion") or _NO_CONCLUSION).strip()
     tag = str(latest.get("head_branch", "")).strip() or "unknown tag"
     run_url = str(latest.get("html_url", "")).strip() or "unknown run"
+    if conclusion not in _KNOWN_CONCLUSIONS:
+        return GateVerdict(
+            green=True,
+            summary=(
+                "## Publish gate: not evaluated\n\n"
+                f"The last tag publish (`{tag}`) reports the unknown "
+                f"conclusion `{conclusion}`, which this gate cannot judge, so "
+                f"it failed open and the version PR proceeds: {run_url}\n\n"
+                "Teach `scripts/ci/check-last-publish-green.py` about the new "
+                "value."
+            ),
+            warning=(
+                f"The last {workflow} tag run (`{tag}`) reports the unknown "
+                f"conclusion '{conclusion}'; the publish gate failed open and "
+                "the version PR proceeds unchecked."
+            ),
+        )
     if conclusion != _STARTUP_FAILURE:
         return GateVerdict(
             green=True,

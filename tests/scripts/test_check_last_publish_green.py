@@ -236,6 +236,83 @@ def test_non_completed_statuses_report_green(
     assert_that(result.summary).contains(f"`{status}`")
 
 
+@pytest.mark.parametrize("conclusion", ["skipped", "neutral", "stale"])
+def test_remaining_documented_conclusions_report_green(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    conclusion: str,
+) -> None:
+    """The rarer documented conclusions are known values, and green.
+
+    Args:
+        module: The loaded gate module.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory for the Actions output files.
+        capsys: Capture fixture for stdout.
+        conclusion: Completed-run conclusion under test.
+    """
+    result = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[_run_payload(head_branch="v0.152.7", conclusion=conclusion)],
+    )
+
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("Publish gate: green")
+    assert_that(result.stdout).does_not_contain("::warning")
+
+
+def test_unknown_conclusion_fails_open_loudly(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A conclusion outside the known set greens the gate, but visibly.
+
+    Exactly one value gates, so a renamed or newly added conclusion would read
+    as "not a startup failure" and green the gate forever with no trace. An
+    unrecognised value is treated like an API error instead: fail open, and say
+    so in the summary and in a ``::warning::`` annotation.
+    """
+    result = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[_run_payload(head_branch="v0.152.7", conclusion="bootstrap_failure")],
+    )
+
+    assert_that(result.code).is_equal_to(0)
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("Publish gate: not evaluated")
+    assert_that(result.summary).contains("`bootstrap_failure`")
+    assert_that(result.stdout).contains("::warning title=Publish gate::")
+    assert_that(result.stdout).contains("bootstrap_failure")
+
+
+def test_known_conclusions_cover_the_documented_api_values(module: Any) -> None:
+    """The allowlist is the documented set, so drift detection is real."""
+    assert_that(set(module._KNOWN_CONCLUSIONS)).is_equal_to(
+        {
+            "success",
+            "failure",
+            "cancelled",
+            "skipped",
+            "timed_out",
+            "action_required",
+            "neutral",
+            "stale",
+            "startup_failure",
+            "none",
+        },
+    )
+
+
 def test_startup_failure_conclusion_skips_the_version_pr(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
