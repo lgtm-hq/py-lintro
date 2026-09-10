@@ -62,6 +62,8 @@ Environment:
   CANDIDATE_FETCH_REF  Local ref the fetched refs/pull/<n>/head is written to
                   (default: refs/lintro/tools-candidate). Only the objects it
                   brings in matter; the ref itself is a fetch destination.
+  CANDIDATE_FETCH_ATTEMPTS  Fetch attempts before giving up (default: 2).
+  CANDIDATE_FETCH_DELAY_SECONDS  Seconds between fetch attempts (default: 2).
   GITHUB_STEP_SUMMARY  When set, the refusal message is appended to it.
 
 Exit codes:
@@ -84,6 +86,11 @@ fi
 # reads them all (see lintro_build/versions/paths.py GeneratorPaths and
 # generate.py REQUIREMENTS_PYPI_SOURCES).
 #
+# The generator *code* counts as an input too: docker/tools.Dockerfile copies
+# lintro_build/ and scripts/ and re-renders the manifest during the image
+# build, and the gates re-render with main's code, so a generator change
+# alone can move the rendered manifest out from under a candidate.
+#
 # tests/scripts/test_manifest_staleness_inputs.py fails if this list and the
 # generator's declared inputs drift apart.
 DEFAULT_MANIFEST_PATHS='
@@ -93,6 +100,8 @@ lintro/tools/manifest.src.json
 package.json
 pyproject.toml
 requirements-semgrep.txt
+lintro_build/
+scripts/ci/generate-tool-versions.py
 docker/tools.Dockerfile
 '
 
@@ -102,6 +111,17 @@ main_sha="${MAIN_SHA:-}"
 force_publish="${FORCE_PUBLISH:-}"
 git_remote="${GIT_REMOTE:-origin}"
 candidate_fetch_ref="${CANDIDATE_FETCH_REF:-refs/lintro/tools-candidate}"
+CANDIDATE_FETCH_ATTEMPTS="${CANDIDATE_FETCH_ATTEMPTS:-2}"
+CANDIDATE_FETCH_DELAY_SECONDS="${CANDIDATE_FETCH_DELAY_SECONDS:-2}"
+
+if ! [[ "$CANDIDATE_FETCH_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+	echo "CANDIDATE_FETCH_ATTEMPTS must be a positive integer (got: ${CANDIDATE_FETCH_ATTEMPTS})" >&2
+	exit 2
+fi
+if ! [[ "$CANDIDATE_FETCH_DELAY_SECONDS" =~ ^[0-9]+$ ]]; then
+	echo "CANDIDATE_FETCH_DELAY_SECONDS must be a non-negative integer (got: ${CANDIDATE_FETCH_DELAY_SECONDS})" >&2
+	exit 2
+fi
 
 summary() {
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
@@ -165,20 +185,49 @@ resolve_commit() {
 # refs/pull/<n>/head, which is what the guard fetches: fetching by the
 # abbreviated SHA the candidate tag carries is not possible (git can only
 # fetch a full object id), so the PR number is the way in.
+fetch_error=""
+
+# fetch_candidate <fetch args...>
+#
+# Fetch with one bounded retry (a single blip against GitHub's git endpoint
+# should not fail a promote) and keep git's stderr in `fetch_error` so a
+# refusal can name the real cause: auth failure, blocked egress, a bad
+# remote. Discarding it would leave "not available in this checkout" as the
+# only clue.
+fetch_candidate() {
+	local attempt=1 err
+	err="$(mktemp)"
+	while true; do
+		if git fetch --no-tags --quiet "$@" 2>"$err"; then
+			rm -f "$err"
+			fetch_error=""
+			return 0
+		fi
+		fetch_error="$(tr '\n' ' ' <"$err" | cut -c1-500)"
+		if ((attempt >= CANDIDATE_FETCH_ATTEMPTS)); then
+			rm -f "$err"
+			return 1
+		fi
+		echo "candidate fetch failed (attempt ${attempt}/${CANDIDATE_FETCH_ATTEMPTS}): ${fetch_error}" >&2
+		sleep "$CANDIDATE_FETCH_DELAY_SECONDS"
+		attempt=$((attempt + 1))
+	done
+}
+
 if ! candidate_full="$(resolve_commit "$candidate_sha")"; then
 	if [[ -n "$candidate_pr" ]]; then
-		git fetch --no-tags --quiet "$git_remote" \
-			"refs/pull/${candidate_pr}/head:${candidate_fetch_ref}" 2>/dev/null || true
+		fetch_candidate "$git_remote" \
+			"refs/pull/${candidate_pr}/head:${candidate_fetch_ref}" || true
 	elif [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]]; then
 		# A full object id can be fetched directly; no PR number needed.
-		git fetch --no-tags --quiet "$git_remote" "$candidate_sha" 2>/dev/null || true
+		fetch_candidate "$git_remote" "$candidate_sha" || true
 	fi
 	candidate_full="$(resolve_commit "$candidate_sha")" || case $? in
 	2)
 		fail_closed "refusing to promote: candidate commit ${candidate_sha} is an ambiguous abbreviation in this checkout; rebuild from main with force_publish=true (docker-tools-publish.yml)"
 		;;
 	*)
-		fail_closed "refusing to promote: candidate commit ${candidate_sha} is not available in this checkout${candidate_pr:+ (fetched refs/pull/${candidate_pr}/head)}; rebuild from main with force_publish=true"
+		fail_closed "refusing to promote: candidate commit ${candidate_sha} is not available in this checkout${candidate_pr:+ (fetched refs/pull/${candidate_pr}/head)}${fetch_error:+ [git fetch: ${fetch_error}]}; rebuild from main with force_publish=true (docker-tools-publish.yml)"
 		;;
 	esac
 fi

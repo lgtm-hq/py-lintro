@@ -19,7 +19,8 @@ setup() {
 	git init --quiet --bare "$UPSTREAM"
 
 	SEED="${BATS_TEST_TMPDIR}/seed"
-	mkdir -p "${SEED}/lintro/tools" "${SEED}/docker"
+	mkdir -p "${SEED}/lintro/tools" "${SEED}/docker" \
+		"${SEED}/lintro_build/versions" "${SEED}/scripts/ci"
 	cd "${SEED}" || return 1
 	git init --quiet --initial-branch=main .
 	git config user.email 'test@example.com'
@@ -31,6 +32,8 @@ setup() {
 	printf '[project]\nname = "lintro"\n' >pyproject.toml
 	printf 'semgrep==1.0.0\n' >requirements-semgrep.txt
 	printf 'SEED = {}\n' >lintro/_tool_packages.py
+	printf 'MANIFEST = "lintro/tools/manifest.json"\n' >lintro_build/versions/paths.py
+	printf 'print("generate")\n' >scripts/ci/generate-tool-versions.py
 	printf 'unrelated\n' >README.md
 	git add -A
 	git commit --quiet -m 'base'
@@ -70,6 +73,7 @@ run_guard() {
 	env CANDIDATE_SHA="${CANDIDATE_ABBREV}" \
 		CANDIDATE_PR="${CANDIDATE_PR_NUMBER}" \
 		MAIN_SHA="$(git rev-parse main)" \
+		CANDIDATE_FETCH_DELAY_SECONDS=0 \
 		GITHUB_STEP_SUMMARY="${GITHUB_STEP_SUMMARY:-${BATS_TEST_TMPDIR}/summary}" \
 		"$@" \
 		"$SCRIPT"
@@ -139,6 +143,54 @@ run_guard() {
 	assert_failure
 	assert_output --partial "refusing to promote"
 	assert_output --partial "requirements-semgrep.txt"
+}
+
+@test "refuses when only the generator code changed on main" {
+	# The rendered manifest is produced by this code during the image build
+	# and by the gates on main, so a generator change alone can strand a
+	# candidate.
+	printf 'MANIFEST = "lintro/tools/manifest.json"  # reordered\n' \
+		>lintro_build/versions/paths.py
+	git add -A
+	git commit --quiet -m 'refactor(build): tidy generator paths'
+	newer="$(git rev-parse HEAD)"
+
+	run run_guard env
+	assert_failure
+	assert_output --partial "refusing to promote: main has newer tool manifest commits"
+	assert_output --partial "$newer"
+	assert_output --partial "lintro_build/versions/paths.py"
+}
+
+@test "refuses when only the generator entry point changed on main" {
+	printf 'print("generate")  # tweak\n' >scripts/ci/generate-tool-versions.py
+	git add -A
+	git commit --quiet -m 'chore(ci): tweak the generator shim'
+
+	run run_guard env
+	assert_failure
+	assert_output --partial "scripts/ci/generate-tool-versions.py"
+}
+
+@test "a failing fetch reports git's own stderr in the refusal" {
+	run run_guard env GIT_REMOTE=no-such-remote
+	assert_failure
+	assert_output --partial "git fetch:"
+	assert_output --partial "no-such-remote"
+	assert_output --partial "is not available in this checkout"
+}
+
+@test "the candidate fetch is retried once before giving up" {
+	run run_guard env GIT_REMOTE=no-such-remote
+	assert_failure
+	assert_output --partial "candidate fetch failed (attempt 1/2)"
+}
+
+@test "rejects a non-numeric fetch attempt count" {
+	run run_guard env CANDIDATE_FETCH_ATTEMPTS=many
+	assert_failure
+	assert_equal "2" "$status"
+	assert_output --partial "CANDIDATE_FETCH_ATTEMPTS must be a positive integer"
 }
 
 @test "refusal is written to the step summary" {
