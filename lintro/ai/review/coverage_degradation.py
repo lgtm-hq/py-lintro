@@ -3,6 +3,11 @@
 Every surface (terminal, GitHub review body, sticky comment) describes a
 degraded run with the same sentence built here, so a capped review can never
 read as complete on one surface and limited on another.
+
+The wording says a chunk *hit* the cap, not that it ran under one: the
+degradation is recorded only when a chunk's parsed answer actually reached the
+ceiling, so a configured cap nobody bumped into produces no sentence at all
+(#2283).
 """
 
 from __future__ import annotations
@@ -65,10 +70,12 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         metadata: Review run metadata carrying ``coverage_degradations``.
 
     Returns:
-        A plain-text sentence naming the capped chunk counts, the caps in
-        force, and any incomplete optional pass, or an empty string when the
-        run was fully uncapped. The text carries no markup so the terminal and
-        the GitHub surfaces can share it verbatim.
+        A plain-text sentence naming how many chunks *hit* a per-call cap, the
+        caps in force, and any incomplete optional pass, or an empty string
+        when the run recorded no degradation. A configured ceiling no chunk
+        reached is not a degradation and produces no sentence (#2283). The
+        text carries no markup so the terminal and the GitHub surfaces can
+        share it verbatim.
     """
     degradations = metadata.coverage_degradations
     if not degradations:
@@ -105,7 +112,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         cap_text = "/".join(str(cap) for cap in caps)
         clauses.append(
             f"{capped_chunks} of {total} {_plural(count=total, noun='chunk')} "
-            f"ran under a {cap_text}-finding per-call cap",
+            f"hit the {cap_text}-finding per-call cap",
         )
     if retried:
         retried_chunks = len({item.chunk_index for item in retried})
@@ -158,7 +165,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # Only a real per-call ceiling can be blamed for lost low-severity depth;
     # a run degraded solely by an incomplete optional pass says so instead.
     tail = (
-        "lower-severity issues beyond the cap may go unreported."
+        "lower-severity findings in those chunks may go unreported."
         if (capped or retried)
         else "some issues may go unreported."
     )

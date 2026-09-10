@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.4] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: record the findings cap only when a chunk actually hits it (#2564)
+  (f9edc68)
+
 ## [0.153.3] - 2026-09-10
 
 ### Fixed
