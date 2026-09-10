@@ -175,6 +175,25 @@ def test_highlighting_without_style_spans_is_reported_as_a_failure(
     assert_that(result.failures[0]).contains("produced no style spans")
 
 
+def test_doctor_self_check_flag_rejects_a_bare_fix() -> None:
+    """``--fix`` alone is rejected by the self-check's own guard.
+
+    The neighbouring test pairs ``--fix`` with ``--json``, which trips the
+    older generic guard instead, so it proves ordering but not this
+    rejection. Without its own guard the self-check would exit through the
+    early return before ``_run_fix`` ever ran: nothing installed, exit 0,
+    no warning (#2514).
+    """
+    runner = CliRunner()
+    result = runner.invoke(doctor_command, ["--self-check-highlighting", "--fix"])
+
+    assert_that(result.exit_code).is_equal_to(2)
+    assert_that(result.output).contains(
+        "--self-check-highlighting cannot be combined",
+    )
+    assert_that(result.output).contains("--fix")
+
+
 def test_doctor_self_check_flag_still_rejects_incoherent_combinations() -> None:
     """The self-check does not short-circuit the flag-combination guard."""
     runner = CliRunner()

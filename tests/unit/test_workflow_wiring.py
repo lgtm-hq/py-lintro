@@ -61,19 +61,38 @@ def _normalize_github_expr(expr: str) -> str:
 def _collect_python_version_pins(*, node: Any) -> list[str]:
     """Return every literal ``python-version`` value nested under a node.
 
+    Scalars are coerced to text: an unquoted ``python-version: 3.14`` loads as
+    a float, and dropping it would quietly remove that workflow from the
+    repo-wide drift sweep. A list is a matrix, so every element is returned as
+    a pin in its own right and compared individually — a workflow that widens
+    to a matrix has to earn its place in the exemption list rather than fall
+    out of the sweep. A comma-joined multi-version string is split the same
+    way, for the same reason.
+
+    ``${{ }}`` expressions are the one thing still skipped: they name another
+    pin rather than stating one, and the pin they resolve to is covered where
+    it is declared.
+
     Args:
         node: Parsed YAML fragment to walk.
 
     Returns:
-        The literal pins found, in document order, skipping ``${{ }}``
-        expressions and multi-version matrix strings.
+        The literal pins found, in document order.
     """
     found: list[str] = []
     if isinstance(node, dict):
         for key, value in node.items():
-            if key == "python-version" and isinstance(value, str):
-                if "${{" not in value and "," not in value:
-                    found.append(value)
+            if key == "python-version":
+                elements = value if isinstance(value, list) else [value]
+                for element in elements:
+                    if not isinstance(element, str | int | float):
+                        continue
+                    text = str(element)
+                    if "${{" in text:
+                        continue
+                    found.extend(
+                        part.strip() for part in text.split(",") if part.strip()
+                    )
                 continue
             found.extend(_collect_python_version_pins(node=value))
     elif isinstance(node, list):
@@ -2116,6 +2135,57 @@ def test_every_workflow_shares_the_build_binary_python_pin(
         ).is_not_empty()
 
 
+def test_python_pin_collector_coerces_unquoted_scalars() -> None:
+    """An unquoted pin still counts, because YAML makes it a float.
+
+    ``python-version: 3.14`` without quotes loads as ``3.14`` the float. The
+    collector used to require a ``str``, so such a workflow contributed no
+    pins and left the repo-wide sweep without ever being named as exempt
+    (#2514).
+    """
+    assert_that(
+        _collect_python_version_pins(node={"python-version": 3.14}),
+    ).is_equal_to(
+        ["3.14"],
+    )
+    assert_that(_collect_python_version_pins(node={"python-version": 3})).is_equal_to(
+        ["3"],
+    )
+
+
+def test_python_pin_collector_expands_matrix_shapes() -> None:
+    """A matrix contributes each of its versions as a pin to compare.
+
+    Both spellings a matrix takes — a YAML list and a comma-joined string —
+    used to yield nothing, so a workflow widening to a matrix dropped out of
+    the drift sweep silently instead of failing until it was named exempt.
+    """
+    assert_that(
+        _collect_python_version_pins(node={"python-version": ["3.13", "3.14"]}),
+    ).is_equal_to(["3.13", "3.14"])
+    assert_that(
+        _collect_python_version_pins(node={"python-version": "3.13, 3.14"}),
+    ).is_equal_to(["3.13", "3.14"])
+
+
+def test_python_pin_collector_skips_expressions_only() -> None:
+    """An expression names another pin, so it is the one thing not collected."""
+    assert_that(
+        _collect_python_version_pins(
+            node={
+                "jobs": {
+                    "a": {"with": {"python-version": "${{ env.PYTHON_VERSION }}"}},
+                },
+            },
+        ),
+    ).is_empty()
+    assert_that(
+        _collect_python_version_pins(
+            node={"jobs": {"a": {"with": {"python-version": "3.14"}}}},
+        ),
+    ).is_equal_to(["3.14"])
+
+
 def test_verify_built_binary_uses_a_registered_doctor_flag() -> None:
     """The build gate's hidden doctor flag must exist on the CLI command.
 
@@ -2267,6 +2337,20 @@ def test_renovate_manages_build_binary_python_pin() -> None:
         assert_that(truncation.match(prerelease)).described_as(
             f"extractVersionTemplate must not extract a version from {prerelease}",
         ).is_none()
+    # Renovate also has to parse the value already stored in the file. The
+    # pin is two-component, so a template demanding all three components
+    # would leave the current value unparseable and the dependency skipped —
+    # the manager would look configured and do nothing at all.
+    stored = str(_load_workflow(name=_BUILD_BINARY_WORKFLOW)["env"]["PYTHON_VERSION"])
+    parsed_stored = truncation.match(stored)
+    if parsed_stored is None:
+        pytest.fail(
+            f"extractVersionTemplate {extract_template!r} cannot parse the "
+            f"stored pin {stored!r}",
+        )
+    assert_that(parsed_stored.group("version")).described_as(
+        "the stored X.Y pin must parse to itself",
+    ).is_equal_to(stored)
     # And the truncated value must still satisfy the manager's own matchStrings,
     # so the next extraction pass finds the pin again.
     for match_string in manager["matchStrings"]:
@@ -5585,6 +5669,62 @@ def parsed_workflows(workflow_files: list[Path]) -> dict[str, dict[str, Any]]:
         A mapping of file name to parsed workflow.
     """
     return {path.name: _load_workflow(name=path.name) for path in workflow_files}
+
+
+def _security_permission_rows() -> dict[str, str]:
+    """Return the workflow-level permission claim of each SECURITY.md row.
+
+    Returns:
+        Workflow file name mapped to the leading claim of its ``Permissions``
+        cell, with any ``+ per-job ...`` remainder dropped.
+    """
+    table = (_REPO_ROOT / ".github" / "SECURITY.md").read_text(encoding="utf-8")
+    rows: dict[str, str] = {}
+    for line in table.splitlines():
+        match = re.match(r"\|\s*`([\w.-]+\.yml)`\s*\|([^|]*)\|", line)
+        if match is None:
+            continue
+        rows[match.group(1)] = re.split(r"\(?\+\s*per-job", match.group(2))[0].strip()
+    return rows
+
+
+def test_security_md_permission_rows_match_the_workflows(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """Each documented row states the workflow-level block the YAML declares.
+
+    The table is the repo's security-facing inventory of the release path, and
+    it drifted twice: #2440 and #2524 changed the workflows without it. Rows
+    are hand-written prose, so this asserts only the half that is mechanical —
+    the workflow-level ``permissions:`` block, spelled as `` `{}` `` or as
+    backticked ``scope: level`` pairs before any ``+ per-job`` remainder
+    (#2514).
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    rows = _security_permission_rows()
+    assert_that(rows).described_as(
+        "no permission rows parsed out of SECURITY.md",
+    ).is_not_empty()
+    assert_that(len(rows)).is_greater_than_or_equal_to(5)
+
+    for name, claim in rows.items():
+        assert_that(parsed_workflows).described_as(
+            f"SECURITY.md names {name}, which no longer exists",
+        ).contains_key(name)
+        declared = parsed_workflows[name].get("permissions")
+        if "`{}`" in claim:
+            documented: dict[str, str] = {}
+        else:
+            documented = dict(re.findall(r"`([a-z-]+):\s*([a-z]+)`", claim))
+            assert_that(documented).described_as(
+                f"{name}: unparseable workflow-level claim {claim!r}",
+            ).is_not_empty()
+        assert_that(declared or {}).described_as(
+            f"{name}: SECURITY.md documents {documented} but the workflow "
+            f"declares {declared}",
+        ).is_equal_to(documented)
 
 
 def test_reusable_workflow_callers_grant_what_callees_request(

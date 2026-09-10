@@ -145,13 +145,17 @@ permissions:
 
 ## Permission Scopes by Workflow
 
+The release path and the two main CI workflows, not every workflow in the repo. The
+`Permissions` column states the **workflow-level** block verbatim, then the per-job
+escalations; a wiring test asserts the workflow-level half against the YAML.
+
 | Workflow                   | Permissions                                                                                             | Justification                          |
 | -------------------------- | ------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `docker-ci.yml`            | `contents: read` (+ per-job)                                                                            | CI pipeline + quality                  |
-| `test-ci.yml`              | `contents: read` (+ per-job)                                                                            | Unit tests                             |
+| `docker-ci.yml`            | `{}` + per-job `contents: read`/`packages: write`/`pull-requests: write`                                | CI pipeline + quality                  |
+| `test-ci.yml`              | `{}` + per-job `contents: read`/`actions: write`/`pull-requests: write`                                 | Unit tests                             |
 | `publish-pypi-on-tag.yml`  | `{}` + per-job `contents`/`id-token`/`attestations`/`security-events`/`actions: read`/`packages: write` | Release, OIDC, SBOM, GHCR, asset reuse |
 | `build-binary.yml`         | `{}` + per-job `contents: write, actions: read`                                                         | Release assets; asset reuse check      |
-| `docker-build-publish.yml` | `contents: read, packages: write`                                                                       | Push to GHCR                           |
+| `docker-build-publish.yml` | `contents: read` + per-job `packages`/`id-token`/`attestations`/`security-events: write`                | Push to GHCR                           |
 
 ## Supply Chain Security
 

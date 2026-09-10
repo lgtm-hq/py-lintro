@@ -219,7 +219,7 @@
       "packageNameTemplate": "astral-sh/uv"
     },
     {
-      "description": "Interpreter the binary builds compile against; hoisted off the setup-python `python-version:` key because the Nuitka cache key has to carry it (#2484), which puts it outside Renovate's native reach. `extractVersionTemplate` truncates the datasource's `X.Y.Z` release to the `X.Y` shape this line (and the Nuitka cache key) uses, so the value written back keeps matching `matchStrings`. It is anchored to a complete stable release, so a prerelease feed entry such as `3.15.0rc1` is filtered out instead of being truncated to a stable-looking `3.15`",
+      "description": "Interpreter the binary builds compile against; hoisted off the setup-python `python-version:` key because the Nuitka cache key has to carry it (#2484), which puts it outside Renovate's native reach. `extractVersionTemplate` truncates the datasource's `X.Y.Z` release to the `X.Y` shape this line (and the Nuitka cache key) uses, so the value written back keeps matching `matchStrings`. The third component is optional so the stored `X.Y` pin parses too, and the pattern is end-anchored so a prerelease feed entry such as `3.15.0rc1` is filtered out instead of being truncated to a stable-looking `3.15`",
       "customType": "regex",
       "managerFilePatterns": [
         ".github/workflows/build-binary.yml"
@@ -230,7 +230,7 @@
       "datasourceTemplate": "python-version",
       "depNameTemplate": "python",
       "versioningTemplate": "python",
-      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+)\\.[0-9]+$"
+      "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+)(?:\\.[0-9]+)?$"
     },
     {
       "description": "Bundled Node.js runtime in the lintro-ai-tools image; the agent CLIs are Node apps and the lint image aliases node to bun (checksum fetched at build time, so only the version pins here)",
