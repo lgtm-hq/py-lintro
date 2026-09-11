@@ -1288,7 +1288,8 @@ def test_lint_report_wait_is_bounded_at_ten_minutes() -> None:
     assert_that(text.index("while :; do")).described_as(
         "the locator call must sit inside the poll loop",
     ).is_less_than(locate)
-    assert_that(text).contains('sleep "$LINT_REPORT_POLL_SECONDS"')
+    assert_that(text).contains('sleep "$lint_sleep"')
+    assert_that(text).contains("lint_sleep=$((LINT_REPORT_WAIT_SECONDS - lint_waited))")
     assert_that(text).contains('"$lint_waited" -ge "$LINT_REPORT_WAIT_SECONDS"')
 
 
@@ -1315,6 +1316,7 @@ def _run_review_with_lint_stubs(
     *,
     report_appears_on_poll: int | None,
     wait_seconds: int,
+    poll_seconds: str = "1",
 ) -> tuple[str, list[str], int]:
     """Run the script end to end with ``gh`` and ``uv`` stubbed.
 
@@ -1328,7 +1330,8 @@ def _run_review_with_lint_stubs(
         tmp_path: Per-test scratch directory.
         report_appears_on_poll: 1-based locator poll on which the run listing
             first carries the report; ``None`` means it never appears.
-        wait_seconds: ``LINT_REPORT_WAIT_SECONDS`` override; polls run at 1 s.
+        wait_seconds: ``LINT_REPORT_WAIT_SECONDS`` override.
+        poll_seconds: ``LINT_REPORT_POLL_SECONDS`` override; defaults to 1 s.
 
     Returns:
         The script's combined output, the recorded ``uv`` argv, and the
@@ -1404,7 +1407,7 @@ def _run_review_with_lint_stubs(
         "PR_NUMBER": str(_LINT_PR_NUMBER),
         "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
         "LINTRO_REVIEW_STATE_DIR": str(state_dir),
-        "LINT_REPORT_POLL_SECONDS": "1",
+        "LINT_REPORT_POLL_SECONDS": poll_seconds,
         "LINT_REPORT_WAIT_SECONDS": str(wait_seconds),
     }
     # Output goes to a file, not a captured pipe: the script's heartbeat
@@ -2085,3 +2088,44 @@ def test_workflow_exports_runtime_token_into_review_step() -> None:
     assert_that(review["env"]["ACTIONS_RESULTS_URL"]).is_equal_to(
         "${{ steps.artifact-runtime.outputs.results-url }}",
     )
+
+
+def test_lint_report_wait_rejects_a_zero_poll_interval(tmp_path: Path) -> None:
+    """A poll interval of zero would never advance the wait, so it is replaced.
+
+    With the bound also at zero the loop exits after one locate, so the test
+    observes the warning and the fallback without sleeping.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds=0,
+        poll_seconds="0",
+    )
+
+    assert_that(output).contains(
+        "::warning::LINT_REPORT_POLL_SECONDS=0 is not a positive integer; using 30",
+    )
+    assert_that(listings).is_equal_to(1)
+    assert_that(argv).does_not_contain("--lint-report")
+
+
+def test_lint_report_last_poll_sleeps_only_the_remaining_wait(
+    tmp_path: Path,
+) -> None:
+    """A poll interval longer than the remaining wait is capped to it.
+
+    Bound 2 s at a 5 s interval: the script sleeps 2 s, not 5 s, then
+    makes its final locate and gives up.
+    """
+    output, _argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds=2,
+        poll_seconds="5",
+    )
+
+    assert_that(output).contains("retrying in 2s (waited 0/2s)")
+    assert_that(output).does_not_contain("retrying in 5s")
+    assert_that(listings).is_equal_to(2)
+    assert_that(output).contains("after 2s")

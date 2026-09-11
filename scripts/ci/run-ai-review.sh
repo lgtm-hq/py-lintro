@@ -327,6 +327,16 @@ echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
 # defaults are pinned by tests/scripts/test_run_ai_review.py.
 LINT_REPORT_POLL_SECONDS="${LINT_REPORT_POLL_SECONDS:-30}"
 LINT_REPORT_WAIT_SECONDS="${LINT_REPORT_WAIT_SECONDS:-600}"
+# Both must be whole seconds; the poll must be positive or the loop never
+# advances. Anything else falls back to the default with a warning.
+if ! [[ "$LINT_REPORT_POLL_SECONDS" =~ ^[0-9]+$ ]] || [[ "$LINT_REPORT_POLL_SECONDS" -lt 1 ]]; then
+	echo "::warning::LINT_REPORT_POLL_SECONDS=${LINT_REPORT_POLL_SECONDS} is not a positive integer; using 30"
+	LINT_REPORT_POLL_SECONDS=30
+fi
+if ! [[ "$LINT_REPORT_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
+	echo "::warning::LINT_REPORT_WAIT_SECONDS=${LINT_REPORT_WAIT_SECONDS} is not a whole number of seconds; using 600"
+	LINT_REPORT_WAIT_SECONDS=600
+fi
 lint_report_path="${lint_report_dir}/results.json"
 lint_run_id=""
 lint_head_sha=""
@@ -339,9 +349,14 @@ while :; do
 	if [[ -n "$lint_run_id" || "$lint_waited" -ge "$LINT_REPORT_WAIT_SECONDS" ]]; then
 		break
 	fi
-	echo "[ai-review] linter facts: no linting-json-report yet for head ${lint_head_sha:-unknown}; retrying in ${LINT_REPORT_POLL_SECONDS}s (waited ${lint_waited}/${LINT_REPORT_WAIT_SECONDS}s)"
-	sleep "$LINT_REPORT_POLL_SECONDS"
-	lint_waited=$((lint_waited + LINT_REPORT_POLL_SECONDS))
+	# Never sleep past the bound: the last poll waits only the remainder.
+	lint_sleep=$((LINT_REPORT_WAIT_SECONDS - lint_waited))
+	if [[ "$lint_sleep" -gt "$LINT_REPORT_POLL_SECONDS" ]]; then
+		lint_sleep="$LINT_REPORT_POLL_SECONDS"
+	fi
+	echo "[ai-review] linter facts: no linting-json-report yet for head ${lint_head_sha:-unknown}; retrying in ${lint_sleep}s (waited ${lint_waited}/${LINT_REPORT_WAIT_SECONDS}s)"
+	sleep "$lint_sleep"
+	lint_waited=$((lint_waited + lint_sleep))
 done
 lint_report_arg=()
 if [[ -n "$lint_run_id" ]]; then
