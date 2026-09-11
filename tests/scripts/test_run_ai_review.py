@@ -667,20 +667,21 @@ def test_workflow_serializes_ai_review_repo_wide() -> None:
 
 
 def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
-    """The job budget is pinned at 38 minutes (#2506).
+    """The job budget is pinned at 48 minutes (#2506, #2571).
 
-    38 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
-    allows with the 1800 s per-chunk CLI timeout: ceil(1800 / 60) + 7 min setup
-    + 1 min posting margin. Measured review durations over the last 40 runs are
+    48 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
+    allows with the 1800 s per-chunk CLI timeout and the 600 s lint-report
+    wait: ceil(1800 / 60) + 7 min setup + 10 min wait + 1 min posting margin
+    (38 before the wait). Measured review durations over the last 40 runs are
     median 10 to 14 min and p75 21 min, so the ceiling is not what a healthy
     review needs — it bounds the tail. The long tail that previously argued for
     120 was reruns restarting from scratch, which #2506 fixed by resuming the
     run's own prior attempt. Raising this number is a decision about the CLI
-    timeout, not about this line: bump both together.
+    timeout or the wait, not about this line: bump them together.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
-    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(38)
+    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(48)
 
 
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
@@ -1924,7 +1925,7 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     setup_overhead_minutes = 7
     posting_margin_minutes = 1
     lint_report_wait_minutes = math.ceil(
-        _shell_default("LINT_REPORT_WAIT_SECONDS") / 60
+        _shell_default("LINT_REPORT_WAIT_SECONDS") / 60,
     )
 
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
