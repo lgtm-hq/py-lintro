@@ -282,13 +282,16 @@ class PytestPlugin(BaseToolPlugin):
         merged_options = dict(self.options)
         merged_options.update(options)
 
-        # Resolve the timeout once, before anything reads it. The argv, the
-        # collection subprocess, the banner, the kill deadline and the timeout
-        # message all read this one value, so they cannot disagree. An absent
-        # or ``None`` timeout is left alone: it means "no ``--timeout`` flag".
+        # Resolve the timeout once, before anything reads it, and write it
+        # back unconditionally. The argv, the collection subprocess, the
+        # banner, the kill deadline and the timeout message then all read this
+        # one value, so they cannot disagree. A ``None`` override means "not
+        # specified for this invocation" and falls through to the persisted
+        # options and then the default, so it must be written back too:
+        # leaving it alone would omit ``--timeout`` from the argv while the
+        # deadline still enforced the persisted value.
         timeout_val = self._resolve_timeout_seconds(merged_options)
-        if merged_options.get("timeout") is not None:
-            merged_options["timeout"] = timeout_val
+        merged_options["timeout"] = timeout_val
 
         # Check version requirements
         version_result = self._verify_tool_version()

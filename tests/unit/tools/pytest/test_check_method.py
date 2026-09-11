@@ -824,3 +824,52 @@ def test_collection_timeout_returns_a_timed_out_result(
     assert_that(result.timed_out).is_true()
     assert_that(result.success).is_false()
     assert_that(result.output).contains("600s")
+
+
+def test_none_override_falls_through_to_the_persisted_timeout(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """A ``None`` override leaves the persisted timeout governing both consumers.
+
+    ``None`` means "not specified for this invocation", so the persisted 600
+    must reach the argv and the kill deadline alike.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    sample_pytest_plugin.set_options(timeout=600)
+    executed: list[tuple[list[str], int | float | None]] = []
+
+    def record(
+        cmd: list[str],
+        timeout: int | float | None = None,
+    ) -> tuple[bool, str, int]:
+        """Record the argv and the deadline the run was held to.
+
+        Args:
+            cmd: Command line built for the pytest subprocess.
+            timeout: Seconds allowed before the subprocess is killed.
+
+        Returns:
+            tuple[bool, str, int]: A successful, empty execution result.
+        """
+        executed.append((cmd, timeout))
+        return True, "10 passed", 0
+
+    with (
+        _configured_check(sample_pytest_plugin),
+        patch(
+            "lintro.tools.pytest.pytest_command_builder.check_plugin_installed",
+            return_value=True,
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            new=record,
+        ),
+    ):
+        sample_pytest_plugin.check(["tests"], {"timeout": None})
+
+    cmd, enforced = executed[0]
+    assert_that(cmd[cmd.index("--timeout") + 1]).is_equal_to("600")
+    assert_that(enforced).is_equal_to(600)
