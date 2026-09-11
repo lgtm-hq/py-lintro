@@ -27,6 +27,7 @@ from lintro.ai.review.confirmation_filter import (
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.merge import parse_review_response
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
@@ -71,6 +72,7 @@ def _finding(
     title: str = "Flag parsed but never read",
     description: str = _DEFECT_DESCRIPTION,
     fix: str = "Read the flag in resolve_config before applying defaults.",
+    kind: FindingKind = FindingKind.FINDING,
 ) -> ReviewFinding:
     """Build a finding with defect-shaped text unless overridden.
 
@@ -78,6 +80,7 @@ def _finding(
         title: Finding title.
         description: Finding description.
         fix: Finding fix text.
+        kind: Whether the entry is a defect claim or an open question.
 
     Returns:
         A P2 finding on a fixed file and line.
@@ -93,6 +96,7 @@ def _finding(
         fix=fix,
         confidence="high",
         checklist_ids=(3,),
+        kind=kind,
     )
 
 
@@ -427,3 +431,18 @@ def test_prose_recovery_finding_is_never_dropped() -> None:
 
     assert_that(partial.findings).is_length(1)
     assert_that(partial.findings[0].category).is_equal_to(UNSTRUCTURED_CATEGORY)
+
+
+@pytest.mark.parametrize(
+    ("description", "fix"),
+    [
+        ("Not a defect, but should the retry budget be configurable?", "None"),
+        ("This is a confirmation that the flag is read; is the default right?", "None"),
+    ],
+)
+def test_questions_are_never_dropped(description: str, fix: str) -> None:
+    """A question keeps its place even when its prose looks like a confirmation."""
+    finding = _finding(description=description, fix=fix, kind=FindingKind.QUESTION)
+
+    assert_that(is_confirmation_finding(finding=finding)).is_false()
+    assert_that(drop_confirmation_findings(findings=(finding,))).is_equal_to((finding,))

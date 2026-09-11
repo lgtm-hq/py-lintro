@@ -69,6 +69,8 @@ def is_confirmation_finding(*, finding: ReviewFinding) -> bool:
     The prose-recovery finding (:data:`UNSTRUCTURED_CATEGORY`) is never a
     confirmation: its description is the model's whole answer, which may
     open with such a sentence while carrying real findings further down.
+    Questions (``kind=question``) are never confirmations either: their fix
+    is routinely "None" and their prose may open with "Not a defect, but".
 
     Args:
         finding: A parsed finding from one chunk answer.
@@ -77,7 +79,7 @@ def is_confirmation_finding(*, finding: ReviewFinding) -> bool:
         True when the whole fix matches :data:`CONFIRMATION_FIX_PATTERN` or a
         description sentence opens as :data:`CONFIRMATION_SENTENCE_PATTERN`.
     """
-    if finding.category == UNSTRUCTURED_CATEGORY:
+    if finding.category == UNSTRUCTURED_CATEGORY or finding.is_question:
         return False
     if CONFIRMATION_FIX_PATTERN.match(finding.fix.strip().casefold()):
         return True
