@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, cast
 
@@ -1794,6 +1795,297 @@ def test_build_binary_pins_setup_uv_version() -> None:
         version = step.get("with", {}).get("version", "")
         assert_that(version).does_not_contain("latest")
         assert_that(version).contains("env.UV_VERSION")
+
+
+# Every publishing step and job carries the same opt-in disjunction. Asserting
+# it by substring lets an inverted or conjunctive rewrite through, so the tests
+# below pin the literal disjunct *and* evaluate the whole condition against the
+# three payloads that matter. These tests read the working tree, so a gate
+# regression reddens the PR that introduces it - which is the point, because
+# the gate's runtime behaviour is only exercised on a tag run or a manual
+# dispatch. Neither happens on a PR, so this file is the only place a broken
+# gate can be caught before it reaches a published release.
+
+_UPLOAD_OPT_IN_DISJUNCTION = (
+    "(inputs.release_tag != '' || inputs.upload_to_release == true)"
+)
+
+# The exact publishing surface. A rename or a new upload step must be added
+# here deliberately, so the sweep cannot silently shrink.
+_UPLOAD_STEPS = (
+    ("generate-man-page", "Upload to release"),
+    ("build-macos", "Upload to release"),
+    ("build-linux", "Upload to release"),
+    ("create-universal-binary", "Upload to release"),
+)
+
+# Operands that are true on every payload under test: the tag resolved by
+# get-release-info (its latest-release fallback covers the dispatch path), the
+# #2435 reuse guard and the universal-arch guards.
+_UPLOAD_GATE_TRUE_OPERANDS = (
+    "needs.get-release-info.outputs.release_tag != ''",
+    "steps.reuse.outputs.reuse != 'true'",
+    "inputs.arch == 'universal'",
+    "needs.get-release-info.outputs.is_prerelease == 'false'",
+)
+
+
+def _evaluate_upload_gate(
+    condition: str,
+    *,
+    release_tag: str,
+    upload_to_release: str,
+) -> bool:
+    """Evaluate an upload-gate condition against one dispatch/call payload.
+
+    The condition is reduced to boolean literals and ``and``/``or`` and then
+    handed to the same restricted-AST evaluator every other ``if:`` assertion
+    in this module uses, so there is one boolean grammar here rather than two.
+    Only the operand forms this workflow actually uses are understood; anything
+    else survives reduction and fails the completeness pre-pass, so a rewrite
+    into an unrecognised shape cannot pass silently.
+
+    Args:
+        condition: The raw ``if:`` expression.
+        release_tag: Value of ``inputs.release_tag`` (``''`` on a dispatch).
+        upload_to_release: Value of ``inputs.upload_to_release`` (``''`` when
+            the input is undeclared, as on the ``workflow_call`` path).
+
+    Returns:
+        Whether the step or job would run.
+    """
+    expr = _normalize_github_expr(condition)
+    for operand in _UPLOAD_GATE_TRUE_OPERANDS:
+        expr = expr.replace(operand, "True")
+    upload_requested = upload_to_release == "true"
+    # ``!input`` and the ``== false`` form are recognised so that an inverted
+    # rewrite reduces cleanly and fails on semantics, not on tokenisation.
+    for token, value in (
+        ("!inputs.upload_to_release", not upload_requested),
+        ("inputs.release_tag != ''", release_tag != ""),
+        ("inputs.release_tag == ''", release_tag == ""),
+        ("inputs.upload_to_release == true", upload_requested),
+        ("inputs.upload_to_release == false", not upload_requested),
+    ):
+        expr = expr.replace(token, repr(value))
+    expr = expr.replace("&&", " and ").replace("||", " or ")
+    # A parenthesised inversion is the other shape an inverted rewrite takes,
+    # and the token table above cannot reach it. Map it onto Python's ``not``,
+    # which the restricted AST evaluator already understands, so such a rewrite
+    # also fails on semantics rather than on tokenisation.
+    expr = re.sub(r"!\s*\(", "not (", expr)
+
+    residue = re.sub(
+        r"\bTrue\b|\bFalse\b|\bnot\b|\band\b|\bor\b|[()\s]",
+        "",
+        expr,
+    )
+    assert_that(residue).described_as(
+        f"unrecognised operand in {condition!r} (reduced to {expr!r})",
+    ).is_empty()
+    return _eval_restricted_bool_expr(expr)
+
+
+def _assert_upload_gate_behaviour(condition: str, *, described_as: str) -> None:
+    """Assert one condition publishes on exactly the three intended payloads.
+
+    Args:
+        condition: The raw ``if:`` expression.
+        described_as: Label for assertion failures.
+    """
+    # workflow_call from the tag pipeline: release_tag is passed, and the
+    # undeclared upload_to_release evaluates to the empty string.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="v1", upload_to_release=""),
+    ).described_as(f"{described_as}: workflow_call must publish").is_true()
+    # Plain dispatch (a build check): publishes nothing.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="", upload_to_release="false"),
+    ).described_as(f"{described_as}: plain dispatch must not publish").is_false()
+    # Repair dispatch: upload_to_release alone is enough.
+    assert_that(
+        _evaluate_upload_gate(condition, release_tag="", upload_to_release="true"),
+    ).described_as(f"{described_as}: repair dispatch must publish").is_true()
+
+
+def test_upload_gate_evaluator_rejects_a_conjunctive_gate() -> None:
+    """The gate assertions are not vacuous: a conjunctive rewrite must fail.
+
+    ``inputs.release_tag != '' && inputs.upload_to_release == true`` is the
+    plausible regression - it looks equivalent and silently disables publishing
+    on the tag path, where ``upload_to_release`` is undeclared and empty.
+    """
+    conjunctive = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "(inputs.release_tag != '' && inputs.upload_to_release == true)"
+    )
+    assert_that(
+        _evaluate_upload_gate(conjunctive, release_tag="v1", upload_to_release=""),
+    ).is_false()
+    with pytest.raises(AssertionError):
+        _assert_upload_gate_behaviour(conjunctive, described_as="conjunctive")
+
+    # An inverted arm publishes on the plain dispatch this issue exists to stop.
+    # The evaluator understands ``== false``, so this sub-case must fail on the
+    # semantic assertion rather than on operand tokenisation.
+    inverted = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "(inputs.release_tag != '' || inputs.upload_to_release == false)"
+    )
+    assert_that(
+        _evaluate_upload_gate(inverted, release_tag="", upload_to_release="false"),
+    ).is_true()
+    with pytest.raises(AssertionError) as inverted_failure:
+        _assert_upload_gate_behaviour(inverted, described_as="inverted")
+    assert_that(str(inverted_failure.value)).contains(
+        "inverted: plain dispatch must not publish",
+    )
+
+
+def test_upload_gate_evaluator_rejects_a_negated_disjunction() -> None:
+    """``!(a || b)`` reduces to ``not (...)`` and fails on semantics.
+
+    An author "fixing" the gate by wrapping the disjunction in a negation
+    produces exactly the inverted publishing surface #2484 is about, so the
+    evaluator must understand the shape rather than choke on it.
+    """
+    negated = (
+        "needs.get-release-info.outputs.release_tag != '' && "
+        "!(inputs.release_tag != '' || inputs.upload_to_release == true)"
+    )
+    assert_that(
+        _evaluate_upload_gate(negated, release_tag="", upload_to_release="false"),
+    ).is_true()
+    assert_that(
+        _evaluate_upload_gate(negated, release_tag="v1", upload_to_release=""),
+    ).is_false()
+    with pytest.raises(AssertionError):
+        _assert_upload_gate_behaviour(negated, described_as="negated")
+
+
+def test_build_binary_dispatch_uploads_are_opt_in() -> None:
+    """A plain ``workflow_dispatch`` must not republish release assets.
+
+    ``get-release-info`` resolves the latest published release when no
+    ``release_tag`` input is supplied, so before #2484 a bare dispatch
+    overwrote that release's binaries and man page. Every publishing step and
+    job must therefore also require the workflow_call path or the explicit
+    ``upload_to_release`` repair input.
+    """
+    workflow = _load_workflow(name="build-binary.yml")
+    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
+    upload_input = dispatch_inputs["upload_to_release"]
+    assert_that(upload_input["type"]).is_equal_to("boolean")
+    assert_that(upload_input["default"]).is_false()
+    assert_that(str(upload_input["description"]).lower()).described_as(
+        "the dispatch form must say this is the repair path",
+    ).contains("repair")
+
+    # ``upload_to_release`` is dispatch-only by design, and that asymmetry is
+    # what makes the gate's workflow_call payload correct: the tag pipeline
+    # cannot pass the input, so it evaluates to the empty string there and the
+    # gate has to publish on ``release_tag`` alone. Pin both halves, because a
+    # later ``upload_to_release`` added under workflow_call would silently
+    # invalidate the payload the evaluator below asserts against.
+    call_inputs = workflow["on"]["workflow_call"]["inputs"]
+    assert_that(call_inputs).described_as(
+        "upload_to_release is a dispatch-only repair input",
+    ).does_not_contain_key("upload_to_release")
+    assert_that(call_inputs["release_tag"]["required"]).described_as(
+        "the workflow_call path must always carry a release tag",
+    ).is_true()
+    # The other half of the asymmetry: the gate's ``inputs.release_tag != ''``
+    # disjunct is inert on dispatch only because dispatch declares no such
+    # input. A later dispatch-level ``release_tag`` would let a repair run
+    # republish its ref onto whichever release get-release-info resolves.
+    assert_that(dispatch_inputs).described_as(
+        "a dispatch must not be able to name a release_tag",
+    ).does_not_contain_key("release_tag")
+
+    upload_steps = tuple(
+        (job_id, str(step.get("name")))
+        for job_id, job in workflow["jobs"].items()
+        for step in job.get("steps") or []
+        if str(step.get("name", "")).startswith("Upload to release")
+    )
+    assert_that(upload_steps).described_as(
+        "the publishing surface must not grow or shrink unnoticed",
+    ).is_equal_to(_UPLOAD_STEPS)
+
+    for job_id, step_name in _UPLOAD_STEPS:
+        step = next(
+            candidate
+            for candidate in workflow["jobs"][job_id]["steps"]
+            if candidate.get("name") == step_name
+        )
+        condition = _normalize_github_expr(str(step.get("if", "")))
+        label = f"{job_id}/{step_name}"
+        assert_that(condition).described_as(label).contains(
+            _UPLOAD_OPT_IN_DISJUNCTION,
+        )
+        _assert_upload_gate_behaviour(str(step["if"]), described_as=label)
+
+    homebrew = str(workflow["jobs"]["homebrew-dispatch"].get("if", ""))
+    assert_that(_normalize_github_expr(homebrew)).described_as(
+        "homebrew-dispatch publishes downstream and must honour the gate",
+    ).contains(_UPLOAD_OPT_IN_DISJUNCTION)
+    _assert_upload_gate_behaviour(homebrew, described_as="homebrew-dispatch")
+
+
+def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
+    """The workflows README documents the plain dispatch and the repair path.
+
+    The input description alone is only visible once the dispatch form is
+    open; an operator reaching for a manual build reads the README first, and
+    the repair path is the part that has to be written down (#2484).
+
+    ``upload_to_release`` alone is not a full repair: ``arch`` decides which
+    binaries are rebuilt and its dispatch default is ``arm64``, so a repair
+    left on the default never produces the macOS x86_64 asset, never runs
+    ``create-universal-binary`` and never re-pings the tap - both jobs are
+    gated on ``inputs.arch == 'universal'``. The dispatch ref matters just as
+    much and is not an input at all: the workflow builds the ref it was
+    dispatched from while ``get-release-info`` resolves the latest published
+    release either way, so a repair run from ``main`` publishes main-HEAD onto
+    a shipped release. The README has to name both inputs and the ref, so pin
+    that here rather than trusting prose to stay complete.
+    """
+    readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
+        encoding="utf-8",
+    )
+    assert_that(readme).contains("upload_to_release")
+    assert_that(readme).contains("build-binary.yml")
+
+    section = readme.partition("### Dispatching `build-binary.yml` by hand")[2]
+    assert_that(section).described_as(
+        "the dispatch runbook section must exist to document the repair path",
+    ).is_not_empty()
+    repair = section.partition("- **Repair dispatch**")[2].partition("\n- **The tag")[0]
+    assert_that(repair).described_as(
+        "the repair bullet must name both inputs a full repair needs",
+    ).is_not_empty()
+    # "ref" and "tag" carry the dispatch-ref prerequisite, which is not an
+    # input and so has no workflow-side assertion to anchor it.
+    for token in ("upload_to_release", "arch", "universal", "arm64", "ref", "tag"):
+        assert_that(repair).described_as(
+            f"the repair path must mention {token}",
+        ).contains(token)
+
+    # The arch prerequisite is only true while the two jobs stay gated on it.
+    workflow = _load_workflow(name="build-binary.yml")
+    for job_id in ("create-universal-binary", "homebrew-dispatch"):
+        gate = _normalize_github_expr(str(workflow["jobs"][job_id]["if"]))
+        assert_that(gate).described_as(
+            f"{job_id} gates the documented arch prerequisite",
+        ).contains("inputs.arch == 'universal'")
+
+    arch_defaults = {
+        trigger: str(workflow["on"][trigger]["inputs"]["arch"]["default"])
+        for trigger in ("workflow_dispatch", "workflow_call")
+    }
+    assert_that(arch_defaults).described_as(
+        "the README warns about the dispatch default; a change must update it",
+    ).is_equal_to({"workflow_dispatch": "arm64", "workflow_call": "universal"})
 
 
 def test_renovate_manages_build_binary_uv_pin() -> None:
@@ -4999,3 +5291,488 @@ def test_dogfood_nightly_classifies_before_pinging_the_tracker() -> None:
     assert_that(condition).contains("needs.classify-failure.outputs.notify == 'true'")
     # Fail closed: a classifier that did not succeed still pings.
     assert_that(condition).contains("needs.classify-failure.result != 'success'")
+
+
+# --- Reusable-workflow permission wiring (#2484) ---------------------------
+#
+# GitHub refuses a called workflow that requests a permission its caller job
+# does not grant, and it refuses it before any job starts: the run reports
+# `startup_failure` with no jobs and no logs. #2440 added `actions: read` to
+# build-binary.yml's compile jobs without adding it to the `homebrew-tap` job
+# that calls them, and every tag from v0.151.2 through v0.152.6 died that way.
+# Nothing caught it because the only caller is the tag pipeline, which never
+# runs on a PR or on main, and a `workflow_dispatch` of the callee uses its own
+# token so the mismatch does not apply.
+
+_PERMISSION_LEVELS = {"none": 0, "read": 1, "write": 2}
+_LOCAL_WORKFLOW_CALL_PREFIX = "./.github/workflows/"
+
+
+def _permission_level(value: object) -> int:
+    """Map a workflow permission value to a comparable access level.
+
+    Args:
+        value: The raw YAML value of a single permission scope.
+
+    Returns:
+        ``0`` for none, ``1`` for read, ``2`` for write.
+
+    Raises:
+        AssertionError: If the value is not one GitHub accepts, so a typo or
+            a novel level fails the walk instead of reading as "none".
+    """
+    if not isinstance(value, str) or value.strip().lower() not in _PERMISSION_LEVELS:
+        raise AssertionError(f"unknown permission value {value!r}")
+    return _PERMISSION_LEVELS[value.strip().lower()]
+
+
+def test_permission_level_rejects_unknown_values() -> None:
+    """A misspelt or novel permission value fails loudly, never as ``none``."""
+    for bad in ("writ", None, True, 1):
+        with pytest.raises(AssertionError, match="unknown permission value"):
+            _permission_level(bad)
+
+
+def _normalize_permissions(raw: object) -> dict[str, int] | None:
+    """Normalize a ``permissions:`` value to per-scope access levels.
+
+    Args:
+        raw: A ``permissions`` mapping, the ``read-all``/``write-all``
+            shorthand, or ``None`` when the block is absent.
+
+    Returns:
+        A scope-to-level mapping, or ``None`` when no block was declared.
+        The ``read-all``/``write-all`` shorthands return ``{"*": level}``,
+        which :func:`_granted_level` reads as a floor for every scope.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        shorthand = raw.strip().lower()
+        if shorthand in {"read-all", "write-all"}:
+            return {"*": _permission_level(shorthand.removesuffix("-all"))}
+        return {}
+    if isinstance(raw, dict):
+        return {str(scope): _permission_level(value) for scope, value in raw.items()}
+    return {}
+
+
+def _granted_level(grant: dict[str, int], *, scope: str) -> int:
+    """Return the access level ``grant`` gives ``scope``.
+
+    Args:
+        grant: A normalized permission mapping.
+        scope: The permission scope being looked up.
+
+    Returns:
+        The granted level, falling back to any ``read-all``/``write-all``
+        wildcard and then to ``0``.
+    """
+    return max(grant.get(scope, 0), grant.get("*", 0))
+
+
+def _effective_grant(
+    *,
+    job: dict[str, Any],
+    workflow: dict[str, Any],
+) -> dict[str, int]:
+    """Return the permissions a job actually holds.
+
+    A job without its own ``permissions`` block inherits the workflow-level
+    block. Most workflows here declare ``permissions: {}`` at the top, so the
+    empty grant is the usual outcome - but not all of them do
+    (``docker-build-publish.yml`` declares a top-level ``contents: read``),
+    which is exactly why the workflow-level block is consulted rather than
+    assumed empty. When neither the job nor the workflow declares a block at
+    all, GitHub falls back to the default ``GITHUB_TOKEN`` grant, which this
+    repository's org/repo setting models as ``contents: read``; that default
+    is returned instead of an empty grant, while an explicit
+    ``permissions: {}`` stays empty.
+
+    Args:
+        job: The parsed job mapping.
+        workflow: The parsed workflow that contains ``job``.
+
+    Returns:
+        A scope-to-level mapping.
+    """
+    job_level = _normalize_permissions(job.get("permissions"))
+    if job_level is not None:
+        return job_level
+    workflow_level = _normalize_permissions(workflow.get("permissions"))
+    if workflow_level is not None:
+        return workflow_level
+    return {"contents": _PERMISSION_LEVELS["read"]}
+
+
+def _local_workflow_calls(
+    *,
+    workflow: dict[str, Any],
+) -> list[tuple[str, dict[str, Any], str]]:
+    """Find the jobs of ``workflow`` that call a local reusable workflow.
+
+    Args:
+        workflow: The parsed caller workflow.
+
+    Returns:
+        ``(job id, job mapping, callee file name)`` for each local call.
+    """
+    calls: list[tuple[str, dict[str, Any], str]] = []
+    for job_id, job in (workflow.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        uses = job.get("uses")
+        if isinstance(uses, str) and uses.startswith(_LOCAL_WORKFLOW_CALL_PREFIX):
+            calls.append(
+                (
+                    str(job_id),
+                    job,
+                    uses.removeprefix(_LOCAL_WORKFLOW_CALL_PREFIX),
+                ),
+            )
+    return calls
+
+
+def _permission_shortfalls(
+    *,
+    caller_label: str,
+    caller_grant: dict[str, int],
+    callee_name: str,
+    depth: int,
+) -> list[str]:
+    """Collect every permission a callee requests beyond its caller's grant.
+
+    Recurses one level so a callee that itself calls a local workflow is
+    checked against the grant it received, not against the root caller's.
+
+    Args:
+        caller_label: Human-readable ``workflow::job`` label of the caller.
+        caller_grant: The caller job's effective permissions.
+        callee_name: File name of the called workflow.
+        depth: Remaining recursion depth; ``0`` stops the walk.
+
+    Returns:
+        One message per scope the callee requests and the caller withholds.
+    """
+    callee = _load_workflow(name=callee_name)
+    shortfalls: list[str] = []
+    for callee_job_id, callee_job in (callee.get("jobs") or {}).items():
+        if not isinstance(callee_job, dict):
+            continue
+        requested = _effective_grant(job=callee_job, workflow=callee)
+        for scope, level in requested.items():
+            if level == 0:
+                continue
+            granted = _granted_level(caller_grant, scope=scope)
+            if granted < level:
+                shortfalls.append(
+                    f"{caller_label} grants {scope}="
+                    f"{'none' if granted == 0 else 'read'} but "
+                    f"{callee_name}::{callee_job_id} requests {scope}="
+                    f"{'read' if level == 1 else 'write'}",
+                )
+        if depth > 0:
+            nested_uses = callee_job.get("uses")
+            if isinstance(nested_uses, str) and nested_uses.startswith(
+                _LOCAL_WORKFLOW_CALL_PREFIX,
+            ):
+                shortfalls.extend(
+                    _permission_shortfalls(
+                        caller_label=f"{callee_name}::{callee_job_id}",
+                        caller_grant=requested,
+                        callee_name=nested_uses.removeprefix(
+                            _LOCAL_WORKFLOW_CALL_PREFIX,
+                        ),
+                        depth=depth - 1,
+                    ),
+                )
+    return shortfalls
+
+
+@pytest.fixture
+def workflow_files() -> list[Path]:
+    """Return every workflow definition under ``.github/workflows``.
+
+    Returns:
+        Sorted paths of the repository's workflow YAML files.
+    """
+    workflows_dir = _REPO_ROOT / ".github" / "workflows"
+    return sorted(
+        path
+        for path in workflows_dir.iterdir()
+        if path.suffix in {".yml", ".yaml"} and path.is_file()
+    )
+
+
+@pytest.fixture
+def parsed_workflows(workflow_files: list[Path]) -> dict[str, dict[str, Any]]:
+    """Parse every workflow once, keyed by file name.
+
+    Args:
+        workflow_files: The workflow paths to parse.
+
+    Returns:
+        A mapping of file name to parsed workflow.
+    """
+    return {path.name: _load_workflow(name=path.name) for path in workflow_files}
+
+
+def test_reusable_workflow_callers_grant_what_callees_request(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """Every local `uses:` caller grants at least what the callee requests.
+
+    A shortfall is not a job failure but a whole-run `startup_failure` with no
+    logs to point at it, so it has to be caught here. See #2484.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    shortfalls: list[str] = []
+    for workflow_name, workflow in parsed_workflows.items():
+        for job_id, job, callee_name in _local_workflow_calls(workflow=workflow):
+            shortfalls.extend(
+                _permission_shortfalls(
+                    caller_label=f"{workflow_name}::{job_id}",
+                    caller_grant=_effective_grant(job=job, workflow=workflow),
+                    callee_name=callee_name,
+                    depth=1,
+                ),
+            )
+    assert_that(shortfalls).described_as("caller/callee permission gaps").is_empty()
+
+
+def test_reusable_workflow_permission_check_covers_the_release_pipeline(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """The check actually walks the tag pipeline's reusable-workflow calls.
+
+    An empty walk would make the test above pass vacuously, which is exactly
+    how #2440's regression stayed invisible.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    calls = _local_workflow_calls(
+        workflow=parsed_workflows["publish-pypi-on-tag.yml"],
+    )
+    callees = {callee for _, _, callee in calls}
+    assert_that(callees).contains("build-binary.yml")
+    caller_job = next(job for job_id, job, _ in calls if job_id == "homebrew-tap")
+    grant = _effective_grant(
+        job=caller_job,
+        workflow=parsed_workflows["publish-pypi-on-tag.yml"],
+    )
+    assert_that(_granted_level(grant, scope="actions")).is_greater_than_or_equal_to(
+        _PERMISSION_LEVELS["read"],
+    )
+
+
+def test_permission_shortfalls_detects_a_withheld_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_permission_shortfalls` reports a scope the caller withholds.
+
+    Guards the detector itself against a synthetic callee: without this, a
+    detector that always returned an empty list would leave the walk above
+    green forever.
+
+    Args:
+        monkeypatch: pytest attribute patcher, used to substitute a synthetic
+            callee workflow for the on-disk one.
+    """
+    callee = {
+        "permissions": {},
+        "jobs": {
+            "compile": {"permissions": {"contents": "write", "actions": "read"}},
+        },
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: callee,
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="caller.yml::calls",
+        caller_grant=_normalize_permissions({"contents": "write"}) or {},
+        callee_name="callee.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_length(1)
+    assert_that(shortfalls[0]).contains("actions=none")
+    assert_that(shortfalls[0]).contains("requests actions=read")
+
+
+def test_permission_shortfalls_detects_a_read_grant_against_a_write_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller granting read against a write request is reported as a gap.
+
+    The withheld-scope test above only exercises the ``none``/``read`` corner
+    of the message. The ``read``/``write`` rendering is the shape a callee
+    bumping a scope to write produces, and it is the one that startup-fails a
+    tag run, so it needs its own synthetic case.
+
+    Args:
+        monkeypatch: pytest attribute patcher, used to substitute a synthetic
+            callee workflow for the on-disk one.
+    """
+    callee = {
+        "permissions": {},
+        "jobs": {
+            "compile": {"permissions": {"actions": "write"}},
+        },
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: callee,
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="caller.yml::calls",
+        caller_grant=_normalize_permissions({"actions": "read"}) or {},
+        callee_name="callee.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_length(1)
+    assert_that(shortfalls[0]).contains("grants actions=read")
+    assert_that(shortfalls[0]).contains("requests actions=write")
+
+
+def test_reusable_workflow_walk_fails_on_the_pre_2518_publish_workflow(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """The walk reddens on the exact grant the v0.151.2-v0.152.6 tags died on.
+
+    #2440 gave build-binary.yml's compile jobs ``actions: read`` while the
+    ``homebrew-tap`` caller still granted only ``contents: write``; #2518 added
+    the grant. Replaying that state against the real callee proves the walk
+    catches it rather than passing because nothing on disk is broken today.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    publish = deepcopy(parsed_workflows["publish-pypi-on-tag.yml"])
+    caller_job = publish["jobs"]["homebrew-tap"]
+    pre_2518_grant = {
+        scope: value
+        for scope, value in caller_job["permissions"].items()
+        if scope != "actions"
+    }
+    assert_that(caller_job["permissions"]).described_as(
+        "the fixture only means something while #2518's grant is present",
+    ).contains_key("actions")
+    caller_job["permissions"] = pre_2518_grant
+
+    shortfalls = _permission_shortfalls(
+        caller_label="publish-pypi-on-tag.yml::homebrew-tap",
+        caller_grant=_effective_grant(job=caller_job, workflow=publish),
+        callee_name=str(caller_job["uses"]).removeprefix(
+            _LOCAL_WORKFLOW_CALL_PREFIX,
+        ),
+        depth=1,
+    )
+    assert_that(shortfalls).is_not_empty()
+    for message in shortfalls:
+        assert_that(message).contains("requests actions=read")
+    assert_that(" ".join(shortfalls)).contains("build-binary.yml::build-linux")
+
+
+def test_permission_shortfalls_is_silent_when_the_grant_covers_the_callee(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller granting at least as much as the callee produces no message.
+
+    Args:
+        monkeypatch: pytest attribute patcher.
+    """
+    callee = {
+        "permissions": {"contents": "read"},
+        "jobs": {"compile": {"permissions": {"actions": "read"}}, "docs": {}},
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: callee,
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="caller.yml::calls",
+        caller_grant=_normalize_permissions(
+            {"contents": "write", "actions": "read"},
+        )
+        or {},
+        callee_name="callee.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_empty()
+
+
+def test_permission_shortfalls_recurses_into_a_nested_local_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A grandchild's request is checked against the grant its caller received.
+
+    Args:
+        monkeypatch: pytest attribute patcher.
+    """
+    workflows = {
+        "middle.yml": {
+            "permissions": {},
+            "jobs": {
+                "relay": {
+                    "permissions": {"contents": "write"},
+                    "uses": "./.github/workflows/leaf.yml",
+                },
+            },
+        },
+        "leaf.yml": {
+            "permissions": {},
+            "jobs": {"compile": {"permissions": {"packages": "write"}}},
+        },
+    }
+    monkeypatch.setattr(
+        f"{__name__}._load_workflow",
+        lambda *, name: workflows[name],
+    )
+    shortfalls = _permission_shortfalls(
+        caller_label="root.yml::calls",
+        caller_grant=_normalize_permissions({"contents": "write"}) or {},
+        callee_name="middle.yml",
+        depth=1,
+    )
+    assert_that(shortfalls).is_length(1)
+    assert_that(shortfalls[0]).contains("middle.yml::relay")
+    assert_that(shortfalls[0]).contains("requests packages=write")
+
+
+def test_missing_permissions_block_models_the_token_default() -> None:
+    """No block anywhere means GitHub's default grant, not an empty one."""
+    default_grant = _effective_grant(job={}, workflow={})
+    assert_that(_granted_level(default_grant, scope="contents")).is_equal_to(
+        _PERMISSION_LEVELS["read"],
+    )
+    assert_that(_granted_level(default_grant, scope="packages")).is_equal_to(0)
+
+    explicit_empty = _effective_grant(job={}, workflow={"permissions": {}})
+    assert_that(explicit_empty).is_equal_to({})
+    inherited = _effective_grant(
+        job={},
+        workflow={"permissions": {"contents": "read"}},
+    )
+    assert_that(inherited).is_equal_to({"contents": _PERMISSION_LEVELS["read"]})
+    job_overrides = _effective_grant(
+        job={"permissions": {}},
+        workflow={"permissions": {"contents": "write"}},
+    )
+    assert_that(job_overrides).is_equal_to({})
+
+
+def test_permission_shorthands_normalize_to_levels() -> None:
+    """``read-all``/``write-all`` and a missing block normalize correctly."""
+    assert_that(_normalize_permissions(None)).is_none()
+    assert_that(_normalize_permissions({})).is_equal_to({})
+    read_all = _normalize_permissions("read-all") or {}
+    assert_that(_granted_level(read_all, scope="actions")).is_equal_to(1)
+    write_all = _normalize_permissions("write-all") or {}
+    assert_that(_granted_level(write_all, scope="packages")).is_equal_to(2)
+    explicit = _normalize_permissions({"contents": "read", "id-token": "write"}) or {}
+    assert_that(_granted_level(explicit, scope="contents")).is_equal_to(1)
+    assert_that(_granted_level(explicit, scope="id-token")).is_equal_to(2)
+    assert_that(_granted_level(explicit, scope="actions")).is_equal_to(0)
