@@ -7,19 +7,25 @@ native binary at runtime, so consumers need no Python.
 
 ## Package layout
 
-The `npm/` directory holds five packages:
+The `npm/` directory holds four packages:
 
 | Package  | npm name                       | Contents                                       |
 | -------- | ------------------------------ | ---------------------------------------------- |
 | Meta     | `@lgtm-hq/lintro`              | `bin/lintro` launcher + `optionalDependencies` |
 | Platform | `@lgtm-hq/lintro-darwin-arm64` | macOS Apple Silicon binary                     |
-| Platform | `@lgtm-hq/lintro-darwin-x64`   | macOS Intel binary                             |
 | Platform | `@lgtm-hq/lintro-linux-arm64`  | Linux ARM64 binary                             |
 | Platform | `@lgtm-hq/lintro-linux-x64`    | Linux x86_64 binary                            |
 
 Each platform package declares `os` and `cpu` fields, so npm and bun download only the
-binary matching the host. The meta-package lists all four as `optionalDependencies`; the
-unsupported ones are skipped during install.
+binary matching the host. The meta-package lists all three as `optionalDependencies`;
+the unsupported ones are skipped during install.
+
+There is no Intel macOS package (#2579). The MCP bundle makes `cryptography` a hard
+dependency of the binary, and cryptography ships no Intel macOS wheel from 49.0.0 on, so
+the x86_64 binary was dropped rather than built from source on a runner GitHub is
+retiring. On an Intel Mac the launcher exits with a one-line pointer to the Homebrew
+formula (`brew tap lgtm-hq/tap && brew install lintro`, which installs from PyPI there)
+or to `pip install lintro`.
 
 ## Runtime resolution
 
@@ -35,7 +41,7 @@ argv and stdio and propagating its exit code. Resolution is pure and unit-tested
 existing `build_macos.py`. Linux has no cross-arch flag, so arm64 and x86_64 are built
 natively on their respective runners. The `build-linux` job in
 `.github/workflows/build-binary.yml` uploads `lintro-linux-x64` and `lintro-linux-arm64`
-artifacts alongside the macOS ones.
+artifacts alongside the macOS arm64 one.
 
 ## Versioning
 

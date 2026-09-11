@@ -236,12 +236,11 @@ jobs:
       actions: read
     with:
       release_tag: ${{ github.ref_name }}
-      arch: universal
     secrets: inherit
 
   npm-publish:
     name: Publish to npm
-    # Needs homebrew-tap: that job (build-binary.yml) uploads the four
+    # Needs homebrew-tap: that job (build-binary.yml) uploads the three
     # platform binaries to the GitHub release, which publish-npm.yml
     # downloads. Gated to stable releases only, since build-binary does not
     # run for prereleases.

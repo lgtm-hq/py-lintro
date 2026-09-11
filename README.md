@@ -398,6 +398,7 @@ See the [AI Features Guide](docs/ai-features.md) for full documentation.
 # Lightweight (CLI only — detects tools on PATH)
 uv pip install lintro
 brew tap lgtm-hq/tap && brew install lintro
+# Homebrew ships a prebuilt binary on Apple silicon; Intel Macs install from PyPI
 
 # Full (bundled Python tools: ruff, black, mypy, bandit, import-linter,
 # pydoclint, pylint, yamllint)

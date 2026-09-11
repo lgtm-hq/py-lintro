@@ -8,25 +8,11 @@ name: Publish - Homebrew Tap
         description: 'Release tag to publish'
         required: true
         type: string
-      arch:
-        description: 'Target architecture'
-        required: false
-        default: universal
-        type: string
   workflow_dispatch:
     inputs:
-      arch:
-        description: 'Target architecture'
-        required: true
-        default: 'arm64'
-        type: choice
-        options:
-          - arm64
-          - x86_64
-          - universal
       upload_to_release:
         # yamllint disable-line rule:line-length
-        description: 'Repair path: republish the built binaries onto the latest release. Dispatch from the release tag, with arch=universal, or you publish this ref onto that release. Leave off - a plain dispatch only builds and uploads run artifacts.'
+        description: 'Repair path: republish the built binaries onto the latest release. Dispatch from the release tag, or you publish this ref onto that release. Leave off - a plain dispatch only builds and uploads run artifacts.'
         required: false
         default: false
         type: boolean
@@ -158,7 +144,7 @@ jobs:
   build-macos:
     name: Build macOS Binary
     needs: get-release-info
-    runs-on: ${{ matrix.arch == 'x86_64' && 'macos-15-intel' || 'macos-latest' }}
+    runs-on: macos-latest
     # 25 min compile + 20 min smoke + 15 min setup/diagnostic headroom.
     # The smoke step's 20-minute budget used to sit inside a 35-minute job
     # that already spent 25 minutes on compile, so the parent could cancel a
@@ -172,13 +158,16 @@ jobs:
       actions: read
     strategy:
       fail-fast: false
+      # #2579: Apple silicon only. The x86_64 leg and the lipo'd universal
+      # binary were dropped once the MCP bundle (#2577) made `cryptography` a
+      # hard dependency of the binary: it ships no Intel macOS wheel from
+      # 49.0.0 on, and GitHub retires the Intel runner in August 2027. Intel
+      # Macs install from PyPI through the Homebrew formula instead. The
+      # single-entry matrix keeps `matrix.arch` as the one arch spelling the
+      # asset, artifact and checksum names below are built from.
       matrix:
-        arch: >-
-          ${{
-            inputs.arch != 'universal' &&
-            fromJSON(format('["{0}"]', inputs.arch)) ||
-            fromJSON('["arm64", "x86_64"]')
-          }}
+        arch:
+          - arm64
 
     steps:
       - name: Harden Runner
@@ -229,10 +218,10 @@ jobs:
           version: ${{ env.UV_VERSION }}
 
       # #1897: binary builds install the runtime deps plus the `build` group and
-      # nothing else. The default `dev` group drags in `mcp` -> `pyjwt[crypto]`
-      # -> `cryptography`, which ships no macOS x86_64 wheel from 49.0.0 on, so
-      # uv would build it from source via maturin/cargo and hit the (correctly)
-      # blocked crates.io egress. A Nuitka binary needs none of that stack.
+      # nothing else. The default `dev` group drags in the test stack, which a
+      # Nuitka binary does not need; keep the sync minimal so a dependency
+      # without a wheel for this runner cannot turn into a source build behind
+      # the (correctly) blocked crates.io egress.
       - name: Install dependencies
         run: |
           uv sync --group build --no-default-groups
@@ -276,8 +265,8 @@ jobs:
             --arch "$BUILD_ARCH" \
             --skip-verify
         env:
-          # matrix.arch via env, not template expansion: workflow_call passes
-          # inputs.arch as a free-form string (template-injection hardening).
+          # matrix.arch via env, not template expansion, kept symmetric with
+          # the Linux job so the two never drift apart.
           BUILD_ARCH: ${{ matrix.arch }}
           PYTHONUNBUFFERED: '1'
 
@@ -316,9 +305,8 @@ jobs:
         timeout-minutes: 20
         run: python3 scripts/ci/smoke-test-binary.py dist/nuitka/lintro
 
-      # matrix.arch reaches the shell via env, not template expansion: on
-      # workflow_call inputs.arch is a free-form string that feeds this matrix
-      # (same hardening as the Build binary step above).
+      # matrix.arch reaches the shell via env, not template expansion (same
+      # shape as the Build binary step above).
       - name: Finalize binary
         id: sha256
         # On reuse the asset is already at the finalized path and its checksum
@@ -613,104 +601,6 @@ jobs:
           "$RELEASE_TAG"
           "dist/nuitka/lintro-linux-$BUILD_ARCH"
 
-  create-universal-binary:
-    name: Create Universal Binary
-    needs: [get-release-info, build-macos]
-    runs-on: macos-latest
-    # download/lipo/upload (~10 min) + 20 min smoke + 5 min headroom.
-    # The smoke step's 20-minute budget must not sit inside the previous
-    # 10-minute job deadline or the parent would cancel a valid smoke test.
-    timeout-minutes: 35
-    permissions:
-      contents: write
-    if: inputs.arch == 'universal'
-
-    steps:
-      - name: Harden Runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-            uploads.github.com:443
-
-      # Needed for scripts/build/create_universal.sh and the binary smoke
-      # test. smoke-test-binary.py reads lintro/plugins/_builtin_index.py,
-      # which is no longer committed (#2180), so the checkout carries the
-      # builtin-index generator's inputs instead: lintro/tools (the per-tool
-      # packages it scans) and the lintro_build package (the
-      # implementation). The codeload / objects.githubusercontent.com
-      # endpoints above are what actions/checkout fetches through, and match
-      # the other sparse-checkout jobs here.
-      - name: Checkout scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: |
-            scripts
-            lintro/plugins
-            lintro/tools
-            lintro_build
-          persist-credentials: false
-
-      # #2202: regenerate the builtin index the smoke test reads; the file
-      # stopped being committed in #2180 and this job never builds the
-      # package, so nothing else generates it. Stdlib-only and offline.
-      - name: Generate builtin tool index
-        run: python3 scripts/ci/generate-builtin-tool-index.py
-
-      - name: Download arm64 binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: lintro-macos-arm64
-          path: binaries/
-
-      - name: Download x86_64 binary
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: lintro-macos-x86_64
-          path: binaries/
-
-      - name: Create universal binary
-        run: >-
-          scripts/build/create_universal.sh
-          binaries/lintro-macos-arm64
-          binaries/lintro-macos-x86_64
-          binaries/lintro-macos-universal
-
-      # #2006: --version/--help pass even when the frozen binary ships an empty
-      # tool registry. Lipo can also produce a binary that will not launch, so
-      # the post-lipo artifact is smoke-tested independently of the per-arch
-      # inputs.
-      - name: Smoke-test tool registry
-        # 9 min of script-internal timeouts (120s + 120s + 300s) plus slack for
-        # the cold onefile extraction each of the three invocations may pay.
-        timeout-minutes: 20
-        run: python3 scripts/ci/smoke-test-binary.py binaries/lintro-macos-universal
-
-      - name: Upload universal artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: lintro-macos-universal
-          path: binaries/lintro-macos-universal
-          retention-days: 7
-
-      - name: Upload to release
-        # Resolved tag is set for both workflow_call and workflow_dispatch; a
-        # bare dispatch must not republish onto the latest release (#2484).
-        if: >-
-          needs.get-release-info.outputs.release_tag != '' &&
-          (inputs.release_tag != '' || inputs.upload_to_release == true)
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
-        with:
-          tag_name: ${{ needs.get-release-info.outputs.release_tag }}
-          files: binaries/lintro-macos-universal
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   homebrew-dispatch:
     name: Notify Homebrew Tap
     needs: [get-release-info, build-macos, generate-man-page]
@@ -719,15 +609,14 @@ jobs:
     permissions:
       contents: read
     # Stable tag releases only. The tap's formulas/lintro.yml declares a
-    # binary formula, so the dispatch must carry both macOS checksums:
-    # a failed binary build blocks the formula update (re-run this workflow
-    # to recover) instead of shipping a partial bump. The universal guard
-    # keeps single-arch workflow_call runs from failing on a missing
-    # checksum artifact.
+    # binary formula for Apple silicon, so the dispatch must carry the arm64
+    # checksum: a failed binary build blocks the formula update (re-run this
+    # workflow to recover) instead of shipping a partial bump. Intel Macs are
+    # served from PyPI by the formula's own `on_intel` branch (#2579), so no
+    # second checksum travels with the dispatch.
     # Use resolved tag: workflow_dispatch has no release_tag input.
     # #2484: a bare dispatch builds only and publishes nothing.
     if: >-
-      inputs.arch == 'universal' &&
       needs.get-release-info.outputs.release_tag != '' &&
       needs.get-release-info.outputs.is_prerelease == 'false' &&
       (inputs.release_tag != '' || inputs.upload_to_release == true)
@@ -752,20 +641,17 @@ jobs:
           sparse-checkout: scripts
           persist-credentials: false
 
-      - name: Download SHA256 artifacts
+      - name: Download SHA256 artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          pattern: sha256-*
+          name: sha256-arm64
           path: checksums/
-          merge-multiple: true
 
-      - name: Read checksums
+      - name: Read checksum
         id: checksums
         run: |
           ARM64_SHA=$(cat checksums/sha256-arm64.txt)
-          X86_64_SHA=$(cat checksums/sha256-x86_64.txt)
           echo "arm64_sha256=$ARM64_SHA" >> "$GITHUB_OUTPUT"
-          echo "x86_64_sha256=$X86_64_SHA" >> "$GITHUB_OUTPUT"
 
       - name: Extract version from tag
         id: version
@@ -790,5 +676,4 @@ jobs:
           version: ${{ steps.version.outputs.version }}
           pypi-package: lintro
           binary-arm64-sha: ${{ steps.checksums.outputs.arm64_sha256 }}
-          binary-x86-sha: ${{ steps.checksums.outputs.x86_64_sha256 }}
           token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}

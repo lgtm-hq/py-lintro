@@ -22,8 +22,8 @@ from assertpy import assert_that
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 _SCRIPT = _REPO_ROOT / "scripts/ci/npm/publish_packages.sh"
 
-# The five package subdirectories the script publishes, in order.
-_PACKAGES = ("darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "lintro")
+# The four package subdirectories the script publishes, in order.
+_PACKAGES = ("darwin-arm64", "linux-arm64", "linux-x64", "lintro")
 
 
 def _publish_log(result: subprocess.CompletedProcess[str]) -> str:
@@ -440,7 +440,7 @@ def test_view_e404_still_means_version_absent(tmp_path: Path) -> None:
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).does_not_contain("could not verify")
     # All five packages publish: nothing was skipped or aborted.
-    assert_that(_publish_log(result).strip().splitlines()).is_length(5)
+    assert_that(_publish_log(result).strip().splitlines()).is_length(len(_PACKAGES))
 
 
 def test_auth_error_mentioning_sigstore_is_not_retried(tmp_path: Path) -> None:
@@ -562,9 +562,9 @@ def test_stderr_patterns_select_expected_path(
 
 def test_already_published_versions_are_skipped(tmp_path: Path) -> None:
     """Versions already on the registry are skipped loudly, not re-published."""
-    # npm view reports the two darwin packages as present, others E404.
+    # npm view reports the darwin package as present, others E404.
     view_body = (
-        'if grep -qE "darwin-(arm64|x64)" <<<"$*"; then\n'
+        'if grep -qE "darwin-arm64" <<<"$*"; then\n'
         '  echo "9.9.9"\n'
         "  exit 0\n"
         "fi\n"
@@ -575,7 +575,6 @@ def test_already_published_versions_are_skipped(tmp_path: Path) -> None:
     result = _run(tmp_path, npm_body="exit 0", view_body=view_body)
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Skipping @lgtm-hq/lintro-darwin-arm64")
-    assert_that(result.stdout).contains("Skipping @lgtm-hq/lintro-darwin-x64")
     # Only the three remaining packages actually publish.
     log = _publish_log(result)
     published = log.strip().splitlines()
@@ -646,9 +645,9 @@ def test_skip_path_reconciles_dist_tag(tmp_path: Path) -> None:
     A version already on the registry is not re-published, so the tag a fresh
     publish would have applied atomically must be re-applied explicitly.
     """
-    # npm view reports the two darwin packages as present, others E404.
+    # npm view reports the darwin package as present, others E404.
     view_body = (
-        'if grep -qE "darwin-(arm64|x64)" <<<"$*"; then\n'
+        'if grep -qE "darwin-arm64" <<<"$*"; then\n'
         '  echo "9.9.9"\n'
         "  exit 0\n"
         "fi\n"
@@ -659,9 +658,8 @@ def test_skip_path_reconciles_dist_tag(tmp_path: Path) -> None:
     result = _run(tmp_path, npm_body="exit 0", view_body=view_body)
     assert_that(result.returncode).is_equal_to(0)
     tags = _dist_tag_log(result).strip().splitlines()
-    assert_that(tags).is_length(2)
+    assert_that(tags).is_length(1)
     assert_that(tags[0]).contains("add @lgtm-hq/lintro-darwin-arm64@9.9.9 latest")
-    assert_that(tags[1]).contains("add @lgtm-hq/lintro-darwin-x64@9.9.9 latest")
     # Skipped packages are never re-published.
     assert_that(_publish_log(result)).does_not_contain("darwin")
 

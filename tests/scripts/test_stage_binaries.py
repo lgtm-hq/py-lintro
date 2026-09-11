@@ -71,7 +71,7 @@ def test_find_binary_returns_none_when_missing(tmp_path: Path) -> None:
     """No candidate files yields None."""
     mod = _load_module()
 
-    found = mod._find_binary(tmp_path, "lintro-macos-x86_64")
+    found = mod._find_binary(tmp_path, "lintro-linux-arm64")
 
     assert_that(found).is_none()
 

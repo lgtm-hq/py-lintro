@@ -18,9 +18,23 @@
  */
 const PLATFORM_PACKAGES = Object.freeze({
   'darwin-arm64': '@lgtm-hq/lintro-darwin-arm64',
-  'darwin-x64': '@lgtm-hq/lintro-darwin-x64',
   'linux-arm64': '@lgtm-hq/lintro-linux-arm64',
   'linux-x64': '@lgtm-hq/lintro-linux-x64',
+});
+
+/**
+ * Platforms that ship no npm binary but have a supported install route
+ * elsewhere. Intel macOS lost its prebuilt binary in #2579: the `cryptography`
+ * dependency the MCP bundle needs ships no Intel macOS wheel, so the Homebrew
+ * formula installs lintro from PyPI on those machines instead.
+ *
+ * @type {Readonly<Record<string, string>>}
+ */
+const UNSUPPORTED_PLATFORM_HINTS = Object.freeze({
+  'darwin-x64':
+    'Intel Macs have no npm binary. Install with Homebrew ' +
+    '(`brew tap lgtm-hq/tap && brew install lintro`) or from PyPI ' +
+    '(`pip install lintro`, or `uv tool install lintro`) instead.',
 });
 
 /**
@@ -35,6 +49,21 @@ function packageForPlatform(platform, arch) {
   const key = `${platform}-${arch}`;
   return Object.prototype.hasOwnProperty.call(PLATFORM_PACKAGES, key)
     ? PLATFORM_PACKAGES[key]
+    : null;
+}
+
+/**
+ * Explain why a platform has no npm binary and where to install from.
+ *
+ * @param {string} platform - Value of `process.platform` (e.g. `"darwin"`).
+ * @param {string} arch - Value of `process.arch` (e.g. `"x64"`).
+ * @returns {string | null} A one-line pointer to another install route, or
+ *   `null` when the platform has none documented.
+ */
+function unsupportedPlatformHint(platform, arch) {
+  const key = `${platform}-${arch}`;
+  return Object.prototype.hasOwnProperty.call(UNSUPPORTED_PLATFORM_HINTS, key)
+    ? UNSUPPORTED_PLATFORM_HINTS[key]
     : null;
 }
 
@@ -65,8 +94,10 @@ function resolveBinary(requireFn, platform, arch) {
   const pkg = packageForPlatform(plat, cpu);
 
   if (!pkg) {
+    const hint = unsupportedPlatformHint(plat, cpu);
     throw new Error(
       `lintro: unsupported platform ${plat}-${cpu}. ` +
+        (hint ? `${hint} ` : '') +
         `Supported platforms: ${supportedPlatforms().join(', ')}.`
     );
   }
@@ -98,7 +129,9 @@ function resolveBinary(requireFn, platform, arch) {
 
 module.exports = {
   PLATFORM_PACKAGES,
+  UNSUPPORTED_PLATFORM_HINTS,
   packageForPlatform,
+  unsupportedPlatformHint,
   supportedPlatforms,
   resolveBinary,
 };
