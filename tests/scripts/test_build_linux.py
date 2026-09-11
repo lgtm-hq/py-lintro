@@ -109,3 +109,54 @@ def test_verify_step_drives_the_committed_review_fixtures() -> None:
     for fixture in (_REVIEW_DRIVER, _FAKE_CLAUDE, _FAKE_RUFF):
         assert_that(fixture.is_file()).is_true()
         assert_that(os.access(fixture, os.X_OK)).is_true()
+
+
+def test_both_platforms_bundle_the_same_sdk_packages_and_metadata() -> None:
+    """The SDK bundle policy must not diverge between the two build scripts."""
+    build_linux = _load_build_linux_module()
+    build_macos = _load_macos_module()
+
+    assert_that(build_linux.MCP_SDK_PACKAGES).is_equal_to(
+        build_macos.MCP_SDK_PACKAGES,
+    )
+    assert_that(build_linux.INCLUDE_DISTRIBUTION_METADATA).is_equal_to(
+        build_macos.INCLUDE_DISTRIBUTION_METADATA,
+    )
+    assert_that(build_linux.MCP_SDK_PACKAGES).contains("mcp", "mcp_types")
+
+
+def test_build_nuitka_command_compiles_the_package_not_a_file_inside_it() -> None:
+    """Nuitka must get the ``lintro`` package in ``-m`` mode (#2577).
+
+    See the macOS test of the same name; the Linux binaries crashed the same
+    way for the same reason.
+    """
+    build_linux = _load_build_linux_module()
+    package_dir = str(build_linux.PROJECT_ROOT / "lintro")
+
+    with patch.object(Path, "exists", return_value=True):
+        cmd = build_linux.build_nuitka_command()
+
+    assert_that(cmd).contains("--python-flag=-m")
+    assert_that(cmd[-1]).is_equal_to(package_dir)
+    positional = [arg for arg in cmd[3:] if not arg.startswith("--")]
+    inside_package = [arg for arg in positional if arg.startswith(package_dir + os.sep)]
+    assert_that(inside_package).is_empty()
+
+
+def test_build_nuitka_command_bundles_the_mcp_sdk() -> None:
+    """The SDK, its metadata and its bytecode stack are all requested (#2577)."""
+    build_linux = _load_build_linux_module()
+
+    with patch.object(Path, "exists", return_value=True):
+        cmd = build_linux.build_nuitka_command()
+
+    assert_that(cmd).contains(
+        "--include-package=mcp",
+        "--include-package=mcp_types",
+        "--include-distribution-metadata=httpx2",
+        "--noinclude-custom-mode=mcp:bytecode",
+        "--noinclude-custom-mode=pydantic:bytecode",
+        "--noinclude-custom-mode=starlette:bytecode",
+        "--noinclude-custom-mode=anyio:bytecode",
+    )

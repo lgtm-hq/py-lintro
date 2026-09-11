@@ -42,6 +42,29 @@ INCLUDE_PACKAGES = [
     "httpx",
 ]
 
+# The MCP SDK (#2577). The `mcp` extra is synced for binary builds and both
+# packages are named here explicitly: nothing in lintro imports the SDK at
+# module level (the server imports it lazily), so --follow-imports alone
+# would leave it out and `lintro mcp` would fail at the first SDK import.
+MCP_SDK_PACKAGES = [
+    "mcp",
+    "mcp_types",
+]
+
+# Distributions whose metadata the SDK stack reads at runtime (#2577).
+# `httpx2` and `httpcore2` resolve their own version from it at import time,
+# so without it `lintro mcp` fails on `PackageNotFoundError` before the
+# server starts; the rest expose it lazily through ``__version__``.
+INCLUDE_DISTRIBUTION_METADATA = [
+    "httpx2",
+    "httpcore2",
+    "mcp",
+    "mcp-types",
+    "pydantic",
+    "jsonschema",
+    "attrs",
+]
+
 # Directory data files to include (relative to package).
 INCLUDE_DATA_DIRS = [
     "lintro/assets=lintro/assets",
@@ -53,6 +76,38 @@ INCLUDE_DATA_DIRS = [
 BYTECODE_PACKAGES = [
     "lintro",
     "pygments",
+    # The MCP SDK and its pure-Python runtime stack (#2577). Shipped as
+    # bytecode so bundling the SDK stays inside the #2514 compile budget;
+    # pydantic_core, rpds and cryptography are extension modules and are
+    # copied as-is regardless of this list.
+    "mcp",
+    "mcp_types",
+    "pydantic",
+    "pydantic_settings",
+    "annotated_types",
+    "typing_inspection",
+    "typing_extensions",
+    "starlette",
+    "sse_starlette",
+    "anyio",
+    "sniffio",
+    "httpx",
+    "httpx2",
+    "httpcore",
+    "httpcore2",
+    "h11",
+    "idna",
+    "certifi",
+    "jsonschema",
+    "jsonschema_specifications",
+    "referencing",
+    "attrs",
+    "attr",
+    "jwt",
+    "python_multipart",
+    "multipart",
+    "opentelemetry",
+    "uvicorn",
 ]
 
 # Non-Python data files required at runtime.
@@ -103,17 +158,21 @@ def build_nuitka_command(*, verbose: bool = False) -> list[str]:
         "--assume-yes-for-downloads",
     ]
 
-    for pkg in INCLUDE_PACKAGES:
+    for pkg in [*INCLUDE_PACKAGES, *MCP_SDK_PACKAGES]:
         cmd.append(f"--include-package={pkg}")
 
     cmd.append("--include-package-data=lintro")
+
+    for distribution in INCLUDE_DISTRIBUTION_METADATA:
+        cmd.append(f"--include-distribution-metadata={distribution}")
 
     # #2514: compiling these to C produced 1,527 C units and macOS arm64 build
     # steps of 26-28 minutes against the 25-minute cap (Intel 20-25, Linux
     # 16-21); as bytecode it is 340 units and 6-12 minutes on every runner,
     # with identical behaviour. `bytecode` is the anti-bloat plugin's mode,
     # the same one that already ships `rich` uncompiled. lintro/__main__.py is
-    # the entry point and stays compiled.
+    # the entry point (compiled as `lintro.__main__`, see below) and stays
+    # compiled.
     for package in BYTECODE_PACKAGES:
         cmd.append(f"--noinclude-custom-mode={package}:bytecode")
 
@@ -132,7 +191,13 @@ def build_nuitka_command(*, verbose: bool = False) -> list[str]:
     if verbose:
         cmd.append("--verbose")
 
-    cmd.append(str(PROJECT_ROOT / "lintro" / "__main__.py"))
+    # Package mode (#2577): Nuitka adds the main program's directory to its
+    # module search path, so handing it `lintro/__main__.py` made `lintro/`
+    # the import root and lintro's own `lintro/mcp` shadowed the SDK's
+    # top-level `mcp` package inside the binary. Compiling the package as
+    # `lintro.__main__` keeps the search path at the project root.
+    cmd.append("--python-flag=-m")
+    cmd.append(str(PROJECT_ROOT / "lintro"))
     return cmd
 
 
