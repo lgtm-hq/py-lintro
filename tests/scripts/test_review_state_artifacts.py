@@ -17,6 +17,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1655,3 +1656,44 @@ def test_lint_report_subcommand_prints_run_id_and_head(
 
     assert_that(exit_code).is_equal_to(0)
     assert_that(capsys.readouterr().out).is_equal_to(f"run-id=200\nhead-sha={HEAD}\n")
+
+
+def test_lint_report_artifact_contract_is_pinned_across_files(
+    artifacts: ModuleType,
+) -> None:
+    """The artifact name, report path, and note wording agree across files.
+
+    docker-ci.yml uploads the report, the locator names the artifact,
+    run-ai-review.sh downloads it and passes the file, and lintro renders the
+    note. Each lives in a different language, so this reads the literals out
+    of every file and compares them to each other; a rename in one place
+    fails here instead of 404-ing forever behind the fail-safe note (#2571).
+    """
+    from lintro.ai.review.preparation_resolvers import LINT_FACTS_UNAVAILABLE
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "docker-ci.yml").read_text(
+            encoding="utf-8",
+        ),
+    )
+    uploads = [
+        step
+        for step in workflow["jobs"]["dogfooding-lint-changed"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        and step.get("with", {}).get("name") == artifacts.LINT_REPORT_ARTIFACT
+    ]
+    assert_that(uploads).is_length(1)
+    uploaded_path = Path(uploads[0]["with"]["path"])
+
+    script = (REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh").read_text(
+        encoding="utf-8",
+    )
+    downloaded_name = re.search(r"--name (\S+)", script)
+    report_path = re.search(r'lint_report_path="\$\{lint_report_dir\}/([^"]+)"', script)
+    assert_that(downloaded_name).is_not_none()
+    assert_that(report_path).is_not_none()
+    assert downloaded_name is not None and report_path is not None
+    assert_that(downloaded_name.group(1)).is_equal_to(artifacts.LINT_REPORT_ARTIFACT)
+    # A single-file artifact downloads under its own basename.
+    assert_that(report_path.group(1)).is_equal_to(uploaded_path.name)
+    assert_that(script).contains(LINT_FACTS_UNAVAILABLE)
