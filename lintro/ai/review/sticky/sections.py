@@ -17,14 +17,17 @@ from lintro.ai.review.github_notes import (
     format_inline_post_note,
 )
 from lintro.ai.review.github_render import sanitize_comment_text
+from lintro.ai.review.lifecycle.markers import file_line_url
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
-from lintro.ai.review.models.review_finding import Severity
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import describe_suggestion_drops
-from lintro.ai.review.sticky.cells import _plural
+from lintro.ai.review.posting_policy import describe_notes, note_findings
+from lintro.ai.review.sticky.cells import _cell, _inline_safe, _plural
 from lintro.ai.review.sticky.constants import (
+    _QUESTION_EMOJI,
     _REASONING_HEADINGS,
     _VERDICT_NOUNS,
     _VERDICT_SEVERITY,
@@ -414,3 +417,79 @@ def _degraded_row(*, failure: InlinePostFailure | None) -> str:
         when inline posting succeeded.
     """
     return format_inline_post_note(failure=failure)
+
+
+def _note_line(*, finding: ReviewFinding, repo: str, head_sha: str) -> str:
+    """Render one notes-block entry with its ``file:line`` link.
+
+    Args:
+        finding: Finding the posting policy routed to the notes block.
+        repo: ``owner/name`` slug used to build the file link.
+        head_sha: Commit the link pins, so it survives later pushes.
+
+    Returns:
+        A Markdown list item: kind or severity, title, linked location, and
+        the finding's description on one line.
+    """
+    if finding.is_question:
+        label = f"{_QUESTION_EMOJI} question"
+    else:
+        label = f"{_SEVERITY_EMOJI[finding.severity]} {finding.severity.value}"
+    confidence = _cell(text=finding.confidence, limit=20)
+    if confidence and not finding.is_question:
+        label = f"{label} · {confidence} confidence"
+    title = _inline_safe(text=finding.title, limit=200)
+    path = _cell(text=finding.file or "(unknown)", limit=200)
+    location = f"{path}:{finding.line}" if finding.line > 0 else path
+    # A path the sanitizer had to alter (a ``)`` or ``|`` the model wrote) is
+    # rendered as text rather than as a link that would break the Markdown.
+    url = (
+        file_line_url(repo=repo, sha=head_sha, path=path, line=finding.line)
+        if path == finding.file
+        else ""
+    )
+    where = f"[`{location}`]({url})" if url else f"`{location}`"
+    line = f"- {label} — **{title}** · {where}"
+    description = _inline_safe(text=finding.description, limit=600).strip()
+    if description:
+        line = f"{line}\n  {description}"
+    return line
+
+
+def _notes_section(*, result: ReviewResult, repo: str, head_sha: str) -> str:
+    """Render the collapsed block for findings not posted inline (#2572).
+
+    A low-confidence finding or a question never opens a thread: the posting
+    policy routes it here instead, where the author can read it without
+    having to resolve anything. Nothing in this block feeds the verdict, the
+    tiles, or the open-findings table.
+
+    Args:
+        result: Current review result, with ``posted_inline`` already set on
+            each finding by the posting policy.
+        repo: ``owner/name`` slug used to build the file links.
+        head_sha: Commit the links pin.
+
+    Returns:
+        A ``<details>`` block titled ``Notes and questions (N)``, or an empty
+        string when every finding was posted inline.
+    """
+    summary = describe_notes(findings=result.findings)
+    if not summary:
+        return ""
+    notes = note_findings(findings=result.findings)
+    return "\n".join(
+        [
+            f"<details><summary>💬 {summary}</summary>",
+            "",
+            "<sub>Not posted as threads and not counted in the verdict: "
+            "low-confidence findings and open questions.</sub>",
+            "",
+            *(
+                _note_line(finding=finding, repo=repo, head_sha=head_sha)
+                for finding in notes
+            ),
+            "",
+            "</details>",
+        ],
+    )

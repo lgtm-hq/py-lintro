@@ -36,6 +36,7 @@ from lintro.ai.review.sticky.sections import (
     _degraded_row,
     _header,
     _incomplete_banner,
+    _notes_section,
     _reasoning_section,
     _suggestion_drops_row,
     _summary_section,
@@ -184,6 +185,14 @@ def round_sections(
                 checklist_display=plan.checklist_display,
                 question_map=plan.question_map,
                 limit=limits.open,
+            ),
+        ),
+        Section(
+            name="notes",
+            text=_notes_section(
+                result=result,
+                repo=plan.repo,
+                head_sha=plan.head_sha,
             ),
         ),
         Section(

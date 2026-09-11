@@ -69,6 +69,9 @@ from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.output import render_inline_post_failure_json
+from lintro.ai.review.posting_policy import (
+    inline_findings as policy_inline_findings,
+)
 from lintro.ai.review.sticky import (
     build_sticky_bodies,
     build_sticky_comment,
@@ -201,8 +204,13 @@ def post_review_to_github(
 
     render.archive = None  # type: ignore[attr-defined]
 
+    # Only findings the posting policy selected (#2572) are candidates for a
+    # thread: a note lives in the sticky's collapsed "Notes and questions"
+    # block and nowhere else. ``match_findings`` applies the same rule to the
+    # tracked records, so a note never feeds the verdict or counts as open in
+    # a later round either.
     inline_findings, fallback = _partition_findings(
-        findings=result.findings,
+        findings=policy_inline_findings(findings=result.findings),
         diff_lines=diff_lines,
     )
     # Matching is pure and deterministic over (prior_state, findings), so the

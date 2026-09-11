@@ -356,10 +356,18 @@ def match_findings(
     Fixing some of its locations leaves it open with a lower
     ``occurrence_count`` against an unchanged ``occurrence_total``.
 
+    A finding the posting policy routed to the notes block (#2572,
+    ``posted_inline`` cleared) is never tracked: it opens no thread, so there
+    is nothing to carry, resolve, or count as open in a later round. The
+    filter lives here rather than at each caller so the sticky, the review
+    body, the inline comments, and the coverage bookkeeping cannot disagree
+    about which findings exist.
+
     Args:
         previous: State decoded from the prior sticky comment, or ``None`` for
             the first round on a PR.
-        findings: Findings reported in the current round.
+        findings: Findings reported in the current round. Entries with
+            ``posted_inline`` cleared are ignored.
         round_number: Round number being recorded (1-based).
         head_sha: Head commit sha reviewed in this round; stamped onto findings
             resolved by this round.
@@ -373,7 +381,10 @@ def match_findings(
         The per-round transitions plus the merged record set to persist.
     """
     prior_records = list(previous.findings) if previous is not None else []
-    current_records = _current_records(findings=findings, round_number=round_number)
+    current_records = _current_records(
+        findings=[finding for finding in findings if finding.posted_inline],
+        round_number=round_number,
+    )
 
     prior_by_fingerprint: dict[str, list[int]] = defaultdict(list)
     for index, record in enumerate(prior_records):

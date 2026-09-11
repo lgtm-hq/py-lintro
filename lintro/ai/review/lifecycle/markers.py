@@ -13,6 +13,7 @@ import re
 __all__ = [
     "FINDING_MARKER_PREFIX",
     "FINDING_MARKER_SUFFIX",
+    "file_line_url",
     "finding_marker",
     "inline_comment_url",
     "parse_finding_marker",
@@ -86,3 +87,32 @@ def inline_comment_url(
     if comment_id is None or not repo or pr_number is None:
         return ""
     return f"https://github.com/{repo}/pull/{pr_number}#discussion_r{comment_id}"
+
+
+def file_line_url(
+    *,
+    repo: str,
+    sha: str,
+    path: str,
+    line: int,
+) -> str:
+    """Build the browser URL of one line of a file at a commit.
+
+    The sticky comment's notes block (#2572) points at ``file:line`` this
+    way: a note has no inline thread to link to, so the file itself is the
+    only stable anchor.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        sha: Commit sha the link should pin, so it survives later pushes.
+        path: Repository-relative file path.
+        line: 1-based line number; a non-positive line drops the anchor.
+
+    Returns:
+        The blob URL, or an empty string when the repository, sha, or path is
+        missing — a pointer renders unlinked rather than as a dead link.
+    """
+    if not repo or not sha or not path:
+        return ""
+    url = f"https://github.com/{repo}/blob/{sha}/{path}"
+    return f"{url}#L{line}" if line > 0 else url

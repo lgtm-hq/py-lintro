@@ -76,6 +76,7 @@ from lintro.ai.review.output import (
     render_review_output,
 )
 from lintro.ai.review.patch_validation import validate_result_suggested_patches
+from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
 from lintro.ai.review.preparation import (
     PreparedReview,
     ReviewExecutionPolicy,
@@ -1214,6 +1215,12 @@ def _render_post_and_exit(
     ``--post`` can never publish a block that would corrupt the file when
     committed. Findings are never removed, only stripped and tagged.
 
+    The posting policy (#2572) is applied on the same terms and at the same
+    point: every finding is marked ``posted_inline`` before any surface reads
+    it, so the terminal verdict, the JSON payload, the exit code, and the
+    threads ``--post`` opens all agree on which findings were gated to the
+    sticky's notes block.
+
     Args:
         options: The command's Click-populated options.
         lintro_config: Loaded project configuration.
@@ -1227,6 +1234,13 @@ def _render_post_and_exit(
         SystemExit: Always; ``1`` for a blocking outcome, ``0`` otherwise.
     """
     result = validate_result_suggested_patches(result=result, context=prepared.context)
+    result = replace(
+        result,
+        findings=apply_posting_policy(
+            findings=result.findings,
+            policy=PostingPolicy.from_ai_config(prepared.ai_config),
+        ),
+    )
     question_map = build_prompt_question_map(items=prepared.checklist_items)
     result = enrich_review_result(result=result, question_map=question_map)
     render = _ReviewRender(
