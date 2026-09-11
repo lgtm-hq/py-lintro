@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.155.0] - 2026-09-11
+
+### Added
+
+- **review**: gate inline posting on finding confidence and route notes to the sticky
+  (#2583) (1b0e60f)
+
 ## [0.154.1] - 2026-09-11
 
 ### Fixed
