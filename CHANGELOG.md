@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.8] - 2026-09-11
+
+### Fixed
+
+- **pytest**: honour per-invocation options when building the check command (#2543)
+  (b9842f1)
+
 ## [0.153.7] - 2026-09-11
 
 ### Fixed
