@@ -21,11 +21,26 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     ".git",
     ".hg",
     ".svn",
-    "__pycache__",
+    # Cache excludes are anchored on the trailing slash so they match
+    # *directories* only. The bare glob ``*cache*`` used here previously also
+    # matched any file whose basename contained "cache" -- ``lintro/ai/cache.py``,
+    # ``tests/unit/utils/test_file_cache.py`` -- so those sources were invisible
+    # to every tool and nothing reported the skip (#2379).
+    "__pycache__/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".mypy_cache/",
+    ".cache/",
+    # These two were only ever excluded because the `*cache*` glob happened to
+    # cover them; name them so dropping the glob does not un-exclude them.
+    # `terragrunt` vendors remote modules under `.terragrunt-cache`, and lintro
+    # writes its own AI suggestion cache, transcripts and raw responses under
+    # `.lintro-cache` (see lintro/ai/cache.py, lintro/ai/audit.py).
+    ".terragrunt-cache/",
+    ".lintro-cache/",
     "*.pyc",
     "*.pyo",
     "*.pyd",
-    "*cache*",
     ".coverage",
     "htmlcov",
     "dist",
@@ -36,7 +51,6 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     # reports findings nobody in this repository can fix. Detection prunes the
     # directory too (lintro/utils/project_detection.py); both are needed,
     # because pruning detection only decides whether the tool is selected.
-    # `.terragrunt-cache` is already covered by the `*cache*` entry above.
     ".terraform",
 ]
 
