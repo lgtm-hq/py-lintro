@@ -5314,16 +5314,16 @@ def _permission_level(value: object) -> int:
         AssertionError: If the value is not one GitHub accepts, so a typo or
             a novel level fails the walk instead of reading as "none".
     """
-    key = str(value).strip().lower()
-    if key not in _PERMISSION_LEVELS:
+    if not isinstance(value, str) or value.strip().lower() not in _PERMISSION_LEVELS:
         raise AssertionError(f"unknown permission value {value!r}")
-    return _PERMISSION_LEVELS[key]
+    return _PERMISSION_LEVELS[value.strip().lower()]
 
 
 def test_permission_level_rejects_unknown_values() -> None:
     """A misspelt or novel permission value fails loudly, never as ``none``."""
-    with pytest.raises(AssertionError, match="unknown permission value"):
-        _permission_level("writ")
+    for bad in ("writ", None, True, 1):
+        with pytest.raises(AssertionError, match="unknown permission value"):
+            _permission_level(bad)
 
 
 def _normalize_permissions(raw: object) -> dict[str, int] | None:
