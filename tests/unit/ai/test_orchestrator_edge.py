@@ -375,16 +375,23 @@ def test_provider_error_message_reaches_the_console():
     assert_that(logger.text).contains("input_schema.type")
 
 
+#: A credential in the shape ``lintro/ai/secrets.py`` actually matches
+#: (``sk-`` followed by 20 or more alphanumerics), assembled at runtime so no
+#: credential-shaped literal is committed. The test below asserts on this
+#: value, so it fails if ``_failure_detail`` stops redacting.
+_FAKE_API_KEY = "sk-" + "A" * 24
+
+
 def test_provider_error_message_is_redacted_and_single_line():
     """Only the first line is shown, with secrets redacted (#2573)."""
     logger = _run_check_with_provider_error(
         RuntimeError(
-            "auth failed with sk-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n"
-            "second line with detail",
+            f"auth failed for key {_FAKE_API_KEY}\nsecond line with detail",
         ),
     )
 
-    assert_that(logger.text).does_not_contain("sk-AAAA")
+    assert_that(logger.text).does_not_contain(_FAKE_API_KEY)
+    assert_that(logger.text).contains("[REDACTED]")
     assert_that(logger.text).does_not_contain("second line with detail")
 
 

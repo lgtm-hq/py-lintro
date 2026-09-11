@@ -23,7 +23,10 @@ _SECRET_PATTERNS = [
         re.I,
     ),
     re.compile(r"ghp_[A-Za-z0-9]{36}"),  # GitHub personal access token
-    re.compile(r"sk-[A-Za-z0-9]{20,}"),  # OpenAI/Anthropic API key
+    # OpenAI/Anthropic API key. Hyphens are part of the body so the segmented
+    # Anthropic form (sk-ant-api03-...) is redacted whole rather than stopping
+    # at its first hyphen (#2573: provider messages now reach the console).
+    re.compile(r"sk-(?=[A-Za-z0-9-]{20,})[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*"),
     re.compile(
         r"-----BEGIN (?:RSA |EC )?PRIVATE KEY-----"
         r"[\s\S]*?"
