@@ -37,6 +37,12 @@ _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
         ".mypy_cache",
         ".ruff_cache",
         ".pytest_cache",
+        # Kept in lockstep with the directory-anchored cache excludes in
+        # lintro/plugins/file_discovery.py (#2379): detection decides whether a
+        # tool is selected, discovery decides what reaches its argv, so a cache
+        # directory is only fully skipped when both walks prune it.
+        ".cache",
+        ".terragrunt-cache",
         "htmlcov",
         # `terraform init` vendors provider plugins and remote modules here;
         # their .tf files are third-party and must not select checkov.
