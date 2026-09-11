@@ -51,6 +51,7 @@ from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
+from lintro.ai.review.posting_policy import inline_findings
 
 __all__ = ["REVIEW_BODY_FOOTER", "build_review_body"]
 
@@ -193,6 +194,10 @@ def _header(
     where a partial finding set has to be announced -- matching the
     ``degraded`` outcome the CI check reports for the same condition.
 
+    The findings count is the number posted inline. A finding the posting
+    policy routed to the sticky's notes block (#2572) is not announced here:
+    the header promises threads below, and a note has none.
+
     Args:
         result: This round's review result.
         match: Cross-round matching outcome for this round.
@@ -207,8 +212,11 @@ def _header(
     base = _short(_prior_sha(prior_state=prior_state) or result.metadata.base_ref)
     partial = format_partial_review_label(metadata=result.metadata)
     lead = f"⚠️ **{partial}" if partial else "🔎 **Lintro review"
+    # "posted" means posted inline: a note the posting policy routed to the
+    # sticky (#2572) is neither a thread below this body nor a count here.
+    posted = len(inline_findings(findings=result.findings))
     parts = [
-        f"{lead} — {_plural(count=len(result.findings), noun='finding')} posted**",
+        f"{lead} — {_plural(count=posted, noun='finding')} posted**",
     ]
     if round_number > 1:
         parts.append(
@@ -249,12 +257,14 @@ def _prompt_section(
 
     Returns:
         Markdown for the prompt panel; empty when the round produced nothing
-        actionable to fix.
+        actionable to fix. Notes (#2572) are left out: a low-confidence claim
+        is not an instruction to change the code.
     """
-    if not prompt_findings(findings=result.findings):
+    posted = inline_findings(findings=result.findings)
+    if not prompt_findings(findings=posted):
         return ""
     return render_agent_prompt_panel(
-        findings=result.findings,
+        findings=posted,
         scope=AgentPromptScope(
             kind=AgentPromptScopeKind.THIS_REVIEW,
             round_number=round_number,

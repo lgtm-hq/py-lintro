@@ -9,7 +9,9 @@ over rather than declaring it resolved.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -18,6 +20,7 @@ from lintro.ai.review.models.finding_record import FindingRecord
 __all__ = [
     "merge_pair",
     "next_free_ordinal",
+    "notes_holding_prior_records",
     "pair_group",
 ]
 
@@ -145,3 +148,63 @@ def merge_pair(
     if regressed:
         return merged, FindingMatchOutcome.REGRESSED
     return merged, FindingMatchOutcome.CARRIED
+
+
+def notes_holding_prior_records(
+    *,
+    prior_records: Sequence[FindingRecord],
+    prior_by_fingerprint: Mapping[str, list[int]],
+    notes: Sequence[FindingRecord],
+    matched_prior: AbstractSet[int],
+) -> tuple[set[int], frozenset[tuple[str, int]]]:
+    """Pair this round's notes with the prior records they keep open (#2572).
+
+    A note is not a record of its own, but it is still the model asserting the
+    finding — only below the inline confidence floor, or as a question the
+    policy does not post. The prior record it re-asserts is therefore carried
+    rather than resolved.
+
+    The pairing is per record, not per fingerprint: two prior records can share
+    a fingerprint at different lines and ordinals, so carrying every sibling
+    because one of them came back as a note would leave the absent sibling open
+    forever. Notes are paired against the prior records no current *inline*
+    finding claimed, by the same :func:`pair_group` rules, so each note holds at
+    most one record open.
+
+    Args:
+        prior_records: Records decoded from the prior state, in state order.
+        prior_by_fingerprint: Index of ``prior_records`` positions per
+            fingerprint.
+        notes: Transient records built from this round's notes.
+        matched_prior: Positions already claimed by an inline finding.
+
+    Returns:
+        The prior positions notes hold open, and the ``(fingerprint, line)`` of
+        each note that holds one whose thread was actually posted — what the
+        sticky tags.
+    """
+    notes_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
+    for note in notes:
+        notes_by_fingerprint[note.fingerprint].append(note)
+
+    held: set[int] = set()
+    carries: set[tuple[str, int]] = set()
+    for fingerprint, group in notes_by_fingerprint.items():
+        available = [
+            index
+            for index in prior_by_fingerprint.get(fingerprint, [])
+            if index not in matched_prior
+            and prior_records[index].status is FindingStatus.OPEN
+        ]
+        prior_group = [prior_records[index] for index in available]
+        for note_index, group_index in pair_group(
+            prior=prior_group,
+            current=group,
+        ).items():
+            prior_index = available[group_index]
+            held.add(prior_index)
+            # Only a record whose thread was posted can be the reason a thread
+            # is still open, which is what the sticky's tag tells the reader.
+            if prior_records[prior_index].inline_comment_id is not None:
+                carries.add((fingerprint, group[note_index].line))
+    return held, frozenset(carries)

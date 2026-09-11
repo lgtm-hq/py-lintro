@@ -315,6 +315,56 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### Confidence gate on inline posting
+
+Every finding carries a model-reported `confidence` (`high`, `medium`, `low`) and a
+`kind` (`finding` or `question`). `lintro review --post` opens an inline thread only for
+findings that clear the posting policy; the rest become _notes_:
+
+- **Inline** — `confidence` at or above `ai.review_inline_min_confidence` (default
+  `medium`), and `kind: finding` unless `ai.review_post_questions_inline` is `true`, in
+  which case questions that clear the same floor open threads too. These open threads,
+  count in the review body's header, feed the derived verdict, and are tracked across
+  rounds.
+- **Notes** — everything else: `low` confidence findings, and questions unless
+  `ai.review_post_questions_inline` is `true`. Notes render in the sticky comment under
+  a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
+  the reviewed commit. They open no thread, are excluded from the verdict, the severity
+  tiles, the open-findings table and the fix prompts, and open no record of their own.
+  Notes are round-scoped, like the summary and the reasoning block: nothing persists
+  them, so a sticky comment re-rendered from state alone — a converged skip, an error
+  surface — shows no notes block. The comment posted by the round that routed them still
+  carries it.
+
+A note never resolves an existing thread. When a finding posted inline in an earlier
+round comes back as a note, its record is carried forward open — the model still asserts
+it, only below the floor, or as a question the policy does not post — so the thread
+stays, the round does not count it as fixed, and the notes entry is tagged with the
+reason: _(below the inline confidence floor this round)_ for a finding, _(questions are
+not posted inline)_ for a question. Notes are paired to prior records one at a time, so
+a sibling at another line that stopped being reported still resolves. The record
+resolves only once the finding stops being reported at all, and a finding whose
+confidence recovers matches the record it already had rather than reappearing as new.
+
+Nothing is dropped. JSON and MCP output keep every finding and add `posted_inline`
+(`true` / `false`) per finding so a consumer can tell a thread from a note. The terminal
+verdict, the JSON `readiness_verdict`, and the exit code all use the inline subset: a P1
+routed to notes does not fail the process. With the default floor that means a `low`
+confidence P1; with `review_inline_min_confidence: low` no confidence is below the
+floor, so every P1 finding blocks again.
+
+```yaml
+# .lintro-config.yaml
+ai:
+  review_inline_min_confidence: medium # low | medium | high
+  review_post_questions_inline: false # true opens a thread per question
+```
+
+Set `review_inline_min_confidence: low` to restore posting every `kind: finding` entry
+inline. Questions stay in the notes block regardless of the floor — set
+`review_post_questions_inline: true` to open threads for them too. The two keys are
+independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
+
 ### When inline comments cannot be posted
 
 A finding always has a surface. When GitHub refuses the inline review batch — or a
@@ -711,6 +761,9 @@ only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
 otherwise flip that verdict run-to-run: borderline findings must be P3, and every
 finding `description` must name the rubric boundary it used.
 
+Only findings the posting policy routes inline count (see "Confidence gate on inline
+posting"): a `low` confidence finding or an open question never moves the verdict.
+
 A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
 Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
@@ -963,6 +1016,20 @@ ai:
   # Minimum confidence for AI fix suggestions; anything below the threshold is
   # discarded. (one of: low | medium | high, default: low)
   min_confidence: low
+
+  # ── Review inline posting (#2572) ─────────────────────────────
+  # Lowest model-reported confidence a review finding needs to open an inline
+  # PR thread. Findings below it stay in JSON/MCP output but are routed to the
+  # sticky comment's collapsed "Notes and questions" block, where they never
+  # affect the verdict. Unlike `min_confidence` above, which discards
+  # low-confidence AI fix suggestions, this one reroutes review findings
+  # instead of dropping them. (one of: low | medium | high, default: medium)
+  review_inline_min_confidence: medium
+
+  # Post question-kind review entries as inline threads. Off by default:
+  # questions go to the "Notes and questions" block so an open question never
+  # blocks a merge under a zero-unresolved-threads rule. (bool, default: false)
+  review_post_questions_inline: false
 
   # Restrict AI processing to matching paths / rules (glob patterns).
   # Empty means "no filter". (list[str], default: [])

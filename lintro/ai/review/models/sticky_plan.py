@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lintro.ai.review.posting_policy import PostingPolicy
+
 from dataclasses import dataclass, field
 
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
@@ -35,6 +40,8 @@ class StickyPlan:
         inline_failure: Findings whose inline comments could not be posted.
         repo: ``owner/name`` slug used to link finding titles.
         pr_number: Pull request number used for the same links.
+        posting_policy: Policy the findings were marked under, so the
+            notes block can name the confidence floor it rendered at.
     """
 
     match: FindingMatchResult
@@ -50,3 +57,4 @@ class StickyPlan:
     inline_failure: InlinePostFailure | None = None
     repo: str = ""
     pr_number: int | None = None
+    posting_policy: PostingPolicy | None = None

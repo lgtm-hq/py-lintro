@@ -76,6 +76,7 @@ from lintro.ai.review.output import (
     render_review_output,
 )
 from lintro.ai.review.patch_validation import validate_result_suggested_patches
+from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
 from lintro.ai.review.preparation import (
     PreparedReview,
     ReviewExecutionPolicy,
@@ -349,9 +350,18 @@ def _finish_converged_review(
             the board the banner is stamped onto.
 
     Raises:
-        SystemExit: Always. ``0`` for a clean skip; ``1`` when the last real
-            round left an open P1 — the same local exit a round that found
-            them produces, and equally not a CI failure.
+        SystemExit: Always. ``0`` for a clean skip; ``1`` when an open P1
+            record is left over — and equally not a CI failure.
+
+            The exit is over *records*, so it tracks open threads rather than
+            this round's findings. The one case where that differs from the
+            round that found them is a P1 demoted to a note (#2572): the
+            demotion round exits 0 because its finding-based gate ignores
+            notes, while its record is deliberately carried open so the thread
+            stays. A skip after it exits 1, reporting the thread a human still
+            has to deal with. That is the intended reading — the skip mirrors
+            what is still open on the PR, not what the last round chose to
+            gate.
     """
     if post and resolved_pr is not None and effective_repo:
         from lintro.ai.review.github import post_review_converged_to_github
@@ -363,10 +373,12 @@ def _finish_converged_review(
                 repo=effective_repo,
                 prior_state=prior_state,
             )
-    # A skipped round changes nothing about what is open, so it reports the
-    # same local exit a real round would: an open P1 left by the last real
-    # round still exits 1 here, exactly as that round did. The CI check
-    # greens both alike and names the count instead (see the docstring).
+    # A skipped round changes nothing about what is open, so it reports what
+    # the open records say: an open P1 record still exits 1 here. A P1 the
+    # posting policy demoted to a note keeps its record open on purpose, so
+    # the skip names it even though the demotion round's finding-based gate
+    # did not (see the docstring). The CI check greens both alike and names
+    # the count instead.
     open_p1 = count_blocking_findings(findings=prior_state.findings)
     if output_format == "json":
         click.echo(
@@ -1057,7 +1069,13 @@ def _run_round(
     targets: _ReviewTargets,
     console: Console,
 ) -> ReviewResult:
-    """Construct the provider, execute the review, and persist its state.
+    """Construct the provider, mark, execute the review, and persist its state.
+
+    The posting policy (#2572) is applied here, between the replay and the
+    persist, because the persisted state is what the next round matches
+    against: a note that reached the store unmarked would be recorded as an
+    open inline finding the sticky never tracked, and the next round's board,
+    verdict and exit code would disagree with this one's.
 
     Args:
         options: The command's Click-populated options.
@@ -1072,7 +1090,8 @@ def _run_round(
     the review-error exit code.
 
     Returns:
-        ReviewResult: The completed review.
+        ReviewResult: The completed review, with ``posted_inline`` already set
+        on every finding.
     """
     provider = None
     try:
@@ -1091,6 +1110,19 @@ def _run_round(
                 prior_state=policy.prior_state,
                 context=prepared.context,
             )
+        # Before any state is derived (#2572): the store is the authoritative
+        # record the next round matches against, so persisting unmarked
+        # findings would open records for notes the sticky never tracked and
+        # leave the next round's board and exit code contradicting the
+        # verdict. The re-application in ``_render_post_and_exit`` is
+        # idempotent; this is the write that must not see a raw result.
+        result = replace(
+            result,
+            findings=apply_posting_policy(
+                findings=result.findings,
+                policy=PostingPolicy.from_ai_config(prepared.ai_config),
+            ),
+        )
         try:
             persist_review_state(
                 result=result,
@@ -1214,6 +1246,12 @@ def _render_post_and_exit(
     ``--post`` can never publish a block that would corrupt the file when
     committed. Findings are never removed, only stripped and tagged.
 
+    The posting policy (#2572) is applied on the same terms and at the same
+    point: every finding is marked ``posted_inline`` before any surface reads
+    it, so the terminal verdict, the JSON payload, the exit code, and the
+    threads ``--post`` opens all agree on which findings were gated to the
+    sticky's notes block.
+
     Args:
         options: The command's Click-populated options.
         lintro_config: Loaded project configuration.
@@ -1227,6 +1265,13 @@ def _render_post_and_exit(
         SystemExit: Always; ``1`` for a blocking outcome, ``0`` otherwise.
     """
     result = validate_result_suggested_patches(result=result, context=prepared.context)
+    result = replace(
+        result,
+        findings=apply_posting_policy(
+            findings=result.findings,
+            policy=PostingPolicy.from_ai_config(prepared.ai_config),
+        ),
+    )
     question_map = build_prompt_question_map(items=prepared.checklist_items)
     result = enrich_review_result(result=result, question_map=question_map)
     render = _ReviewRender(
@@ -1339,6 +1384,9 @@ def _post_review(
     from lintro.ai.review.github import post_review_to_github
     from lintro.ai.review.models.review_post_options import ReviewPostOptions
 
+    # Rebuilt from the same resolved config the apply point read, so the
+    # sticky's notes caption names the floor its flags were set under.
+    posting_policy = PostingPolicy.from_ai_config(prepared.ai_config)
     captured_comment_ids: dict[str, int] = {}
     posted = post_review_to_github(
         result=result,
@@ -1355,6 +1403,7 @@ def _post_review(
             # the provider reported no usage), not the pre-run profile value.
             cost_basis=result.metadata.cost_basis,
             auto_resolve=lintro_config.review.auto_resolve,
+            posting_policy=posting_policy,
             config_source=_describe_config_source(
                 config_path=lintro_config.config_path,
                 overrides=_cli_overrides(options=options),
@@ -1362,21 +1411,24 @@ def _post_review(
             captured_comment_ids=captured_comment_ids,
         ),
     )
-    if captured_comment_ids:
-        try:
-            persist_review_state(
-                result=result,
-                context=prepared.context,
-                prior=prior_state,
-                pr_number=targets.state_pr,
-                repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
-                inline_comment_ids=captured_comment_ids,
-            )
-        except Exception:
-            logger.warning(
-                "Could not persist posted inline comment ids; next "
-                "round may replay those findings",
-            )
+    # Unconditional: ``_run_round`` already wrote this round's state from the
+    # same prior, so re-advancing it here is the same state plus whatever
+    # thread ids posting captured. Guarding on the ids would make the ledger's
+    # last word depend on whether GitHub accepted the inline batch.
+    try:
+        persist_review_state(
+            result=result,
+            context=prepared.context,
+            prior=prior_state,
+            pr_number=targets.state_pr,
+            repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
+            inline_comment_ids=captured_comment_ids,
+        )
+    except Exception:
+        logger.warning(
+            "Could not persist posted inline comment ids; next "
+            "round may replay those findings",
+        )
     if not posted:
         logger.warning("GitHub review posting skipped or failed")
 

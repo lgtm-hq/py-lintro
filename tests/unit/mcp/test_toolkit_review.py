@@ -997,6 +997,41 @@ def _synthesis_result(
     )
 
 
+def test_review_payload_applies_the_posting_policy_and_keeps_every_finding(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """Gated findings stay in the payload, flagged rather than dropped (#2572).
+
+    Driven through the public tool so the handler's own policy application is
+    in the path: a serializer that stamped ``posted_inline: true`` on every
+    finding would fail this, and so would one that filtered the list.
+
+    Args:
+        repo: Temporary git workspace.
+        stub_ai: Fixture installing a stubbed ``run_review``.
+    """
+    from dataclasses import replace as dataclass_replace
+
+    base = _result()
+    high = dataclass_replace(base.findings[0], severity=Severity.P2)
+    low = dataclass_replace(
+        high,
+        title="Possibly unreachable branch",
+        severity=Severity.P1,
+        confidence="low",
+    )
+    stub_ai(result=dataclass_replace(base, findings=(high, low)))
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(payload["findings"]).is_length(2)
+    assert_that(payload["findings"][0]["posted_inline"]).is_true()
+    assert_that(payload["findings"][1]["posted_inline"]).is_false()
+    # The gated P1 is routed to notes, so only the inline P2 decides the verdict.
+    assert_that(payload["readiness_verdict"]).is_equal_to("changes_requested")
+
+
 def test_review_payload_omits_synthesis_keys_on_a_default_run(
     repo: Path,
     stub_ai: Callable[..., list[Any]],

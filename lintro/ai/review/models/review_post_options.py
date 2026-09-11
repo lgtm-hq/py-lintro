@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lintro.ai.review.posting_policy import PostingPolicy
+
 from dataclasses import dataclass
 
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
@@ -37,6 +42,8 @@ class ReviewPostOptions:
             rename sources). Their open findings may resolve.
         captured_comment_ids: Optional sink for newly captured inline comment
             ids so the caller can persist them after posting.
+        posting_policy: Policy the findings were marked under, so the
+            notes block can name the confidence floor it rendered at.
     """
 
     checklist_display: ChecklistDisplay = ChecklistDisplay.OFF
@@ -49,3 +56,4 @@ class ReviewPostOptions:
     prior_state: ReviewState | None = None
     departed_paths: frozenset[str] | None = None
     captured_comment_ids: dict[str, int] | None = None
+    posting_policy: PostingPolicy | None = None

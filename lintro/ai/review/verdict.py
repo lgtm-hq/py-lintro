@@ -73,9 +73,16 @@ def derive_readiness_verdict(
         open, ``NITS_ONLY`` when only P3s are open, and ``READY`` when nothing
         is open. Questions (#1925) are excluded entirely: a question is
         suspicion without proof, and letting it move the verdict would
-        reintroduce exactly the severity inflation it exists to absorb.
+        reintroduce exactly the severity inflation it exists to absorb. So
+        is any finding the posting policy routed to the notes block (#2572):
+        a low-confidence claim the reviewer never opened a thread for cannot
+        be the reason a PR reads blocked.
     """
-    severities = {finding.severity for finding in findings if not finding.is_question}
+    severities = {
+        finding.severity
+        for finding in findings
+        if not finding.is_question and finding.posted_inline
+    }
     if Severity.P1 in severities:
         return ReviewVerdict.BLOCKED
     if Severity.P2 in severities:

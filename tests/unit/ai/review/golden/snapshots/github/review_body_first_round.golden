@@ -1,12 +1,12 @@
-🔎 **Lintro review — 3 findings posted** · round 1 · commits `main..0d15ea5`
+🔎 **Lintro review — 2 findings posted** · round 1 · commits `main..0d15ea5`
 
 > [!IMPORTANT]
-> ⚡ **Fix prompt — this round's 3 findings only**
+> ⚡ **Fix prompt — this round's 2 findings only**
 >
 > <details><summary>Show prompt</summary>
 >
 > ```
-> Scope: the 3 findings posted in round 1 of this PR's lintro review ONLY (older
+> Scope: the 2 findings posted in round 1 of this PR's lintro review ONLY (older
 > open findings are covered by the fix-all prompt on the sticky status comment).
 >
 > These are open findings from a lintro AI code review. Verify each one against
@@ -25,12 +25,6 @@
 > - Line 12 — **No test covers the expired branch** (P2 · test-gap):
 >   The expired path is never exercised. Test gap.
 >   Fix: Add a case asserting the expired status is rejected.
->
-> In `src/auth/tokens.py`:
->
-> - Line 7 — **Docstring omits the raised error** (P3 · style):
->   The Raises section is missing. Oversight.
->   Fix: Document the ValueError.
 > ```
 >
 > </details>

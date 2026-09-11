@@ -383,6 +383,25 @@ class AIConfig(BaseModel):
             "delegated git retrieval on very large diffs is required."
         ),
     )
+    review_inline_min_confidence: ConfidenceLevel = Field(
+        default=ConfidenceLevel.MEDIUM,
+        description=(
+            "Lowest model-reported confidence a review finding needs to be "
+            "posted as an inline PR thread (#2572). Findings below it are "
+            "kept in JSON and MCP output but routed to the sticky comment's "
+            "collapsed 'Notes and questions' block, where they never affect "
+            "the derived verdict. One of 'low', 'medium', 'high'."
+        ),
+    )
+    review_post_questions_inline: bool = Field(
+        default=False,
+        description=(
+            "Post question-kind review entries as inline PR threads. Off by "
+            "default: questions go to the sticky comment's 'Notes and "
+            "questions' block so an open question never blocks a merge under "
+            "a zero-unresolved-threads rule."
+        ),
+    )
     cli_max_diff_tokens: int = Field(
         default=24_000,
         ge=1_000,
