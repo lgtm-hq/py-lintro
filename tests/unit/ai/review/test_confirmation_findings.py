@@ -163,6 +163,7 @@ def test_dropped_confirmation_does_not_count_toward_findings_cap() -> None:
         "Not a defect.",
         "Checklist item 4 is a Positive Verification of the retry path.",
         "This is a confirmation that the sha256 matches.",
+        "Verified the sha256. Not a defect.",
     ],
 )
 def test_self_classifying_description_sentence_is_dropped(description: str) -> None:
@@ -260,6 +261,11 @@ def test_whole_field_no_code_change_fix_is_dropped(fix: str) -> None:
         (
             "The bump is correct. Confirmation of the claimed 0.23.0 update.",
             "Pin the version in the formula test.",
+        ),
+        (
+            "Not a defect in isolation, but together with the retry loop the "
+            "events are lost.",
+            "Drain the queue before the retry loop restarts.",
         ),
     ],
 )

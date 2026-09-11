@@ -57,7 +57,7 @@ CONFIRMATION_SENTENCE_PATTERN: re.Pattern[str] = re.compile(
     r"(?:this|checklist item \d+) is (?:a |an )?"
     r"(?:positive verification|confirmation)"
     r"(?=\s+(?:that|of)\b|\s*[.,;:]|\s*$)"
-    r"|(?:(?:this|checklist item \d+) is )?not a defect(?=\s*[.,;:]|\s|$)"
+    r"|(?:(?:this|checklist item \d+) is )?not a defect(?=\s*[.,;:]|\s*$)"
     r")",
     re.IGNORECASE,
 )
