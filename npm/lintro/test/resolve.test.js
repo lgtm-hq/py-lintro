@@ -37,6 +37,19 @@ describe('unsupportedPlatformHint', () => {
     expect(hint).toContain('pip install lintro');
   });
 
+  it('recommends Homebrew over the PyPI route on Intel Macs', () => {
+    const hint = unsupportedPlatformHint('darwin', 'x64');
+    expect(hint).toContain('recommended route');
+    // The recommendation must come before the PyPI alternative it outranks.
+    expect(hint.indexOf('brew install lintro')).toBeLessThan(hint.indexOf('pip install lintro'));
+  });
+
+  it('warns that the Intel PyPI route builds cryptography from source', () => {
+    const hint = unsupportedPlatformHint('darwin', 'x64');
+    expect(hint).toContain('cryptography from source');
+    expect(hint).toContain('Rust toolchain');
+  });
+
   it('returns null for platforms with no documented alternative', () => {
     expect(unsupportedPlatformHint('win32', 'x64')).toBeNull();
     expect(unsupportedPlatformHint('constructor', 'x64')).toBeNull();
@@ -85,6 +98,20 @@ describe('resolveBinary', () => {
     expect(message).toMatch(/unsupported platform darwin-x64/);
     expect(message).toContain('brew install lintro');
     expect(message).toContain('pip install lintro');
+    expect(message).toContain('Supported platforms: darwin-arm64, linux-arm64, linux-x64.');
+  });
+
+  it('leaves the Intel hint off unsupported platforms that have none', () => {
+    let message = '';
+    try {
+      resolveBinary(() => ({ path: 'x' }), 'linux', 'riscv64');
+    } catch (err) {
+      message = err.message;
+    }
+    expect(message).toMatch(/unsupported platform linux-riscv64/);
+    expect(message).not.toContain('Intel Macs');
+    expect(message).not.toContain('brew install lintro');
+    expect(message).not.toContain('pip install lintro');
     expect(message).toContain('Supported platforms: darwin-arm64, linux-arm64, linux-x64.');
   });
 

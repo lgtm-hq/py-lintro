@@ -25,16 +25,20 @@ const PLATFORM_PACKAGES = Object.freeze({
 /**
  * Platforms that ship no npm binary but have a supported install route
  * elsewhere. Intel macOS lost its prebuilt binary in #2579: the `cryptography`
- * dependency the MCP bundle needs ships no Intel macOS wheel, so the Homebrew
- * formula installs lintro from PyPI on those machines instead.
+ * dependency the MCP bundle needs ships no Intel macOS wheel from 49.0.0 on.
+ * Homebrew is the recommended route there because the formula's `on_intel`
+ * branch owns the PyPI install; a bare `pip install` works too but compiles
+ * cryptography from source, which needs a Rust toolchain on the machine.
  *
  * @type {Readonly<Record<string, string>>}
  */
 const UNSUPPORTED_PLATFORM_HINTS = Object.freeze({
   'darwin-x64':
     'Intel Macs have no npm binary. Install with Homebrew ' +
-    '(`brew tap lgtm-hq/tap && brew install lintro`) or from PyPI ' +
-    '(`pip install lintro`, or `uv tool install lintro`) instead.',
+    '(`brew tap lgtm-hq/tap && brew install lintro`), which is the ' +
+    'recommended route. Installing from PyPI (`pip install lintro` or ' +
+    '`uv tool install lintro`) also works, but on an Intel Mac it builds ' +
+    'cryptography from source and needs a Rust toolchain.',
 });
 
 /**

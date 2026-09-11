@@ -217,7 +217,7 @@ def test_help_exits_zero() -> None:
 
 
 def test_all_packages_publish_when_absent(tmp_path: Path) -> None:
-    """When no version exists, all five packages publish once, in order."""
+    """When no version exists, all four packages publish once, in order."""
     result = _run(tmp_path, npm_body="exit 0")
     assert_that(result.returncode).is_equal_to(0)
     for pkg in _PACKAGES:
@@ -439,7 +439,7 @@ def test_view_e404_still_means_version_absent(tmp_path: Path) -> None:
 
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).does_not_contain("could not verify")
-    # All five packages publish: nothing was skipped or aborted.
+    # All four packages publish: nothing was skipped or aborted.
     assert_that(_publish_log(result).strip().splitlines()).is_length(len(_PACKAGES))
 
 
@@ -598,7 +598,7 @@ def test_publish_conflict_is_treated_as_idempotent_success(tmp_path: Path) -> No
     result = _run(tmp_path, npm_body=npm_body)
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("idempotent success")
-    # All five packages are attempted; the meta package still publishes.
+    # All four packages are attempted; the meta package still publishes.
     assert_that(result.stdout).contains("Publishing lintro")
 
 

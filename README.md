@@ -45,6 +45,7 @@ assurance tools under a single command-line interface.
 # Install (choose one)
 uv pip install lintro              # Python / PyPI (or: pip install lintro)
 bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
+# npm ships no Intel Mac binary; Intel Macs install via Homebrew or PyPI
 
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
