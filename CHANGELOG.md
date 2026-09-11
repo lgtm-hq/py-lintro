@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.154.0] - 2026-09-11
+
+### Added
+
+- **review**: feed the untrusted lint job's report to the dogfood review (#2576)
+  (9adae8f)
+
+### Changed
+
+- **release**: ship lintro and pygments as bytecode in the binary builds (#2568)
+  (ffa6c03)
+
 ## [0.153.9] - 2026-09-11
 
 ### Fixed
