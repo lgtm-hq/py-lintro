@@ -1994,6 +1994,13 @@ def test_build_binary_dispatch_uploads_are_opt_in() -> None:
     assert_that(call_inputs["release_tag"]["required"]).described_as(
         "the workflow_call path must always carry a release tag",
     ).is_true()
+    # The other half of the asymmetry: the gate's ``inputs.release_tag != ''``
+    # disjunct is inert on dispatch only because dispatch declares no such
+    # input. A later dispatch-level ``release_tag`` would let a repair run
+    # republish its ref onto whichever release get-release-info resolves.
+    assert_that(dispatch_inputs).described_as(
+        "a dispatch must not be able to name a release_tag",
+    ).does_not_contain_key("release_tag")
 
     upload_steps = tuple(
         (job_id, str(step.get("name")))
