@@ -8,10 +8,13 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.enums.pytest_enums import PytestSpecialMode
 from lintro.parsers.pytest.pytest_issue import PytestIssue
+from lintro.tools.pytest.definition import PYTEST_DEFAULT_TIMEOUT
 
 if TYPE_CHECKING:
     from lintro.tools.pytest.definition import PytestPlugin
@@ -541,3 +544,89 @@ def test_pytest_config_int_timeout_is_enforced_without_float_drift(
     assert_that(sample_pytest_plugin.pytest_config.timeout).is_equal_to(600)
     assert_that(enforced[0]).is_instance_of(int)
     assert_that(enforced[0]).is_equal_to(600)
+
+
+def _resolved_with_warnings(
+    plugin: PytestPlugin,
+    options: dict[str, object],
+) -> tuple[int | float, list[str]]:
+    """Resolve a timeout and capture the warnings the resolution emitted.
+
+    ``caplog`` sees nothing here: lintro logs through loguru, which does not
+    propagate to the stdlib ``logging`` root, so warnings are captured with a
+    loguru sink the way the rest of the suite does it.
+
+    Args:
+        plugin: PytestPlugin instance whose resolver is exercised.
+        options: Options mapping to resolve the timeout from.
+
+    Returns:
+        tuple[int | float, list[str]]: The resolved seconds and the warnings.
+    """
+    warnings: list[str] = []
+    handler_id = logger.add(
+        lambda message: warnings.append(message.record["message"]),
+        level="WARNING",
+    )
+    try:
+        resolved = plugin._resolve_timeout_seconds(options)
+    finally:
+        logger.remove(handler_id)
+    return resolved, warnings
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_in_warning"),
+    [
+        pytest.param("abc", "'abc'", id="non_numeric_string"),
+        pytest.param(float("nan"), "nan", id="nan"),
+        pytest.param(float("inf"), "inf", id="infinity"),
+        pytest.param(True, "True", id="bool"),
+    ],
+)
+def test_invalid_timeout_warns_and_falls_back_to_the_default(
+    sample_pytest_plugin: PytestPlugin,
+    raw: object,
+    expected_in_warning: str,
+) -> None:
+    """An unusable timeout logs a warning and yields the pytest default.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+        raw: Unusable value stored under the ``timeout`` option.
+        expected_in_warning: Text the warning must name.
+    """
+    resolved, warnings = _resolved_with_warnings(
+        sample_pytest_plugin,
+        {"timeout": raw},
+    )
+
+    assert_that(resolved).is_equal_to(PYTEST_DEFAULT_TIMEOUT)
+    assert_that(warnings).is_length(1)
+    assert_that(warnings[0]).contains(expected_in_warning)
+    assert_that(warnings[0]).contains(str(PYTEST_DEFAULT_TIMEOUT))
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        pytest.param({}, id="absent_key"),
+        pytest.param({"timeout": None}, id="explicit_none"),
+    ],
+)
+def test_absent_timeout_falls_back_to_the_default_without_warning(
+    sample_pytest_plugin: PytestPlugin,
+    options: dict[str, object],
+) -> None:
+    """An unset timeout yields the default silently: it is not a misconfiguration.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+        options: Options mapping carrying no usable timeout.
+    """
+    sample_pytest_plugin.options.pop("timeout", None)
+
+    resolved, warnings = _resolved_with_warnings(sample_pytest_plugin, options)
+
+    assert_that(resolved).is_equal_to(PYTEST_DEFAULT_TIMEOUT)
+    assert_that(warnings).is_empty()

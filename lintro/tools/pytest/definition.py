@@ -8,7 +8,6 @@ and provides extensive plugin support for customization.
 from __future__ import annotations
 
 import copy
-import math
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, field
 from typing import Any
@@ -45,48 +44,6 @@ from lintro.utils.path_utils import load_lintro_ignore
 # Constants for pytest configuration
 PYTEST_DEFAULT_TIMEOUT: int = 300  # 5 minutes for test runs
 PYTEST_FILE_PATTERNS: list[str] = ["test_*.py", "*_test.py"]
-
-
-def resolve_timeout_seconds(options: dict[str, Any]) -> int | float:
-    """Resolve the pytest subprocess timeout from an options mapping.
-
-    ``BaseToolPlugin.set_options`` stores every configured timeout as a float,
-    so a value the caller wrote as ``600`` reaches this function as ``600.0``.
-    Floats, ints and numeric strings are all accepted; an integral value is
-    normalised back to ``int`` so timeout messages read ``600s`` rather than
-    ``600.0s``. ``bool`` is rejected: it is an ``int`` subclass, but no caller
-    means "one second" by ``True``.
-
-    Args:
-        options: Effective options for one invocation.
-
-    Returns:
-        int | float: Timeout in seconds, falling back to the pytest default
-            when the option is absent, ``None``, or not a finite number.
-    """
-    raw = options.get("timeout", PYTEST_DEFAULT_TIMEOUT)
-    if raw is None:
-        return PYTEST_DEFAULT_TIMEOUT
-
-    value: float
-    if isinstance(raw, bool):
-        value = float("nan")
-    elif isinstance(raw, (int, float)):
-        value = float(raw)
-    else:
-        try:
-            value = float(str(raw))
-        except (TypeError, ValueError):
-            value = float("nan")
-
-    if not math.isfinite(value):
-        logger.warning(
-            f"Invalid timeout value {raw!r}; using default "
-            f"{PYTEST_DEFAULT_TIMEOUT}s",
-        )
-        return PYTEST_DEFAULT_TIMEOUT
-
-    return int(value) if value.is_integer() else value
 
 
 @register_tool
@@ -260,6 +217,26 @@ class PytestPlugin(BaseToolPlugin):
             self.result_processor.config = self.pytest_config
         # error_handler holds only the immutable tool name; safe to share.
 
+    def _resolve_timeout_seconds(self, options: dict[str, Any]) -> int | float:
+        """Resolve the pytest subprocess timeout from an options mapping.
+
+        Delegates the acceptance rule to
+        :func:`~lintro.plugins.execution_preparation.get_effective_timeout`,
+        which every tool shares, and layers only display normalisation on top:
+        ``set_options`` stores a configured timeout as a float, so an integral
+        result is handed back as an ``int`` and timeout messages read ``600s``
+        rather than ``600.0s``.
+
+        Args:
+            options: Effective options for one invocation.
+
+        Returns:
+            int | float: Timeout in seconds, falling back to the pytest default
+                when the option is absent, ``None``, or not a finite number.
+        """
+        seconds = self._get_effective_timeout(options.get("timeout"))
+        return int(seconds) if seconds.is_integer() else seconds
+
     def _parse_output(
         self,
         output: str,
@@ -381,7 +358,7 @@ class PytestPlugin(BaseToolPlugin):
 
         # Resolve the timeout once from the merged options so the value the
         # subprocess is killed at is the value reported when it times out.
-        timeout_val = resolve_timeout_seconds(merged_options)
+        timeout_val = self._resolve_timeout_seconds(merged_options)
 
         try:
             # Record start time to filter out stale junitxml files
