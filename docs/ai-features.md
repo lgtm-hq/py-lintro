@@ -848,6 +848,16 @@ Reading the block:
   window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
   existing consumers.
 
+### Review design record
+
+What the review mechanism promises — its shape (parallel file-group chunks,
+findings-only chunk output, one synthesis call, one verification call, transport
+neutrality, posting tiers), its six protocol layers, and the interim merge policy for a
+partial-review red check — is recorded in
+[ADR-0010](adr/0010-review-shape-and-protocol.md). The invariants the architecture holds
+are in [ADR-0008](adr/0008-ai-review-architecture-invariants.md), resume and artifact
+state in [ADR-0007](adr/0007-review-resume-and-artifact-state.md).
+
 ## Configuration
 
 ### Basic Setup
