@@ -763,6 +763,29 @@ def test_vendored_terraform_is_pruned_by_discovery_and_detection(
     assert_that(_VENDOR_SKIP_DIRS).contains(".terraform")
 
 
+def test_directory_excludes_are_mirrored_in_the_detection_prune_set() -> None:
+    """Every directory-style discovery exclude is also pruned by detection.
+
+    Detection decides whether a tool is selected at all and discovery decides
+    what reaches its argv, so the two prune sets have to agree. Only comments
+    held them together, and the behavioural lockstep test above covers
+    ``.terraform`` alone. This is the tripwire: dropping an entry from either
+    side fails here instead of silently diverging (#2379).
+    """
+    directory_excludes = {
+        pattern.rstrip("/")
+        for pattern in DEFAULT_EXCLUDE_PATTERNS
+        if pattern.endswith("/")
+    }
+
+    assert_that(directory_excludes).contains(
+        ".cache",
+        ".terragrunt-cache",
+        ".lintro-cache",
+    )
+    assert_that(sorted(directory_excludes - _VENDOR_SKIP_DIRS)).is_empty()
+
+
 def test_cache_excludes_skip_directories_but_keep_cache_named_sources(
     tmp_path: Path,
 ) -> None:
