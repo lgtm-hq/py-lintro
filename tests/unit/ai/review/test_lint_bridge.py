@@ -87,3 +87,45 @@ def test_run_lint_on_changed_files_invokes_tool_check() -> None:
     # would leave ruff formatting alongside black.
     for call in mock_configure.call_args_list:
         assert_that(call.kwargs["selected_tools"]).is_equal_to({"ruff", "black"})
+
+
+def test_run_lint_on_changed_files_returns_empty_when_selection_fails() -> None:
+    """A failure selecting tools drops the digest instead of aborting (#2571).
+
+    ``get_tools_to_run`` triggers plugin discovery; if that raises, the review
+    must still run from the diff alone.
+    """
+    with patch(
+        "lintro.ai.review.lint_bridge.get_tools_to_run",
+        side_effect=RuntimeError("discovery exploded"),
+    ):
+        results = run_lint_on_changed_files(
+            changed_files=["src/main.py"],
+            lintro_config=LintroConfig(),
+        )
+
+    assert_that(results).is_empty()
+
+
+def test_run_lint_on_changed_files_returns_empty_when_config_manager_fails() -> None:
+    """A failure loading native tool configs drops the digest (#2571).
+
+    ``UnifiedConfigManager`` reads pyproject and native tool configs from disk;
+    a malformed file must not take the review down with it.
+    """
+    with (
+        patch("lintro.ai.review.lint_bridge.get_tools_to_run") as mock_get_tools,
+        patch(
+            "lintro.ai.review.lint_bridge.UnifiedConfigManager",
+            side_effect=ValueError("bad pyproject"),
+        ),
+        patch("lintro.ai.review.lint_bridge.tool_manager.get_tool") as mock_get_tool,
+    ):
+        mock_get_tools.return_value.to_run = ["ruff"]
+        results = run_lint_on_changed_files(
+            changed_files=["src/main.py"],
+            lintro_config=LintroConfig(),
+        )
+
+    assert_that(results).is_empty()
+    mock_get_tool.assert_not_called()

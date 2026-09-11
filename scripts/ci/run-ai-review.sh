@@ -294,7 +294,11 @@ echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
 # Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
 # ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.
 export PYTHONUNBUFFERED=1
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --output json >"$output_file" 2>&1 &
+# --with-lint (#2571) runs the check tools on the changed files and feeds the
+# digest to the model as fenced, untrusted data (layer 1: facts before
+# opinion). The lint bridge never aborts the review: a tool that fails is
+# skipped, and a failure setting up the bridge itself drops the whole digest.
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --with-lint --output json >"$output_file" 2>&1 &
 lintro_pid=$!
 # --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
 # group signal left it ignoring TERM (``trap '' TERM``).

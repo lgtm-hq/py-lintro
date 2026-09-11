@@ -42,15 +42,27 @@ def run_lint_on_changed_files(
     if not changed_files:
         return []
 
-    selection = get_tools_to_run(
-        tools="all",
-        action=Action.CHECK,
-        lintro_config=lintro_config,
-    )
-    if not selection.to_run:
+    # Tool selection triggers plugin discovery and the config manager reads
+    # the project's native tool configs from disk. Either can raise, and
+    # neither failure is a reason to abort the review: the digest is an
+    # optional fact layer, so a setup failure drops it and the review runs
+    # from the diff alone (#2571). Per-tool failures are handled below.
+    try:
+        selection = get_tools_to_run(
+            tools="all",
+            action=Action.CHECK,
+            lintro_config=lintro_config,
+        )
+        if not selection.to_run:
+            return []
+        config_manager = UnifiedConfigManager()
+    except Exception:
+        logger.warning(
+            "Lint bridge skipped: could not select or configure tools",
+            exc_info=True,
+        )
         return []
 
-    config_manager = UnifiedConfigManager()
     results: list[ToolResult] = []
     # Every tool this bridge is about to run. Format authority is resolved
     # from the run's selection (#1742), so passing the real set keeps the

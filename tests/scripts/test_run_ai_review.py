@@ -601,6 +601,7 @@ def test_review_cli_accepts_script_flags() -> None:
     assert_that(result.output).contains("--depth")
     assert_that(result.output).contains("--output")
     assert_that(result.output).contains("json")
+    assert_that(result.output).contains("--with-lint")
 
 
 def test_workflow_yaml_parses() -> None:
@@ -1126,6 +1127,29 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
     assert_that(command).contains("--output json")
     # --post publishes the sticky review comment (and inline findings) on the PR.
     assert_that(command).contains("--post")
+
+
+def test_workflow_review_command_passes_with_lint() -> None:
+    """The dogfood review feeds lint results to the model (#2571).
+
+    ``--with-lint`` runs the check tools on the changed files and renders the
+    digest into the prompt as fenced data. Without it the model reviews from
+    the diff alone, so the flag must sit on the executable command line, not
+    in a comment.
+    """
+    lines = SHELL_SCRIPT.read_text(encoding="utf-8").splitlines()
+    command_lines = [
+        line
+        for line in lines
+        if "uv run lintro review" in line and not line.lstrip().startswith("#")
+    ]
+    assert_that(command_lines).is_length(1)
+
+    command = command_lines[0]
+    assert_that(command).contains("--with-lint")
+    # The flag joins the existing invocation; it does not replace anything.
+    for flag in ("--pr", "--depth 1", "--post", "--output json"):
+        assert_that(command).contains(flag)
 
 
 @pytest.mark.parametrize(
