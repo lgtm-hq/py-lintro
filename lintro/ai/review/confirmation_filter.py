@@ -9,6 +9,11 @@ this module is the backstop for a model that still produces one. It runs in
 :func:`lintro.ai.review.response_pipeline.payload_to_partial`, before the
 caller counts the answer against its findings cap, so a dropped confirmation
 never counts as a capped-out finding.
+
+Only self-classifying statements count. A phrase that merely occurs inside
+defect prose ("treats HTTP 200 as a confirmation of rollback success") or
+inside a longer fix instruction ("Update the README; no code change needed")
+is not a classification, and a finding carrying one is kept.
 """
 
 from __future__ import annotations
@@ -18,66 +23,69 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.review.response_recovery import UNSTRUCTURED_CATEGORY
+
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_finding import ReviewFinding
 
 __all__ = [
-    "CONFIRMATION_PHRASES",
+    "CONFIRMATION_FIX_PATTERN",
+    "CONFIRMATION_SENTENCE_PATTERN",
     "drop_confirmation_findings",
     "is_confirmation_finding",
 ]
 
-#: Phrases whose presence in a finding's description or fix marks it as a
-#: checklist confirmation rather than a defect. Matched case-insensitively on
-#: word boundaries. Each phrase is an explicit non-defect assertion: a bare
-#: ``confirmation`` is deliberately absent, because a real defect in a
-#: confirmation flow ("the confirmation dialog never opens") must survive.
-CONFIRMATION_PHRASES: tuple[str, ...] = (
-    "not a defect",
-    "no code change",
-    "positive verification",
-    "this is a confirmation",
-    "as a confirmation",
-    "as confirmation",
+#: A ``fix`` whose whole text (stripped, case-folded) is a bare "no code
+#: change" or "none". Anchored at both ends on purpose: a fix that goes on to
+#: describe work is an instruction, not a classification.
+CONFIRMATION_FIX_PATTERN: re.Pattern[str] = re.compile(
+    r"^(?:no code change(?: (?:needed|required))?|none)\.?$",
 )
 
-#: ``fix`` text that on its own marks a finding as a confirmation, compared
-#: case-insensitively after stripping surrounding whitespace.
-_NO_CODE_CHANGE_FIX: str = "no code change"
-
-_CONFIRMATION_PATTERN: re.Pattern[str] = re.compile(
-    "|".join(rf"\b{re.escape(phrase)}\b" for phrase in CONFIRMATION_PHRASES),
+#: A ``description`` sentence that opens by classifying the finding as a
+#: confirmation: "Not a defect.", "This is a confirmation that ...",
+#: "Positive verification of ...", or the checklist-mapped form the prompt
+#: used to elicit, "Checklist item 8 is a positive verification, ...". The
+#: alternation is anchored at start-of-text or after sentence punctuation, so
+#: the same words mid-sentence do not match.
+CONFIRMATION_SENTENCE_PATTERN: re.Pattern[str] = re.compile(
+    r"(?:^|[.!?]\s+)"
+    r"(?:(?:this|checklist item \d+) is (?:a |an )?)?"
+    r"(?:not a defect|positive verification|confirmation(?: that| of)?)\b",
     re.IGNORECASE,
 )
 
 
 def is_confirmation_finding(*, finding: ReviewFinding) -> bool:
-    """Return whether a finding's own text says it is not a defect.
+    """Return whether a finding classifies itself as not a defect.
+
+    The prose-recovery finding (:data:`UNSTRUCTURED_CATEGORY`) is never a
+    confirmation: its description is the model's whole answer, which may
+    open with such a sentence while carrying real findings further down.
 
     Args:
         finding: A parsed finding from one chunk answer.
 
     Returns:
-        True when the description or fix contains one of
-        :data:`CONFIRMATION_PHRASES` (case-insensitive) or the fix is exactly
-        "No code change".
+        True when the whole fix matches :data:`CONFIRMATION_FIX_PATTERN` or a
+        description sentence opens as :data:`CONFIRMATION_SENTENCE_PATTERN`.
     """
-    if finding.fix.strip().casefold() == _NO_CODE_CHANGE_FIX:
+    if finding.category == UNSTRUCTURED_CATEGORY:
+        return False
+    if CONFIRMATION_FIX_PATTERN.match(finding.fix.strip().casefold()):
         return True
-    return any(
-        _CONFIRMATION_PATTERN.search(text)
-        for text in (finding.description, finding.fix)
-    )
+    return CONFIRMATION_SENTENCE_PATTERN.search(finding.description.strip()) is not None
 
 
 def drop_confirmation_findings(
     *,
     findings: tuple[ReviewFinding, ...],
 ) -> tuple[ReviewFinding, ...]:
-    """Drop findings that describe a checklist confirmation, not a defect.
+    """Drop findings that classify themselves as confirmations, not defects.
 
-    Each drop is logged at debug level with the finding title. Severity and
-    every other field of the kept findings are left untouched.
+    Each drop is logged at info level with the finding title so it is visible
+    in the review run log. Severity and every other field of the kept
+    findings are left untouched.
 
     Args:
         findings: Parsed findings from one chunk answer, in payload order.
@@ -88,7 +96,7 @@ def drop_confirmation_findings(
     kept: list[ReviewFinding] = []
     for finding in findings:
         if is_confirmation_finding(finding=finding):
-            logger.debug(
+            logger.info(
                 "Dropped checklist-confirmation finding {title!r}: its body says "
                 "it is not a defect (#2430)",
                 title=finding.title,
