@@ -376,9 +376,10 @@ def test_provider_error_message_reaches_the_console():
 
 
 #: A credential in the shape ``lintro/ai/secrets.py`` actually matches
-#: (``sk-`` followed by 20 or more alphanumerics). The test below asserts on
-#: this literal, so it fails if ``_failure_detail`` stops redacting.
-_FAKE_API_KEY = "sk-Hk39dQ2mVb71PzLt58Rn"
+#: (``sk-`` followed by 20 or more alphanumerics), assembled at runtime so no
+#: credential-shaped literal is committed. The test below asserts on this
+#: value, so it fails if ``_failure_detail`` stops redacting.
+_FAKE_API_KEY = "sk-" + "A" * 24
 
 
 def test_provider_error_message_is_redacted_and_single_line():
