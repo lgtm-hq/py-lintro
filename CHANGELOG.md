@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.154.1] - 2026-09-11
+
+### Fixed
+
+- **review**: stop emitting positive checklist confirmations as findings (#2581)
+  (197120e)
+
 ## [0.154.0] - 2026-09-11
 
 ### Added
