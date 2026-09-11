@@ -231,8 +231,9 @@ class PytestPlugin(BaseToolPlugin):
             options: Effective options for one invocation.
 
         Returns:
-            int | float: Timeout in seconds, falling back to the pytest default
-                when the option is absent, ``None``, or not a finite number.
+            int | float: Timeout in seconds. A finite, positive number in
+                ``options`` is used directly; otherwise the value falls back to
+                the persisted plugin options, then to the pytest default.
         """
         seconds = self._get_effective_timeout(options.get("timeout"))
         return int(seconds) if seconds.is_integer() else seconds
@@ -280,6 +281,14 @@ class PytestPlugin(BaseToolPlugin):
         # Merge runtime options
         merged_options = dict(self.options)
         merged_options.update(options)
+
+        # Resolve the timeout once, before anything reads it. The argv, the
+        # collection subprocess, the banner, the kill deadline and the timeout
+        # message all read this one value, so they cannot disagree. An absent
+        # or ``None`` timeout is left alone: it means "no ``--timeout`` flag".
+        timeout_val = self._resolve_timeout_seconds(merged_options)
+        if merged_options.get("timeout") is not None:
+            merged_options["timeout"] = timeout_val
 
         # Check version requirements
         version_result = self._verify_tool_version()
@@ -351,14 +360,17 @@ class PytestPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
-        total_available_tests = self.executor.prepare_test_execution(target_files)
+        total_available_tests = self.executor.prepare_test_execution(
+            target_files,
+            timeout=timeout_val,
+        )
 
         # Display run configuration summary
-        self.executor.display_run_config(total_available_tests, target_files)
-
-        # Resolve the timeout once from the merged options so the value the
-        # subprocess is killed at is the value reported when it times out.
-        timeout_val = self._resolve_timeout_seconds(merged_options)
+        self.executor.display_run_config(
+            total_available_tests,
+            target_files,
+            options=merged_options,
+        )
 
         try:
             # Record start time to filter out stale junitxml files

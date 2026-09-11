@@ -582,6 +582,8 @@ def _resolved_with_warnings(
         pytest.param(float("nan"), "nan", id="nan"),
         pytest.param(float("inf"), "inf", id="infinity"),
         pytest.param(True, "True", id="bool"),
+        pytest.param(0, "0", id="zero"),
+        pytest.param(-1, "-1", id="negative"),
     ],
 )
 def test_invalid_timeout_warns_and_falls_back_to_the_default(
@@ -630,3 +632,167 @@ def test_absent_timeout_falls_back_to_the_default_without_warning(
 
     assert_that(resolved).is_equal_to(PYTEST_DEFAULT_TIMEOUT)
     assert_that(warnings).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param(0.5, 0.5, id="fractional"),
+        pytest.param(600.0, 600, id="integral_float_normalised"),
+    ],
+)
+def test_resolved_timeout_keeps_fractional_values_as_floats(
+    sample_pytest_plugin: PytestPlugin,
+    raw: float,
+    expected: int | float,
+) -> None:
+    """A fractional timeout survives; only integral values become ints.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+        raw: Timeout stored under the ``timeout`` option.
+        expected: Value the resolver is expected to return.
+    """
+    resolved = sample_pytest_plugin._resolve_timeout_seconds({"timeout": raw})
+
+    assert_that(resolved).is_equal_to(expected)
+    assert_that(isinstance(resolved, int)).is_equal_to(isinstance(expected, int))
+
+
+def test_fractional_timeout_is_formatted_without_normalisation(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """A fractional timeout reaches the message as ``0.5s``.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    with (
+        _configured_check(sample_pytest_plugin),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            side_effect=subprocess.TimeoutExpired(cmd="pytest", timeout=0.5),
+        ),
+    ):
+        result = sample_pytest_plugin.check(["tests"], {"timeout": 0.5})
+
+    assert_that(result.timed_out).is_true()
+    assert_that(result.output).contains("0.5s")
+
+
+def test_invalid_timeout_override_reaches_argv_as_the_default(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """An unusable timeout override is normalised before it reaches the argv.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    executed: list[list[str]] = []
+
+    def record_command(
+        cmd: list[str],
+        timeout: int | float | None = None,
+    ) -> tuple[bool, str, int]:
+        """Record the argv pytest would be launched with.
+
+        Args:
+            cmd: Command line built for the pytest subprocess.
+            timeout: Seconds allowed before the subprocess is killed.
+
+        Returns:
+            tuple[bool, str, int]: A successful, empty execution result.
+        """
+        executed.append(cmd)
+        return True, "10 passed", 0
+
+    with (
+        _configured_check(sample_pytest_plugin),
+        patch(
+            "lintro.tools.pytest.pytest_command_builder.check_plugin_installed",
+            return_value=True,
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            new=record_command,
+        ),
+    ):
+        sample_pytest_plugin.check(["tests"], {"timeout": "abc"})
+
+    cmd = executed[0]
+    assert_that(cmd).contains("--timeout")
+    assert_that(cmd[cmd.index("--timeout") + 1]).is_equal_to(
+        str(PYTEST_DEFAULT_TIMEOUT),
+    )
+
+
+def test_run_config_banner_reflects_the_invocation_options(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """A ``workers=0`` override is reported as disabled, not as auto.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    banners: list[str] = []
+
+    with (
+        _configured_check(sample_pytest_plugin),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            return_value=(True, "10 passed", 0),
+        ),
+        patch("click.echo", side_effect=lambda text: banners.append(str(text))),
+    ):
+        sample_pytest_plugin.check(["tests"], {"workers": 0})
+
+    assert_that("\n".join(banners)).contains("Parallel: disabled")
+
+
+def test_collection_subprocess_receives_the_invocation_timeout(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """Test collection runs under the same timeout as the test run.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    timeouts: list[int | float | None] = []
+
+    def record(
+        cmd: list[str],
+        timeout: int | float | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[bool, str]:
+        """Record the timeout each pytest subprocess runs under.
+
+        Args:
+            cmd: Command line for the subprocess.
+            timeout: Seconds allowed before the subprocess is killed.
+            *args: Ignored positional arguments.
+            **kwargs: Ignored keyword arguments.
+
+        Returns:
+            tuple[bool, str]: A successful collection result.
+        """
+        timeouts.append(timeout)
+        return True, "collected 10 items"
+
+    with (
+        patch.object(sample_pytest_plugin, "_verify_tool_version", return_value=None),
+        patch.object(
+            sample_pytest_plugin,
+            "_get_executable_command",
+            return_value=["pytest"],
+        ),
+        patch.object(sample_pytest_plugin, "_parse_output", return_value=[]),
+        patch.object(sample_pytest_plugin, "_run_subprocess", new=record),
+    ):
+        sample_pytest_plugin.check(["tests"], {"timeout": 600})
+
+    assert_that(timeouts).is_not_empty()
+    assert_that(set(timeouts)).is_equal_to({600})

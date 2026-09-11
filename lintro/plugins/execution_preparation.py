@@ -78,8 +78,11 @@ def get_effective_timeout(
     This is the single acceptance rule for the ``timeout`` option: every tool
     resolves the value here rather than re-implementing its own coercion, so
     the same option cannot mean different things to different callers. Only a
-    finite ``int`` or ``float`` is accepted. ``bool`` is rejected despite being
-    an ``int`` subclass, because no caller means "one second" by ``True``.
+    finite, strictly positive ``int`` or ``float`` is accepted. ``bool`` is
+    rejected despite being an ``int`` subclass, because no caller means "one
+    second" by ``True``; zero and negatives are rejected because they make
+    ``subprocess.run`` expire immediately and disable pytest's ``--timeout``
+    rather than expressing "wait forever".
 
     Args:
         timeout: Override timeout value, or None to use default.
@@ -95,7 +98,7 @@ def get_effective_timeout(
 
     if isinstance(raw_timeout, (int, float)) and not isinstance(raw_timeout, bool):
         value = float(raw_timeout)
-        if math.isfinite(value):
+        if math.isfinite(value) and value > 0:
             return value
 
     type_name = type(raw_timeout).__name__

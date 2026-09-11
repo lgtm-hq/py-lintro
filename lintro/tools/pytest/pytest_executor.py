@@ -7,7 +7,7 @@ and subprocess operations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from lintro.tools.pytest.addopts_coverage import (
     config_addopts_enable_coverage,
@@ -38,11 +38,15 @@ class PytestExecutor:
     def prepare_test_execution(
         self,
         target_files: list[str],
+        timeout: int | float | None = None,
     ) -> int:
         """Prepare test execution by collecting tests.
 
         Args:
             target_files: Files or directories to test.
+            timeout: Seconds to allow the collection subprocess. Collection is
+                part of the invocation, so it runs under the same timeout the
+                test run itself is held to.
 
         Raises:
             ValueError: If tool reference is not set.
@@ -57,6 +61,7 @@ class PytestExecutor:
         total_available_tests = collect_tests_once(
             self.tool,
             target_files,
+            timeout=timeout,
         )
 
         return total_available_tests
@@ -93,16 +98,21 @@ class PytestExecutor:
         self,
         total_tests: int,
         target_files: list[str],
+        options: dict[str, Any] | None = None,
     ) -> None:
         """Display test run configuration summary.
 
         Args:
             total_tests: Total number of tests discovered.
             target_files: List of target files/directories.
+            options: Effective options for this invocation. Defaults to the
+                persisted configuration, so the banner must be handed the
+                merged options to describe the run that is about to happen.
         """
         import click
 
-        options = self.config.get_options_dict()
+        if options is None:
+            options = self.config.get_options_dict()
 
         # Get worker configuration
         workers = options.get("workers")
