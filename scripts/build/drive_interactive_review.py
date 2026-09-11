@@ -11,7 +11,7 @@ gap inside the verify step.
 It runs ``check --fix --yes`` on a throwaway file with the fixtures under
 ``scripts/build/fixtures`` first on ``PATH`` (a fake ``ruff`` that reports two
 unused imports and a fake ``claude`` that offers a behavioural-risk fix for
-each, so the run routes to interactive review), answers the ``[q]quit:``
+each, so the run routes to interactive review), answers the ``[q]quit``
 prompt with ``d`` then ``q``, and fails unless the diff came back
 pygments-highlighted -- ANSI colour on the ``+``/``-`` lines.
 
@@ -37,8 +37,13 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = SCRIPT_DIR / "fixtures"
 
-#: Prompt emitted once per fix group by ``review_fixes_interactive``.
-PROMPT_MARKER = b"[q]quit:"
+#: Prompt emitted once per fix group by ``review_fixes_interactive``. The
+#: trailing colon is deliberately excluded: the safe-style-default form puts a
+#: hint between `[q]quit` and the colon, and a fixture whose fixes stopped
+#: being behavioural would then strand this driver on a prompt it can see.
+#: tests/scripts/test_release_gate_contracts.py pins this against the prompt
+#: lintro renders.
+PROMPT_MARKER = b"[q]quit"
 
 #: Keys answered at successive prompts: show the diffs, then quit.
 REVIEW_KEYS = (b"d", b"q")
@@ -46,10 +51,14 @@ REVIEW_KEYS = (b"d", b"q")
 #: Seconds to wait for the whole session, including onefile extraction.
 SESSION_TIMEOUT_SECONDS = 300
 
-#: A pygments-highlighted diff line: an SGR sequence immediately followed by
-#: the diff marker. A degraded (plain-text) render emits the marker bare.
-COLOURED_ADDITION = re.compile(rb"\x1b\[[0-9;]*m\+")
-COLOURED_REMOVAL = re.compile(rb"\x1b\[[0-9;]*m-")
+#: A pygments-highlighted diff line: a line that opens with an SGR sequence
+#: and then the diff marker. A degraded (plain-text) render emits the marker
+#: bare. Anchoring to the start of a line matters: lintro colours plenty of
+#: mid-line text, and a bare `\x1b[..m` before any `+`/`-` anywhere in the
+#: output (a table rule, a summary count) would otherwise pass a build whose
+#: diff never highlighted at all.
+COLOURED_ADDITION = re.compile(rb"(?:\A|[\r\n])\x1b\[[0-9;]*m\+")
+COLOURED_REMOVAL = re.compile(rb"(?:\A|[\r\n])\x1b\[[0-9;]*m-")
 
 SAMPLE_FILE = "bad.py"
 SAMPLE_SOURCE = "import os\nimport sys\n\n\nVALUE = 1\n"
