@@ -52,6 +52,13 @@ from urllib.parse import urlparse
 WORKFLOW_FILENAME: Final[str] = "ai-review.yml"
 WORKFLOW_PATH: Final[str] = f".github/workflows/{WORKFLOW_FILENAME}"
 WORKFLOW_EVENT: Final[str] = "pull_request_target"
+# The untrusted lint job (#2571): docker-ci.yml runs on ``pull_request`` with
+# no secrets, lints the PR head, and uploads lintro's JSON report under this
+# artifact name. The review job downloads it for the exact head it reviews.
+LINT_WORKFLOW_FILENAME: Final[str] = "docker-ci.yml"
+LINT_WORKFLOW_PATH: Final[str] = f".github/workflows/{LINT_WORKFLOW_FILENAME}"
+LINT_WORKFLOW_EVENT: Final[str] = "pull_request"
+LINT_REPORT_ARTIFACT: Final[str] = "linting-json-report"
 STATE_ARTIFACT_PREFIX: Final[str] = "lintro-review-state-pr-"
 _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
@@ -120,6 +127,8 @@ class WorkflowRun:
             when the API omitted or sent an unusable timestamp.
         pull_request_numbers: PRs attached on the run. Empty on some
             ``pull_request_target`` payloads; then artifact names decide.
+        head_sha: Commit the run executed for. Empty when the payload
+            omitted it; the lint-report locator then rejects the run.
     """
 
     run_id: int
@@ -128,6 +137,22 @@ class WorkflowRun:
     path: str
     created_at: datetime | None
     pull_request_numbers: tuple[int, ...] = ()
+    head_sha: str = ""
+
+
+@dataclass(frozen=True)
+class LocatedLintReport:
+    """Where the lint report for one PR head lives, if anywhere.
+
+    Attributes:
+        run_id: docker-ci run carrying an unexpired lint JSON report for
+            exactly ``head_sha``. ``None`` when no such run exists yet.
+        head_sha: PR head the search was pinned to. Empty when it could not
+            be resolved, in which case ``run_id`` is always ``None``.
+    """
+
+    run_id: int | None
+    head_sha: str = ""
 
 
 GhApi = Callable[[str], Any | None]
@@ -401,6 +426,7 @@ def parse_workflow_run(payload: Mapping[str, Any]) -> WorkflowRun | None:
         path=str(payload.get("path", "")),
         created_at=_parse_datetime(str(payload.get("created_at", ""))),
         pull_request_numbers=_parse_pr_numbers(payload),
+        head_sha=str(payload.get("head_sha", "") or ""),
     )
 
 
@@ -829,6 +855,156 @@ def locate_prior_run_id(
         gh_api=gh_api,
         now=now,
     ).run_id
+
+
+def is_lint_run_for_head(run: WorkflowRun, *, head_sha: str) -> bool:
+    """Return whether a run is the untrusted lint workflow for ``head_sha``.
+
+    The listing is already filtered by ``head_sha`` server-side; this is the
+    client-side check that makes the pin real (#2571): a run whose recorded
+    head differs from the PR head, or whose payload omitted it, is never a
+    source of facts about this head.
+
+    Args:
+        run: Candidate workflow run.
+        head_sha: PR head commit the review is looking at.
+
+    Returns:
+        True when event, workflow path, and head all match.
+    """
+    return (
+        bool(head_sha)
+        and run.head_sha == head_sha
+        and run.event == LINT_WORKFLOW_EVENT
+        and run.path == LINT_WORKFLOW_PATH
+    )
+
+
+def has_lint_report_artifact(artifacts: Sequence[Artifact]) -> bool:
+    """Return whether a run's artifacts include an unexpired lint report.
+
+    Args:
+        artifacts: Artifacts listed on the run.
+
+    Returns:
+        True when :data:`LINT_REPORT_ARTIFACT` is present and not expired.
+    """
+    return any(
+        artifact.name == LINT_REPORT_ARTIFACT and not artifact.expired
+        for artifact in artifacts
+    )
+
+
+def fetch_pr_head_sha(
+    repo: str,
+    pr_number: int,
+    *,
+    gh_api: GhApi = _gh_api,
+) -> str:
+    """Return the current head commit of a pull request.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        pr_number: Pull request number.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The head sha, or an empty string when it cannot be read.
+    """
+    payload = _call_with_retry(f"repos/{repo}/pulls/{pr_number}", gh_api)
+    if not isinstance(payload, Mapping):
+        return ""
+    head = payload.get("head")
+    if not isinstance(head, Mapping):
+        return ""
+    sha = head.get("sha")
+    return sha if isinstance(sha, str) else ""
+
+
+def locate_lint_report(
+    *,
+    repo: str,
+    head_sha: str,
+    gh_api: GhApi = _gh_api,
+) -> LocatedLintReport:
+    """Find the docker-ci run holding the lint report for one PR head.
+
+    Walks the workflow's runs for ``head_sha`` newest-first and returns the
+    first one carrying an unexpired :data:`LINT_REPORT_ARTIFACT`. Run status
+    is deliberately not required to be ``completed``: the lint job uploads
+    its report while sibling jobs may still be running, and a report that is
+    already there is a report for this head.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        head_sha: PR head commit the review is looking at.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The located run, or ``run_id=None`` when no report exists yet.
+    """
+    if not head_sha:
+        _log_locate("lint report: no head sha; nothing to look for")
+        return LocatedLintReport(run_id=None)
+    path = (
+        f"repos/{repo}/actions/workflows/{LINT_WORKFLOW_FILENAME}/runs"
+        f"?event={LINT_WORKFLOW_EVENT}&head_sha={head_sha}"
+    )
+    for item in _yield_api_pages(
+        path,
+        "workflow_runs",
+        per_page=RUNS_PER_PAGE,
+        gh_api=gh_api,
+    ):
+        run = parse_workflow_run(item)
+        if run is None:
+            continue
+        if not is_lint_run_for_head(run, head_sha=head_sha):
+            _log_locate(
+                f"lint report: skip run-id={run.run_id}: "
+                f"head {run.head_sha or '?'} is not {head_sha}",
+            )
+            continue
+        if not has_lint_report_artifact(
+            fetch_artifacts(repo, run.run_id, gh_api=gh_api),
+        ):
+            _log_locate(f"lint report: run-id={run.run_id} has no report yet")
+            continue
+        _log_locate(f"lint report: selected run-id={run.run_id} for {head_sha}")
+        return LocatedLintReport(run_id=run.run_id, head_sha=head_sha)
+    _log_locate(f"lint report: none for head {head_sha}")
+    return LocatedLintReport(run_id=None, head_sha=head_sha)
+
+
+def locate_lint_report_from_env(
+    env: Mapping[str, str],
+    *,
+    gh_api: GhApi = _gh_api,
+) -> LocatedLintReport:
+    """Resolve the lint-report run from process environment.
+
+    The head is read from the pull request itself, not from the event
+    payload, so the pin follows what ``lintro review --pr`` is about to fetch.
+    Any missing value or API failure is fail-safe: no run, so the review
+    proceeds without linter facts.
+
+    Args:
+        env: Process environment.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The located run, or ``run_id=None``.
+    """
+    repo = env.get("GITHUB_REPOSITORY", "").strip()
+    pr_number = _parse_optional_int(env.get("PR_NUMBER"))
+    if not repo or pr_number is None or pr_number <= 0:
+        return LocatedLintReport(run_id=None)
+    try:
+        head_sha = fetch_pr_head_sha(repo, pr_number, gh_api=gh_api)
+        return locate_lint_report(repo=repo, head_sha=head_sha, gh_api=gh_api)
+    except Exception as exc:
+        _log_locate(f"lint report locator exception: {type(exc).__name__}")
+        return LocatedLintReport(run_id=None)
 
 
 def write_run_id(run_id: int | None, output_path: Path | None) -> None:
@@ -1413,6 +1589,13 @@ def build_parser() -> argparse.ArgumentParser:
         "locate",
         help="Write run-id= for the latest eligible prior-state run.",
     )
+    subparsers.add_parser(
+        "lint-report",
+        help=(
+            "Print run-id= and head-sha= for the docker-ci run holding the "
+            "lint JSON report of the PR's current head (empty when none)."
+        ),
+    )
     upload = subparsers.add_parser(
         "upload",
         help="Upload ai-review-state/ from inside the review step.",
@@ -1446,6 +1629,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "lint-report":
+        lint_report = locate_lint_report_from_env(os.environ)
+        run_id = "" if lint_report.run_id is None else str(lint_report.run_id)
+        sys.stdout.write(f"run-id={run_id}\nhead-sha={lint_report.head_sha}\n")
+        return 0
     if args.command == "upload":
         uploaded = upload_from_env(
             os.environ,

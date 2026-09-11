@@ -359,6 +359,24 @@ total, `--output json` carries `suggestions_dropped` plus a
 `suggestions_dropped_by_reason` tally alongside a per-finding `suggestion_dropped` tag,
 and the sticky comment states the count and reasons.
 
+### Linter facts in the review prompt
+
+The review protocol puts facts before opinion: the model is given the deterministic
+linter results for the changed files before it reads the diff. Two flags feed them.
+`--with-lint` runs the check tools in-process on the working tree, which is right when
+the tree _is_ the revision under review (a local branch or `--uncommitted`).
+`--lint-report PATH` reads a saved lintro JSON report instead
+(`lintro chk --output-format json`, or the `.lintro/artifacts/json/results.json` side
+channel CI emits) and is the form the dogfood review uses: the trusted `--pr` job checks
+out the base branch and never executes PR code, so the untrusted `docker-ci` lint job
+lints the PR head, uploads the report as the `linting-json-report` artifact, and the
+review job downloads it for the exact head SHA it is reviewing. Either way the digest is
+restricted to the changed files, size-capped, fenced into the prompt as untrusted data
+alongside the diff, and never acted on by lintro itself. A report that is missing,
+oversized, or malformed is not fatal: the review runs from the diff alone and the posted
+header says `linter facts unavailable for this head`. The two flags are mutually
+exclusive.
+
 ### Review coverage completeness
 
 A capped CLI review is **not a guaranteed full finding set**. Under `--transport cli`,

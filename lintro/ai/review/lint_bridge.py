@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from dataclasses import dataclass, field
+from pathlib import PurePosixPath
+from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
 
 from lintro.ai.prompts.review import format_lint_results_section
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.base_issue import BaseIssue
 from lintro.tools import tool_manager
 from lintro.utils.execution.tool_configuration import (
     configure_tool_for_execution,
@@ -17,12 +21,49 @@ from lintro.utils.execution.tool_configuration import (
 from lintro.utils.unified_config import UnifiedConfigManager
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from lintro.config.lintro_config import LintroConfig
 
 __all__ = [
+    "MAX_LINT_REPORT_BYTES",
+    "LintReportError",
+    "LintReportIssue",
     "format_lint_results_for_prompt",
+    "load_lint_report",
+    "restrict_lint_results_to_files",
     "run_lint_on_changed_files",
 ]
+
+#: Largest saved report ``load_lint_report`` will read. The report is
+#: PR-controlled data (#2571): it comes from the untrusted lint job's artifact,
+#: so it gets a hard byte ceiling before parsing, the same way the diff has a
+#: prompt budget. A lintro JSON report for a whole PR is tens of kilobytes.
+MAX_LINT_REPORT_BYTES: Final[int] = 4 * 1024 * 1024
+
+
+class LintReportError(ValueError):
+    """A saved lintro JSON report cannot be used as review input.
+
+    Raised by :func:`load_lint_report` for a missing, oversized, unreadable,
+    or structurally invalid report. Callers turn it into a review-header
+    warning rather than a failed review: linter facts are an optional input.
+    """
+
+
+@dataclass
+class LintReportIssue(BaseIssue):
+    """One issue rehydrated from a saved lintro JSON report.
+
+    ``BaseIssue`` has no ``code`` field of its own (each tool's issue class
+    supplies it); the report serializer already resolved the canonical code,
+    so this carries it verbatim.
+
+    Attributes:
+        code: Rule code as written by the report's serializer.
+    """
+
+    code: str = field(default="")
 
 
 def run_lint_on_changed_files(
@@ -143,3 +184,217 @@ def format_lint_results_for_prompt(
     if len(lines) >= max_entries:
         digest += "\n\n(truncated lint digest)"
     return format_lint_results_section(digest=digest)
+
+
+def _report_field(entry: Any, key: str, *, where: str) -> Any:
+    """Return ``entry[key]`` from a report mapping, or raise.
+
+    Args:
+        entry: Candidate mapping from the report.
+        key: Key that must be present.
+        where: Location description for the error message.
+
+    Returns:
+        The value under ``key``.
+
+    Raises:
+        LintReportError: When ``entry`` is not a mapping or lacks ``key``.
+    """
+    if not isinstance(entry, dict):
+        msg = f"{where} is not an object"
+        raise LintReportError(msg)
+    if key not in entry:
+        msg = f"{where} has no '{key}' field"
+        raise LintReportError(msg)
+    return entry[key]
+
+
+def _parse_report_issue(raw: Any, *, where: str) -> LintReportIssue:
+    """Validate and convert one serialized issue.
+
+    Args:
+        raw: Serialized issue mapping from the report.
+        where: Location description for error messages.
+
+    Returns:
+        The rehydrated issue.
+
+    Raises:
+        LintReportError: When a required field is missing or mistyped.
+    """
+    file_path = _report_field(raw, "file", where=where)
+    message = _report_field(raw, "message", where=where)
+    code = raw.get("code", "")
+    line = raw.get("line", 0)
+    if not isinstance(file_path, str) or not isinstance(message, str):
+        msg = f"{where} has a non-string 'file' or 'message'"
+        raise LintReportError(msg)
+    if not isinstance(code, str):
+        msg = f"{where} has a non-string 'code'"
+        raise LintReportError(msg)
+    if line is None:
+        line = 0
+    if isinstance(line, bool) or not isinstance(line, int):
+        msg = f"{where} has a non-integer 'line'"
+        raise LintReportError(msg)
+    return LintReportIssue(
+        file=file_path,
+        line=line,
+        message=message,
+        code=code,
+    )
+
+
+def load_lint_report(path: Path) -> list[ToolResult]:
+    """Load a saved lintro JSON report as tool results.
+
+    Reads the document ``lintro chk --output-format json`` (and the
+    ``.lintro/artifacts/json/results.json`` side channel) writes and converts
+    each per-tool entry into the same shape :func:`run_lint_on_changed_files`
+    returns, so the two feed :func:`format_lint_results_for_prompt`
+    identically (#2571). Only ``file``, ``line``, ``code`` and ``message`` are
+    carried per issue: that is all the prompt digest renders.
+
+    The report is untrusted input. It is size-capped before parsing and
+    validated structurally; anything that does not look like a lintro report
+    raises rather than being coerced.
+
+    Args:
+        path: Path to the JSON report.
+
+    Returns:
+        One ``ToolResult`` per tool entry, in report order.
+
+    Raises:
+        LintReportError: When the file is missing, too large, not JSON, or
+            not shaped like a lintro report.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError as exc:
+        msg = f"lint report not readable: {path} ({exc.strerror or exc})"
+        raise LintReportError(msg) from exc
+    if size > MAX_LINT_REPORT_BYTES:
+        msg = (
+            f"lint report too large: {path} is {size} bytes "
+            f"(limit {MAX_LINT_REPORT_BYTES})"
+        )
+        raise LintReportError(msg)
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        msg = f"lint report is not valid JSON: {path} ({exc})"
+        raise LintReportError(msg) from exc
+
+    raw_results = _report_field(document, "results", where="lint report")
+    if not isinstance(raw_results, list):
+        msg = "lint report 'results' is not a list"
+        raise LintReportError(msg)
+
+    results: list[ToolResult] = []
+    for index, entry in enumerate(raw_results):
+        where = f"lint report results[{index}]"
+        name = _report_field(entry, "tool", where=where)
+        if not isinstance(name, str) or not name:
+            msg = f"{where} has an empty or non-string 'tool'"
+            raise LintReportError(msg)
+        raw_issues = entry.get("issues", [])
+        if raw_issues is None:
+            raw_issues = []
+        if not isinstance(raw_issues, list):
+            msg = f"{where} 'issues' is not a list"
+            raise LintReportError(msg)
+        issues = [
+            _parse_report_issue(raw, where=f"{where}.issues[{position}]")
+            for position, raw in enumerate(raw_issues)
+        ]
+        results.append(
+            ToolResult(
+                name=name,
+                success=bool(entry.get("success", True)),
+                issues_count=len(issues),
+                issues=issues,
+            ),
+        )
+    return results
+
+
+def _normalize_report_path(raw: str) -> str:
+    """Normalize a report file path for changed-file matching.
+
+    Args:
+        raw: Path as written in the report.
+
+    Returns:
+        Forward-slash path with any leading ``./`` removed.
+    """
+    text = raw.replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
+def _matches_changed_file(report_path: str, changed: frozenset[str]) -> bool:
+    """Return whether a report path names one of the changed files.
+
+    The lint job runs inside a container with the repository mounted at some
+    root, so a report path may be repository-relative (``lintro/x.py``) or
+    absolute (``/code/lintro/x.py``). A relative path must match exactly: a
+    trailing-components match would let ``tests/lintro/x.py`` stand in for
+    ``lintro/x.py``. Only an absolute path, whose mount prefix is unknown
+    here, matches by its trailing components.
+
+    Args:
+        report_path: Normalized path from the report.
+        changed: Normalized repository-relative changed-file paths.
+
+    Returns:
+        True when the path refers to a changed file.
+    """
+    if report_path in changed:
+        return True
+    if not report_path.startswith("/"):
+        return False
+    parts = PurePosixPath(report_path).parts
+    return any("/".join(parts[depth:]) in changed for depth in range(1, len(parts)))
+
+
+def restrict_lint_results_to_files(
+    *,
+    results: list[ToolResult],
+    changed_files: list[str],
+) -> list[ToolResult]:
+    """Keep only the issues that fall on the review's changed files.
+
+    A saved report may cover more than the diff under review (a full-repo
+    lint, or a lint of a broader change set), and facts about files the
+    reviewer cannot see would only invite the model to cite them (#2571).
+
+    Args:
+        results: Tool results, typically from :func:`load_lint_report`.
+        changed_files: Repository-relative changed file paths.
+
+    Returns:
+        New tool results carrying only the matching issues, one per input
+        result, with ``issues_count`` recomputed.
+    """
+    changed = frozenset(_normalize_report_path(path) for path in changed_files)
+    restricted: list[ToolResult] = []
+    for result in results:
+        kept = [
+            issue
+            for issue in result.issues or ()
+            if _matches_changed_file(
+                _normalize_report_path(getattr(issue, "file", "") or ""),
+                changed,
+            )
+        ]
+        restricted.append(
+            ToolResult(
+                name=result.name,
+                success=result.success,
+                issues_count=len(kept),
+                issues=kept,
+            ),
+        )
+    return restricted

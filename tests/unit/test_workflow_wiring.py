@@ -5776,3 +5776,55 @@ def test_permission_shorthands_normalize_to_levels() -> None:
     assert_that(_granted_level(explicit, scope="contents")).is_equal_to(1)
     assert_that(_granted_level(explicit, scope="id-token")).is_equal_to(2)
     assert_that(_granted_level(explicit, scope="actions")).is_equal_to(0)
+
+
+def test_ai_review_job_has_no_lint_step() -> None:
+    """Linter facts come from the untrusted lint job's artifact (#2571).
+
+    The trusted review job holds the posting and provider credentials and
+    checks out the base ref, so it must never run lintro's tools or any PR
+    code: no lint step, no ``--with-lint``, and no second checkout.
+    """
+    review = _load_workflow(name=_AI_REVIEW_WORKFLOW)
+    job = review["jobs"][_AI_REVIEW_JOB]
+    checkouts = 0
+    for step in job["steps"]:
+        run = str(step.get("run", ""))
+        assert_that(run).does_not_contain("--with-lint")
+        assert_that(run).does_not_match(r"lintro\s+(chk|check|fmt|format)\b")
+        assert_that(str(step.get("uses", ""))).does_not_contain("lgtm-ci/")
+        if str(step.get("uses", "")).startswith("actions/checkout@"):
+            checkouts += 1
+    assert_that(checkouts).is_equal_to(1)
+    # `gh run download` of the report needs actions: read, which the job
+    # already grants for review-state artifacts.
+    assert_that(job["permissions"]["actions"]).is_equal_to("read")
+
+
+def test_docker_ci_changed_scope_publishes_the_lint_json_report() -> None:
+    """The changed-files lint job uploads the same JSON report the full run does.
+
+    The AI review downloads ``linting-json-report`` for the PR head (#2571);
+    the reusable full-repo lint already publishes it, so changed scope must
+    too, and lintro only emits the file when it sees ``GITHUB_ACTIONS=true``
+    inside the container, which the script forwards.
+    """
+    docker_ci = _load_workflow(name="docker-ci.yml")
+    steps = docker_ci["jobs"]["dogfooding-lint-changed"]["steps"]
+    uploads = [
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        and step.get("with", {}).get("name") == "linting-json-report"
+    ]
+    assert_that(uploads).is_length(1)
+    upload = uploads[0]
+    assert_that(upload["with"]["path"]).is_equal_to(
+        ".lintro/artifacts/json/results.json",
+    )
+    assert_that(upload["if"]).is_equal_to("always()")
+    assert_that(upload.get("continue-on-error")).is_true()
+    script = (_REPO_ROOT / "scripts" / "ci" / "dogfood-changed-files.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(script).contains("-e GITHUB_ACTIONS=true")

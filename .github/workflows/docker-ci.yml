@@ -743,12 +743,27 @@ jobs:
             chk-output.txt
           retention-days: 7
           if-no-files-found: ignore
+      - name: Upload lint JSON report
+        # Same artifact name and shape the reusable full-repo lint publishes:
+        # the AI review job downloads `linting-json-report` for the exact PR
+        # head and feeds it to `lintro review --lint-report` as linter facts
+        # (#2571). The skip gate below deliberately does not read it for
+        # changed scope. Best-effort: the lint verdict does not depend on it.
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linting-json-report
+          path: .lintro/artifacts/json/results.json
+          retention-days: 7
+          if-no-files-found: ignore
 
   # No-silent-skip gate (#1510, #2240): the dogfooding jobs above run an
   # external reusable workflow (no place to add a post-lint step). For a
   # full-repo run, consume its authoritative JSON artifact instead of running
-  # lintro a second time. Changed-files runs publish no JSON, so that path
-  # retains the gate's existing full-repo derivation. Runs whenever a CI image
+  # lintro a second time. Changed-files runs publish JSON only for the AI
+  # review (#2571), so that path retains the gate's existing full-repo
+  # derivation. Runs whenever a CI image
   # exists (not docs-only) so both PR paths are covered.
   dogfood-skip-gate:
     name: 🚦 Dogfood No-Silent-Skip Gate
