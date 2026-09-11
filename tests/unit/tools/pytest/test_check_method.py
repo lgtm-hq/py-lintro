@@ -796,3 +796,31 @@ def test_collection_subprocess_receives_the_invocation_timeout(
 
     assert_that(timeouts).is_not_empty()
     assert_that(set(timeouts)).is_equal_to({600})
+
+
+def test_collection_timeout_returns_a_timed_out_result(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """A collection that times out reports a timed-out result, not an exception.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    with (
+        patch.object(sample_pytest_plugin, "_verify_tool_version", return_value=None),
+        patch.object(
+            sample_pytest_plugin,
+            "_get_executable_command",
+            return_value=["pytest"],
+        ),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "prepare_test_execution",
+            side_effect=subprocess.TimeoutExpired(cmd="pytest", timeout=600),
+        ),
+    ):
+        result = sample_pytest_plugin.check(["tests"], {"timeout": 600})
+
+    assert_that(result.timed_out).is_true()
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("600s")

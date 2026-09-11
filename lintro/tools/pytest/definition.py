@@ -360,19 +360,24 @@ class PytestPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
-        total_available_tests = self.executor.prepare_test_execution(
-            target_files,
-            timeout=timeout_val,
-        )
-
-        # Display run configuration summary
-        self.executor.display_run_config(
-            total_available_tests,
-            target_files,
-            options=merged_options,
-        )
-
         try:
+            # Collection runs inside the timeout handler: it is a pytest
+            # subprocess held to the same deadline, so a collection that times
+            # out must surface as a timed-out ToolResult rather than escaping
+            # as subprocess.TimeoutExpired (collect_tests_once catches only
+            # OSError, ValueError and RuntimeError).
+            total_available_tests = self.executor.prepare_test_execution(
+                target_files,
+                timeout=timeout_val,
+            )
+
+            # Display run configuration summary
+            self.executor.display_run_config(
+                total_available_tests,
+                target_files,
+                options=merged_options,
+            )
+
             # Record start time to filter out stale junitxml files
             import time
 
