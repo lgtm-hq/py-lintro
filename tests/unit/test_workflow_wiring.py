@@ -1816,16 +1816,14 @@ _UPLOAD_STEPS = (
     ("generate-man-page", "Upload to release"),
     ("build-macos", "Upload to release"),
     ("build-linux", "Upload to release"),
-    ("create-universal-binary", "Upload to release"),
 )
 
 # Operands that are true on every payload under test: the tag resolved by
 # get-release-info (its latest-release fallback covers the dispatch path), the
-# #2435 reuse guard and the universal-arch guards.
+# #2435 reuse guard and the stable-release guard.
 _UPLOAD_GATE_TRUE_OPERANDS = (
     "needs.get-release-info.outputs.release_tag != ''",
     "steps.reuse.outputs.reuse != 'true'",
-    "inputs.arch == 'universal'",
     "needs.get-release-info.outputs.is_prerelease == 'false'",
 )
 
@@ -2039,16 +2037,14 @@ def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
     open; an operator reaching for a manual build reads the README first, and
     the repair path is the part that has to be written down (#2484).
 
-    ``upload_to_release`` alone is not a full repair: ``arch`` decides which
-    binaries are rebuilt and its dispatch default is ``arm64``, so a repair
-    left on the default never produces the macOS x86_64 asset, never runs
-    ``create-universal-binary`` and never re-pings the tap - both jobs are
-    gated on ``inputs.arch == 'universal'``. The dispatch ref matters just as
-    much and is not an input at all: the workflow builds the ref it was
-    dispatched from while ``get-release-info`` resolves the latest published
-    release either way, so a repair run from ``main`` publishes main-HEAD onto
-    a shipped release. The README has to name both inputs and the ref, so pin
-    that here rather than trusting prose to stay complete.
+    Since #2579 the workflow has no ``arch`` input: every dispatch builds the
+    macOS arm64 binary and both Linux binaries, so ``upload_to_release`` is the
+    only input a repair needs. The dispatch ref still matters and is not an
+    input at all: the workflow builds the ref it was dispatched from while
+    ``get-release-info`` resolves the latest published release either way, so
+    a repair run from ``main`` publishes main-HEAD onto a shipped release. The
+    README has to name the input and the ref, and must not send an operator
+    looking for an ``arch`` selector that no longer exists.
     """
     readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
         encoding="utf-8",
@@ -2062,30 +2058,30 @@ def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
     ).is_not_empty()
     repair = section.partition("- **Repair dispatch**")[2].partition("\n- **The tag")[0]
     assert_that(repair).described_as(
-        "the repair bullet must name both inputs a full repair needs",
+        "the repair bullet must name the input and the ref a full repair needs",
     ).is_not_empty()
     # "ref" and "tag" carry the dispatch-ref prerequisite, which is not an
     # input and so has no workflow-side assertion to anchor it.
-    for token in ("upload_to_release", "arch", "universal", "arm64", "ref", "tag"):
+    for token in ("upload_to_release", "ref", "tag", "#2579"):
         assert_that(repair).described_as(
             f"the repair path must mention {token}",
         ).contains(token)
+    for stale in ("arch: universal", "inputs.arch", "create-universal-binary"):
+        assert_that(repair).described_as(
+            f"the repair path must not describe the removed {stale!r}",
+        ).does_not_contain(stale)
 
-    # The arch prerequisite is only true while the two jobs stay gated on it.
+    # The README's claim is only true while the workflow declares no arch
+    # input and nothing is gated on one.
     workflow = _load_workflow(name="build-binary.yml")
-    for job_id in ("create-universal-binary", "homebrew-dispatch"):
-        gate = _normalize_github_expr(str(workflow["jobs"][job_id]["if"]))
-        assert_that(gate).described_as(
-            f"{job_id} gates the documented arch prerequisite",
-        ).contains("inputs.arch == 'universal'")
-
-    arch_defaults = {
-        trigger: str(workflow["on"][trigger]["inputs"]["arch"]["default"])
-        for trigger in ("workflow_dispatch", "workflow_call")
-    }
-    assert_that(arch_defaults).described_as(
-        "the README warns about the dispatch default; a change must update it",
-    ).is_equal_to({"workflow_dispatch": "arm64", "workflow_call": "universal"})
+    for trigger in ("workflow_dispatch", "workflow_call"):
+        assert_that(workflow["on"][trigger]["inputs"]).described_as(
+            f"{trigger} must not declare an arch input (#2579)",
+        ).does_not_contain_key("arch")
+    for job_id, job in workflow["jobs"].items():
+        assert_that(str(job.get("if", ""))).described_as(
+            f"{job_id} must not gate on the removed arch input",
+        ).does_not_contain("inputs.arch")
 
 
 def test_renovate_manages_build_binary_uv_pin() -> None:
@@ -3164,59 +3160,210 @@ def test_build_binary_job_timeout_covers_compile_and_smoke() -> None:
         assert_that(headroom).described_as(job_id).is_greater_than_or_equal_to(10)
 
 
-def test_create_universal_binary_smoke_tests_the_post_lipo_artifact() -> None:
-    """The universal macOS binary is smoke-tested after lipo, not only per-arch.
+# #2579: the macOS x86_64 leg and the lipo'd universal binary are gone. The
+# release ships exactly three binaries, the tap dispatch carries one macOS
+# checksum, and the npm distribution has no darwin-x64 package - an Intel Mac
+# gets a pointer to Homebrew/PyPI from the launcher instead. Every list that
+# spells those platforms out is pinned here so none of them can drift back.
 
-    Lipo can produce a binary that will not launch even when both inputs
-    passed the per-arch smoke test. The post-lipo artifact must be exercised
-    independently, with the same script, timeout, and checkout coverage the
-    per-arch jobs use.
+_RELEASE_BINARY_ARTIFACTS = (
+    "lintro-macos-arm64",
+    "lintro-linux-x64",
+    "lintro-linux-arm64",
+)
+
+_NPM_PLATFORM_KEYS = ("darwin-arm64", "linux-arm64", "linux-x64")
+
+
+def test_build_binary_ships_exactly_three_platform_binaries() -> None:
+    """build-binary.yml builds macOS arm64 plus both Linux arches, nothing else.
+
+    No x86_64 macOS leg, no universal job, no ``arch`` input to select either:
+    the job list, the macOS matrix and the caller's ``with:`` block are all
+    pinned so a partial revert of #2579 is caught here rather than on a tag.
     """
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
-    job = workflow["jobs"]["create-universal-binary"]
-    steps = job["steps"]
-    by_name = {step.get("name"): step for step in steps}
-
-    smoke = by_name["Smoke-test tool registry"]
-    assert_that(smoke["timeout-minutes"]).is_equal_to(20)
-    assert_that(smoke["run"]).is_equal_to(
-        "python3 scripts/ci/smoke-test-binary.py binaries/lintro-macos-universal",
+    assert_that(set(workflow["jobs"])).is_equal_to(
+        {
+            "get-release-info",
+            "generate-man-page",
+            "build-macos",
+            "build-linux",
+            "homebrew-dispatch",
+        },
     )
 
-    names = [step.get("name") for step in steps]
-    assert_that(names.index("Create universal binary")).is_less_than(
-        names.index("Smoke-test tool registry"),
+    macos = workflow["jobs"]["build-macos"]
+    assert_that(macos["strategy"]["matrix"]).is_equal_to({"arch": ["arm64"]})
+    assert_that(str(macos["runs-on"])).does_not_contain("intel")
+    assert_that(str(macos["runs-on"])).does_not_contain("x86_64")
+
+    linux = workflow["jobs"]["build-linux"]
+    linux_arches = sorted(
+        entry["arch"] for entry in linux["strategy"]["matrix"]["include"]
     )
-    assert_that(names.index("Smoke-test tool registry")).is_less_than(
-        names.index("Upload universal artifact"),
+    assert_that(linux_arches).is_equal_to(["arm64", "x64"])
+
+    text = (_REPO_ROOT / ".github" / "workflows" / _BUILD_BINARY_WORKFLOW).read_text(
+        encoding="utf-8",
+    )
+    for stale in (
+        "lintro-macos-x86_64",
+        "sha256-x86_64",
+        "universal",
+        "lipo",
+        "macos-15-intel",
+    ):
+        # Only the #2579 rationale comment may mention the dropped leg.
+        occurrences = [
+            line
+            for line in text.splitlines()
+            if stale in line and not line.lstrip().startswith("#")
+        ]
+        assert_that(occurrences).described_as(
+            f"{stale!r} must not appear outside comments in build-binary.yml",
+        ).is_empty()
+
+    caller = _load_workflow(name="publish-pypi-on-tag.yml")
+    homebrew_tap = caller["jobs"]["homebrew-tap"]
+    assert_that(homebrew_tap["uses"]).is_equal_to(
+        "./.github/workflows/build-binary.yml",
+    )
+    assert_that(homebrew_tap["with"]).is_equal_to(
+        {"release_tag": "${{ github.ref_name }}"},
     )
 
-    checkout = by_name["Checkout scripts"]
-    # Split into paths: ``contains`` on the raw block is a substring match, so
-    # it would keep passing for a now-deleted sibling path such as the old
-    # ``lintro/tools/definitions`` (#2428).
-    sparse = checkout["with"]["sparse-checkout"].split()
-    assert_that(sparse).contains("scripts")
-    assert_that(sparse).contains("lintro/plugins")
-    # #2202: the builtin index is generated, not committed (#2180), and this
-    # job never builds the package — the checkout must carry the generator's
-    # inputs and the generate step must run between checkout and smoke test.
-    assert_that(sparse).contains("lintro/tools")
-    assert_that(sparse).contains("lintro_build")
-    generate = by_name["Generate builtin tool index"]
-    assert_that(generate["run"]).is_equal_to(
-        "python3 scripts/ci/generate-builtin-tool-index.py",
-    )
-    assert_that(names.index("Checkout scripts")).is_less_than(
-        names.index("Generate builtin tool index"),
-    )
-    assert_that(names.index("Generate builtin tool index")).is_less_than(
-        names.index("Smoke-test tool registry"),
+
+def test_homebrew_dispatch_carries_one_macos_checksum() -> None:
+    """The tap dispatch sends the arm64 checksum and no x86_64 one (#2579).
+
+    The formula's Intel branch installs from PyPI and needs no asset checksum,
+    so a second value here would either be fabricated or read from an artifact
+    no job produces any more.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    job = workflow["jobs"]["homebrew-dispatch"]
+    assert_that(job["needs"]).contains("build-macos")
+    by_name = {step.get("name"): step for step in job["steps"]}
+
+    download = by_name["Download SHA256 artifact"]
+    assert_that(download["uses"]).contains("actions/download-artifact@")
+    assert_that(download["with"]).is_equal_to(
+        {"name": "sha256-arm64", "path": "checksums/"},
     )
 
+    read = by_name["Read checksum"]
+    assert_that(read["id"]).is_equal_to("checksums")
+    assert_that(read["run"]).contains("checksums/sha256-arm64.txt")
+    assert_that(read["run"]).contains("arm64_sha256=")
+    assert_that(read["run"]).does_not_contain("x86_64")
+
+    dispatch = by_name["Dispatch formula update"]
+    assert_that(dispatch["uses"]).contains("trigger-homebrew-update@")
+    payload = dispatch["with"]
+    assert_that(payload["binary-arm64-sha"]).is_equal_to(
+        "${{ steps.checksums.outputs.arm64_sha256 }}",
+    )
+    assert_that(payload).does_not_contain_key("binary-x86-sha")
+    assert_that(set(payload)).is_equal_to(
+        {"formula", "version", "pypi-package", "binary-arm64-sha", "token"},
+    )
+
+    # The build-macos matrix is what makes ``sha256-arm64`` exist at all.
+    macos_arches = workflow["jobs"]["build-macos"]["strategy"]["matrix"]["arch"]
+    assert_that(macos_arches).is_equal_to(["arm64"])
+
+
+def _quoted_strings_in_block(text: str, *, start: str, end: str) -> list[str]:
+    """Return every quoted string between two markers of a source file.
+
+    Args:
+        text: The file contents.
+        start: Substring that opens the block (the first occurrence is used).
+        end: Substring that closes the block, searched after ``start``.
+
+    Returns:
+        The quoted literals in the block, in order.
+    """
+    head = text.index(start)
+    tail = text.index(end, head + len(start))
+    return re.findall(r"""["']([^"']+)["']""", text[head + len(start) : tail])
+
+
+def test_npm_platform_map_has_no_intel_macos_package() -> None:
+    """Every npm platform list agrees on the three shipped platforms (#2579).
+
+    The staging map, the version-sync list, the publish order, the on-disk
+    package tree, the meta-package's optional dependencies, the release
+    download list and the resolver's map are seven spellings of one fact. If
+    any of them kept ``darwin-x64`` the tag run would fail on a missing asset
+    or publish a meta-package pointing at a platform package that never ships.
+    """
+    npm_scripts = _REPO_ROOT / "scripts" / "ci" / "npm"
+
+    stage = (npm_scripts / "stage_binaries.py").read_text(encoding="utf-8")
+    stage_pairs = re.findall(
+        r'"(lintro-[a-z0-9_-]+)":\s*"([a-z0-9-]+)"',
+        stage.partition("BINARY_MAP")[2].partition("}")[0],
+    )
+    assert_that(dict(stage_pairs)).is_equal_to(
+        {
+            "lintro-macos-arm64": "darwin-arm64",
+            "lintro-linux-arm64": "linux-arm64",
+            "lintro-linux-x64": "linux-x64",
+        },
+    )
+    assert_that(sorted(dict(stage_pairs))).is_equal_to(
+        sorted(_RELEASE_BINARY_ARTIFACTS),
+    )
+
+    download = (npm_scripts / "download_release_binaries.sh").read_text(
+        encoding="utf-8",
+    )
     assert_that(
-        job["timeout-minutes"] - smoke["timeout-minutes"],
-    ).is_greater_than_or_equal_to(10)
+        sorted(_quoted_strings_in_block(download, start="binaries=(", end=")")),
+    ).is_equal_to(sorted(_RELEASE_BINARY_ARTIFACTS))
+
+    sync = (npm_scripts / "sync_npm_version.py").read_text(encoding="utf-8")
+    assert_that(
+        sorted(_quoted_strings_in_block(sync, start="PLATFORM_PACKAGES = (", end=")")),
+    ).is_equal_to(sorted(_NPM_PLATFORM_KEYS))
+
+    publish = (npm_scripts / "publish_packages.sh").read_text(encoding="utf-8")
+    publish_order = _quoted_strings_in_block(publish, start="PACKAGES=(", end=")")
+    assert_that(publish_order).is_equal_to([*sorted(_NPM_PLATFORM_KEYS), "lintro"])
+
+    npm_dir = _REPO_ROOT / "npm"
+    on_disk = sorted(child.name for child in npm_dir.iterdir() if child.is_dir())
+    assert_that(on_disk).is_equal_to(sorted([*_NPM_PLATFORM_KEYS, "lintro"]))
+
+    meta = json.loads(
+        (npm_dir / "lintro" / "package.json").read_text(encoding="utf-8"),
+    )
+    assert_that(sorted(meta["optionalDependencies"])).is_equal_to(
+        sorted(f"@lgtm-hq/lintro-{key}" for key in _NPM_PLATFORM_KEYS),
+    )
+
+    resolver = (npm_dir / "lintro" / "lib" / "resolve.js").read_text(encoding="utf-8")
+    resolver_map = dict(
+        re.findall(
+            r"'([a-z0-9-]+)':\s*'(@lgtm-hq/lintro-[a-z0-9-]+)'",
+            resolver.partition("PLATFORM_PACKAGES = Object.freeze({")[2].partition(
+                "});",
+            )[0],
+        ),
+    )
+    assert_that(resolver_map).is_equal_to(
+        {key: f"@lgtm-hq/lintro-{key}" for key in _NPM_PLATFORM_KEYS},
+    )
+
+    # The Intel pointer: a documented dead end, not a silent one.
+    hints = resolver.partition("UNSUPPORTED_PLATFORM_HINTS = Object.freeze({")[
+        2
+    ].partition("});")[0]
+    assert_that(hints).contains("'darwin-x64'")
+    assert_that(hints).contains("brew install lintro")
+    assert_that(hints).contains("pip install lintro")
 
 
 def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:

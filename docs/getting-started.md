@@ -26,6 +26,7 @@ Install the CLI only; Lintro detects tools already on your system:
 ```bash
 pip install lintro
 # or: brew tap lgtm-hq/tap && brew install lintro
+# (Homebrew ships a prebuilt binary on Apple silicon; Intel Macs install from PyPI)
 ```
 
 ### Full (bundled Python tools)

@@ -45,6 +45,7 @@ assurance tools under a single command-line interface.
 # Install (choose one)
 uv pip install lintro              # Python / PyPI (or: pip install lintro)
 bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
+# npm ships no Intel Mac binary; Intel Macs install via Homebrew or PyPI
 
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
@@ -398,6 +399,7 @@ See the [AI Features Guide](docs/ai-features.md) for full documentation.
 # Lightweight (CLI only — detects tools on PATH)
 uv pip install lintro
 brew tap lgtm-hq/tap && brew install lintro
+# Homebrew ships a prebuilt binary on Apple silicon; Intel Macs install from PyPI
 
 # Full (bundled Python tools: ruff, black, mypy, bandit, import-linter,
 # pydoclint, pylint, yamllint)

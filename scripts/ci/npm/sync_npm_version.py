@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sync npm package versions with the project version.
 
-The npm distribution ships a meta-package (``npm/lintro``) plus four
+The npm distribution ships a meta-package (``npm/lintro``) plus three
 platform packages (``npm/<platform>``). Every ``package.json`` carries a
 ``"version"`` field, and the meta-package additionally pins each
 ``@lgtm-hq/lintro-<platform>`` optional dependency to the same version. This script
@@ -35,7 +35,6 @@ NPM_DIR = PROJECT_ROOT / "npm"
 META_PACKAGE = "lintro"
 PLATFORM_PACKAGES = (
     "darwin-arm64",
-    "darwin-x64",
     "linux-arm64",
     "linux-x64",
 )
