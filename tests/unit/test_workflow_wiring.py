@@ -5746,10 +5746,15 @@ def test_missing_permissions_block_models_the_token_default() -> None:
     explicit_empty = _effective_grant(job={}, workflow={"permissions": {}})
     assert_that(explicit_empty).is_equal_to({})
     inherited = _effective_grant(
+        job={},
+        workflow={"permissions": {"contents": "read"}},
+    )
+    assert_that(inherited).is_equal_to({"contents": _PERMISSION_LEVELS["read"]})
+    job_overrides = _effective_grant(
         job={"permissions": {}},
         workflow={"permissions": {"contents": "write"}},
     )
-    assert_that(inherited).is_equal_to({})
+    assert_that(job_overrides).is_equal_to({})
 
 
 def test_permission_shorthands_normalize_to_levels() -> None:
