@@ -34,6 +34,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 FIXTURES_DIR = SCRIPT_DIR / "fixtures"
@@ -108,6 +109,45 @@ def build_environment() -> dict[str, str]:
     return env
 
 
+class Session(NamedTuple):
+    """Outcome of one driven review session.
+
+    Attributes:
+        captured: Everything the child wrote to the pty.
+        keys_sent: How many of ``REVIEW_KEYS`` were delivered.
+        exit_code: The child's exit code, negative when a signal ended it.
+        timed_out: Whether the session hit ``SESSION_TIMEOUT_SECONDS``.
+    """
+
+    captured: bytes
+    keys_sent: int
+    exit_code: int
+    timed_out: bool
+
+
+def kill_session(pid: int) -> None:
+    """Kill the pty child and everything it started.
+
+    ``pty.fork`` calls ``setsid`` in the child, so it is a session leader and
+    therefore its own process-group leader with pgid == pid. Signalling the
+    group rather than the pid alone is what reaches the tool subprocesses the
+    review spawned -- a ``ruff`` left running would otherwise outlive the
+    driver and hold the verify step's pipes open.
+
+    Args:
+        pid: Process id of the pty child, which is also its process-group id.
+    """
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        # The group is gone, or this platform refused it: the child itself is
+        # still worth killing.
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
 def reap(pid: int) -> int:
     """Wait for the pty child to finish, killing it if it will not.
 
@@ -124,12 +164,12 @@ def reap(pid: int) -> int:
             return os.waitstatus_to_exitcode(status)
         time.sleep(0.1)
 
-    os.kill(pid, signal.SIGKILL)
+    kill_session(pid)
     _, status = os.waitpid(pid, 0)
     return os.waitstatus_to_exitcode(status)
 
 
-def drive(binary: Path, workspace: Path) -> tuple[bytes, int, int]:
+def drive(binary: Path, workspace: Path) -> Session:
     """Run the review under a pty and answer its prompts.
 
     Args:
@@ -137,8 +177,7 @@ def drive(binary: Path, workspace: Path) -> tuple[bytes, int, int]:
         workspace: Directory holding the sample file to review.
 
     Returns:
-        Everything the child wrote, the number of keys delivered, and the
-        child's exit code.
+        The session outcome, including whether it ran out of time.
     """
     argv = [
         str(binary),
@@ -164,6 +203,7 @@ def drive(binary: Path, workspace: Path) -> tuple[bytes, int, int]:
 
     captured = b""
     sent = 0
+    timed_out = True
     deadline = time.time() + SESSION_TIMEOUT_SECONDS
     while time.time() < deadline:
         ready, _, _ = select.select([fd], [], [], 0.5)
@@ -172,8 +212,11 @@ def drive(binary: Path, workspace: Path) -> tuple[bytes, int, int]:
         try:
             chunk = os.read(fd, 65536)
         except OSError:
+            # The child closed the pty: the session ended on its own terms.
+            timed_out = False
             break
         if not chunk:
+            timed_out = False
             break
         captured += chunk
         while sent < len(REVIEW_KEYS) and captured.count(PROMPT_MARKER) > sent:
@@ -181,8 +224,16 @@ def drive(binary: Path, workspace: Path) -> tuple[bytes, int, int]:
             os.write(fd, REVIEW_KEYS[sent])
             sent += 1
 
+    if timed_out:
+        kill_session(pid)
+
     os.close(fd)
-    return captured, sent, reap(pid)
+    return Session(
+        captured=captured,
+        keys_sent=sent,
+        exit_code=reap(pid),
+        timed_out=timed_out,
+    )
 
 
 def diff_was_highlighted(captured: bytes) -> bool:
@@ -217,22 +268,33 @@ def main() -> int:
         workspace = Path(tmp)
         (workspace / SAMPLE_FILE).write_text(SAMPLE_SOURCE, encoding="utf-8")
         (workspace / CONFIG_FILE).write_text(CONFIG_SOURCE, encoding="utf-8")
-        captured, sent, exit_code = drive(binary, workspace)
+        session = drive(binary, workspace)
 
+    captured = session.captured
     transcript = captured.decode("utf-8", errors="replace")
-    if sent < len(REVIEW_KEYS):
+    if session.timed_out:
         print(transcript, file=sys.stderr)
         print(
-            "FAIL interactive review: the review prompt appeared "
-            f"{sent} of {len(REVIEW_KEYS)} times",
+            "FAIL interactive review: the session ran out of time after "
+            f"{SESSION_TIMEOUT_SECONDS}s and the binary was killed",
             file=sys.stderr,
         )
         return 1
 
-    if exit_code not in ACCEPTED_EXIT_CODES:
+    if session.keys_sent < len(REVIEW_KEYS):
         print(transcript, file=sys.stderr)
         print(
-            f"FAIL interactive review: the binary exited {exit_code} around the "
+            "FAIL interactive review: the review prompt appeared "
+            f"{session.keys_sent} of {len(REVIEW_KEYS)} times",
+            file=sys.stderr,
+        )
+        return 1
+
+    if session.exit_code not in ACCEPTED_EXIT_CODES:
+        print(transcript, file=sys.stderr)
+        print(
+            "FAIL interactive review: the binary exited "
+            f"{session.exit_code} around the "
             "render (expected one of "
             f"{', '.join(str(code) for code in ACCEPTED_EXIT_CODES)})",
             file=sys.stderr,
@@ -250,7 +312,7 @@ def main() -> int:
 
     print(
         "OK interactive review: pygments-highlighted diff, "
-        f"{len(captured)} bytes, binary exited {exit_code}",
+        f"{len(captured)} bytes, binary exited {session.exit_code}",
     )
     return 0
 

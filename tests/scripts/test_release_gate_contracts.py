@@ -269,17 +269,21 @@ def test_drive_answers_each_prompt_once_in_order(tmp_path: Path) -> None:
     driver = _load_driver()
     binary = _write_child(tmp_path / "fake-lintro", _PROMPTING_CHILD)
 
-    captured, sent, exit_code = driver.drive(binary, tmp_path)
+    session = driver.drive(binary, tmp_path)
 
-    assert_that(sent).is_equal_to(len(driver.REVIEW_KEYS))
-    assert_that(exit_code).is_equal_to(0)
-    echoed = re.findall(rb"got:(.)", captured)
+    assert_that(session.keys_sent).is_equal_to(len(driver.REVIEW_KEYS))
+    assert_that(session.exit_code).is_equal_to(0)
+    assert_that(session.timed_out).is_false()
+    echoed = re.findall(rb"got:(.)", session.captured)
     assert_that(echoed).is_equal_to(list(driver.REVIEW_KEYS))
 
 
 @pytest.mark.skipif(not _HAS_PTY, reason="requires a pty")
 def test_drive_kills_a_child_that_never_prompts(tmp_path: Path) -> None:
-    """A session that runs out of time reports no keys and a killed child.
+    """A session that runs out of time is killed, flagged, and fails the gate.
+
+    The flag matters on its own: a binary that rendered a diff and then hung
+    would otherwise satisfy every other assertion.
 
     Args:
         tmp_path: Workspace for the scripted child.
@@ -290,11 +294,41 @@ def test_drive_kills_a_child_that_never_prompts(tmp_path: Path) -> None:
     with pytest.MonkeyPatch.context() as patcher:
         patcher.setattr(driver, "SESSION_TIMEOUT_SECONDS", 1)
         patcher.setattr(driver, "REAP_GRACE_SECONDS", 1)
-        captured, sent, exit_code = driver.drive(binary, tmp_path)
+        session = driver.drive(binary, tmp_path)
 
-    assert_that(sent).is_equal_to(0)
-    assert_that(captured).is_equal_to(b"")
-    assert_that(exit_code).is_less_than(0)
+        assert_that(session.keys_sent).is_equal_to(0)
+        assert_that(session.captured).is_equal_to(b"")
+        assert_that(session.exit_code).is_less_than(0)
+        assert_that(session.timed_out).is_true()
+
+        patcher.setattr(sys, "argv", ["drive_interactive_review.py", str(binary)])
+        assert_that(driver.main()).is_equal_to(1)
+
+
+@pytest.mark.skipif(not _HAS_PTY, reason="requires a pty")
+def test_main_fails_a_timed_out_session_that_rendered_a_diff(
+    tmp_path: Path,
+) -> None:
+    """A hung binary fails even when the diff and exit code look healthy.
+
+    Args:
+        tmp_path: Location for the stand-in binary path.
+    """
+    driver = _load_driver()
+    binary = _write_child(tmp_path / "fake-lintro", _PROMPTING_CHILD)
+    hung = driver.Session(
+        captured=_HIGHLIGHTED_DIFF,
+        keys_sent=len(driver.REVIEW_KEYS),
+        exit_code=0,
+        timed_out=True,
+    )
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(sys, "argv", ["drive_interactive_review.py", str(binary)])
+        patcher.setattr(driver, "drive", lambda *args, **kwargs: hung)
+        exit_code = driver.main()
+
+    assert_that(exit_code).is_equal_to(1)
 
 
 @pytest.mark.skipif(not _HAS_PTY, reason="requires a pty")
@@ -312,7 +346,12 @@ def test_main_fails_when_the_reviewed_binary_dies(tmp_path: Path) -> None:
         patcher.setattr(
             driver,
             "drive",
-            lambda *args, **kwargs: (_HIGHLIGHTED_DIFF, len(driver.REVIEW_KEYS), 139),
+            lambda *args, **kwargs: driver.Session(
+                captured=_HIGHLIGHTED_DIFF,
+                keys_sent=len(driver.REVIEW_KEYS),
+                exit_code=139,
+                timed_out=False,
+            ),
         )
         exit_code = driver.main()
 
