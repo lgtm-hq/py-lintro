@@ -1703,10 +1703,12 @@ AI API calls use exponential backoff retry:
 - **Not retried:** authentication errors (fail immediately)
 
 AI failures never break the main linting flow. If the provider is unavailable, you get
-your normal linting results with a one-line notice:
+your normal linting results with a one-line notice naming the exception class and the
+first line of the provider's message (secrets redacted); the full traceback stays at
+debug level:
 
 ```text
-AI: enhancement unavailable
+AI: enhancement unavailable (AIProviderError: claude exited with status 1)
 ```
 
 ### Non-JSON review responses
