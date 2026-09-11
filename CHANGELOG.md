@@ -13,19 +13,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.156.0] - 2026-09-11
+
+### Added
+
+- **release**: drop the Intel and universal macOS binaries (#2585) (cf65e74)
+
+### Changed
+
 - **release**: point Intel Mac npm users at Homebrew or PyPI and send the tap a single
   macOS checksum (#2579)
-
-### Deprecated
 
 ### Removed
 
 - **release**: drop the macOS `x86_64` and universal binaries; Apple silicon keeps the
   prebuilt binary (#2579)
-
-### Fixed
-
-### Security
 
 ## [0.155.0] - 2026-09-11
 
