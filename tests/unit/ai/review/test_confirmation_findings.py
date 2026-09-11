@@ -159,8 +159,6 @@ def test_dropped_confirmation_does_not_count_toward_findings_cap() -> None:
         "Not a defect.",
         "Checklist item 4 is a Positive Verification of the retry path.",
         "This is a confirmation that the sha256 matches.",
-        "The bump is correct. Confirmation of the claimed 0.23.0 update.",
-        "Positive verification: the workflow input reaches the script.",
     ],
 )
 def test_self_classifying_description_sentence_is_dropped(description: str) -> None:
@@ -234,6 +232,30 @@ def test_whole_field_no_code_change_fix_is_dropped(fix: str) -> None:
             "P2 because the migration is not a defect-free path: it drops the "
             "index before the backfill finishes.",
             "Create the new index before dropping the old one.",
+        ),
+        (
+            "Confirmation emails are never sent when the queue is paused.",
+            "Flush the queue before returning from the pause handler.",
+        ),
+        (
+            "Confirmation prompts are skipped when --yes is unset.",
+            "Prompt unless --yes was passed.",
+        ),
+        (
+            "This is a confirmation dialog that never opens on expired tokens.",
+            "Open the dialog before checking token expiry.",
+        ),
+        (
+            "Positive verification of the checksum is skipped for cached wheels.",
+            "Verify the checksum on cache hits too.",
+        ),
+        (
+            "Positive verification: the workflow input reaches the script.",
+            "Assert the input in the wiring test.",
+        ),
+        (
+            "The bump is correct. Confirmation of the claimed 0.23.0 update.",
+            "Pin the version in the formula test.",
         ),
     ],
 )

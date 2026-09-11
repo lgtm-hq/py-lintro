@@ -43,15 +43,22 @@ CONFIRMATION_FIX_PATTERN: re.Pattern[str] = re.compile(
 )
 
 #: A ``description`` sentence that opens by classifying the finding as a
-#: confirmation: "Not a defect.", "This is a confirmation that ...",
-#: "Positive verification of ...", or the checklist-mapped form the prompt
-#: used to elicit, "Checklist item 8 is a positive verification, ...". The
-#: alternation is anchored at start-of-text or after sentence punctuation, so
-#: the same words mid-sentence do not match.
+#: confirmation: "Not a defect.", "This is a confirmation that ...", or the
+#: checklist-mapped form the prompt used to elicit, "Checklist item 8 is a
+#: positive verification, ...". The alternation is anchored at start-of-text
+#: or after sentence punctuation, so the same words mid-sentence do not match.
+#: "confirmation" and "positive verification" also need the "this is" /
+#: "checklist item N is" subject and must end the clause (or continue with
+#: "that"/"of"), so defect prose such as "Confirmation emails are never sent"
+#: or "This is a confirmation dialog that never opens" is kept.
 CONFIRMATION_SENTENCE_PATTERN: re.Pattern[str] = re.compile(
     r"(?:^|[.!?]\s+)"
-    r"(?:(?:this|checklist item \d+) is (?:a |an )?)?"
-    r"(?:not a defect|positive verification|confirmation(?: that| of)?)\b",
+    r"(?:"
+    r"(?:this|checklist item \d+) is (?:a |an )?"
+    r"(?:positive verification|confirmation)"
+    r"(?=\s+(?:that|of)\b|\s*[.,;:]|\s*$)"
+    r"|(?:(?:this|checklist item \d+) is )?not a defect(?=\s*[.,;:]|\s|$)"
+    r")",
     re.IGNORECASE,
 )
 
