@@ -601,6 +601,7 @@ def test_review_cli_accepts_script_flags() -> None:
     assert_that(result.output).contains("--depth")
     assert_that(result.output).contains("--output")
     assert_that(result.output).contains("json")
+    assert_that(result.output).contains("--lint-report")
 
 
 def test_workflow_yaml_parses() -> None:
@@ -1126,6 +1127,111 @@ def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:
     assert_that(command).contains("--output json")
     # --post publishes the sticky review comment (and inline findings) on the PR.
     assert_that(command).contains("--post")
+
+
+def _review_command_line() -> str:
+    """Return the single executable ``lintro review`` line of the script.
+
+    Comment lines are skipped so a mention in prose can never satisfy a
+    check on the real invocation.
+
+    Returns:
+        The command line.
+    """
+    lines = SHELL_SCRIPT.read_text(encoding="utf-8").splitlines()
+    command_lines = [
+        line
+        for line in lines
+        if "uv run lintro review" in line and not line.lstrip().startswith("#")
+    ]
+    assert_that(command_lines).is_length(1)
+    return command_lines[0]
+
+
+def _executable_shell_lines() -> list[str]:
+    """Return the script's non-comment lines.
+
+    Returns:
+        Lines with comments removed.
+    """
+    return [
+        line
+        for line in SHELL_SCRIPT.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    ]
+
+
+def test_review_command_passes_the_downloaded_lint_report() -> None:
+    """Linter facts reach the review through ``--lint-report``, not ``--with-lint``.
+
+    The trusted job checks out the base ref, so running the tools in-process
+    would lint main rather than the PR (#2571); the saved report from the
+    untrusted lint job is the only correct source. The flag joins the existing
+    invocation unchanged.
+    """
+    command = _review_command_line()
+
+    assert_that(command).contains('--lint-report "$lint_report_path"')
+    assert_that(command).does_not_contain("--with-lint")
+    for flag in ("--pr", "--depth 1", "--post", "--output json"):
+        assert_that(command).contains(flag)
+
+
+def test_review_job_runs_no_linter() -> None:
+    """Neither the script nor the review job runs lintro's tools or PR code."""
+    for line in _executable_shell_lines():
+        assert_that(line).does_not_contain("--with-lint")
+        assert_that(line).does_not_match(r"lintro\s+(chk|check|fmt|format)\b")
+    for step in _ai_review_steps():
+        run = str(step.get("run", ""))
+        assert_that(run).does_not_contain("--with-lint")
+        assert_that(run).does_not_match(r"lintro\s+(chk|check|fmt|format)\b")
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    permissions = loaded["jobs"]["ai-review"]["permissions"]
+    # `gh run download` of the lint report needs actions: read, already
+    # granted for review-state artifacts; nothing wider.
+    assert_that(permissions["actions"]).is_equal_to("read")
+
+
+def test_lint_report_download_is_keyed_on_the_located_run() -> None:
+    """The script downloads only the run the head-pinned locator named.
+
+    ``review_state_artifacts.py lint-report`` resolves the docker-ci run
+    whose head SHA equals the PR head; ``gh run download`` is then given that
+    run id and the one artifact name, never a search of its own.
+    """
+    text = "\n".join(_executable_shell_lines())
+
+    assert_that(text).contains('review_state_artifacts.py" lint-report')
+    assert_that(text).contains("sed -n 's/^run-id=//p'")
+    downloads = [
+        line for line in _executable_shell_lines() if "gh run download" in line
+    ]
+    assert_that(downloads).is_length(1)
+    assert_that(downloads[0]).contains('gh run download "$lint_run_id"')
+    assert_that(text).contains("--name linting-json-report")
+    # The download is bounded so a stalled artifact cannot eat the budget.
+    download_index = text.index("gh run download")
+    assert_that(text[:download_index].rsplit("\n", 3)[-2]).contains("timeout")
+
+
+def test_missing_lint_report_degrades_to_a_header_note() -> None:
+    """No report for this head means a visible note, never an abort.
+
+    The script always passes the report path; when nothing was downloaded the
+    file is absent and lintro renders the fixed wording in the review header.
+    The script's own log line uses the same words so the Actions log and the
+    posted comment agree.
+    """
+    text = "\n".join(_executable_shell_lines())
+
+    assert_that(text).contains("linter facts unavailable for this head")
+    assert_that(text).does_not_contain('[[ -s "$lint_report_path" ]] || exit')
+    # No `exit` between the locator and the review invocation: absence is
+    # handled by falling through to the review with the (missing) path.
+    start = text.index('review_state_artifacts.py" lint-report')
+    end = text.index("uv run lintro review")
+    assert_that(text[start:end]).does_not_match(r"\bexit\b")
 
 
 @pytest.mark.parametrize(

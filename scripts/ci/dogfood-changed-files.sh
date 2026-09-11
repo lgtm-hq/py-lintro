@@ -173,6 +173,14 @@ declare -a docker_args=(
 	-v "$(pwd):/code"
 	-w /code
 )
+# Same passthrough as lgtm-ci run-lintro-docker.sh: lintro auto-emits its
+# side-channel artifacts (.lintro/artifacts/json/results.json, the report the
+# AI review reads as linter facts — #2571) only when it sees
+# GITHUB_ACTIONS=true, and that variable belongs to the runner, not the
+# container.
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+	docker_args+=(-e GITHUB_ACTIONS=true)
+fi
 if [[ "$MAP_HOST_USER" == "true" ]]; then
 	docker_args+=(--user "$(id -u):$(id -g)")
 fi

@@ -86,6 +86,7 @@ def test_review_help_shows_flags() -> None:
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(result.output).contains("--base")
     assert_that(result.output).contains("--with-lint")
+    assert_that(result.output).contains("--lint-report")
     assert_that(result.output).contains("--depth")
     assert_that(result.output).contains("--show-checklist")
     assert_that(result.output).contains("--timeout")
@@ -1648,6 +1649,71 @@ def test_advisory_only_rejects_diff_flags() -> None:
 
     assert_that(result.exit_code).is_not_equal_to(0)
     assert_that(result.output).contains("--advisory-only")
+
+
+def test_with_lint_and_lint_report_are_mutually_exclusive(tmp_path: Path) -> None:
+    """Running the tools and reading a saved report are one choice, not two.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+    """
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        ["review", "--with-lint", "--lint-report", str(tmp_path / "r.json")],
+    )
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("--lint-report")
+    assert_that(result.output).contains("--with-lint")
+
+
+def test_lint_report_reaches_the_review_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--lint-report`` is forwarded to preparation as the report path.
+
+    Args:
+        tmp_path: Pytest temporary directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.review.preparation import ReviewRunRequest
+
+    captured: list[ReviewRunRequest] = []
+
+    def fake_prepare(request: ReviewRunRequest, **_kwargs: Any) -> None:
+        captured.append(request)
+        raise SystemExit(0)
+
+    monkeypatch.setattr("lintro.cli_utils.commands.review.prepare_review", fake_prepare)
+    report = tmp_path / "results.json"
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(
+                ai={"enabled": True, "review": True},
+                config_path=None,
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.resolve_effective_ai_config",
+            lambda _mapping, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True, "provider": "anthropic"},
+            ),
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--base", "main", "--lint-report", str(report)],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(captured).is_length(1)
+    assert_that(captured[0].lint_report).is_equal_to(report)
+    assert_that(captured[0].with_lint).is_false()
 
 
 def test_advisory_only_with_no_tools_errors() -> None:

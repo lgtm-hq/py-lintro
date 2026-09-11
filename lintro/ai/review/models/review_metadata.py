@@ -100,6 +100,12 @@ class ReviewMetadata:
             synthesis pass did (#2269), or ``None`` when the pass did not
             run — which is the default, and every run before the pass
             existed. Surfaces render nothing at all for ``None``.
+        lint_facts_note (str): Why the run had no linter facts to cite when
+            a saved report was requested with ``--lint-report`` but could
+            not be used — missing, oversized, or malformed (#2571). Rendered
+            under the review header so a reader knows the model reviewed
+            from the diff alone. Empty when facts were loaded or never asked
+            for.
     """
 
     model: str
@@ -140,6 +146,7 @@ class ReviewMetadata:
         default_factory=tuple,
     )
     synthesis: SynthesisOutcome | None = None
+    lint_facts_note: str = ""
 
     @property
     def findings_coverage_complete(self) -> bool:

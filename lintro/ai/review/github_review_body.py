@@ -36,6 +36,7 @@ from lintro.ai.review.github_badges import (
 from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
+    format_lint_facts_note,
     format_partial_review_label,
     format_synthesis_note_line,
     format_timings_note,
@@ -217,8 +218,17 @@ def _header(
     if base and head:
         parts.append(f"commits `{base}..{head}`")
     line = " · ".join(parts)
-    warning = format_coverage_limited_warning(metadata=result.metadata)
-    return f"{line}\n\n{warning}" if warning else line
+    header = line
+    # Limits on what the model saw sit together under the header: the
+    # coverage warning, then the absence of linter facts (#2571). Appended
+    # one at a time; the pipeline owns section joining, not this renderer.
+    for note in (
+        format_coverage_limited_warning(metadata=result.metadata),
+        format_lint_facts_note(metadata=result.metadata),
+    ):
+        if note:
+            header = f"{header}\n\n{note}"
+    return header
 
 
 def _prompt_section(

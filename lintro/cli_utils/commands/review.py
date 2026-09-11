@@ -140,6 +140,7 @@ class ReviewCommandOptions:
         post: Whether ``--post`` was passed.
         output_format: ``--output`` value (``terminal`` or ``json``).
         with_lint: Whether ``--with-lint`` was passed.
+        lint_report: ``--lint-report`` value, or None.
         context_window: ``--context-window`` value, or None.
         timeout: ``--timeout`` value in seconds, or None.
         path_filter: ``--path`` values.
@@ -169,6 +170,7 @@ class ReviewCommandOptions:
     post: bool = False
     output_format: str = "terminal"
     with_lint: bool = False
+    lint_report: Path | None = None
     context_window: int | None = None
     timeout: float | None = None
     path_filter: tuple[str, ...] = ()
@@ -495,6 +497,17 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
     help="Run lintro tools on changed files and include results in review.",
 )
 @click.option(
+    "--lint-report",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=None,
+    help=(
+        "Saved lintro JSON report (lintro chk --output-format json) to "
+        "include in the review instead of running the tools. Restricted "
+        "to the changed files; an unusable report is noted in the review "
+        "header, not fatal. Cannot be combined with --with-lint."
+    ),
+)
+@click.option(
     "--context-window",
     type=int,
     default=None,
@@ -662,6 +675,12 @@ def _review(*, options: ReviewCommandOptions) -> None:
             "--advisory-only runs advisory tools over paths and produces no "
             "diff review, so it cannot be combined with --base, "
             "--uncommitted, --pr or --post.",
+        )
+
+    if options.with_lint and options.lint_report is not None:
+        raise click.UsageError(
+            "--with-lint runs the tools and --lint-report reads a saved "
+            "report; pass one or the other.",
         )
 
     require_ai()
@@ -871,6 +890,7 @@ def _prepare(
         depth=options.depth,
         strictness=options.strictness,
         with_lint=options.with_lint,
+        lint_report=options.lint_report,
         semantic_chunks=options.semantic_chunks,
         timeout=options.timeout,
         custom_agent_mode=lintro_config.review.custom_agents,
@@ -882,11 +902,18 @@ def _prepare(
     except ReviewPreparationError as exc:
         raise click.UsageError(str(exc)) from exc
     if prepared.lint_digest and options.output_format == "terminal":
+        # A saved report was read, not produced: say which (#2571).
         logger.info(
-            "Ran lint on changed files: {} tools, {} issues",
+            (
+                "Loaded lint report: {} tools, {} issues on changed files"
+                if options.lint_report is not None
+                else "Ran lint on changed files: {} tools, {} issues"
+            ),
             prepared.lint_tool_count,
             prepared.lint_issue_count,
         )
+    if prepared.lint_note and options.output_format == "terminal":
+        logger.warning(prepared.lint_note)
     return prepared
 
 

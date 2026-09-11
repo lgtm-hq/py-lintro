@@ -17,6 +17,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1466,3 +1467,233 @@ def test_rerun_resume_retries_a_failed_current_run_lookup(
 
     assert_that(located.run_id).is_equal_to(500)
     assert_that(run_lookups).is_equal_to(2)
+
+
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+OTHER_HEAD = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def _lint_run(
+    run_id: int,
+    *,
+    head_sha: str,
+    path: str = ".github/workflows/docker-ci.yml",
+) -> dict[str, Any]:
+    """Build a docker-ci workflow-run payload.
+
+    Args:
+        run_id: Actions run id.
+        head_sha: Head commit recorded on the run.
+        path: Workflow path recorded on the run.
+
+    Returns:
+        A raw run mapping as the Actions API returns it.
+    """
+    return {
+        "id": run_id,
+        "event": "pull_request",
+        "status": "in_progress",
+        "path": path,
+        "created_at": "2026-09-11T01:00:00Z",
+        "head_sha": head_sha,
+    }
+
+
+def _lint_gh_api(
+    runs: list[dict[str, Any]],
+    artifacts_by_run: dict[int, list[dict[str, Any]]],
+) -> Callable[[str], dict[str, Any] | None]:
+    """Fake ``gh api`` serving the PR head, a run listing, and artifacts.
+
+    Args:
+        runs: Runs returned for the docker-ci listing, regardless of query.
+        artifacts_by_run: Artifact payloads keyed by run id.
+
+    Returns:
+        The fake API callable.
+    """
+
+    def gh_api(path: str) -> dict[str, Any] | None:
+        if path.startswith("repos/lgtm-hq/py-lintro/pulls/15"):
+            return {"head": {"sha": HEAD}}
+        if path.startswith(
+            "repos/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml/runs",
+        ):
+            return {"workflow_runs": runs}
+        for run_id, payloads in artifacts_by_run.items():
+            if path.startswith(
+                f"repos/lgtm-hq/py-lintro/actions/runs/{run_id}/artifacts",
+            ):
+                return {"artifacts": payloads}
+        return {"artifacts": []}
+
+    return gh_api
+
+
+def test_lint_report_locator_pins_the_exact_head_sha(artifacts: ModuleType) -> None:
+    """Only a run whose recorded head equals the PR head can supply facts.
+
+    The listing is filtered server-side, but the client re-checks every run:
+    a newer run for a different head, and a run whose payload omitted the
+    head, are both skipped even when they carry the artifact.
+    """
+    report = [{"name": "linting-json-report", "expired": False}]
+    gh_api = _lint_gh_api(
+        runs=[
+            _lint_run(300, head_sha=OTHER_HEAD),
+            {**_lint_run(250, head_sha=HEAD), "head_sha": ""},
+            _lint_run(200, head_sha=HEAD),
+        ],
+        artifacts_by_run={300: report, 250: report, 200: report},
+    )
+
+    located = artifacts.locate_lint_report_from_env(
+        {"GITHUB_REPOSITORY": "lgtm-hq/py-lintro", "PR_NUMBER": "15"},
+        gh_api=gh_api,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+    assert_that(located.head_sha).is_equal_to(HEAD)
+
+
+def test_lint_report_locator_needs_the_artifact_not_a_completed_run(
+    artifacts: ModuleType,
+) -> None:
+    """The artifact decides, not run status.
+
+    A run for the right head without the report (yet) is skipped; an
+    in-progress run that already uploaded it is selected.
+    """
+    gh_api = _lint_gh_api(
+        runs=[_lint_run(300, head_sha=HEAD), _lint_run(200, head_sha=HEAD)],
+        artifacts_by_run={
+            300: [{"name": "linting-report", "expired": False}],
+            200: [{"name": "linting-json-report", "expired": False}],
+        },
+    )
+
+    located = artifacts.locate_lint_report(
+        repo="lgtm-hq/py-lintro",
+        head_sha=HEAD,
+        gh_api=gh_api,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_lint_report_locator_skips_expired_and_foreign_workflow_reports(
+    artifacts: ModuleType,
+) -> None:
+    """An expired report, or one on another workflow, is not a source of facts."""
+    gh_api = _lint_gh_api(
+        runs=[
+            _lint_run(300, head_sha=HEAD),
+            _lint_run(200, head_sha=HEAD, path=".github/workflows/other.yml"),
+        ],
+        artifacts_by_run={
+            300: [{"name": "linting-json-report", "expired": True}],
+            200: [{"name": "linting-json-report", "expired": False}],
+        },
+    )
+
+    located = artifacts.locate_lint_report(
+        repo="lgtm-hq/py-lintro",
+        head_sha=HEAD,
+        gh_api=gh_api,
+    )
+
+    assert_that(located.run_id).is_none()
+    assert_that(located.head_sha).is_equal_to(HEAD)
+
+
+def test_lint_report_locator_is_empty_without_a_head_or_on_api_failure(
+    artifacts: ModuleType,
+) -> None:
+    """Missing inputs and API failures degrade to no run, never an exception."""
+    assert_that(
+        artifacts.locate_lint_report(
+            repo="lgtm-hq/py-lintro",
+            head_sha="",
+            gh_api=lambda _p: None,
+        ).run_id,
+    ).is_none()
+    assert_that(
+        artifacts.locate_lint_report_from_env(
+            {"PR_NUMBER": "15"},
+            gh_api=lambda _p: None,
+        ).run_id,
+    ).is_none()
+
+    def exploding(_path: str) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    located = artifacts.locate_lint_report_from_env(
+        {"GITHUB_REPOSITORY": "lgtm-hq/py-lintro", "PR_NUMBER": "15"},
+        gh_api=exploding,
+    )
+    assert_that(located.run_id).is_none()
+
+
+def test_lint_report_subcommand_prints_run_id_and_head(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``lint-report`` writes the key=value lines run-ai-review.sh parses.
+
+    Args:
+        artifacts: Loaded helper module.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest capture fixture.
+    """
+    monkeypatch.setattr(
+        artifacts,
+        "locate_lint_report_from_env",
+        lambda _env, **_kw: artifacts.LocatedLintReport(run_id=200, head_sha=HEAD),
+    )
+
+    exit_code = artifacts.main(["lint-report"])
+
+    assert_that(exit_code).is_equal_to(0)
+    assert_that(capsys.readouterr().out).is_equal_to(f"run-id=200\nhead-sha={HEAD}\n")
+
+
+def test_lint_report_artifact_contract_is_pinned_across_files(
+    artifacts: ModuleType,
+) -> None:
+    """The artifact name, report path, and note wording agree across files.
+
+    docker-ci.yml uploads the report, the locator names the artifact,
+    run-ai-review.sh downloads it and passes the file, and lintro renders the
+    note. Each lives in a different language, so this reads the literals out
+    of every file and compares them to each other; a rename in one place
+    fails here instead of 404-ing forever behind the fail-safe note (#2571).
+    """
+    from lintro.ai.review.preparation_resolvers import LINT_FACTS_UNAVAILABLE
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "docker-ci.yml").read_text(
+            encoding="utf-8",
+        ),
+    )
+    uploads = [
+        step
+        for step in workflow["jobs"]["dogfooding-lint-changed"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        and step.get("with", {}).get("name") == artifacts.LINT_REPORT_ARTIFACT
+    ]
+    assert_that(uploads).is_length(1)
+    uploaded_path = Path(uploads[0]["with"]["path"])
+
+    script = (REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh").read_text(
+        encoding="utf-8",
+    )
+    downloaded_name = re.search(r"--name (\S+)", script)
+    report_path = re.search(r'lint_report_path="\$\{lint_report_dir\}/([^"]+)"', script)
+    assert_that(downloaded_name).is_not_none()
+    assert_that(report_path).is_not_none()
+    assert downloaded_name is not None and report_path is not None
+    assert_that(downloaded_name.group(1)).is_equal_to(artifacts.LINT_REPORT_ARTIFACT)
+    # A single-file artifact downloads under its own basename.
+    assert_that(report_path.group(1)).is_equal_to(uploaded_path.name)
+    assert_that(script).contains(LINT_FACTS_UNAVAILABLE)
