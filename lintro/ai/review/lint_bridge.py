@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Final
 
 from loguru import logger
@@ -26,6 +25,7 @@ if TYPE_CHECKING:
     from lintro.config.lintro_config import LintroConfig
 
 __all__ = [
+    "DEFAULT_LINT_REPORT_ROOT",
     "MAX_LINT_REPORT_BYTES",
     "LintReportError",
     "LintReportIssue",
@@ -40,6 +40,15 @@ __all__ = [
 #: so it gets a hard byte ceiling before parsing, the same way the diff has a
 #: prompt budget. A lintro JSON report for a whole PR is tens of kilobytes.
 MAX_LINT_REPORT_BYTES: Final[int] = 4 * 1024 * 1024
+
+#: Repository mount root inside the container the untrusted lint job runs
+#: in. Both producers of the report the dogfood review reads mount the
+#: checkout here: ``scripts/ci/dogfood-changed-files.sh`` (``-v $(pwd):/code
+#: -w /code``) and lgtm-ci's ``run-lintro-docker.sh`` behind the reusable
+#: full-repo lint. An absolute report path is repository-relative only after
+#: this exact prefix is stripped; any other absolute path is outside the
+#: review and dropped.
+DEFAULT_LINT_REPORT_ROOT: Final[str] = "/code"
 
 
 class LintReportError(ValueError):
@@ -334,45 +343,51 @@ def _normalize_report_path(raw: str) -> str:
     return text
 
 
-def _matches_changed_file(report_path: str, changed: frozenset[str]) -> bool:
-    """Return whether a report path names one of the changed files.
+def _relative_report_path(report_path: str, *, report_root: str) -> str | None:
+    """Return a report path as repository-relative, or ``None`` if it is not.
 
-    The lint job runs inside a container with the repository mounted at some
-    root, so a report path may be repository-relative (``lintro/x.py``) or
-    absolute (``/code/lintro/x.py``). A relative path must match exactly: a
-    trailing-components match would let ``tests/lintro/x.py`` stand in for
-    ``lintro/x.py``. Only an absolute path, whose mount prefix is unknown
-    here, matches by its trailing components.
+    A relative path is already repository-relative. An absolute path is
+    repository-relative only when it sits under ``report_root``, the mount
+    root the lint container ran in; the prefix is stripped exactly, so
+    ``/code/tests/lintro/x.py`` becomes ``tests/lintro/x.py`` and can never
+    stand in for ``lintro/x.py``. An absolute path anywhere else is not a
+    file of this repository as far as the review can tell.
 
     Args:
         report_path: Normalized path from the report.
-        changed: Normalized repository-relative changed-file paths.
+        report_root: Absolute container mount root, without a trailing slash.
 
     Returns:
-        True when the path refers to a changed file.
+        The repository-relative path, or ``None`` when the path is absolute
+        and outside ``report_root``.
     """
-    if report_path in changed:
-        return True
     if not report_path.startswith("/"):
-        return False
-    parts = PurePosixPath(report_path).parts
-    return any("/".join(parts[depth:]) in changed for depth in range(1, len(parts)))
+        return report_path
+    prefix = report_root.rstrip("/") + "/"
+    if report_path.startswith(prefix):
+        return report_path[len(prefix) :]
+    return None
 
 
 def restrict_lint_results_to_files(
     *,
     results: list[ToolResult],
     changed_files: list[str],
+    report_root: str = DEFAULT_LINT_REPORT_ROOT,
 ) -> list[ToolResult]:
     """Keep only the issues that fall on the review's changed files.
 
     A saved report may cover more than the diff under review (a full-repo
     lint, or a lint of a broader change set), and facts about files the
     reviewer cannot see would only invite the model to cite them (#2571).
+    Paths match exactly once made repository-relative; an absolute path
+    outside ``report_root`` is dropped and counted in the log.
 
     Args:
         results: Tool results, typically from :func:`load_lint_report`.
         changed_files: Repository-relative changed file paths.
+        report_root: Container mount root the report's absolute paths are
+            relative to. Defaults to :data:`DEFAULT_LINT_REPORT_ROOT`.
 
     Returns:
         New tool results carrying only the matching issues, one per input
@@ -380,15 +395,19 @@ def restrict_lint_results_to_files(
     """
     changed = frozenset(_normalize_report_path(path) for path in changed_files)
     restricted: list[ToolResult] = []
+    outside_root = 0
     for result in results:
-        kept = [
-            issue
-            for issue in result.issues or ()
-            if _matches_changed_file(
+        kept = []
+        for issue in result.issues or ():
+            relative = _relative_report_path(
                 _normalize_report_path(getattr(issue, "file", "") or ""),
-                changed,
+                report_root=report_root,
             )
-        ]
+            if relative is None:
+                outside_root += 1
+                continue
+            if relative in changed:
+                kept.append(issue)
         restricted.append(
             ToolResult(
                 name=result.name,
@@ -396,5 +415,11 @@ def restrict_lint_results_to_files(
                 issues_count=len(kept),
                 issues=kept,
             ),
+        )
+    if outside_root:
+        logger.info(
+            "Lint report: dropped {} issue(s) on absolute paths outside {}",
+            outside_root,
+            report_root,
         )
     return restricted

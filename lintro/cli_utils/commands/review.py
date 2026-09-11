@@ -902,8 +902,13 @@ def _prepare(
     except ReviewPreparationError as exc:
         raise click.UsageError(str(exc)) from exc
     if prepared.lint_digest and options.output_format == "terminal":
+        # A saved report was read, not produced: say which (#2571).
         logger.info(
-            "Ran lint on changed files: {} tools, {} issues",
+            (
+                "Loaded lint report: {} tools, {} issues on changed files"
+                if options.lint_report is not None
+                else "Ran lint on changed files: {} tools, {} issues"
+            ),
             prepared.lint_tool_count,
             prepared.lint_issue_count,
         )

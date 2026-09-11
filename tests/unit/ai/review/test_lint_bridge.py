@@ -256,11 +256,35 @@ def test_load_lint_report_rejects_an_oversized_file(
     assert_that(load_lint_report).raises(LintReportError).when_called_with(report)
 
 
+def _issue(file: str) -> lint_bridge.LintReportIssue:
+    """Build a report issue whose message names its file.
+
+    Args:
+        file: Path as the report would write it.
+
+    Returns:
+        The issue.
+    """
+    return lint_bridge.LintReportIssue(file=file, line=1, message=file)
+
+
+def _kept(results: list[ToolResult]) -> list[str]:
+    """Return the messages of every issue kept on the first result.
+
+    Args:
+        results: Restricted tool results.
+
+    Returns:
+        Issue messages in order.
+    """
+    return [issue.message for issue in results[0].issues or []]
+
+
 def test_restrict_lint_results_to_files_keeps_only_changed_files() -> None:
     """Issues on files outside the review are dropped and counts recomputed.
 
-    Report paths may be repository-relative or absolute from inside the lint
-    container, so both forms match a changed file.
+    Relative report paths match exactly (``./`` stripped); absolute paths
+    match only after the container mount root is stripped exactly.
     """
     results = [
         ToolResult(
@@ -268,14 +292,10 @@ def test_restrict_lint_results_to_files_keeps_only_changed_files() -> None:
             success=False,
             issues_count=4,
             issues=[
-                lint_bridge.LintReportIssue(file="src/main.py", line=1, message="a"),
-                lint_bridge.LintReportIssue(file="./src/main.py", line=2, message="b"),
-                lint_bridge.LintReportIssue(
-                    file="/code/src/util.py",
-                    line=3,
-                    message="c",
-                ),
-                lint_bridge.LintReportIssue(file="src/other.py", line=4, message="d"),
+                _issue("src/main.py"),
+                _issue("./src/main.py"),
+                _issue("/code/src/util.py"),
+                _issue("src/other.py"),
             ],
         ),
         ToolResult(name="black", success=True, issues_count=0, issues=[]),
@@ -287,32 +307,78 @@ def test_restrict_lint_results_to_files_keeps_only_changed_files() -> None:
     )
 
     assert_that(restricted).is_length(2)
-    kept = [issue.message for issue in restricted[0].issues or []]
-    assert_that(kept).is_equal_to(["a", "b", "c"])
+    assert_that(_kept(restricted)).is_equal_to(
+        ["src/main.py", "./src/main.py", "/code/src/util.py"],
+    )
     assert_that(restricted[0].issues_count).is_equal_to(3)
     assert_that(restricted[1].issues).is_empty()
 
 
-def test_restrict_lint_results_does_not_match_on_a_bare_suffix() -> None:
-    """``main.py`` under another directory is not the changed ``src/main.py``."""
+@pytest.mark.parametrize(
+    ("report_path", "changed", "kept"),
+    [
+        ("/code/lintro/x.py", "lintro/x.py", True),
+        ("/code/tests/lintro/x.py", "lintro/x.py", False),
+        ("/elsewhere/lintro/x.py", "lintro/x.py", False),
+        ("/codebase/lintro/x.py", "lintro/x.py", False),
+        ("tests/lintro/x.py", "lintro/x.py", False),
+        ("x.py", "lintro/x.py", False),
+        ("/code/x.py", "lintro/x.py", False),
+    ],
+    ids=[
+        "under-root-matches",
+        "under-root-nested-elsewhere-does-not",
+        "outside-root-dropped",
+        "root-prefix-must-be-a-path-component",
+        "relative-suffix-does-not-match",
+        "bare-basename-does-not-match",
+        "absolute-basename-does-not-match",
+    ],
+)
+def test_restrict_lint_results_matches_exactly_after_stripping_the_root(
+    report_path: str,
+    changed: str,
+    kept: bool,
+) -> None:
+    """Only an exact repository-relative match survives; no suffix matching.
+
+    Args:
+        report_path: Path as written in the report.
+        changed: The review's one changed file.
+        kept: Whether the issue must survive restriction.
+    """
     results = [
         ToolResult(
             name="ruff",
             success=False,
             issues_count=1,
-            issues=[
-                lint_bridge.LintReportIssue(
-                    file="tests/src/main.py",
-                    line=1,
-                    message="x",
-                ),
-            ],
+            issues=[_issue(report_path)],
         ),
     ]
 
     restricted = restrict_lint_results_to_files(
         results=results,
-        changed_files=["src/main.py"],
+        changed_files=[changed],
     )
 
-    assert_that(restricted[0].issues).is_empty()
+    assert_that(_kept(restricted)).is_equal_to([report_path] if kept else [])
+
+
+def test_restrict_lint_results_honours_a_custom_report_root() -> None:
+    """The mount root is a parameter; a different container layout still works."""
+    results = [
+        ToolResult(
+            name="ruff",
+            success=False,
+            issues_count=2,
+            issues=[_issue("/workspace/lintro/x.py"), _issue("/code/lintro/x.py")],
+        ),
+    ]
+
+    restricted = restrict_lint_results_to_files(
+        results=results,
+        changed_files=["lintro/x.py"],
+        report_root="/workspace",
+    )
+
+    assert_that(_kept(restricted)).is_equal_to(["/workspace/lintro/x.py"])
