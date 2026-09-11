@@ -28,6 +28,7 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_pairing import (
     merge_pair,
     next_free_ordinal,
+    notes_holding_prior_records,
     pair_group,
 )
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
@@ -359,9 +360,13 @@ def match_findings(
     A finding the posting policy routed to the notes block (#2572,
     ``posted_inline`` cleared) gets no record of its own: it opens no thread,
     so there is nothing to carry, resolve, or count as open in a later round.
-    A prior *inline* record whose fingerprint comes back as a note is not
-    resolved either — the model still asserts the finding, only with less
-    confidence — so it is carried forward open rather than stamped fixed.
+    A prior *inline* record a note re-asserts is not resolved either — the
+    model still asserts the finding, only below the floor — so it is carried
+    forward open rather than stamped fixed. Notes are paired to prior records
+    one by one
+    (:func:`~lintro.ai.review.finding_pairing.notes_holding_prior_records`), so
+    a sibling sharing the fingerprint that stopped being reported still
+    resolves.
     The filter lives here rather than at each caller so the sticky, the
     review body, the inline comments, and the coverage bookkeeping cannot
     disagree about which findings exist.
@@ -389,15 +394,10 @@ def match_findings(
         findings=[finding for finding in findings if finding.posted_inline],
         round_number=round_number,
     )
-    note_fingerprints = {
-        fingerprint_for(
-            file=finding.file,
-            category=finding.category,
-            title=finding.title,
-        )
-        for finding in findings
-        if not finding.posted_inline
-    }
+    note_records = _current_records(
+        findings=[finding for finding in findings if not finding.posted_inline],
+        round_number=round_number,
+    )
 
     prior_by_fingerprint: dict[str, list[int]] = defaultdict(list)
     for index, record in enumerate(prior_records):
@@ -451,6 +451,13 @@ def match_findings(
 
         merged.extend(assigned[index] for index in range(len(group)))
 
+    note_held, note_carries = notes_holding_prior_records(
+        prior_records=prior_records,
+        prior_by_fingerprint=prior_by_fingerprint,
+        notes=note_records,
+        matched_prior=matched_prior,
+    )
+
     for index, record in enumerate(prior_records):
         if index in matched_prior:
             continue
@@ -460,8 +467,7 @@ def match_findings(
         path = record.file
         left_diff = departed_paths is not None and path in departed_paths
         unread = reviewed_paths is not None and path not in reviewed_paths
-        still_asserted = record.fingerprint in note_fingerprints
-        if (unread and not left_diff) or still_asserted:
+        if (unread and not left_diff) or index in note_held:
             merged.append(record)
             carried.append(record)
             outcomes[record.key] = FindingMatchOutcome.CARRIED
@@ -483,4 +489,5 @@ def match_findings(
         resolved=tuple(resolved),
         regressed=tuple(regressed),
         outcomes=outcomes,
+        note_carries=note_carries,
     )

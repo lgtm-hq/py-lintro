@@ -976,7 +976,7 @@ def test_only_inline_findings_open_threads_and_notes_reach_the_sticky_only(
     assert_that(comments).is_length(1)
     assert_that(comments[0]["body"]).contains("Posted as a thread")
     assert_that(str(batches[0])).does_not_contain("Kept as a note")
-    body = reporter.post_issue_comment.call_args.args[0]
+    body = reporter.log.issue_comment_bodies[0]
     assert_that(body).contains("💬 Notes and questions (1)")
     assert_that(body).contains("**Kept as a note**")
     assert_that(body).does_not_contain("could not be posted")

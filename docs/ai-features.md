@@ -322,8 +322,10 @@ Every finding carries a model-reported `confidence` (`high`, `medium`, `low`) an
 findings that clear the posting policy; the rest become _notes_:
 
 - **Inline** — `confidence` at or above `ai.review_inline_min_confidence` (default
-  `medium`) and `kind: finding`. These open threads, count in the review body's header,
-  feed the derived verdict, and are tracked across rounds.
+  `medium`), and `kind: finding` unless `ai.review_post_questions_inline` is `true`, in
+  which case questions that clear the same floor open threads too. These open threads,
+  count in the review body's header, feed the derived verdict, and are tracked across
+  rounds.
 - **Notes** — everything else: `low` confidence findings, and questions unless
   `ai.review_post_questions_inline` is `true`. Notes render in the sticky comment under
   a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
@@ -335,17 +337,21 @@ findings that clear the posting policy; the rest become _notes_:
   carries it.
 
 A note never resolves an existing thread. When a finding posted inline in an earlier
-round comes back below the floor, its record is carried forward open — the model still
-asserts it, only with less confidence — so the thread stays, the round does not count it
-as fixed, and the notes entry is tagged _(below the inline confidence floor this
-round)_. The record resolves only once the finding stops being reported at all, and a
-finding whose confidence recovers matches the record it already had rather than
-reappearing as new.
+round comes back as a note, its record is carried forward open — the model still asserts
+it, only below the floor, or as a question the policy does not post — so the thread
+stays, the round does not count it as fixed, and the notes entry is tagged with the
+reason: _(below the inline confidence floor this round)_ for a finding, _(questions are
+not posted inline)_ for a question. Notes are paired to prior records one at a time, so
+a sibling at another line that stopped being reported still resolves. The record
+resolves only once the finding stops being reported at all, and a finding whose
+confidence recovers matches the record it already had rather than reappearing as new.
 
 Nothing is dropped. JSON and MCP output keep every finding and add `posted_inline`
 (`true` / `false`) per finding so a consumer can tell a thread from a note. The terminal
-verdict, the JSON `readiness_verdict`, and the exit code all use the inline subset: a
-`low` confidence P1 does not fail the process.
+verdict, the JSON `readiness_verdict`, and the exit code all use the inline subset: a P1
+routed to notes does not fail the process. With the default floor that means a `low`
+confidence P1; with `review_inline_min_confidence: low` no confidence is below the
+floor, so every P1 finding blocks again.
 
 ```yaml
 # .lintro-config.yaml
@@ -354,7 +360,10 @@ ai:
   review_post_questions_inline: false # true opens a thread per question
 ```
 
-Set `review_inline_min_confidence: low` to restore posting every finding inline.
+Set `review_inline_min_confidence: low` to restore posting every `kind: finding` entry
+inline. Questions stay in the notes block regardless of the floor — set
+`review_post_questions_inline: true` to open threads for them too. The two keys are
+independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
 
 ### When inline comments cannot be posted
 
@@ -1012,7 +1021,9 @@ ai:
   # Lowest model-reported confidence a review finding needs to open an inline
   # PR thread. Findings below it stay in JSON/MCP output but are routed to the
   # sticky comment's collapsed "Notes and questions" block, where they never
-  # affect the verdict. (one of: low | medium | high, default: medium)
+  # affect the verdict. Unlike `min_confidence` above, which discards
+  # low-confidence AI fix suggestions, this one reroutes review findings
+  # instead of dropping them. (one of: low | medium | high, default: medium)
   review_inline_min_confidence: medium
 
   # Post question-kind review entries as inline threads. Off by default:

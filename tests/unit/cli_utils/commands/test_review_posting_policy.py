@@ -57,6 +57,15 @@ def _finding(**overrides: Any) -> ReviewFinding:
     return ReviewFinding(**fields)
 
 
+#: The GitHub target and transport profile the post tail reads. Both are plain
+#: value holders on the real types, so a namespace stands in for them.
+_TARGETS = SimpleNamespace(effective_repo="o/r", resolved_pr=7, state_pr=7)
+_PROFILE = SimpleNamespace(
+    transport=SimpleNamespace(value="api"),
+    auth_mode="token",
+)
+
+
 @pytest.fixture
 def emitted(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Stub every step around the apply point and capture what it emits.
@@ -122,20 +131,39 @@ def _result(*findings: ReviewFinding) -> ReviewResult:
     )
 
 
-def _run(*, result: ReviewResult) -> None:
+def _run(*, result: ReviewResult, post: bool = False) -> None:
     """Drive ``_render_post_and_exit`` over a stubbed run.
 
     Args:
         result: The review result the run completed with.
+        post: Whether the run was invoked with ``--post``, so the post tail
+            and ``_post_review`` run for real.
     """
     options = SimpleNamespace(
         show_checklist=None,
         advisory_tools=(),
         tool_options=None,
-        post=False,
+        post=post,
         fail_on_findings=False,
+        # Read only by ``_cli_overrides`` on the post tail; every flag unset
+        # means the config-source note lists no overrides.
+        depth=None,
+        strictness=None,
+        transport=None,
+        provider_override=None,
+        model_override=None,
+        review_override=None,
+        max_cost_usd_override=None,
+        provider_options=(),
+        timeout=None,
+        context_window=None,
+        semantic_chunks=False,
+        path_filter=(),
     )
-    lintro_config = SimpleNamespace(review=SimpleNamespace(checklist_display=None))
+    lintro_config = SimpleNamespace(
+        config_path=None,
+        review=SimpleNamespace(checklist_display=None, auto_resolve=True),
+    )
     prepared = SimpleNamespace(
         ai_config=AIConfig(review_inline_min_confidence=ConfidenceLevel.HIGH),
         context=SimpleNamespace(changed_files=()),
@@ -151,8 +179,8 @@ def _run(*, result: ReviewResult) -> None:
             prepared=cast(Any, prepared),
             result=result,
             prior_state=ReviewState(),
-            targets=cast(Any, SimpleNamespace()),
-            resolved_profile=cast(Any, SimpleNamespace()),
+            targets=cast(Any, _TARGETS),
+            resolved_profile=cast(Any, _PROFILE),
         )
 
 
@@ -284,3 +312,53 @@ def test_a_gated_p1_never_reaches_the_state_store_as_an_open_record(
         ReviewVerdict.BLOCKED,
     )
     assert_that(count_blocking_findings(findings=records)).is_equal_to(0)
+
+
+def test_the_post_tail_hands_the_poster_a_marked_result_and_re_persists(
+    monkeypatch: pytest.MonkeyPatch,
+    emitted: dict[str, Any],
+) -> None:
+    """``--post`` runs the real ``_post_review``, ids captured or not.
+
+    The re-persist used to be guarded on captured comment ids, so a round whose
+    inline batch GitHub rejected — or that gated every finding — left the
+    ledger's last word to the pre-post write.
+    """
+    from lintro.ai.review import github as review_github
+
+    posted: dict[str, Any] = {}
+    monkeypatch.setattr(
+        review_github,
+        "post_review_to_github",
+        lambda *, result, pr_number, repo, options: posted.update(
+            result=result,
+            options=options,
+        )
+        or True,
+    )
+    persisted: dict[str, Any] = {}
+    monkeypatch.setattr(
+        review_command,
+        "persist_review_state",
+        lambda **kwargs: persisted.update(kwargs),
+    )
+
+    _run(
+        result=_result(
+            _finding(),
+            _finding(title="Kept as a note", confidence="medium"),
+        ),
+        post=True,
+    )
+
+    flags = {
+        finding.title: finding.posted_inline for finding in posted["result"].findings
+    }
+    assert_that(flags).is_equal_to(
+        {"Posted as a thread": True, "Kept as a note": False},
+    )
+    assert_that(posted["options"].posting_policy.inline_min_confidence).is_equal_to(
+        ConfidenceLevel.HIGH,
+    )
+    assert_that(persisted["inline_comment_ids"]).is_empty()
+    assert_that(persisted["result"]).is_same_as(posted["result"])

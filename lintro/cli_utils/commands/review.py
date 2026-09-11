@@ -350,9 +350,18 @@ def _finish_converged_review(
             the board the banner is stamped onto.
 
     Raises:
-        SystemExit: Always. ``0`` for a clean skip; ``1`` when the last real
-            round left an open P1 — the same local exit a round that found
-            them produces, and equally not a CI failure.
+        SystemExit: Always. ``0`` for a clean skip; ``1`` when an open P1
+            record is left over — and equally not a CI failure.
+
+            The exit is over *records*, so it tracks open threads rather than
+            this round's findings. The one case where that differs from the
+            round that found them is a P1 demoted to a note (#2572): the
+            demotion round exits 0 because its finding-based gate ignores
+            notes, while its record is deliberately carried open so the thread
+            stays. A skip after it exits 1, reporting the thread a human still
+            has to deal with. That is the intended reading — the skip mirrors
+            what is still open on the PR, not what the last round chose to
+            gate.
     """
     if post and resolved_pr is not None and effective_repo:
         from lintro.ai.review.github import post_review_converged_to_github
@@ -364,10 +373,12 @@ def _finish_converged_review(
                 repo=effective_repo,
                 prior_state=prior_state,
             )
-    # A skipped round changes nothing about what is open, so it reports the
-    # same local exit a real round would: an open P1 left by the last real
-    # round still exits 1 here, exactly as that round did. The CI check
-    # greens both alike and names the count instead (see the docstring).
+    # A skipped round changes nothing about what is open, so it reports what
+    # the open records say: an open P1 record still exits 1 here. A P1 the
+    # posting policy demoted to a note keeps its record open on purpose, so
+    # the skip names it even though the demotion round's finding-based gate
+    # did not (see the docstring). The CI check greens both alike and names
+    # the count instead.
     open_p1 = count_blocking_findings(findings=prior_state.findings)
     if output_format == "json":
         click.echo(

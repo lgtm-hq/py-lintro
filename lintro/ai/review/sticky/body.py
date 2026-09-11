@@ -202,8 +202,9 @@ def round_sections(
                 result=result,
                 repo=plan.repo,
                 head_sha=plan.head_sha,
-                records=plan.match.records,
+                carries=plan.match.note_carries,
                 policy=plan.posting_policy or PostingPolicy(),
+                limit=limits.open,
             ),
         ),
         Section(

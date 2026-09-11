@@ -13,7 +13,13 @@ from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.finding_matcher import derive_verdict, match_findings
+from lintro.ai.review.finding_matcher import (
+    count_blocking_findings,
+    derive_verdict,
+    match_findings,
+)
+from lintro.ai.review.github_constants import STICKY_FOOTER
+from lintro.ai.review.github_contract import MAX_COMMENT_CHARS, TRUNCATION_NOTICE
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.lifecycle.markers import file_line_url
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
@@ -454,9 +460,30 @@ def _round(
     )
 
 
-def _state_after(match: FindingMatchResult) -> ReviewState:
-    """Persist a round's records the way the sticky state would."""
-    return ReviewState(findings=match.records)
+def _state_after(match: FindingMatchResult, *, posted: bool = True) -> ReviewState:
+    """Persist a round's records the way the sticky state would.
+
+    Args:
+        match: The round's matching outcome.
+        posted: When True, stamp an inline comment id on every open record, as
+            the post path does once GitHub accepts the review batch. The
+            carried-note tag keys on that id, because only a posted thread can
+            be the thread the note keeps open.
+
+    Returns:
+        The state the next round loads.
+    """
+    records = match.records
+    if posted:
+        records = tuple(
+            (
+                replace(record, inline_comment_id=index + 1)
+                if record.status is FindingStatus.OPEN
+                else record
+            )
+            for index, record in enumerate(records)
+        )
+    return ReviewState(findings=records)
 
 
 def test_a_prior_inline_record_stays_open_when_re_reported_as_a_note() -> None:
@@ -646,3 +673,173 @@ def test_notes_caption_drops_questions_when_they_post_inline(
     )
     assert_that(notes).does_not_contain("open questions")
     assert_that(notes).does_not_contain("**question**")
+
+
+# --- round 3 review threads on #2583 ------------------------------------------
+
+
+def test_only_the_sibling_a_note_re_asserts_is_carried() -> None:
+    """Two prior records share a fingerprint; one note holds exactly one open.
+
+    Fingerprint membership would carry both, leaving the sibling that stopped
+    being reported open forever.
+    """
+    first = _finding(severity=Severity.P1, confidence="high", line=12)
+    second = replace(first, line=90)
+    round_one = match_findings(
+        previous=None,
+        findings=apply_posting_policy(
+            findings=(first, second),
+            policy=PostingPolicy(),
+        ),
+        round_number=1,
+        reviewed_paths=frozenset({first.file}),
+    )
+    assert_that(round_one.records).is_length(2)
+
+    round_two = _round(
+        previous=_state_after(round_one),
+        finding=replace(second, confidence="low"),
+        round_number=2,
+    )
+
+    by_line = {record.line: record.status for record in round_two.records}
+    assert_that(by_line).is_equal_to(
+        {90: FindingStatus.OPEN, 12: FindingStatus.RESOLVED},
+    )
+    assert_that([record.line for record in round_two.resolved]).is_equal_to([12])
+
+
+def test_a_carried_question_note_says_why_it_was_not_posted(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A question is never below the floor; the tag must not claim it was."""
+    question = _finding(
+        severity=Severity.P2,
+        kind=FindingKind.QUESTION,
+        confidence="high",
+        title="Is this intended?",
+    )
+    round_one = match_findings(
+        previous=None,
+        findings=apply_posting_policy(
+            findings=(question,),
+            policy=PostingPolicy(post_questions_inline=True),
+        ),
+        round_number=1,
+        reviewed_paths=frozenset({question.file}),
+    )
+    (note,) = apply_posting_policy(findings=(question,), policy=PostingPolicy())
+
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=(note,)),
+            prior_state=_state_after(round_one),
+        ),
+    )
+
+    assert_that(body).contains(
+        "**Is this intended?** · `src/app.py:12` (questions are not posted " "inline)",
+    )
+    assert_that(body).does_not_contain("below the inline confidence floor this")
+
+
+def test_a_note_matching_an_unposted_record_is_not_tagged(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Only a thread that was actually opened can be the thread still open."""
+    blocker = _finding(severity=Severity.P1, confidence="high", title="No thread")
+    round_one = _round(previous=None, finding=blocker, round_number=1)
+    (note,) = apply_posting_policy(
+        findings=(replace(blocker, confidence="low"),),
+        policy=PostingPolicy(),
+    )
+
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=(note,)),
+            prior_state=_state_after(round_one, posted=False),
+        ),
+    )
+
+    assert_that(body).contains("**No thread**")
+    assert_that(body).does_not_contain("below the inline confidence floor this")
+
+
+def test_a_multi_line_note_description_renders_on_one_line(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A newline in the description would drop its tail out of the list item."""
+    note = _finding(
+        confidence="low",
+        title="Wrapped",
+        description="First line.\nSecond line.\r\nThird line.",
+        posted_inline=False,
+    )
+
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=(note,)),
+        ),
+    )
+
+    assert_that(body).contains("  First line. Second line. Third line.")
+
+
+def test_an_oversized_notes_block_is_pruned_rather_than_truncated(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The notes block shrinks under the size budget and says that it did.
+
+    Without a limit the block is unprunable, so ``fit_body`` exhausts its
+    stages and ``cap_body`` hard-truncates the tail — silently cutting the
+    fix-all prompt and the footer.
+    """
+    result = sample_review_result
+    notes = tuple(
+        _finding(
+            confidence="low",
+            title=f"Note {index}",
+            description="x" * 500,
+            file=f"src/mod{index}.py",
+            posted_inline=False,
+        )
+        for index in range(400)
+    )
+    body = build_sticky_comment(
+        request=StickyRequest(result=replace(result, findings=notes)),
+    )
+
+    assert_that(len(body)).is_less_than_or_equal_to(MAX_COMMENT_CHARS)
+    assert_that(body).contains("more notes not listed")
+    assert_that(body).contains(STICKY_FOOTER)
+    assert_that(body).does_not_contain(TRUNCATION_NOTICE)
+
+
+def test_a_demoted_p1_still_counts_as_blocking_for_a_converged_skip(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The skip's exit tracks open threads, not the demotion round's gate.
+
+    The demotion round exits 0 because ``has_p1_findings`` ignores notes, but
+    its record is carried open so the thread stays — and a converged skip after
+    it reports that thread. Documented on ``_finish_converged_review``; locked
+    here so a later change has to change the contract deliberately.
+    """
+    blocker = _finding(severity=Severity.P1, confidence="high")
+    round_one = _round(previous=None, finding=blocker, round_number=1)
+    demoted = replace(blocker, confidence="low")
+
+    round_two = _round(
+        previous=_state_after(round_one),
+        finding=demoted,
+        round_number=2,
+    )
+
+    result = replace(
+        sample_review_result,
+        findings=apply_posting_policy(findings=(demoted,), policy=PostingPolicy()),
+    )
+    assert_that(result.has_p1_findings).is_false()
+    assert_that(round_one.records).is_length(1)
+    assert_that(count_blocking_findings(findings=round_two.records)).is_equal_to(1)
