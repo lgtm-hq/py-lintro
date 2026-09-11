@@ -55,18 +55,18 @@ scripts/
 
 Scripts for building standalone binaries and distribution packages.
 
-| Script                                | Purpose                                                                                                     | Usage                                                                    |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_macos.py`                             |
-| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                    | `uv run python scripts/build/build_linux.py`                             |
-| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                             | `uv run python scripts/generate-man-page.py`                             |
-| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing) | `uv run python scripts/generate-checklist-corpus-schema.py`              |
-| `verify_built_binary.sh`              | Verify a built binary: `--version`, the pty AI review, an MCP start-and-exit, `--help`                      | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`              |
-| `drive_interactive_review.py`         | Drive the built binary's interactive AI review under a pty and assert the pygments diff rendered (#2514)    | `python3 scripts/build/drive_interactive_review.py dist/nuitka/lintro`   |
-| `finalize_binary.sh`                  | Rename binary, ensure executable, compute SHA256, write the `sha256` step output                            | `./scripts/build/finalize_binary.sh <source> <target> [label]`           |
-| `create_universal.sh`                 | Combine arm64 and x86_64 macOS binaries into a universal fat binary with `lipo`                             | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>`          |
-| `reuse_release_asset.sh`              | Reuse a release asset whose SHA256 matches this run's checksum artifact instead of rebuilding (#2435)       | `./scripts/build/reuse_release_asset.sh <tag> <asset> <artifact> <dest>` |
-| `upload_release_asset.sh`             | Attach a binary to a release by upload-then-swap, never deleting the live asset first (#2435)               | `./scripts/build/upload_release_asset.sh <tag> <file> [asset-name]`      |
+| Script                                | Purpose                                                                                                                                            | Usage                                                                    |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `build_macos.py`                      | Build macOS binary using Nuitka compiler                                                                                                           | `uv run python scripts/build/build_macos.py`                             |
+| `build_linux.py`                      | Build Linux binary using Nuitka compiler                                                                                                           | `uv run python scripts/build/build_linux.py`                             |
+| `generate-man-page.py`                | Generate the lintro(1) man page from Click help                                                                                                    | `uv run python scripts/generate-man-page.py`                             |
+| `generate-checklist-corpus-schema.py` | Generate the review checklist corpus JSON Schema from the Python enums (`--check` diffs instead of writing)                                        | `uv run python scripts/generate-checklist-corpus-schema.py`              |
+| `verify_built_binary.sh`              | Verify a built binary: `--version`, the pty AI review, an `mcp --help` wiring probe (the server start-and-exit check returns with #2577), `--help` | `./scripts/build/verify_built_binary.sh dist/nuitka/lintro`              |
+| `drive_interactive_review.py`         | Drive the built binary's interactive AI review under a pty and assert the pygments diff rendered (#2514)                                           | `python3 scripts/build/drive_interactive_review.py dist/nuitka/lintro`   |
+| `finalize_binary.sh`                  | Rename binary, ensure executable, compute SHA256, write the `sha256` step output                                                                   | `./scripts/build/finalize_binary.sh <source> <target> [label]`           |
+| `create_universal.sh`                 | Combine arm64 and x86_64 macOS binaries into a universal fat binary with `lipo`                                                                    | `./scripts/build/create_universal.sh <arm64> <x86_64> <output>`          |
+| `reuse_release_asset.sh`              | Reuse a release asset whose SHA256 matches this run's checksum artifact instead of rebuilding (#2435)                                              | `./scripts/build/reuse_release_asset.sh <tag> <asset> <artifact> <dest>` |
+| `upload_release_asset.sh`             | Attach a binary to a release by upload-then-swap, never deleting the live asset first (#2435)                                                      | `./scripts/build/upload_release_asset.sh <tag> <file> [asset-name]`      |
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 

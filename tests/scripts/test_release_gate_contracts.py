@@ -10,6 +10,7 @@ as a false packaging failure on the next tag (#2514).
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -25,6 +26,16 @@ _VERIFY_PATH = _REPO_ROOT / "scripts" / "build" / "verify_built_binary.sh"
 _BATS_PATH = (
     _REPO_ROOT / "tests" / "bats" / "unit" / "build" / "test_verify_built_binary.bats"
 )
+_FAKE_CLAUDE_PATH = (
+    _REPO_ROOT / "scripts" / "build" / "fixtures" / "fake-claude" / "claude"
+)
+
+# How the fake provider recognises a fix request: it looks for this fragment in
+# the `--json-schema` argument lintro sends.
+_SCHEMA_SNIFF = "'\"original_code\"' in schema"
+
+# The risk level the fixture answers with, read back out of the fixture.
+_FIXTURE_RISK_PATTERN = re.compile(r'"risk_level": "([a-z-]+)"')
 
 # The literal the verify step greps the `mcp --help` output for, as written in
 # the shell script itself.
@@ -318,3 +329,43 @@ def test_accepted_exit_codes_cover_a_run_that_leaves_issues() -> None:
 
     assert_that(driver.ACCEPTED_EXIT_CODES).contains(0, 1)
     assert_that(driver.ACCEPTED_EXIT_CODES).does_not_contain(2)
+
+
+def test_fake_provider_sniffs_a_field_lintro_actually_sends() -> None:
+    """The fixture's schema test must match lintro's real fix schema.
+
+    The fake provider decides between a fix array and a summary by looking for
+    ``original_code`` in the ``--json-schema`` argument. If lintro renamed that
+    field the fixture would answer every request with a summary, the review
+    would never open, and the release gate would fail on the next tag.
+    """
+    from lintro.ai.cli_schemas import FIX_BATCH_CLI_SCHEMA
+
+    fixture_source = _FAKE_CLAUDE_PATH.read_text(encoding="utf-8")
+    assert_that(fixture_source).contains(_SCHEMA_SNIFF)
+
+    assert_that(json.dumps(FIX_BATCH_CLI_SCHEMA)).contains('"original_code"')
+
+
+def test_fake_provider_risk_level_is_one_lintro_accepts() -> None:
+    """The fixture's risk level must be in lintro's enum, and behavioural.
+
+    ``additionalProperties`` is false and the enum is closed, so an unknown
+    value would be rejected; a *safe-style* value would route the run to the
+    auto-apply fast path and the interactive review would never render a diff.
+    """
+    from lintro.ai.cli_schemas import FIX_BATCH_CLI_SCHEMA
+
+    fixture_source = _FAKE_CLAUDE_PATH.read_text(encoding="utf-8")
+    risk_levels = set(_FIXTURE_RISK_PATTERN.findall(fixture_source))
+    assert_that(risk_levels).is_length(1)
+
+    items = FIX_BATCH_CLI_SCHEMA["items"]
+    assert isinstance(items, dict)  # narrow type for mypy
+    properties = items["properties"]
+    assert isinstance(properties, dict)  # narrow type for mypy
+    risk_level = properties["risk_level"]
+    assert isinstance(risk_level, dict)  # narrow type for mypy
+
+    assert_that(risk_level["enum"]).contains(*risk_levels)
+    assert_that(risk_levels).contains("behavioral-risk")
