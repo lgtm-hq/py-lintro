@@ -8,10 +8,10 @@ from typing import Any, cast
 import pytest
 from assertpy import assert_that
 
+from lintro.ai import cli_schemas
 from lintro.ai.cli_schemas import (
     FIX_BATCH_CLI_SCHEMA,
     FIX_BATCH_KEY,
-    FIX_CLI_SCHEMA,
     REVIEW_CLI_SCHEMA,
     SUMMARY_CLI_SCHEMA,
     cli_schema_for_fix,
@@ -59,14 +59,30 @@ def test_cli_schema_for_fix_supports_batch_mode() -> None:
     assert_that(batch_properties[FIX_BATCH_KEY]["type"]).is_equal_to("array")
 
 
-#: Every schema handed to a CLI transport, so the object-at-the-root contract
-#: below covers a newly added schema without anyone remembering to list it.
+#: Every schema module :mod:`lintro.ai.cli_schemas` exports, derived from
+#: ``__all__`` rather than listed by hand so a newly exported schema is held to
+#: the contract below without anyone remembering to add it here.
 _EXPORTED_CLI_SCHEMAS = {
-    "FIX_BATCH_CLI_SCHEMA": FIX_BATCH_CLI_SCHEMA,
-    "FIX_CLI_SCHEMA": FIX_CLI_SCHEMA,
-    "REVIEW_CLI_SCHEMA": REVIEW_CLI_SCHEMA,
-    "SUMMARY_CLI_SCHEMA": SUMMARY_CLI_SCHEMA,
+    name: cast(dict[str, Any], getattr(cli_schemas, name))
+    for name in cli_schemas.__all__
+    if name.endswith("_CLI_SCHEMA")
 }
+
+
+def test_the_cli_schema_registry_is_derived_and_complete() -> None:
+    """The derived registry must hold every schema, not silently none.
+
+    A rename that broke the ``_CLI_SCHEMA`` suffix would empty the registry and
+    turn the parametrised contract below into zero tests.
+    """
+    assert_that(sorted(_EXPORTED_CLI_SCHEMAS)).is_equal_to(
+        [
+            "FIX_BATCH_CLI_SCHEMA",
+            "FIX_CLI_SCHEMA",
+            "REVIEW_CLI_SCHEMA",
+            "SUMMARY_CLI_SCHEMA",
+        ],
+    )
 
 
 @pytest.mark.parametrize(
