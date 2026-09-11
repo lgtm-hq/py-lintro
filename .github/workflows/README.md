@@ -196,8 +196,11 @@ step and the `homebrew-dispatch` job are now gated on
     it was dispatched from, but `get-release-info` resolves the _latest published
     release_ regardless — so a repair dispatched from `main` compiles main-HEAD and
     publishes it onto a shipped release under that release's asset names, which is the
-    same corruption #2484 is about, just with the gate honoured. The ref and the release
-    being repaired have to be the same tag.
+    same corruption #2484 is about, just with the gate honoured. The full invariant:
+    only the _latest published_ release can be repaired this way, the dispatch ref has
+    to be that release's tag, and dispatching from any older tag publishes that ref's
+    binaries onto the current latest release's asset names. Repairing an older release
+    needs a different path (see the incident notes on #2484).
   - **`arch` decides what gets rebuilt, and its dispatch default is `arm64`, not
     `universal`.** A repair left on the default rebuilds only the macOS arm64 binary
     (both Linux arches build unconditionally); the macOS x86_64 asset is never produced,
