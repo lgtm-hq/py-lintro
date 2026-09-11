@@ -29,6 +29,7 @@ import os
 import pty
 import re
 import select
+import signal
 import sys
 import tempfile
 import time
@@ -50,6 +51,17 @@ REVIEW_KEYS = (b"d", b"q")
 
 #: Seconds to wait for the whole session, including onefile extraction.
 SESSION_TIMEOUT_SECONDS = 300
+
+#: Seconds to let the child finish after the pty master is closed, before it
+#: is killed. Only reached when the session ran out of time.
+REAP_GRACE_SECONDS = 5
+
+#: Exit codes the reviewed run may legitimately report. ``check`` exits 1 when
+#: issues remain, and quitting the review at the ``q`` prompt leaves the two
+#: fixture issues unfixed, so 1 -- not 0 -- is what a healthy gate sees today.
+#: Anything else (a usage error, a crash, the 127 of a failed exec, or a
+#: negative code for a signal) means the binary died around the render.
+ACCEPTED_EXIT_CODES = (0, 1)
 
 #: A pygments-highlighted diff line: a line that opens with an SGR sequence
 #: and then the diff marker. A degraded (plain-text) render emits the marker
@@ -96,7 +108,28 @@ def build_environment() -> dict[str, str]:
     return env
 
 
-def drive(binary: Path, workspace: Path) -> tuple[bytes, int]:
+def reap(pid: int) -> int:
+    """Wait for the pty child to finish, killing it if it will not.
+
+    Args:
+        pid: Process id of the pty child.
+
+    Returns:
+        The child's exit code, negative when a signal ended it.
+    """
+    deadline = time.time() + REAP_GRACE_SECONDS
+    while time.time() < deadline:
+        reaped, status = os.waitpid(pid, os.WNOHANG)
+        if reaped == pid:
+            return os.waitstatus_to_exitcode(status)
+        time.sleep(0.1)
+
+    os.kill(pid, signal.SIGKILL)
+    _, status = os.waitpid(pid, 0)
+    return os.waitstatus_to_exitcode(status)
+
+
+def drive(binary: Path, workspace: Path) -> tuple[bytes, int, int]:
     """Run the review under a pty and answer its prompts.
 
     Args:
@@ -104,7 +137,8 @@ def drive(binary: Path, workspace: Path) -> tuple[bytes, int]:
         workspace: Directory holding the sample file to review.
 
     Returns:
-        Everything the child wrote, and the number of keys delivered.
+        Everything the child wrote, the number of keys delivered, and the
+        child's exit code.
     """
     argv = [
         str(binary),
@@ -148,11 +182,7 @@ def drive(binary: Path, workspace: Path) -> tuple[bytes, int]:
             sent += 1
 
     os.close(fd)
-    try:
-        os.waitpid(pid, 0)
-    except ChildProcessError:
-        pass
-    return captured, sent
+    return captured, sent, reap(pid)
 
 
 def diff_was_highlighted(captured: bytes) -> bool:
@@ -187,7 +217,7 @@ def main() -> int:
         workspace = Path(tmp)
         (workspace / SAMPLE_FILE).write_text(SAMPLE_SOURCE, encoding="utf-8")
         (workspace / CONFIG_FILE).write_text(CONFIG_SOURCE, encoding="utf-8")
-        captured, sent = drive(binary, workspace)
+        captured, sent, exit_code = drive(binary, workspace)
 
     transcript = captured.decode("utf-8", errors="replace")
     if sent < len(REVIEW_KEYS):
@@ -195,6 +225,16 @@ def main() -> int:
         print(
             "FAIL interactive review: the review prompt appeared "
             f"{sent} of {len(REVIEW_KEYS)} times",
+            file=sys.stderr,
+        )
+        return 1
+
+    if exit_code not in ACCEPTED_EXIT_CODES:
+        print(transcript, file=sys.stderr)
+        print(
+            f"FAIL interactive review: the binary exited {exit_code} around the "
+            "render (expected one of "
+            f"{', '.join(str(code) for code in ACCEPTED_EXIT_CODES)})",
             file=sys.stderr,
         )
         return 1
@@ -208,7 +248,10 @@ def main() -> int:
         )
         return 1
 
-    print(f"OK interactive review: pygments-highlighted diff, {len(captured)} bytes")
+    print(
+        "OK interactive review: pygments-highlighted diff, "
+        f"{len(captured)} bytes, binary exited {exit_code}",
+    )
     return 0
 
 

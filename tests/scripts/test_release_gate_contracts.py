@@ -31,6 +31,54 @@ _BATS_PATH = (
 # optional `lintro[mcp]` extra, as written in the shell script itself.
 _MCP_GREP_PATTERN = re.compile(r'grep -q "([^"]+)"')
 
+# The exit code the verify step requires that message to arrive with.
+_MCP_EXIT_PATTERN = re.compile(r"^MCP_USAGE_ERROR_EXIT=(\d+)$", re.MULTILINE)
+
+# A pty is required for the send-loop tests; every CI platform has one, but
+# the module must still import where it does not.
+_HAS_PTY = hasattr(os, "fork") and sys.platform != "win32"
+
+# Scripted stand-in for the binary: prints the review prompt twice, echoing
+# each keypress it is sent, then exits cleanly.
+_PROMPTING_CHILD = """#!/usr/bin/env python3
+import os
+import sys
+import tty
+
+tty.setcbreak(sys.stdin.fileno())
+for _ in range(2):
+    sys.stdout.write("  [y]accept group  [q]quit: ")
+    sys.stdout.flush()
+    key = os.read(0, 1).decode()
+    sys.stdout.write("got:" + key + "\\n")
+    sys.stdout.flush()
+sys.exit(0)
+"""
+
+# Scripted stand-in that never prompts and never exits, so the session runs
+# out of time and the child has to be killed.
+_SILENT_CHILD = """#!/usr/bin/env python3
+import time
+
+time.sleep(120)
+"""
+
+
+def _write_child(path: Path, source: str) -> Path:
+    """Write an executable stand-in for the built binary.
+
+    Args:
+        path: File to create.
+        source: Python source for the stand-in.
+
+    Returns:
+        The path written, now executable.
+    """
+    path.write_text(source, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
 # A pygments-rendered diff captured from a real pty session of the driver.
 _HIGHLIGHTED_DIFF = (
     b"\x1b[91m--- a/bad.py\x1b[0m\r\n\r\n\x1b[92m+++ b/bad.py\x1b[0m\r\n\r\n"
@@ -101,6 +149,22 @@ def test_mcp_marker_matches_the_usage_error_lintro_raises() -> None:
             require_mcp()
 
     assert_that(str(raised.value)).contains(_verify_mcp_marker())
+
+
+def test_mcp_acceptance_requires_clicks_usage_error_exit_code() -> None:
+    """Only click's ``UsageError`` code may carry the missing-extra message.
+
+    Without the code, a crash whose traceback happens to quote the phrase
+    would be accepted as a healthy release binary.
+    """
+    import click
+
+    source = _VERIFY_PATH.read_text(encoding="utf-8")
+    match = _MCP_EXIT_PATTERN.search(source)
+    assert_that(match).is_not_none()
+    assert match is not None  # narrow type for mypy
+
+    assert_that(int(match.group(1))).is_equal_to(click.UsageError.exit_code)
 
 
 def test_bats_stub_reuses_the_same_mcp_marker() -> None:
@@ -200,3 +264,75 @@ def test_main_reports_a_missing_binary_instead_of_forking(tmp_path: Path) -> Non
         exit_code = driver.main()
 
     assert_that(exit_code).is_equal_to(1)
+
+
+@pytest.mark.skipif(not _HAS_PTY, reason="requires a pty")
+def test_drive_answers_each_prompt_once_in_order(tmp_path: Path) -> None:
+    """The send loop must deliver ``d`` then ``q``, one key per prompt.
+
+    Args:
+        tmp_path: Workspace for the scripted child.
+    """
+    driver = _load_driver()
+    binary = _write_child(tmp_path / "fake-lintro", _PROMPTING_CHILD)
+
+    captured, sent, exit_code = driver.drive(binary, tmp_path)
+
+    assert_that(sent).is_equal_to(len(driver.REVIEW_KEYS))
+    assert_that(exit_code).is_equal_to(0)
+    echoed = re.findall(rb"got:(.)", captured)
+    assert_that(echoed).is_equal_to(list(driver.REVIEW_KEYS))
+
+
+@pytest.mark.skipif(not _HAS_PTY, reason="requires a pty")
+def test_drive_kills_a_child_that_never_prompts(tmp_path: Path) -> None:
+    """A session that runs out of time reports no keys and a killed child.
+
+    Args:
+        tmp_path: Workspace for the scripted child.
+    """
+    driver = _load_driver()
+    binary = _write_child(tmp_path / "fake-lintro", _SILENT_CHILD)
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(driver, "SESSION_TIMEOUT_SECONDS", 1)
+        patcher.setattr(driver, "REAP_GRACE_SECONDS", 1)
+        captured, sent, exit_code = driver.drive(binary, tmp_path)
+
+    assert_that(sent).is_equal_to(0)
+    assert_that(captured).is_equal_to(b"")
+    assert_that(exit_code).is_less_than(0)
+
+
+@pytest.mark.skipif(not _HAS_PTY, reason="requires a pty")
+def test_main_fails_when_the_reviewed_binary_dies(tmp_path: Path) -> None:
+    """An unexpected exit code fails the gate even with a rendered diff.
+
+    Args:
+        tmp_path: Location for the stand-in binary path.
+    """
+    driver = _load_driver()
+    binary = _write_child(tmp_path / "fake-lintro", _PROMPTING_CHILD)
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(sys, "argv", ["drive_interactive_review.py", str(binary)])
+        patcher.setattr(
+            driver,
+            "drive",
+            lambda *args, **kwargs: (_HIGHLIGHTED_DIFF, len(driver.REVIEW_KEYS), 139),
+        )
+        exit_code = driver.main()
+
+    assert_that(exit_code).is_equal_to(1)
+
+
+def test_accepted_exit_codes_cover_a_run_that_leaves_issues() -> None:
+    """Quitting the review leaves issues, so ``check`` exits 1, not 0.
+
+    Pinning both codes keeps a future tightening to ``0`` from turning every
+    release into a false failure.
+    """
+    driver = _load_driver()
+
+    assert_that(driver.ACCEPTED_EXIT_CODES).contains(0, 1)
+    assert_that(driver.ACCEPTED_EXIT_CODES).does_not_contain(2)

@@ -51,14 +51,54 @@ python3 "$SCRIPT_DIR/drive_interactive_review.py" "$BINARY"
 # MCP server start-and-exit: the stdio server is the one entry point the smoke
 # test never reaches. With stdin at EOF a working server exits 0 immediately.
 # Release binaries are built without the optional `lintro[mcp]` extra, so the
-# documented UsageError is the other accepted outcome; a traceback or any other
-# non-zero exit is a packaging failure.
-if "$BINARY" mcp </dev/null >"$MCP_OUTPUT" 2>&1; then
+# documented UsageError is the other accepted outcome; a traceback, any other
+# non-zero exit, or a server that never exits is a packaging failure.
+#
+# `click.UsageError.exit_code`, pinned against click in
+# tests/scripts/test_release_gate_contracts.py: only that code may carry the
+# missing-extra message, so a crash whose traceback happens to quote it, or a
+# binary that prints it and exits 0 without serving, still fails.
+MCP_USAGE_ERROR_EXIT=2
+
+# Whole-probe budget. A hung server would otherwise burn the runner until the
+# job timeout. `timeout(1)` is GNU coreutils and absent from the macOS
+# runners, so the wait is a poll loop; the override exists for the bats suite.
+MCP_BUDGET_SECONDS="${LINTRO_VERIFY_MCP_BUDGET_SECONDS:-60}"
+
+"$BINARY" mcp </dev/null >"$MCP_OUTPUT" 2>&1 &
+MCP_PID=$!
+
+MCP_STATUS=""
+for _ in $(seq 1 "$MCP_BUDGET_SECONDS"); do
+	if ! kill -0 "$MCP_PID" 2>/dev/null; then
+		if wait "$MCP_PID"; then
+			MCP_STATUS=0
+		else
+			MCP_STATUS=$?
+		fi
+		break
+	fi
+	sleep 1
+done
+
+if [[ -z "$MCP_STATUS" ]]; then
+	kill -9 "$MCP_PID" 2>/dev/null || true
+	wait "$MCP_PID" 2>/dev/null || true
+	log_error "MCP server did not exit within ${MCP_BUDGET_SECONDS}s of EOF:"
+	cat "$MCP_OUTPUT"
+	exit 1
+fi
+
+if [[ "$MCP_STATUS" -eq 0 ]]; then
+	# Exit 0 is the success signal on its own: the stdio server prints no
+	# start banner, and inventing one to grep for would be a new contract
+	# maintained only for this gate.
 	log_success "MCP server started and exited at EOF"
-elif grep -q "requires lintro\[mcp\]" "$MCP_OUTPUT"; then
+elif [[ "$MCP_STATUS" -eq "$MCP_USAGE_ERROR_EXIT" ]] &&
+	grep -q "requires lintro\[mcp\]" "$MCP_OUTPUT"; then
 	log_info "MCP server: optional SDK not bundled (documented UsageError)"
 else
-	log_error "MCP server start-and-exit failed:"
+	log_error "MCP server start-and-exit failed (exit ${MCP_STATUS}):"
 	cat "$MCP_OUTPUT"
 	exit 1
 fi

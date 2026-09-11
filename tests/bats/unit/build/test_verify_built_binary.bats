@@ -192,3 +192,40 @@ EOF
 	assert_failure
 	assert_output --partial "MCP server start-and-exit failed"
 }
+
+@test "verify_built_binary.sh: rejects the MCP message under the wrong exit code" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) echo "Traceback: ... requires lintro[mcp] ... quoted in a crash"; exit 1 ;;
+--help) echo "help"; exit 0 ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	run "$SCRIPT" "$BINARY"
+	assert_failure
+	assert_output --partial "MCP server start-and-exit failed (exit 1)"
+}
+
+# The stub closes fd 3 before sleeping: a background process that inherits
+# bats' TAP descriptor keeps `run` waiting for it even after the script under
+# test has killed and reported it.
+@test "verify_built_binary.sh: fails a hung MCP server within the budget" {
+	cat >"$BINARY" <<'EOF'
+#!/usr/bin/env bash
+case "${1:-}" in
+--version) echo "lintro test 0.0.0"; exit 0 ;;
+mcp) exec 3>&-; sleep 120 ;;
+--help) echo "help"; exit 0 ;;
+*) exit 1 ;;
+esac
+EOF
+	chmod +x "$BINARY"
+
+	LINTRO_VERIFY_MCP_BUDGET_SECONDS=2 run "$SCRIPT" "$BINARY"
+	assert_failure
+	assert_output --partial "did not exit within 2s of EOF"
+}
