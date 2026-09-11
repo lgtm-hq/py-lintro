@@ -43,6 +43,7 @@ _VENDOR_SKIP_DIRS: frozenset[str] = frozenset(
         # directory is only fully skipped when both walks prune it.
         ".cache",
         ".terragrunt-cache",
+        ".lintro-cache",
         "htmlcov",
         # `terraform init` vendors provider plugins and remote modules here;
         # their .tf files are third-party and must not select checkov.

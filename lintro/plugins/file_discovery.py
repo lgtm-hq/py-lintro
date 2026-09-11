@@ -31,9 +31,13 @@ DEFAULT_EXCLUDE_PATTERNS: list[str] = [
     ".ruff_cache/",
     ".mypy_cache/",
     ".cache/",
-    # `terragrunt` vendors remote modules here; kept from the days when the
-    # `*cache*` glob covered it implicitly.
+    # These two were only ever excluded because the `*cache*` glob happened to
+    # cover them; name them so dropping the glob does not un-exclude them.
+    # `terragrunt` vendors remote modules under `.terragrunt-cache`, and lintro
+    # writes its own AI suggestion cache, transcripts and raw responses under
+    # `.lintro-cache` (see lintro/ai/cache.py, lintro/ai/audit.py).
     ".terragrunt-cache/",
+    ".lintro-cache/",
     "*.pyc",
     "*.pyo",
     "*.pyd",

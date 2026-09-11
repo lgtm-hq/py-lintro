@@ -782,6 +782,9 @@ def test_cache_excludes_skip_directories_but_keep_cache_named_sources(
     source = tmp_path / "lintro" / "ai"
     source.mkdir(parents=True)
     (source / "cache.py").write_text("VALUE = 1\n")
+    lintro_cache_json = tmp_path / ".lintro-cache" / "ai" / "suggestion.json"
+    lintro_cache_json.parent.mkdir(parents=True)
+    lintro_cache_json.write_text("{}\n")
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
     (tests_dir / "test_file_cache.py").write_text("VALUE = 2\n")
@@ -791,6 +794,7 @@ def test_cache_excludes_skip_directories_but_keep_cache_named_sources(
         ".ruff_cache/x.py",
         ".mypy_cache/x.py",
         ".cache/x.py",
+        ".lintro-cache/ai/x.py",
     ):
         cached = tmp_path / relative
         cached.parent.mkdir(parents=True, exist_ok=True)
@@ -808,6 +812,14 @@ def test_cache_excludes_skip_directories_but_keep_cache_named_sources(
     assert_that(relative_paths).is_equal_to(
         ["lintro/ai/cache.py", "tests/test_file_cache.py"],
     )
+    # Lintro's own cache is not only Python: a *.json scan must not pick up the
+    # AI suggestion entries it writes under .lintro-cache/ai either.
+    json_discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*.json"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    assert_that(json_discovered).is_empty()
 
 
 def test_repo_source_files_named_cache_are_discovered_by_the_real_walk() -> None:
