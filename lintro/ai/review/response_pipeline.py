@@ -39,6 +39,7 @@ from lintro.ai.review.cli_limits import (
     is_cli_output_exhaustion,
     tighter_findings_cap,
 )
+from lintro.ai.review.confirmation_filter import drop_confirmation_findings
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
@@ -412,6 +413,9 @@ def payload_to_partial(
     :data:`~lintro.ai.cli_schemas.REVIEW_CLI_SCHEMA` and from the prose
     recovery payload, not from a schema-constrained CLI-transport reply.
 
+    Findings whose body says they are not a defect are dropped here, before
+    the caller counts the answer against its findings cap (#2430).
+
     Args:
         response: Provider response the payload was parsed from.
         payload: Parsed model response for one chunk.
@@ -424,7 +428,9 @@ def payload_to_partial(
     pr_summary, verdict_reasoning, file_assessments = parse_narrative(payload=payload)
 
     checklist = parse_checklist(raw_checklist=payload.get("checklist", []))
-    findings = parse_findings(raw_findings=payload.get("findings", []))
+    findings = drop_confirmation_findings(
+        findings=parse_findings(raw_findings=payload.get("findings", [])),
+    )
     flagged_files = parse_flagged_files(raw_flags=payload.get("flagged_files"))
 
     return ChunkReviewPartial(
