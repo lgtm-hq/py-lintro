@@ -8,6 +8,7 @@ and provides extensive plugin support for customization.
 from __future__ import annotations
 
 import copy
+import math
 import subprocess  # nosec B404 - used safely with shell disabled
 from dataclasses import dataclass, field
 from typing import Any
@@ -46,29 +47,46 @@ PYTEST_DEFAULT_TIMEOUT: int = 300  # 5 minutes for test runs
 PYTEST_FILE_PATTERNS: list[str] = ["test_*.py", "*_test.py"]
 
 
-def resolve_timeout_seconds(options: dict[str, Any]) -> int:
+def resolve_timeout_seconds(options: dict[str, Any]) -> int | float:
     """Resolve the pytest subprocess timeout from an options mapping.
+
+    ``BaseToolPlugin.set_options`` stores every configured timeout as a float,
+    so a value the caller wrote as ``600`` reaches this function as ``600.0``.
+    Floats, ints and numeric strings are all accepted; an integral value is
+    normalised back to ``int`` so timeout messages read ``600s`` rather than
+    ``600.0s``. ``bool`` is rejected: it is an ``int`` subclass, but no caller
+    means "one second" by ``True``.
 
     Args:
         options: Effective options for one invocation.
 
     Returns:
-        int: Timeout in seconds, falling back to the pytest default when the
-            option is absent, ``None``, or not coercible to an integer.
+        int | float: Timeout in seconds, falling back to the pytest default
+            when the option is absent, ``None``, or not a finite number.
     """
     raw = options.get("timeout", PYTEST_DEFAULT_TIMEOUT)
-    if isinstance(raw, int):
-        return raw
     if raw is None:
         return PYTEST_DEFAULT_TIMEOUT
-    try:
-        return int(str(raw))
-    except (TypeError, ValueError):
+
+    value: float
+    if isinstance(raw, bool):
+        value = float("nan")
+    elif isinstance(raw, (int, float)):
+        value = float(raw)
+    else:
+        try:
+            value = float(str(raw))
+        except (TypeError, ValueError):
+            value = float("nan")
+
+    if not math.isfinite(value):
         logger.warning(
             f"Invalid timeout value {raw!r}; using default "
             f"{PYTEST_DEFAULT_TIMEOUT}s",
         )
         return PYTEST_DEFAULT_TIMEOUT
+
+    return int(value) if value.is_integer() else value
 
 
 @register_tool

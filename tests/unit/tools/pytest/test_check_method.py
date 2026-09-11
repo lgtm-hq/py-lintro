@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess  # nosec B404 - only referenced to build a TimeoutExpired object
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -403,3 +405,139 @@ def test_check_timeout_message_uses_the_overridden_timeout(
 
     assert_that(result.timed_out).is_true()
     assert_that(result.output).contains("600")
+
+
+def _record_subprocess_timeout(
+    sink: list[int | float | None],
+) -> Callable[..., tuple[bool, str]]:
+    """Build a ``_run_subprocess`` stand-in that records its timeout.
+
+    Args:
+        sink: List the recorded timeout is appended to.
+
+    Returns:
+        Callable[..., tuple[bool, str]]: Replacement for ``_run_subprocess``.
+    """
+
+    def run(
+        cmd: list[str],
+        timeout: int | float | None = None,
+        *args: object,
+        **kwargs: object,
+    ) -> tuple[bool, str]:
+        """Record the timeout and report a clean run.
+
+        Args:
+            cmd: Command line built for the pytest subprocess.
+            timeout: Seconds allowed before the subprocess is killed.
+            *args: Ignored positional arguments.
+            **kwargs: Ignored keyword arguments.
+
+        Returns:
+            tuple[bool, str]: A successful, empty subprocess result.
+        """
+        sink.append(timeout)
+        return True, "10 passed"
+
+    return run
+
+
+@contextmanager
+def _configured_check(plugin: PytestPlugin) -> Generator[None]:
+    """Patch away everything ``check`` needs beyond the subprocess itself.
+
+    Args:
+        plugin: PytestPlugin instance to patch.
+
+    Yields:
+        None: Context in which ``check`` runs without touching the filesystem.
+    """
+    with (
+        patch.object(plugin, "_verify_tool_version", return_value=None),
+        patch.object(plugin, "_get_executable_command", return_value=["pytest"]),
+        patch.object(plugin.executor, "prepare_test_execution", return_value=10),
+        patch.object(plugin, "_parse_output", return_value=[]),
+    ):
+        yield
+
+
+def test_timeout_configured_through_set_options_reaches_the_subprocess(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """A timeout configured the way the CLI configures it is enforced.
+
+    ``BaseToolPlugin.set_options`` stores the value as ``600.0``, so this is
+    the wiring a configured ``timeout`` actually travels through.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    sample_pytest_plugin.set_options(timeout=600)
+    enforced: list[int | float | None] = []
+
+    with (
+        _configured_check(sample_pytest_plugin),
+        patch.object(
+            sample_pytest_plugin,
+            "_run_subprocess",
+            new=_record_subprocess_timeout(enforced),
+        ),
+    ):
+        sample_pytest_plugin.check(["tests"], {})
+
+    assert_that(sample_pytest_plugin.options["timeout"]).is_equal_to(600.0)
+    assert_that(enforced).is_equal_to([600])
+
+
+def test_timeout_configured_through_set_options_names_itself_on_timeout(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """The timeout message names the configured value, not the default.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    sample_pytest_plugin.set_options(timeout=600)
+
+    with (
+        _configured_check(sample_pytest_plugin),
+        patch.object(
+            sample_pytest_plugin.executor,
+            "execute_tests",
+            side_effect=subprocess.TimeoutExpired(cmd="pytest", timeout=600),
+        ),
+    ):
+        result = sample_pytest_plugin.check(["tests"], {})
+
+    assert_that(result.timed_out).is_true()
+    assert_that(result.output).contains("600s")
+    assert_that(result.output).does_not_contain("300s")
+
+
+def test_pytest_config_int_timeout_is_enforced_without_float_drift(
+    sample_pytest_plugin: PytestPlugin,
+) -> None:
+    """The int timeout held by ``pytest_config`` survives as an int.
+
+    Args:
+        sample_pytest_plugin: The PytestPlugin instance to test.
+    """
+    sample_pytest_plugin.pytest_config.set_options(timeout=600)
+    sample_pytest_plugin.set_options(
+        **sample_pytest_plugin.pytest_config.get_options_dict(),
+    )
+    enforced: list[int | float | None] = []
+
+    with (
+        _configured_check(sample_pytest_plugin),
+        patch.object(
+            sample_pytest_plugin,
+            "_run_subprocess",
+            new=_record_subprocess_timeout(enforced),
+        ),
+    ):
+        sample_pytest_plugin.check(["tests"], {})
+
+    assert_that(sample_pytest_plugin.pytest_config.timeout).is_equal_to(600)
+    assert_that(enforced[0]).is_instance_of(int)
+    assert_that(enforced[0]).is_equal_to(600)
