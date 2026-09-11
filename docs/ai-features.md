@@ -1702,10 +1702,11 @@ AI API calls use exponential backoff retry:
 - **Retried errors:** rate limits, transient provider errors
 - **Not retried:** authentication errors (fail immediately)
 
-AI failures never break the main linting flow. If the provider is unavailable, you get
-your normal linting results with a one-line notice naming the exception class and the
-first line of the provider's message (secrets redacted); the full traceback stays at
-debug level:
+By default (`ai.fail_on_ai_error: false`) AI failures never break the main linting flow.
+If the provider is unavailable, you get your normal linting results with a one-line
+notice naming the exception class and the first line of the provider's message (secrets
+redacted); the full traceback stays at debug level. With `ai.fail_on_ai_error: true` the
+provider error is re-raised instead, so the run exits non-zero:
 
 ```text
 AI: enhancement unavailable (AIProviderError: claude exited with status 1)
