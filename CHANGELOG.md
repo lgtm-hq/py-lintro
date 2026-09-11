@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.9] - 2026-09-11
+
+### Fixed
+
+- **discovery**: stop excluding source files whose name contains "cache" (#2575)
+  (ffabb0e)
+
 ## [0.153.8] - 2026-09-11
 
 ### Fixed
