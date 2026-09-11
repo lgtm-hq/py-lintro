@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.153.7] - 2026-09-11
+
+### Fixed
+
+- **ci**: make a plain build-binary dispatch side-effect free and check caller grants
+  (#2563) (f796b0f)
+
 ## [0.153.6] - 2026-09-10
 
 ### Fixed
