@@ -87,6 +87,11 @@ set -euo pipefail
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
 #                           GH_TOKEN also downloads the lint report artifact
 #                           (`gh run download`, needs actions: read).
+#   LINT_REPORT_POLL_SECONDS  Seconds between lint-report locator polls
+#                           (default 30). Test override.
+#   LINT_REPORT_WAIT_SECONDS  Upper bound on the lint-report wait before the
+#                           review runs without linter facts (default 600).
+#                           Test override; the default is pinned in tests.
 #   GITHUB_REPOSITORY       owner/name; supplies --repo for `lintro review`.
 #   GITHUB_RUN_ID           Current Actions run; excluded from prior-state lookup.
 #   GITHUB_OUTPUT           When set, --locate-prior-state writes run-id=.
@@ -309,33 +314,54 @@ echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
 # Linter facts (#2571): fetch the untrusted lint job's JSON report for the
 # exact PR head. The locator pins the run by head SHA (see
 # review_state_artifacts.py lint-report); this script downloads only the run
-# it named, and only that one artifact. Every failure path is fail-safe: the
-# path below is passed regardless, and lintro renders the missing file as
-# "linter facts unavailable for this head" in the review header.
+# it named, and only that one artifact. Every failure path is fail-safe:
+# without a report the review runs with no --lint-report flag at all, and
+# lintro renders the single "linter facts unavailable for this head" note in
+# the review header.
+#
+# Bounded wait: docker-ci.yml and ai-review.yml start on the same push, and
+# the lint job needs minutes to upload its report, so a first-seconds lookup
+# almost never finds it (#2583's dogfood run). The locator is polled every
+# LINT_REPORT_POLL_SECONDS for up to LINT_REPORT_WAIT_SECONDS before the
+# review falls back. Both are env-overridable so tests can shrink them; the
+# defaults are pinned by tests/scripts/test_run_ai_review.py.
+LINT_REPORT_POLL_SECONDS="${LINT_REPORT_POLL_SECONDS:-30}"
+LINT_REPORT_WAIT_SECONDS="${LINT_REPORT_WAIT_SECONDS:-600}"
 lint_report_path="${lint_report_dir}/results.json"
 lint_run_id=""
 lint_head_sha=""
-if located="$(python3 "${script_dir}/review_state_artifacts.py" lint-report)"; then
-	lint_run_id="$(printf '%s\n' "$located" | sed -n 's/^run-id=//p')"
-	lint_head_sha="$(printf '%s\n' "$located" | sed -n 's/^head-sha=//p')"
-fi
+lint_waited=0
+while :; do
+	if located="$(python3 "${script_dir}/review_state_artifacts.py" lint-report)"; then
+		lint_run_id="$(printf '%s\n' "$located" | sed -n 's/^run-id=//p')"
+		lint_head_sha="$(printf '%s\n' "$located" | sed -n 's/^head-sha=//p')"
+	fi
+	if [[ -n "$lint_run_id" || "$lint_waited" -ge "$LINT_REPORT_WAIT_SECONDS" ]]; then
+		break
+	fi
+	echo "[ai-review] linter facts: no linting-json-report yet for head ${lint_head_sha:-unknown}; retrying in ${LINT_REPORT_POLL_SECONDS}s (waited ${lint_waited}/${LINT_REPORT_WAIT_SECONDS}s)"
+	sleep "$LINT_REPORT_POLL_SECONDS"
+	lint_waited=$((lint_waited + LINT_REPORT_POLL_SECONDS))
+done
+lint_report_arg=()
 if [[ -n "$lint_run_id" ]]; then
 	# Bounded: a stalled artifact download must not eat the review budget.
 	if timeout --signal=TERM --kill-after=5 120 \
 		gh run download "$lint_run_id" "${repo_arg[@]}" \
 		--name linting-json-report --dir "$lint_report_dir" &&
 		[[ -s "$lint_report_path" ]]; then
-		echo "[ai-review] linter facts: linting-json-report from docker-ci run ${lint_run_id} (head ${lint_head_sha})"
+		lint_report_arg=(--lint-report "$lint_report_path")
+		echo "[ai-review] linter facts: linting-json-report from docker-ci run ${lint_run_id} (head ${lint_head_sha}) after ${lint_waited}s"
 	else
 		echo "[ai-review] linter facts unavailable for this head: download of run ${lint_run_id} failed"
 	fi
 else
-	echo "[ai-review] linter facts unavailable for this head: no linting-json-report for head ${lint_head_sha:-unknown}"
+	echo "[ai-review] linter facts unavailable for this head: no linting-json-report for head ${lint_head_sha:-unknown} after ${lint_waited}s"
 fi
 # Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
 # ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.
 export PYTHONUNBUFFERED=1
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post --lint-report "$lint_report_path" --output json >"$output_file" 2>&1 &
+uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post "${lint_report_arg[@]}" --output json >"$output_file" 2>&1 &
 lintro_pid=$!
 # --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
 # group signal left it ignoring TERM (``trap '' TERM``).
