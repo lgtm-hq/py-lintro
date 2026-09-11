@@ -667,12 +667,13 @@ def test_workflow_serializes_ai_review_repo_wide() -> None:
 
 
 def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
-    """The job budget is pinned at 48 minutes (#2506, #2571).
+    """The job budget is pinned at 51 minutes (#2506, #2571).
 
-    48 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
-    allows with the 1800 s per-chunk CLI timeout and the 600 s lint-report
-    wait: ceil(1800 / 60) + 7 min setup + 10 min wait + 1 min posting margin
-    (38 before the wait). Measured review durations over the last 40 runs are
+    51 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
+    allows with the 1800 s per-chunk CLI timeout and the 600 s wall-clock
+    lint-report wait: ceil(1800 / 60) + 7 min setup + 10 min wait + 3 min for
+    one locate straddling the deadline + 1 min posting margin (38 before the
+    wait). Measured review durations over the last 40 runs are
     median 10 to 14 min and p75 21 min, so the ceiling is not what a healthy
     review needs — it bounds the tail. The long tail that previously argued for
     120 was reruns restarting from scratch, which #2506 fixed by resuming the
@@ -681,7 +682,7 @@ def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
-    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(48)
+    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(51)
 
 
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
@@ -1292,6 +1293,7 @@ def test_lint_report_wait_is_bounded_at_ten_minutes() -> None:
     assert_that(text).contains('sleep "$lint_sleep"')
     assert_that(text).contains("lint_sleep=$((LINT_REPORT_WAIT_SECONDS - lint_waited))")
     assert_that(text).contains('"$lint_waited" -ge "$LINT_REPORT_WAIT_SECONDS"')
+    assert_that(text).contains("lint_waited=$((SECONDS - lint_wait_started))")
 
 
 _LINT_PR_NUMBER = 12
@@ -1446,10 +1448,10 @@ def test_lint_report_appearing_during_the_wait_reaches_the_review(
 
     assert_that(listings).is_equal_to(3)
     assert_that(output).contains("retrying in 1s (waited 0/30s)")
-    assert_that(output).contains("retrying in 1s (waited 1/30s)")
+    assert_that(output).matches(r"retrying in 1s \(waited [1-3]/30s\)")
     assert_that(output).contains(
         f"linting-json-report from docker-ci run {_LINT_RUN_ID} "
-        f"(head {_LINT_HEAD_SHA}) after 2s",
+        f"(head {_LINT_HEAD_SHA}) after ",
     )
     assert_that(argv[:3]).is_equal_to(["run", "lintro", "review"])
     assert_that(argv).contains("--lint-report")
@@ -1463,8 +1465,9 @@ def test_lint_report_never_appearing_falls_back_after_the_bound(
 ) -> None:
     """When the bound expires the review still runs, without the flag.
 
-    The locator is polled at 0 s, 1 s and 2 s (bound 2 s at a 1 s interval)
-    and then the script stops waiting. No ``--lint-report`` is passed, so
+    The locator is polled at 0 s, 1 s and 2 s of wall clock (bound 2 s at a
+    1 s interval; the locator's own run time counts) and then the script
+    stops waiting. No ``--lint-report`` is passed, so
     lintro renders only its own "linter facts unavailable" note rather than
     a second "not readable" note for a path that never existed.
     """
@@ -1474,10 +1477,12 @@ def test_lint_report_never_appearing_falls_back_after_the_bound(
         wait_seconds=2,
     )
 
-    assert_that(listings).is_equal_to(3)
-    assert_that(output).contains(
-        "linter facts unavailable for this head: no linting-json-report "
-        f"for head {_LINT_HEAD_SHA} after 2s",
+    # Wall-clock bound at 1 s granularity: the locator itself takes time, so
+    # the loop makes two or three listings before the 2 s deadline passes.
+    assert_that(listings).is_between(2, 3)
+    assert_that(output).matches(
+        r"linter facts unavailable for this head: no linting-json-report "
+        rf"for head {_LINT_HEAD_SHA} after [2-9]s",
     )
     assert_that(argv[:3]).is_equal_to(["run", "lintro", "review"])
     assert_that(argv).does_not_contain("--lint-report")
@@ -1958,13 +1963,18 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
 
+    # One locate may straddle the wall-clock deadline: two gh sequences of
+    # three 30 s attempts each (scripts/ci/review_state_artifacts.py).
+    locate_overshoot_minutes = 3
     budget = review_timeout_minutes + setup_overhead_minutes
-    budget += lint_report_wait_minutes + posting_margin_minutes
+    budget += lint_report_wait_minutes + locate_overshoot_minutes
+    budget += posting_margin_minutes
     assert_that(job_timeout_minutes).described_as(
         f"timeout-minutes ({job_timeout_minutes}) must cover the CLI profile "
         f"timeout ({review_timeout_minutes} min) plus "
         f"{setup_overhead_minutes} min setup, "
-        f"{lint_report_wait_minutes} min lint-report wait and "
+        f"{lint_report_wait_minutes} min lint-report wait, "
+        f"{locate_overshoot_minutes} min locate overshoot and "
         f"{posting_margin_minutes} min posting margin — bump it together "
         "with CLI_REVIEW_TIMEOUT_SECONDS / LINT_REPORT_WAIT_SECONDS",
     ).is_greater_than_or_equal_to(budget)
@@ -2133,7 +2143,7 @@ def test_lint_report_last_poll_sleeps_only_the_remaining_wait(
         poll_seconds="5",
     )
 
-    assert_that(output).contains("retrying in 2s (waited 0/2s)")
+    assert_that(output).matches(r"retrying in [12]s \(waited [01]/2s\)")
     assert_that(output).does_not_contain("retrying in 5s")
-    assert_that(listings).is_equal_to(2)
-    assert_that(output).contains("after 2s")
+    assert_that(listings).is_between(2, 3)
+    assert_that(output).matches(r"after [2-9]s")

@@ -340,12 +340,18 @@ fi
 lint_report_path="${lint_report_dir}/results.json"
 lint_run_id=""
 lint_head_sha=""
+# The bound is wall clock, not summed sleeps: the locator's own gh calls
+# count against it, so a slow API cannot stretch the wait past the budget
+# the ai-review job books for it (timeout-minutes in ai-review.yml). At most
+# one locate runs after the deadline, which the job budget allows for.
+lint_wait_started=$SECONDS
 lint_waited=0
 while :; do
 	if located="$(python3 "${script_dir}/review_state_artifacts.py" lint-report)"; then
 		lint_run_id="$(printf '%s\n' "$located" | sed -n 's/^run-id=//p')"
 		lint_head_sha="$(printf '%s\n' "$located" | sed -n 's/^head-sha=//p')"
 	fi
+	lint_waited=$((SECONDS - lint_wait_started))
 	if [[ -n "$lint_run_id" || "$lint_waited" -ge "$LINT_REPORT_WAIT_SECONDS" ]]; then
 		break
 	fi
@@ -356,7 +362,6 @@ while :; do
 	fi
 	echo "[ai-review] linter facts: no linting-json-report yet for head ${lint_head_sha:-unknown}; retrying in ${lint_sleep}s (waited ${lint_waited}/${LINT_REPORT_WAIT_SECONDS}s)"
 	sleep "$lint_sleep"
-	lint_waited=$((lint_waited + lint_sleep))
 done
 lint_report_arg=()
 if [[ -n "$lint_run_id" ]]; then
