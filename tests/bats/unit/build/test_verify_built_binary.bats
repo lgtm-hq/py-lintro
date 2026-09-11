@@ -64,7 +64,7 @@ teardown() {
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) exit 0 ;;
+mcp) echo "  --workspace DIRECTORY  Workspace root for path guards"; exit 0 ;;
 --help) echo "help"; exit 0 ;;
 *) exit 1 ;;
 esac
@@ -81,7 +81,7 @@ EOF
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) exit 0 ;;
+mcp) echo "  --workspace DIRECTORY  Workspace root for path guards"; exit 0 ;;
 *) echo "help exploded"; exit 4 ;;
 esac
 EOF
@@ -112,7 +112,7 @@ EOF
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) exit 0 ;;
+mcp) echo "  --workspace DIRECTORY  Workspace root for path guards"; exit 0 ;;
 --help) echo "help"; exit 0 ;;
 *) exit 1 ;;
 esac
@@ -130,7 +130,7 @@ EOF
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) exit 0 ;;
+mcp) echo "  --workspace DIRECTORY  Workspace root for path guards"; exit 0 ;;
 *) exit 0 ;;
 esac
 EOF
@@ -141,12 +141,17 @@ EOF
 	assert_output --partial "without pygments highlighting"
 }
 
-@test "verify_built_binary.sh: accepts an MCP server that exits at EOF" {
+
+
+
+
+@test "verify_built_binary.sh: accepts a binary whose mcp command renders help" {
 	cat >"$BINARY" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) exit 0 ;;
+mcp) [[ "${2:-}" == "--help" ]] || exit 9
+	echo "  --workspace DIRECTORY  Workspace root for path guards"; exit 0 ;;
 --help) echo "help"; exit 0 ;;
 *) exit 1 ;;
 esac
@@ -155,33 +160,15 @@ EOF
 
 	run "$SCRIPT" "$BINARY"
 	assert_success
-	assert_output --partial "MCP server started and exited at EOF"
+	assert_output --partial "MCP command is wired into the binary"
 }
 
-@test "verify_built_binary.sh: accepts the documented missing-MCP-extra error" {
+@test "verify_built_binary.sh: fails when the mcp command is missing" {
 	cat >"$BINARY" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) echo "Error: MCP server requires lintro[mcp]. Install with: uv pip install 'lintro[mcp]'"
-	exit 2 ;;
---help) echo "help"; exit 0 ;;
-*) exit 1 ;;
-esac
-EOF
-	chmod +x "$BINARY"
-
-	run "$SCRIPT" "$BINARY"
-	assert_success
-	assert_output --partial "optional SDK not bundled"
-}
-
-@test "verify_built_binary.sh: fails when the MCP server crashes" {
-	cat >"$BINARY" <<'EOF'
-#!/usr/bin/env bash
-case "${1:-}" in
---version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) echo "Traceback (most recent call last): ImportError" >&2; exit 1 ;;
+mcp) echo "Error: No such command 'mcp'." >&2; exit 2 ;;
 --help) echo "help"; exit 0 ;;
 *) exit 1 ;;
 esac
@@ -190,15 +177,15 @@ EOF
 
 	run "$SCRIPT" "$BINARY"
 	assert_failure
-	assert_output --partial "MCP server start-and-exit failed"
+	assert_output --partial "mcp command wiring failed (exit 2)"
 }
 
-@test "verify_built_binary.sh: rejects the MCP message under the wrong exit code" {
+@test "verify_built_binary.sh: fails when mcp --help renders no options" {
 	cat >"$BINARY" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
 --version) echo "lintro test 0.0.0"; exit 0 ;;
-mcp) echo "Traceback: ... requires lintro[mcp] ... quoted in a crash"; exit 1 ;;
+mcp) echo ""; exit 0 ;;
 --help) echo "help"; exit 0 ;;
 *) exit 1 ;;
 esac
@@ -207,13 +194,13 @@ EOF
 
 	run "$SCRIPT" "$BINARY"
 	assert_failure
-	assert_output --partial "MCP server start-and-exit failed (exit 1)"
+	assert_output --partial "mcp command wiring failed (exit 0)"
 }
 
 # The stub closes fd 3 before sleeping: a background process that inherits
 # bats' TAP descriptor keeps `run` waiting for it even after the script under
 # test has killed and reported it.
-@test "verify_built_binary.sh: fails a hung MCP server within the budget" {
+@test "verify_built_binary.sh: fails a hung mcp command within the budget" {
 	cat >"$BINARY" <<'EOF'
 #!/usr/bin/env bash
 case "${1:-}" in
@@ -227,5 +214,5 @@ EOF
 
 	LINTRO_VERIFY_MCP_BUDGET_SECONDS=2 run "$SCRIPT" "$BINARY"
 	assert_failure
-	assert_output --partial "did not exit within 2s of EOF"
+	assert_output --partial "mcp --help did not exit within 2s"
 }

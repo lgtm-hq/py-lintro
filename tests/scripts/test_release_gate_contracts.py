@@ -1,9 +1,8 @@
 """Lockstep tests for the release verify step's couplings to lintro's UI.
 
 ``verify_built_binary.sh`` and ``drive_interactive_review.py`` classify a
-release build by matching lintro's own human-readable copy: the missing-extra
-``UsageError`` from the MCP command, the interactive review prompt, and its key
-bindings. Those literals are hand-maintained in three other files, so without
+release build by matching lintro's own human-readable copy: the ``mcp``
+command's help, the interactive review prompt, and its key bindings. Those literals are hand-maintained in three other files, so without
 these tests a reword inside ``lintro`` passes the whole suite and only surfaces
 as a false packaging failure on the next tag (#2514).
 """
@@ -27,12 +26,9 @@ _BATS_PATH = (
     _REPO_ROOT / "tests" / "bats" / "unit" / "build" / "test_verify_built_binary.bats"
 )
 
-# The literal the verify step greps for to accept a binary built without the
-# optional `lintro[mcp]` extra, as written in the shell script itself.
-_MCP_GREP_PATTERN = re.compile(r'grep -q "([^"]+)"')
-
-# The exit code the verify step requires that message to arrive with.
-_MCP_EXIT_PATTERN = re.compile(r"^MCP_USAGE_ERROR_EXIT=(\d+)$", re.MULTILINE)
+# The literal the verify step greps the `mcp --help` output for, as written in
+# the shell script itself.
+_MCP_GREP_PATTERN = re.compile(r'^MCP_HELP_MARKER="([^"]+)"$', re.MULTILINE)
 
 # A pty is required for the send-loop tests; every CI platform has one, but
 # the module must still import where it does not.
@@ -129,49 +125,35 @@ def _verify_mcp_marker() -> str:
     match = _MCP_GREP_PATTERN.search(source)
     assert_that(match).is_not_none()
     assert match is not None  # narrow type for mypy
-    return match.group(1).replace("\\[", "[").replace("\\]", "]")
+    marker = match.group(1)
+    # The marker is the grep pattern, so the script must actually use it.
+    assert_that(source).contains('grep -q "$MCP_HELP_MARKER"')
+    return marker
 
 
-def test_mcp_marker_matches_the_usage_error_lintro_raises() -> None:
-    """The verify step's MCP literal must come from ``require_mcp`` itself.
+def test_mcp_marker_matches_the_commands_help_output() -> None:
+    """The verify step's literal must come from the ``mcp`` command's help.
 
-    A reword of the missing-extra ``UsageError`` would otherwise make the
-    verify step treat a perfectly normal release binary as a packaging
-    failure, discovered only on the next tag.
+    The probe is narrowed to command wiring while #2577 is open -- ``lintro
+    mcp`` dies in every frozen binary -- so the pin follows it: a reword of
+    the ``--workspace`` option help would otherwise fail a healthy release
+    binary, discovered only on the next tag.
     """
-    import click
+    from click.testing import CliRunner
 
-    from lintro.mcp import require_mcp
+    from lintro.cli_utils.commands.mcp import mcp_command
 
-    with pytest.MonkeyPatch.context() as patcher:
-        patcher.setattr("lintro.mcp.is_mcp_available", lambda: False)
-        with pytest.raises(click.UsageError) as raised:
-            require_mcp()
+    result = CliRunner().invoke(mcp_command, ["--help"])
 
-    assert_that(str(raised.value)).contains(_verify_mcp_marker())
-
-
-def test_mcp_acceptance_requires_clicks_usage_error_exit_code() -> None:
-    """Only click's ``UsageError`` code may carry the missing-extra message.
-
-    Without the code, a crash whose traceback happens to quote the phrase
-    would be accepted as a healthy release binary.
-    """
-    import click
-
-    source = _VERIFY_PATH.read_text(encoding="utf-8")
-    match = _MCP_EXIT_PATTERN.search(source)
-    assert_that(match).is_not_none()
-    assert match is not None  # narrow type for mypy
-
-    assert_that(int(match.group(1))).is_equal_to(click.UsageError.exit_code)
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(result.output).contains(_verify_mcp_marker())
 
 
 def test_bats_stub_reuses_the_same_mcp_marker() -> None:
     """The bats stub must speak the copy the verify step accepts.
 
-    The stub hard-codes the message a real binary prints; if it drifts from
-    the grep literal the suite goes green while the release gate breaks.
+    The stub hard-codes the help a real binary prints; if it drifts from the
+    grep literal the suite goes green while the release gate breaks.
     """
     assert_that(_BATS_PATH.read_text(encoding="utf-8")).contains(
         _verify_mcp_marker(),
