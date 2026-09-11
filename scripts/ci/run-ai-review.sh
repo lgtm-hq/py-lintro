@@ -362,7 +362,7 @@ lint_report_arg=()
 if [[ -n "$lint_run_id" ]]; then
 	# Bounded: a stalled artifact download must not eat the review budget.
 	if timeout --signal=TERM --kill-after=5 120 \
-		gh run download "$lint_run_id" "${repo_arg[@]}" \
+		gh run download "$lint_run_id" ${repo_arg[@]+"${repo_arg[@]}"} \
 		--name linting-json-report --dir "$lint_report_dir" &&
 		[[ -s "$lint_report_path" ]]; then
 		lint_report_arg=(--lint-report "$lint_report_path")
@@ -376,7 +376,7 @@ fi
 # Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
 # ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.
 export PYTHONUNBUFFERED=1
-uv run lintro review --pr "${pr_number}" "${repo_arg[@]}" --depth 1 --post "${lint_report_arg[@]}" --output json >"$output_file" 2>&1 &
+uv run lintro review --pr "${pr_number}" ${repo_arg[@]+"${repo_arg[@]}"} --depth 1 --post ${lint_report_arg[@]+"${lint_report_arg[@]}"} --output json >"$output_file" 2>&1 &
 lintro_pid=$!
 # --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
 # group signal left it ignoring TERM (``trap '' TERM``).

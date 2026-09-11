@@ -1228,10 +1228,10 @@ def test_lint_report_download_is_keyed_on_the_located_run() -> None:
 def test_missing_lint_report_degrades_to_a_header_note() -> None:
     """No report for this head means a visible note, never an abort.
 
-    The script always passes the report path; when nothing was downloaded the
-    file is absent and lintro renders the fixed wording in the review header.
-    The script's own log line uses the same words so the Actions log and the
-    posted comment agree.
+    When nothing was downloaded the script passes no ``--lint-report`` at
+    all and lintro renders its fixed "unavailable" wording in the review
+    header. The script's own log line uses the same words so the Actions log
+    and the posted comment agree.
     """
     text = "\n".join(_executable_shell_lines())
 
@@ -1909,17 +1909,23 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     first, the Actions runner kills the review mid-flight, no JSON error
     envelope is written, and ``classify_review_outcome.py`` reads a truncated
     output file (how PR #1916's review died under 600 s / 15 min). The
-    invariant is ``ceil(cli_timeout / 60) + setup overhead + posting margin <=
-    timeout-minutes``, with ~7 minutes observed for harden-runner + checkout +
-    Node/claude install + uv sync, and a 1-minute posting margin. Bump the two
-    values together — ``CLI_REVIEW_TIMEOUT_SECONDS`` in run-ai-review.sh (kept
-    in sync with ``ai.transports.cli.timeout`` / DEFAULT_CLI_TIMEOUT) and
+    invariant is ``ceil(cli_timeout / 60) + setup overhead + lint-report wait
+    + posting margin <= timeout-minutes``, with ~7 minutes observed for
+    harden-runner + checkout + Node/claude install + uv sync, up to
+    ``LINT_REPORT_WAIT_SECONDS`` spent waiting for the exact-head lint report
+    (#2571), and a 1-minute posting margin. Bump the values together —
+    ``CLI_REVIEW_TIMEOUT_SECONDS`` and ``LINT_REPORT_WAIT_SECONDS`` in
+    run-ai-review.sh (the former kept in sync with
+    ``ai.transports.cli.timeout`` / DEFAULT_CLI_TIMEOUT) and
     ``timeout-minutes`` in ai-review.yml. The review invocation itself must
     not pass a hand-tuned ``--timeout`` once the profile default covers it
     (#1923).
     """
     setup_overhead_minutes = 7
     posting_margin_minutes = 1
+    lint_report_wait_minutes = math.ceil(
+        _shell_default("LINT_REPORT_WAIT_SECONDS") / 60
+    )
 
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
     # Collapse backslash continuations so a flag wrapped onto its own line
@@ -1952,13 +1958,14 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
 
     budget = review_timeout_minutes + setup_overhead_minutes
-    budget += posting_margin_minutes
+    budget += lint_report_wait_minutes + posting_margin_minutes
     assert_that(job_timeout_minutes).described_as(
         f"timeout-minutes ({job_timeout_minutes}) must cover the CLI profile "
         f"timeout ({review_timeout_minutes} min) plus "
-        f"{setup_overhead_minutes} min setup and "
+        f"{setup_overhead_minutes} min setup, "
+        f"{lint_report_wait_minutes} min lint-report wait and "
         f"{posting_margin_minutes} min posting margin — bump it together "
-        "with CLI_REVIEW_TIMEOUT_SECONDS / ai.transports.cli.timeout",
+        "with CLI_REVIEW_TIMEOUT_SECONDS / LINT_REPORT_WAIT_SECONDS",
     ).is_greater_than_or_equal_to(budget)
 
 
