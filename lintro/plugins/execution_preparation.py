@@ -5,6 +5,7 @@ This module provides execution preparation, version checking, and config injecti
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,15 @@ def get_effective_timeout(
 ) -> float:
     """Get the effective timeout value.
 
+    This is the single acceptance rule for the ``timeout`` option: every tool
+    resolves the value here rather than re-implementing its own coercion, so
+    the same option cannot mean different things to different callers. Only a
+    finite, strictly positive ``int`` or ``float`` is accepted. ``bool`` is
+    rejected despite being an ``int`` subclass, because no caller means "one
+    second" by ``True``; zero and negatives are rejected because they make
+    ``subprocess.run`` expire immediately and disable pytest's ``--timeout``
+    rather than expressing "wait forever".
+
     Args:
         timeout: Override timeout value, or None to use default.
         options: Options dict that may contain timeout.
@@ -82,20 +92,20 @@ def get_effective_timeout(
     Returns:
         Timeout value in seconds.
     """
-    if timeout is not None:
-        return float(timeout)
+    raw_timeout = timeout if timeout is not None else options.get("timeout")
+    if raw_timeout is None:
+        return float(default_timeout)
 
-    raw_timeout = options.get("timeout", default_timeout)
-    if isinstance(raw_timeout, (int, float)):
-        return float(raw_timeout)
+    if isinstance(raw_timeout, (int, float)) and not isinstance(raw_timeout, bool):
+        value = float(raw_timeout)
+        if math.isfinite(value) and value > 0:
+            return value
 
-    # Warn about invalid timeout value
-    if raw_timeout is not None:
-        type_name = type(raw_timeout).__name__
-        logger.warning(
-            f"Invalid timeout value {raw_timeout!r} (type {type_name}), "
-            f"using default {default_timeout}s",
-        )
+    type_name = type(raw_timeout).__name__
+    logger.warning(
+        f"Invalid timeout value {raw_timeout!r} (type {type_name}), "
+        f"using default {default_timeout}s",
+    )
     return float(default_timeout)
 
 
