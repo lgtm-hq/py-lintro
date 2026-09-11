@@ -329,6 +329,10 @@ findings that clear the posting policy; the rest become _notes_:
   a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
   the reviewed commit. They open no thread, are excluded from the verdict, the severity
   tiles, the open-findings table and the fix prompts, and open no record of their own.
+  Notes are round-scoped, like the summary and the reasoning block: nothing persists
+  them, so a sticky comment re-rendered from state alone — a converged skip, an error
+  surface — shows no notes block. The comment posted by the round that routed them still
+  carries it.
 
 A note never resolves an existing thread. When a finding posted inline in an earlier
 round comes back below the floor, its record is carried forward open — the model still

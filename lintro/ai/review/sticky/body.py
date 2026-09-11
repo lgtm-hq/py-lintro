@@ -90,6 +90,14 @@ def state_sections(
 ) -> list[Section]:
     """Order the sections of a board re-rendered from state alone.
 
+    No notes block (#2572, #2583): notes are round-scoped, like the summary
+    and the model's reasoning. They are the round's routed findings, not
+    tracked state — nothing persists them — so a board re-rendered without a
+    result (a converged skip, an error surface) carries the previous round's
+    notes no more than it carries that round's summary. The last real round's
+    comment still shows them; this render is a state-derived board, not a
+    replay of the round that produced it.
+
     Args:
         plan: Resolved inputs, with ``result`` left as ``None``.
         banner: Optional blockquote rendered directly under the header.

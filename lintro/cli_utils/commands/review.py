@@ -1058,7 +1058,13 @@ def _run_round(
     targets: _ReviewTargets,
     console: Console,
 ) -> ReviewResult:
-    """Construct the provider, execute the review, and persist its state.
+    """Construct the provider, mark, execute the review, and persist its state.
+
+    The posting policy (#2572) is applied here, between the replay and the
+    persist, because the persisted state is what the next round matches
+    against: a note that reached the store unmarked would be recorded as an
+    open inline finding the sticky never tracked, and the next round's board,
+    verdict and exit code would disagree with this one's.
 
     Args:
         options: The command's Click-populated options.
@@ -1073,7 +1079,8 @@ def _run_round(
     the review-error exit code.
 
     Returns:
-        ReviewResult: The completed review.
+        ReviewResult: The completed review, with ``posted_inline`` already set
+        on every finding.
     """
     provider = None
     try:
@@ -1092,6 +1099,19 @@ def _run_round(
                 prior_state=policy.prior_state,
                 context=prepared.context,
             )
+        # Before any state is derived (#2572): the store is the authoritative
+        # record the next round matches against, so persisting unmarked
+        # findings would open records for notes the sticky never tracked and
+        # leave the next round's board and exit code contradicting the
+        # verdict. The re-application in ``_render_post_and_exit`` is
+        # idempotent; this is the write that must not see a raw result.
+        result = replace(
+            result,
+            findings=apply_posting_policy(
+                findings=result.findings,
+                policy=PostingPolicy.from_ai_config(prepared.ai_config),
+            ),
+        )
         try:
             persist_review_state(
                 result=result,
@@ -1380,21 +1400,24 @@ def _post_review(
             captured_comment_ids=captured_comment_ids,
         ),
     )
-    if captured_comment_ids:
-        try:
-            persist_review_state(
-                result=result,
-                context=prepared.context,
-                prior=prior_state,
-                pr_number=targets.state_pr,
-                repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
-                inline_comment_ids=captured_comment_ids,
-            )
-        except Exception:
-            logger.warning(
-                "Could not persist posted inline comment ids; next "
-                "round may replay those findings",
-            )
+    # Unconditional: ``_run_round`` already wrote this round's state from the
+    # same prior, so re-advancing it here is the same state plus whatever
+    # thread ids posting captured. Guarding on the ids would make the ledger's
+    # last word depend on whether GitHub accepted the inline batch.
+    try:
+        persist_review_state(
+            result=result,
+            context=prepared.context,
+            prior=prior_state,
+            pr_number=targets.state_pr,
+            repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
+            inline_comment_ids=captured_comment_ids,
+        )
+    except Exception:
+        logger.warning(
+            "Could not persist posted inline comment ids; next "
+            "round may replay those findings",
+        )
     if not posted:
         logger.warning("GitHub review posting skipped or failed")
 
