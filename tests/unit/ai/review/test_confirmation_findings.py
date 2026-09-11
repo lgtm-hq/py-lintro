@@ -192,13 +192,19 @@ def test_confirmation_phrase_in_fix_is_dropped(fix: str) -> None:
             "The unconfirmed write is retried without a backoff.",
             "Add exponential backoff to the retry loop.",
         ),
+        (
+            "P2 because the confirmation dialog never opens when the token has "
+            "expired, so the delete runs without confirmation.",
+            "Open the confirmation dialog before checking token expiry.",
+        ),
     ],
 )
 def test_defect_findings_are_kept(description: str, fix: str) -> None:
     """Findings that describe a defect pass through untouched.
 
-    ``unconfirmed`` does not match ``confirmation``: the phrases match on word
-    boundaries, so a defect about an unconfirmed write is not a confirmation.
+    A bare ``confirmation`` is not a marker: a defect in a confirmation flow
+    keeps its finding. The phrases match on word boundaries, so a defect about
+    an unconfirmed write is not a confirmation either.
 
     Args:
         description: Defect description.

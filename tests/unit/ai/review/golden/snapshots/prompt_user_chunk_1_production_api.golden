@@ -83,7 +83,7 @@ Binary files a/assets/logo.png and b/assets/logo.png differ
 
 ### Sensitivity (balanced)
 
-Report every checklist **yes** as a finding. Prioritize cross-file integration bugs over isolated nits, but do not drop legitimate P3 issues when checklist items fire.
+Record every checklist **yes** in `checklist`; report it as a finding only when it identifies a defect. Prioritize cross-file integration bugs over isolated nits, but do not drop legitimate P3 issues when checklist items fire.
 
 ---
 

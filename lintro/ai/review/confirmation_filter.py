@@ -29,13 +29,16 @@ __all__ = [
 
 #: Phrases whose presence in a finding's description or fix marks it as a
 #: checklist confirmation rather than a defect. Matched case-insensitively on
-#: word boundaries, so ``unconfirmed`` does not match ``confirmation``.
+#: word boundaries. Each phrase is an explicit non-defect assertion: a bare
+#: ``confirmation`` is deliberately absent, because a real defect in a
+#: confirmation flow ("the confirmation dialog never opens") must survive.
 CONFIRMATION_PHRASES: tuple[str, ...] = (
     "not a defect",
     "no code change",
     "positive verification",
     "this is a confirmation",
-    "confirmation",
+    "as a confirmation",
+    "as confirmation",
 )
 
 #: ``fix`` text that on its own marks a finding as a confirmation, compared

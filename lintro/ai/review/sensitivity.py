@@ -121,16 +121,18 @@ def format_strictness_prompt_section(*, policy: ReviewSensitivityPolicy) -> str:
         return (
             "### Sensitivity (thorough)\n\n"
             f"Actively hunt for: {hunt_text}.\n"
-            "Report checklist **yes** answers as findings, including P3 "
+            "Record every checklist **yes** in `checklist`; report it as a "
+            "finding only when it identifies a defect, including P3 "
             "documentation and migration nits when they would confuse "
             "contributors or break runbooks."
         )
 
     return (
         "### Sensitivity (balanced)\n\n"
-        "Report every checklist **yes** as a finding. Prioritize cross-file "
-        "integration bugs over isolated nits, but do not drop legitimate P3 "
-        "issues when checklist items fire."
+        "Record every checklist **yes** in `checklist`; report it as a finding "
+        "only when it identifies a defect. Prioritize cross-file integration "
+        "bugs over isolated nits, but do not drop legitimate P3 issues when "
+        "checklist items fire."
     )
 
 
