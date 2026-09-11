@@ -191,6 +191,7 @@ def _round_plan(*, request: StickyRequest, outcome: RoundOutcome) -> StickyPlan:
         inline_failure=request.inline_failure,
         repo=request.repo,
         pr_number=request.pr_number,
+        posting_policy=request.posting_policy,
     )
 
 

@@ -197,6 +197,7 @@ def post_review_to_github(
                 repo=gh_reporter.repo or "",
                 pr_number=gh_reporter.pr_number,
                 departed_paths=settings.departed_paths,
+                posting_policy=settings.posting_policy,
             ),
         )
         render.archive = archive  # type: ignore[attr-defined]

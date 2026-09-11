@@ -1353,6 +1353,9 @@ def _post_review(
     from lintro.ai.review.github import post_review_to_github
     from lintro.ai.review.models.review_post_options import ReviewPostOptions
 
+    # Rebuilt from the same resolved config the apply point read, so the
+    # sticky's notes caption names the floor its flags were set under.
+    posting_policy = PostingPolicy.from_ai_config(prepared.ai_config)
     captured_comment_ids: dict[str, int] = {}
     posted = post_review_to_github(
         result=result,
@@ -1369,6 +1372,7 @@ def _post_review(
             # the provider reported no usage), not the pre-run profile value.
             cost_basis=result.metadata.cost_basis,
             auto_resolve=lintro_config.review.auto_resolve,
+            posting_policy=posting_policy,
             config_source=_describe_config_source(
                 config_path=lintro_config.config_path,
                 overrides=_cli_overrides(options=options),

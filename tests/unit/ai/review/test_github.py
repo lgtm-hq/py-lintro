@@ -926,3 +926,57 @@ def test_review_body_and_degraded_sticky_coexist(
     reporter.update_issue_comment.assert_called()
     folded = reporter.update_issue_comment.call_args.kwargs["body"]
     assert_that(folded).contains("could not be posted")
+
+
+def test_only_inline_findings_open_threads_and_notes_reach_the_sticky_only(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The posting policy's flag is honoured at the one place threads open (#2572).
+
+    A note shares the inline finding's diff-mappable line, so nothing but the
+    ``posted_inline`` filter in front of ``_partition_findings`` can keep it
+    out of the review batch and out of the unmappable fallback.
+    """
+    from dataclasses import replace as dataclass_replace
+
+    from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+
+    inline = ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file="src/main.py",
+        line=10,
+        title="Posted as a thread",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+    )
+    note = dataclass_replace(
+        inline,
+        title="Kept as a note",
+        confidence="low",
+        posted_inline=False,
+    )
+    reporter = _fresh_reporter()
+
+    posted = post_review_to_github(
+        result=dataclass_replace(sample_review_result, findings=(inline, note)),
+        reporter=reporter,
+    )
+
+    assert_that(posted).is_true()
+    batches = [
+        payload
+        for _method, url, payload in reporter.log.api_calls
+        if url.endswith("/reviews")
+    ]
+    assert_that(batches).is_length(1)
+    comments = batches[0]["comments"]
+    assert_that(comments).is_length(1)
+    assert_that(comments[0]["body"]).contains("Posted as a thread")
+    assert_that(str(batches[0])).does_not_contain("Kept as a note")
+    body = reporter.post_issue_comment.call_args.args[0]
+    assert_that(body).contains("💬 Notes and questions (1)")
+    assert_that(body).contains("**Kept as a note**")
+    assert_that(body).does_not_contain("could not be posted")

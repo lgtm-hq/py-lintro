@@ -9,6 +9,7 @@ thread, and the address is the same wherever it is rendered.
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 __all__ = [
     "FINDING_MARKER_PREFIX",
@@ -114,5 +115,8 @@ def file_line_url(
     """
     if not repo or not sha or not path:
         return ""
-    url = f"https://github.com/{repo}/blob/{sha}/{path}"
+    # A space or an unbalanced ``)`` in the path would end a CommonMark link
+    # destination early and render the whole link as literal text, so the
+    # path is percent-encoded; ``/`` is kept so the blob route stays intact.
+    url = f"https://github.com/{repo}/blob/{sha}/{quote(path, safe='/')}"
     return f"{url}#L{line}" if line > 0 else url

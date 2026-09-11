@@ -19,7 +19,7 @@ Two blocking issues remain; the session fix landed.
 
 <details><summary>💬 Notes and questions (1)</summary>
 
-<sub>Not posted as threads and not counted in the verdict: low-confidence findings and open questions.</sub>
+<sub>Not posted as threads and not counted in the verdict: findings below the inline confidence floor (medium) and open questions.</sub>
 
 - 🟡 P3 · low confidence — **Docstring omits the raised error** · [`src/auth/tokens.py:7`](https://github.com/lgtm-hq/py-lintro/blob/0d15ea5edeadbeef0d15ea5edeadbeef0d15ea5e/src/auth/tokens.py#L7)
   The Raises section is missing.

@@ -10,9 +10,12 @@ from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
+from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import derive_verdict, match_findings
 from lintro.ai.review.github_review_body import build_review_body
+from lintro.ai.review.lifecycle.markers import file_line_url
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
@@ -429,3 +432,217 @@ def test_match_result_type_is_unchanged_by_the_gate() -> None:
     match = match_findings(previous=None, findings=(), round_number=1)
 
     assert_that(match).is_instance_of(FindingMatchResult)
+
+
+# --- cross-round carry (review thread on #2583) --------------------------------
+
+
+def _round(
+    *,
+    previous: ReviewState | None,
+    finding: ReviewFinding,
+    round_number: int,
+) -> FindingMatchResult:
+    """Match one round carrying a single policy-marked finding."""
+    (marked,) = apply_posting_policy(findings=(finding,), policy=PostingPolicy())
+    return match_findings(
+        previous=previous,
+        findings=(marked,),
+        round_number=round_number,
+        head_sha=f"sha{round_number}",
+        reviewed_paths=frozenset({finding.file}),
+    )
+
+
+def _state_after(match: FindingMatchResult) -> ReviewState:
+    """Persist a round's records the way the sticky state would."""
+    return ReviewState(findings=match.records)
+
+
+def test_a_prior_inline_record_stays_open_when_re_reported_as_a_note() -> None:
+    """Dropping below the floor is not a fix: the thread is carried, not resolved."""
+    blocker = _finding(severity=Severity.P1, confidence="high")
+
+    round_one = _round(previous=None, finding=blocker, round_number=1)
+    round_two = _round(
+        previous=_state_after(round_one),
+        finding=replace(blocker, confidence="low"),
+        round_number=2,
+    )
+
+    (record,) = round_two.records
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+    assert_that(record.resolved_round).is_equal_to(0)
+    assert_that(round_two.resolved).is_empty()
+    assert_that(round_two.new).is_empty()
+    assert_that([carried.key for carried in round_two.carried]).is_equal_to(
+        [record.key],
+    )
+    assert_that(round_two.outcome_for(record=record)).is_equal_to(
+        FindingMatchOutcome.CARRIED,
+    )
+
+
+def test_a_note_that_recovers_confidence_is_carried_not_new() -> None:
+    """Round 3 at high confidence matches the still-open record from round 1."""
+    blocker = _finding(severity=Severity.P1, confidence="high")
+    round_one = _round(previous=None, finding=blocker, round_number=1)
+    round_two = _round(
+        previous=_state_after(round_one),
+        finding=replace(blocker, confidence="low"),
+        round_number=2,
+    )
+
+    round_three = _round(
+        previous=_state_after(round_two),
+        finding=blocker,
+        round_number=3,
+    )
+
+    (record,) = round_three.records
+    assert_that(round_three.new).is_empty()
+    assert_that(record.since_round).is_equal_to(1)
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
+
+
+def test_a_prior_record_resolves_only_when_its_fingerprint_is_absent() -> None:
+    """The carry is fingerprint-scoped: an unrelated note resolves nothing."""
+    blocker = _finding(severity=Severity.P1, confidence="high")
+    round_one = _round(previous=None, finding=blocker, round_number=1)
+
+    round_two = _round(
+        previous=_state_after(round_one),
+        finding=_finding(title="Different thing", confidence="low"),
+        round_number=2,
+    )
+
+    assert_that([record.status for record in round_two.records]).is_equal_to(
+        [FindingStatus.RESOLVED],
+    )
+
+
+def test_sticky_tags_a_note_that_kept_a_prior_thread_open(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The reader learns why round 2's thread was not resolved."""
+    blocker = _finding(severity=Severity.P1, confidence="high", title="Kept open")
+    round_one = _round(previous=None, finding=blocker, round_number=1)
+    (note,) = apply_posting_policy(
+        findings=(replace(blocker, confidence="low"),),
+        policy=PostingPolicy(),
+    )
+
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=(note,)),
+            prior_state=_state_after(round_one),
+        ),
+    )
+
+    assert_that(body).contains(
+        "**Kept open** · `src/app.py:12` (below the inline confidence floor "
+        "this round)",
+    )
+    assert_that(body).contains("0 fixed this round")
+
+
+# --- link encoding and caption (review threads on #2583) ------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "encoded"),
+    [
+        ("docs/my notes.md", "docs/my%20notes.md"),
+        ("src/weird).py", "src/weird%29.py"),
+        ("src/(group)/a.py", "src/%28group%29/a.py"),
+    ],
+    ids=["space", "lone-paren", "balanced-parens"],
+)
+def test_note_link_percent_encodes_characters_commonmark_cannot_take(
+    sample_review_result: ReviewResult,
+    path: str,
+    encoded: str,
+) -> None:
+    """A space or a parenthesis in the path must not end the link early."""
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=replace(
+                sample_review_result,
+                findings=(
+                    _finding(
+                        title="odd path",
+                        confidence="low",
+                        file=path,
+                        posted_inline=False,
+                    ),
+                ),
+            ),
+            head_sha="abc123def456",
+            repo="lgtm-hq/py-lintro",
+            pr_number=7,
+        ),
+    )
+
+    assert_that(body).contains(
+        f"[`{path}:12`](https://github.com/lgtm-hq/py-lintro/blob/abc123def456/"
+        f"{encoded}#L12)",
+    )
+
+
+def test_file_line_url_encodes_the_path_and_keeps_the_route() -> None:
+    """Slashes stay literal; everything CommonMark would choke on is encoded."""
+    url = file_line_url(
+        repo="o/r",
+        sha="deadbeef",
+        path="a b/c(d).py",
+        line=3,
+    )
+
+    assert_that(url).is_equal_to(
+        "https://github.com/o/r/blob/deadbeef/a%20b/c%28d%29.py#L3",
+    )
+
+
+def _notes_body(*, result: ReviewResult, policy: PostingPolicy) -> str:
+    """Render a sticky under the given policy and return its notes block."""
+    body = build_sticky_comment(
+        request=StickyRequest(result=result, posting_policy=policy),
+    )
+    return body.split("💬 Notes and questions", 1)[1].split("</details>", 1)[0]
+
+
+def test_notes_caption_names_the_configured_floor(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Under a ``high`` floor the caption says so instead of claiming ``low``."""
+    policy = PostingPolicy(inline_min_confidence=ConfidenceLevel.HIGH)
+    result = replace(
+        sample_review_result,
+        findings=apply_posting_policy(findings=_mixed_findings(), policy=policy),
+    )
+
+    notes = _notes_body(result=result, policy=policy)
+
+    assert_that(notes).contains(
+        "findings below the inline confidence floor (high) and open questions.",
+    )
+    assert_that(notes).contains("**medium**")
+
+
+def test_notes_caption_drops_questions_when_they_post_inline(
+    sample_review_result: ReviewResult,
+) -> None:
+    """With questions posted inline the caption does not claim they live here."""
+    policy = PostingPolicy(post_questions_inline=True)
+    result = replace(
+        sample_review_result,
+        findings=apply_posting_policy(findings=_mixed_findings(), policy=policy),
+    )
+
+    notes = _notes_body(result=result, policy=policy)
+
+    assert_that(notes).contains(
+        "findings below the inline confidence floor (medium).",
+    )
+    assert_that(notes).does_not_contain("open questions")
+    assert_that(notes).does_not_contain("**question**")

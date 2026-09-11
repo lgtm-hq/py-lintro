@@ -328,8 +328,15 @@ findings that clear the posting policy; the rest become _notes_:
   `ai.review_post_questions_inline` is `true`. Notes render in the sticky comment under
   a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
   the reviewed commit. They open no thread, are excluded from the verdict, the severity
-  tiles, the open-findings table and the fix prompts, and are not carried into later
-  rounds.
+  tiles, the open-findings table and the fix prompts, and open no record of their own.
+
+A note never resolves an existing thread. When a finding posted inline in an earlier
+round comes back below the floor, its record is carried forward open — the model still
+asserts it, only with less confidence — so the thread stays, the round does not count it
+as fixed, and the notes entry is tagged _(below the inline confidence floor this
+round)_. The record resolves only once the finding stops being reported at all, and a
+finding whose confidence recovers matches the record it already had rather than
+reappearing as new.
 
 Nothing is dropped. JSON and MCP output keep every finding and add `posted_inline`
 (`true` / `false`) per finding so a consumer can tell a thread from a note. The terminal

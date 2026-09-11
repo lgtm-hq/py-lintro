@@ -357,17 +357,21 @@ def match_findings(
     ``occurrence_count`` against an unchanged ``occurrence_total``.
 
     A finding the posting policy routed to the notes block (#2572,
-    ``posted_inline`` cleared) is never tracked: it opens no thread, so there
-    is nothing to carry, resolve, or count as open in a later round. The
-    filter lives here rather than at each caller so the sticky, the review
-    body, the inline comments, and the coverage bookkeeping cannot disagree
-    about which findings exist.
+    ``posted_inline`` cleared) gets no record of its own: it opens no thread,
+    so there is nothing to carry, resolve, or count as open in a later round.
+    A prior *inline* record whose fingerprint comes back as a note is not
+    resolved either — the model still asserts the finding, only with less
+    confidence — so it is carried forward open rather than stamped fixed.
+    The filter lives here rather than at each caller so the sticky, the
+    review body, the inline comments, and the coverage bookkeeping cannot
+    disagree about which findings exist.
 
     Args:
         previous: State decoded from the prior sticky comment, or ``None`` for
             the first round on a PR.
         findings: Findings reported in the current round. Entries with
-            ``posted_inline`` cleared are ignored.
+            ``posted_inline`` cleared get no record, but keep a matching
+            prior record open.
         round_number: Round number being recorded (1-based).
         head_sha: Head commit sha reviewed in this round; stamped onto findings
             resolved by this round.
@@ -385,6 +389,15 @@ def match_findings(
         findings=[finding for finding in findings if finding.posted_inline],
         round_number=round_number,
     )
+    note_fingerprints = {
+        fingerprint_for(
+            file=finding.file,
+            category=finding.category,
+            title=finding.title,
+        )
+        for finding in findings
+        if not finding.posted_inline
+    }
 
     prior_by_fingerprint: dict[str, list[int]] = defaultdict(list)
     for index, record in enumerate(prior_records):
@@ -447,7 +460,8 @@ def match_findings(
         path = record.file
         left_diff = departed_paths is not None and path in departed_paths
         unread = reviewed_paths is not None and path not in reviewed_paths
-        if unread and not left_diff:
+        still_asserted = record.fingerprint in note_fingerprints
+        if (unread and not left_diff) or still_asserted:
             merged.append(record)
             carried.append(record)
             outcomes[record.key] = FindingMatchOutcome.CARRIED

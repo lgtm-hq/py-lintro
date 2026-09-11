@@ -23,12 +23,14 @@ from lintro.ai.review.github_render import (
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.sticky_plan import StickyPlan
+from lintro.ai.review.posting_policy import PostingPolicy
 from lintro.ai.review.sticky.cells import _open_prompt_findings
 from lintro.ai.review.sticky.findings import (
     _degraded_details,
     _findings_round_section,
 )
 from lintro.ai.review.sticky.history import _history_section, _this_run_section
+from lintro.ai.review.sticky.notes import _notes_section
 from lintro.ai.review.sticky.sections import (
     _coverage_limited_row,
     _coverage_section,
@@ -36,7 +38,6 @@ from lintro.ai.review.sticky.sections import (
     _degraded_row,
     _header,
     _incomplete_banner,
-    _notes_section,
     _reasoning_section,
     _suggestion_drops_row,
     _summary_section,
@@ -193,6 +194,8 @@ def round_sections(
                 result=result,
                 repo=plan.repo,
                 head_sha=plan.head_sha,
+                records=plan.match.records,
+                policy=plan.posting_policy or PostingPolicy(),
             ),
         ),
         Section(
