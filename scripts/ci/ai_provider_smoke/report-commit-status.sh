@@ -26,6 +26,29 @@
 
 set -euo pipefail
 
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+	cat <<'EOF'
+Report one provider API smoke row as a commit status on main's HEAD.
+
+Usage:
+  SMOKE_NAME=anthropic-api SMOKE_OUTCOME=success \
+    scripts/ci/ai_provider_smoke/report-commit-status.sh
+
+Environment:
+  GH_TOKEN       Token with `statuses: write`.
+  SMOKE_NAME     Table row name; becomes the context ai-provider-smoke/<name>.
+  SMOKE_KEY_ENV  The row's credential variable NAME, quoted in a skip status.
+  SMOKE_OUTCOME  The smoke script's outcome: success, failure or skipped.
+  SMOKE_STEP     The smoke step's outcome, used when the script wrote none.
+  GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_SERVER_URL, GITHUB_RUN_ID
+
+States: success (the provider answered), pending (the row's credential variable
+is empty, so nothing was called and nothing may look green) and failure
+(anything else, credit exhaustion included).
+EOF
+	exit 0
+fi
+
 : "${SMOKE_NAME:?SMOKE_NAME is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${GITHUB_SHA:?GITHUB_SHA is required}"
