@@ -8,6 +8,7 @@ records the error text the tracker issue quotes.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import json
 import sys
@@ -17,6 +18,10 @@ from typing import Any
 
 import pytest
 from assertpy import assert_that
+
+from lintro.ai import providers as providers_module
+from lintro.ai.enums import AITransport
+from lintro.ai.provider_enum import AIProvider
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SMOKE_DIR = _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke"
@@ -173,6 +178,104 @@ def test_matrix_carries_the_egress_host_for_every_row(smoke: ModuleType) -> None
         assert_that(entry["egress"]).ends_with(":443")
 
 
+def test_egress_follows_the_port_the_row_actually_connects_to(
+    smoke: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A non-443 row must allowlist the port it dials, not the default.
+
+    An entry naming 443 for a row pointing at 8443 has harden-runner block the
+    call, so the weekly run reports an opaque network error instead of the
+    provider's own verdict.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the table.
+    """
+    table = _write_table(
+        tmp_path / "providers.json",
+        [_row(base_url="https://gateway.example.com:8443/v1")],
+    )
+    (row,) = smoke.load_table(path=table)
+
+    assert_that(row.egress).is_equal_to("gateway.example.com:8443")
+    entry = smoke.build_matrix(rows=[row])["include"][0]
+    assert_that(entry["egress"]).is_equal_to("gateway.example.com:8443")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://api.example.com:0", "https://api.example.com:99999"],
+)
+def test_table_validation_rejects_an_unusable_port(
+    smoke: ModuleType,
+    tmp_path: Path,
+    base_url: str,
+) -> None:
+    """A port urlparse cannot use must fail the table, not the matrix step.
+
+    ``urlparse`` defers the port check to attribute access, so without this the
+    row validates and only explodes where the allowlist entry is built.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the table.
+        base_url: The malformed base URL under test.
+    """
+    table = _write_table(tmp_path / "providers.json", [_row(base_url=base_url)])
+    with pytest.raises(ValueError, match="port"):
+        smoke.load_table(path=table)
+
+
+def test_the_openai_protocol_row_drives_lintros_openai_provider(
+    smoke: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The openai row must reach lintro's openai provider, base URL and all.
+
+    Every other behavioural test here runs the anthropic row; the protocol
+    field is what selects the code path, so the second protocol needs its own
+    proof that the row's base URL, model and credential *variable name* arrive
+    on the config lintro builds the call from.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        monkeypatch: Provider-factory patcher.
+    """
+    captured: list[Any] = []
+
+    class _StubProvider:
+        async def complete(self, _prompt: str, **_kwargs: Any) -> Any:
+            return type("R", (), {"content": "pong"})()
+
+        async def aclose(self) -> None:
+            return None
+
+    def _get_provider(config: Any) -> Any:
+        captured.append(config)
+        return _StubProvider()
+
+    monkeypatch.setattr(providers_module, "get_provider", _get_provider)
+
+    row = next(
+        candidate
+        for candidate in smoke.load_table(path=_TABLE)
+        if candidate.protocol == "openai"
+    )
+    content = asyncio.run(
+        smoke._complete(row=row, credential_env="LINTRO_SMOKE_CREDENTIAL"),
+    )
+
+    assert_that(content).is_equal_to("pong")
+    assert_that(captured).is_length(1)
+    config = captured[0]
+    assert_that(config.provider).is_equal_to(AIProvider.OPENAI)
+    assert_that(config.transport).is_equal_to(AITransport.API)
+    assert_that(config.api_base_url).is_equal_to(row.base_url)
+    assert_that(config.model).is_equal_to(row.model)
+    assert_that(config.api_key_env).is_equal_to("LINTRO_SMOKE_CREDENTIAL")
+
+
 def test_a_missing_secret_reports_a_skip_and_never_calls_the_provider(
     smoke: ModuleType,
     tmp_path: Path,
@@ -213,19 +316,26 @@ def test_a_missing_secret_reports_a_skip_and_never_calls_the_provider(
     assert_that(summary.read_text(encoding="utf-8")).contains("skipped")
 
 
+@pytest.mark.parametrize("answer", ["pong", "  Pong!  ", '"pong"'])
 def test_a_successful_call_reports_success(
     smoke: ModuleType,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    answer: str,
 ) -> None:
-    """A non-empty response is the only thing that counts as a pass.
+    """Answering the prompt is what counts as a pass, however it is dressed.
+
+    Case, surrounding whitespace and the punctuation a chat model likes to add
+    are not drift worth reddening main for; anything else is (see the failure
+    cases below).
 
     Args:
         smoke: The loaded smoke runner module.
         tmp_path: Temporary directory for the Actions output files.
         monkeypatch: Environment patcher.
+        answer: The response content to simulate.
     """
-    monkeypatch.setattr(smoke.asyncio, "run", lambda _coro: "pong")
+    monkeypatch.setattr(smoke.asyncio, "run", lambda _coro: answer)
     monkeypatch.setattr(smoke, "_complete", lambda **_kwargs: None)
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -246,6 +356,8 @@ def test_a_successful_call_reports_success(
     [
         ("", "empty response"),
         (None, "Credit balance is too low"),
+        ("Sorry, I cannot help with that.", "expected 'pong'"),
+        ('{"error": "model_not_found"}', "expected 'pong'"),
     ],
 )
 def test_a_failing_call_records_the_error_text(
@@ -257,8 +369,10 @@ def test_a_failing_call_records_the_error_text(
 ) -> None:
     """Failure text must reach the file the tracker comment quotes.
 
-    An empty envelope and a raised provider error are both failures — the
-    credit-exhaustion case is the one that went unseen for a month (#2600).
+    An empty envelope, a raised provider error and an answer that is not the
+    word asked for are all failures — the credit-exhaustion case is the one
+    that went unseen for a month (#2600), and a gateway that renders its error
+    as prose would otherwise score a green tick on a call that failed.
 
     Args:
         smoke: The loaded smoke runner module.

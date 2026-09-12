@@ -1,5 +1,6 @@
 {
   "content": "pong",
+  "cost_estimate": 0.0,
   "input_tokens": 12,
   "model": "auto",
   "output_tokens": 4,

@@ -159,8 +159,9 @@ def test_live_cli_completes_a_minimal_invocation(
     except AIAuthenticationError as exc:
         # CLI liveness is presence-only, so an unauthenticated CLI only reveals
         # itself here. That is a missing precondition (link 3 of 3), not
-        # behavioural drift — and in the scheduled gate, where the credential is
+        # behavioural drift — and in the contract gate, where the credential is
         # supposed to be provided, unmet_precondition turns it into a failure.
+        # That gate is the manual dispatch now: this tier has no cron (#2600).
         #
         # This branch reaches a logged-out `claude`: the CLI prints "Not logged in
         # · Please run /login" on *stdout* with empty stderr, and the transport

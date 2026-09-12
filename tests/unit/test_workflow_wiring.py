@@ -6072,8 +6072,13 @@ def test_provider_api_smoke_runs_weekly_and_on_demand() -> None:
     assert_that(triggers).contains_key("workflow_dispatch")
     crons = [entry["cron"] for entry in triggers["schedule"]]
     assert_that(crons).is_length(1)
-    # Weekly: a day-of-week field that is not a wildcard.
-    assert_that(crons[0].split()[4]).is_not_equal_to("*")
+    # Weekly, exactly: a single day-of-week. A range or a list ('1-5', '1,3')
+    # would pass a not-a-wildcard check while spending quota several times a
+    # week, which is the cost this cadence was chosen to bound.
+    day_of_week = crons[0].split()[4]
+    assert_that(day_of_week).described_as(
+        "the provider smoke must run on exactly one weekday",
+    ).matches(r"^[0-6]$")
 
 
 def test_cli_invocation_smoke_is_manual_only() -> None:
@@ -6132,6 +6137,12 @@ def test_provider_api_smoke_is_driven_by_the_committed_table() -> None:
     assert_that(rows).is_not_empty()
     for row in rows:
         host = urlparse(row["base_url"]).hostname
+        # Without this, a row whose base_url does not parse yields host None
+        # and the check below becomes the vacuous 'None:443' is absent — the
+        # guard would pass on exactly the row that breaks egress.
+        assert_that(host).described_as(
+            f"{row['name']} base_url {row['base_url']!r} must parse to a host",
+        ).is_not_none()
         assert_that(allowlist).described_as(
             f"{row['name']} host must not be hard-coded here",
         ).does_not_contain(f"{host}:443")

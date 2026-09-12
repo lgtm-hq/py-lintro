@@ -12,12 +12,18 @@ because recording real output needs the CLIs installed and a credential. Until
 an owner re-records, this guards our parsers rather than proving vendor
 output.
 
+The expectation files pin the cost the parser attributed to each call as
+well, so a break in cost extraction is caught here rather than falling back to
+an estimate that still looks plausible downstream; a change to lintro's own
+pricing table therefore also asks for a re-record.
+
 Re-record with ``scripts/ci/record_cli_fixture.sh`` when a CLI pin moves.
 """
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -32,6 +38,16 @@ from tests.unit.ai.providers.cli_replay import (
 )
 
 _RECORDINGS = recordings()
+
+#: The Dockerfile build arg that pins each CLI. The recording's file name must
+#: match *its own* CLI's pin: searching the whole Dockerfile for the version
+#: string would let a comment, or another tool that happens to share the
+#: version, keep the test green while the pin that matters moved.
+_PIN_ARGS: dict[str, str] = {
+    "claude": "CLAUDE_CODE_VERSION",
+    "codex": "CODEX_VERSION",
+    "cursor": "CURSOR_AGENT_VERSION",
+}
 
 
 def test_every_supported_cli_has_a_recording() -> None:
@@ -53,9 +69,19 @@ def test_recordings_are_versioned_by_the_pinned_cli_version() -> None:
     )
     for cli, recording in _RECORDINGS:
         version = recording.name.removesuffix(".jsonl")
-        assert_that(pins).described_as(
-            f"{cli} recording {version} must match the pinned CLI version",
-        ).contains(f"={version}")
+        arg = _PIN_ARGS.get(cli)
+        assert_that(arg).described_as(f"{cli} has no known pin arg").is_not_none()
+        match = re.search(
+            rf"^ARG {arg}=(?P<version>\S+)\s*$",
+            pins,
+            flags=re.MULTILINE,
+        )
+        assert_that(match).described_as(
+            f"docker/ai-tools.Dockerfile must pin {arg}",
+        ).is_not_none()
+        assert_that(match.group("version")).described_as(  # type: ignore[union-attr]
+            f"{cli} recording {version} must match the {arg} pin",
+        ).is_equal_to(version)
 
 
 @pytest.mark.parametrize(
@@ -91,3 +117,22 @@ def test_fixture_root_is_where_the_recorder_writes() -> None:
     """The helper and the fixtures must not drift apart on location."""
     assert_that(str(FIXTURE_ROOT)).ends_with("tests/fixtures/ai/cli_replay")
     assert_that(FIXTURE_ROOT.is_dir()).is_true()
+
+
+def test_a_recording_under_an_unknown_cli_is_an_error_not_a_skip(
+    tmp_path: Path,
+) -> None:
+    """A fixture nobody parses must fail loudly, not vanish from the run.
+
+    Dropping it silently is the exact hole this fixture set exists to close:
+    a recording added for a CLI whose parser was never wired up would leave
+    the suite green while guarding nothing.
+
+    Args:
+        tmp_path: Temporary fixture root.
+    """
+    (tmp_path / "gemini").mkdir()
+    (tmp_path / "gemini" / "1.0.0.jsonl").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="gemini"):
+        recordings(root=tmp_path)

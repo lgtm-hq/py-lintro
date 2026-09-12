@@ -48,6 +48,12 @@ class ReplayResult:
         input_tokens: Prompt tokens the parser read from the recording.
         output_tokens: Completion tokens the parser read.
         session_id: Session id the parser recovered, when the CLI reports one.
+        cost_estimate: Cost in USD the parser attributed to the call — read
+            from the capture where the CLI reports one (claude's
+            ``total_cost_usd``) and estimated from the token counts where it
+            does not. Pinned so a break in cost extraction shows up here
+            rather than falling back to an estimate that still looks
+            plausible downstream.
     """
 
     content: str
@@ -55,6 +61,7 @@ class ReplayResult:
     input_tokens: int
     output_tokens: int
     session_id: str | None
+    cost_estimate: float
 
     def as_dict(self) -> dict[str, object]:
         """Return the result in the shape the ``.expected.json`` files use.
@@ -68,6 +75,7 @@ class ReplayResult:
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "session_id": self.session_id,
+            "cost_estimate": self.cost_estimate,
         }
 
 
@@ -125,23 +133,35 @@ def replay(*, cli: str, stdout: str, model: str) -> ReplayResult:
         input_tokens=int(response.input_tokens),
         output_tokens=int(response.output_tokens),
         session_id=session_id,
+        cost_estimate=float(response.cost_estimate),
     )
 
 
 def recordings(*, root: Path = FIXTURE_ROOT) -> list[tuple[str, Path]]:
     """Return every committed recording as a ``(cli, path)`` pair.
 
+    Every ``*.jsonl`` under the root is returned. A recording filed under a
+    directory this module has no parser for is an error rather than a quiet
+    omission: silently dropping it is exactly the unguarded-parser hole the
+    fixture set exists to close.
+
     Args:
         root: Fixture root to scan.
 
     Returns:
         Sorted ``(cli, recording path)`` pairs.
+
+    Raises:
+        ValueError: When a recording sits under an unknown CLI directory.
     """
-    found = [
-        (path.parent.name, path)
-        for path in sorted(root.rglob("*.jsonl"))
-        if path.parent.name in supported_clis()
-    ]
+    found = [(path.parent.name, path) for path in sorted(root.rglob("*.jsonl"))]
+    unknown = sorted({cli for cli, _ in found} - set(supported_clis()))
+    if unknown:
+        msg = (
+            f"recordings under unknown CLI directories {unknown}; "
+            f"known: {', '.join(supported_clis())}"
+        )
+        raise ValueError(msg)
     return found
 
 
