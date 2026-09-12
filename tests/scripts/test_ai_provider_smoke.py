@@ -408,6 +408,48 @@ def test_a_failing_call_records_the_error_text(
     assert_that(recorded).contains("anthropic-api")
 
 
+def test_a_wrong_answer_carrying_the_credential_is_redacted(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A gateway that echoes the key back as content must not publish it.
+
+    The unexpected-answer text is quoted into the log, the summary, the error
+    file and the tracker issue, so it has to clear the same bar as provider
+    error text: nothing derived from the credential survives.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the Actions output files.
+        monkeypatch: Environment patcher.
+    """
+    echoed = f"Unauthorized: key {_FAKE_CREDENTIAL} is not valid"
+    monkeypatch.setattr(smoke.asyncio, "run", lambda _coro: echoed)
+    monkeypatch.setattr(smoke, "_complete", lambda **_kwargs: None)
+    output = tmp_path / "output"
+    summary = tmp_path / "summary"
+    error_file = tmp_path / "smoke-error.md"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+
+    code = smoke.run_smoke(
+        row=smoke.load_table(path=_TABLE)[0],
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=error_file,
+    )
+
+    assert_that(code).is_equal_to(1)
+    assert_that(output.read_text(encoding="utf-8")).contains("outcome=failure")
+    for written in (error_file, summary):
+        text = written.read_text(encoding="utf-8")
+        assert_that(text).described_as(str(written)).does_not_contain(
+            _FAKE_CREDENTIAL,
+        )
+        assert_that(text).contains("RedactedProviderError")
+
+
 def test_an_unknown_row_name_fails_loudly(smoke: ModuleType) -> None:
     """Naming a row the table does not have must not silently do nothing.
 

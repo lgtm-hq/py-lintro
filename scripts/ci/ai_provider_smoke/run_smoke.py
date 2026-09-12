@@ -438,9 +438,15 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
             # ignored the prompt — is a failure too. The prompt was chosen so
             # the answer is checkable; checking only that it is non-empty
             # would throw that away.
+            #
+            # The answer is quoted into the log, the summary, the error file
+            # and the tracker issue, so it goes through the same redaction as
+            # a provider error: a 401 body echoed back as content would
+            # otherwise carry the live credential into all four.
+            safe_answer = _safe_detail(answer, env_name=credential_env)
             detail = (
                 "UnexpectedResponse: expected 'pong', got "
-                f"{answer[:_ANSWER_EXCERPT]!r}"
+                f"{safe_answer[:_ANSWER_EXCERPT]!r}"
             )
 
     if detail is not None:
