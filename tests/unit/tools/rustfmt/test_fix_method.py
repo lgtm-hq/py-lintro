@@ -232,3 +232,58 @@ def test_every_fix_result_records_the_crate_root_as_its_cwd(
             result = rustfmt_plugin.fix([str(source)], {})
 
     assert_that(result.cwd).is_equal_to(str(tmp_path))
+
+
+def test_every_fix_subprocess_runs_from_the_crate_root(
+    rustfmt_plugin: RustfmtPlugin,
+    tmp_path: Path,
+) -> None:
+    """``cargo fmt`` is only meaningful from the crate root.
+
+    ``fix`` runs three subprocesses — the pre-fix check, the write, the
+    post-fix check — and each must be launched from the directory holding
+    ``Cargo.toml``. Run from anywhere else, ``cargo fmt`` formats a different
+    crate or none at all, and the paths its parser reports stop lining up with
+    the ``cwd`` stamped on the result. The stamp is pinned above; this pins the
+    execution it describes.
+
+    Args:
+        rustfmt_plugin: The RustfmtPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    source = _cargo_crate(tmp_path)
+    seen_cwds: list[str | None] = []
+
+    def _record(
+        cmd: list[str],
+        timeout: int,
+        cwd: str | None = None,
+    ) -> tuple[bool, str]:
+        """Record the working directory and report a clean run.
+
+        Args:
+            cmd: Command list.
+            timeout: Timeout in seconds.
+            cwd: Working directory the plugin asked for.
+
+        Returns:
+            Tuple of (success, output).
+        """
+        del cmd, timeout
+        seen_cwds.append(cwd)
+        return (True, "")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            rustfmt_plugin,
+            "_run_subprocess",
+            side_effect=_record,
+        ):
+            rustfmt_plugin.fix([str(source)], {})
+
+    # Three invocations, every one of them from the crate root.
+    assert_that(seen_cwds).is_length(3)
+    assert_that(set(seen_cwds)).is_equal_to({str(tmp_path)})

@@ -394,11 +394,12 @@ def _run_verify_phase(
     """Run the single verify pass and fold its residual into the run.
 
     This is the verify half of the mutate-then-verify pipeline (#1743). The
-    ``CHECK`` capability of every selected tool that has one runs exactly once,
-    after every mutating capability has finished, over the files whose
-    fingerprint moved. Its findings replace the residual each mutating tool
-    reported for itself, so a residual is counted once and cross-tool
-    interference is visible.
+    ``CHECK`` capability of every selected tool that declares one runs exactly
+    once, after every mutating capability has finished, over the files whose
+    fingerprint moved. Its findings replace the residual those tools reported
+    for themselves, so a residual is counted once and cross-tool interference
+    is visible. A mutator that declares no ``CHECK`` (prettier, oxfmt, rustfmt,
+    shfmt) is not verified here and keeps its own counts until #2607.
 
     Does nothing outside a ``fmt`` run, or when no selected tool declares a
     pattern-addressed mutating claim.

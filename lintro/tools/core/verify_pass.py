@@ -2,12 +2,20 @@
 
 ``lintro fmt`` runs the mutating capabilities (``FIX``, ``FORMAT``) in derived
 DAG order and then makes **one** verify pass with the ``CHECK`` capabilities of
-the same tools. That single pass is the authoritative residual count, replacing
-the per-plugin "lint again after formatting" implementations each mutating tool
-used to carry privately. Only a run-level pass can see cross-tool interference:
-if ruff fixes a file and prettier then reformats it, ruff's own post-fix lint
-already ran, and the new scheduler deliberately sequences more mutating tools
-over the same files.
+the same tools. For a mutating tool that declares ``CHECK``, that single pass is
+the authoritative residual count, and the per-plugin "lint again after
+formatting" taplo and sqlfluff carried privately is gone. Only a run-level pass
+can see cross-tool interference: if ruff fixes a file and prettier then
+reformats it, ruff's own post-fix lint already ran, and the new scheduler
+deliberately sequences more mutating tools over the same files.
+
+What the pass does **not** cover: a mutator that declares no ``CHECK`` claim —
+prettier, oxfmt, rustfmt and shfmt — is never asked for a residual and keeps
+its own result contract, including whatever post-format checking it does for
+itself. Making every mutator declare ``CHECK`` is a follow-up (#2607). The pass
+also reports the *final state* of each file rather than who wrote it last,
+which is why the mutation phase runs one tool at a time (#2606) until the
+scheduler can keep overlapping mutators out of one batch.
 
 Scope narrowing
 ---------------
@@ -40,9 +48,11 @@ Residual accounting
 A file whose fingerprint did *not* move was not rewritten, so the issues it
 had before the mutation phase are exactly the issues it has after it. The
 authoritative residual is therefore the verify pass's findings on the changed
-files plus the mutation phase's pre-fix findings on the unchanged ones, and
-``fixed`` is derived from it rather than self-reported. Nothing is counted
-twice: a tool's own post-fix opinion is discarded, not added.
+files plus the mutation phase's pre-fix findings on the unchanged ones, and the
+displayed **net resolved** figure is derived from it rather than self-reported.
+Nothing is counted twice: a tool's own post-fix opinion is discarded, not
+added. A ``CHECK`` that could not answer produces no residual at all — see
+:class:`~lintro.enums.verify_status.VerifyStatus`.
 
 Where this lives
 ----------------
@@ -920,13 +930,15 @@ def fold_verify_results(
     """Fold each verify outcome into its tool's mutation result, in place.
 
     Display rolls up to the tool, so the run keeps exactly one result per
-    tool: the mutation result carries what was fixed and, after this fold, the
-    verify pass's residual. Keeping both rows instead would have made every
+    tool: the mutation result carries the net resolved figure and, after this
+    fold, the verify pass's residual. Keeping both rows instead would have made every
     output formatter, SARIF writer and AI summary responsible for a grouping
     rule for no user-visible gain.
 
-    A tool with no outcome at all declares no ``CHECK`` capability (prettier is
-    ``FORMAT``-only) and keeps its own numbers.
+    A tool with no outcome at all declares no ``CHECK`` capability — prettier,
+    oxfmt, rustfmt and shfmt are ``FORMAT``-only — and keeps its own numbers,
+    including any post-format checking it does for itself, until #2607 makes
+    every mutator declare ``CHECK``.
 
     Args:
         mutation_results: Results from the mutation phase, mutated in place.

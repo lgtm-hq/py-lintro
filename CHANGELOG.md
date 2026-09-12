@@ -13,20 +13,43 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 - **core**: `lintro format` (alias `fmt`) now runs as a mutate-then-verify pipeline.
   Every mutating capability (`FIX`, `FORMAT`) runs in derived DAG order, and then a
-  single verify pass runs the `CHECK` capability of the same tools; that one pass is the
-  run's authoritative residual count, replacing the per-plugin "lint again after
-  formatting" each mutating tool carried privately. A per-tool self-verify could not see
-  cross-tool interference — if ruff fixes a file and prettier then reformats it, ruff's
-  own post-fix lint has already run — so counts reported after a multi-tool format run
-  are now measured once, at the end, over the final bytes on disk. `fixed` is derived as
-  initial minus residual rather than self-reported. The verify pass is narrowed by file
+  single verify pass runs the `CHECK` capability of the same tools; for every mutator
+  that declares `CHECK`, that one pass is the run's authoritative residual count, and
+  the private post-fix re-lints taplo and sqlfluff carried are deleted. A per-tool
+  self-verify could not see cross-tool interference — if ruff fixes a file and prettier
+  then reformats it, ruff's own post-fix lint has already run — so counts reported after
+  a multi-tool format run are now measured once, at the end, over the final bytes on
+  disk. Format-only tools (prettier, oxfmt, rustfmt, shfmt) do not declare `CHECK`, so
+  they are not verified centrally and keep their own result contract until the follow-up
+  that makes every mutator declare it (#2607). The verify pass is narrowed by file
   fingerprint: only files whose stat moved between a pre- and post-mutation snapshot are
   re-checked, degrading to every file handed to a mutating capability when fingerprints
   cannot be trusted. `lintro check` stays read-only — no snapshot, no verify pass — and
   so does `format --dry-run`.
+- **core**: a tool whose residual the verify pass could not measure — its `CHECK`
+  crashed, timed out or was skipped — now reports **residual unknown**, a third state
+  beside "clean" and "N remaining". The run fails, the summary prints `unknown` in the
+  count columns with the reason beside it, and the JSON report carries
+  `"remaining": null`, `"net_resolved": null` and `"residual_unknown": true`. An
+  unmeasured residual is never presented as a measured after-count.
 
 ### Changed
 
+- **core**: the mutation phase of a `format` run executes one tool at a time. Batching
+  and derived DAG order are unchanged, but two mutating capabilities are never in flight
+  at once, so one tool's write can no longer be lost to another's. `lintro check` and
+  the verify pass keep the full parallel fan-out. A bridge until the scheduler keeps
+  overlapping mutators out of the same batch (#2606).
+- **output**: the before-minus-after figure is labelled **net resolved**, not "fixed" —
+  it is the difference between two measurements, not any tool's reported fix count, and
+  a finding one tool fixed and another reintroduced nets out of it. Breaking for
+  consumers of the machine-readable reports: `summary.total_fixed` is now
+  `summary.total_net_resolved`, a result's `fixed` is now `net_resolved`, the JSONL
+  stream's `fixed_issues_count` is now `net_resolved_count`, and the MCP tool summary's
+  `fixed_count` is now `net_resolved`. In the console the summary column reads
+  `Net Resolved`, the totals row reads `Net Resolved (Native)`, the plain-text report
+  line reads `Total Net Resolved:` and the final status line reads `N net resolved`.
+  "Fixed" is kept where a tool reports its own fix count.
 - **plugins**: `DEFAULT_EXCLUDE_PATTERNS` moved to `lintro.utils.path_filtering` and is
   now a `tuple[str, ...]` instead of a `list[str]`. It is still re-exported from
   `lintro.plugins.base` and `lintro.plugins.file_discovery`, so imports keep working,
