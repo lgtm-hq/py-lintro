@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.156.2] - 2026-09-12
+
+### Fixed
+
+- **review**: wait for the exact-head lint report and keep the header note (#2587)
+  (27651f8)
+
 ## [0.156.1] - 2026-09-12
 
 ### Changed
