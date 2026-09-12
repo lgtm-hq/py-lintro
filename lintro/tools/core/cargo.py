@@ -113,9 +113,8 @@ class CargoRoot:
             to the generic wording when there is no recorded reason, which
             only happens when a root was found.
         """
-        if self.issue is None:
-            return f"No Cargo.toml found; skipping {tool_label}."
-        return _SKIP_MESSAGES[self.issue].format(tool=tool_label)
+        issue = self.issue or CargoRootIssue.NO_MANIFEST
+        return _SKIP_MESSAGES[issue].format(tool=tool_label)
 
 
 def _read_manifest(manifest: Path) -> dict[str, Any] | None:
