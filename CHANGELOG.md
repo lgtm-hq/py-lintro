@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.156.3] - 2026-09-12
+
+### Fixed
+
+- **mcp**: build the binary in package mode and bundle the MCP SDK (#2593) (9055f33)
+
 ## [0.156.2] - 2026-09-12
 
 ### Fixed
