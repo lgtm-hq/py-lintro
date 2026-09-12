@@ -2787,6 +2787,72 @@ lintro check my-crate/ --tools cargo_deny
 lintro check . --tools cargo_deny --tool-options "cargo_deny:timeout=120"
 ```
 
+### Ruby Tools
+
+#### RuboCop Configuration
+
+RuboCop is a Ruby static code analyzer (linter) and formatter based on the community
+Ruby style guide. It groups its rules ("cops") into departments (Layout, Lint, Metrics,
+Naming, Security, Style) and can autocorrect many offenses. RuboCop runs with sensible
+defaults when no `.rubocop.yml` is present.
+
+**Installation:**
+
+```bash
+# RubyGems (any platform)
+gem install rubocop
+```
+
+> **Lintro runs the `rubocop` executable it finds on `PATH`, never
+> `bundle exec rubocop`.** A Bundler-only install (`bundle add rubocop`) is therefore
+> invisible to lintro, and extension gems a project loads through `require:` in
+> `.rubocop.yml` (rubocop-rails, rubocop-rspec, …) must also be installed so the PATH
+> copy can load them — for example `gem install rubocop-rails`. Cops from a gem RuboCop
+> cannot load make the run fail rather than silently skip, and lintro surfaces that
+> error.
+
+**File:** `.rubocop.yml` (or `.rubocop.yaml`)
+
+```yaml
+AllCops:
+  NewCops: enable
+  TargetRubyVersion: 3.3
+
+Style/StringLiterals:
+  EnforcedStyle: single_quotes
+
+Layout/LineLength:
+  Max: 120
+```
+
+**Lintro options via `--tool-options`:**
+
+```bash
+# Default: safe autocorrect only (rubocop --autocorrect)
+lintro format --tools rubocop
+
+# Opt in to unsafe autocorrect (rubocop --autocorrect-all), which may change
+# program semantics — review the diff afterwards.
+lintro format --tools rubocop --tool-options "rubocop:unsafe_fixes=True"
+```
+
+**Available Options:**
+
+| Option         | Type | Description                                                                                                 |
+| -------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
+| `unsafe_fixes` | bool | Use `--autocorrect-all` (includes unsafe cops) instead of the default safe `--autocorrect`. Default `False` |
+| `timeout`      | int  | Per-invocation timeout in seconds. Default `60`                                                             |
+
+RuboCop's per-cop configuration (which cops are enabled, their styles, exclusions) is
+driven by its native `.rubocop.yml` rather than lintro `--tool-options`, so existing
+Ruby project conventions are respected automatically.
+
+**Files inspected:** lintro hands RuboCop the files matching RuboCop's own default
+`AllCops/Include` list — `*.rb`, `*.rake`, `*.gemspec`, `*.ru` (so `config.ru` is
+covered), `*.thor`, and the extensionless Ruby DSL files (`Gemfile`, `Rakefile`,
+`Capfile`, `Guardfile`, `Podfile`, `Puppetfile`, `Vagrantfile`, and friends). Narrowing
+that set is `.rubocop.yml`'s `AllCops/Exclude`, as it would be for RuboCop run directly.
+
 ### Shell Tools
 
 #### ShellCheck Configuration

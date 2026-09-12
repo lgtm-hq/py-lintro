@@ -182,6 +182,8 @@ jobs:
         releases.astral.sh:443
         sh.rustup.rs:443
         registry.npmjs.org:443
+        rubygems.org:443
+        index.rubygems.org:443
         crates.io:443
         static.crates.io:443
         index.crates.io:443

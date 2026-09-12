@@ -76,6 +76,7 @@ GATE_PACKAGES: tuple[str, ...] = (
     "lintro/tools/pydoclint",
     "lintro/tools/pylint",
     "lintro/tools/pytest",
+    "lintro/tools/rubocop",
     "lintro/tools/ruff",
     "lintro/tools/rustfmt",
     "lintro/tools/semgrep",

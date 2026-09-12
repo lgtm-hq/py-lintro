@@ -146,16 +146,24 @@ def test_build_target_versions_dispatches_by_install_type(
             {"name": "oxfmt", "install": {"type": "npm", "package": "oxfmt"}},
             {"name": "pytest", "install": {"type": "pip", "package": "pytest"}},
             {"name": "hadolint", "install": {"type": "binary"}},
+            {"name": "rubocop", "install": {"type": "gem", "package": "rubocop"}},
         ],
     }
     targets = gen.build_target_versions(
         manifest_data=manifest,
         npm_versions={"oxfmt": "0.43.0"},
         pypi_versions={"pytest": "9.0.3"},
-        binary_versions={"hadolint": "2.14.0"},
+        binary_versions={"hadolint": "2.14.0", "rubocop": "1.88.1"},
     )
+    # ``gem`` resolves from _tool_versions.py by manifest entry name, the same
+    # as binary/cargo/rustup — there is no gem package registry to read.
     assert_that(targets).is_equal_to(
-        {"oxfmt": "0.43.0", "pytest": "9.0.3", "hadolint": "2.14.0"},
+        {
+            "oxfmt": "0.43.0",
+            "pytest": "9.0.3",
+            "hadolint": "2.14.0",
+            "rubocop": "1.88.1",
+        },
     )
 
 
