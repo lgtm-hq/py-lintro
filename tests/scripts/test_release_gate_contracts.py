@@ -16,6 +16,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -78,16 +79,32 @@ if mode == "silent":
 tools = os.environ.get("FAKE_MCP_TOOLS", "lintro_ping").split(",")
 for line in sys.stdin:
     message = json.loads(line)
-    if message.get("method") == "initialize":
+    method = message.get("method")
+    if method not in ("initialize", "tools/list"):
+        continue
+    if mode == "malformed":
+        sys.stdout.write("{not json\\n")
+        sys.stdout.flush()
+        break
+    if mode == "error-" + method.split("/")[0]:
+        reply = {
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "error": {"code": -32603, "message": "staged failure"},
+        }
+        sys.stdout.write(json.dumps(reply) + "\\n")
+        sys.stdout.flush()
+        continue
+    if method == "initialize":
         result = {
             "protocolVersion": message["params"]["protocolVersion"],
             "capabilities": {"tools": {}},
             "serverInfo": {
                 "name": os.environ.get("FAKE_MCP_NAME", "lintro"),
-                "version": "0.0.0",
+                "version": os.environ.get("FAKE_MCP_VERSION", "0.0.0"),
             },
         }
-    elif message.get("method") == "tools/list":
+    else:
         result = {
             "tools": [
                 {"name": name, "inputSchema": {"type": "object"}}
@@ -95,8 +112,6 @@ for line in sys.stdin:
                 if name
             ],
         }
-    else:
-        continue
     reply = {"jsonrpc": "2.0", "id": message["id"], "result": result}
     sys.stdout.write(json.dumps(reply) + "\\n")
     sys.stdout.flush()
@@ -246,6 +261,10 @@ def test_exported_commands_match_the_cli_command_table() -> None:
     from lintro.cli import _COMMAND_MODULES
 
     assert_that(set(_verify_exported_commands())).is_equal_to(set(_COMMAND_MODULES))
+    # The table must drive the run loop, or it is decorative.
+    assert_that(_VERIFY_PATH.read_text(encoding="utf-8")).contains(
+        'for name in "${EXPORTED_COMMANDS[@]}"; do',
+    )
 
 
 def test_every_exported_command_has_an_invocation() -> None:
@@ -265,7 +284,11 @@ def test_bats_stub_answers_every_exported_command() -> None:
     bats_source = _BATS_PATH.read_text(encoding="utf-8")
 
     for name in _verify_exported_commands():
-        assert_that(bats_source).contains(name)
+        # A standalone or grouped case arm at line start, not a substring:
+        # `test` occurs in every `@test` line and `config` in the fixture text.
+        assert_that(bats_source).matches(
+            rf"(?m)^(?:[^\n|)]*\|)*{re.escape(name)}(?:\|[^\n)]*)*\) ",
+        )
 
 
 def test_watch_marker_matches_the_watchers_ready_line() -> None:
@@ -353,11 +376,26 @@ def test_mcp_drive_completes_the_round_trip(
         ({"FAKE_MCP_MODE": "crash"}, "no response to initialize"),
         ({"FAKE_MCP_TOOLS": "lintro_check"}, "lintro_ping missing"),
         ({"FAKE_MCP_NAME": "other"}, "unexpected serverInfo"),
+        ({"FAKE_MCP_VERSION": ""}, "serverInfo missing version"),
         ({"FAKE_MCP_EXIT": "3"}, "server exited 3"),
         ({"FAKE_MCP_MODE": "hang"}, "did not exit after stdin closed"),
         ({"FAKE_MCP_MODE": "silent"}, "no response to initialize"),
+        ({"FAKE_MCP_MODE": "error-initialize"}, "initialize failed"),
+        ({"FAKE_MCP_MODE": "error-tools"}, "tools/list failed"),
+        ({"FAKE_MCP_MODE": "malformed"}, "no response to initialize"),
     ],
-    ids=["crash", "missing-tool", "wrong-name", "exit-code", "hang", "silent"],
+    ids=[
+        "crash",
+        "missing-tool",
+        "wrong-name",
+        "no-version",
+        "exit-code",
+        "hang",
+        "silent",
+        "error-on-initialize",
+        "error-on-tools-list",
+        "malformed-json",
+    ],
 )
 def test_mcp_drive_fails_a_broken_server(
     fake_mcp_server: Path,
@@ -410,6 +448,36 @@ def test_mcp_drive_reports_the_servers_stderr_on_a_crash(
     assert_that(session.exit_code).is_equal_to(1)
 
 
+def test_mcp_drive_lets_a_disappointing_server_exit_on_eof(
+    fake_mcp_server: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A healthy server that fails an assertion gets EOF, not the grace and a kill.
+
+    Stdin closes before the child is reaped on every path, so the failure is
+    reported within moments with the server's own exit code, never as a
+    ``SIGKILL`` after ``REAP_GRACE_SECONDS``.
+
+    Args:
+        fake_mcp_server: The scripted stand-in.
+        tmp_path: Workspace handed to the server.
+        monkeypatch: Stages a tool list without ``lintro_ping``.
+    """
+    mcp_driver = _load_mcp_driver()
+    monkeypatch.setenv("FAKE_MCP_TOOLS", "lintro_check")
+    started = time.monotonic()
+
+    session = mcp_driver.drive(fake_mcp_server, tmp_path)
+
+    assert_that(time.monotonic() - started).is_less_than(
+        mcp_driver.REAP_GRACE_SECONDS,
+    )
+    assert_that(session.failure).contains("lintro_ping missing")
+    assert_that(session.exit_code).is_equal_to(0)
+    assert_that(session.timed_out).is_false()
+
+
 def test_mcp_main_reports_a_missing_binary(tmp_path: Path) -> None:
     """A missing binary fails the gate before any process is spawned.
 
@@ -445,10 +513,16 @@ def test_mcp_drive_round_trips_with_lintros_real_server(tmp_path: Path) -> None:
         f'#!/bin/sh\nexec "{sys.executable}" -m lintro "$@"\n',
     )
 
-    session = mcp_driver.drive(wrapper, tmp_path)
+    with pytest.MonkeyPatch.context() as patcher:
+        # A test-local budget: the release values are sized for a cold onefile
+        # extraction, not for a suite run.
+        patcher.setattr(mcp_driver, "SESSION_TIMEOUT_SECONDS", 30)
+        patcher.setattr(mcp_driver, "REAP_GRACE_SECONDS", 5)
+        session = mcp_driver.drive(wrapper, tmp_path)
 
     assert_that(mcp_driver.session_failure(session)).is_empty()
     assert_that(session.tools).contains("lintro_ping")
+    assert_that(session.protocol_version).is_equal_to(mcp_driver.PROTOCOL_VERSION)
 
 
 def test_prompt_marker_matches_the_interactive_review_prompt() -> None:

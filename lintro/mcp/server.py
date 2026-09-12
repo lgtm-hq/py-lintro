@@ -40,7 +40,8 @@ __all__ = [
 # How long a client may treat a ``tools/list`` result as fresh (#2577). The
 # SDK's default is ``ttlMs: 0``, immediately stale, which tells a spec-following
 # client to re-list before every call. The registry is fixed for the life of
-# the process, so a minute is conservative; ``0`` disables the hint.
+# the process, so a minute is conservative; ``0`` marks the list immediately
+# stale (the hint is always attached).
 DEFAULT_TOOL_LIST_TTL_SECONDS: float = 60.0
 
 _EMPTY_OBJECT_SCHEMA: dict[str, Any] = {

@@ -14,7 +14,12 @@ from assertpy import assert_that
 from click import UsageError
 
 import lintro
-from lintro.mcp import is_mcp_available, require_mcp, spec_is_lintro_subpackage
+from lintro.mcp import (
+    is_mcp_available,
+    require_mcp,
+    spec_has_server_subpackage,
+    spec_is_lintro_subpackage,
+)
 
 _LINTRO_DIR = Path(lintro.__file__).resolve().parent
 _OWN_MCP_INIT = _LINTRO_DIR / "mcp" / "__init__.py"
@@ -49,7 +54,8 @@ def fake_sdk(tmp_path: Path) -> Path:
         The package's ``__init__.py``.
     """
     package = tmp_path / "site-packages" / "mcp"
-    package.mkdir(parents=True)
+    (package / "server").mkdir(parents=True)
+    (package / "server" / "__init__.py").write_text("", encoding="utf-8")
     init_file = package / "__init__.py"
     init_file.write_text("", encoding="utf-8")
     return init_file
@@ -81,6 +87,81 @@ def test_is_mcp_available_does_not_import_the_sdk(fake_sdk: Path) -> None:
         patch("builtins.__import__", side_effect=AssertionError("imported mcp")),
     ):
         assert_that(is_mcp_available()).is_true()
+
+
+def test_is_mcp_available_true_for_the_installed_sdk() -> None:
+    """The un-stubbed probe accepts the SDK where it really lives.
+
+    Every other true-path test hands the probe a spec; this one asks the live
+    import machinery, so a classifier that wrongly rejected site-packages
+    would fail here instead of on every normal install.
+    """
+    pytest.importorskip("mcp.server")
+
+    assert_that(is_mcp_available()).is_true()
+
+
+def test_is_mcp_available_rejects_a_single_file_mcp_module(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A standalone ``mcp.py`` on ``sys.path`` is not the SDK.
+
+    It would pass a spec-only probe and then fail ``lintro mcp`` on the
+    server's ``import mcp.server``.
+
+    Args:
+        tmp_path: Holds the stray module.
+        monkeypatch: Restores ``sys.path`` and ``sys.modules`` afterwards.
+    """
+    (tmp_path / "mcp.py").write_text("", encoding="utf-8")
+    for name in [key for key in sys.modules if key == "mcp" or key.startswith("mcp.")]:
+        monkeypatch.delitem(sys.modules, name)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    importlib.invalidate_caches()
+
+    found = importlib.util.find_spec("mcp")
+    assert found is not None  # narrow type for mypy
+    assert_that(found.origin).is_equal_to(str(tmp_path / "mcp.py"))
+    assert_that(is_mcp_available()).is_false()
+
+
+def test_is_mcp_available_rejects_a_package_without_the_server(
+    tmp_path: Path,
+) -> None:
+    """A top-level ``mcp`` package that lacks ``mcp.server`` is not the SDK.
+
+    Args:
+        tmp_path: Holds the hollow package.
+    """
+    package = tmp_path / "mcp"
+    package.mkdir()
+    init_file = package / "__init__.py"
+    init_file.write_text("", encoding="utf-8")
+
+    with patch("importlib.util.find_spec", return_value=_package_spec(init_file)):
+        assert_that(is_mcp_available()).is_false()
+
+
+@pytest.mark.parametrize("layout", ["server/__init__.py", "server.py"])
+def test_spec_has_server_subpackage_accepts_either_layout(
+    tmp_path: Path,
+    layout: str,
+) -> None:
+    """Both a ``server`` package and a ``server`` module count.
+
+    Args:
+        tmp_path: Holds the package.
+        layout: Relative path of the server entry inside the package.
+    """
+    package = tmp_path / "mcp"
+    (package / layout).parent.mkdir(parents=True, exist_ok=True)
+    (package / layout).write_text("", encoding="utf-8")
+    init_file = package / "__init__.py"
+    init_file.write_text("", encoding="utf-8")
+
+    assert_that(spec_has_server_subpackage(_package_spec(init_file))).is_true()
+    assert_that(spec_has_server_subpackage(ModuleSpec("mcp", None))).is_false()
 
 
 def test_is_mcp_available_rejects_lintros_own_mcp_subpackage() -> None:

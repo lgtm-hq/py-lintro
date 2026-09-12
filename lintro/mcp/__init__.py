@@ -31,6 +31,7 @@ __all__ = [
     "ensure_within_workspace",
     "is_mcp_available",
     "require_mcp",
+    "spec_has_server_subpackage",
     "spec_is_lintro_subpackage",
     "tool_annotations_dict",
 ]
@@ -82,6 +83,32 @@ def spec_is_lintro_subpackage(spec: ModuleSpec) -> bool:
     return False
 
 
+def spec_has_server_subpackage(spec: ModuleSpec) -> bool:
+    """Return whether a top-level ``mcp`` spec is a package shipping ``mcp.server``.
+
+    The server imports ``mcp.server`` and ``mcp.types``, so a standalone
+    ``mcp.py`` or a package without the server subpackage is not the SDK. The
+    lookup is a filesystem check, not ``find_spec("mcp.server")``, because the
+    dotted form imports the parent package and the probe must not execute the
+    SDK.
+
+    Args:
+        spec: The spec ``find_spec("mcp")`` located.
+
+    Returns:
+        True when the spec is a package and one of its search locations holds
+        a ``server`` subpackage or module.
+    """
+    search = getattr(spec, "submodule_search_locations", None) or ()
+    for location in search:
+        root = Path(str(location))
+        if (root / "server" / "__init__.py").is_file() or (
+            root / "server.py"
+        ).is_file():
+            return True
+    return False
+
+
 def is_mcp_available() -> bool:
     """Return True when the optional ``mcp`` Python SDK is installed.
 
@@ -93,7 +120,10 @@ def is_mcp_available() -> bool:
     A spec that resolves inside lintro's own package is rejected: with
     ``lintro/`` on the search path ``find_spec("mcp")`` finds this subpackage,
     and reporting that as the SDK is how a release binary passed ``doctor``
-    while ``lintro mcp`` died on ``import mcp.server`` (#2577).
+    while ``lintro mcp`` died on ``import mcp.server`` (#2577). So is anything
+    that is not a package carrying ``mcp.server``: a stray single-file
+    ``mcp.py`` would pass ``require_mcp`` and fail on the server's first
+    import.
 
     Returns:
         True when a module spec for the SDK's ``mcp`` package can be located.
@@ -102,9 +132,9 @@ def is_mcp_available() -> bool:
         spec = importlib.util.find_spec("mcp")
     except (ImportError, ValueError):
         return False
-    if spec is None:
+    if spec is None or spec_is_lintro_subpackage(spec):
         return False
-    return not spec_is_lintro_subpackage(spec)
+    return spec_has_server_subpackage(spec)
 
 
 def require_mcp() -> None:

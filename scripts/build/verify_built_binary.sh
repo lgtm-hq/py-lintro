@@ -25,7 +25,11 @@ EOF
 	exit 2
 fi
 
-BINARY="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")"
+BINARY="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")" ||
+	{
+		log_error "Binary not found: $1"
+		exit 1
+	}
 
 if [[ ! -f "$BINARY" ]]; then
 	log_error "Binary not found: $1"
@@ -158,6 +162,7 @@ assert_no_crash() {
 			return 1
 		fi
 	done
+	return 0
 }
 
 # Args:
@@ -207,7 +212,7 @@ run_command_once() {
 		return 1
 	fi
 
-	assert_no_crash "$name" "$COMMAND_OUTPUT"
+	assert_no_crash "$name" "$COMMAND_OUTPUT" || return 1
 	accepted="$(accepted_exit_codes "$name")"
 	if [[ " $accepted " != *" $status "* ]]; then
 		log_error "$name exited $status (accepted: $accepted):"
@@ -248,7 +253,7 @@ run_watch_once() {
 	done
 	kill "$pid" 2>/dev/null || true
 	wait "$pid" 2>/dev/null || true
-	assert_no_crash watch "$COMMAND_OUTPUT"
+	assert_no_crash watch "$COMMAND_OUTPUT" || return 1
 	log_success "watch: OK (ready, then stopped)"
 }
 

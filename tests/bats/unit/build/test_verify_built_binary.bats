@@ -221,12 +221,28 @@ EOF
 }
 
 @test "verify_built_binary.sh: runs the commands inside a throwaway workspace" {
-	write_healthy_binary "config" 'pwd; exit 0'
+	# The stub passes only from inside the gate's own workspace: a fresh git
+	# repository holding the staged sample and the fake-provider config.
+	write_healthy_binary "config" \
+		'[[ -d .git && -f bad.py && -f .lintro-config.yaml ]] || exit 1'
 
 	run "$SCRIPT" "$BINARY"
 	assert_success
 	assert_output --partial "config: OK"
-	# The workspace is a fresh git repository, not the caller's directory.
-	[[ ! -d "${BATS_TEST_TMPDIR}/.git" ]]
 	[[ ! -d "${WORKDIR}/.git" ]]
+}
+
+@test "verify_built_binary.sh: reports a binary whose directory is missing" {
+	run "$SCRIPT" "${WORKDIR}/dist/nuitk/lintro"
+	assert_failure
+	assert_equal "1" "$status"
+	assert_output --partial "Binary not found"
+}
+
+@test "verify_built_binary.sh: passes clean output past the crash check" {
+	write_healthy_binary "versions" 'echo "lintro 0.0.0 (no traceback here)"; exit 0'
+
+	run "$SCRIPT" "$BINARY"
+	assert_success
+	assert_output --partial "versions: OK (exit 0)"
 }

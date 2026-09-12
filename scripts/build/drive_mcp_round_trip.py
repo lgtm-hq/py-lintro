@@ -60,6 +60,7 @@ class Session(NamedTuple):
 
     Attributes:
         server_info: The ``serverInfo`` object from the ``initialize`` result.
+        protocol_version: The revision the server negotiated in ``initialize``.
         tools: Tool names the ``tools/list`` result carried.
         tool_list_ttl_ms: The ``ttlMs`` freshness hint on the tool list, when
             the negotiated revision carries one (handshake-era wires do not).
@@ -70,6 +71,7 @@ class Session(NamedTuple):
     """
 
     server_info: dict[str, Any]
+    protocol_version: str
     tools: list[str]
     tool_list_ttl_ms: int | None
     exit_code: int
@@ -234,6 +236,7 @@ def drive(binary: Path, workspace: Path) -> Session:
 
     deadline = time.monotonic() + SESSION_TIMEOUT_SECONDS
     server_info: dict[str, Any] = {}
+    protocol_version = ""
     tools: list[str] = []
     ttl_ms: int | None = None
     failure = ""
@@ -241,12 +244,20 @@ def drive(binary: Path, workspace: Path) -> Session:
 
     def finish(reason: str) -> Session:
         nonlocal timed_out
+        # EOF first, on every path: a server that answered but disappointed is
+        # still healthy and exits on its own once stdin closes; reaping before
+        # that would burn the grace period and report a SIGKILL exit instead.
+        try:
+            child.stdin.close()  # type: ignore[union-attr]
+        except OSError:
+            pass
         exit_code, killed = _reap(child, grace=REAP_GRACE_SECONDS)
         timed_out = timed_out or killed
         stderr_thread.join(timeout=REAP_GRACE_SECONDS)
         stderr = b"".join(stderr_chunks).decode("utf-8", errors="replace")
         return Session(
             server_info=server_info,
+            protocol_version=protocol_version,
             tools=tools,
             tool_list_ttl_ms=ttl_ms,
             exit_code=exit_code,
@@ -265,8 +276,11 @@ def drive(binary: Path, workspace: Path) -> Session:
         if not isinstance(result, dict):
             return finish(f"initialize failed: {json.dumps(response)}")
         server_info = dict(result.get("serverInfo") or {})
+        protocol_version = str(result.get("protocolVersion") or "")
         if server_info.get("name") != SERVER_NAME:
             return finish(f"unexpected serverInfo: {json.dumps(server_info)}")
+        if not server_info.get("version"):
+            return finish(f"serverInfo missing version: {json.dumps(server_info)}")
 
         _write(child.stdin, initialized_notification())
         _write(child.stdin, tools_list_request(request_id=2))
@@ -288,11 +302,6 @@ def drive(binary: Path, workspace: Path) -> Session:
             return finish(f"{REQUIRED_TOOL} missing from tools/list: {tools}")
     except BrokenPipeError:
         return finish("server closed its stdin pipe early")
-    finally:
-        try:
-            child.stdin.close()
-        except OSError:
-            pass
 
     return finish(failure)
 
@@ -347,9 +356,9 @@ def main() -> int:
                 print(f"    {line}")
         return 1
 
-    version = session.server_info.get("version", "?")
     print(
-        f"OK mcp round trip: {SERVER_NAME} {version} listed {len(session.tools)} "
+        f"OK mcp round trip: {SERVER_NAME} {session.server_info['version']} "
+        f"(protocol {session.protocol_version}) listed {len(session.tools)} "
         f"tools (ttlMs={session.tool_list_ttl_ms}) and exited cleanly",
     )
     return 0
