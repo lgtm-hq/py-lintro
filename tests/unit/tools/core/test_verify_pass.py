@@ -1715,11 +1715,11 @@ def test_a_failed_verification_reports_the_residual_as_unknown(
                 ToolResult: The canned partial result, when there is one.
 
             Raises:
-                Exception: The canned failure, when there is one.
+                OSError: The canned failure, for the crashed case.
             """
             del paths, options
             if raises is not None:
-                raise raises
+                raise OSError(str(raises))
             assert check_result is not None
             return check_result
 
