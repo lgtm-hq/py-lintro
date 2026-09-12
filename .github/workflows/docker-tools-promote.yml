@@ -9,6 +9,13 @@ name: Promote - Lintro Tools Candidate
 # digest commit changes the PR head SHA before GitHub creates the merge commit.
 # Non-Renovate main updates use the canonical build fallback below; a Renovate
 # merge with a missing candidate fails closed instead of rebuilding.
+#
+# The promote step refuses a candidate whose tool manifest inputs no longer
+# match main (#2497). The workflow_dispatch input below is that guard's
+# escape hatch: re-running the promote by hand with force_publish=true retags
+# the resolved candidate anyway. The safe remedy is usually the other one --
+# dispatch docker-tools-publish.yml with force_publish=true to rebuild the
+# image from main.
 
 'on':
   push:
@@ -28,6 +35,13 @@ name: Promote - Lintro Tools Candidate
       - 'package.json'
       - 'pyproject.toml'
       - 'requirements-semgrep.txt'
+  workflow_dispatch:
+    inputs:
+      force_publish:
+        # yamllint disable-line rule:line-length
+        description: 'Promote the resolved candidate even if main has newer tool manifest commits'
+        required: false
+        default: 'false'
 
 permissions: {}
 
@@ -48,6 +62,8 @@ jobs:
     outputs:
       action: ${{ steps.candidate.outputs.action }}
       candidate-tag: ${{ steps.candidate.outputs.candidate-tag }}
+      candidate-sha: ${{ steps.candidate.outputs.candidate-sha }}
+      candidate-pr: ${{ steps.candidate.outputs.candidate-pr }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -104,7 +120,10 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 1
+          # Full history: the manifest staleness guard walks main back to the
+          # candidate's branch point. The candidate commit itself is fetched
+          # by SHA inside the guard (its branch is deleted on merge).
+          fetch-depth: 0
           persist-credentials: false
       - name: Set up Docker Buildx
         # yamllint disable-line rule:line-length
@@ -123,6 +142,16 @@ jobs:
           SOURCE_IMAGE: ghcr.io/lgtm-hq/lintro-tools
           CI_TAG: ${{ needs.resolve.outputs.candidate-tag }}
           TAGS: ghcr.io/lgtm-hq/lintro-tools:latest
+          # Staleness guard inputs (#2497): refuse to retag a candidate whose
+          # manifest inputs no longer match main.
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate-sha }}
+          # The tag carries an abbreviated SHA, so the guard resolves it
+          # against refs/pull/<n>/head rather than fetching by object id.
+          CANDIDATE_PR: ${{ needs.resolve.outputs.candidate-pr }}
+          MAIN_SHA: ${{ github.sha }}
+          # Manual escape hatch for the guard; always 'false' on a push.
+          # yamllint disable-line rule:line-length
+          FORCE_PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.force_publish || 'false' }}
         run: scripts/ci/promote-ci-docker-images.sh
 
   publish-fallback:

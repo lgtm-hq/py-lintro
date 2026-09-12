@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess  # nosec B404 - fixed argv runs the repository script under test
 import sys
 from datetime import UTC, datetime, timedelta
@@ -311,7 +312,9 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     )
     assert "reusable-docker.yml@" in fallback["uses"]
     assert resolve["permissions"]["packages"] == "read"
-    assert "workflow_dispatch" not in trigger
+    # The one dispatch entry point is the staleness guard's escape hatch
+    # (#2497); nothing else may be driven by hand.
+    assert set(trigger["workflow_dispatch"]["inputs"]) == {"force_publish"}
     assert resolve["if"] == "github.ref == 'refs/heads/main'"
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
@@ -1255,3 +1258,126 @@ def test_merged_pr_prefers_the_merged_renovate_pull_request(
 
     assert resolved is not None
     assert_that(resolved["number"]).is_equal_to(11)
+
+
+def test_promotion_exports_candidate_sha_and_pr(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolver must export both halves of the candidate tag (#2497).
+
+    The promote step feeds ``candidate-sha`` and ``candidate-pr`` to the
+    manifest staleness guard: the abbreviated SHA is what gets compared with
+    main, and the PR number is how ``refs/pull/<n>/head`` is fetched so that
+    abbreviation resolves.
+
+    Args:
+        promotion_module: Loaded ``promote-tools-candidate.py`` module.
+        tmp_path: Temporary directory for the fake ``GITHUB_OUTPUT`` file.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    tag = "tools-candidate-pr4321-0123456789ab"
+    output = tmp_path / "github_output"
+    output.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "f" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setattr(
+        promotion_module,
+        "resolve_main_action",
+        lambda **_kwargs: ("promote", tag),
+    )
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert_that(lines).contains("action=promote")
+    assert_that(lines).contains(f"candidate-tag={tag}")
+    assert_that(lines).contains("candidate-sha=0123456789ab")
+    assert_that(lines).contains("candidate-pr=4321")
+
+
+def test_promotion_exports_empty_candidate_fields_without_a_tag(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A publish/skip classification must still write the keys, empty.
+
+    Downstream ``needs.resolve.outputs`` references would otherwise read a
+    missing key, so the fields are always written.
+
+    Args:
+        promotion_module: Loaded ``promote-tools-candidate.py`` module.
+        tmp_path: Temporary directory for the fake ``GITHUB_OUTPUT`` file.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    output = tmp_path / "github_output"
+    output.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "f" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setattr(
+        promotion_module,
+        "resolve_main_action",
+        lambda **_kwargs: ("publish", None),
+    )
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert_that(lines).contains("action=publish")
+    assert_that(lines).contains("candidate-sha=")
+    assert_that(lines).contains("candidate-pr=")
+
+
+def test_candidate_outputs_and_guard_env_stay_in_lockstep() -> None:
+    """The resolver, the workflow and the guard must agree on every name.
+
+    Three files have to line up for the staleness guard to see anything:
+    ``promote-tools-candidate.py`` writes step outputs, the promote workflow
+    forwards them as env, and ``check-tools-manifest-staleness.sh`` reads that
+    env. A rename in any one of them silently disables the guard, so all three
+    sets are read from source and compared here (#2497).
+    """
+    resolver_source = (
+        _REPO_ROOT / "scripts" / "ci" / "promote-tools-candidate.py"
+    ).read_text(encoding="utf-8")
+    written_keys = set(
+        re.findall(r'output_file\.write\(f?"([a-z-]+)=', resolver_source),
+    )
+    assert_that(written_keys).contains("candidate-sha", "candidate-pr")
+
+    workflow = _load_workflow("docker-tools-promote.yml")
+    resolve_outputs = workflow["jobs"]["resolve"]["outputs"]
+    # Every job output must come from a key the resolver actually writes.
+    for name, expression in resolve_outputs.items():
+        referenced = re.findall(r"steps\.candidate\.outputs\.([a-z-]+)", expression)
+        assert_that(referenced).described_as(name).is_length(1)
+        assert_that(written_keys).described_as(name).contains(referenced[0])
+
+    promote_step = next(
+        step
+        for step in workflow["jobs"]["promote"]["steps"]
+        if "scripts/ci/promote-ci-docker-images.sh" in str(step.get("run", ""))
+    )
+    env = promote_step["env"]
+    # Every needs.resolve reference must be an output the resolve job exports.
+    for value in env.values():
+        for referenced in re.findall(
+            r"needs\.resolve\.outputs\.([a-z-]+)",
+            str(value),
+        ):
+            assert_that(resolve_outputs).contains_key(referenced)
+
+    guard_source = (
+        _REPO_ROOT / "scripts" / "ci" / "check-tools-manifest-staleness.sh"
+    ).read_text(encoding="utf-8")
+    for name in ("CANDIDATE_SHA", "CANDIDATE_PR", "MAIN_SHA", "FORCE_PUBLISH"):
+        assert_that(env).contains_key(name)
+        assert_that(guard_source).described_as(name).contains(f"${{{name}:-}}")
