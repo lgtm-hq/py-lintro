@@ -708,6 +708,13 @@ def _review(*, options: ReviewCommandOptions) -> None:
             "--with-lint runs the tools and --lint-report reads a saved "
             "report; pass one or the other.",
         )
+    if options.lint_report_missing is not None and (
+        options.with_lint or options.lint_report is not None
+    ):
+        raise click.UsageError(
+            "--lint-report-missing explains why no lint facts are available; "
+            "it cannot be combined with --with-lint or --lint-report.",
+        )
 
     require_ai()
     resolved_ai = _resolve_ai(options=options, lintro_config=lintro_config)

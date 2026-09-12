@@ -95,16 +95,15 @@ def test_unusable_report_yields_a_header_note_not_an_error(tmp_path: Path) -> No
 
 
 def test_missing_report_reason_becomes_the_header_note() -> None:
-    """``--lint-report-missing`` is a request field that feeds the header note."""
-    import dataclasses
-
-    from lintro.ai.review.preparation import ReviewRunRequest
-    from lintro.ai.review.preparation_resolvers import LINT_FACTS_UNAVAILABLE
-
-    fields = {f.name: f for f in dataclasses.fields(ReviewRunRequest)}
-
-    assert_that(fields).contains_key("lint_report_missing")
-    assert_that(fields["lint_report_missing"].default).is_none()
-    assert_that(LINT_FACTS_UNAVAILABLE).is_equal_to(
-        "linter facts unavailable for this head",
+    """``--lint-report-missing`` renders the single header note; blank means none."""
+    from lintro.ai.review.preparation_resolvers import (
+        LINT_FACTS_UNAVAILABLE,
+        lint_facts_missing_note,
     )
+
+    note = lint_facts_missing_note("no linting-json-report for head abc after 600s")
+
+    assert_that(note).is_equal_to(
+        f"{LINT_FACTS_UNAVAILABLE}: no linting-json-report for head abc after 600s",
+    )
+    assert_that(lint_facts_missing_note("   ")).is_empty()

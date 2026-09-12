@@ -195,6 +195,25 @@ def build_lint_digest(
 LINT_FACTS_UNAVAILABLE: str = "linter facts unavailable for this head"
 
 
+def lint_facts_missing_note(reason: str) -> str:
+    """Render the header note for a review that was given no lint report.
+
+    The CI wiring passes the reason through ``--lint-report-missing`` (#2571)
+    so the posted comment says the review ran without deterministic lint
+    facts, in the same words the Actions log uses.
+
+    Args:
+        reason: Why no report was available, e.g. ``no linting-json-report
+            for head <sha> after 600s``.
+
+    Returns:
+        str: ``"<LINT_FACTS_UNAVAILABLE>: <reason>"``, or an empty string when
+        the reason is blank so callers can assign it unconditionally.
+    """
+    reason = reason.strip()
+    return f"{LINT_FACTS_UNAVAILABLE}: {reason}" if reason else ""
+
+
 def build_lint_digest_from_report(
     *,
     context: ReviewContext,

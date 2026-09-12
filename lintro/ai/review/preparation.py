@@ -42,10 +42,10 @@ from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.preparation_resolvers import (
-    LINT_FACTS_UNAVAILABLE,
     apply_timeout,
     build_lint_digest,
     build_lint_digest_from_report,
+    lint_facts_missing_note,
     resolve_custom_agent_mode,
     resolve_custom_agents,
     resolve_review_depth,
@@ -317,7 +317,7 @@ def prepare_review(
             lintro_config=request.lintro_config,
         )
     elif request.lint_report_missing:
-        lint_note = f"{LINT_FACTS_UNAVAILABLE}: {request.lint_report_missing}"
+        lint_note = lint_facts_missing_note(request.lint_report_missing)
     else:
         lint_digest, lint_tool_count, lint_issue_count = None, 0, 0
 
