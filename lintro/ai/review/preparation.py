@@ -45,6 +45,7 @@ from lintro.ai.review.preparation_resolvers import (
     apply_timeout,
     build_lint_digest,
     build_lint_digest_from_report,
+    lint_facts_missing_note,
     resolve_custom_agent_mode,
     resolve_custom_agents,
     resolve_review_depth,
@@ -115,6 +116,9 @@ class ReviewRunRequest:
         lint_report: Saved lintro JSON report to digest instead of running
             the tools (``--lint-report``, #2571). Takes precedence over
             ``with_lint``; the CLI rejects the two together.
+        lint_report_missing: Why the caller has no report to pass
+            (``--lint-report-missing``). Surfaces as the header's
+            linter-facts note when ``lint_report`` is None.
         semantic_chunks: Force semantic chunking for this run. Config's
             ``review.force_semantic_chunking`` can enable it independently.
         timeout: Per-run API timeout override in seconds, or None.
@@ -135,6 +139,7 @@ class ReviewRunRequest:
     strictness: str | None = None
     with_lint: bool = False
     lint_report: Path | None = None
+    lint_report_missing: str | None = None
     semantic_chunks: bool = False
     timeout: float | None = None
     custom_agent_mode: CustomAgentMode | None = None
@@ -170,8 +175,9 @@ class PreparedReview:
             prompt, or None.
         lint_tool_count: Number of lint tools that ran for the digest.
         lint_issue_count: Total issues those tools reported.
-        lint_note: Why a requested ``--lint-report`` could not be used
-            (#2571), for the review header. Empty otherwise.
+        lint_note: Why a requested ``--lint-report`` could not be used, or
+            why none was passed (#2571), for the review header. Empty
+            otherwise.
         context_collection_seconds: Wall-clock seconds spent collecting the
             diff context. Excluded from equality: it measures the run, not the
             preparation.
@@ -297,6 +303,9 @@ def prepare_review(
     )
     checklist_text, _prompt_mapping = format_checklist_for_prompt(items=selected_items)
 
+    lint_digest: str | None = None
+    lint_tool_count = 0
+    lint_issue_count = 0
     lint_note = ""
     if request.lint_report is not None:
         lint_digest, lint_tool_count, lint_issue_count, lint_note = (
@@ -310,8 +319,9 @@ def prepare_review(
             context=context,
             lintro_config=request.lintro_config,
         )
-    else:
-        lint_digest, lint_tool_count, lint_issue_count = None, 0, 0
+    elif request.lint_report_missing:
+        # No report and no tool run: the header note is the only lint surface.
+        lint_note = lint_facts_missing_note(request.lint_report_missing)
 
     strictness = resolve_review_strictness(request)
     custom_agent_mode = resolve_custom_agent_mode(request)

@@ -92,3 +92,18 @@ def test_unusable_report_yields_a_header_note_not_an_error(tmp_path: Path) -> No
     assert_that((tools, issues)).is_equal_to((0, 0))
     assert_that(note).starts_with(LINT_FACTS_UNAVAILABLE)
     assert_that(note).contains("absent.json")
+
+
+def test_missing_report_reason_becomes_the_header_note() -> None:
+    """``--lint-report-missing`` renders the single header note; blank means none."""
+    from lintro.ai.review.preparation_resolvers import (
+        LINT_FACTS_UNAVAILABLE,
+        lint_facts_missing_note,
+    )
+
+    note = lint_facts_missing_note("no linting-json-report for head abc after 600s")
+
+    assert_that(note).is_equal_to(
+        f"{LINT_FACTS_UNAVAILABLE}: no linting-json-report for head abc after 600s",
+    )
+    assert_that(lint_facts_missing_note("   ")).is_empty()

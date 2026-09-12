@@ -8,6 +8,7 @@ valid YAML and feeds ``LINTRO_AI_*`` from repo Actions variables (#1971).
 from __future__ import annotations
 
 import base64
+import json
 import math
 import os
 import re
@@ -666,20 +667,22 @@ def test_workflow_serializes_ai_review_repo_wide() -> None:
 
 
 def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
-    """The job budget is pinned at 38 minutes (#2506).
+    """The job budget is pinned at 53 minutes (#2506, #2571).
 
-    38 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
-    allows with the 1800 s per-chunk CLI timeout: ceil(1800 / 60) + 7 min setup
-    + 1 min posting margin. Measured review durations over the last 40 runs are
+    53 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
+    allows with the 1800 s per-chunk CLI timeout and the 600 s wall-clock
+    lint-report wait: ceil(1800 / 60) + 7 min setup + 10 min wait + 5 min for
+    one locate straddling the deadline + 1 min posting margin (38 before the
+    wait). Measured review durations over the last 40 runs are
     median 10 to 14 min and p75 21 min, so the ceiling is not what a healthy
     review needs — it bounds the tail. The long tail that previously argued for
     120 was reruns restarting from scratch, which #2506 fixed by resuming the
     run's own prior attempt. Raising this number is a decision about the CLI
-    timeout, not about this line: bump both together.
+    timeout or the wait, not about this line: bump them together.
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
-    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(38)
+    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(53)
 
 
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
@@ -1171,10 +1174,19 @@ def test_review_command_passes_the_downloaded_lint_report() -> None:
     """
     command = _review_command_line()
 
-    assert_that(command).contains('--lint-report "$lint_report_path"')
+    # The flag is spliced in from an array that is only populated once a
+    # report was actually downloaded (#2571 follow-up): a literal path on the
+    # command line would pass a nonexistent file on fallback.
+    assert_that(command).contains('"${lint_report_arg[@]}"')
+    assert_that(command).does_not_contain("--lint-report")
     assert_that(command).does_not_contain("--with-lint")
     for flag in ("--pr", "--depth 1", "--post", "--output json"):
         assert_that(command).contains(flag)
+    text = "\n".join(_executable_shell_lines())
+    assert_that(text).contains('lint_report_arg=(--lint-report "$lint_report_path")')
+    populate = text.index('lint_report_arg=(--lint-report "$lint_report_path")')
+    guard = text.index('[[ -s "$lint_report_path" ]]')
+    assert_that(guard).is_less_than(populate)
 
 
 def test_review_job_runs_no_linter() -> None:
@@ -1218,10 +1230,11 @@ def test_lint_report_download_is_keyed_on_the_located_run() -> None:
 def test_missing_lint_report_degrades_to_a_header_note() -> None:
     """No report for this head means a visible note, never an abort.
 
-    The script always passes the report path; when nothing was downloaded the
-    file is absent and lintro renders the fixed wording in the review header.
-    The script's own log line uses the same words so the Actions log and the
-    posted comment agree.
+    When nothing was downloaded the script passes no ``--lint-report`` at
+    all; it passes ``--lint-report-missing`` with the reason instead, and
+    lintro renders the fixed "linter facts unavailable for this head" note
+    in the review header. The script's own log line uses the same words so
+    the Actions log and the posted comment agree.
     """
     text = "\n".join(_executable_shell_lines())
 
@@ -1232,6 +1245,280 @@ def test_missing_lint_report_degrades_to_a_header_note() -> None:
     start = text.index('review_state_artifacts.py" lint-report')
     end = text.index("uv run lintro review")
     assert_that(text[start:end]).does_not_match(r"\bexit\b")
+
+
+#: Lint-report wait policy (#2571 follow-up): docker-ci.yml and ai-review.yml
+#: start on the same push, so the report is polled for up to ten minutes
+#: before the review falls back to running without linter facts.
+LINT_REPORT_POLL_SECONDS = 30
+LINT_REPORT_WAIT_SECONDS = 10 * 60
+
+
+def _shell_default(name: str) -> int:
+    """Return the env-overridable default a script variable declares.
+
+    Args:
+        name: Variable declared as ``NAME="${NAME:-<default>}"``.
+
+    Returns:
+        The declared default.
+    """
+    matches = re.findall(
+        rf'^{name}="\$\{{{name}:-(\d+)\}}"\s*$',
+        SHELL_SCRIPT.read_text(encoding="utf-8"),
+        flags=re.MULTILINE,
+    )
+    assert_that(matches).described_as(
+        f"run-ai-review.sh must declare {name} once, env-overridable",
+    ).is_length(1)
+    return int(matches[0])
+
+
+def test_lint_report_wait_is_bounded_at_ten_minutes() -> None:
+    """The exact-head report is polled every 30 s for at most 10 minutes.
+
+    Both values are script variables with an env override so the tests
+    below can shrink them; the defaults are the policy and are pinned here.
+    """
+    assert_that(_shell_default("LINT_REPORT_POLL_SECONDS")).is_equal_to(
+        LINT_REPORT_POLL_SECONDS,
+    )
+    assert_that(_shell_default("LINT_REPORT_WAIT_SECONDS")).is_equal_to(
+        LINT_REPORT_WAIT_SECONDS,
+    )
+    text = "\n".join(_executable_shell_lines())
+    locate = text.index('review_state_artifacts.py" lint-report')
+    assert_that(text.index("while :; do")).described_as(
+        "the locator call must sit inside the poll loop",
+    ).is_less_than(locate)
+    assert_that(text).contains('sleep "$lint_sleep"')
+    assert_that(text).contains("lint_sleep=$((LINT_REPORT_WAIT_SECONDS - lint_waited))")
+    assert_that(text).contains('"$lint_waited" -ge "$LINT_REPORT_WAIT_SECONDS"')
+    assert_that(text).contains("lint_waited=$((SECONDS - lint_wait_started))")
+
+
+_LINT_PR_NUMBER = 12
+_LINT_HEAD_SHA = "0123456789abcdef0123456789abcdef01234567"
+_LINT_RUN_ID = 777
+
+
+def _write_stub(bin_dir: Path, name: str, body: str) -> None:
+    """Write an executable stub binary into a PATH shim directory.
+
+    Args:
+        bin_dir: Directory prepended to PATH for the script under test.
+        name: Binary name to shadow (``gh``, ``uv``).
+        body: Bash script body executed when the stub is invoked.
+    """
+    stub = bin_dir / name
+    stub.write_text(f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+
+def _run_review_with_lint_stubs(
+    tmp_path: Path,
+    *,
+    report_appears_on_poll: int | None,
+    wait_seconds: int,
+    poll_seconds: str = "1",
+    download_fails: bool = False,
+) -> tuple[str, list[str], int]:
+    """Run the script end to end with ``gh`` and ``uv`` stubbed.
+
+    The ``gh`` stub answers the locator's API calls: the PR head, the
+    docker-ci run listing for that head (empty until the ``report_appears_on_poll``-th
+    listing), the run's artifacts, and ``gh run download`` (writes the JSON
+    report). The ``uv`` stub records the assembled ``lintro review`` argv and
+    exits 0 so the classifier sees a produced review.
+
+    Args:
+        tmp_path: Per-test scratch directory.
+        report_appears_on_poll: 1-based locator poll on which the run listing
+            first carries the report; ``None`` means it never appears.
+        wait_seconds: ``LINT_REPORT_WAIT_SECONDS`` override.
+        poll_seconds: ``LINT_REPORT_POLL_SECONDS`` override; defaults to 1 s.
+        download_fails: Make the stubbed ``gh run download`` exit non-zero.
+
+    Returns:
+        The script's combined output, the recorded ``uv`` argv, and the
+        number of run listings the locator made.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    listing_count = tmp_path / "listings"
+    uv_argv = tmp_path / "uv-argv"
+    appears_on = "never" if report_appears_on_poll is None else report_appears_on_poll
+    runs_payload = json.dumps(
+        {
+            "workflow_runs": [
+                {
+                    "id": _LINT_RUN_ID,
+                    "event": "pull_request",
+                    "status": "in_progress",
+                    "path": ".github/workflows/docker-ci.yml",
+                    "created_at": "2026-09-11T12:00:00Z",
+                    "head_sha": _LINT_HEAD_SHA,
+                },
+            ],
+        },
+        separators=(",", ":"),
+    )
+    _write_stub(
+        bin_dir,
+        "gh",
+        f"""
+        set -euo pipefail
+        if [[ "$1" == "run" && "$2" == "download" ]]; then
+            if [[ "${{LINT_STUB_DOWNLOAD_FAILS:-0}}" == "1" ]]; then
+                echo "stub: download failed" >&2
+                exit 1
+            fi
+            dir=""
+            while [[ $# -gt 0 ]]; do
+                if [[ "$1" == "--dir" ]]; then dir="$2"; shift; fi
+                shift
+            done
+            printf '{{"tool_results":[]}}\\n' >"$dir/results.json"
+            exit 0
+        fi
+        [[ "$1" == "api" ]] || exit 1
+        case "$2" in
+            repos/lgtm-hq/py-lintro/pulls/{_LINT_PR_NUMBER}*)
+                printf '{{"head":{{"sha":"{_LINT_HEAD_SHA}"}}}}\\n' ;;
+            repos/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml/runs*)
+                n=$(cat "{listing_count}" 2>/dev/null || echo 0)
+                n=$((n + 1))
+                printf '%s\\n' "$n" >"{listing_count}"
+                if [[ "{appears_on}" != "never" && "$n" -ge "{appears_on}" ]]; then
+                    printf '%s\\n' '{runs_payload}'
+                else
+                    printf '{{"workflow_runs":[]}}\\n'
+                fi ;;
+            repos/lgtm-hq/py-lintro/actions/runs/{_LINT_RUN_ID}/artifacts*)
+                printf '{{"artifacts":[{{"id":1,"name":"linting-json-report","expired":false}}]}}\\n' ;;
+            *) exit 1 ;;
+        esac
+        """,
+    )
+    _write_stub(
+        bin_dir,
+        "uv",
+        f"""
+        printf '%s\\n' "$@" >"{uv_argv}"
+        printf '{{"findings":[],"metadata":{{}}}}\\n'
+        exit 0
+        """,
+    )
+    env = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        CREDENTIAL_ENV: "test-token",
+        "PR_NUMBER": str(_LINT_PR_NUMBER),
+        "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+        "LINTRO_REVIEW_STATE_DIR": str(state_dir),
+        "LINT_REPORT_POLL_SECONDS": poll_seconds,
+        "LINT_REPORT_WAIT_SECONDS": str(wait_seconds),
+        "LINT_STUB_DOWNLOAD_FAILS": "1" if download_fails else "0",
+    }
+    # Output goes to a file, not a captured pipe: the script's heartbeat
+    # ``sleep`` outlives the EXIT trap and would hold a pipe open for 15 s.
+    output = tmp_path / "output.log"
+    with output.open("w", encoding="utf-8") as sink:
+        subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
+            [str(SHELL_SCRIPT)],
+            stdout=sink,
+            stderr=subprocess.STDOUT,
+            check=False,
+            env=env,
+            timeout=60,
+        )
+    argv = uv_argv.read_text(encoding="utf-8").splitlines() if uv_argv.exists() else []
+    listings = int(listing_count.read_text(encoding="utf-8").strip() or 0)
+    return output.read_text(encoding="utf-8"), argv, listings
+
+
+def test_lint_report_appearing_during_the_wait_reaches_the_review(
+    tmp_path: Path,
+) -> None:
+    """A report uploaded while the script polls is downloaded and passed.
+
+    The first two locator polls find no docker-ci run for the head (the
+    lint job is still running); the third does. The script must keep
+    polling instead of falling back after the first miss, then hand the
+    downloaded file to ``--lint-report``.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=3,
+        wait_seconds=30,
+    )
+
+    assert_that(listings).is_equal_to(3)
+    assert_that(output).matches(r"retrying in 1s \(waited [0-2]/30s\)")
+    assert_that(output).matches(r"retrying in 1s \(waited [1-5]/30s\)")
+    assert_that(output).contains(
+        f"linting-json-report from docker-ci run {_LINT_RUN_ID} "
+        f"(head {_LINT_HEAD_SHA}) after ",
+    )
+    assert_that(argv[:3]).is_equal_to(["run", "lintro", "review"])
+    assert_that(argv).contains("--lint-report")
+    report_path = argv[argv.index("--lint-report") + 1]
+    assert_that(report_path).ends_with("/results.json")
+    assert_that(argv).contains("--pr", str(_LINT_PR_NUMBER), "--post")
+
+
+def test_lint_report_never_appearing_falls_back_after_the_bound(
+    tmp_path: Path,
+) -> None:
+    """When the bound expires the review still runs, without the flag.
+
+    The locator is polled at 0 s, 1 s and 2 s of wall clock (bound 2 s at a
+    1 s interval; the locator's own run time counts) and then the script
+    stops waiting. No ``--lint-report`` is passed, so
+    lintro renders only its own "linter facts unavailable" note rather than
+    a second "not readable" note for a path that never existed.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds=2,
+    )
+
+    # Wall-clock bound at 1 s granularity: the locator itself takes time, so
+    # the loop makes two or three listings before the 2 s deadline passes.
+    assert_that(listings).is_between(1, 3)
+    assert_that(output).matches(
+        r"linter facts unavailable for this head: no linting-json-report "
+        rf"for head {_LINT_HEAD_SHA} after [2-9]s",
+    )
+    assert_that(argv[:3]).is_equal_to(["run", "lintro", "review"])
+    assert_that(argv).does_not_contain("--lint-report")
+    assert_that(argv).does_not_contain("--with-lint")
+    assert_that(argv).contains("--pr", str(_LINT_PR_NUMBER), "--post")
+    missing = argv[argv.index("--lint-report-missing") + 1]
+    assert_that(missing).matches(
+        rf"^no linting-json-report for head {_LINT_HEAD_SHA} after [0-9]+s$",
+    )
+
+
+def test_lint_report_fallback_passes_no_report_argument_at_all(
+    tmp_path: Path,
+) -> None:
+    """The fallback argv carries no report path in any position.
+
+    Guards against the pre-follow-up shape, where ``--lint-report`` was
+    always passed with a path inside the scratch download directory.
+    """
+    _output, argv, _listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds=0,
+    )
+
+    assert_that(argv).is_not_empty()
+    assert_that([arg for arg in argv if arg.endswith("results.json")]).is_empty()
+    assert_that(argv).does_not_contain("--lint-report")
 
 
 @pytest.mark.parametrize(
@@ -1640,17 +1927,23 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     first, the Actions runner kills the review mid-flight, no JSON error
     envelope is written, and ``classify_review_outcome.py`` reads a truncated
     output file (how PR #1916's review died under 600 s / 15 min). The
-    invariant is ``ceil(cli_timeout / 60) + setup overhead + posting margin <=
-    timeout-minutes``, with ~7 minutes observed for harden-runner + checkout +
-    Node/claude install + uv sync, and a 1-minute posting margin. Bump the two
-    values together — ``CLI_REVIEW_TIMEOUT_SECONDS`` in run-ai-review.sh (kept
-    in sync with ``ai.transports.cli.timeout`` / DEFAULT_CLI_TIMEOUT) and
+    invariant is ``ceil(cli_timeout / 60) + setup overhead + lint-report wait
+    + posting margin <= timeout-minutes``, with ~7 minutes observed for
+    harden-runner + checkout + Node/claude install + uv sync, up to
+    ``LINT_REPORT_WAIT_SECONDS`` spent waiting for the exact-head lint report
+    (#2571), and a 1-minute posting margin. Bump the values together —
+    ``CLI_REVIEW_TIMEOUT_SECONDS`` and ``LINT_REPORT_WAIT_SECONDS`` in
+    run-ai-review.sh (the former kept in sync with
+    ``ai.transports.cli.timeout`` / DEFAULT_CLI_TIMEOUT) and
     ``timeout-minutes`` in ai-review.yml. The review invocation itself must
     not pass a hand-tuned ``--timeout`` once the profile default covers it
     (#1923).
     """
     setup_overhead_minutes = 7
     posting_margin_minutes = 1
+    lint_report_wait_minutes = math.ceil(
+        _shell_default("LINT_REPORT_WAIT_SECONDS") / 60,
+    )
 
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
     # Collapse backslash continuations so a flag wrapped onto its own line
@@ -1682,14 +1975,21 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
 
+    # One locate may straddle the wall-clock deadline: three gh sequences
+    # (PR head, run listing, artifact listing) of three 30 s attempts each
+    # plus retry sleeps (scripts/ci/review_state_artifacts.py), ~4.6 min.
+    locate_overshoot_minutes = 5
     budget = review_timeout_minutes + setup_overhead_minutes
+    budget += lint_report_wait_minutes + locate_overshoot_minutes
     budget += posting_margin_minutes
     assert_that(job_timeout_minutes).described_as(
         f"timeout-minutes ({job_timeout_minutes}) must cover the CLI profile "
         f"timeout ({review_timeout_minutes} min) plus "
-        f"{setup_overhead_minutes} min setup and "
+        f"{setup_overhead_minutes} min setup, "
+        f"{lint_report_wait_minutes} min lint-report wait, "
+        f"{locate_overshoot_minutes} min locate overshoot and "
         f"{posting_margin_minutes} min posting margin — bump it together "
-        "with CLI_REVIEW_TIMEOUT_SECONDS / ai.transports.cli.timeout",
+        "with CLI_REVIEW_TIMEOUT_SECONDS / LINT_REPORT_WAIT_SECONDS",
     ).is_greater_than_or_equal_to(budget)
 
 
@@ -1819,3 +2119,94 @@ def test_workflow_exports_runtime_token_into_review_step() -> None:
     assert_that(review["env"]["ACTIONS_RESULTS_URL"]).is_equal_to(
         "${{ steps.artifact-runtime.outputs.results-url }}",
     )
+
+
+def test_lint_report_wait_rejects_a_zero_poll_interval(tmp_path: Path) -> None:
+    """A poll interval of zero would never advance the wait, so it is replaced.
+
+    With the bound also at zero the loop exits after one locate, so the test
+    observes the warning and the fallback without sleeping.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds=0,
+        poll_seconds="0",
+    )
+
+    assert_that(output).contains(
+        "::warning::LINT_REPORT_POLL_SECONDS=0 is not a positive integer; using 30",
+    )
+    assert_that(listings).is_equal_to(1)
+    assert_that(argv).does_not_contain("--lint-report")
+
+
+def test_lint_report_last_poll_sleeps_only_the_remaining_wait(
+    tmp_path: Path,
+) -> None:
+    """A poll interval longer than the remaining wait is capped to it.
+
+    Bound 2 s at a 5 s interval: the script sleeps 2 s, not 5 s, then
+    makes its final locate and gives up.
+    """
+    output, _argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds=2,
+        poll_seconds="5",
+    )
+
+    # A slow first locate may already exhaust the 2 s bound; either way no
+    # sleep is ever longer than the remaining wait.
+    assert_that(output).does_not_contain("retrying in 5s")
+    assert_that(output).does_not_contain("retrying in 4s")
+    assert_that(output).does_not_contain("retrying in 3s")
+    assert_that(listings).is_between(1, 3)
+    assert_that(output).matches(r"after [2-9]s")
+
+
+def test_lint_report_download_failure_falls_back_with_the_reason(
+    tmp_path: Path,
+) -> None:
+    """A located run whose download fails still reviews, without the flag.
+
+    The locator finds the run on its first poll, ``gh run download`` exits
+    non-zero, and the script passes ``--lint-report-missing`` naming the
+    failed run instead of a report path.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=30,
+        download_fails=True,
+    )
+
+    assert_that(listings).is_equal_to(1)
+    assert_that(output).contains("download of run 777 failed")
+    assert_that(argv).does_not_contain("--lint-report")
+    assert_that(argv).contains("--lint-report-missing")
+    missing = argv[argv.index("--lint-report-missing") + 1]
+    assert_that(missing).is_equal_to("download of docker-ci run 777 failed")
+
+
+def test_lint_report_wait_reads_leading_zero_values_as_decimal(
+    tmp_path: Path,
+) -> None:
+    """``0900``-style overrides are decimal seconds, never octal.
+
+    Bound ``02`` at interval ``01`` behaves exactly like ``2`` at ``1``: the
+    script neither aborts on an invalid-octal expansion nor shortens the
+    wait, and the log reports the decimal bound.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds="02",  # type: ignore[arg-type]
+        poll_seconds="01",
+    )
+
+    assert_that(output).does_not_contain("::warning::")
+    assert_that(output).contains("/2s)")
+    assert_that(listings).is_between(1, 3)
+    assert_that(argv[:3]).is_equal_to(["run", "lintro", "review"])
+    assert_that(argv).contains("--lint-report-missing")

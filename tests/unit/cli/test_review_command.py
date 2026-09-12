@@ -1716,6 +1716,89 @@ def test_lint_report_reaches_the_review_request(
     assert_that(captured[0].with_lint).is_false()
 
 
+def test_lint_report_missing_reason_reaches_the_review_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--lint-report-missing`` is forwarded to preparation as the reason.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.review.preparation import ReviewRunRequest
+
+    captured: list[ReviewRunRequest] = []
+
+    def fake_prepare(request: ReviewRunRequest, **_kwargs: Any) -> None:
+        captured.append(request)
+        raise SystemExit(0)
+
+    monkeypatch.setattr("lintro.cli_utils.commands.review.prepare_review", fake_prepare)
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(
+                ai={"enabled": True, "review": True},
+                config_path=None,
+            ),
+        ),
+        patch(
+            "lintro.cli_utils.commands.review.resolve_effective_ai_config",
+            lambda _mapping, **_kwargs: AIConfig.resolve_from_mapping(
+                {"enabled": True, "review": True, "provider": "anthropic"},
+            ),
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "review",
+                "--base",
+                "main",
+                "--lint-report-missing",
+                "no linting-json-report for head abc after 600s",
+            ],
+        )
+
+    assert_that(result.exit_code).is_equal_to(0)
+    assert_that(captured).is_length(1)
+    assert_that(captured[0].lint_report).is_none()
+    assert_that(captured[0].lint_report_missing).is_equal_to(
+        "no linting-json-report for head abc after 600s",
+    )
+
+
+@pytest.mark.parametrize(
+    "conflicting",
+    [["--with-lint"], ["--lint-report", "results.json"]],
+)
+def test_lint_report_missing_excludes_the_lint_sources(conflicting: list[str]) -> None:
+    """A missing-report reason cannot ride along with a real lint source.
+
+    Args:
+        conflicting: The option that supplies lint facts.
+    """
+    runner = CliRunner()
+    with (
+        patch("lintro.cli_utils.commands.review.require_ai"),
+        patch(
+            "lintro.cli_utils.commands.review.get_config",
+            return_value=MagicMock(
+                ai={"enabled": True, "review": True},
+                config_path=None,
+            ),
+        ),
+    ):
+        result = runner.invoke(
+            cli,
+            ["review", "--base", "main", "--lint-report-missing", "why", *conflicting],
+        )
+
+    assert_that(result.exit_code).is_not_equal_to(0)
+    assert_that(result.output).contains("--lint-report-missing")
+
+
 def test_advisory_only_with_no_tools_errors() -> None:
     """Asking for advisory-only while disabling every tool is a usage error."""
     runner = CliRunner()
