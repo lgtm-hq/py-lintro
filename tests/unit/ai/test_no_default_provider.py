@@ -96,30 +96,50 @@ def _scanned_modules() -> list[Path]:
 #: The enum's own name, before any module renames it on import.
 _PROVIDER_ENUM = "AIProvider"
 
+#: The module that declares the enum, for module-qualified access.
+_PROVIDER_ENUM_MODULE = "lintro.ai.provider_enum"
+
 
 def _provider_enum_aliases(*, tree: ast.AST) -> frozenset[str]:
-    """Return every name *tree* binds to the provider enum.
+    """Return every spelling *tree* can reach the provider enum by.
 
     A module is free to write ``from lintro.ai.provider_enum import
     AIProvider as Provider``, and a matcher keyed on the literal spelling
-    would then see ``Provider.ANTHROPIC`` as an unrelated attribute. The
-    import statements are the authority on what the enum is called here.
+    would then see ``Provider.ANTHROPIC`` as an unrelated attribute. Importing
+    the *module* is the same story one level up: ``import
+    lintro.ai.provider_enum as provider_enum`` makes the member
+    ``provider_enum.AIProvider.ANTHROPIC``. The import statements are the
+    authority on what the enum is called here, and the returned set holds
+    printed owner spellings so both forms compare the same way.
 
     Args:
         tree: Parsed module.
 
     Returns:
-        The enum's own name plus any alias bound by an ``import from``.
+        The enum's own name, any alias bound by an ``import from``, and the
+        module-qualified spellings bound by importing the enum's module.
     """
+    package, _, module_name = _PROVIDER_ENUM_MODULE.rpartition(".")
     aliases = {_PROVIDER_ENUM}
     for node in ast.walk(tree):
-        if not isinstance(node, ast.ImportFrom):
-            continue
-        aliases.update(
-            alias.asname or alias.name
-            for alias in node.names
-            if alias.name == _PROVIDER_ENUM
-        )
+        if isinstance(node, ast.Import):
+            aliases.update(
+                f"{alias.asname or alias.name}.{_PROVIDER_ENUM}"
+                for alias in node.names
+                if alias.name == _PROVIDER_ENUM_MODULE
+            )
+        elif isinstance(node, ast.ImportFrom):
+            aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == _PROVIDER_ENUM
+            )
+            if node.module == package:
+                aliases.update(
+                    f"{alias.asname or alias.name}.{_PROVIDER_ENUM}"
+                    for alias in node.names
+                    if alias.name == module_name
+                )
     return frozenset(aliases)
 
 
@@ -132,18 +152,22 @@ def _is_provider_literal(
 
     Args:
         node: Expression appearing in a default-shaped position.
-        aliases: Names bound to the provider enum in the module under scan,
-            from :func:`_provider_enum_aliases`.
+        aliases: Printed spellings the provider enum is reachable by in the
+            module under scan, from :func:`_provider_enum_aliases`.
 
     Returns:
         True for ``"anthropic"``-style string constants and for
         ``AIProvider.ANTHROPIC``-style enum member references, under any name
-        the module imported the enum as.
+        the module imported the enum — or the enum's module — as.
     """
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value.lower() in _PROVIDER_NAMES
-    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-        return node.value.id in aliases and node.attr.lower() in _PROVIDER_NAMES
+    if isinstance(node, ast.Attribute) and isinstance(
+        node.value,
+        ast.Name | ast.Attribute,
+    ):
+        owner = ast.unparse(node.value)
+        return owner in aliases and node.attr.lower() in _PROVIDER_NAMES
     return False
 
 
@@ -462,6 +486,18 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
             "from lintro.ai.provider_enum import AIProvider as Provider\n"
             "def build(provider=Provider.ANTHROPIC): ...\n"
         ),
+        (
+            "import lintro.ai.provider_enum as provider_enum\n"
+            "def build(provider=provider_enum.AIProvider.ANTHROPIC): ...\n"
+        ),
+        (
+            "import lintro.ai.provider_enum\n"
+            "DEFAULT_PROVIDER = lintro.ai.provider_enum.AIProvider.CURSOR\n"
+        ),
+        (
+            "from lintro.ai import provider_enum\n"
+            'provider = getattr(cfg, "provider", provider_enum.AIProvider.OPENAI)\n'
+        ),
         'provider = "anthropic" if provider is None else provider',
         'provider = explicit or "cursor" or fallback',
     ],
@@ -489,6 +525,9 @@ def test_no_module_defaults_to_a_provider(module: Path) -> None:
         "unset-guard-on-an-attribute",
         "pop-fallback",
         "aliased-enum-import",
+        "module-aliased-enum-import",
+        "dotted-module-enum-import",
+        "module-from-import-enum",
         "conditional-fallback-in-body",
         "or-fallback-mid-chain",
     ],
