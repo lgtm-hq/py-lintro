@@ -150,9 +150,14 @@ def test_the_summary_totals_skip_a_tool_whose_residual_is_unknown() -> None:
         exit_code=1,
     )
 
+    assert_that(total_fixed).is_equal_to(3)
+    assert_that(total_remaining).is_equal_to(1)
     assert_that(data["summary"]["total_net_resolved"]).is_equal_to(3)
     assert_that(data["summary"]["total_fixed"]).is_equal_to(3)
     assert_that(data["summary"]["total_remaining"]).is_equal_to(1)
+    # The totals cover only the measured tool, so the summary names the one
+    # they leave out — otherwise "total_remaining": 1 reads as the whole run.
+    assert_that(data["summary"]["residual_unknown_tools"]).is_equal_to(["ruff"])
 
 
 def test_serialize_tool_result_includes_output_and_issues(

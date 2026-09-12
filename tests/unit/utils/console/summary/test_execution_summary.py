@@ -238,6 +238,10 @@ def test_execution_summary_omits_an_unknown_residual_from_the_totals(
     rows = _totals_row(output=output)
     assert_that(rows).contains_entry({"Net Resolved (Native)": 3})
     assert_that(rows).contains_entry({"Remaining Issues": 1})
+    # And the table says what those numbers do not cover, so "Remaining
+    # Issues 1" cannot be read as the whole run's measured residual.
+    assert_that(rows).contains_entry({"Residual Unknown (tools)": 1})
+    assert_that(output).contains("Residual unknown for 1 tool (ruff)")
     # The per-tool row above says "unknown" in both count columns and carries
     # the reason as its note, so the totals are not the only thing a reader
     # has to go on.

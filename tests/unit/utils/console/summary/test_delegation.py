@@ -8,7 +8,7 @@ called another (#2315).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from assertpy import assert_that
@@ -174,7 +174,7 @@ def test_print_totals_table_renders_fix_mode_metrics(
 )
 def test_print_totals_table_various_inputs(
     action: Action,
-    kwargs: dict[str, int],
+    kwargs: dict[str, Any],
     expected_metric: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:

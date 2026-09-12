@@ -621,3 +621,37 @@ def test_check_timeout_continues_to_remaining_targets(
     assert_that(result.issues_count).is_equal_to(1)
     assert_that(result.output).contains("timed out")
     assert_that(result.output).contains(str(first / "requirements.txt"))
+
+
+def test_a_declined_setup_py_is_not_reported_as_matched_nothing(
+    pip_audit_plugin: PipAuditPlugin,
+    tmp_path: Path,
+) -> None:
+    """Discovery matched a file; pip-audit declined it. That is not "no files".
+
+    The only way to reach the empty-targets return is a matched file that
+    ``_build_targets`` dropped — the ``setup.py`` inside an importable
+    package. An empty discovery set never gets here, because ``prepare``
+    returns its own no-files result first. Stamping ``no_files`` on this
+    branch would print the "no files matched" note for a run where the user's
+    path matched fine and pip-audit made a decision about it.
+
+    Args:
+        pip_audit_plugin: The plugin instance.
+        tmp_path: Temporary directory path.
+    """
+    pkg = tmp_path / "commands"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "setup.py").write_text('"""lintro setup command."""\n')
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        result = pip_audit_plugin.check([str(pkg / "setup.py")], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.issues_count).is_equal_to(0)
+    assert_that(result.no_files).is_false()
+    assert_that(result.output).contains("among the matched paths")

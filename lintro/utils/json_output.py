@@ -20,6 +20,7 @@ from lintro.enums.action import Action, normalize_action
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.execution.exit_codes import unknown_residual_tool_names
 from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
@@ -213,6 +214,11 @@ def create_json_output(
             # failures, not findings, so they never appear in ``total_issues``;
             # this list is where a consumer reads them instead.
             "timed_out_tools": timed_out_tool_names(results),
+            # Names of tools whose residual the verify pass could not measure
+            # (#1743). The two derived totals above leave them out rather
+            # than folding a zero in, so this list is what tells a consumer
+            # which tools the numbers do not cover.
+            "residual_unknown_tools": unknown_residual_tool_names(list(results)),
         },
     }
     # Additive: include the severity tallies under summary when supplied so

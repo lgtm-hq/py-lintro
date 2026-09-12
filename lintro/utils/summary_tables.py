@@ -31,6 +31,9 @@ UNKNOWN_RESIDUAL_DISPLAY: str = "unknown"
 # tool's own output block.
 UNKNOWN_RESIDUAL_NOTE: str = "residual unknown"
 
+# TOTALS row counting the tools the derived totals had to leave out.
+UNKNOWN_RESIDUAL_ROW: str = "Residual Unknown (tools)"
+
 # Note shown when a tool passed without inspecting a single file. A zero-file
 # run and a genuinely clean run are both ``PASS 0``; without this note they are
 # indistinguishable, which is how a fully excluded scan reads as green (#1678).
@@ -642,6 +645,7 @@ def print_totals_table(
     total_ai_applied: int = 0,
     total_ai_verified: int = 0,
     total_fixable: int = 0,
+    residual_unknown_tools: Sequence[str] = (),
 ) -> None:
     """Print a totals summary table for the run.
 
@@ -663,6 +667,11 @@ def print_totals_table(
             (CHECK/TEST mode). When greater than zero, an "Auto-fixable" row is
             shown. The hint to run ``lintro fmt`` is emitted only in CHECK
             mode; TEST mode is read-only and never advertises ``fmt``.
+        residual_unknown_tools: Tools whose residual the verify pass could not
+            measure (#1743). They are excluded from ``total_fixed`` and
+            ``total_remaining``, so the table has to say so: without it a run
+            whose only mutator ended in the third state would print a measured
+            "0 remaining" under a tool row that reads "unknown".
     """
     try:
         import click
@@ -681,6 +690,12 @@ def print_totals_table(
                 ["Remaining Issues", total_remaining],
                 ["Affected Files", affected_files],
             ]
+            if residual_unknown_tools:
+                # The counts above cover the measured tools only. Naming the
+                # rest here is what keeps them from reading as zeroes.
+                rows.append(
+                    [UNKNOWN_RESIDUAL_ROW, len(residual_unknown_tools)],
+                )
         else:
             rows = [
                 ["Total Issues", total_issues],
@@ -702,6 +717,18 @@ def print_totals_table(
         )
         console_output_func(text=table)
         console_output_func(text="")
+
+        if residual_unknown_tools:
+            named = ", ".join(residual_unknown_tools)
+            noun = "tool" if len(residual_unknown_tools) == 1 else "tools"
+            console_output_func(
+                text=(
+                    f"{_YELLOW}Residual unknown for {len(residual_unknown_tools)} "
+                    f"{noun} ({named}){_RESET} — the counts above cover only the "
+                    "tools the verify pass could measure"
+                ),
+            )
+            console_output_func(text="")
 
         # In check mode, nudge the user toward auto-fixing when the tools
         # report fixable issues. Only shown when at least one issue is

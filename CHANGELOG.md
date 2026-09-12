@@ -75,6 +75,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **core**: the run totals no longer present an unmeasured residual as a measured zero.
+  A tool in the residual-unknown state is excluded from `total_net_resolved` and
+  `total_remaining` (its pre-fix findings still reach `total_issues`), the TOTALS table
+  gains a `Residual Unknown (tools)` row plus a line naming them, and the JSON summary
+  gains `residual_unknown_tools`. Before this the table could print "Remaining Issues 0"
+  directly under a tool row reading "unknown".
+- **core**: `lintro badge` and the severity baseline classify a "nothing was examined"
+  result by the structured `no_files` flag instead of its message. Bandit nulls its
+  output for that case, making it byte-identical to a clean pass, so the prose heuristic
+  could not tell them apart; it is kept underneath the flag for producers that do not
+  set it yet.
+- **pip-audit**: a file discovery matched and pip-audit declined — a `setup.py` inside
+  an importable package — is no longer reported as "no files matched". The flag is
+  dropped from that branch and the message says the matched paths held nothing
+  auditable.
 - **core**: a verifying tool whose `CHECK` timed out is no longer read as a verdict. A
   multi-root aggregator such as golangci-lint returns one result carrying the findings
   the roots that finished produced plus `timed_out=True`; the run-level verify pass now

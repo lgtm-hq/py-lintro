@@ -302,12 +302,22 @@ class PipAuditPlugin(BaseToolPlugin):
                 covered.add(resolved)
 
         if not targets:
+            # Reached only when discovery *did* match files and
+            # ``_build_targets`` declined every one of them — today that is
+            # the ``setup.py`` inside an importable package. An empty
+            # discovery set never gets here: ``prepare`` returns its own
+            # no-files result long before. So this is a declined-after-match,
+            # not a matched-nothing, and must not carry ``no_files``: that
+            # flag drives the "no files matched" note, which would blame
+            # discovery for a decision pip-audit made about real files.
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No requirements or project files found; skipping pip-audit.",
+                output=(
+                    "No auditable requirements or project file among the "
+                    "matched paths; skipping pip-audit."
+                ),
                 issues_count=0,
-                no_files=True,
             )
 
         base_cmd = self._build_command()

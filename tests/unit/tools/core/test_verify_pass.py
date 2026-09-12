@@ -1580,6 +1580,12 @@ def _tool_result_calls() -> list[tuple[str, int, str, set[str]]]:
     return calls
 
 
+#: Marker a wrapper uses when discovery matched files and it declined them
+#: all. Distinct from an empty discovery set, which is what ``no_files``
+#: means, so the guard below leaves these results alone.
+_DECLINED_AFTER_MATCH: str = "among the matched paths"
+
+
 def test_every_nothing_examined_result_is_flagged() -> None:
     """A "no files" result must say so structurally, not only in prose.
 
@@ -1587,15 +1593,22 @@ def test_every_nothing_examined_result_is_flagged() -> None:
     examined nothing" apart from "I examined the scope and it is clean". A
     plugin that builds the first shape by hand without the flag hands the pass
     a clean verdict it never earned, and the tool's pre-fix findings are
-    dropped as fixed. Missing-configuration results are excluded: they mean
-    the tool could not run at all, which the display already renders on its
-    own terms.
+    dropped as fixed.
+
+    Two shapes are excluded, because neither is an empty discovery set:
+    missing-configuration results, where the tool could not run at all, and
+    declined-after-match results, where discovery matched files and the
+    wrapper then refused them (pip-audit and a ``setup.py`` inside an
+    importable package). Flagging the second would print "no files matched"
+    for a run whose paths matched fine, which is the opposite of what the
+    note means.
     """
     unflagged = [
         f"{path}:{lineno} {text!r}"
         for path, lineno, text, keywords in _tool_result_calls()
         if text.startswith("No ")
         and "configuration" not in text
+        and _DECLINED_AFTER_MATCH not in text
         and not keywords & {"no_files", "skipped"}
     ]
 
