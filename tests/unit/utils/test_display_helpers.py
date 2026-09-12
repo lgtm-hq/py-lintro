@@ -330,13 +330,13 @@ def test_print_final_status_produces_output(
         pytest.param(
             5,
             0,
-            ["5 fixed"],
+            ["5 net resolved"],
             id="all_fixed_no_remaining",
         ),
         pytest.param(
             3,
             2,
-            ["3 fixed", "2 remaining"],
+            ["3 net resolved", "2 remaining"],
             id="some_fixed_some_remaining",
         ),
         pytest.param(
@@ -348,7 +348,7 @@ def test_print_final_status_produces_output(
         pytest.param(
             10,
             5,
-            ["10 fixed", "5 remaining"],
+            ["10 net resolved", "5 remaining"],
             id="many_fixed_some_remaining",
         ),
     ],

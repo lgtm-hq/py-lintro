@@ -152,7 +152,7 @@ def test_fix_with_fixed_count(
     combined = "".join(output)
     assert_that(combined).contains("black")
     assert_that(combined).contains("PASS")
-    assert_that(combined).contains("Fixed")
+    assert_that(combined).contains("Net Resolved")
     assert_that(combined).contains("AI-Applied")
     assert_that(combined).contains("AI-Resolved")
     assert_that(combined).contains("Remaining")

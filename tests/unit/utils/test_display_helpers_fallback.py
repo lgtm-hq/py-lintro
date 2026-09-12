@@ -183,14 +183,14 @@ def test_print_final_status_fallback_includes_reset_code(
         pytest.param(
             5,
             0,
-            ["5 fixed"],
+            ["5 net resolved"],
             [ANSI_GREEN],
             id="all_fixed_green",
         ),
         pytest.param(
             3,
             2,
-            ["fixed", "remaining"],
+            ["net resolved", "remaining"],
             [ANSI_GREEN, ANSI_RED],
             id="some_fixed_some_remaining",
         ),
@@ -308,5 +308,7 @@ def test_print_final_status_format_fallback_mixed_colors(
     combined = "".join(output)
     # Should have both colors or both messages
     has_both_colors = ANSI_GREEN in combined and ANSI_RED in combined
-    has_both_messages = "fixed" in combined.lower() and "remaining" in combined.lower()
+    has_both_messages = (
+        "net resolved" in combined.lower() and "remaining" in combined.lower()
+    )
     assert_that(has_both_colors or has_both_messages).is_true()

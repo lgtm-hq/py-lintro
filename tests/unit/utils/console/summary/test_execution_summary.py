@@ -193,7 +193,7 @@ def test_execution_summary_fix_with_standardized_counts(
     logger.print_execution_summary(Action.FIX, results)
 
     rows = _totals_row(output=capsys.readouterr().out)
-    assert_that(rows).contains_entry({"Fixed Issues (Native)": 10})
+    assert_that(rows).contains_entry({"Net Resolved (Native)": 10})
     assert_that(rows).contains_entry({"Remaining Issues": 2})
 
 
@@ -456,5 +456,5 @@ def test_execution_summary_fix_various_counts(
     logger.print_execution_summary(Action.FIX, results)
 
     rows = _totals_row(output=capsys.readouterr().out)
-    assert_that(rows).contains_entry({"Fixed Issues (Native)": fixed})
+    assert_that(rows).contains_entry({"Net Resolved (Native)": fixed})
     assert_that(rows).contains_entry({"Remaining Issues": expected_remaining})

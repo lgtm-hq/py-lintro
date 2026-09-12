@@ -604,7 +604,7 @@ def print_summary_table(
             headers = [
                 "Tool",
                 "Status",
-                "Fixed",
+                "Net Resolved",
                 "AI-Applied",
                 "AI-Resolved",
                 "Remaining",
@@ -649,7 +649,9 @@ def print_totals_table(
         console_output_func: Function to output text to console.
         action: The action being performed.
         total_issues: Total number of issues found (CHECK/TEST mode).
-        total_fixed: Total number of native-tool issues fixed (FIX mode).
+        total_fixed: Net resolved by the native tools (FIX mode): issues
+            detected before the mutation phase minus the residual measured
+            after it, which is not any one tool's reported fix count (#1743).
         total_remaining: Total number of remaining issues (FIX mode).
         affected_files: Number of unique files with issues.
         severity_errors: Number of issues at ERROR severity.
@@ -672,7 +674,7 @@ def print_totals_table(
         if action == Action.FIX:
             total_resolved = total_fixed + total_ai_verified
             rows: list[list[str | int]] = [
-                ["Fixed Issues (Native)", total_fixed],
+                ["Net Resolved (Native)", total_fixed],
                 ["AI Applied Fixes", total_ai_applied],
                 ["AI Resolved Fixes", total_ai_verified],
                 ["Total Resolved", total_resolved],

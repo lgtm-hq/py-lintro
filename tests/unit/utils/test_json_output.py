@@ -71,7 +71,7 @@ def test_serialize_tool_result_fix_mode_defaults_unset_counts_to_zero() -> None:
 
     data = serialize_tool_result(result, action=Action.FIX)
 
-    assert_that(data["fixed"]).is_equal_to(0)
+    assert_that(data["net_resolved"]).is_equal_to(0)
     assert_that(data["remaining"]).is_equal_to(0)
 
 
@@ -149,7 +149,7 @@ def test_file_and_stdout_serializers_parity_fix_mode(
     assert_that(file_result).is_equal_to(stdout_result)
     # Merged/deduped count: detected [E001, E002] + remaining [E002] -> 2
     assert_that(stdout_result["issues_count"]).is_equal_to(2)
-    assert_that(stdout_result["fixed"]).is_equal_to(1)
+    assert_that(stdout_result["net_resolved"]).is_equal_to(1)
     assert_that(stdout_result["remaining"]).is_equal_to(1)
 
 

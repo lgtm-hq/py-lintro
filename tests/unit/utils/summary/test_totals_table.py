@@ -356,7 +356,7 @@ def test_totals_table_check_mode_does_not_contain_fix_rows(
         affected_files=2,
     )
     combined = "\n".join(output)
-    assert_that(combined).does_not_contain("Fixed Issues")
+    assert_that(combined).does_not_contain("Net Resolved")
     assert_that(combined).does_not_contain("Remaining Issues")
 
 
@@ -440,7 +440,7 @@ def test_totals_table_check_mode_shows_fmt_hint_for_same_input(
 def test_totals_table_fix_mode_contains_fixed_issues(
     console_capture: tuple[Callable[..., None], list[str]],
 ) -> None:
-    """Verify FIX mode table contains Fixed Issues row.
+    """Verify FIX mode table contains the Net Resolved row.
 
     Args:
         console_capture: Fixture for capturing console output.
@@ -454,7 +454,7 @@ def test_totals_table_fix_mode_contains_fixed_issues(
         affected_files=5,
     )
     combined = "\n".join(output)
-    assert_that(combined).contains("Fixed Issues")
+    assert_that(combined).contains("Net Resolved")
     assert_that(combined).contains("10")
 
 

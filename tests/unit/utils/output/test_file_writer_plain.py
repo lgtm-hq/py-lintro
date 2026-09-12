@@ -71,7 +71,7 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
     tmp_path: Path,
     sample_results_empty: list[ToolResult],
 ) -> None:
-    """Verify fix action report includes 'Total Fixed' instead of just issues.
+    """Verify fix action report includes 'Total Net Resolved' instead of just issues.
 
     Args:
         tmp_path: Temporary directory path for test output.
@@ -91,7 +91,7 @@ def test_write_plain_file_shows_fixed_count_for_fix_action(
     content = output_path.read_text()
 
     assert_that(content).contains("Lintro Fix Report")
-    assert_that(content).contains("Total Fixed: 5")
+    assert_that(content).contains("Total Net Resolved: 5")
 
 
 def test_write_plain_fix_mode_shows_detected_and_remaining(

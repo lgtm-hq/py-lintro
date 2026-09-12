@@ -45,7 +45,7 @@ class StreamingResultHandler:
         """Initialize totals dictionary."""
         self._totals = {
             "issues": 0,
-            "fixed": 0,
+            "net_resolved": 0,
             "remaining": 0,
             "tools_run": 0,
             "tools_failed": 0,
@@ -116,7 +116,7 @@ class StreamingResultHandler:
             fixed = getattr(result, "fixed_issues_count", None)
             remaining = getattr(result, "remaining_issues_count", None)
             if fixed is not None:
-                self._totals["fixed"] += fixed
+                self._totals["net_resolved"] += fixed
             if remaining is not None:
                 self._totals["remaining"] += remaining
 
@@ -183,7 +183,7 @@ class StreamingResultHandler:
         if result.initial_issues_count is not None:
             data["initial_issues_count"] = result.initial_issues_count
         if result.fixed_issues_count is not None:
-            data["fixed_issues_count"] = result.fixed_issues_count
+            data["net_resolved_count"] = result.fixed_issues_count
         if result.remaining_issues_count is not None:
             data["remaining_issues_count"] = result.remaining_issues_count
         if result.residual_unknown:

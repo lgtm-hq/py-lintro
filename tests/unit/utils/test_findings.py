@@ -220,7 +220,7 @@ def test_tool_summary_reports_issues_status_and_duration() -> None:
     assert_that(summary.status).is_equal_to(ToolRunStatus.ISSUES)
     assert_that(summary.issue_count).is_equal_to(1)
     assert_that(summary.duration).is_equal_to(1.25)
-    assert_that(summary.to_dict()).does_not_contain_key("fixed_count")
+    assert_that(summary.to_dict()).does_not_contain_key("net_resolved")
 
 
 def test_tool_summary_reports_passed_skipped_timed_out_and_errored() -> None:
@@ -248,7 +248,7 @@ def test_tool_summary_reports_passed_skipped_timed_out_and_errored() -> None:
     assert_that(summaries[0].duration).is_none()
 
 
-def test_tool_summary_reports_fixed_count_for_fix_runs() -> None:
+def test_tool_summary_reports_net_resolved_for_fix_runs() -> None:
     """A fix run surfaces how many issues the tool resolved."""
     result = ToolResult(
         name="ruff",
@@ -267,4 +267,4 @@ def test_tool_summary_reports_fixed_count_for_fix_runs() -> None:
 
     assert_that(summary.status).is_equal_to(ToolRunStatus.PASSED)
     assert_that(summary.issue_count).is_equal_to(0)
-    assert_that(summary.to_dict()["fixed_count"]).is_equal_to(1)
+    assert_that(summary.to_dict()["net_resolved"]).is_equal_to(1)
