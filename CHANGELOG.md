@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.157.0] - 2026-09-12
+
+### Added
+
+- **ai**: present providers without a default (#2150) (42c4a93)
+
 ## [0.156.4] - 2026-09-12
 
 ### Fixed
