@@ -399,7 +399,11 @@ def test_fake_provider_risk_level_is_one_lintro_accepts() -> None:
     risk_levels = set(_FIXTURE_RISK_PATTERN.findall(fixture_source))
     assert_that(risk_levels).is_length(1)
 
-    items = FIX_BATCH_CLI_SCHEMA["items"]
+    schema_properties = FIX_BATCH_CLI_SCHEMA["properties"]
+    assert isinstance(schema_properties, dict)  # narrow type for mypy
+    fixes = schema_properties["fixes"]
+    assert isinstance(fixes, dict)  # narrow type for mypy
+    items = fixes["items"]
     assert isinstance(items, dict)  # narrow type for mypy
     properties = items["properties"]
     assert isinstance(properties, dict)  # narrow type for mypy
