@@ -81,6 +81,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.156.4] - 2026-09-12
+
+### Fixed
+
+- **ci**: refuse to promote a tools-image candidate built from a stale manifest (#2542)
+  (c6dda8c)
+
+## [0.156.3] - 2026-09-12
+
+### Fixed
+
+- **mcp**: build the binary in package mode and bundle the MCP SDK (#2593) (9055f33)
+
+## [0.156.2] - 2026-09-12
+
+### Fixed
+
+- **review**: wait for the exact-head lint report and keep the header note (#2587)
+  (27651f8)
+
 ## [0.156.1] - 2026-09-12
 
 ### Changed

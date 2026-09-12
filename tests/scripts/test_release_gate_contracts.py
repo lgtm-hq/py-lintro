@@ -1,10 +1,12 @@
-"""Lockstep tests for the release verify step's couplings to lintro's UI.
+"""Lockstep tests for the release verify step's couplings to lintro.
 
-``verify_built_binary.sh`` and ``drive_interactive_review.py`` classify a
-release build by matching lintro's own human-readable copy: the ``mcp``
-command's help, the interactive review prompt, and its key bindings. Those literals are hand-maintained in three other files, so without
-these tests a reword inside ``lintro`` passes the whole suite and only surfaces
-as a false packaging failure on the next tag (#2514).
+``verify_built_binary.sh``, ``drive_interactive_review.py`` and
+``drive_mcp_round_trip.py`` classify a release build by matching lintro's own
+surface: the CLI's command table, the ``watch`` ready line, the interactive
+review prompt and its key bindings, and the MCP server's name, first tool and
+protocol revision. Those literals are hand-maintained outside ``lintro``, so
+without these tests a change inside ``lintro`` passes the whole suite and only
+surfaces as a false packaging failure on the next tag (#2514, #2577).
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 
@@ -22,7 +25,9 @@ from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DRIVER_PATH = _REPO_ROOT / "scripts" / "build" / "drive_interactive_review.py"
+_MCP_DRIVER_PATH = _REPO_ROOT / "scripts" / "build" / "drive_mcp_round_trip.py"
 _VERIFY_PATH = _REPO_ROOT / "scripts" / "build" / "verify_built_binary.sh"
+_WATCHER_PATH = _REPO_ROOT / "lintro" / "watch" / "watcher.py"
 _BATS_PATH = (
     _REPO_ROOT / "tests" / "bats" / "unit" / "build" / "test_verify_built_binary.bats"
 )
@@ -37,9 +42,83 @@ _SCHEMA_SNIFF = "'\"original_code\"' in schema"
 # The risk level the fixture answers with, read back out of the fixture.
 _FIXTURE_RISK_PATTERN = re.compile(r'"risk_level": "([a-z-]+)"')
 
-# The literal the verify step greps the `mcp --help` output for, as written in
-# the shell script itself.
-_MCP_GREP_PATTERN = re.compile(r'^MCP_HELP_MARKER="([^"]+)"$', re.MULTILINE)
+# The command table the verify step runs once each, as written in the shell
+# script itself.
+_EXPORTED_COMMANDS_PATTERN = re.compile(
+    r"^EXPORTED_COMMANDS=\(\n(.*?)\n\)$",
+    re.MULTILINE | re.DOTALL,
+)
+
+# The literal the verify step waits for before stopping `lintro watch`.
+_WATCH_MARKER_PATTERN = re.compile(r'^WATCH_READY_MARKER="([^"]+)"$', re.MULTILINE)
+
+# Rich console markup tags, which the watcher's source carries but its output
+# does not.
+_RICH_MARKUP = re.compile(r"\[/?[a-z ]+\]")
+
+# Scripted stand-in for `lintro mcp`: a stdio JSON-RPC server that answers
+# `initialize` and `tools/list` and exits at EOF. `FAKE_MCP_MODE` selects a
+# failure to stage; the other variables shape the healthy answers.
+_FAKE_MCP_SERVER = """#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+
+if sys.argv[1:2] != ["mcp"]:
+    sys.exit(2)
+mode = os.environ.get("FAKE_MCP_MODE", "healthy")
+if mode == "crash":
+    sys.stderr.write(
+        "Traceback (most recent call last):\\n"
+        "ModuleNotFoundError: No module named 'mcp.server.stdio'\\n"
+    )
+    sys.exit(1)
+if mode == "silent":
+    time.sleep(120)
+tools = os.environ.get("FAKE_MCP_TOOLS", "lintro_ping").split(",")
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    if method not in ("initialize", "tools/list"):
+        continue
+    if mode == "malformed":
+        sys.stdout.write("{not json\\n")
+        sys.stdout.flush()
+        break
+    if mode == "error-" + method.split("/")[0]:
+        reply = {
+            "jsonrpc": "2.0",
+            "id": message["id"],
+            "error": {"code": -32603, "message": "staged failure"},
+        }
+        sys.stdout.write(json.dumps(reply) + "\\n")
+        sys.stdout.flush()
+        continue
+    if method == "initialize":
+        result = {
+            "protocolVersion": message["params"]["protocolVersion"],
+            "capabilities": {"tools": {}},
+            "serverInfo": {
+                "name": os.environ.get("FAKE_MCP_NAME", "lintro"),
+                "version": os.environ.get("FAKE_MCP_VERSION", "0.0.0"),
+            },
+        }
+    else:
+        result = {
+            "tools": [
+                {"name": name, "inputSchema": {"type": "object"}}
+                for name in tools
+                if name
+            ],
+        }
+    reply = {"jsonrpc": "2.0", "id": message["id"], "result": result}
+    sys.stdout.write(json.dumps(reply) + "\\n")
+    sys.stdout.flush()
+if mode == "hang":
+    time.sleep(120)
+sys.exit(int(os.environ.get("FAKE_MCP_EXIT", "0")))
+"""
 
 # A pty is required for the send-loop tests; every CI platform has one, but
 # the module must still import where it does not.
@@ -109,66 +188,341 @@ _COLOURED_NON_DIFF = (
 )
 
 
+def _load_module(path: Path, name: str) -> ModuleType:
+    """Import a script as a module without running its entry point.
+
+    Args:
+        path: The script to import.
+        name: Module name to register it under.
+
+    Returns:
+        The loaded module.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None  # narrow type for mypy
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_driver() -> ModuleType:
     """Import the pty driver without running it.
 
     Returns:
         The loaded ``drive_interactive_review`` module.
     """
-    spec = importlib.util.spec_from_file_location(
-        "drive_interactive_review",
-        _DRIVER_PATH,
-    )
-    assert spec is not None and spec.loader is not None  # narrow type for mypy
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["drive_interactive_review"] = module
-    spec.loader.exec_module(module)
-    return module
+    return _load_module(_DRIVER_PATH, "drive_interactive_review")
 
 
-def _verify_mcp_marker() -> str:
-    """Read the MCP acceptance literal out of the verify script.
+def _load_mcp_driver() -> ModuleType:
+    """Import the MCP round-trip driver without running it.
 
     Returns:
-        The unescaped text the shell script greps the MCP output for.
+        The loaded ``drive_mcp_round_trip`` module.
+    """
+    return _load_module(_MCP_DRIVER_PATH, "drive_mcp_round_trip")
+
+
+def _verify_exported_commands() -> list[str]:
+    """Read the command table out of the verify script.
+
+    Returns:
+        The canonical command names the verify step runs once each.
     """
     source = _VERIFY_PATH.read_text(encoding="utf-8")
-    match = _MCP_GREP_PATTERN.search(source)
+    match = _EXPORTED_COMMANDS_PATTERN.search(source)
     assert_that(match).is_not_none()
     assert match is not None  # narrow type for mypy
-    marker = match.group(1)
-    # The marker is the grep pattern, so the script must actually use it.
-    assert_that(source).contains('grep -q "$MCP_HELP_MARKER"')
-    return marker
+    return match.group(1).split()
 
 
-def test_mcp_marker_matches_the_commands_help_output() -> None:
-    """The verify step's literal must come from the ``mcp`` command's help.
+def _verify_watch_marker() -> str:
+    """Read the watch ready literal out of the verify script.
 
-    The probe is narrowed to command wiring while #2577 is open -- ``lintro
-    mcp`` dies in every frozen binary -- so the pin follows it: a reword of
-    the ``--workspace`` option help would otherwise fail a healthy release
-    binary, discovered only on the next tag.
+    Returns:
+        The text the shell script waits for in ``lintro watch`` output.
     """
-    from click.testing import CliRunner
-
-    from lintro.cli_utils.commands.mcp import mcp_command
-
-    result = CliRunner().invoke(mcp_command, ["--help"])
-
-    assert_that(result.exit_code).is_equal_to(0)
-    assert_that(result.output).contains(_verify_mcp_marker())
+    source = _VERIFY_PATH.read_text(encoding="utf-8")
+    match = _WATCH_MARKER_PATTERN.search(source)
+    assert_that(match).is_not_none()
+    assert match is not None  # narrow type for mypy
+    assert_that(source).contains('grep -q "$WATCH_READY_MARKER"')
+    return match.group(1)
 
 
-def test_bats_stub_reuses_the_same_mcp_marker() -> None:
-    """The bats stub must speak the copy the verify step accepts.
+def test_exported_commands_match_the_cli_command_table() -> None:
+    """The verify step must run every command lintro exports, and only those.
 
-    The stub hard-codes the help a real binary prints; if it drifts from the
-    grep literal the suite goes green while the release gate breaks.
+    A command added to ``lintro.cli`` without an entry here would ship
+    unexercised, which is how ``lintro mcp`` was broken in every release
+    before #2577; a stale entry would fail every release on a usage error.
     """
-    assert_that(_BATS_PATH.read_text(encoding="utf-8")).contains(
-        _verify_mcp_marker(),
+    from lintro.cli import _COMMAND_MODULES
+
+    assert_that(set(_verify_exported_commands())).is_equal_to(set(_COMMAND_MODULES))
+    # The table must drive the run loop, or it is decorative.
+    assert_that(_VERIFY_PATH.read_text(encoding="utf-8")).contains(
+        'for name in "${EXPORTED_COMMANDS[@]}"; do',
     )
+
+
+def test_every_exported_command_has_an_invocation() -> None:
+    """Each command in the table needs its own ``command_argv`` case arm."""
+    source = _VERIFY_PATH.read_text(encoding="utf-8")
+
+    for name in _verify_exported_commands():
+        assert_that(source).matches(rf"(?m)^\t{re.escape(name)}\) ")
+
+
+def test_bats_stub_answers_every_exported_command() -> None:
+    """The bats stub must answer every command the verify step runs.
+
+    Otherwise a command added to the table is only ever run against a real
+    binary on a release runner.
+    """
+    bats_source = _BATS_PATH.read_text(encoding="utf-8")
+
+    for name in _verify_exported_commands():
+        # A standalone or grouped case arm at line start, not a substring:
+        # `test` occurs in every `@test` line and `config` in the fixture text.
+        assert_that(bats_source).matches(
+            rf"(?m)^(?:[^\n|)]*\|)*{re.escape(name)}(?:\|[^\n)]*)*\) ",
+        )
+
+
+def test_watch_marker_matches_the_watchers_ready_line() -> None:
+    """The verify step waits for a line the watcher actually prints.
+
+    The watcher's source carries rich markup that never reaches the terminal,
+    so the pin is against the de-marked source.
+    """
+    watcher_source = _RICH_MARKUP.sub("", _WATCHER_PATH.read_text(encoding="utf-8"))
+
+    assert_that(watcher_source).contains(_verify_watch_marker())
+
+
+def test_mcp_driver_offers_the_latest_handshake_revision() -> None:
+    """The driver's ``initialize`` offer is the newest revision the SDK negotiates.
+
+    An older offer would be counter-offered and still pass; a revision the SDK
+    no longer accepts would fail every release binary.
+    """
+    from mcp_types.version import LATEST_HANDSHAKE_VERSION
+
+    mcp_driver = _load_mcp_driver()
+
+    assert_that(mcp_driver.PROTOCOL_VERSION).is_equal_to(LATEST_HANDSHAKE_VERSION)
+
+
+def test_mcp_driver_requires_a_tool_and_name_lintro_serves(tmp_path: Path) -> None:
+    """The tool and server name the gate insists on are lintro's own.
+
+    Args:
+        tmp_path: Workspace root for the registry under test.
+    """
+    from lintro.mcp.server import build_default_registry, create_mcp_server
+
+    mcp_driver = _load_mcp_driver()
+
+    assert_that(mcp_driver.REQUIRED_TOOL).is_in(
+        *[
+            spec.name
+            for spec in build_default_registry(workspace=tmp_path).list_tools()
+        ],
+    )
+    assert_that(create_mcp_server(workspace=tmp_path).name).is_equal_to(
+        mcp_driver.SERVER_NAME,
+    )
+
+
+@pytest.fixture
+def fake_mcp_server(tmp_path: Path) -> Path:
+    """Write the scripted stdio server stand-in.
+
+    Args:
+        tmp_path: Workspace for the stand-in.
+
+    Returns:
+        Path to the executable stand-in.
+    """
+    return _write_child(tmp_path / "fake-lintro", _FAKE_MCP_SERVER)
+
+
+def test_mcp_drive_completes_the_round_trip(
+    fake_mcp_server: Path,
+    tmp_path: Path,
+) -> None:
+    """A server that answers both requests and exits at EOF passes the gate.
+
+    Args:
+        fake_mcp_server: The scripted stand-in.
+        tmp_path: Workspace handed to the server.
+    """
+    mcp_driver = _load_mcp_driver()
+
+    session = mcp_driver.drive(fake_mcp_server, tmp_path)
+
+    assert_that(mcp_driver.session_failure(session)).is_empty()
+    assert_that(session.server_info["name"]).is_equal_to("lintro")
+    assert_that(session.tools).contains("lintro_ping")
+    assert_that(session.exit_code).is_equal_to(0)
+    assert_that(session.timed_out).is_false()
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        ({"FAKE_MCP_MODE": "crash"}, "no response to initialize"),
+        ({"FAKE_MCP_TOOLS": "lintro_check"}, "lintro_ping missing"),
+        ({"FAKE_MCP_NAME": "other"}, "unexpected serverInfo"),
+        ({"FAKE_MCP_VERSION": ""}, "serverInfo missing version"),
+        ({"FAKE_MCP_EXIT": "3"}, "server exited 3"),
+        ({"FAKE_MCP_MODE": "hang"}, "did not exit after stdin closed"),
+        ({"FAKE_MCP_MODE": "silent"}, "no response to initialize"),
+        ({"FAKE_MCP_MODE": "error-initialize"}, "initialize failed"),
+        ({"FAKE_MCP_MODE": "error-tools"}, "tools/list failed"),
+        ({"FAKE_MCP_MODE": "malformed"}, "no response to initialize"),
+    ],
+    ids=[
+        "crash",
+        "missing-tool",
+        "wrong-name",
+        "no-version",
+        "exit-code",
+        "hang",
+        "silent",
+        "error-on-initialize",
+        "error-on-tools-list",
+        "malformed-json",
+    ],
+)
+def test_mcp_drive_fails_a_broken_server(
+    fake_mcp_server: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: dict[str, str],
+    expected: str,
+) -> None:
+    """Every way the server can fall short is reported, none is accepted.
+
+    The usage-error escape hatch is gone on purpose: a build that dropped the
+    SDK and reported the documented usage error was accepted before #2577.
+
+    Args:
+        fake_mcp_server: The scripted stand-in.
+        tmp_path: Workspace handed to the server.
+        monkeypatch: Sets the stand-in's failure mode and shortens budgets.
+        environment: Variables selecting the stand-in's behaviour.
+        expected: Fragment of the failure the driver must report.
+    """
+    mcp_driver = _load_mcp_driver()
+    for key, value in environment.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(mcp_driver, "SESSION_TIMEOUT_SECONDS", 2)
+    monkeypatch.setattr(mcp_driver, "REAP_GRACE_SECONDS", 1)
+
+    session = mcp_driver.drive(fake_mcp_server, tmp_path)
+
+    assert_that(mcp_driver.session_failure(session)).contains(expected)
+
+
+def test_mcp_drive_reports_the_servers_stderr_on_a_crash(
+    fake_mcp_server: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crashed server's traceback reaches the log, not just "no response".
+
+    Args:
+        fake_mcp_server: The scripted stand-in.
+        tmp_path: Workspace handed to the server.
+        monkeypatch: Selects the crash mode.
+    """
+    mcp_driver = _load_mcp_driver()
+    monkeypatch.setenv("FAKE_MCP_MODE", "crash")
+
+    session = mcp_driver.drive(fake_mcp_server, tmp_path)
+
+    assert_that(session.stderr).contains("No module named 'mcp.server.stdio'")
+    assert_that(session.exit_code).is_equal_to(1)
+
+
+def test_mcp_drive_lets_a_disappointing_server_exit_on_eof(
+    fake_mcp_server: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A healthy server that fails an assertion gets EOF, not the grace and a kill.
+
+    Stdin closes before the child is reaped on every path, so the failure is
+    reported within moments with the server's own exit code, never as a
+    ``SIGKILL`` after ``REAP_GRACE_SECONDS``.
+
+    Args:
+        fake_mcp_server: The scripted stand-in.
+        tmp_path: Workspace handed to the server.
+        monkeypatch: Stages a tool list without ``lintro_ping``.
+    """
+    mcp_driver = _load_mcp_driver()
+    monkeypatch.setenv("FAKE_MCP_TOOLS", "lintro_check")
+    started = time.monotonic()
+
+    session = mcp_driver.drive(fake_mcp_server, tmp_path)
+
+    assert_that(time.monotonic() - started).is_less_than(
+        mcp_driver.REAP_GRACE_SECONDS,
+    )
+    assert_that(session.failure).contains("lintro_ping missing")
+    assert_that(session.exit_code).is_equal_to(0)
+    assert_that(session.timed_out).is_false()
+
+
+def test_mcp_main_reports_a_missing_binary(tmp_path: Path) -> None:
+    """A missing binary fails the gate before any process is spawned.
+
+    Args:
+        tmp_path: Location for the missing path.
+    """
+    mcp_driver = _load_mcp_driver()
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(sys, "argv", ["drive_mcp_round_trip.py", str(tmp_path / "x")])
+        patcher.setattr(
+            mcp_driver,
+            "drive",
+            lambda *args, **kwargs: pytest.fail("drive() must not run"),
+        )
+        exit_code = mcp_driver.main()
+
+    assert_that(exit_code).is_equal_to(1)
+
+
+def test_mcp_drive_round_trips_with_lintros_real_server(tmp_path: Path) -> None:
+    """The driver speaks what lintro's actual stdio server understands.
+
+    The stand-in above pins the driver's expectations; this pins them to the
+    server itself, run from this interpreter the way the binary runs it.
+
+    Args:
+        tmp_path: Workspace for the wrapper and the server.
+    """
+    mcp_driver = _load_mcp_driver()
+    wrapper = _write_child(
+        tmp_path / "lintro",
+        f'#!/bin/sh\nexec "{sys.executable}" -m lintro "$@"\n',
+    )
+
+    with pytest.MonkeyPatch.context() as patcher:
+        # A test-local budget: the release values are sized for a cold onefile
+        # extraction, not for a suite run.
+        patcher.setattr(mcp_driver, "SESSION_TIMEOUT_SECONDS", 30)
+        patcher.setattr(mcp_driver, "REAP_GRACE_SECONDS", 5)
+        session = mcp_driver.drive(wrapper, tmp_path)
+
+    assert_that(mcp_driver.session_failure(session)).is_empty()
+    assert_that(session.tools).contains("lintro_ping")
+    assert_that(session.protocol_version).is_equal_to(mcp_driver.PROTOCOL_VERSION)
 
 
 def test_prompt_marker_matches_the_interactive_review_prompt() -> None:

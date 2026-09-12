@@ -217,14 +217,16 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      # #1897: binary builds install the runtime deps plus the `build` group and
-      # nothing else. The default `dev` group drags in the test stack, which a
-      # Nuitka binary does not need; keep the sync minimal so a dependency
-      # without a wheel for this runner cannot turn into a source build behind
-      # the (correctly) blocked crates.io egress.
+      # #1897: binary builds install the runtime deps, the `mcp` extra and the
+      # `build` group, and nothing else. The default `dev` group drags in the
+      # test stack, which a Nuitka binary does not need; keep the sync minimal
+      # so a dependency without a wheel for this runner cannot turn into a
+      # source build behind the (correctly) blocked crates.io egress. #2577:
+      # the extra is what puts the MCP SDK into the binary, so `lintro mcp`
+      # works from a release.
       - name: Install dependencies
         run: |
-          uv sync --group build --no-default-groups
+          uv sync --group build --extra mcp --no-default-groups
 
       # #2435: a rerun of this job (the supported npm backfill path, see
       # docs/npm-distribution.md) used to rebuild from scratch even when the
@@ -258,10 +260,11 @@ jobs:
         # binary.
         if: steps.reuse.outputs.reuse != 'true'
         timeout-minutes: 25
-        # `--no-default-groups` is required here too: `uv run` re-syncs the
-        # environment with the default groups and would reinstall `dev`.
+        # `--no-default-groups` and `--extra mcp` are required here too:
+        # `uv run` re-syncs the environment and would otherwise reinstall
+        # `dev` and drop the SDK.
         run: |
-          uv run --no-default-groups python scripts/build/build_macos.py \
+          uv run --no-default-groups --extra mcp python scripts/build/build_macos.py \
             --arch "$BUILD_ARCH" \
             --skip-verify
         env:
@@ -469,11 +472,11 @@ jobs:
         with:
           version: ${{ env.UV_VERSION }}
 
-      # #1897: kept in lockstep with the macOS job above - binary builds never
-      # install the dev test stack.
+      # #1897/#2577: kept in lockstep with the macOS job above - binary builds
+      # never install the dev test stack, and always the `mcp` extra.
       - name: Install dependencies
         run: |
-          uv sync --group build --no-default-groups
+          uv sync --group build --extra mcp --no-default-groups
 
       # #2435: see the macOS job — the reuse check and the `if:` guards it
       # feeds are kept identical across the two jobs.
@@ -504,7 +507,7 @@ jobs:
         timeout-minutes: 25
         run: |
           HOST_ARCH="${{ matrix.arch == 'x64' && 'x86_64' || 'arm64' }}"
-          uv run --no-default-groups python scripts/build/build_linux.py \
+          uv run --no-default-groups --extra mcp python scripts/build/build_linux.py \
             --arch "$HOST_ARCH" \
             --skip-verify
         env:
