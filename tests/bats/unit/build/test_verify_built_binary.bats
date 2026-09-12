@@ -239,6 +239,22 @@ EOF
 	assert_output --partial "Binary not found"
 }
 
+# A copy of the gate with one extra table entry, run from a directory that
+# mirrors scripts/ so its `source ../utils/utils.sh` and fixtures resolve.
+@test "verify_built_binary.sh: fails a table entry that has no argv arm" {
+	local copy_dir="${BATS_TEST_TMPDIR}/scripts/build"
+	mkdir -p "$copy_dir"
+	ln -s "${BUILD_SCRIPTS_DIR}/../utils" "${BATS_TEST_TMPDIR}/scripts/utils"
+	ln -s "${BUILD_SCRIPTS_DIR}/fixtures" "${copy_dir}/fixtures"
+	sed 's/^\twatch$/\twatch\n\tpublish/' "$SCRIPT" >"${copy_dir}/verify_built_binary.sh"
+	chmod +x "${copy_dir}/verify_built_binary.sh"
+	write_healthy_binary "publish" 'echo "would pass as a bare call"; exit 0'
+
+	run "${copy_dir}/verify_built_binary.sh" "$BINARY"
+	assert_failure
+	assert_output --partial "no argv arm for publish"
+}
+
 @test "verify_built_binary.sh: passes clean output past the crash check" {
 	write_healthy_binary "versions" 'echo "lintro 0.0.0 (no traceback here)"; exit 0'
 

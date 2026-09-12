@@ -25,11 +25,9 @@ EOF
 	exit 2
 fi
 
-BINARY="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")" ||
-	{
-		log_error "Binary not found: $1"
-		exit 1
-	}
+# A missing directory makes the `cd` fail and the path resolve to
+# "/<basename>", which the -f check below reports.
+BINARY="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")"
 
 if [[ ! -f "$BINARY" ]]; then
 	log_error "Binary not found: $1"
@@ -87,6 +85,9 @@ WATCH_READY_MARKER="Watching for changes"
 # reporting a result: a missing module or an unhandled exception.
 CRASH_MARKERS=("Traceback" "No module named")
 
+# Argument vector of the command being run, filled by load_argv.
+ARGV=()
+
 # Throwaway workspace the commands run in: a git repository with one staged
 # file for the review, a config that points the AI features at the fake
 # provider fixture, and nothing else. `init` writes its config elsewhere so it
@@ -132,11 +133,25 @@ command_argv() {
 	test) printf '%s\n' test --collect-only . ;;
 	versions) printf '%s\n' versions --json ;;
 	watch) printf '%s\n' watch --debounce 100 . ;;
-	*)
-		log_error "no invocation defined for command: $1"
-		return 1
-		;;
+	*) return 1 ;;
 	esac
+}
+
+# Args:
+#   $1: canonical command name.
+# Fills the ARGV array from command_argv, failing when no arm exists: the
+# read loop alone would run the binary with no arguments and let a command
+# added to the table without an arm pass as a bare `lintro` call.
+load_argv() {
+	local argv_text
+	if ! argv_text="$(command_argv "$1")"; then
+		log_error "no argv arm for $1"
+		return 1
+	fi
+	ARGV=()
+	while IFS= read -r arg; do
+		ARGV+=("$arg")
+	done <<<"$argv_text"
 }
 
 # Exit codes a command may report and still pass. 1 is "issues found" for the
@@ -197,13 +212,9 @@ wait_within_budget() {
 # accepted code without crashing.
 run_command_once() {
 	local name="$1" status accepted
-	local -a argv
-	argv=()
-	while IFS= read -r arg; do
-		argv+=("$arg")
-	done < <(command_argv "$name")
+	load_argv "$name" || return 1
 
-	(cd "$WORKSPACE" && exec "$BINARY" "${argv[@]}" </dev/null >"$COMMAND_OUTPUT" 2>&1) &
+	(cd "$WORKSPACE" && exec "$BINARY" "${ARGV[@]}" </dev/null >"$COMMAND_OUTPUT" 2>&1) &
 	wait_within_budget $! "$COMMAND_BUDGET_SECONDS"
 	status="$WAIT_STATUS"
 	if [[ -z "$status" ]]; then
@@ -226,13 +237,9 @@ run_command_once() {
 # it. A binary that dropped the file-watching stack dies before the line.
 run_watch_once() {
 	local pid elapsed=0
-	local -a argv
-	argv=()
-	while IFS= read -r arg; do
-		argv+=("$arg")
-	done < <(command_argv watch)
+	load_argv watch || return 1
 
-	(cd "$WORKSPACE" && exec "$BINARY" "${argv[@]}" </dev/null >"$COMMAND_OUTPUT" 2>&1) &
+	(cd "$WORKSPACE" && exec "$BINARY" "${ARGV[@]}" </dev/null >"$COMMAND_OUTPUT" 2>&1) &
 	pid=$!
 	while ! grep -q "$WATCH_READY_MARKER" "$COMMAND_OUTPUT"; do
 		if ! kill -0 "$pid" 2>/dev/null; then

@@ -239,7 +239,6 @@ def drive(binary: Path, workspace: Path) -> Session:
     protocol_version = ""
     tools: list[str] = []
     ttl_ms: int | None = None
-    failure = ""
     timed_out = False
 
     def finish(reason: str) -> Session:
@@ -303,7 +302,7 @@ def drive(binary: Path, workspace: Path) -> Session:
     except BrokenPipeError:
         return finish("server closed its stdin pipe early")
 
-    return finish(failure)
+    return finish("")
 
 
 def session_failure(session: Session) -> str:
