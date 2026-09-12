@@ -124,8 +124,10 @@ class ToolRunSummary:
         duration: Wall-clock seconds the tool took, or ``None`` when the run
             did not record one (a tool that never executed, or a result
             constructed outside the executor).
-        fixed_count: How many issues the tool fixed, or ``None`` for a check
-            run and for fix-incapable tools.
+        net_resolved: Issues detected before the mutation phase minus the
+            residual measured after it, or ``None`` for a check run and for
+            fix-incapable tools. Not any one tool's reported fix count: a
+            finding one tool fixed and another reintroduced nets out (#1743).
         skip_reason: Why the tool was skipped, or ``None``.
     """
 
@@ -133,7 +135,7 @@ class ToolRunSummary:
     status: ToolRunStatus
     issue_count: int
     duration: float | None
-    fixed_count: int | None = None
+    net_resolved: int | None = None
     skip_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,8 +150,11 @@ class ToolRunSummary:
             "issue_count": self.issue_count,
             "duration": self.duration,
         }
-        if self.fixed_count is not None:
-            data["fixed_count"] = self.fixed_count
+        if self.net_resolved is not None:
+            data["net_resolved"] = self.net_resolved
+            # Deprecated alias of ``net_resolved``, carrying the same value
+            # so existing MCP consumers keep working.
+            data["fixed_count"] = self.net_resolved
         if self.skip_reason:
             data["skip_reason"] = self.skip_reason
         return data
@@ -301,7 +306,7 @@ def tool_summary_from_result(
         status=tool_run_status(result=result, issue_count=issue_count),
         issue_count=issue_count,
         duration=result.duration_seconds,
-        fixed_count=result.fixed_issues_count if action == Action.FIX else None,
+        net_resolved=result.fixed_issues_count if action == Action.FIX else None,
         skip_reason=result.skip_reason,
     )
 

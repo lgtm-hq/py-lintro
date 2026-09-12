@@ -239,6 +239,10 @@ def test_fix_counts_initial_and_remaining(
     assert_that(result.initial_issues_count).is_equal_to(1)
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(0)
+    # clippy runs from the crate root and its parser reports crate-relative
+    # paths, so the run-level verify pass (#1743) needs the directory recorded
+    # to tell a rewritten file from an untouched one.
+    assert_that(result.cwd).is_equal_to(str(tmp_path))
 
 
 def _cargo_workspace(tmp_path: Path) -> tuple[Path, Path]:

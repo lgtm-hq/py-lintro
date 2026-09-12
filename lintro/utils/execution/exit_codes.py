@@ -6,6 +6,8 @@ tool results from linting operations.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
 
@@ -68,6 +70,14 @@ def aggregate_tool_results(
         Tuple of (total_issues, total_fixed, total_remaining). In CHECK/TEST
         mode nothing is fixed, so ``total_remaining`` mirrors ``total_issues``
         rather than the misleading constant 0.
+
+        In FIX mode the two derived totals cover only the tools whose residual
+        the verify pass measured. A tool in the third state — residual unknown
+        (#1743) — contributes nothing to either, because adding a zero for it
+        would present an after-count nobody took. Its *pre-fix* findings still
+        reach ``total_issues``: those were measured. Callers that render the
+        totals must say how many tools were left out; see
+        :func:`unknown_residual_tool_names`.
     """
     total_issues = 0
     total_fixed = 0
@@ -80,6 +90,10 @@ def aggregate_tool_results(
         total_issues += getattr(result, "issues_count", 0)
 
         if action == Action.FIX:
+            if getattr(result, "residual_unknown", False):
+                # No measurement exists for this tool. Deliberately not a
+                # zero: the run reports it as unknown instead.
+                continue
             fixed = getattr(result, "fixed_issues_count", None)
             total_fixed += fixed if fixed is not None else 0
             remaining = getattr(result, "remaining_issues_count", None)
@@ -92,3 +106,25 @@ def aggregate_tool_results(
         total_remaining = total_issues
 
     return total_issues, total_fixed, total_remaining
+
+
+def unknown_residual_tool_names(results: Sequence[object]) -> list[str]:
+    """Return the tools whose residual the verify pass could not measure.
+
+    The run totals leave these tools out rather than folding a zero in for
+    them (#1743), so every surface that renders those totals needs the list to
+    say what the numbers do not cover. Without it the TOTALS table reads as a
+    measured "0 remaining" for a tool whose own row says "unknown".
+
+    Args:
+        results: Every result in the run, in execution order. Typed loosely
+            because the console layer holds them as opaque objects.
+
+    Returns:
+        list[str]: Names of the tools in the third state, in run order.
+    """
+    return [
+        str(getattr(result, "name", ""))
+        for result in results
+        if getattr(result, "residual_unknown", False)
+    ]

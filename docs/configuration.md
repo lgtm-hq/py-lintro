@@ -333,15 +333,20 @@ configuration.
 #### JSON output
 
 In `--output-format json` the tallies appear under `summary`, alongside `total_issues`,
-`total_fixed` and `total_remaining`, which are unchanged. The `summary.health_score`
-object is **gone** — this is a breaking change for anything that read it.
-`severity_delta` appears only when a comparable baseline exists; on a first run the key
-is absent rather than zero. The **stdout** document looks like this:
+`total_net_resolved`, `total_remaining`, `timed_out_tools` and `residual_unknown_tools`
+(the tools the two derived totals could not cover; see
+[Mutate-then-verify](#mutate-then-verify-lintro-format)). `summary.total_fixed` carries
+the same value as `total_net_resolved` and is **deprecated**: read the new key. It will
+be removed in a later release. The `summary.health_score` object is **gone** — this is a
+breaking change for anything that read it. `severity_delta` appears only when a
+comparable baseline exists; on a first run the key is absent rather than zero. The
+**stdout** document looks like this:
 
 ```json
 {
   "summary": {
     "total_issues": 3,
+    "total_net_resolved": 0,
     "total_fixed": 0,
     "total_remaining": 3,
     "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
@@ -360,6 +365,7 @@ rest of their `summary` object differs from the stdout document by design — it
   "action": "check",
   "summary": {
     "total_issues": 3,
+    "total_net_resolved": 0,
     "total_fixed": 0,
     "tools_run": 12,
     "timed_out_tools": [],
@@ -391,6 +397,7 @@ A timed-out tool reports:
 {
   "summary": {
     "total_issues": 0,
+    "total_net_resolved": 0,
     "total_fixed": 0,
     "total_remaining": 0,
     "timed_out_tools": ["mypy"]
@@ -990,6 +997,104 @@ Execution order (derived from tool claims)
 mutating capabilities wins) and ruff is demoted to its fix capability: when black is in
 the run, ruff's `format` / `format_check` stages are switched off unless you ask for
 them explicitly through `--tool-options` or `[tool.lintro.ruff]`.
+
+### Mutate-then-verify (`lintro format`)
+
+Since #1743 `lintro format` runs in two phases:
+
+1. **Mutation.** Every mutating capability (`FIX`, `FORMAT`) runs in derived DAG order.
+2. **Verify.** One pass runs the `CHECK` capability of the same tools. For every tool
+   that declares `CHECK`, that single pass is the run's authoritative residual count.
+
+A tool's own post-fix opinion is no longer the residual — it is replaced, not added, so
+no issue is counted twice. The figure the run displays is **net resolved**: issues
+detected before the mutation phase minus the residual measured after it. It is not
+called "fixed" because no tool reported it — it is the difference between two
+measurements, and a finding one tool fixed and another reintroduced nets out of it. The
+word "fixed" is kept only where a tool reports its own fix count.
+
+The machine-readable keys for this figure, and for the third state below:
+
+| Surface                | Key                              | Meaning                                                      |
+| ---------------------- | -------------------------------- | ------------------------------------------------------------ |
+| JSON, per tool         | `net_resolved`                   | Before minus after; `null` when the residual is unknown      |
+| JSON, per tool         | `remaining`                      | Measured residual; `null` when the residual is unknown       |
+| JSON, per tool         | `residual_unknown`               | `true` when no after-count was taken                         |
+| JSON, per tool         | `residual_unknown_reason`        | Why — the check crashed, timed out or was skipped            |
+| JSON, run summary      | `summary.total_net_resolved`     | Sum over the tools that were measured                        |
+| JSON, run summary      | `summary.total_remaining`        | Sum over the tools that were measured                        |
+| JSON, run summary      | `summary.residual_unknown_tools` | Tools the two totals above do **not** cover                  |
+| JSONL stream, per tool | `net_resolved_count`             | Per-result net resolved; absent when the residual is unknown |
+
+The previous spellings still appear with the same values and are **deprecated**, to be
+removed in a later release: `fixed` per tool (read `net_resolved`),
+`summary.total_fixed` (read `summary.total_net_resolved`), `fixed_issues_count` in the
+JSONL stream (read `net_resolved_count`) and `fixed_count` in the MCP tool summary (read
+`net_resolved`).
+
+**Which tools the pass covers.** The central verify pass covers the mutating tools that
+declare `CHECK`. Format-only tools — prettier, oxfmt, rustfmt and shfmt — do not declare
+it, so they are not asked for a residual and keep their own result contract, including
+whatever post-format checking they do themselves. Making every mutator declare `CHECK`
+is a follow-up (#2607), not this change.
+
+This is the only place cross-tool interference is visible. If ruff fixes a file and
+prettier then reformats it, ruff's own post-fix lint already ran; a run-level pass sees
+the result of every mutating tool that ran before it.
+
+**Scope.** Verifying every file again would double the cost of a format run, so the pass
+is narrowed by fingerprint (mtime + size, from `lintro/utils/file_cache.py`; the pass
+itself is `lintro/tools/core/verify_pass.py`): every file a mutating capability could be
+handed is stat'ed before the mutation phase and re-stat'ed after, and only the files
+whose fingerprint moved are verified. A file nobody rewrote keeps the issues it had
+before the run, so narrowing never loses a residual.
+
+mtime over-approximates: a formatter rewriting a file to byte-identical content still
+bumps mtime, so a file may be re-verified needlessly. That is a wasted check, not a
+wrong answer. Size alone is near-useless (a quote-style rewrite is the same length) and
+serves only as a cheap tiebreak.
+
+**The floor.** When fingerprints cannot be trusted — a `stat` that fails, or a
+filesystem with whole-second mtime granularity, where a rewrite inside the same second
+is invisible — the pass falls back to **every file handed to a mutating capability**.
+That is the documented floor, not a separate code path: the same verify pass runs over a
+wider set. The run reports which it used:
+
+```text
+Verify pass: re-checking 12 changed file(s)
+Verify pass: re-checking 340 file(s) (coarse mtime resolution)
+Verify pass: re-checking 340 file(s) (some files could not be fingerprinted)
+```
+
+**`lintro check` is unaffected** and stays read-only: it takes no snapshot and runs no
+verify pass. So does `lintro format --dry-run`, which is a check-mode preview.
+
+**When the verify `CHECK` cannot answer** — it was skipped by a version gate, it raised,
+or it timed out — the residual is **unknown**, a third state beside "clean" and "N
+remaining". A timeout counts here even when the tool returned findings: a multi-root
+checker such as golangci-lint aggregates one result across module roots, so missing the
+deadline on one root leaves the others unchecked. An unknown residual fails the run, and
+it is never rendered as a measured after-count: the summary prints `unknown` in the net
+resolved and remaining columns with the reason beside it, and the JSON report carries
+`"remaining": null`, `"net_resolved": null` (and `"fixed": null`) plus
+`"residual_unknown": true` and `"residual_unknown_reason"`. The run summary names every
+such tool in `summary.residual_unknown_tools`, because `summary.total_net_resolved` and
+`summary.total_remaining` cover only the tools that were measured — a zero there is
+never a claim about a tool in this state. The TOTALS table says the same thing with a
+`Residual Unknown (tools)` row. The tool's pre-fix findings are still listed, because
+those _were_ measured.
+
+**Mutation runs one tool at a time.** Two mutating capabilities in flight over the same
+file would race on its bytes, so within a `format` run each batch dispatches one tool at
+a time; `lintro check` and the verify pass itself keep the full parallel fan-out. This
+is a bridge until the scheduler learns to keep overlapping mutators out of the same
+batch ([#2606](https://github.com/lgtm-hq/py-lintro/issues/2606)).
+
+**Limitation.** The verify pass reports the final state of each file. Within one lintro
+run, a write lost to concurrent mutators shows up as an unexplained residual that a
+re-run may fix; attribution lands with the provenance follow-up. Serializing the
+mutation phase (above) removes the concurrent-mutator case inside a single run until the
+scheduler rule lands in [#2606](https://github.com/lgtm-hq/py-lintro/issues/2606).
 
 ### Ruff vs Black Policy (Python)
 

@@ -338,7 +338,9 @@ def write_output_file(
         all_results: list: List of ToolResult objects.
         action: Action: The action performed (check, fmt, test).
         total_issues: int: Total number of issues found.
-        total_fixed: int: Total number of issues fixed.
+        total_fixed: int: The net resolved figure — issues detected before
+            the mutation phase minus the residual measured after it. Written
+            as ``total_net_resolved`` / ``Total Net Resolved`` (#1743).
         ai_enrichment: Optional AI objects for SARIF output, supplied by the
             caller via the AI seam. Ignored for non-SARIF formats. When None,
             SARIF is rendered without AI enrichment.
@@ -356,6 +358,8 @@ def write_output_file(
             "action": action.value,
             "summary": {
                 "total_issues": total_issues,
+                "total_net_resolved": total_fixed,
+                # Deprecated alias of ``total_net_resolved``, same value.
                 "total_fixed": total_fixed,
                 "tools_run": len(all_results),
                 # Timeouts are execution failures, not findings, so they never
@@ -491,7 +495,7 @@ def write_output_file(
             lines.append("")
         lines.append(f"Total Issues: {total_issues}")
         if action == Action.FIX:
-            lines.append(f"Total Fixed: {total_fixed}")
+            lines.append(f"Total Net Resolved: {total_fixed}")
         output_file.write_text("\n".join(lines), encoding="utf-8")
 
 

@@ -3,7 +3,6 @@
 Functions for running ruff check commands and processing results.
 """
 
-import os
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ from lintro.tools.core.timeout_utils import (
 # timeout (defined in lintro.tools.ruff.definition). Importing here preserves
 # the historical ``from ...ruff.check import RUFF_DEFAULT_TIMEOUT`` entry point.
 from lintro.tools.ruff.definition import RUFF_DEFAULT_TIMEOUT
+from lintro.tools.ruff.paths import absolute_issue_paths
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -148,14 +148,10 @@ def execute_ruff_check(
 
         format_files = parse_ruff_format_check_output(output=output_format)
         # Normalize files to absolute paths to keep behavior consistent with
-        # direct CLI calls and stabilize tests that compare exact paths.
-        normalized_files: list[str] = []
-        for file_path in format_files:
-            if cwd and not os.path.isabs(file_path):
-                absolute_path = os.path.abspath(os.path.join(cwd, file_path))
-                normalized_files.append(absolute_path)
-            else:
-                normalized_files.append(file_path)
+        # direct CLI calls and stabilize tests that compare exact paths. The
+        # fix flow canonicalises the same way through the same helper, so a
+        # file cannot be keyed two ways across a mutate-then-verify run.
+        normalized_files = absolute_issue_paths(files=format_files, cwd=cwd)
         format_issues_count = len(normalized_files)
         format_issues = [RuffFormatIssue(file=file) for file in normalized_files]
 

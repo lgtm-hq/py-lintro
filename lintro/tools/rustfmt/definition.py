@@ -141,6 +141,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 success=True,
                 output=resolved.skip_message("rustfmt"),
                 issues_count=0,
+                no_files=True,
             )
 
         cmd = _build_rustfmt_check_command()
@@ -189,6 +190,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 initial_issues_count=0,
                 fixed_issues_count=0,
                 remaining_issues_count=0,
+                no_files=True,
             )
 
         check_cmd = _build_rustfmt_check_command()
@@ -210,6 +212,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 initial_issues=[],
                 cmd=check_cmd,
                 tool_name="rustfmt",
+                cwd=str(cargo_root),
             )
 
         initial_issues = parse_rustfmt_output(output=output_check)
@@ -232,6 +235,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
                 cmd=fix_cmd,
                 tool_name="rustfmt",
+                cwd=str(cargo_root),
             )
 
         # If fix command failed, return early with the fix output
@@ -246,6 +250,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 fixed_issues_count=0,
                 remaining_issues_count=initial_count,
                 initial_issues=initial_issues if initial_issues else None,
+                cwd=str(cargo_root),
             )
 
         # Re-check after fix to count remaining issues
@@ -264,6 +269,7 @@ class RustfmtPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
                 cmd=check_cmd,
                 tool_name="rustfmt",
+                cwd=str(cargo_root),
             )
 
         remaining_issues = parse_rustfmt_output(output=output_after)
@@ -283,4 +289,9 @@ class RustfmtPlugin(BaseToolPlugin):
             fixed_issues_count=fixed_count,
             remaining_issues_count=remaining_count,
             initial_issues=initial_issues if initial_issues else None,
+            # rustfmt runs from the crate root and its parser can report paths
+            # relative to it. The run-level verify pass (#1743) resolves each
+            # issue's file against this directory to decide whether the file
+            # was rewritten, so dropping it would overstate the residual.
+            cwd=str(cargo_root),
         )

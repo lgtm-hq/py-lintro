@@ -169,6 +169,7 @@ class ActionlintPlugin(BaseToolPlugin):
                 success=True,
                 output="No GitHub workflow files found to check.",
                 issues_count=0,
+                no_files=True,
             )
 
         # Accumulate results across all files

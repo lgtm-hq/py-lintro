@@ -155,6 +155,7 @@ class CargoAuditPlugin(BaseToolPlugin):
                 success=True,
                 output="No Cargo.lock found; skipping cargo-audit.",
                 issues_count=0,
+                no_files=True,
             )
 
         cmd = self._build_command()

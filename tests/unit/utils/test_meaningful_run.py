@@ -183,7 +183,7 @@ def test_baseline_is_not_eligible_for_an_unmeasured_run(
         "No paths to check.",
         "No Cargo.lock found; skipping cargo-audit.",
         "No go.mod found; skipping golangci-lint.",
-        "No requirements or project files found; skipping pip-audit.",
+        "No auditable requirements or project file among the matched paths; skipping pip-audit.",
         "No import-linter configuration found; skipping.",
         "No Python files under the configured pylint include paths.",
         "No .proto files to format.",
@@ -258,16 +258,63 @@ def test_result_inspected_files_reads_formatted_output_too() -> None:
 
 
 def test_result_inspected_files_treats_empty_output_as_inspected() -> None:
-    """Empty output is ambiguous, and is resolved in favour of "inspected".
+    """Empty output with the flag unset is resolved in favour of "inspected".
 
-    `ruff` returns no output for a clean pass over real files, while `bandit`
-    nulls its output for the no-files case; the two are byte-identical. Failing
-    the other way would make every clean run look unmeasured. Issue #2369
-    replaces the heuristic with a structured signal.
+    `ruff` returns no output for a clean pass over real files. Failing the
+    other way would make every clean run look unmeasured, so the text
+    heuristic keeps its bias; the structured flag is what breaks the tie for
+    producers that set it.
     """
     result = ToolResult(name="ruff", success=True, skipped=False, output=None)
 
     assert_that(result_inspected_files(result)).is_true()
+
+
+def test_the_no_files_flag_beats_an_output_no_heuristic_can_read() -> None:
+    """Bandit is the case the prose heuristic could never decide.
+
+    It nulls its ``output`` for the no-files result, making it byte-identical
+    to a clean ruff pass. The structured flag says which is which, so the
+    badge and the severity baseline stop treating "bandit examined nothing"
+    as a measured clean run.
+    """
+    bandit = ToolResult(
+        name="bandit",
+        success=True,
+        skipped=False,
+        output=None,
+        issues_count=0,
+        no_files=True,
+    )
+
+    assert_that(result_inspected_files(bandit)).is_false()
+    assert_that(run_inspected_files([bandit])).is_false()
+    assert_that(
+        baseline_is_eligible(
+            action=Action.CHECK,
+            dry_run_preview=False,
+            tool_results=[bandit],
+        ),
+    ).is_false()
+
+
+def test_a_flagged_result_is_rejected_even_with_a_clean_looking_message() -> None:
+    """The flag is read before the text, not after it.
+
+    A converted producer that says something the heuristic would pass ("No
+    issues found.", which means the tool *did* look) must still be classified
+    as having examined nothing when it says so structurally.
+    """
+    result = ToolResult(
+        name="osv-scanner",
+        success=True,
+        skipped=False,
+        output="No issues found.",
+        issues_count=0,
+        no_files=True,
+    )
+
+    assert_that(result_inspected_files(result)).is_false()
 
 
 @pytest.mark.parametrize(

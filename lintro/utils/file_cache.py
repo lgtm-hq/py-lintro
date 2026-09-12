@@ -10,9 +10,12 @@ import json
 import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # Cache directory location
 CACHE_DIR = Path.home() / ".lintro" / "cache"
@@ -244,3 +247,104 @@ def get_cache_stats() -> dict[str, int]:
             pass
 
     return stats
+
+
+@dataclass(frozen=True)
+class FingerprintSnapshot:
+    """Fingerprints taken at one instant, with the paths that could not be read.
+
+    Attributes:
+        fingerprints: Fingerprint per absolute file path.
+        unreadable: Paths whose ``stat`` failed. These are always treated as
+            changed, because "we do not know" must degrade towards verifying
+            more rather than less.
+    """
+
+    fingerprints: dict[str, FileFingerprint]
+    unreadable: tuple[str, ...] = ()
+
+    @property
+    def is_reliable(self) -> bool:
+        """Report whether the snapshot can narrow anything at all.
+
+        Two things can make a snapshot unusable.
+
+        A file that could not be stat'ed at all has no fingerprint to compare
+        against, so nothing can be concluded about it, and "we do not know"
+        must widen the scope rather than narrow it.
+
+        mtime resolution is the subtler one: on a filesystem with whole-second
+        granularity a formatter that rewrites a file inside the same second
+        leaves the fingerprint unmoved, and the file would be skipped. Every
+        sampled file must show a fractional ``st_mtime``. Requiring only
+        *some* of them would miss the mixed case — a coarse bind mount
+        alongside a sub-second local filesystem — where the coarse half is
+        exactly the half that can hide a rewrite. A file whose mtime lands on
+        an exact second by chance costs a fallback to the floor, which is a
+        wasted check rather than a wrong answer.
+
+        Returns:
+            True when nothing was unreadable and every sampled mtime shows
+            sub-second resolution. An empty sample is trivially reliable:
+            there is nothing to narrow.
+        """
+        if self.unreadable:
+            return False
+        if not self.fingerprints:
+            return True
+        return all(fp.mtime % 1 for fp in self.fingerprints.values())
+
+    def changed_paths(self) -> list[str]:
+        """Re-stat every fingerprinted file and return the ones that moved.
+
+        A file counts as moved when its mtime or its size differs from the
+        snapshot, when it can no longer be stat'ed, or when it was already
+        unreadable at snapshot time. Size alone is near-useless (a quote-style
+        rewrite is byte-for-byte the same length) and serves only as a cheap
+        tiebreak for a same-mtime rewrite.
+
+        Returns:
+            Sorted absolute paths whose fingerprint moved.
+        """
+        moved: set[str] = set(self.unreadable)
+        for file_path, before in self.fingerprints.items():
+            try:
+                stat = Path(file_path).stat()
+            except OSError as exc:
+                logger.debug(f"Could not re-stat {file_path}: {exc}")
+                moved.add(file_path)
+                continue
+            if before.mtime != stat.st_mtime or before.size != stat.st_size:
+                moved.add(file_path)
+        return sorted(moved)
+
+
+def snapshot_fingerprints(files: Sequence[str]) -> FingerprintSnapshot:
+    """Stat every file once so a later re-stat can tell which ones moved.
+
+    Args:
+        files: Absolute file paths to fingerprint.
+
+    Returns:
+        FingerprintSnapshot: The fingerprints that could be taken, plus the
+        paths whose ``stat`` failed. Unreadable paths are carried separately
+        rather than dropped so the caller can degrade to the floor for them.
+    """
+    fingerprints: dict[str, FileFingerprint] = {}
+    unreadable: list[str] = []
+    for file_path in files:
+        try:
+            stat = Path(file_path).stat()
+        except OSError as exc:
+            logger.debug(f"Could not fingerprint {file_path}: {exc}")
+            unreadable.append(file_path)
+            continue
+        fingerprints[file_path] = FileFingerprint(
+            path=file_path,
+            mtime=stat.st_mtime,
+            size=stat.st_size,
+        )
+    return FingerprintSnapshot(
+        fingerprints=fingerprints,
+        unreadable=tuple(sorted(unreadable)),
+    )

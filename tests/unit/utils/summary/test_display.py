@@ -15,6 +15,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.enums.action import Action
+from lintro.models.core.tool_result import ToolResult
 from lintro.utils.summary_tables import (
     DEFAULT_REMAINING_COUNT,
     NO_FILES_NOTE,
@@ -151,7 +152,7 @@ def test_fix_with_fixed_count(
     combined = "".join(output)
     assert_that(combined).contains("black")
     assert_that(combined).contains("PASS")
-    assert_that(combined).contains("Fixed")
+    assert_that(combined).contains("Net Resolved")
     assert_that(combined).contains("AI-Applied")
     assert_that(combined).contains("AI-Resolved")
     assert_that(combined).contains("Remaining")
@@ -610,3 +611,61 @@ def test_is_no_files_result_ignores_ran_messages(message: object) -> None:
         message: A message that must not be treated as a no-files result.
     """
     assert_that(_is_no_files_result(message)).is_false()
+
+
+def test_is_no_files_result_prefers_the_structured_flag() -> None:
+    """``no_files`` is the authority; the prose match is only a fallback.
+
+    ``prepare_execution`` and the tool definitions that build their own
+    "nothing was examined" result stamp ``no_files=True`` (#1743). A message
+    that the suffix list does not recognise — "No Cargo.toml found; skipping
+    clippy." — must still render the note, and a flagged result with no
+    message at all must too.
+    """
+    flagged = ToolResult(
+        name="clippy",
+        success=True,
+        output="No Cargo.toml found; skipping clippy.",
+        issues_count=0,
+        no_files=True,
+    )
+    assert_that(_is_no_files_result(flagged.output)).is_false()
+    assert_that(_is_no_files_result(flagged.output, flagged)).is_true()
+
+    silent = ToolResult(
+        name="typos",
+        success=True,
+        issues_count=0,
+        no_files=True,
+    )
+    assert_that(_is_no_files_result(silent.output, silent)).is_true()
+
+    ran = ToolResult(
+        name="ruff",
+        success=True,
+        output="No issues found",
+        issues_count=0,
+    )
+    assert_that(_is_no_files_result(ran.output, ran)).is_false()
+
+
+def test_no_files_note_renders_from_the_flag_alone(
+    console_capture: tuple[Callable[[str], None], list[str]],
+) -> None:
+    """A flagged result gets the note even when its message is unrecognised.
+
+    Args:
+        console_capture: Mock console output capture.
+    """
+    capture, output = console_capture
+    result = ToolResult(
+        name="clippy",
+        success=True,
+        output="No Cargo.toml found; skipping clippy.",
+        issues_count=0,
+        no_files=True,
+    )
+
+    print_summary_table(capture, Action.CHECK, [result])
+
+    assert_that("".join(output)).contains(NO_FILES_NOTE)

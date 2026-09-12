@@ -4,6 +4,9 @@
 ``ai_metadata`` alias was removed (issue #1831), so these tests pin the
 things the removed ``__init__`` wrapper used to touch: keyword construction,
 :func:`dataclasses.replace`, and ``__post_init__`` validation.
+
+They also pin the fields the run-level verify pass (#1743) added: ``no_files``
+and ``capability``.
 """
 
 from __future__ import annotations
@@ -11,9 +14,16 @@ from __future__ import annotations
 import dataclasses
 import warnings
 
+import pytest
 from assertpy import assert_that
 
+from lintro.enums.capability import Cap
 from lintro.models.core.tool_result import ToolResult
+from lintro.tools.core.verify_pass import (
+    VerifyOutcome,
+    VerifyScope,
+    fold_verify_results,
+)
 
 
 def test_metadata_field_is_the_only_metadata_dataclass_field() -> None:
@@ -84,3 +94,149 @@ def test_post_init_still_validates_issue_counts() -> None:
         remaining_issues_count=1,
         metadata={"fixed_count": 1},
     )
+
+
+def test_no_files_defaults_to_false_and_is_settable() -> None:
+    """``no_files`` marks "nothing was examined", and defaults to off.
+
+    Two consumers read it: ``lintro.tools.core.verify_pass.run_verify_pass``,
+    which must tell a clean verdict apart from a successful non-event, and
+    ``lintro.utils.meaningful_run.result_inspected_files``, which gates the
+    badge and the severity baseline on whether anything was measured at all.
+    A real result must not carry it.
+    """
+    real = ToolResult(name="ruff", success=True, issues_count=0)
+    assert_that(real.no_files).is_false()
+
+    nothing_examined = ToolResult(
+        name="ruff",
+        success=True,
+        output="No .py files found to check.",
+        issues_count=0,
+        no_files=True,
+    )
+    assert_that(nothing_examined.no_files).is_true()
+    # It is a successful non-event, not a skip: the tool stays in reporting.
+    assert_that(nothing_examined.success).is_true()
+    assert_that(nothing_examined.skipped).is_false()
+
+
+def test_capability_survives_the_verify_fold() -> None:
+    """The folded row keeps the mutation's capability, not the CHECK's.
+
+    Display rolls up to the tool, so the row stays the mutation's; the field
+    names what produced it.
+    """
+    mutation = ToolResult(
+        name="ruff",
+        success=True,
+        output="Fixed 1 issue(s)",
+        issues_count=0,
+        issues=[],
+        initial_issues_count=1,
+        fixed_issues_count=1,
+        remaining_issues_count=0,
+        capability=Cap.FIX,
+    )
+    verify = ToolResult(
+        name="ruff",
+        success=True,
+        issues_count=0,
+        issues=[],
+        capability=Cap.CHECK,
+    )
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[VerifyOutcome(tool="ruff", result=verify)],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+    )
+
+    assert_that(results[0].capability).is_equal_to(Cap.FIX)
+
+
+def test_capability_defaults_to_none() -> None:
+    """A result not produced by a capability names none."""
+    assert_that(ToolResult(name="ruff").capability).is_none()
+
+
+@pytest.mark.parametrize(
+    ("fixed", "remaining"),
+    [
+        (None, 0),
+        (0, None),
+        (2, None),
+        (2, 0),
+    ],
+)
+def test_an_unknown_residual_may_not_carry_a_measured_count(
+    fixed: int | None,
+    remaining: int | None,
+) -> None:
+    """The model refuses "unknown" beside a number, zero included.
+
+    The falsy counts are in the matrix on purpose: a validator that regressed
+    from ``is not None`` to truthiness would accept ``fixed_issues_count=0``
+    and ``remaining_issues_count=0`` beside the flag, which is exactly the
+    "unknown, and also zero" rendering this rejects.
+
+    ``residual_unknown`` means the verify pass took no after-measurement
+    (#1743), so a result that still carries ``fixed_issues_count`` or
+    ``remaining_issues_count`` would render "unknown" in one column and a
+    count nobody measured in the next. A producer that folds incorrectly has
+    to fail here, where the contradiction is, rather than at the display.
+
+    Args:
+        fixed: Net resolved count the producer wrongly kept, or ``None``.
+        remaining: Residual count the producer wrongly kept, or ``None``.
+    """
+    with pytest.raises(ValueError, match="must be None when residual_unknown"):
+        ToolResult(
+            name="ruff",
+            success=False,
+            issues_count=2,
+            fixed_issues_count=fixed,
+            remaining_issues_count=remaining,
+            residual_unknown=True,
+            residual_unknown_reason="the verify check timed out",
+        )
+
+
+def test_an_unknown_residual_may_not_report_success() -> None:
+    """The other half of the contract: an unmeasured residual fails the run.
+
+    Condition 4 of this change is that verification failure fails the run and
+    is never presented as a measured after-count. The counts half was already
+    enforced; a result that admits it measured nothing while claiming
+    ``success=True`` would exit 0 on an outcome nobody knows, so the model
+    refuses it too.
+    """
+    with pytest.raises(ValueError, match="success must be False"):
+        ToolResult(
+            name="ruff",
+            success=True,
+            issues_count=2,
+            residual_unknown=True,
+            residual_unknown_reason="the verify check timed out",
+        )
+
+
+def test_an_unknown_residual_with_both_counts_cleared_is_valid() -> None:
+    """The shape the fold produces constructs without complaint.
+
+    ``issues_count`` stays populated in this state: it is the before-count,
+    the pre-fix findings carried forward, not a residual.
+    """
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=2,
+        initial_issues_count=2,
+        residual_unknown=True,
+        residual_unknown_reason="the verify check timed out",
+    )
+
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(2)

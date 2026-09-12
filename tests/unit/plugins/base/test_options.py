@@ -122,7 +122,7 @@ def test_set_options_exclude_patterns_preserves_lintro_ignore(
     ignore_file.write_text("test_samples/\ncustom_dir\n")
 
     with patch(
-        "lintro.plugins.file_discovery.find_lintro_ignore",
+        "lintro.utils.path_filtering.find_lintro_ignore",
         return_value=ignore_file,
     ):
         plugin = FakeToolPlugin()
@@ -210,7 +210,7 @@ def test_setup_defaults_adds_lintro_ignore_patterns(tmp_path: Path) -> None:
     ignore_file.write_text("custom_pattern\n# comment\n\nother_pattern\n")
 
     with patch(
-        "lintro.plugins.file_discovery.find_lintro_ignore",
+        "lintro.utils.path_filtering.find_lintro_ignore",
         return_value=ignore_file,
     ):
         plugin = FakeToolPlugin()
@@ -224,7 +224,7 @@ def test_setup_defaults_handles_lintro_ignore_read_error_gracefully() -> None:
     from tests.unit.plugins.conftest import FakeToolPlugin
 
     with patch(
-        "lintro.plugins.file_discovery.find_lintro_ignore",
+        "lintro.utils.path_filtering.find_lintro_ignore",
         side_effect=PermissionError("Access denied"),
     ):
         plugin = FakeToolPlugin()

@@ -11,13 +11,103 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **core**: `lintro format` (alias `fmt`) now runs as a mutate-then-verify pipeline.
+  Every mutating capability (`FIX`, `FORMAT`) runs in derived DAG order, and then a
+  single verify pass runs the `CHECK` capability of the same tools; for every mutator
+  that declares `CHECK`, that one pass is the run's authoritative residual count, and
+  the private post-fix re-lints taplo and sqlfluff carried are deleted. A per-tool
+  self-verify could not see cross-tool interference — if ruff fixes a file and prettier
+  then reformats it, ruff's own post-fix lint has already run — so counts reported after
+  a multi-tool format run are now measured once, at the end, over the final bytes on
+  disk. Format-only tools (prettier, oxfmt, rustfmt, shfmt) do not declare `CHECK`, so
+  they are not verified centrally and keep their own result contract until the follow-up
+  that makes every mutator declare it (#2607). The verify pass is narrowed by file
+  fingerprint: only files whose stat moved between a pre- and post-mutation snapshot are
+  re-checked, degrading to every file handed to a mutating capability when fingerprints
+  cannot be trusted. `lintro check` stays read-only — no snapshot, no verify pass — and
+  so does `format --dry-run`.
+- **core**: a tool whose residual the verify pass could not measure — its `CHECK`
+  crashed, timed out or was skipped — now reports **residual unknown**, a third state
+  beside "clean" and "N remaining". The run fails, the summary prints `unknown` in the
+  count columns with the reason beside it, and the JSON report carries
+  `"remaining": null`, `"net_resolved": null` and `"residual_unknown": true`. An
+  unmeasured residual is never presented as a measured after-count.
+
 ### Changed
+
+- **core**: the mutation phase of a `format` run executes one tool at a time. Batching
+  and derived DAG order are unchanged, but two mutating capabilities are never in flight
+  at once, so one tool's write can no longer be lost to another's. `lintro check` and
+  the verify pass keep the full parallel fan-out. A bridge until the scheduler keeps
+  overlapping mutators out of the same batch (#2606).
+- **output**: the before-minus-after figure is labelled **net resolved**, not "fixed" —
+  it is the difference between two measurements, not any tool's reported fix count, and
+  a finding one tool fixed and another reintroduced nets out of it. In the console the
+  summary column reads `Net Resolved`, the totals row reads `Net Resolved (Native)`, the
+  plain-text report line reads `Total Net Resolved:` and the final status line reads
+  `N net resolved`. "Fixed" is kept where a tool reports its own fix count.
+- **output**: the machine-readable reports gain `summary.total_net_resolved`, a result's
+  `net_resolved`, the JSONL stream's `net_resolved_count` and the MCP tool summary's
+  `net_resolved`. Nothing is removed: every existing key is still emitted with the same
+  value, so no consumer breaks.
+- **plugins**: `DEFAULT_EXCLUDE_PATTERNS` moved to `lintro.utils.path_filtering` and is
+  now a `tuple[str, ...]` instead of a `list[str]`. It is still re-exported from
+  `lintro.plugins.base` and `lintro.plugins.file_discovery`, so imports keep working,
+  but out-of-tree callers that mutated it (`DEFAULT_EXCLUDE_PATTERNS.append(...)`) or
+  concatenated a list to it (`DEFAULT_EXCLUDE_PATTERNS + [...]`) must copy it first:
+  `list(DEFAULT_EXCLUDE_PATTERNS) + [...]`.
 
 ### Deprecated
 
+- **output**: `summary.total_fixed`, a result's `fixed`, the JSONL stream's
+  `fixed_issues_count` and the MCP tool summary's `fixed_count` are deprecated in favour
+  of `summary.total_net_resolved`, `net_resolved`, `net_resolved_count` and
+  `net_resolved`. Both spellings carry the same value; the old ones are removed in a
+  later release. The figure is a before-minus-after difference, not a tool's own fix
+  count, and the new names say so.
+
 ### Removed
 
+- **plugins**: `VerifyMode.ALWAYS` (`lintro.tools.core.fix_runner`). Since the run-level
+  verify pass measures the residual once after every mutating tool has run, a per-file
+  re-lint after a failed fix could only report an earlier, less accurate number.
+  Out-of-tree plugins using it should declare `VerifyMode.AFTER_SUCCESS`.
+
 ### Fixed
+
+- **core**: the run totals no longer present an unmeasured residual as a measured zero.
+  A tool in the residual-unknown state is excluded from `total_net_resolved` and
+  `total_remaining` (its pre-fix findings still reach `total_issues`), the TOTALS table
+  gains a `Residual Unknown (tools)` row plus a line naming them, and the JSON summary
+  gains `residual_unknown_tools`. Before this the table could print "Remaining Issues 0"
+  directly under a tool row reading "unknown".
+- **core**: `lintro badge` and the severity baseline classify a "nothing was examined"
+  result by the structured `no_files` flag instead of its message. Bandit nulls its
+  output for that case, making it byte-identical to a clean pass, so the prose heuristic
+  could not tell them apart; it is kept underneath the flag for producers that do not
+  set it yet.
+- **pip-audit**: a file discovery matched and pip-audit declined — a `setup.py` inside
+  an importable package — is no longer reported as "no files matched". The flag is
+  dropped from that branch and the message says the matched paths held nothing
+  auditable.
+- **core**: a verifying tool whose `CHECK` timed out is no longer read as a verdict. A
+  multi-root aggregator such as golangci-lint returns one result carrying the findings
+  the roots that finished produced plus `timed_out=True`; the run-level verify pass now
+  treats that partial answer as no answer, so every pre-fix finding survives and the run
+  reports a failure instead of counting the difference as fixed.
+- **tools**: the hand-built "nothing was examined" results now carry the structured
+  `no_files` flag. The framework's own early return
+  (`lintro.plugins.execution_preparation`) stamps it for every tool whose discovery
+  matched nothing, and these thirteen wrappers stamp the results they build themselves:
+  actionlint, bandit, cargo-audit, cargo-deny, clippy, golangci-lint, mypy, osv-scanner,
+  rustfmt, stylelint, trufflehog, typos and yamllint. The summary table reads the flag
+  before falling back to matching the message text, so a tool whose wording the suffix
+  list does not recognise is still annotated.
+
+  Not covered by the flag, and still classified by their message: wrappers that decline
+  to run at all without setting `skipped` — vale and commitlint emit a
+  `Skipping <name>: ...` result — and pip-audit's declined-after-match branch, which
+  matched files and refused them (see above) rather than finding none.
 
 ### Security
 

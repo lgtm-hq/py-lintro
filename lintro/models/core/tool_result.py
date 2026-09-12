@@ -11,6 +11,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from lintro.enums.capability import Cap
+
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
 
@@ -25,9 +27,18 @@ class ToolResult:
     For fix/format operations:
         - ``initial_issues_count`` is the number of issues detected before fixes
         - ``fixed_issues_count`` is the number of issues the tool auto-fixed
-        - ``remaining_issues_count`` is the number of issues still remaining
+        - ``remaining_issues_count`` is the number of issues still remaining,
+          or ``None`` when ``residual_unknown`` says it was never measured
         - ``issues_count`` should mirror ``remaining_issues_count`` for
           backward compatibility in format-mode summaries
+
+    When ``residual_unknown`` is set the run-level verify pass (#1743) never
+    measured an after-state, so there is no count to mirror:
+    ``fixed_issues_count`` and ``remaining_issues_count`` are both ``None``
+    (enforced below) and ``issues_count`` is a **before**-count — the number of
+    pre-fix findings carried forward, which is what ``issues`` holds. It is not
+    a residual, and consumers must render "unknown" rather than presenting it
+    as one.
 
     The ``issues`` field can contain parsed issue objects (tool-specific) to
     support unified table formatting.
@@ -72,6 +83,14 @@ class ToolResult:
     # issue file paths in AI fix generation)
     cwd: str | None = field(default=None)
 
+    # True when the tool returned early because file discovery matched
+    # nothing. Deliberately distinct from ``skipped`` (which forces
+    # ``success=True`` and hides the tool from reporting): a no-files result is
+    # a successful non-event, but it is not a verdict about any file, so the
+    # run-level verify pass (#1743) must not read it as "these files are
+    # clean".
+    no_files: bool = field(default=False)
+
     # Skip tracking for tools that didn't execute
     skipped: bool = field(default=False)
     skip_reason: str | None = field(default=None)
@@ -95,6 +114,26 @@ class ToolResult:
     # directly in a test).
     duration_seconds: float | None = field(default=None)
 
+    # Set when the run-level verify pass (#1743) could not measure this
+    # tool's residual: its ``CHECK`` raised, timed out, was skipped, or the
+    # tool could not be resolved. This is a third state beside "clean" and "N
+    # remaining" — the count after the mutation phase was never taken, so
+    # ``fixed_issues_count`` and ``remaining_issues_count`` are cleared to
+    # ``None`` and consumers must render "unknown" rather than a number. The
+    # run fails either way, which is enforced below: ``success`` must be
+    # False whenever this is set.
+    residual_unknown: bool = field(default=False)
+    residual_unknown_reason: str | None = field(default=None)
+
+    # Which capability produced this result: ``CHECK`` outside a fix run, and
+    # the tool's mutating capability (``FIX``/``FORMAT``) inside one. It keeps
+    # that value after the verify pass folds its ``CHECK`` residual into the
+    # same row (#1743) — display rolls up to the tool, so the row stays the
+    # mutation's and the field names what produced it. ``None`` on results not
+    # produced by a capability at all (skipped tools, run-level gates, results
+    # built directly in a test).
+    capability: Cap | None = field(default=None)
+
     def __post_init__(self) -> None:
         """Validate that the issue counts and skip state are consistent.
 
@@ -112,6 +151,40 @@ class ToolResult:
         if self.skip_reason and not self.skipped:
             raise ValueError(
                 "skip_reason can only be set when skipped=True",
+            )
+
+        if self.residual_unknown and not self.residual_unknown_reason:
+            raise ValueError(
+                "residual_unknown_reason is required when residual_unknown=True",
+            )
+
+        if self.residual_unknown_reason and not self.residual_unknown:
+            raise ValueError(
+                "residual_unknown_reason can only be set when " "residual_unknown=True",
+            )
+
+        if self.residual_unknown and self.success:
+            # The other half of the same contract: an unmeasured residual
+            # fails the run. A result that claims success while admitting it
+            # never measured anything would exit 0 on a run whose outcome
+            # nobody knows.
+            raise ValueError(
+                "success must be False when residual_unknown=True",
+            )
+
+        if self.residual_unknown and (
+            self.fixed_issues_count is not None
+            or self.remaining_issues_count is not None
+        ):
+            # "Unknown" beside a hard number is the one rendering this state
+            # exists to prevent: the display would print "unknown" in one
+            # column and a measurement nobody took in the next. A producer
+            # that folds incorrectly fails here rather than downstream.
+            raise ValueError(
+                "fixed_issues_count and remaining_issues_count must be None "
+                "when residual_unknown=True: "
+                f"fixed={self.fixed_issues_count}, "
+                f"remaining={self.remaining_issues_count}",
             )
 
         if (
