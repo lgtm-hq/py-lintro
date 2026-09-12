@@ -26,6 +26,7 @@ Install the CLI only; Lintro detects tools already on your system:
 ```bash
 pip install lintro
 # or: brew tap lgtm-hq/tap && brew install lintro
+# (Homebrew ships a prebuilt binary on Apple silicon; Intel Macs install from PyPI)
 ```
 
 ### Full (bundled Python tools)
@@ -116,6 +117,9 @@ order and for what changed.
 - `semgrep` - Security scanner and code analyzer (`./scripts/utils/install-semgrep.sh`
   from a checkout, `uv tool install semgrep`, or `brew install semgrep`). Not included
   in `lintro[tools]`.
+- `checkov` - Infrastructure-as-Code security scanner for Terraform
+  (`uv tool install checkov`). Not included in `lintro[tools]`: checkov pins
+  `packaging<24` and cannot share lintro's environment.
 - `gitleaks` - Secret detection in git repos (`brew install gitleaks` or GitHub
   releases)
 - `trufflehog` - Secret detection with 800+ credential detectors, verification disabled

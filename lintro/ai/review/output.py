@@ -120,6 +120,10 @@ def finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
     change the JSON of every run that never enabled the pass, so the key is
     dropped when unset and rendered as its plain string label when set.
 
+    ``posted_inline`` (#2572) is always present: the payload keeps every
+    finding, gated or not, and the flag is how a consumer tells a finding
+    that opened a thread from one routed to the sticky's notes block.
+
     Args:
         finding: Finding to serialize.
 
@@ -156,6 +160,11 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     ``null`` on a run degraded solely by the synthesis pass. They are always
     present, so a classifier can tell "the model found N issues" from "we
     capped the model at N".
+
+    Every finding is serialized whether or not the posting policy (#2572)
+    posted it inline; each carries ``posted_inline`` so the gate is visible
+    rather than a silent omission. ``readiness_verdict`` is derived from the
+    inline subset only.
 
     ``cross_chunk_contradictions`` (#2265) reports how many findings the
     cross-chunk guard tagged for claiming a changed file was never touched

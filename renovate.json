@@ -107,7 +107,8 @@
     {
       "description": "Binary pins in _tool_versions.py install only when the tools image rebuilds; do not automerge versions-only (#2220)",
       "matchPackageNames": [
-        "golangci/golangci-lint"
+        "golangci/golangci-lint",
+        "checkov"
       ],
       "automerge": false
     },
@@ -134,6 +135,11 @@
       ],
       "schedule": ["before 5am on monday"],
       "automerge": false
+    },
+    {
+      "description": "assertpy is deliberately kept despite the abandoned flag: pure Python, works on 3.14, guarded by tests/unit/test_assertpy_guard.py, assertpy2 is the designated fallback (#2437). Null threshold suppresses the dependency-dashboard abandonment notice for it",
+      "matchPackageNames": ["assertpy"],
+      "abandonmentThreshold": null
     },
     {
       "description": "Compiled semgrep lockfile is regenerated from requirements-semgrep.in by scripts/ci/compile-semgrep-lock.sh; CI gates the drift (#2436)",
@@ -297,6 +303,18 @@
       "datasourceTemplate": "github-releases",
       "packageNameTemplate": "rhysd/actionlint",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "description": "Update checkov version in _tool_versions.py",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "lintro/_tool_versions\\.py"
+      ],
+      "matchStrings": [
+        "ToolName\\.CHECKOV:\\s*\"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ],
+      "datasourceTemplate": "pypi",
+      "packageNameTemplate": "checkov"
     },
     {
       "description": "Update gitleaks version in _tool_versions.py",

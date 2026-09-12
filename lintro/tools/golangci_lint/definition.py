@@ -106,12 +106,19 @@ def _rebase_issue_paths(
 def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
     """Merge per-module fix results into a single aggregate result.
 
+    A module whose check, fix, or re-check invocation exceeded its deadline
+    contributes a timed-out stage result. The timeout is an execution failure
+    rather than a lint finding, so it is carried onto the aggregate: the merged
+    result reports ``timed_out=True`` and can never be a success, even when
+    every other module root came back clean (#2386).
+
     Args:
         name: Tool name for the aggregate result.
         results: One fix ToolResult per Go module root.
 
     Returns:
-        Aggregate ToolResult (success only when every module succeeded).
+        Aggregate ToolResult (success only when every module succeeded and no
+        module timed out).
     """
     issues: list[Any] = []
     initial_issues: list[Any] = []
@@ -121,9 +128,11 @@ def _merge_fix_results(*, name: str, results: list[ToolResult]) -> ToolResult:
         initial_issues.extend(result.initial_issues or [])
         if result.output:
             outputs.append(result.output)
+    any_timed_out = any(r.timed_out for r in results)
     return ToolResult(
         name=name,
-        success=all(r.success for r in results),
+        success=all(r.success for r in results) and not any_timed_out,
+        timed_out=any_timed_out,
         output="\n".join(outputs) if outputs else None,
         issues_count=sum(r.issues_count or 0 for r in results),
         issues=issues,

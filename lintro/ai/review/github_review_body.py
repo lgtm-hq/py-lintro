@@ -36,6 +36,8 @@ from lintro.ai.review.github_badges import (
 from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
+    format_lint_facts_note,
+    format_partial_review_label,
     format_synthesis_note_line,
     format_timings_note,
 )
@@ -49,6 +51,7 @@ from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
+from lintro.ai.review.posting_policy import inline_findings
 
 __all__ = ["REVIEW_BODY_FOOTER", "build_review_body"]
 
@@ -178,11 +181,22 @@ def _header(
     round_number: int,
     head_sha: str,
 ) -> str:
-    """Render the one-line findings header with the resolved delta.
+    """Render the findings header with the resolved delta.
 
     The resolved segment is rendered on every round after the first, even at
     zero: omitting it would make "nothing was fixed since last round" and
     "there was no last round" look identical.
+
+    A round whose finding depth was degraded leads with "Partial review"
+    instead of "Lintro review" and carries the coverage-limited warning right
+    here, under the header line rather than down in the run stats (#2395). The
+    header is the only line a scanning reader is guaranteed to read, so it is
+    where a partial finding set has to be announced -- matching the
+    ``degraded`` outcome the CI check reports for the same condition.
+
+    The findings count is the number posted inline. A finding the posting
+    policy routed to the sticky's notes block (#2572) is not announced here:
+    the header promises threads below, and a note has none.
 
     Args:
         result: This round's review result.
@@ -196,9 +210,13 @@ def _header(
     """
     head = _short(head_sha or result.metadata.head_ref)
     base = _short(_prior_sha(prior_state=prior_state) or result.metadata.base_ref)
+    partial = format_partial_review_label(metadata=result.metadata)
+    lead = f"⚠️ **{partial}" if partial else "🔎 **Lintro review"
+    # "posted" means posted inline: a note the posting policy routed to the
+    # sticky (#2572) is neither a thread below this body nor a count here.
+    posted = len(inline_findings(findings=result.findings))
     parts = [
-        f"🔎 **Lintro review — {_plural(count=len(result.findings), noun='finding')} "
-        "posted**",
+        f"{lead} — {_plural(count=posted, noun='finding')} posted**",
     ]
     if round_number > 1:
         parts.append(
@@ -207,7 +225,18 @@ def _header(
     parts.append(f"round {round_number}")
     if base and head:
         parts.append(f"commits `{base}..{head}`")
-    return " · ".join(parts)
+    line = " · ".join(parts)
+    header = line
+    # Limits on what the model saw sit together under the header: the
+    # coverage warning, then the absence of linter facts (#2571). Appended
+    # one at a time; the pipeline owns section joining, not this renderer.
+    for note in (
+        format_coverage_limited_warning(metadata=result.metadata),
+        format_lint_facts_note(metadata=result.metadata),
+    ):
+        if note:
+            header = f"{header}\n\n{note}"
+    return header
 
 
 def _prompt_section(
@@ -228,12 +257,14 @@ def _prompt_section(
 
     Returns:
         Markdown for the prompt panel; empty when the round produced nothing
-        actionable to fix.
+        actionable to fix. Notes (#2572) are left out: a low-confidence claim
+        is not an instruction to change the code.
     """
-    if not prompt_findings(findings=result.findings):
+    posted = inline_findings(findings=result.findings)
+    if not prompt_findings(findings=posted):
         return ""
     return render_agent_prompt_panel(
-        findings=result.findings,
+        findings=posted,
         scope=AgentPromptScope(
             kind=AgentPromptScopeKind.THIS_REVIEW,
             round_number=round_number,
@@ -315,11 +346,10 @@ def _run_stats_section(
 
     lines = ["**📊 Run stats**", ""]
     lines.extend(format_badge_tables(rows=[primary, secondary]))
-    coverage_warning = format_coverage_limited_warning(metadata=metadata)
-    if coverage_warning:
-        # Parity with the cost-cap partial warning: a findings-cap run says so
-        # in the run-stats block, where the reader looks for run mechanics.
-        lines.extend(["", coverage_warning])
+    # The coverage-limited warning used to sit here, beside the run
+    # mechanics. It now renders under the header line instead (#2395), where
+    # a scanning reader meets it; repeating it here would put the same
+    # sentence in one comment twice.
     cross_chunk_note = format_cross_chunk_note(findings=result.findings)
     if cross_chunk_note:
         # A guard-driven downgrade is run mechanics too: the reader needs to

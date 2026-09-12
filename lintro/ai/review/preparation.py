@@ -44,6 +44,8 @@ from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.preparation_resolvers import (
     apply_timeout,
     build_lint_digest,
+    build_lint_digest_from_report,
+    lint_facts_missing_note,
     resolve_custom_agent_mode,
     resolve_custom_agents,
     resolve_review_depth,
@@ -111,6 +113,12 @@ class ReviewRunRequest:
             ``review.strictness``.
         with_lint: Run lintro on the changed files and include a digest of
             the results in the review prompt.
+        lint_report: Saved lintro JSON report to digest instead of running
+            the tools (``--lint-report``, #2571). Takes precedence over
+            ``with_lint``; the CLI rejects the two together.
+        lint_report_missing: Why the caller has no report to pass
+            (``--lint-report-missing``). Surfaces as the header's
+            linter-facts note when ``lint_report`` is None.
         semantic_chunks: Force semantic chunking for this run. Config's
             ``review.force_semantic_chunking`` can enable it independently.
         timeout: Per-run API timeout override in seconds, or None.
@@ -130,6 +138,8 @@ class ReviewRunRequest:
     depth: int | None = None
     strictness: str | None = None
     with_lint: bool = False
+    lint_report: Path | None = None
+    lint_report_missing: str | None = None
     semantic_chunks: bool = False
     timeout: float | None = None
     custom_agent_mode: CustomAgentMode | None = None
@@ -161,9 +171,13 @@ class PreparedReview:
         run_builtin_checklist: Whether the built-in checklist passes run.
         synthesis: Cross-chunk synthesis configuration (#2269).
         workspace_root: Absolute workspace root the review is anchored to.
-        lint_digest: ``--with-lint`` digest for the prompt, or None.
+        lint_digest: ``--with-lint`` / ``--lint-report`` digest for the
+            prompt, or None.
         lint_tool_count: Number of lint tools that ran for the digest.
         lint_issue_count: Total issues those tools reported.
+        lint_note: Why a requested ``--lint-report`` could not be used, or
+            why none was passed (#2571), for the review header. Empty
+            otherwise.
         context_collection_seconds: Wall-clock seconds spent collecting the
             diff context. Excluded from equality: it measures the run, not the
             preparation.
@@ -185,6 +199,7 @@ class PreparedReview:
     lint_digest: str | None = None
     lint_tool_count: int = 0
     lint_issue_count: int = 0
+    lint_note: str = ""
     context_collection_seconds: float = field(default=0.0, compare=False)
 
     def with_max_cost_usd(self, *, max_cost_usd: float | None) -> PreparedReview:
@@ -288,11 +303,25 @@ def prepare_review(
     )
     checklist_text, _prompt_mapping = format_checklist_for_prompt(items=selected_items)
 
-    lint_digest, lint_tool_count, lint_issue_count = (
-        build_lint_digest(context=context, lintro_config=request.lintro_config)
-        if request.with_lint
-        else (None, 0, 0)
-    )
+    lint_digest: str | None = None
+    lint_tool_count = 0
+    lint_issue_count = 0
+    lint_note = ""
+    if request.lint_report is not None:
+        lint_digest, lint_tool_count, lint_issue_count, lint_note = (
+            build_lint_digest_from_report(
+                context=context,
+                report_path=request.lint_report,
+            )
+        )
+    elif request.with_lint:
+        lint_digest, lint_tool_count, lint_issue_count = build_lint_digest(
+            context=context,
+            lintro_config=request.lintro_config,
+        )
+    elif request.lint_report_missing:
+        # No report and no tool run: the header note is the only lint surface.
+        lint_note = lint_facts_missing_note(request.lint_report_missing)
 
     strictness = resolve_review_strictness(request)
     custom_agent_mode = resolve_custom_agent_mode(request)
@@ -321,6 +350,7 @@ def prepare_review(
         lint_digest=lint_digest,
         lint_tool_count=lint_tool_count,
         lint_issue_count=lint_issue_count,
+        lint_note=lint_note,
         context_collection_seconds=context_collection_seconds,
     )
 
@@ -362,6 +392,7 @@ def execute_review(
             classifications=prepared.classifications,
             context_window_override=policy.context_window_override,
             lint_results=prepared.lint_digest,
+            lint_note=prepared.lint_note,
             progress=policy.progress,
             sensitivity=prepared.sensitivity,
             force_semantic_chunking=prepared.force_semantic_chunking,

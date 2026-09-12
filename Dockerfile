@@ -15,7 +15,7 @@
 # Built from docker/tools.Dockerfile and published by docker-tools-publish.yml
 # (cosign-signed, SBOM + provenance). Renovate manages the digest bump (#1360).
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:8a166e064deed2c5afafb1524494672ba19b6e3cfffb2ef750410c41dc2ecd12 AS tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:1a533a42313ed4139be2a4afd645bce9082b217e15d430679a5209c5c8abf7d7 AS tools
 
 # -----------------------------------------------------------------------------
 # Stage: full — lintro application (default target)
@@ -69,11 +69,11 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 # New binaries land in docker/tools.Dockerfile, but this app image still
 # FROMs a digest-pinned tools image that will not contain them until the
 # next published digest. Bridge typos, spectral, buf, import-linter, pylint,
-# and cppcheck here so dogfood and the manifest-vs-image gate actually run
+# cppcheck and checkov here so dogfood and the manifest-vs-image gate run
 # them instead of failing with binary_missing. No-op once the digest already
 # has them on PATH.
 RUN chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck && \
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov && \
     rm -rf /var/lib/apt/lists/*
 
 # hadolint ignore=DL3008
@@ -88,10 +88,10 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 
 RUN getent group tools >/dev/null || groupadd -r tools && \
     id -u lintro >/dev/null 2>&1 || useradd -m -G tools lintro && \
-    mkdir -p /code && \
-    chgrp -R tools /opt/semgrep-venv && \
-    chmod -R g+rwX /opt/semgrep-venv && \
-    chmod -R a+rX /opt/semgrep-venv && \
+    mkdir -p /code /opt/uv-tools && \
+    chgrp -R tools /opt/semgrep-venv /opt/uv-tools && \
+    chmod -R g+rwX /opt/semgrep-venv /opt/uv-tools && \
+    chmod -R a+rX /opt/semgrep-venv /opt/uv-tools && \
     chown -R lintro:lintro /app /code
 
 # Minimal cross-ecosystem smoke check. Comprehensive manifest-vs-image tool
@@ -112,13 +112,18 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD ["/app/.venv/bin/python", "-m", "lintro", "--version"]
 
 # Minimal non-root smoke: confirm the gosu privilege drop works and the tools
-# group can execute the permission-sensitive toolchains under /opt/bun and
-# /opt/cargo. The CI manifest gate runs as root, so it would not catch a
-# non-root permission regression on these dirs — this stays as a targeted smoke.
+# group can execute the permission-sensitive toolchains under /opt/bun,
+# /opt/cargo and /opt/uv-tools. The CI manifest gate runs as root, so it would
+# not catch a non-root permission regression on these dirs — this stays as a
+# targeted smoke. checkov belongs here because it joins semgrep as a tool whose
+# shim on PATH and whose interpreter live in different trees (/usr/local/bin and
+# its uv-tool venv under /opt/uv-tools), so root being able to run it says
+# nothing about `lintro`.
 RUN echo "Smoke-testing tools as non-root user..." && \
     gosu lintro prettier --version && \
     gosu lintro cargo clippy --version && \
     gosu lintro semgrep --version && \
+    gosu lintro checkov --version && \
     echo "Non-root tool smoke check passed."
 
 # No USER directive: the container starts as root so entrypoint.sh can detect
@@ -188,7 +193,7 @@ CMD ["--help"]
 # manages the digest bump. Only the `ai` target below depends on this stage, so
 # `--target base` / `--target full` builds never pull it.
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:d7d6c139909965db774f85861a897e2af54f97db081a0f5bd0971e42f24314ab AS aitools
+FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:a2f111bdad51695008ea593ca09cb4991df4c5beab5ecaafce1ca5bd3b468bb4 AS aitools
 
 # -----------------------------------------------------------------------------
 # Stage: ai — full image plus the agent CLIs `--transport cli` drives

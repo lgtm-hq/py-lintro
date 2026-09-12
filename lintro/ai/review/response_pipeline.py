@@ -7,10 +7,14 @@ and convert the parsed payload into a
 :class:`~lintro.ai.review.merge.ChunkReviewPartial` the merge layer folds
 together (issue #2301).
 
-Both degradation paths -- the findings cap and the output-exhaustion retry --
-are recorded as :class:`CoverageDegradation` entries so a capped chunk can never
-present as an unlimited one, and the parse ladder never drops a paid-for answer:
-a non-JSON reply becomes unstructured findings rather than an error.
+The output-exhaustion retry is recorded here as a :class:`CoverageDegradation`
+entry so a chunk that re-ran under a tighter ceiling can never present as an
+unlimited one. The findings cap is *not* recorded here: a configured ceiling is
+only a degradation once a chunk's parsed answer actually reaches it, which is
+known after parsing, so :mod:`lintro.ai.review.chunk_pass` records it against
+the effective cap this module reports back (#2283). The parse ladder never
+drops a paid-for answer either: a non-JSON reply becomes unstructured findings
+rather than an error.
 """
 
 from __future__ import annotations
@@ -35,6 +39,7 @@ from lintro.ai.review.cli_limits import (
     is_cli_output_exhaustion,
     tighter_findings_cap,
 )
+from lintro.ai.review.confirmation_filter import drop_confirmation_findings
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
@@ -67,6 +72,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
+    "ChunkCallResult",
     "ChunkReviewRequest",
     "invoke_chunk_review",
     "merge_response_usage",
@@ -122,24 +128,50 @@ class ChunkReviewRequest:
     chunk_index: int
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ChunkCallResult:
+    """What one chunk's main provider call produced.
+
+    The findings cap is reported rather than recorded here: whether the
+    ceiling actually bit is only knowable once the answer is parsed, so the
+    caller gates the degradation on the parsed finding count (#2283).
+
+    Attributes:
+        response: The provider response whose usage the chunk is charged.
+        elapsed: Wall-clock seconds the successful (or final) attempt took.
+        degradations: Coverage degradations this call itself incurred, today
+            only the output-exhaustion retry.
+        findings_cap: The per-call findings ceiling actually in force for the
+            answer in ``response``, tightened when a retry ran, or ``None``
+            when the call was uncapped.
+    """
+
+    response: AIResponse
+    elapsed: float
+    degradations: tuple[CoverageDegradation, ...]
+    findings_cap: int | None
+
+
 async def invoke_chunk_review(
     *,
     request: ChunkReviewRequest,
-) -> tuple[AIResponse, float, tuple[CoverageDegradation, ...]]:
+) -> ChunkCallResult:
     """Build the chunk prompt, call the provider, and retry on output exhaustion.
 
     When CLI transport hits the ~32k output-token cap mid-JSON, retry once with
     a tighter findings ceiling so the call can finish a complete object (#1967).
-    Both the cap itself and the retry are recorded as coverage degradations so
-    a capped chunk can never present as an unlimited one (#2003).
+    The retry is recorded as a coverage degradation; the cap in force is only
+    reported, because a configured ceiling becomes a degradation once a chunk's
+    parsed answer reaches it, not when it is configured (#2283).
 
     Args:
         request: The chunk, prompt material, provider handles and limits for
             this call.
 
     Returns:
-        The provider response, wall-clock seconds spent on the successful (or
-        final) call attempt, and the coverage degradations this chunk incurred.
+        The provider response, the wall-clock seconds it took, the coverage
+        degradations this call incurred, and the findings cap in force for the
+        returned answer.
 
     Raises:
         AICostBudgetExceededError: When the session cost ceiling is hit.
@@ -151,14 +183,6 @@ async def invoke_chunk_review(
     findings_cap = request.max_findings
     allow_output_retry = findings_cap is not None and findings_cap > 1
     degradations: list[CoverageDegradation] = []
-    if findings_cap is not None:
-        degradations.append(
-            CoverageDegradation(
-                reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-                chunk_index=request.chunk_index,
-                findings_cap=findings_cap,
-            ),
-        )
     started = time.monotonic()
     while True:
         prompt_inputs = PromptInputs(
@@ -228,7 +252,12 @@ async def invoke_chunk_review(
                     started = time.monotonic()
                     continue
             raise
-        return response, time.monotonic() - started, tuple(degradations)
+        return ChunkCallResult(
+            response=response,
+            elapsed=time.monotonic() - started,
+            degradations=tuple(degradations),
+            findings_cap=findings_cap,
+        )
 
 
 async def parse_review_payload_with_recovery(
@@ -384,6 +413,9 @@ def payload_to_partial(
     :data:`~lintro.ai.cli_schemas.REVIEW_CLI_SCHEMA` and from the prose
     recovery payload, not from a schema-constrained CLI-transport reply.
 
+    Findings whose body says they are not a defect are dropped here, before
+    the caller counts the answer against its findings cap (#2430).
+
     Args:
         response: Provider response the payload was parsed from.
         payload: Parsed model response for one chunk.
@@ -396,7 +428,9 @@ def payload_to_partial(
     pr_summary, verdict_reasoning, file_assessments = parse_narrative(payload=payload)
 
     checklist = parse_checklist(raw_checklist=payload.get("checklist", []))
-    findings = parse_findings(raw_findings=payload.get("findings", []))
+    findings = drop_confirmation_findings(
+        findings=parse_findings(raw_findings=payload.get("findings", [])),
+    )
     flagged_files = parse_flagged_files(raw_flags=payload.get("flagged_files"))
 
     return ChunkReviewPartial(

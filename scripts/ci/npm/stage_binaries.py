@@ -27,10 +27,10 @@ NPM_DIR = PROJECT_ROOT / "npm"
 
 # Map: (artifact name, binary filename) -> npm platform package directory.
 # Artifact names mirror the upload steps in build-binary.yml; npm platform
-# keys follow Node's platform-arch convention (darwin/x64, linux/arm64, ...).
+# keys follow Node's platform-arch convention (darwin/arm64, linux/x64, ...).
+# There is no darwin-x64 entry: Intel Macs are served from PyPI (#2579).
 BINARY_MAP: dict[str, str] = {
     "lintro-macos-arm64": "darwin-arm64",
-    "lintro-macos-x86_64": "darwin-x64",
     "lintro-linux-arm64": "linux-arm64",
     "lintro-linux-x64": "linux-x64",
 }

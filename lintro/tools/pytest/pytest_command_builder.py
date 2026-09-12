@@ -307,6 +307,7 @@ def build_check_command(
     tool: "PytestPlugin",
     files: list[str],
     fix: bool = False,
+    options: dict[str, Any] | None = None,
 ) -> tuple[list[str], str | None]:
     """Build the pytest command.
 
@@ -314,26 +315,31 @@ def build_check_command(
         tool: PytestPlugin instance.
         files: list[str]: List of files to test.
         fix: bool: Ignored for pytest (not applicable).
+        options: Effective options for this invocation. Defaults to the
+            plugin's persisted ``tool.options`` when omitted, so callers that
+            do not merge per-invocation overrides keep their behaviour.
 
     Returns:
         tuple[list[str], str | None]: Tuple of (command arguments, auto junitxml path).
     """
+    effective_options = tool.options if options is None else options
+
     cmd = build_base_command(tool)
 
     # Add verbosity options
-    add_verbosity_options(cmd, tool.options)
+    add_verbosity_options(cmd, effective_options)
 
     # Add output options and capture auto-enabled junitxml path
-    auto_junitxml_path = add_output_options(cmd, tool.options)
+    auto_junitxml_path = add_output_options(cmd, effective_options)
 
     # Add parallel options
-    add_parallel_options(cmd, tool.options)
+    add_parallel_options(cmd, effective_options)
 
     # Add coverage options
-    add_coverage_options(cmd, tool.options)
+    add_coverage_options(cmd, effective_options)
 
     # Add plugin options (timeout, reruns, etc.)
-    add_plugin_options(cmd, tool.options)
+    add_plugin_options(cmd, effective_options)
 
     # Add test mode options
     add_test_mode_options(cmd)

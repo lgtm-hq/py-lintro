@@ -15,6 +15,8 @@ from lintro.plugins.base import (
     DEFAULT_TIMEOUT,
     ExecutionContext,
 )
+from lintro.utils.path_filtering import walk_files_with_excludes
+from lintro.utils.project_detection import _VENDOR_SKIP_DIRS, _iter_project_files
 
 from .conftest import NoFixPlugin
 
@@ -699,8 +701,14 @@ def test_get_executable_command_unknown_tool(fake_tool_plugin: FakeToolPlugin) -
     "pattern",
     [
         pytest.param(".git", id="git_directory"),
-        pytest.param("__pycache__", id="pycache_directory"),
+        # Directory-anchored: the trailing slash keeps the pattern off source
+        # files whose basename contains "cache" (#2379).
+        pytest.param("__pycache__/", id="pycache_directory"),
         pytest.param("*.pyc", id="pyc_files"),
+        # `terraform init` vendors provider plugins and remote modules under
+        # .terraform. Dropping it would hand third-party .tf downloads to
+        # checkov, reporting findings nobody in the repository can fix.
+        pytest.param(".terraform", id="terraform_vendor_directory"),
     ],
 )
 def test_default_exclude_patterns_contains_expected_patterns(pattern: str) -> None:
@@ -715,6 +723,157 @@ def test_default_exclude_patterns_contains_expected_patterns(pattern: str) -> No
 def test_default_exclude_patterns_is_not_empty() -> None:
     """Verify DEFAULT_EXCLUDE_PATTERNS is not empty."""
     assert_that(DEFAULT_EXCLUDE_PATTERNS).is_not_empty()
+
+
+def test_vendored_terraform_is_pruned_by_discovery_and_detection(
+    tmp_path: Path,
+) -> None:
+    """Neither walk reaches a ``.terraform`` download; both must prune it.
+
+    Detection decides whether an IaC tool is selected at all, discovery
+    decides which files reach its argv, so a vendored ``terraform init``
+    download is only kept away from checkov when both walks skip it. Asserted
+    by running the walks rather than by comparing the two constants: a
+    refactor that stopped consulting either set would leave a membership
+    assertion green while vendored ``.tf`` files reached the scanner.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    vendored = tmp_path / ".terraform" / "modules" / "x"
+    vendored.mkdir(parents=True)
+    (vendored / "vendored.tf").write_text('resource "aws_s3_bucket" "v" {}\n')
+    own = tmp_path / "main.tf"
+    own.write_text('output "noop" {\n  value = "ok"\n}\n')
+
+    discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*.tf"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    detected = [str(path) for path in _iter_project_files(tmp_path)]
+
+    assert_that(discovered).is_length(1)
+    assert_that(discovered[0]).ends_with("main.tf")
+    assert_that([path for path in detected if "vendored.tf" in path]).is_empty()
+    assert_that([path for path in detected if path.endswith("main.tf")]).is_length(1)
+    # Fast tripwires alongside the behavioural assertions above: these name the
+    # exact entry a future edit would have to remove.
+    assert_that(DEFAULT_EXCLUDE_PATTERNS).contains(".terraform")
+    assert_that(_VENDOR_SKIP_DIRS).contains(".terraform")
+
+
+def test_directory_excludes_are_mirrored_in_the_detection_prune_set() -> None:
+    """Every directory-style discovery exclude is also pruned by detection.
+
+    Detection decides whether a tool is selected at all and discovery decides
+    what reaches its argv, so the two prune sets have to agree. Only comments
+    held them together, and the behavioural lockstep test above covers
+    ``.terraform`` alone. This is the tripwire: dropping an entry from either
+    side fails here instead of silently diverging (#2379).
+    """
+    directory_excludes = {
+        pattern.rstrip("/")
+        for pattern in DEFAULT_EXCLUDE_PATTERNS
+        if pattern.endswith("/")
+    }
+
+    assert_that(directory_excludes).contains(
+        ".cache",
+        ".terragrunt-cache",
+        ".lintro-cache",
+    )
+    assert_that(sorted(directory_excludes - _VENDOR_SKIP_DIRS)).is_empty()
+
+
+def test_cache_excludes_skip_directories_but_keep_cache_named_sources(
+    tmp_path: Path,
+) -> None:
+    """Anchor cache excludes on directories, not on basenames (#2379).
+
+    The former ``*cache*`` glob was gitignore-style, so it matched any file
+    whose basename contained "cache" as well as the cache directories it was
+    meant to prune. Sources such as ``lintro/ai/cache.py`` were then invisible
+    to every tool with nothing reporting the skip. The trailing ``/`` in the
+    replacement entries is what makes them directory-only, so this asserts both
+    halves from one walk.
+
+    Args:
+        tmp_path: Temporary project directory.
+    """
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'x'\n")
+    source = tmp_path / "lintro" / "ai"
+    source.mkdir(parents=True)
+    (source / "cache.py").write_text("VALUE = 1\n")
+    lintro_cache_json = tmp_path / ".lintro-cache" / "ai" / "suggestion.json"
+    lintro_cache_json.parent.mkdir(parents=True)
+    lintro_cache_json.write_text("{}\n")
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_file_cache.py").write_text("VALUE = 2\n")
+    for relative in (
+        "__pycache__/x.py",
+        ".pytest_cache/v/x.py",
+        ".ruff_cache/x.py",
+        ".mypy_cache/x.py",
+        ".cache/x.py",
+        ".lintro-cache/ai/x.py",
+    ):
+        cached = tmp_path / relative
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        cached.write_text("VALUE = 3\n")
+
+    discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*.py"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+
+    relative_paths = sorted(
+        str(Path(path).relative_to(tmp_path)) for path in discovered
+    )
+    assert_that(relative_paths).is_equal_to(
+        ["lintro/ai/cache.py", "tests/test_file_cache.py"],
+    )
+    # Lintro's own cache is not only Python: a *.json scan must not pick up the
+    # AI suggestion entries it writes under .lintro-cache/ai either.
+    json_discovered = walk_files_with_excludes(
+        paths=[str(tmp_path)],
+        file_patterns=["*.json"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    assert_that(json_discovered).is_empty()
+
+
+def test_repo_source_files_named_cache_are_discovered_by_the_real_walk() -> None:
+    """The seven tracked ``*cache*`` files reach discovery from the repo root.
+
+    Exercises the real walk over this checkout rather than a tmp tree, because
+    the regression was reported against these exact tracked paths: every one of
+    them sat outside the dogfood gate while ``lintro chk`` still reported a
+    clean pass (#2379).
+    """
+    repo_root = Path(__file__).resolve().parents[4]
+    expected = [
+        "lintro/ai/cache.py",
+        "lintro/utils/file_cache.py",
+        "tests/unit/ai/test_cache.py",
+        "tests/unit/cli/test_cli_cache_invalidation.py",
+        "tests/unit/config/test_config_cwd_cache.py",
+        "tests/unit/test_mypy_cache_dir.py",
+        "tests/unit/utils/test_file_cache.py",
+    ]
+
+    discovered = walk_files_with_excludes(
+        paths=[str(repo_root / "lintro"), str(repo_root / "tests")],
+        file_patterns=["*.py"],
+        exclude_patterns=list(DEFAULT_EXCLUDE_PATTERNS),
+    )
+    discovered_relative = {
+        str(Path(path).resolve().relative_to(repo_root)) for path in discovered
+    }
+
+    assert_that(sorted(discovered_relative & set(expected))).is_equal_to(expected)
 
 
 # =============================================================================

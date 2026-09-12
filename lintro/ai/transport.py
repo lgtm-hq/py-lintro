@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 
 from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.providers.anthropic.config import anthropic_settings
 from lintro.ai.providers.claude_auth import should_send_bare
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
@@ -128,7 +129,7 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
         # subscription, so report api_key/estimated instead of claiming
         # subscription/unpriceable (#1923 cost provenance).
         bare_billing = ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
-            configured=ai_config.cli_bare,
+            configured=anthropic_settings(ai_config).cli_bare,
         )
         return ResolvedTransportSettings(
             transport=transport,

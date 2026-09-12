@@ -29,6 +29,7 @@ ingestion evaluation) and the resulting decision is distilled here.
 | [0007](0007-review-resume-and-artifact-state.md)         | File-level review resume and artifact state    | Accepted |
 | [0008](0008-ai-review-architecture-invariants.md)        | AI review architecture invariants              | Accepted |
 | [0009](0009-ai-provider-plugin-contract.md)              | AI provider plugin contract                    | Accepted |
+| [0010](0010-review-shape-and-protocol.md)                | AI review shape and protocol                   | Accepted |
 
 ## Writing a new ADR
 

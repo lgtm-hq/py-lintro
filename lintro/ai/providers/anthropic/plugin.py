@@ -13,6 +13,10 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.enums import AITransport
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers.anthropic.config import (
+    AnthropicConfig,
+    anthropic_settings,
+)
 from lintro.ai.providers.anthropic.metadata import ANTHROPIC_METADATA
 
 if TYPE_CHECKING:
@@ -58,13 +62,24 @@ class AnthropicPlugin:
         """
         return ANTHROPIC_METADATA
 
+    @property
+    def config_model(self) -> type[AnthropicConfig]:
+        """Return the model for the ``ai.providers.anthropic`` block.
+
+        Returns:
+            :class:`~lintro.ai.providers.anthropic.config.AnthropicConfig`.
+        """
+        return AnthropicConfig
+
     def build(self, config: AIConfig) -> BaseAIProvider:
         """Construct the Anthropic provider described by *config*.
 
-        ``cli_bare`` is an Anthropic-only knob, so the plugin reads it off the
-        config here rather than the factory assembling a per-vendor keyword
-        list. Transport support is not re-validated: the provider constructor
-        owns that rejection and its error text.
+        ``cli_bare`` is an Anthropic-only knob, so it is declared on
+        :class:`~lintro.ai.providers.anthropic.config.AnthropicConfig` and read
+        from the ``ai.providers.anthropic`` block here (#2309) rather than the
+        factory assembling a per-vendor keyword list. Transport support is not
+        re-validated: the provider constructor owns that rejection and its
+        error text.
 
         Args:
             config: Effective AI configuration for this run.
@@ -75,11 +90,12 @@ class AnthropicPlugin:
         """
         from lintro.ai.providers.anthropic.provider import AnthropicProvider
 
+        settings = anthropic_settings(config)
         return AnthropicProvider(
             model=config.model,
             api_key_env=config.api_key_env,
             max_tokens=config.max_tokens,
             base_url=config.api_base_url,
             transport=config.transport or AITransport.API,
-            cli_bare=config.cli_bare,
+            cli_bare=settings.cli_bare,
         )

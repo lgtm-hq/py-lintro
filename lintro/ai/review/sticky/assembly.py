@@ -19,7 +19,6 @@ from lintro.ai.review.convergence import score_records
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.finding_matcher import derive_verdict, match_findings
 from lintro.ai.review.github_constants import (
-    MAX_COMMENT_CHARS,
     MAX_STORED_RUNS,
     PRIMARY_SOFT_LIMIT,
     STATE_VERSION,
@@ -29,7 +28,6 @@ from lintro.ai.review.github_constants import (
 from lintro.ai.review.github_contract import (
     RenderLimits,
     SectionCounts,
-    cap_body,
     fit_body,
 )
 from lintro.ai.review.github_render import Section, assemble
@@ -193,6 +191,7 @@ def _round_plan(*, request: StickyRequest, outcome: RoundOutcome) -> StickyPlan:
         inline_failure=request.inline_failure,
         repo=request.repo,
         pr_number=request.pr_number,
+        posting_policy=request.posting_policy,
     )
 
 
@@ -228,20 +227,40 @@ def build_sticky_bodies(*, request: StickyRequest) -> tuple[str, str | None]:
             budget=None,
         )
 
-    primary = fit_body(
-        assemble=render,
-        counts=SectionCounts(
-            history_rows=max(len(outcome.runs) - 1, 0),
-            open=outcome.open_count,
-            resolved=len(outcome.match.resolved),
-        ),
+    def render_archived(*, limits: RenderLimits) -> str:
+        """Render the primary body with history spilled to the archive.
+
+        Args:
+            limits: Per-section render limits to apply.
+
+        Returns:
+            str: The assembled primary body, without a state block.
+        """
+        return render(limits=limits, archive_history=True)
+
+    counts = SectionCounts(
+        history_rows=max(len(outcome.runs) - 1, 0),
+        open=outcome.open_count,
+        resolved=len(outcome.match.resolved),
     )
+    primary = fit_body(assemble=render, counts=counts)
     archive: str | None = None
     if len(primary) > PRIMARY_SOFT_LIMIT and len(outcome.runs) > 1:
-        primary = render(limits=RenderLimits(), archive_history=True)
+        # The archived render obeys the same contract as the primary one
+        # (#2418): pruning history, then resolved, then open findings, each
+        # with a visible marker. Tail-capping it here instead would drop rows
+        # off the bottom with nothing saying they were dropped.
+        #
+        # It reports no history rows because it has none to prune: the fold is
+        # already a fixed link to the archive comment, so ``limits.history``
+        # changes nothing. Left at the real count, ``fit_body`` would re-render
+        # the same over-budget body once per stored run before reaching the
+        # resolved and open stages that can actually shrink it.
+        primary = fit_body(
+            assemble=render_archived,
+            counts=replace(counts, history_rows=0),
+        )
         archive = _archive_body(runs=outcome.runs, records=outcome.match.records)
-        if len(primary) > MAX_COMMENT_CHARS:
-            primary = cap_body(body=primary)
     return primary, archive
 
 

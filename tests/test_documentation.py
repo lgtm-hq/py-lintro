@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.config_overrides import ENV_PROVIDER_BLOCK_PREFIX
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -349,6 +351,12 @@ def test_command_consistency() -> None:
 # documented execution keys, and the SECURITY.md supported-version table.
 # ---------------------------------------------------------------------------
 
+#: Prefix of the per-provider block overrides (#2309), read from the runtime
+#: rather than re-declared, so a rename cannot leave this guard testing a
+#: literal nothing uses. Documented spellings under it are checked against the
+#: plugin that declares the field rather than listed one by one.
+_AI_PROVIDER_BLOCK_ENV_PREFIX = ENV_PROVIDER_BLOCK_PREFIX
+
 # Env vars the docs are allowed to advertise: they MUST be read by the runtime.
 _DOCUMENTED_LINTRO_ENV_VARS = {
     "LINTRO_LOG_DIR",
@@ -364,6 +372,10 @@ _DOCUMENTED_LINTRO_ENV_VARS = {
     "LINTRO_AI_ENABLED",
     "LINTRO_AI_REVIEW",
     "LINTRO_AI_MAX_COST_USD",
+    # A family, not a single variable: the runtime reads any
+    # LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD> whose provider and field a
+    # plugin declares (#2309), so the prefix is what the source can name.
+    _AI_PROVIDER_BLOCK_ENV_PREFIX,
 }
 
 # Env vars that were historically documented but are NOT read by the runtime.
@@ -407,6 +419,35 @@ def test_docs_agree_on_tier_count() -> None:
     assert_that(config_tiers).contains("5")
 
 
+def _assert_provider_block_var_resolves(var: str) -> None:
+    """Check one documented block override names a real provider and field.
+
+    The placeholder form ``LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`` documents
+    the shape rather than a usable spelling; the name regex stops at the ``<``,
+    so it arrives here as the bare prefix and is skipped.
+
+    Args:
+        var: The documented variable name.
+    """
+    from lintro.ai.exceptions import AIProviderNotRegisteredError
+    from lintro.ai.registry import config_model_for
+
+    remainder = var[len(_AI_PROVIDER_BLOCK_ENV_PREFIX) :]
+    if not remainder:
+        return
+    provider_token, separator, field_token = remainder.partition("__")
+    assert_that(separator).described_as(
+        f"{var} must name a provider and a field",
+    ).is_equal_to("__")
+    try:
+        model = config_model_for(provider_token.lower())
+    except AIProviderNotRegisteredError:  # pragma: no cover - guard
+        pytest.fail(f"{var} names a provider no plugin declares")
+    assert_that(sorted(model.model_fields)).described_as(
+        f"{var} must name a setting {provider_token.lower()} declares",
+    ).contains(field_token.lower())
+
+
 def test_documented_env_vars_are_handled() -> None:
     """Every LINTRO_* env var in the config docs must be read by the runtime."""
     config_doc = (_REPO_ROOT / "docs" / "configuration.md").read_text(
@@ -424,12 +465,21 @@ def test_documented_env_vars_are_handled() -> None:
     documented -= {"LINTRO_PLUGIN_API_VERSION"}
 
     for var in documented:
+        # A LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD> spelling is one member of
+        # a family the runtime reads by prefix, so the allowlist and the
+        # source check use the prefix — but the provider and field segments
+        # are then resolved against the plugin that declares them, because the
+        # runtime hard-fails on either being wrong.
+        prefixed = var.startswith(_AI_PROVIDER_BLOCK_ENV_PREFIX)
+        checked = _AI_PROVIDER_BLOCK_ENV_PREFIX if prefixed else var
         assert_that(_DOCUMENTED_LINTRO_ENV_VARS).described_as(
             f"{var} documented in configuration.md must be an allowed env var",
-        ).contains(var)
+        ).contains(checked)
         assert_that(source_text).described_as(
             f"{var} must be referenced in lintro/ source",
-        ).contains(var)
+        ).contains(checked)
+        if prefixed:
+            _assert_provider_block_var_resolves(var)
 
     # Phantom vars must not have crept back into the docs.
     for var in _PHANTOM_LINTRO_ENV_VARS:

@@ -24,6 +24,7 @@ from lintro.ai.models import AIResult
 from lintro.ai.paths import resolve_workspace_file, resolve_workspace_root
 from lintro.ai.pipeline import run_fix_pipeline
 from lintro.ai.providers import get_provider
+from lintro.ai.secrets import redact_secrets
 from lintro.ai.summary import generate_summary
 from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat
@@ -177,9 +178,31 @@ async def run_ai_enhancement_async(
         is_json = output_format.lower() == OutputFormat.JSON
         if not is_json:
             logger.console_output(
-                f"  AI: enhancement unavailable ({type(e).__name__})",
+                f"  AI: enhancement unavailable ({_failure_detail(e)})",
             )
         return AIResult(error=True)
+
+
+def _failure_detail(exc: Exception) -> str:
+    """Describe a swallowed AI failure for the console line (#2573).
+
+    The class name alone hid the cause of every provider failure — a rejected
+    request schema surfaced only as ``KeyError``. The first line of the
+    provider's own message is appended, redacted, so the user sees what went
+    wrong; the full traceback stays at debug level.
+
+    Args:
+        exc: The exception the orchestrator swallowed.
+
+    Returns:
+        ``"<ClassName>: <first line of message>"``, or just the class name
+        when the exception carries no message.
+    """
+    message = redact_secrets(str(exc)).strip().splitlines()
+    first_line = message[0].strip() if message else ""
+    if not first_line:
+        return type(exc).__name__
+    return f"{type(exc).__name__}: {first_line}"
 
 
 async def _run_ai_check(

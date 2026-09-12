@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import subprocess  # nosec B404 - only CalledProcessError is referenced in test doubles
 import sys
 from pathlib import Path
@@ -14,6 +15,13 @@ from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _BUILD_SCRIPT = _REPO_ROOT / "scripts" / "build" / "build_macos.py"
+
+# Fixtures and driver the verify step runs against the built binary (#2514).
+_VERIFY_HELPERS = (
+    _REPO_ROOT / "scripts" / "build" / "drive_interactive_review.py",
+    _REPO_ROOT / "scripts" / "build" / "fixtures" / "fake-claude" / "claude",
+    _REPO_ROOT / "scripts" / "build" / "fixtures" / "fake-ruff" / "ruff",
+)
 
 
 def _load_build_macos_module() -> ModuleType:
@@ -44,6 +52,36 @@ def test_build_nuitka_command_includes_manifest_json() -> None:
     assert_that(cmd).contains(
         "--include-data-files=lintro/tools/manifest.json=lintro/tools/manifest.json",
     )
+
+
+def test_build_nuitka_command_ships_lintro_and_pygments_as_bytecode() -> None:
+    """Both packages must be requested as bytecode, not compiled to C (#2514).
+
+    Compiling them produced 26-28 minute macOS arm64 build steps against a
+    25-minute cap; removing either flag brings that back.
+    """
+    build_macos = _load_build_macos_module()
+
+    with patch.object(Path, "exists", return_value=True):
+        cmd = build_macos.build_nuitka_command(arch="arm64")
+
+    assert_that(cmd).contains("--noinclude-custom-mode=lintro:bytecode")
+    assert_that(cmd).contains("--noinclude-custom-mode=pygments:bytecode")
+
+
+@pytest.mark.parametrize(
+    "helper",
+    _VERIFY_HELPERS,
+    ids=lambda path: path.name,
+)
+def test_verify_helper_is_executable(helper: Path) -> None:
+    """The verify step's driver and CLI fixtures ship runnable (#2514).
+
+    Args:
+        helper: Script the verify step executes directly.
+    """
+    assert_that(helper.is_file()).is_true()
+    assert_that(os.access(helper, os.X_OK)).is_true()
 
 
 def test_build_nuitka_command_raises_when_manifest_missing(tmp_path: Path) -> None:

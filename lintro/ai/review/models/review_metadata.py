@@ -100,6 +100,12 @@ class ReviewMetadata:
             synthesis pass did (#2269), or ``None`` when the pass did not
             run — which is the default, and every run before the pass
             existed. Surfaces render nothing at all for ``None``.
+        lint_facts_note (str): Why the run had no linter facts to cite when
+            a saved report was requested with ``--lint-report`` but could
+            not be used — missing, oversized, or malformed (#2571). Rendered
+            under the review header so a reader knows the model reviewed
+            from the diff alone. Empty when facts were loaded or never asked
+            for.
     """
 
     model: str
@@ -140,18 +146,23 @@ class ReviewMetadata:
         default_factory=tuple,
     )
     synthesis: SynthesisOutcome | None = None
+    lint_facts_note: str = ""
 
     @property
     def findings_coverage_complete(self) -> bool:
         """Return whether the run's finding depth was limited in any way.
 
         "Complete" means the run recorded no coverage degradation of any kind
-        — not a per-chunk findings cap, not a tightened output-exhaustion
-        retry, and not a cross-chunk synthesis pass that was truncated or did
-        not complete (#2269). Any entry in ``coverage_degradations`` makes
-        this false, including a whole-run one that carries no per-call
+        — no chunk *hit* its per-chunk findings cap, no chunk was retried
+        after output exhaustion, and no cross-chunk synthesis pass was
+        truncated or failed (#2269). Any entry in ``coverage_degradations``
+        makes this false, including a whole-run one that carries no per-call
         ceiling; ``findings_cap_applied`` is the narrower signal that stays
         ``None`` for a run degraded only by the synthesis pass.
+
+        A cap that was merely *configured* is not a degradation: a CLI run
+        whose chunks all came back under ``ai.cli_max_findings_per_call``
+        stays complete, because no finding was displaced (#2283).
 
         Returns:
             True when ``coverage_degradations`` is empty. ``partial`` is a

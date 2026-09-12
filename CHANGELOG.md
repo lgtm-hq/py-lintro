@@ -44,6 +44,209 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.156.1] - 2026-09-12
+
+### Changed
+
+- **adr**: record the review shape and protocol decisions as ADR-0010 (#2588) (b5097a3)
+
+### Fixed
+
+- **ai**: wrap the CLI batch fix schema and surface provider errors (#2592) (c64d0df)
+
+## [0.156.0] - 2026-09-11
+
+### Added
+
+- **release**: drop the Intel and universal macOS binaries (#2585) (cf65e74)
+
+### Changed
+
+- **release**: point Intel Mac npm users at Homebrew or PyPI and send the tap a single
+  macOS checksum (#2579)
+
+### Removed
+
+- **release**: drop the macOS `x86_64` and universal binaries; Apple silicon keeps the
+  prebuilt binary (#2579)
+
+## [0.155.0] - 2026-09-11
+
+### Added
+
+- **review**: gate inline posting on finding confidence and route notes to the sticky
+  (#2583) (1b0e60f)
+
+## [0.154.1] - 2026-09-11
+
+### Fixed
+
+- **review**: stop emitting positive checklist confirmations as findings (#2581)
+  (197120e)
+
+## [0.154.0] - 2026-09-11
+
+### Added
+
+- **review**: feed the untrusted lint job's report to the dogfood review (#2576)
+  (9adae8f)
+
+### Changed
+
+- **release**: ship lintro and pygments as bytecode in the binary builds (#2568)
+  (ffa6c03)
+
+## [0.153.9] - 2026-09-11
+
+### Fixed
+
+- **discovery**: stop excluding source files whose name contains "cache" (#2575)
+  (ffabb0e)
+
+## [0.153.8] - 2026-09-11
+
+### Fixed
+
+- **pytest**: honour per-invocation options when building the check command (#2543)
+  (b9842f1)
+
+## [0.153.7] - 2026-09-11
+
+### Fixed
+
+- **ci**: make a plain build-binary dispatch side-effect free and check caller grants
+  (#2563) (f796b0f)
+
+## [0.153.6] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: fit the sticky archive and count pruned fixed rows honestly (#2544)
+  (79a6640)
+
+## [0.153.5] - 2026-09-10
+
+### Fixed
+
+- **ci**: resume AI review reruns, cap the job at 38 minutes, serialise it, and honour
+  Retry-After (#2547) (83f2bcc)
+
+## [0.153.4] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: record the findings cap only when a chunk actually hits it (#2564)
+  (f9edc68)
+
+## [0.153.3] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: degrade to the main pass when a deeper `call_ai` pass fails (#2545)
+  (664fdb5)
+
+## [0.153.2] - 2026-09-10
+
+### Fixed
+
+- **ci**: wire Tier 2 AI CLI smoke auth and egress like the dogfood review job (#2536)
+  (de2407e)
+
+## [0.153.1] - 2026-09-10
+
+### Changed
+
+- **ai/providers**: add the registry parity suite and per-provider test packages (#2538)
+  (f2e8215)
+
+### Fixed
+
+- **release**: skip the version PR only when the last tag publish failed at startup
+  (#2551) (0568fa1)
+
+## [0.153.0] - 2026-09-10
+
+### Added
+
+- **tools**: add checkov Infrastructure-as-Code security scanner (#1156) (0fd27db)
+
+### Changed
+
+- **ai**: prove fallback overlap structurally instead of by wall clock (#2540) (32ed58e)
+- **ai/config**: nest provider-specific settings under ai.providers (#2471) (711690a)
+- **ci**: derive pinned action SHAs in workflow tests from the workflow files (#2531)
+  (a711fb7)
+
+### Fixed
+
+- **ci**: restore permissions: {} on publish-pypi-on-tag (#2524) (98c720b)
+- **golangci-lint**: propagate `timed_out` through the merged fix result (#2541)
+  (1014ae7)
+- **release**: gate the version PR on the last tag publish being green (#2534) (ef0804e)
+
+## [0.152.9] - 2026-09-09
+
+### Changed
+
+- **tests**: keep assertpy with an import guard and a designated fallback (#2468)
+  (223f76f)
+
+### Fixed
+
+- **ai/review**: classify the claude cli session-limit error as quota, not
+  `server_error` (#2529) (d84f0e7)
+- **ai/providers**: pass model through the CLI streaming fallback and default cursor to
+  cli transport (#2527) (648ac4d)
+
+## [0.152.8] - 2026-09-09
+
+### Changed
+
+- **tsc**: restore the `set_options` validation tests removed by #2427 (#2525) (a382c9c)
+
+### Fixed
+
+- **deps**: restore astro 7.2.9 in the docs site (#2526) (32b7115)
+
+## [0.152.7] - 2026-09-09
+
+### Changed
+
+- **deps**: override smol-toml to 1.8.0 to clear GHSA-7w5x-hrqm-74c2 (#2520) (c0297e5)
+
+### Fixed
+
+- **release**: grant actions: read on the homebrew-tap caller job (#2518) (3e37ec7)
+
+## [0.152.6] - 2026-09-09
+
+### Fixed
+
+- **ci**: give the AI Review job a 120-minute budget for large diffs (#2508) (f51c971)
+
+## [0.152.5] - 2026-09-09
+
+### Changed
+
+- **deps**: update lintro-ai-tools docker digest to 5dfda12 (#2496) (2e3e2bd)
+- allow the hosted-compute watchdog hosts on the linux binary job (#2487) (5d5572a)
+
+### Fixed
+
+- **ci**: grant actions:read at the publish caller; upgrade httpx2 (#2503) (4522f34)
+
+## [0.152.4] - 2026-09-09
+
+### Changed
+
+- **deps**: renovate bump (#2486) (af2d97b)
+- **deps**: update rust-lang/rust to 1.98.1 (#2465) (cbe03f5)
+
+### Fixed
+
+- **ci**: pin the lintro-tools image built from main's rustc 1.98.1 manifest (#2499)
+  (e8d2293)
+
 ## [0.152.3] - 2026-09-09
 
 ### Changed

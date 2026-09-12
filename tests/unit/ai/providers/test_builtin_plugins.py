@@ -20,9 +20,11 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers import get_provider
+from lintro.ai.providers.anthropic.config import AnthropicConfig
 from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.builtins import load_builtin_providers
 from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cursor.config import CursorConfig
 from lintro.ai.providers.cursor.provider import CursorProvider
 from lintro.ai.providers.protocol import ProviderPlugin
 from lintro.ai.providers.registry import (
@@ -203,7 +205,7 @@ def test_get_provider_threads_the_anthropic_only_knob() -> None:
     config = AIConfig(
         provider=AIProvider.ANTHROPIC,
         transport=AITransport.CLI,
-        cli_bare=CliBareMode.NEVER,
+        providers={AIProvider.ANTHROPIC: AnthropicConfig(cli_bare=CliBareMode.NEVER)},
     )
 
     with patch(
@@ -219,7 +221,7 @@ def test_get_provider_threads_the_anthropic_only_knob() -> None:
 
 @pytest.mark.parametrize("trust", [True, False])
 def test_get_provider_threads_the_cursor_only_knob(trust: bool) -> None:
-    """``cursor_trust_workspace`` is read by the Cursor plugin.
+    """``ai.providers.cursor.trust_workspace`` is read by the Cursor plugin.
 
     Args:
         trust: The configured workspace-trust value.
@@ -227,7 +229,7 @@ def test_get_provider_threads_the_cursor_only_knob(trust: bool) -> None:
     config = AIConfig(
         provider=AIProvider.CURSOR,
         transport=AITransport.CLI,
-        cursor_trust_workspace=trust,
+        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=trust)},
     )
 
     with patch(
@@ -239,16 +241,38 @@ def test_get_provider_threads_the_cursor_only_knob(trust: bool) -> None:
     assert_that(cast(CursorProvider, built)._trust_workspace).is_equal_to(trust)
 
 
-def test_cursor_still_rejects_api_transport_with_its_own_message() -> None:
-    """The unset-transport fallback stays ``api``, so Cursor's guard still fires."""
-    from lintro.ai.exceptions import AINotAvailableError
-
+def test_cursor_unset_transport_resolves_to_cli() -> None:
+    """An unset transport builds Cursor on ``cli``, the only one it serves (#2449)."""
     config = AIConfig.model_construct(
         provider=AIProvider.CURSOR,
         transport=None,
         model=None,
         api_key_env=None,
         max_tokens=4096,
+        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=True)},
+    )
+
+    with patch(
+        _BINARY_FINDERS[AIProvider.CURSOR],
+        return_value="/usr/local/bin/agent",
+    ):
+        built = get_provider(config)
+
+    assert_that(type(built).__name__).is_equal_to("CursorProvider")
+    assert_that(built._transport).is_equal_to(AITransport.CLI)
+
+
+def test_cursor_still_rejects_api_transport_with_its_own_message() -> None:
+    """An explicit ``transport: api`` keeps Cursor's pre-migration guard message."""
+    from lintro.ai.exceptions import AINotAvailableError
+
+    config = AIConfig.model_construct(
+        provider=AIProvider.CURSOR,
+        transport=AITransport.API,
+        model=None,
+        api_key_env=None,
+        max_tokens=4096,
+        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=True)},
     )
 
     with (
@@ -280,6 +304,12 @@ def test_unknown_provider_message_is_unchanged() -> None:
 
 def test_recognized_provider_without_a_plugin_reports_what_is_implemented() -> None:
     """A known name with no plugin keeps the "not implemented" ``ValueError``."""
+    # Built before the registry is cleared. Constructing a config consults the
+    # plugin registry whenever it has a ``providers`` block or an unrecognized
+    # key to migrate, and that load would re-register the very plugins this
+    # test removes. This config has neither today, so the hoist is insurance
+    # against a future field making it matter, not a live requirement.
+    config = AIConfig(provider=AIProvider.ANTHROPIC)
     saved = all_providers()
     clear_registered()
     try:
@@ -290,7 +320,7 @@ def test_recognized_provider_without_a_plugin_reports_what_is_implemented() -> N
             ),
             pytest.raises(ValueError) as excinfo,
         ):
-            get_provider(AIConfig(provider=AIProvider.ANTHROPIC))
+            get_provider(config)
     finally:
         restore_registered(saved)
 

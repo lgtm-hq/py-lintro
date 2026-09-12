@@ -101,6 +101,14 @@ class ReviewFinding:
             surfaces can attribute a whole-PR finding that no single chunk
             could have reported. Serialized only when set, so a run without
             the pass renders exactly as it did before.
+        posted_inline: Whether the posting policy (#2572) selected this
+            finding for an inline review thread. ``False`` routes it to the
+            sticky comment's collapsed "Notes and questions" block instead,
+            where it never feeds the derived verdict or the header counts.
+            Defaults to ``True`` so a finding that never passed through the
+            policy renders exactly as it did before the gate existed; the
+            default policy clears it for low-confidence findings and for
+            questions.
     """
 
     severity: Severity
@@ -124,6 +132,7 @@ class ReviewFinding:
     suggestion_dropped: SuggestionDropReason | None = None
     cross_chunk_contradiction: CrossChunkContradiction | None = None
     origin: FindingOrigin | None = None
+    posted_inline: bool = True
 
     @property
     def all_occurrences(self) -> tuple[FindingOccurrence, ...]:

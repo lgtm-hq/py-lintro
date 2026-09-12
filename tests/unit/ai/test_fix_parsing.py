@@ -6,6 +6,7 @@ import json
 
 from assertpy import assert_that
 
+from lintro.ai.cli_schemas import FIX_BATCH_KEY
 from lintro.ai.fix_parsing import (
     generate_diff,
     parse_batch_response,
@@ -298,3 +299,48 @@ def test_parse_batch_response_coerces_line_and_code():
     # Non-numeric string falls back to 0
     assert_that(result[1].line).is_equal_to(0)
     assert_that(result[1].code).is_equal_to("None")
+
+
+#: One batch entry in the shape the CLI fix schema requires (#2573).
+_BATCH_ENTRY = {
+    "line": 5,
+    "code": "E501",
+    "original_code": "old",
+    "suggested_code": "new",
+    "explanation": "Fix",
+    "confidence": "high",
+    "risk_level": "safe-style",
+}
+
+
+def test_parse_batch_response_accepts_the_wrapped_cli_schema_object():
+    """The object the CLI schema now requests is unwrapped (#2573).
+
+    ``FIX_BATCH_CLI_SCHEMA`` wraps the array in an object because the CLI
+    transport rejects an array at the root, so this is the shape every CLI
+    ``--fix`` response now arrives in.
+    """
+    content = json.dumps({FIX_BATCH_KEY: [_BATCH_ENTRY]})
+
+    result = parse_batch_response(content, "test.py")
+
+    assert_that(result).is_length(1)
+    assert_that(result[0].line).is_equal_to(5)
+    assert_that(result[0].suggested_code).is_equal_to("new")
+
+
+def test_parse_batch_response_still_accepts_a_bare_array():
+    """Older transcripts and caches hold a bare array and must still parse."""
+    content = json.dumps([_BATCH_ENTRY])
+
+    result = parse_batch_response(content, "test.py")
+
+    assert_that(result).is_length(1)
+    assert_that(result[0].line).is_equal_to(5)
+
+
+def test_parse_batch_response_rejects_a_wrapper_without_an_array():
+    """A ``fixes`` key holding a non-array yields no suggestions."""
+    content = json.dumps({FIX_BATCH_KEY: {"line": 5}})
+
+    assert_that(parse_batch_response(content, "test.py")).is_empty()

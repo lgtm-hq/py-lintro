@@ -102,14 +102,16 @@ def test_get_provider_cursor_trust_defaults_on() -> None:
 
 
 def test_get_provider_cursor_trust_opted_out() -> None:
-    """get_provider threads an explicit cursor_trust_workspace=False opt-out."""
+    """get_provider threads an explicit ``trust_workspace: false`` opt-out."""
     from lintro.ai.enums import AITransport
+    from lintro.ai.provider_enum import AIProvider
+    from lintro.ai.providers.cursor.config import CursorConfig
     from lintro.ai.providers.cursor.provider import CursorProvider
 
     config = AIConfig(
         provider="cursor",  # type: ignore[arg-type]  # Pydantic coerces str
         transport=AITransport.CLI,
-        cursor_trust_workspace=False,
+        providers={AIProvider.CURSOR: CursorConfig(trust_workspace=False)},
     )
     with patch(
         "lintro.ai.providers.cursor.provider._find_agent",
@@ -122,14 +124,18 @@ def test_get_provider_cursor_trust_opted_out() -> None:
 
 
 def test_get_provider_anthropic_threads_cli_bare() -> None:
-    """get_provider threads ai.cli_bare into the Anthropic provider."""
+    """get_provider threads ai.providers.anthropic.cli_bare into the provider."""
     from lintro.ai.enums import AITransport, CliBareMode
+    from lintro.ai.provider_enum import AIProvider
+    from lintro.ai.providers.anthropic.config import AnthropicConfig
     from lintro.ai.providers.anthropic.provider import AnthropicProvider
 
     config = AIConfig(
         provider="anthropic",  # type: ignore[arg-type]  # Pydantic coerces str
         transport=AITransport.CLI,
-        cli_bare=CliBareMode.NEVER,
+        providers={
+            AIProvider.ANTHROPIC: AnthropicConfig(cli_bare=CliBareMode.NEVER),
+        },
     )
     with patch.object(
         anthropic_mod,

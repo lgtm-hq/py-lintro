@@ -108,11 +108,11 @@ def test_repo_manifests_are_internally_consistent() -> None:
     assert_that(mismatches).is_empty()
 
 
-def test_all_manifest_paths_covers_five_packages() -> None:
-    """The tree exposes exactly the meta package plus four platforms."""
+def test_all_manifest_paths_covers_four_packages() -> None:
+    """The tree exposes exactly the meta package plus three platforms."""
     mod = _load_module()
     paths = mod.all_manifest_paths()
-    assert_that(paths).is_length(5)
+    assert_that(paths).is_length(4)
 
 
 # ---------------------------------------------------------------------------
@@ -143,7 +143,7 @@ def test_sync_versions_updates_all_fields(tmp_path: Path) -> None:
 
     changed = mod.sync_versions("2.3.4", npm_dir=npm_dir)
 
-    assert_that(changed).is_length(5)
+    assert_that(changed).is_length(4)
     assert_that(mod.check_versions("2.3.4", npm_dir=npm_dir)).is_empty()
 
     meta = json.loads(
