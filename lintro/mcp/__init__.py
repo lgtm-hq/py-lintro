@@ -9,6 +9,7 @@ Only starting the stdio server imports the SDK.
 from __future__ import annotations
 
 import importlib.util
+import sys
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 
@@ -83,30 +84,67 @@ def spec_is_lintro_subpackage(spec: ModuleSpec) -> bool:
     return False
 
 
-def spec_has_server_subpackage(spec: ModuleSpec) -> bool:
-    """Return whether a top-level ``mcp`` spec is a package shipping ``mcp.server``.
+# The submodule the stdio server imports first; resolving it also resolves
+# ``mcp.server`` on the way, and both must be found for the SDK to count.
+_REQUIRED_SDK_MODULE = "mcp.server.stdio"
 
-    The server imports ``mcp.server`` and ``mcp.types``, so a standalone
-    ``mcp.py`` or a package without the server subpackage is not the SDK. The
-    lookup is a filesystem check, not ``find_spec("mcp.server")``, because the
-    dotted form imports the parent package and the probe must not execute the
-    SDK.
+
+def _find_submodule_spec(name: str, parent: ModuleSpec) -> ModuleSpec | None:
+    """Locate a submodule spec without importing its parent package.
+
+    ``importlib.util.find_spec("mcp.server")`` imports ``mcp`` first, which the
+    probe must not do. Asking the ``sys.meta_path`` finders directly with the
+    parent's search locations is the same lookup minus that import, and it
+    works in a frozen binary too: Nuitka's finder answers from its module
+    table, so no on-disk package directory is assumed.
+
+    Args:
+        name: Fully qualified submodule name.
+        parent: The already located spec of the parent package.
+
+    Returns:
+        The submodule's spec, or ``None`` when no finder knows it.
+    """
+    for finder in sys.meta_path:
+        find = getattr(finder, "find_spec", None)
+        if find is None:
+            continue
+        try:
+            found: ModuleSpec | None = find(name, parent.submodule_search_locations)
+        except (ImportError, ValueError, AttributeError):
+            continue
+        if found is not None:
+            return found
+    return None
+
+
+def spec_has_server_subpackage(spec: ModuleSpec) -> bool:
+    """Return whether a top-level ``mcp`` spec is a package shipping the server.
+
+    The stdio server imports ``mcp.server`` and ``mcp.server.stdio``, so a
+    standalone ``mcp.py`` (no ``submodule_search_locations``) or a package
+    without those submodules is not the SDK. Each submodule must also resolve
+    outside lintro's own package, so a shadowing layout cannot satisfy it.
 
     Args:
         spec: The spec ``find_spec("mcp")`` located.
 
     Returns:
-        True when the spec is a package and one of its search locations holds
-        a ``server`` subpackage or module.
+        True when the spec is a package and both required submodules resolve
+        to specs outside lintro's package.
     """
-    search = getattr(spec, "submodule_search_locations", None) or ()
-    for location in search:
-        root = Path(str(location))
-        if (root / "server" / "__init__.py").is_file() or (
-            root / "server.py"
-        ).is_file():
-            return True
-    return False
+    parent = spec
+    parts = _REQUIRED_SDK_MODULE.split(".")
+    # Walk the dotted path one level at a time: each finder lookup needs the
+    # search locations of the immediate parent, not of ``mcp``.
+    for depth in range(2, len(parts) + 1):
+        if parent.submodule_search_locations is None:
+            return False
+        found = _find_submodule_spec(".".join(parts[:depth]), parent)
+        if found is None or spec_is_lintro_subpackage(found):
+            return False
+        parent = found
+    return True
 
 
 def is_mcp_available() -> bool:
@@ -121,9 +159,11 @@ def is_mcp_available() -> bool:
     ``lintro/`` on the search path ``find_spec("mcp")`` finds this subpackage,
     and reporting that as the SDK is how a release binary passed ``doctor``
     while ``lintro mcp`` died on ``import mcp.server`` (#2577). So is anything
-    that is not a package carrying ``mcp.server``: a stray single-file
-    ``mcp.py`` would pass ``require_mcp`` and fail on the server's first
-    import.
+    that is not a package carrying ``mcp.server`` and ``mcp.server.stdio``: a
+    stray single-file ``mcp.py`` would pass ``require_mcp`` and fail on the
+    server's first import. Those checks are spec-based, not filesystem-based,
+    because inside a Nuitka onefile the bytecode SDK has no package directory
+    to look in.
 
     Returns:
         True when a module spec for the SDK's ``mcp`` package can be located.

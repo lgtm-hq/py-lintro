@@ -56,6 +56,7 @@ def fake_sdk(tmp_path: Path) -> Path:
     package = tmp_path / "site-packages" / "mcp"
     (package / "server").mkdir(parents=True)
     (package / "server" / "__init__.py").write_text("", encoding="utf-8")
+    (package / "server" / "stdio.py").write_text("", encoding="utf-8")
     init_file = package / "__init__.py"
     init_file.write_text("", encoding="utf-8")
     return init_file
@@ -143,25 +144,50 @@ def test_is_mcp_available_rejects_a_package_without_the_server(
         assert_that(is_mcp_available()).is_false()
 
 
-@pytest.mark.parametrize("layout", ["server/__init__.py", "server.py"])
-def test_spec_has_server_subpackage_accepts_either_layout(
+@pytest.mark.parametrize(
+    "present",
+    [("server/__init__.py",), ("server.py",), ()],
+    ids=["server-without-stdio", "server-module", "nothing"],
+)
+def test_spec_has_server_subpackage_requires_server_and_stdio(
     tmp_path: Path,
-    layout: str,
+    present: tuple[str, ...],
 ) -> None:
-    """Both a ``server`` package and a ``server`` module count.
+    """Only a package carrying both ``mcp.server`` and ``mcp.server.stdio`` passes.
 
     Args:
         tmp_path: Holds the package.
-        layout: Relative path of the server entry inside the package.
+        present: Relative paths written inside the package.
     """
     package = tmp_path / "mcp"
-    (package / layout).parent.mkdir(parents=True, exist_ok=True)
-    (package / layout).write_text("", encoding="utf-8")
-    init_file = package / "__init__.py"
-    init_file.write_text("", encoding="utf-8")
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    for relative in present:
+        (package / relative).parent.mkdir(parents=True, exist_ok=True)
+        (package / relative).write_text("", encoding="utf-8")
+    spec = _package_spec(package / "__init__.py")
 
-    assert_that(spec_has_server_subpackage(_package_spec(init_file))).is_true()
+    assert_that(spec_has_server_subpackage(spec)).is_false()
+
+    (package / "server").mkdir(exist_ok=True)
+    (package / "server" / "__init__.py").write_text("", encoding="utf-8")
+    (package / "server" / "stdio.py").write_text("", encoding="utf-8")
+    assert_that(spec_has_server_subpackage(spec)).is_true()
     assert_that(spec_has_server_subpackage(ModuleSpec("mcp", None))).is_false()
+
+
+def test_spec_has_server_subpackage_does_not_import_the_package(
+    fake_sdk: Path,
+) -> None:
+    """The submodule lookup asks the finders, never ``import mcp``.
+
+    Args:
+        fake_sdk: A stand-in SDK layout outside lintro.
+    """
+    spec = _package_spec(fake_sdk)
+    with patch("builtins.__import__", side_effect=AssertionError("imported mcp")):
+        assert_that(spec_has_server_subpackage(spec)).is_true()
+    assert_that(sys.modules).does_not_contain_key("fake_mcp_marker")
 
 
 def test_is_mcp_available_rejects_lintros_own_mcp_subpackage() -> None:
