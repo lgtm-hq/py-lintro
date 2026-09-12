@@ -7,10 +7,26 @@ name: Release - Mirror Version Bump
 # lgtm-hq/lintro-pre-commit mirror, merge the version-bump PR, and tag the
 # mirror with the matching version so pre-commit consumers install the new
 # wheel. See docs/pre-commit.md and issue #1171.
+#
+# Called by publish-pypi-on-tag.yml after the GitHub Release job. A
+# ``release: published`` trigger cannot be used: the release is created with
+# GITHUB_TOKEN, and GitHub suppresses workflow events for actions taken with
+# that token, so the workflow never fired once across ~30 releases (#2599).
+# ``push: tags`` has the same recursion guard, hence ``workflow_call``.
 
 'on':
-  release:
-    types: [published]
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Release tag to mirror (e.g. v0.69.0)'
+        required: true
+        type: string
+    secrets:
+      MIRROR_REPO_TOKEN:
+        description: >-
+          Token with contents and pull-requests write on
+          lgtm-hq/lintro-pre-commit.
+        required: true
   workflow_dispatch:
     inputs:
       release_tag:
@@ -33,7 +49,7 @@ jobs:
       # read: checkout py-lintro CI scripts (mirror writes use MIRROR_REPO_TOKEN)
       contents: read
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.release_tag }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
 
     steps:
       - name: Harden Runner
@@ -62,18 +78,14 @@ jobs:
         run: lintro/scripts/ci/mirror/resolve-version.sh
 
       - name: Wait for PyPI wheel
-        if: >-
-          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
-          (github.event_name != 'release' || !github.event.release.prerelease) }}
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
         env:
           LINTRO_VERSION: ${{ steps.resolve.outputs.version }}
         # yamllint disable-line rule:line-length
         run: lintro/scripts/ci/mirror/wait-for-pypi-wheel.sh lintro "$LINTRO_VERSION"
 
       - name: Checkout lintro-pre-commit mirror
-        if: >-
-          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
-          (github.event_name != 'release' || !github.event.release.prerelease) }}
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lgtm-hq/lintro-pre-commit
@@ -81,9 +93,7 @@ jobs:
           path: mirror
 
       - name: Publish mirror release
-        if: >-
-          ${{ steps.resolve.outputs.is_prerelease == 'false' &&
-          (github.event_name != 'release' || !github.event.release.prerelease) }}
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
         env:
           GH_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
           MIRROR_DIR: mirror

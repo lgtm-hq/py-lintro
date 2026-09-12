@@ -217,6 +217,27 @@ jobs:
         uploads.github.com:443
         pipelines.actions.githubusercontent.com:443
 
+  mirror-release:
+    name: Bump lintro-pre-commit mirror
+    # The mirror bump cannot run off `release: published`: this pipeline
+    # creates the release with GITHUB_TOKEN and GitHub suppresses workflow
+    # events for it, so mirror-release.yml never fired (#2599). Calling it
+    # here is the only trigger that sees the automated release train.
+    needs: [github-release]
+    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    uses: ./.github/workflows/mirror-release.yml
+    permissions:
+      # read: sparse checkout of scripts/ci/mirror in this repo. Mirror-side
+      # writes use MIRROR_REPO_TOKEN, not this token. A called workflow may
+      # not request more than its caller grants, so this must stay a superset
+      # of mirror-release.yml's job permissions (#2484, #2563).
+      contents: read
+    with:
+      release_tag: ${{ github.ref_name }}
+    # Named secret rather than `secrets: inherit`: the call needs exactly one.
+    secrets:
+      MIRROR_REPO_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
+
   homebrew-tap:
     name: Publish Homebrew Tap
     needs: [classify-tag, pypi-upload, github-release]

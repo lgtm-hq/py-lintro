@@ -2979,14 +2979,62 @@ def test_mirror_release_job_has_timeout() -> None:
     assert_that(timeout).is_equal_to(20)
 
 
-def test_mirror_release_triggers_on_published_release() -> None:
-    """Mirror bump runs on release publish plus a manual dispatch fallback."""
+def test_mirror_release_is_called_not_release_triggered() -> None:
+    """Mirror bump is a reusable call plus a manual dispatch fallback.
+
+    A ``release: published`` trigger is unreachable here: the tag pipeline
+    creates the release with GITHUB_TOKEN and GitHub suppresses workflow
+    events for actions taken with that token, so the workflow logged zero runs across
+    every release since (#2599). ``push: tags`` carries the same recursion
+    guard, so ``workflow_call`` is the only trigger the automated train fires.
+    """
     workflow = _load_workflow(name="mirror-release.yml")
     triggers = workflow["on"]
 
-    assert_that(triggers).contains_key("release", "workflow_dispatch")
-    assert_that(triggers["release"]["types"]).contains("published")
+    assert_that(triggers).contains_key("workflow_call", "workflow_dispatch")
+    assert_that(triggers).does_not_contain_key("release")
+    assert_that(triggers).does_not_contain_key("push")
+    assert_that(triggers["workflow_call"]["inputs"]).contains_key("release_tag")
+    assert_that(
+        triggers["workflow_call"]["inputs"]["release_tag"]["required"],
+    ).is_true()
+    assert_that(triggers["workflow_call"]["secrets"]).contains_key(
+        "MIRROR_REPO_TOKEN",
+    )
     assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("release_tag")
+    assert_that(workflow["jobs"]["mirror-bump"]["env"]["RELEASE_TAG"]).is_equal_to(
+        "${{ inputs.release_tag }}",
+    )
+
+
+def test_tag_pipeline_calls_the_mirror_after_the_github_release() -> None:
+    """The tag pipeline is what fires the mirror bump, after the release job.
+
+    Pins the whole repair from #2599: a caller job exists, it waits for the
+    release the mirror mirrors, it passes the pushed tag, it hands over the
+    cross-repo token, and it grants at least what the callee's job requests
+    (a shortfall is a logless ``startup_failure``; see #2484/#2563).
+    """
+    caller = _load_workflow(name="publish-pypi-on-tag.yml")
+    callee = _load_workflow(name="mirror-release.yml")
+    job = caller["jobs"]["mirror-release"]
+
+    assert_that(job["uses"]).is_equal_to("./.github/workflows/mirror-release.yml")
+    assert_that(job["needs"]).contains("github-release")
+    assert_that(job["with"]["release_tag"]).is_equal_to("${{ github.ref_name }}")
+    assert_that(job["secrets"]["MIRROR_REPO_TOKEN"]).is_equal_to(
+        "${{ secrets.MIRROR_REPO_TOKEN }}",
+    )
+    # `secrets: inherit` would hand the call every org/repo secret.
+    assert_that(job["secrets"]).is_instance_of(dict)
+
+    granted = _effective_grant(job=job, workflow=caller)
+    for callee_job in callee["jobs"].values():
+        requested = _effective_grant(job=callee_job, workflow=callee)
+        for scope, level in requested.items():
+            assert_that(_granted_level(granted, scope=scope)).described_as(
+                f"caller grant for {scope}",
+            ).is_greater_than_or_equal_to(level)
 
 
 def test_mirror_release_job_is_read_only_in_source_repo() -> None:
@@ -3049,12 +3097,13 @@ def test_mirror_release_skips_prereleases() -> None:
     workflow = _load_workflow(name="mirror-release.yml")
     steps = _job_steps(workflow, job="mirror-bump")
     guard = "steps.resolve.outputs.is_prerelease == 'false'"
-    github_guard = "!github.event.release.prerelease"
 
     for needle in ("wait-for-pypi-wheel.sh", "publish-mirror-release.sh"):
         step = next(s for s in steps if needle in s.get("run", ""))
         assert_that(step["if"]).contains(guard)
-        assert_that(step["if"]).contains(github_guard)
+        # The tag itself is the only prerelease signal on the call path: there
+        # is no release event payload to read `prerelease` from (#2599).
+        assert_that(step["if"]).does_not_contain("github.event.release")
         assert_that(step.get("env", {})).contains_key("LINTRO_VERSION")
 
     mirror_checkout = next(
@@ -3063,7 +3112,7 @@ def test_mirror_release_skips_prereleases() -> None:
         if s.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
     )
     assert_that(mirror_checkout["if"]).contains(guard)
-    assert_that(mirror_checkout["if"]).contains(github_guard)
+    assert_that(mirror_checkout["if"]).does_not_contain("github.event.release")
 
     setup_python = [
         s for s in steps if s.get("uses", "").startswith("actions/setup-python@")

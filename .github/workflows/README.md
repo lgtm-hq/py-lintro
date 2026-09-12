@@ -82,18 +82,22 @@ comments so Renovate can track digest updates. Policy is enforced by
 - **release-auto-tag.yml** — Creates tags on release commits via
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
-- **mirror-release.yml** — On `release: published`, bumps the `lintro` pin in the
+- **mirror-release.yml** — Reusable (`workflow_call`), invoked by
+  `publish-pypi-on-tag.yml` after the GitHub Release job; bumps the `lintro` pin in the
   `lgtm-hq/lintro-pre-commit` mirror, merges the version-bump PR, and tags the mirror
   `vX.Y.Z` so pre-commit consumers install the matching wheel (scripts under
-  `scripts/ci/mirror/`; see `docs/pre-commit.md`)
+  `scripts/ci/mirror/`; see `docs/pre-commit.md`). It cannot use `release: published`:
+  the release is created with `GITHUB_TOKEN`, whose actions GitHub does not raise
+  workflow events for, so that trigger fired zero times across ~30 releases (#2599).
+  `workflow_dispatch` with a `release_tag` stays for manual backfill.
 
 Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
 are traceable from the Actions list rather than the default commit subject. The mirror
-workflow (`mirror-release.yml`) uses a fixed run name because it is triggered by release
-events rather than branch pushes. Failure visibility itself lives upstream: the
-reusables run a `report-release-failure` job that writes trigger context to the step
-summary and opens/updates a deduplicated GitHub issue on `main` failures — hence the
-`actions: read` + `issues: write` job permissions.
+workflow (`mirror-release.yml`) uses a fixed run name because it is called from the tag
+pipeline rather than triggered by a branch push. Failure visibility itself lives
+upstream: the reusables run a `report-release-failure` job that writes trigger context
+to the step summary and opens/updates a deduplicated GitHub issue on `main` failures —
+hence the `actions: read` + `issues: write` job permissions.
 
 ## Publish
 
