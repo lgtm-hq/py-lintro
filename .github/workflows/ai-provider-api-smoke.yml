@@ -26,7 +26,8 @@ name: AI - Provider API Smoke
 #     credit exhaustion and integration breakage are distinguishable at a
 #     glance.
 #
-# A row whose secret is unset is *skipped with a notice* and a pending commit
+# A row whose credential variable is empty is *skipped with a notice* and a
+# pending commit
 # status. It must never read as a pass: a green tick for a call that was never
 # made is the failure mode this workflow exists to remove.
 
@@ -130,10 +131,13 @@ jobs:
       - name: Run the provider smoke
         id: smoke
         env:
-          # Indexed by the table's key_secret, which is what makes a new
-          # provider a row plus a secret rather than a workflow edit. An unset
-          # secret resolves to '' and the script reports a visible skip.
-          LINTRO_SMOKE_API_KEY: ${{ secrets[matrix.key_secret] }}
+          # Indexed by the table's key_env — the NAME of the variable, which
+          # is what makes a new provider a row plus a repository secret rather
+          # than a workflow edit. An unset secret resolves to '' and the script
+          # reports a visible skip. The value reaches the script only through
+          # this variable: never on argv, never on a matrix row, and never in
+          # anything the script prints, summarises or writes (#2600 CodeQL).
+          LINTRO_SMOKE_CREDENTIAL: ${{ secrets[matrix.key_env] }}
           SMOKE_PROVIDER: ${{ matrix.name }}
         run: >-
           uv run --extra ai python scripts/ci/ai_provider_smoke/run_smoke.py
@@ -159,7 +163,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SMOKE_NAME: ${{ matrix.name }}
           SMOKE_OUTCOME: ${{ steps.smoke.outputs.outcome }}
-          SMOKE_SECRET: ${{ matrix.key_secret }}
+          SMOKE_KEY_ENV: ${{ matrix.key_env }}
           SMOKE_STEP: ${{ steps.smoke.outcome }}
         run: scripts/ci/ai_provider_smoke/report-commit-status.sh
 

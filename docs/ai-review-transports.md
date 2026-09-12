@@ -143,18 +143,23 @@ CLI-transport change.
 **The weekly live signal is the API smoke**
 (`.github/workflows/ai-provider-api-smoke.yml`), one job per funded provider from
 `scripts/ci/ai_provider_smoke/providers.json`. Each row declares a protocol (`anthropic`
-or `openai`), base URL, key secret and model, so a gateway is a row rather than code. A
-failure — credit exhaustion included — posts a red `ai-provider-smoke/<row>` commit
-status on `main` and files the error text on the deduplicated tracker issue under the
-`ai-provider-smoke` label. A row whose secret is unset reports a pending status and a
-skip notice, never a pass.
+or `openai`), base URL, model, and `key_env` — the name of the environment variable the
+repository secret is injected into, never a credential value — so a gateway is a row
+rather than code. A failure — credit exhaustion included — posts a red
+`ai-provider-smoke/<row>` commit status on `main` and files the error text on the
+deduplicated tracker issue under the `ai-provider-smoke` label; that error text is
+dropped whole if it echoes the credential and otherwise redacted, so a gateway quoting
+the key back cannot leak it onto an issue. A row whose credential variable is empty
+reports a pending status and a skip notice, never a pass.
 
 **Parser drift is caught for free.**
-`tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl` holds what each agent CLI actually
-printed for a trivial prompt at the pinned version, and the Tier 1 replay test parses it
-with the real transport parser on every PR. Re-record with
-`scripts/ci/record_cli_fixture.sh <cli>` when a pin in `docker/ai-tools.Dockerfile`
-moves.
+`tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl` holds one stdout capture per agent
+CLI at the pinned version, and the Tier 1 replay test parses it with the real transport
+parser on every PR. The committed captures are hand-authored to the schema each parser
+documents, so until someone runs `scripts/ci/record_cli_fixture.sh <cli>` inside the
+`lintro-ai-tools` image (it needs the CLIs and a credential) the test guards our parsers
+rather than proving vendor output. Re-record whenever a pin in
+`docker/ai-tools.Dockerfile` moves.
 
 ## Reported numbers
 

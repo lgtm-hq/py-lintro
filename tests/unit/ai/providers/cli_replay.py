@@ -3,10 +3,11 @@
 Nothing in this repo used to exercise CLI output parsing against real recorded
 output, so schema drift was discovered in production — the Codex lane needed
 three successive fixes for exactly that (#2600). The fixtures under
-``tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl`` hold one recording per
+``tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl`` hold one capture per
 supported CLI, and the Tier 1 (free, every-PR) replay test parses each of them
 with the *real* transport parser, so a renamed field is a PR-time diff instead
-of a broken review.
+of a broken review. The committed captures are hand-authored to the documented
+schema until someone re-records them from the real binaries.
 
 This module is the seam both consumers share: the replay test, and
 ``scripts/ci/record_cli_fixture.sh``, which regenerates a recording's

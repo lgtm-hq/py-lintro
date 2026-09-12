@@ -22,10 +22,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SMOKE_DIR = _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke"
 _TABLE = _SMOKE_DIR / "providers.json"
 
-#: Placeholder secret *name* for the table-validation rows. Assembled from
-#: parts because bandit's B105/B106 flag any string literal assigned to a
-#: ``*_secret`` field, and a suppression comment would hide the real thing.
-_EXAMPLE_SECRET = "EXAMPLE_API" + "_KEY"
+#: Placeholder credential-variable *name* for the table-validation rows. It
+#: names a variable; it is not a credential, and no test here ever holds one.
+_EXAMPLE_ENV = "EXAMPLE_CREDENTIAL"
+
+#: Stand-in for a live credential value. Assembled at runtime so no
+#: credential-shaped literal is ever committed (GitGuardian scans every commit).
+_FAKE_CREDENTIAL = "sk-" + "smoke" + "-" + ("0" * 24)
 
 
 def _load(name: str, path: Path) -> ModuleType:
@@ -98,7 +101,7 @@ def _row(**overrides: str) -> dict[str, str]:
         "name": "example-api",
         "protocol": "anthropic",
         "base_url": "https://api.example.com",
-        "key_secret": _EXAMPLE_SECRET,
+        "key_env": _EXAMPLE_ENV,
         "model": "example-model",
     }
     row.update(overrides)
@@ -127,7 +130,7 @@ def test_committed_table_loads_and_covers_the_funded_providers(
     [
         ([_row(protocol="gemini")], "protocol"),
         ([_row(base_url="http://api.example.com")], "base_url"),
-        ([_row(key_secret=_EXAMPLE_SECRET.lower())], "key_secret"),
+        ([_row(key_env=_EXAMPLE_ENV.lower())], "key_env"),
         ([_row(name="Example API")], "name"),
         ([_row(model="")], "model"),
         ([_row(), _row()], "duplicate"),
@@ -195,12 +198,12 @@ def test_a_missing_secret_reports_a_skip_and_never_calls_the_provider(
     summary = tmp_path / "summary"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
-    monkeypatch.delenv("LINTRO_SMOKE_API_KEY", raising=False)
+    monkeypatch.delenv("LINTRO_SMOKE_CREDENTIAL", raising=False)
 
     row = smoke.load_table(path=_TABLE)[0]
     code = smoke.run_smoke(
         row=row,
-        api_key_env="LINTRO_SMOKE_API_KEY",
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=None,
     )
 
@@ -226,11 +229,11 @@ def test_a_successful_call_reports_success(
     monkeypatch.setattr(smoke, "_complete", lambda **_kwargs: None)
     output = tmp_path / "output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setenv("LINTRO_SMOKE_API_KEY", "fake-value-for-the-test")
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
 
     code = smoke.run_smoke(
         row=smoke.load_table(path=_TABLE)[0],
-        api_key_env="LINTRO_SMOKE_API_KEY",
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=None,
     )
 
@@ -276,11 +279,11 @@ def test_a_failing_call_records_the_error_text(
     output = tmp_path / "output"
     error_file = tmp_path / "smoke-error.md"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setenv("LINTRO_SMOKE_API_KEY", "fake-value-for-the-test")
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
 
     code = smoke.run_smoke(
         row=smoke.load_table(path=_TABLE)[0],
-        api_key_env="LINTRO_SMOKE_API_KEY",
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
         error_file=error_file,
     )
 
@@ -403,14 +406,134 @@ def test_the_smoke_drives_lintros_own_provider_code_path(
         return provider
 
     monkeypatch.setattr(anthropic_pkg.AnthropicPlugin, "build", _build)
-    monkeypatch.setenv("LINTRO_SMOKE_API_KEY", "fake-value-for-the-test")
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
 
     row = smoke.load_table(path=_TABLE)[0]
     content = asyncio.run(
-        smoke._complete(row=row, api_key_env="LINTRO_SMOKE_API_KEY"),
+        smoke._complete(row=row, credential_env="LINTRO_SMOKE_CREDENTIAL"),
     )
 
     assert_that(content).is_equal_to("pong")
     assert_that(captured["base_url"]).is_equal_to(row.base_url)
     assert_that(captured["model"]).is_equal_to(row.model)
     assert_that(captured["request"]["model"]).is_equal_to(row.model)
+
+
+def test_a_provider_error_that_echoes_the_credential_never_reaches_disk(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 401 that quotes what it was sent must not leak it (CodeQL #6862/#6863).
+
+    A gateway rejecting a call commonly echoes the ``Authorization`` header
+    back, so the provider's own error text is the one string in this script
+    that can carry the live credential — into the log, the step summary, and
+    the error file the tracker issue quotes verbatim. All three must come out
+    clean, and nothing derived from the credential may survive, not even a
+    masked remnant.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the Actions output files.
+        monkeypatch: Environment patcher.
+    """
+
+    def _run(_coro: Any) -> str:
+        msg = f"401 Unauthorized: invalid api key 'Bearer {_FAKE_CREDENTIAL}'"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(smoke.asyncio, "run", _run)
+    monkeypatch.setattr(smoke, "_complete", lambda **_kwargs: None)
+    summary = tmp_path / "summary"
+    output = tmp_path / "output"
+    error_file = tmp_path / "smoke-error.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+
+    code = smoke.run_smoke(
+        row=smoke.load_table(path=_TABLE)[0],
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=error_file,
+    )
+
+    assert_that(code).is_equal_to(1)
+    written = error_file.read_text(encoding="utf-8")
+    summarised = summary.read_text(encoding="utf-8")
+    for where, text in (("error file", written), ("summary", summarised)):
+        assert_that(text).described_as(where).does_not_contain(_FAKE_CREDENTIAL)
+        # Not even a fragment: a partial credential is still a credential.
+        assert_that(text).described_as(where).does_not_contain(
+            _FAKE_CREDENTIAL[: len(_FAKE_CREDENTIAL) // 2],
+        )
+    # The failure is still reported — redaction must not silence the alarm.
+    assert_that(written).contains("anthropic-api")
+    assert_that(output.read_text(encoding="utf-8")).contains("outcome=failure")
+
+
+def test_a_key_shaped_literal_in_provider_text_is_redacted(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Someone else's key quoted by the provider is redacted too.
+
+    The credential-equality check cannot catch a key that is not ours, so the
+    surviving text still goes through lintro's own ``redact_secrets``.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the error file.
+        monkeypatch: Environment patcher.
+    """
+    foreign = "sk-" + "ant" + "-" + ("a" * 32)
+
+    def _run(_coro: Any) -> str:
+        msg = f"400 Bad Request: key {foreign} is disabled"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(smoke.asyncio, "run", _run)
+    monkeypatch.setattr(smoke, "_complete", lambda **_kwargs: None)
+    error_file = tmp_path / "smoke-error.md"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+
+    smoke.run_smoke(
+        row=smoke.load_table(path=_TABLE)[0],
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=error_file,
+    )
+
+    written = error_file.read_text(encoding="utf-8")
+    assert_that(written).does_not_contain(foreign)
+    assert_that(written).contains("[REDACTED]")
+
+
+def test_the_skip_notice_names_the_variable_and_holds_no_credential(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The skip path reports a variable name, which is not sensitive data.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the Actions output files.
+        monkeypatch: Environment patcher.
+    """
+    summary = tmp_path / "summary"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.delenv("LINTRO_SMOKE_CREDENTIAL", raising=False)
+
+    row = smoke.load_table(path=_TABLE)[0]
+    smoke.run_smoke(
+        row=row,
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=None,
+    )
+
+    written = summary.read_text(encoding="utf-8")
+    assert_that(written).contains(row.key_env)
+    assert_that(written).does_not_contain(_FAKE_CREDENTIAL)

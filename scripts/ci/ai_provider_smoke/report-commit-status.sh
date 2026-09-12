@@ -20,7 +20,7 @@
 #   GH_TOKEN       token with statuses: write
 #   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_SERVER_URL, GITHUB_RUN_ID
 #   SMOKE_NAME     table row name, e.g. anthropic-api
-#   SMOKE_SECRET   the row's secret name, quoted in the skip description
+#   SMOKE_KEY_ENV  the row's credential variable NAME, quoted in the skip
 #   SMOKE_OUTCOME  the smoke script's own outcome output (may be empty)
 #   SMOKE_STEP     the smoke step's outcome, used when the script wrote none
 
@@ -44,7 +44,7 @@ success)
 	;;
 skipped)
 	state="pending"
-	description="skipped: secret ${SMOKE_SECRET:-unknown} is not set"
+	description="skipped: no credential in ${SMOKE_KEY_ENV:-unknown}"
 	;;
 *)
 	state="failure"

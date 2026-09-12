@@ -23,15 +23,21 @@ Two subcommands:
 
 ``--provider NAME``
     Run the smoke for one row. The credential arrives in the environment named
-    by ``--api-key-env`` (default ``LINTRO_SMOKE_API_KEY``), never on argv.
+    by ``--credential-env`` (default ``LINTRO_SMOKE_CREDENTIAL``), never on
+    argv. It is read where it is used and is never stored on a row, held on a
+    config object that is rendered, or interpolated into any message: the
+    table's ``key_env`` is the *name* of that variable, never a value.
+    Provider error text is dropped whole when it echoes the live credential and
+    then run through lintro's ``redact_secrets`` for key-shaped literals, before
+    anything is printed, summarised or written to the error file.
 
 Outcomes are reported twice over: as an exit code (0 answered, 1 failed, with
 the error text written to the job summary and to ``--error-file`` so the
 failure notifier can quote it on the tracker issue) and as an ``outcome`` step
-output of ``success`` / ``failure`` / ``skipped``. A row whose secret is unset
-exits 0 but reports ``skipped`` with a workflow notice, and the workflow turns
-that into a *pending* commit status — a call that was never made must never
-show a green tick.
+output of ``success`` / ``failure`` / ``skipped``. A row whose credential
+variable is empty exits 0 but reports ``skipped`` with a workflow notice, and
+the workflow turns that into a *pending* commit status — a call that was never
+made must never show a green tick.
 """
 
 from __future__ import annotations
@@ -58,8 +64,8 @@ SUPPORTED_PROTOCOLS: Final[frozenset[str]] = frozenset({"anthropic", "openai"})
 #: status context, so they are constrained to what both accept.
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-#: Secret names are uppercase environment identifiers.
-_SECRET_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]*$")
+#: Credential variable names are uppercase environment identifiers.
+_ENV_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 #: The smoke prompt. Trivially cheap, and the answer is checkable — a provider
 #: that returns an empty envelope must not be counted as a pass.
@@ -82,14 +88,16 @@ class ProviderRow:
         name: Job name and commit-status suffix, e.g. ``anthropic-api``.
         protocol: Wire protocol, one of :data:`SUPPORTED_PROTOCOLS`.
         base_url: API base URL the call is pointed at.
-        key_secret: Name of the repository secret holding the credential.
+        key_env: NAME of the environment variable (fed by the repository
+            secret of the same name) the credential arrives in. Never a
+            credential value — nothing on this row is sensitive.
         model: Model slug sent with the smoke prompt.
     """
 
     name: str
     protocol: str
     base_url: str
-    key_secret: str
+    key_env: str
     model: str
 
     @property
@@ -111,7 +119,7 @@ class ProviderRow:
             "name": self.name,
             "protocol": self.protocol,
             "base_url": self.base_url,
-            "key_secret": self.key_secret,
+            "key_env": self.key_env,
             "model": self.model,
             "egress": self.egress,
         }
@@ -141,17 +149,17 @@ def _validate_row(*, entry: Any, index: int) -> ProviderRow:
     """
     if not isinstance(entry, dict):
         _fail_table(f"row {index} is not an object")
-    missing = {"name", "protocol", "base_url", "key_secret", "model"} - set(entry)
+    missing = {"name", "protocol", "base_url", "key_env", "model"} - set(entry)
     if missing:
         _fail_table(f"row {index} is missing {sorted(missing)}")
-    unknown = set(entry) - {"name", "protocol", "base_url", "key_secret", "model"}
+    unknown = set(entry) - {"name", "protocol", "base_url", "key_env", "model"}
     if unknown:
         _fail_table(f"row {index} has unknown keys {sorted(unknown)}")
     row = ProviderRow(
         name=str(entry["name"]),
         protocol=str(entry["protocol"]),
         base_url=str(entry["base_url"]),
-        key_secret=str(entry["key_secret"]),
+        key_env=str(entry["key_env"]),
         model=str(entry["model"]),
     )
     if not _NAME_RE.match(row.name):
@@ -164,9 +172,9 @@ def _validate_row(*, entry: Any, index: int) -> ProviderRow:
     parsed = urlparse(row.base_url)
     if parsed.scheme != "https" or not parsed.hostname:
         _fail_table(f"row {row.name} base_url {row.base_url!r} is not an https URL")
-    if not _SECRET_RE.match(row.key_secret):
+    if not _ENV_NAME_RE.match(row.key_env):
         _fail_table(
-            f"row {row.name} key_secret {row.key_secret!r} is not a secret name",
+            f"row {row.name} key_env {row.key_env!r} is not an env variable name",
         )
     if not row.model.strip():
         _fail_table(f"row {row.name} has an empty model")
@@ -256,12 +264,12 @@ def row_for(*, name: str, rows: list[ProviderRow]) -> ProviderRow:
     raise SystemExit(2)
 
 
-async def _complete(*, row: ProviderRow, api_key_env: str) -> str:
+async def _complete(*, row: ProviderRow, credential_env: str) -> str:
     """Send the smoke prompt through lintro's own provider code path.
 
     Args:
         row: The provider row under test.
-        api_key_env: Environment variable holding the credential.
+        credential_env: Environment variable holding the credential.
 
     Returns:
         The provider's response content.
@@ -276,7 +284,7 @@ async def _complete(*, row: ProviderRow, api_key_env: str) -> str:
         provider=AIProvider(row.protocol),
         transport=AITransport.API,
         model=row.model,
-        api_key_env=api_key_env,
+        api_key_env=credential_env,
         api_base_url=row.base_url,
         max_tokens=SMOKE_MAX_TOKENS,
         transcript_logging=False,
@@ -293,24 +301,73 @@ async def _complete(*, row: ProviderRow, api_key_env: str) -> str:
     return response.content
 
 
-def run_smoke(*, row: ProviderRow, api_key_env: str, error_file: Path | None) -> int:
+def _safe_detail(text: str, *, env_name: str) -> str:
+    """Return provider error text with no credential left in it.
+
+    A gateway that 401s likes to quote what it was sent, so the provider's own
+    error is the one string in this script that can carry the live credential —
+    and it is written to three places that outlive the job (the log, the step
+    summary, the error file the tracker issue quotes). Two defences, in order:
+
+    1. If the text contains the credential at all, the whole text is dropped.
+       Nothing derived from the credential is kept, not even a masked remnant.
+    2. Whatever survives still goes through lintro's own ``redact_secrets``,
+       which replaces key-shaped literals (``sk-...``, ``ghp_...``, bearer
+       tokens) that some *other* account's key could hide in.
+
+    Args:
+        text: The provider's error text.
+        env_name: Name of the environment variable holding the credential.
+
+    Returns:
+        Text that is safe to print, summarise and write to a file.
+    """
+    from lintro.ai.secrets import redact_secrets
+
+    if _credential_appears_in(text, env_name=env_name):
+        return (
+            "RedactedProviderError: the provider error echoed the credential, "
+            "so it was dropped in full. See the job log's step for the "
+            "provider's HTTP status."
+        )
+    return redact_secrets(text)
+
+
+def _credential_appears_in(text: str, *, env_name: str) -> bool:
+    """Return whether the live credential occurs in the given text.
+
+    The credential is read here and compared, never returned, stored or
+    interpolated: the only thing that leaves this function is a boolean.
+
+    Args:
+        text: The text to inspect.
+        env_name: Name of the environment variable holding the credential.
+
+    Returns:
+        True when the environment variable's value occurs in the text.
+    """
+    value = os.environ.get(env_name, "").strip()
+    return bool(value) and value in text
+
+
+def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None) -> int:
     """Run the smoke for one row and report it the way CI reads it.
 
     Args:
         row: The provider row under test.
-        api_key_env: Environment variable holding the credential.
+        credential_env: Environment variable holding the credential.
         error_file: Where to write the failure text for the issue filer.
 
     Returns:
         The process exit code.
     """
-    if not os.environ.get(api_key_env, "").strip():
+    if not os.environ.get(credential_env, "").strip():
         # A missing credential is not a pass and not a failure of the provider.
         # It is announced, and the workflow turns it into a pending commit
         # status so the checks tab never shows a green tick for a call that was
         # never made.
         notice = (
-            f"{row.name}: secret {row.key_secret} is not set — "
+            f"{row.name}: no credential in {row.key_env} — "
             "smoke skipped, no call was made"
         )
         print(f"::notice title=Provider smoke skipped::{notice}")
@@ -321,9 +378,9 @@ def run_smoke(*, row: ProviderRow, api_key_env: str, error_file: Path | None) ->
     content = ""
     detail: str | None = None
     try:
-        content = asyncio.run(_complete(row=row, api_key_env=api_key_env))
+        content = asyncio.run(_complete(row=row, credential_env=credential_env))
     except Exception as exc:  # every failure is news here, none is fatal
-        detail = f"{type(exc).__name__}: {exc}"
+        detail = _safe_detail(f"{type(exc).__name__}: {exc}", env_name=credential_env)
     if detail is None and not content.strip():
         # An empty envelope is a failure of the provider, not a pass: the
         # whole point of a prompt with a checkable answer.
@@ -374,8 +431,8 @@ def _build_parser() -> argparse.ArgumentParser:
         help="name of the table row to smoke",
     )
     parser.add_argument(
-        "--api-key-env",
-        default="LINTRO_SMOKE_API_KEY",
+        "--credential-env",
+        default="LINTRO_SMOKE_CREDENTIAL",
         help="environment variable holding the credential",
     )
     parser.add_argument(
@@ -410,7 +467,7 @@ def main(argv: list[str] | None = None) -> int:
 
     return run_smoke(
         row=row_for(name=args.provider, rows=rows),
-        api_key_env=args.api_key_env,
+        credential_env=args.credential_env,
         error_file=Path(args.error_file) if args.error_file else None,
     )
 

@@ -2,10 +2,15 @@
 
 Free by construction — no binary, no credential, no quota — so this runs on
 every PR, which is the point (#2600). The recordings under
-``tests/fixtures/ai/cli_replay`` are what each supported agent CLI emitted for
-a trivial prompt at the pinned version; parsing them with the real transport
-parsers is what turns a vendor schema change into a red diff instead of a
-broken review in production.
+``tests/fixtures/ai/cli_replay`` hold one stdout capture per supported agent
+CLI at the pinned version; parsing them with the real transport parsers is what
+turns a vendor schema change into a red diff instead of a broken review in
+production.
+
+The committed captures are hand-authored to the schema each parser documents,
+because recording real output needs the CLIs installed and a credential. Until
+an owner re-records, this guards our parsers rather than proving vendor
+output.
 
 Re-record with ``scripts/ci/record_cli_fixture.sh`` when a CLI pin moves.
 """
