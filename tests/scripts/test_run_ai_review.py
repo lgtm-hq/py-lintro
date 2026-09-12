@@ -2187,3 +2187,26 @@ def test_lint_report_download_failure_falls_back_with_the_reason(
     assert_that(argv).contains("--lint-report-missing")
     missing = argv[argv.index("--lint-report-missing") + 1]
     assert_that(missing).is_equal_to("download of docker-ci run 777 failed")
+
+
+def test_lint_report_wait_reads_leading_zero_values_as_decimal(
+    tmp_path: Path,
+) -> None:
+    """``0900``-style overrides are decimal seconds, never octal.
+
+    Bound ``02`` at interval ``01`` behaves exactly like ``2`` at ``1``: the
+    script neither aborts on an invalid-octal expansion nor shortens the
+    wait, and the log reports the decimal bound.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=None,
+        wait_seconds="02",  # type: ignore[arg-type]
+        poll_seconds="01",
+    )
+
+    assert_that(output).does_not_contain("::warning::")
+    assert_that(output).contains("/2s)")
+    assert_that(listings).is_between(1, 3)
+    assert_that(argv[:3]).is_equal_to(["run", "lintro", "review"])
+    assert_that(argv).contains("--lint-report-missing")

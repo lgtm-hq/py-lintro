@@ -330,11 +330,17 @@ LINT_REPORT_POLL_SECONDS="${LINT_REPORT_POLL_SECONDS:-30}"
 LINT_REPORT_WAIT_SECONDS="${LINT_REPORT_WAIT_SECONDS:-600}"
 # Both must be whole seconds; the poll must be positive or the loop never
 # advances. Anything else falls back to the default with a warning.
-if ! [[ "$LINT_REPORT_POLL_SECONDS" =~ ^[0-9]+$ ]] || [[ "$LINT_REPORT_POLL_SECONDS" -lt 1 ]]; then
+# Normalise through base 10 so a leading zero is not read as octal by the
+# arithmetic below (0600 would otherwise become 384, and 08 an error).
+if [[ "$LINT_REPORT_POLL_SECONDS" =~ ^[0-9]+$ ]] && [[ "$((10#$LINT_REPORT_POLL_SECONDS))" -ge 1 ]]; then
+	LINT_REPORT_POLL_SECONDS=$((10#$LINT_REPORT_POLL_SECONDS))
+else
 	echo "::warning::LINT_REPORT_POLL_SECONDS=${LINT_REPORT_POLL_SECONDS} is not a positive integer; using 30"
 	LINT_REPORT_POLL_SECONDS=30
 fi
-if ! [[ "$LINT_REPORT_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
+if [[ "$LINT_REPORT_WAIT_SECONDS" =~ ^[0-9]+$ ]]; then
+	LINT_REPORT_WAIT_SECONDS=$((10#$LINT_REPORT_WAIT_SECONDS))
+else
 	echo "::warning::LINT_REPORT_WAIT_SECONDS=${LINT_REPORT_WAIT_SECONDS} is not a whole number of seconds; using 600"
 	LINT_REPORT_WAIT_SECONDS=600
 fi
