@@ -68,13 +68,17 @@ class ReviewResult:
         (:func:`~lintro.ai.review.finding_matcher.derive_verdict`, which has
         always excluded questions) and with the converged-skip gate in the CLI
         — otherwise a round of P1 questions would exit 1 while the skip that
-        follows it exits 0 (#2099 review).
+        follows it exits 0 (#2099 review). A P1 the posting policy routed to
+        the notes block (#2572) is excluded on the same terms: the verdict
+        ignores it, so the exit code must too.
 
         Returns:
             True when an open P1 defect claim exists.
         """
         return any(
-            finding.severity == Severity.P1 and not finding.is_question
+            finding.severity == Severity.P1
+            and not finding.is_question
+            and finding.posted_inline
             for finding in self.findings
         )
 

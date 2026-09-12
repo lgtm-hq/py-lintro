@@ -310,3 +310,40 @@ def test_lint_failure_propagates_exit_code(
     assert_that(outputs).contains("exit-code=5")
     assert_that(outputs).contains("status=failed")
     assert_that(outputs).contains("lint-mode=changed-files")
+
+
+def test_forwards_github_actions_so_lintro_emits_the_json_report(
+    pr_repo: Path,
+    docker_stub: tuple[Path, Path],
+    tmp_path: Path,
+) -> None:
+    """Under Actions the container sees GITHUB_ACTIONS=true (JSON side channel).
+
+    lintro writes ``.lintro/artifacts/json/results.json`` only when it detects
+    the runner variable; the AI review reads that file as linter facts
+    (#2571). Outside Actions nothing is forwarded.
+    """
+    bin_dir, args_log = docker_stub
+    output_file = tmp_path / "github-output"
+
+    result = _run_script(
+        pr_repo,
+        bin_dir,
+        args_log,
+        output_file,
+        extra_env={"GITHUB_ACTIONS": "true"},
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines).is_length(1)
+    assert_that(run_lines[0]).contains("-e GITHUB_ACTIONS=true")
+
+    args_log.write_text("")
+    result = _run_script(pr_repo, bin_dir, args_log, output_file)
+    assert_that(result.returncode).is_equal_to(0)
+    run_lines = [
+        line for line in args_log.read_text().splitlines() if line.startswith("run ")
+    ]
+    assert_that(run_lines[0]).does_not_contain("GITHUB_ACTIONS")

@@ -16,7 +16,11 @@ from lintro.ai.validation import ValidationResult
 from lintro.config.lintro_config import LintroConfig
 from lintro.enums.action import Action
 from lintro.models.core.tool_result import ToolResult
-from tests.unit.ai.conftest import MockAIProvider, MockIssue
+from tests.unit.ai.conftest import (
+    MockAIProvider,
+    MockIssue,
+    RecordingConsoleLogger,
+)
 
 # ---------------------------------------------------------------------------
 # TestAIResultExitCode
@@ -322,3 +326,77 @@ def test_fail_on_unfixed_config_can_be_set():
     """Verify fail_on_unfixed can be set to True."""
     config = AIConfig(fail_on_unfixed=True)
     assert_that(config.fail_on_unfixed).is_true()
+
+
+def _run_check_with_provider_error(exc: Exception) -> RecordingConsoleLogger:
+    """Run a check whose provider lookup raises, returning the console log.
+
+    Args:
+        exc: Exception raised in place of the provider call.
+
+    Returns:
+        The recording console logger the orchestrator wrote to.
+    """
+    config = LintroConfig(
+        ai=AIConfig(enabled=True, transport=AITransport.CLI).model_dump(),
+    )
+    logger = RecordingConsoleLogger()
+
+    with (
+        patch("lintro.ai.orchestrator.require_ai"),
+        patch("lintro.ai.orchestrator.get_provider", side_effect=exc),
+    ):
+        ai_result = run_ai_enhancement(
+            action=Action.CHECK,
+            all_results=[],
+            lintro_config=config,
+            logger=logger,
+            output_format="auto",
+        )
+
+    assert_that(ai_result.error).is_true()
+    return logger
+
+
+def test_provider_error_message_reaches_the_console():
+    """The swallowed provider message is printed, not just its class (#2573).
+
+    A rejected request schema surfaced only as ``AI: enhancement unavailable
+    (KeyError)``, which told the user nothing about the cause.
+    """
+    logger = _run_check_with_provider_error(
+        RuntimeError(
+            "tools.0.custom.input_schema.type: Input should be 'object'",
+        ),
+    )
+
+    assert_that(logger.text).contains("AI: enhancement unavailable")
+    assert_that(logger.text).contains("RuntimeError")
+    assert_that(logger.text).contains("input_schema.type")
+
+
+#: A credential in the shape ``lintro/ai/secrets.py`` actually matches
+#: (``sk-`` followed by 20 or more alphanumerics), assembled at runtime so no
+#: credential-shaped literal is committed. The test below asserts on this
+#: value, so it fails if ``_failure_detail`` stops redacting.
+_FAKE_API_KEY = "sk-" + "A" * 24
+
+
+def test_provider_error_message_is_redacted_and_single_line():
+    """Only the first line is shown, with secrets redacted (#2573)."""
+    logger = _run_check_with_provider_error(
+        RuntimeError(
+            f"auth failed for key {_FAKE_API_KEY}\nsecond line with detail",
+        ),
+    )
+
+    assert_that(logger.text).does_not_contain(_FAKE_API_KEY)
+    assert_that(logger.text).contains("[REDACTED]")
+    assert_that(logger.text).does_not_contain("second line with detail")
+
+
+def test_provider_error_without_message_shows_the_class_name():
+    """An exception carrying no message degrades to the class name (#2573)."""
+    logger = _run_check_with_provider_error(RuntimeError())
+
+    assert_that(logger.text).contains("AI: enhancement unavailable (RuntimeError)")

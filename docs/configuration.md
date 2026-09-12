@@ -3190,6 +3190,66 @@ RUN apt-get update && apt-get install -y \
     python3-pip
 ```
 
+#### Checkov Configuration
+
+Checkov scans **Terraform** sources (`*.tf`, `*.tf.json`) for security and compliance
+misconfigurations. Dockerfiles are intentionally left to hadolint to avoid
+double-reporting the same file under two rule sets. Lintro never opts checkov into the
+platform: `--skip-download`, `--download-external-modules False` and
+`--skip-results-upload` are always passed and there is no `--bc-api-key` code path, so
+no lintro option can make checkov fetch policies or modules, or upload a finding. A
+`BC_API_KEY` in the environment is the one remaining route to an outbound request —
+checkov reads that variable itself, so unset it when a run must be fully offline. It
+buys no enrichment either way: `--skip-download` suppresses the platform metadata
+download, so severity and guideline URLs stay unpopulated in **every** lintro-driven
+run, keyed or not.
+
+- Discovery: Terraform files (`*.tf`, `*.tf.json`)
+- Native config: `.checkov.yaml` / `.checkov.yml`
+- Install: `uv tool install checkov` (isolated venv), or
+  `scripts/utils/install-tools.sh --local --tools checkov`. Checkov requires
+  `packaging<24` while lintro requires `packaging>=25`, so it is deliberately not part
+  of `lintro[tools]` and must never be pip-installed into lintro's own environment. The
+  pinned version lives in `lintro/_tool_versions.py`; `brew install checkov` also works
+  but Homebrew's formula lags upstream, so it may sit below that pin (the supported
+  floor in `manifest.src.json` is deliberately lower, so a brew install still runs).
+
+**Tool options:**
+
+| Option        | Type          | Default | Description                                   |
+| ------------- | ------------- | ------- | --------------------------------------------- |
+| `checks`      | list / string | -       | Run only these check IDs (`--check`)          |
+| `skip_checks` | list / string | -       | Skip these check IDs (`--skip-check`)         |
+| `compact`     | bool          | `true`  | Omit the offending code block from the report |
+| `timeout`     | int           | `120`   | Per-invocation timeout in seconds             |
+
+`--tool-options` splits on commas, so several check IDs are passed pipe-delimited:
+
+```bash
+# Skip specific policies
+lintro check --tools checkov --tool-options "checkov:skip_checks=CKV_AWS_18|CKV_AWS_21"
+
+# Run only specific policies
+lintro check --tools checkov --tool-options "checkov:checks=CKV_AWS_260"
+```
+
+> Note: Only the `terraform` and `terraform_json` frameworks run — lintro pins
+> `--framework terraform,terraform_json` so checkov's secrets framework does not
+> double-report what gitleaks and trufflehog own. `checks` and `skip_checks` can
+> therefore only select Terraform policies; another framework's ID (say `CKV_SECRET_6`)
+> matches nothing and reports a clean scan.
+>
+> Checkov's own `severity` and `guideline` fields come from platform metadata it
+> downloads, which `--skip-download` suppresses on every lintro run. Findings therefore
+> normalize to lintro's default severity and link to the Checkov policy index. The
+> parser still reads both fields so nothing is lost if that ever changes.
+
+Checkov is listed under both `terraform` and `security` in the manifest language map, so
+a no-config run that detects Terraform — or any run that selects the security set with
+`checkov` on `PATH` — will invoke it. That can fail previously green Terraform CI on
+first upgrade. Disable it with `tools.checkov.enabled: false`, or skip individual
+policies with `checkov:skip_checks`.
+
 #### Actionlint Configuration
 
 Actionlint validates GitHub Actions workflows. Lintro discovers workflow files under
@@ -3362,35 +3422,36 @@ ai:
 
 ### Full AI Config Reference
 
-| Setting                 | Type   | Default        | Description                                                                                  |
-| ----------------------- | ------ | -------------- | -------------------------------------------------------------------------------------------- |
-| `enabled`               | bool   | `false`        | Master switch; ANDs with `lint` / `review`                                                   |
-| `lint`                  | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                      |
-| `review`                | bool   | `false`        | Enable the `lintro review` AI diff review                                                    |
-| `provider`              | string | `anthropic`    | AI provider (`anthropic`, `openai`, or `cursor`)                                             |
-| `model`                 | string | (default)      | Model override                                                                               |
-| `api_key_env`           | string | (default)      | Custom env var for API key                                                                   |
-| `default_fix`           | bool   | `false`        | Always run `--fix` in check                                                                  |
-| `auto_apply`            | bool   | `false`        | Apply fixes without confirmation                                                             |
-| `auto_apply_safe_fixes` | bool   | `true`         | Auto-apply safe-style fixes in non-interactive                                               |
-| `max_tokens`            | int    | `4096`         | Max tokens per request                                                                       |
-| `max_fix_attempts`      | int    | `20`           | Max issues to attempt fixing per run                                                         |
-| `max_parallel_calls`    | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
-| `max_retries`           | int    | `2`            | Max retries for transient errors (0-10)                                                      |
-| `max_cost_usd`          | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `uncapped` lifts; overlay `0` is an error           |
-| `api_timeout`           | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
-| `transports`            | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
-| `validate_after_group`  | bool   | `false`        | Validate immediately after each accepted group                                               |
-| `show_cost_estimate`    | bool   | `true`         | Show token/cost info in output                                                               |
-| `context_lines`         | int    | `15`           | Lines of context sent for fix generation (1-100)                                             |
-| `fix_search_radius`     | int    | `5`            | Line search radius for fix application (1-50)                                                |
-| `checkpoint_retention`  | int    | `10`           | Git checkpoint refs kept (>=0; 0 = current only)                                             |
-| `checkpoint_fmt`        | bool   | `false`        | Git checkpoint before `lintro format` mutations                                              |
-| `retry_base_delay`      | float  | `1.0`          | Initial retry delay in seconds (min 0.1)                                                     |
-| `retry_max_delay`       | float  | `30.0`         | Maximum retry delay in seconds (min 1.0)                                                     |
-| `retry_backoff_factor`  | float  | `2.0`          | Retry delay multiplier (min 1.0)                                                             |
-| `transcript_logging`    | bool   | `false`        | Opt-in NDJSON logging of AI provider traffic                                                 |
-| `transcript_retention`  | int    | `10`           | Max transcript files kept under `.lintro-cache`                                              |
+| Setting                  | Type   | Default        | Description                                                                                  |
+| ------------------------ | ------ | -------------- | -------------------------------------------------------------------------------------------- |
+| `enabled`                | bool   | `false`        | Master switch; ANDs with `lint` / `review`                                                   |
+| `lint`                   | bool   | `false`        | Enable AI lint summaries on `chk`/`fmt`                                                      |
+| `review`                 | bool   | `false`        | Enable the `lintro review` AI diff review                                                    |
+| `provider`               | string | `anthropic`    | AI provider (`anthropic`, `openai`, or `cursor`)                                             |
+| `model`                  | string | (default)      | Model override                                                                               |
+| `api_key_env`            | string | (default)      | Custom env var for API key                                                                   |
+| `default_fix`            | bool   | `false`        | Always run `--fix` in check                                                                  |
+| `auto_apply`             | bool   | `false`        | Apply fixes without confirmation                                                             |
+| `auto_apply_safe_fixes`  | bool   | `true`         | Auto-apply safe-style fixes in non-interactive                                               |
+| `max_tokens`             | int    | `4096`         | Max tokens per request                                                                       |
+| `max_fix_attempts`       | int    | `20`           | Max issues to attempt fixing per run                                                         |
+| `max_parallel_calls`     | int    | `5`            | Concurrent AI calls (1-20); honored with a cost cap; n−1 overshoot possible                  |
+| `max_retries`            | int    | `2`            | Max retries for transient errors (0-10)                                                      |
+| `rate_limit_max_retries` | int    | `6`            | Retries for HTTP 429 only (0-20); waits `Retry-After` clamped to 300 s                       |
+| `max_cost_usd`           | float  | `null`         | Legacy USD cap; prefer profiles. Overlay `uncapped` lifts; overlay `0` is an error           |
+| `api_timeout`            | float  | `60.0`         | Legacy timeout (s); prefer `transports.*.timeout`                                            |
+| `transports`             | object | empty profiles | Per-transport profiles (`api` / `cli`) — see [AI review transports](ai-review-transports.md) |
+| `validate_after_group`   | bool   | `false`        | Validate immediately after each accepted group                                               |
+| `show_cost_estimate`     | bool   | `true`         | Show token/cost info in output                                                               |
+| `context_lines`          | int    | `15`           | Lines of context sent for fix generation (1-100)                                             |
+| `fix_search_radius`      | int    | `5`            | Line search radius for fix application (1-50)                                                |
+| `checkpoint_retention`   | int    | `10`           | Git checkpoint refs kept (>=0; 0 = current only)                                             |
+| `checkpoint_fmt`         | bool   | `false`        | Git checkpoint before `lintro format` mutations                                              |
+| `retry_base_delay`       | float  | `1.0`          | Initial retry delay in seconds (min 0.1)                                                     |
+| `retry_max_delay`        | float  | `30.0`         | Maximum retry delay in seconds (min 1.0)                                                     |
+| `retry_backoff_factor`   | float  | `2.0`          | Retry delay multiplier (min 1.0)                                                             |
+| `transcript_logging`     | bool   | `false`        | Opt-in NDJSON logging of AI provider traffic                                                 |
+| `transcript_retention`   | int    | `10`           | Max transcript files kept under `.lintro-cache`                                              |
 
 ### Idiom Review Tool (`idiom-review`)
 

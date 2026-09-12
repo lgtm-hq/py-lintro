@@ -143,6 +143,10 @@ def golden_review_result() -> ReviewResult:
                 cause="Oversight.",
                 fix="Document the ValueError.",
                 confidence="low",
+                # The default posting policy (#2572) gates a low-confidence
+                # finding to the sticky's notes block; the CLI sets this flag
+                # before any surface renders, so the fixture carries it too.
+                posted_inline=False,
             ),
         ),
     )

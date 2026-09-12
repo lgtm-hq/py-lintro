@@ -205,6 +205,9 @@ class ReviewSessionOptions:
         depth: Review depth level (1-3).
         context_window_override: Optional explicit context window override.
         lint_results: Optional lint digest for ``--with-lint`` integration.
+        lint_note: Why no lint digest could be loaded when one was requested
+            via ``--lint-report`` (#2571); stamped on the result metadata
+            as ``lint_facts_note``. Empty when there is nothing to say.
         progress: Optional progress callback for live status updates.
         sensitivity: Sensitivity preset controlling prompts and finding
             filters. ``None`` selects the balanced default.
@@ -237,6 +240,7 @@ class ReviewSessionOptions:
     depth: int = 1
     context_window_override: int | None = None
     lint_results: str | None = None
+    lint_note: str = ""
     progress: ReviewProgressCallback | None = None
     sensitivity: ReviewSensitivityPolicy | None = None
     force_semantic_chunking: bool = False

@@ -118,6 +118,7 @@ def get_pytest_version_info() -> str:
 def collect_tests_once(
     tool: PytestPlugin,
     target_files: list[str],
+    timeout: int | float | None = None,
 ) -> int:
     """Collect tests and return total count.
 
@@ -128,6 +129,8 @@ def collect_tests_once(
             methods. Must support running pytest commands.
         target_files: List of file paths or directory paths to check for tests.
             These are passed directly to pytest --collect-only.
+        timeout: Seconds to allow the collection subprocess. ``None`` leaves
+            the tool to fall back to its persisted options.
 
     Returns:
         int: Total number of tests found. Returns 0 if collection fails.
@@ -149,7 +152,7 @@ def collect_tests_once(
 
         logger.debug(f"Collecting tests with command: {' '.join(collect_cmd)}")
 
-        success, output = tool._run_subprocess(collect_cmd)
+        success, output = tool._run_subprocess(collect_cmd, timeout)
         if not success:
             # Log the failure with output to aid debugging
             output_preview = output[:500] if output else "(no output)"
@@ -186,6 +189,7 @@ def collect_tests_once(
 def get_total_test_count(
     tool: PytestPlugin,
     target_files: list[str],
+    timeout: int | float | None = None,
 ) -> int:
     """Get total count of all available tests.
 
@@ -196,6 +200,8 @@ def get_total_test_count(
             methods. Must support running pytest commands.
         target_files: List of file paths or directory paths to check for tests.
             These are passed directly to pytest --collect-only.
+        timeout: Seconds to allow the collection subprocess. ``None`` leaves
+            the tool to fall back to its persisted options.
 
     Returns:
         int: Total number of tests that exist.
@@ -207,4 +213,4 @@ def get_total_test_count(
         >>> count >= 0
         True
     """
-    return collect_tests_once(tool, target_files)
+    return collect_tests_once(tool, target_files, timeout=timeout)

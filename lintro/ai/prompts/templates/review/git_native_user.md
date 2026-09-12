@@ -43,8 +43,8 @@ treat it as evidence that such a file was not updated, not touched, or missing a
 
 ### Mandatory checklist (complete all {checklist_count} before finalizing)
 
-Answer every item. Any **yes** → add a finding. Any **no** → record in `checklist` with
-brief evidence (file:line).
+Answer every item and record it in `checklist` with brief evidence (file:line). A
+**yes** is NOT a finding unless it also identifies a defect.
 
 {checklist}
 

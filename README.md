@@ -45,6 +45,7 @@ assurance tools under a single command-line interface.
 # Install (choose one)
 uv pip install lintro              # Python / PyPI (or: pip install lintro)
 bun add -g @lgtm-hq/lintro         # Node / npm — self-contained, no Python
+# npm ships no Intel Mac binary; Intel Macs install via Homebrew or PyPI
 
 lintro check .                     # Find issues (alias: chk)
 lintro format .                    # Fix issues (alias: fmt)
@@ -297,6 +298,12 @@ system.
 <td>📦</td>
 </tr>
 <tr>
+<td><a href="https://www.checkov.io/"><img src="https://img.shields.io/badge/Checkov-6f42c1?logo=terraform&logoColor=white" alt="Checkov"></a></td>
+<td>🏗️ Terraform (IaC)</td>
+<td>-</td>
+<td><code>uv tool install checkov</code></td>
+</tr>
+<tr>
 <td><a href="https://gitleaks.io/"><img src="https://img.shields.io/badge/Gitleaks-dc2626?logo=git&logoColor=white" alt="Gitleaks"></a></td>
 <td>🔐 Secret Detection</td>
 <td>-</td>
@@ -392,6 +399,7 @@ See the [AI Features Guide](docs/ai-features.md) for full documentation.
 # Lightweight (CLI only — detects tools on PATH)
 uv pip install lintro
 brew tap lgtm-hq/tap && brew install lintro
+# Homebrew ships a prebuilt binary on Apple silicon; Intel Macs install from PyPI
 
 # Full (bundled Python tools: ruff, black, mypy, bandit, import-linter,
 # pydoclint, pylint, yamllint)

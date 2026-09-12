@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
-"""Tests for the release publish gate script (#2516)."""
+"""Tests for the release publish gate script (#2516, #2550)."""
 
 from __future__ import annotations
 
@@ -153,57 +153,173 @@ def _invoke(
     )
 
 
-def test_successful_tag_publish_reports_green(
+@pytest.mark.parametrize(
+    "conclusion",
+    [
+        "success",
+        "failure",
+        "cancelled",
+        "timed_out",
+        "action_required",
+    ],
+)
+def test_completed_non_startup_failure_conclusions_report_green(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    conclusion: str,
 ) -> None:
-    """A successful last tag publish lets the version PR proceed."""
+    """Only a startup failure gates, so every other conclusion is green.
+
+    ``failure``, ``cancelled`` and ``timed_out`` used to redden the gate. They
+    no longer do (#2550): a run that started and then broke is a one-off the
+    next tag may well clear, and freezing the release train on it costs more
+    than the burned version it saves.
+
+    Args:
+        module: The loaded gate module.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory for the Actions output files.
+        capsys: Capture fixture for stdout.
+        conclusion: Completed-run conclusion under test.
+    """
     result = _invoke(
         module=module,
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         capsys=capsys,
-        runs=[_run_payload(head_branch="v0.152.7")],
+        runs=[_run_payload(head_branch="v0.152.7", conclusion=conclusion)],
     )
 
     assert_that(result.code).is_equal_to(0)
     assert_that(result.output).contains("publish_green=true")
     assert_that(result.summary).contains("Publish gate: green")
     assert_that(result.summary).contains("v0.152.7")
+    assert_that(result.summary).contains(f"`{conclusion}`")
 
 
-def test_failed_tag_publish_skips_the_version_pr(
+@pytest.mark.parametrize("status", ["queued", "waiting", "in_progress"])
+def test_non_completed_statuses_report_green(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    status: str,
 ) -> None:
-    """A failed last tag publish reports red without failing the job."""
+    """A run that has not finished carries no startup failure to gate on.
+
+    Args:
+        module: The loaded gate module.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory for the Actions output files.
+        capsys: Capture fixture for stdout.
+        status: Non-completed run status under test.
+    """
     result = _invoke(
         module=module,
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         capsys=capsys,
-        runs=[_run_payload(head_branch="v0.152.6", conclusion="failure")],
+        runs=[
+            _run_payload(
+                head_branch="v0.152.8",
+                status=status,
+                conclusion=None,
+            ),
+        ],
     )
 
     assert_that(result.code).is_equal_to(0)
-    assert_that(result.output).contains("publish_green=false")
-    assert_that(result.stdout).contains(RUN_URL)
-    assert_that(result.summary).contains("version PR skipped")
-    assert_that(result.summary).contains("`failure`")
-    assert_that(result.summary).contains(RUN_URL)
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("Publish gate: green")
+    assert_that(result.summary).contains(f"`{status}`")
 
 
-def test_startup_failure_conclusion_reports_red(
+@pytest.mark.parametrize("conclusion", ["skipped", "neutral", "stale"])
+def test_remaining_documented_conclusions_report_green(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    conclusion: str,
+) -> None:
+    """The rarer documented conclusions are known values, and green.
+
+    Args:
+        module: The loaded gate module.
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Temporary directory for the Actions output files.
+        capsys: Capture fixture for stdout.
+        conclusion: Completed-run conclusion under test.
+    """
+    result = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[_run_payload(head_branch="v0.152.7", conclusion=conclusion)],
+    )
+
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("Publish gate: green")
+    assert_that(result.stdout).does_not_contain("::warning")
+
+
+def test_unknown_conclusion_fails_open_loudly(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Any non-success conclusion, including startup_failure, gates."""
+    """A conclusion outside the known set greens the gate, but visibly.
+
+    Exactly one value gates, so a renamed or newly added conclusion would read
+    as "not a startup failure" and green the gate forever with no trace. An
+    unrecognised value is treated like an API error instead: fail open, and say
+    so in the summary and in a ``::warning::`` annotation.
+    """
+    result = _invoke(
+        module=module,
+        monkeypatch=monkeypatch,
+        tmp_path=tmp_path,
+        capsys=capsys,
+        runs=[_run_payload(head_branch="v0.152.7", conclusion="bootstrap_failure")],
+    )
+
+    assert_that(result.code).is_equal_to(0)
+    assert_that(result.output).contains("publish_green=true")
+    assert_that(result.summary).contains("Publish gate: not evaluated")
+    assert_that(result.summary).contains("`bootstrap_failure`")
+    assert_that(result.stdout).contains("::warning title=Publish gate::")
+    assert_that(result.stdout).contains("bootstrap_failure")
+
+
+def test_known_conclusions_cover_the_documented_api_values(module: Any) -> None:
+    """The allowlist is the documented set, so drift detection is real."""
+    assert_that(set(module._KNOWN_CONCLUSIONS)).is_equal_to(
+        {
+            "success",
+            "failure",
+            "cancelled",
+            "skipped",
+            "timed_out",
+            "action_required",
+            "neutral",
+            "stale",
+            "startup_failure",
+            "none",
+        },
+    )
+
+
+def test_startup_failure_conclusion_skips_the_version_pr(
+    module: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A startup failure reports red without failing the job."""
     result = _invoke(
         module=module,
         monkeypatch=monkeypatch,
@@ -212,8 +328,13 @@ def test_startup_failure_conclusion_reports_red(
         runs=[_run_payload(head_branch="v0.152.5", conclusion="startup_failure")],
     )
 
+    assert_that(result.code).is_equal_to(0)
     assert_that(result.output).contains("publish_green=false")
-    assert_that(result.summary).contains("`startup_failure`")
+    assert_that(result.stdout).contains(RUN_URL)
+    assert_that(result.summary).contains("version PR skipped")
+    assert_that(result.summary).contains("failed at startup")
+    assert_that(result.summary).contains("v0.152.5")
+    assert_that(result.summary).contains(RUN_URL)
 
 
 def test_no_tag_runs_reports_green(
@@ -229,23 +350,32 @@ def test_no_tag_runs_reports_green(
         tmp_path=tmp_path,
         capsys=capsys,
         runs=[
-            _run_payload(head_branch="main", conclusion="failure"),
-            _run_payload(head_branch="tools-candidate-2026", conclusion="failure"),
+            _run_payload(head_branch="main", conclusion="startup_failure"),
+            _run_payload(
+                head_branch="tools-candidate-2026",
+                conclusion="startup_failure",
+            ),
         ],
     )
 
     assert_that(result.code).is_equal_to(0)
     assert_that(result.output).contains("publish_green=true")
-    assert_that(result.summary).contains("No completed")
+    assert_that(result.summary).contains("no broken publish to gate on")
 
 
-def test_in_flight_run_defers_to_the_last_completed_run(
+def test_in_flight_run_hides_an_older_startup_failure(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """A newer in-progress run is ignored in favour of the completed one."""
+    """The newest run wins even when it has not finished (#2550).
+
+    The gate used to skip past in-flight runs to the newest *completed* one.
+    It now judges the newest run by ``created_at`` whatever its status, so a
+    fresh publish already under way is the verdict and an older startup
+    failure no longer blocks the next version PR.
+    """
     result = _invoke(
         module=module,
         monkeypatch=monkeypatch,
@@ -260,6 +390,7 @@ def test_in_flight_run_defers_to_the_last_completed_run(
             ),
             _run_payload(
                 head_branch="v0.152.7",
+                conclusion="startup_failure",
                 created_at="2026-09-09T09:00:00Z",
                 html_url=OLDER_RUN_URL,
             ),
@@ -267,17 +398,17 @@ def test_in_flight_run_defers_to_the_last_completed_run(
     )
 
     assert_that(result.output).contains("publish_green=true")
-    assert_that(result.summary).contains("v0.152.7")
-    assert_that(result.summary).does_not_contain("v0.152.8")
+    assert_that(result.summary).contains("v0.152.8")
+    assert_that(result.summary).does_not_contain("v0.152.7")
 
 
-def test_only_in_flight_runs_report_green(
+def test_newest_startup_failure_wins_over_an_older_success(
     module: Any,
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With nothing completed there is no verdict to gate on."""
+    """Only the newest tag run is consulted, not the best recent one."""
     result = _invoke(
         module=module,
         monkeypatch=monkeypatch,
@@ -285,15 +416,22 @@ def test_only_in_flight_runs_report_green(
         capsys=capsys,
         runs=[
             _run_payload(
+                head_branch="v0.152.7",
+                conclusion="success",
+                created_at="2026-09-09T09:00:00Z",
+                html_url=OLDER_RUN_URL,
+            ),
+            _run_payload(
                 head_branch="v0.152.8",
-                status="in_progress",
-                conclusion=None,
+                conclusion="startup_failure",
+                created_at="2026-09-10T09:00:00Z",
             ),
         ],
     )
 
-    assert_that(result.output).contains("publish_green=true")
-    assert_that(result.summary).contains("no failed publish to gate on")
+    assert_that(result.output).contains("publish_green=false")
+    assert_that(result.summary).contains("failed at startup")
+    assert_that(result.summary).contains("v0.152.8")
 
 
 def test_api_failure_fails_open(
@@ -329,7 +467,7 @@ def test_force_reports_green_without_consulting_the_api(
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         capsys=capsys,
-        runs=[_run_payload(head_branch="v0.152.6", conclusion="failure")],
+        runs=[_run_payload(head_branch="v0.152.6", conclusion="startup_failure")],
         argv=["--force"],
     )
 
@@ -345,19 +483,24 @@ def test_empty_flag_word_from_the_workflow_is_ignored(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The workflow passes a quoted, possibly empty force flag."""
+    """The workflow passes a quoted, possibly empty force flag.
+
+    The run stubbed here concluded ``startup_failure``, the one verdict that
+    gates (#2550), so an empty word silently read as ``--force`` would show up
+    as a green output.
+    """
     result = _invoke(
         module=module,
         monkeypatch=monkeypatch,
         tmp_path=tmp_path,
         capsys=capsys,
-        runs=[_run_payload(head_branch="v0.152.6", conclusion="cancelled")],
+        runs=[_run_payload(head_branch="v0.152.6", conclusion="startup_failure")],
         argv=[""],
     )
 
     assert_that(result.code).is_equal_to(0)
     assert_that(result.output).contains("publish_green=false")
-    assert_that(result.summary).contains("`cancelled`")
+    assert_that(result.summary).contains("failed at startup")
 
 
 def test_unexpected_exception_class_fails_open(

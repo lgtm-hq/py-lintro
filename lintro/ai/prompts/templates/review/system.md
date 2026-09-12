@@ -26,10 +26,8 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 3. Cross-check OpenAPI/docs against new routes, presets, and error shapes when
    applicable.
 4. Complete every checklist item — answer yes/no with file:line evidence.
-5. Report every checklist **yes** as a finding (merge related items that share a root
-   cause).
-6. Scan for additional issues not covered by the checklist.
-7. Output JSON only.
+5. Scan for additional issues not covered by the checklist.
+6. Output JSON only.
 
 **Focus on:**
 

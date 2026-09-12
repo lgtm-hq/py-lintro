@@ -45,8 +45,8 @@ treat it as evidence that such a file was not updated, not touched, or missing a
 
 ### Mandatory checklist (complete all 2 before finalizing)
 
-Answer every item. Any **yes** → add a finding. Any **no** → record in `checklist` with
-brief evidence (file:line).
+Answer every item and record it in `checklist` with brief evidence (file:line). A
+**yes** is NOT a finding unless it also identifies a defect.
 
 1. [security] Does the change fail closed on unknown input?
 2. [logic-bug] Is the renamed module's public signature still compatible?
@@ -138,7 +138,7 @@ Report only defects you can trace to a concrete failure.
 
 - Include all **2** checklist entries in `checklist` (even if answer is
   "no").
-- Every checklist **yes** must have a corresponding finding (link via `checklist_ids`).
+- Finding nothing is a normal result; an empty findings array is valid.
 - Do not duplicate findings — merge related checklist items when they share a root
   cause.
 - Prioritize cross-file integration bugs over isolated nits.

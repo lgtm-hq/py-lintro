@@ -24,6 +24,7 @@ from lintro.ai.review.convergence import (
 )
 from lintro.ai.review.coverage_degradation import (
     COVERAGE_LIMITED_HEADLINE,
+    PARTIAL_REVIEW_LABEL,
     describe_coverage_degradations,
 )
 from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
@@ -49,6 +50,8 @@ __all__ = [
     "format_cross_chunk_note",
     "format_inline_post_cause",
     "format_inline_post_note",
+    "format_lint_facts_note",
+    "format_partial_review_label",
     "format_run_mechanics",
     "format_synthesis_note_line",
     "format_timings_note",
@@ -116,6 +119,27 @@ def format_synthesis_note_line(*, metadata: ReviewMetadata) -> str:
     return f"<sub>{sanitize_comment_text(note, limit=400)}</sub>"
 
 
+def format_partial_review_label(*, metadata: ReviewMetadata) -> str:
+    """Return the header lead-in naming a review as partial, when it is.
+
+    The coverage-limited warning already explains *why* a run was degraded,
+    but it sits below the fold on both posted surfaces. This is the word that
+    goes in the header line itself, so a reader who scans only the first line
+    is never told a partial review was a complete one (#2395). It is the same
+    condition the CI check reports as its ``degraded`` outcome.
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        :data:`PARTIAL_REVIEW_LABEL`, or an empty string when the run's
+        finding depth was complete.
+    """
+    if metadata.findings_coverage_complete:
+        return ""
+    return PARTIAL_REVIEW_LABEL
+
+
 def format_coverage_limited_warning(*, metadata: ReviewMetadata) -> str:
     """Render the shared coverage-limited warning for posted GitHub surfaces.
 
@@ -137,6 +161,27 @@ def format_coverage_limited_warning(*, metadata: ReviewMetadata) -> str:
         f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}** — "
         f"{sanitize_comment_text(detail, limit=400)}"
     )
+
+
+def format_lint_facts_note(*, metadata: ReviewMetadata) -> str:
+    """Render the header note for a run that reviewed without linter facts.
+
+    ``--lint-report`` feeds the untrusted lint job's saved report into the
+    prompt (#2571). When that report was asked for but could not be used, the
+    review still runs from the diff alone, and this line says so under the
+    header, where a scanning reader meets it, so a round without deterministic
+    facts is never mistaken for one that had them.
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        A blockquote note, or an empty string when there is nothing to say.
+    """
+    note = metadata.lint_facts_note.strip()
+    if not note:
+        return ""
+    return f"> ℹ️ **Linter facts** — {sanitize_comment_text(note, limit=300)}"
 
 
 _INLINE_POST_CAUSES: dict[InlinePostFailureKind, str] = {

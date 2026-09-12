@@ -3,9 +3,12 @@
 
 Cross-run download is not ``download-artifact``'s default. This helper lists
 completed trusted runs of ``ai-review.yml`` and prints the newest run that
-carries a valid ``lintro-review-state-pr-<N>-*`` artifact. The current run is
-excluded. Conclusion is irrelevant: an INCOMPLETE (red) round is exactly the
-run to resume from (#2154).
+carries a valid ``lintro-review-state-pr-<N>-*`` artifact. Conclusion is
+irrelevant: an INCOMPLETE (red) round is exactly the run to resume from
+(#2154). The current run is excluded from that walk, with one exception: on
+a rerun (``GITHUB_RUN_ATTEMPT > 1``) whose earlier attempt already uploaded
+state artifacts, the current run id is selected so the rerun resumes its own
+cancelled attempt instead of re-reviewing the whole diff (#2506).
 
 ``upload`` writes the current ``ai-review-state/`` directory through the
 Actions artifact service from inside ``run-ai-review.sh``. A cancelled job
@@ -49,9 +52,19 @@ from urllib.parse import urlparse
 WORKFLOW_FILENAME: Final[str] = "ai-review.yml"
 WORKFLOW_PATH: Final[str] = f".github/workflows/{WORKFLOW_FILENAME}"
 WORKFLOW_EVENT: Final[str] = "pull_request_target"
+# The untrusted lint job (#2571): docker-ci.yml runs on ``pull_request`` with
+# no secrets, lints the PR head, and uploads lintro's JSON report under this
+# artifact name. The review job downloads it for the exact head it reviews.
+LINT_WORKFLOW_FILENAME: Final[str] = "docker-ci.yml"
+LINT_WORKFLOW_PATH: Final[str] = f".github/workflows/{LINT_WORKFLOW_FILENAME}"
+LINT_WORKFLOW_EVENT: Final[str] = "pull_request"
+LINT_REPORT_ARTIFACT: Final[str] = "linting-json-report"
 STATE_ARTIFACT_PREFIX: Final[str] = "lintro-review-state-pr-"
 _STATE_NAME_RE: Final[re.Pattern[str]] = re.compile(
     rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-",
+)
+_STATE_ATTEMPT_RE: Final[re.Pattern[str]] = re.compile(
+    rf"^{re.escape(STATE_ARTIFACT_PREFIX)}(\d+)-attempt-(\d+)-",
 )
 _GH_API_TIMEOUT_SECONDS: Final[int] = 30
 _GH_API_ATTEMPTS: Final[int] = 3
@@ -114,6 +127,8 @@ class WorkflowRun:
             when the API omitted or sent an unusable timestamp.
         pull_request_numbers: PRs attached on the run. Empty on some
             ``pull_request_target`` payloads; then artifact names decide.
+        head_sha: Commit the run executed for. Empty when the payload
+            omitted it; the lint-report locator then rejects the run.
     """
 
     run_id: int
@@ -122,6 +137,22 @@ class WorkflowRun:
     path: str
     created_at: datetime | None
     pull_request_numbers: tuple[int, ...] = ()
+    head_sha: str = ""
+
+
+@dataclass(frozen=True)
+class LocatedLintReport:
+    """Where the lint report for one PR head lives, if anywhere.
+
+    Attributes:
+        run_id: docker-ci run carrying an unexpired lint JSON report for
+            exactly ``head_sha``. ``None`` when no such run exists yet.
+        head_sha: PR head the search was pinned to. Empty when it could not
+            be resolved, in which case ``run_id`` is always ``None``.
+    """
+
+    run_id: int | None
+    head_sha: str = ""
 
 
 GhApi = Callable[[str], Any | None]
@@ -180,6 +211,52 @@ def has_valid_state_artifact(
     )
 
 
+def state_artifact_attempt(name: str, *, pr_number: int) -> int | None:
+    """Return the run attempt encoded in a state artifact name.
+
+    Names are built by :func:`state_artifact_name`, which embeds
+    ``-attempt-<a>-``.
+
+    Args:
+        name: Artifact name.
+        pr_number: Pull request that must own the artifact.
+
+    Returns:
+        The attempt number, or ``None`` when the name is not a state
+        artifact for that PR or carries no attempt segment.
+    """
+    match = _STATE_ATTEMPT_RE.match(name)
+    if match is None or int(match.group(1)) != pr_number:
+        return None
+    return int(match.group(2))
+
+
+def has_earlier_attempt_state_artifact(
+    artifacts: Sequence[Artifact],
+    *,
+    pr_number: int,
+    attempt: int,
+) -> bool:
+    """Return whether an earlier attempt of this run left usable state.
+
+    Args:
+        artifacts: Artifacts attached to the current run.
+        pr_number: Pull request that must own the artifact.
+        attempt: ``GITHUB_RUN_ATTEMPT`` of the running attempt.
+
+    Returns:
+        True when a non-expired state artifact was uploaded by an
+        attempt strictly older than ``attempt``.
+    """
+    for artifact in artifacts:
+        if artifact.expired:
+            continue
+        uploaded = state_artifact_attempt(artifact.name, pr_number=pr_number)
+        if uploaded is not None and uploaded < attempt:
+            return True
+    return False
+
+
 def is_within_retention(run: WorkflowRun, *, now: datetime) -> bool:
     """Return whether ``run`` can still hold a non-expired state artifact.
 
@@ -215,6 +292,21 @@ def mentions_other_pr(run: WorkflowRun, *, pr_number: int) -> bool:
     return bool(run.pull_request_numbers) and pr_number not in run.pull_request_numbers
 
 
+def is_trusted_review_run(run: WorkflowRun) -> bool:
+    """Return whether ``run`` is a trusted AI-review run, ignoring status.
+
+    Status is excluded so the *current* (in-progress) run can be trust
+    checked when resuming its own previous attempt (#2506).
+
+    Args:
+        run: Candidate workflow run.
+
+    Returns:
+        True when event and workflow path both match.
+    """
+    return run.event == WORKFLOW_EVENT and Path(run.path).name == WORKFLOW_FILENAME
+
+
 def is_trusted_completed_run(run: WorkflowRun) -> bool:
     """Return whether ``run`` is a completed trusted AI-review run.
 
@@ -224,12 +316,7 @@ def is_trusted_completed_run(run: WorkflowRun) -> bool:
     Returns:
         True when event, status, and workflow path all match.
     """
-    path_name = Path(run.path).name
-    return (
-        run.status == "completed"
-        and run.event == WORKFLOW_EVENT
-        and path_name == WORKFLOW_FILENAME
-    )
+    return run.status == "completed" and is_trusted_review_run(run)
 
 
 def select_prior_run_id(
@@ -339,6 +426,7 @@ def parse_workflow_run(payload: Mapping[str, Any]) -> WorkflowRun | None:
         path=str(payload.get("path", "")),
         created_at=_parse_datetime(str(payload.get("created_at", ""))),
         pull_request_numbers=_parse_pr_numbers(payload),
+        head_sha=str(payload.get("head_sha", "") or ""),
     )
 
 
@@ -578,11 +666,85 @@ def fetch_artifacts(
     return artifacts
 
 
+def fetch_run(
+    repo: str,
+    run_id: int,
+    *,
+    gh_api: GhApi = _gh_api,
+) -> WorkflowRun | None:
+    """Fetch one workflow run.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        run_id: Actions run id.
+        gh_api: Injectable GitHub API caller.
+
+    Transient ``gh api`` failures are retried like every other read in
+    this module: rejecting the current run after one timeout would send
+    a rerun back to older state it has already superseded.
+
+    Returns:
+        The parsed run, or ``None`` when the call or the payload fails.
+    """
+    payload = _call_with_retry(f"repos/{repo}/actions/runs/{run_id}", gh_api)
+    if not isinstance(payload, Mapping):
+        return None
+    return parse_workflow_run(payload)
+
+
+def can_resume_own_prior_attempt(
+    *,
+    repo: str,
+    pr_number: int,
+    run_id: int,
+    attempt: int,
+    gh_api: GhApi = _gh_api,
+) -> bool:
+    """Return whether this run's previous attempt left resumable state.
+
+    A rerun keeps ``GITHUB_RUN_ID`` and bumps ``GITHUB_RUN_ATTEMPT``, and
+    the artifacts an earlier attempt uploaded stay attached to the same
+    run. Before #2506 the locator excluded the current run outright and
+    walked only *completed* runs, so a review cancelled at the job budget
+    re-reviewed the whole diff on every rerun. The same trust rules apply
+    as to any other resume source: the run must be a
+    ``pull_request_target`` run of this workflow and must not belong to a
+    different pull request. Only ``status == "completed"`` is dropped —
+    the run is by definition still in progress.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        pr_number: Pull request whose state is being resumed.
+        run_id: ``GITHUB_RUN_ID`` of the running attempt.
+        attempt: ``GITHUB_RUN_ATTEMPT`` of the running attempt.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        True when the current run may be used as its own resume source.
+    """
+    if attempt <= 1:
+        return False
+    run = fetch_run(repo, run_id, gh_api=gh_api)
+    if run is None or not is_trusted_review_run(run):
+        _log_locate(f"own-attempt resume rejected: run-id={run_id} not trusted")
+        return False
+    if mentions_other_pr(run, pr_number=pr_number):
+        _log_locate(f"own-attempt resume rejected: run-id={run_id} other PR")
+        return False
+    artifacts = fetch_artifacts(repo, run_id, gh_api=gh_api)
+    return has_earlier_attempt_state_artifact(
+        artifacts,
+        pr_number=pr_number,
+        attempt=attempt,
+    )
+
+
 def locate_prior_state(
     *,
     repo: str,
     pr_number: int,
     current_run_id: int | None,
+    run_attempt: int | None = None,
     gh_api: GhApi = _gh_api,
     now: datetime | None = None,
 ) -> LocatedPrior:
@@ -601,6 +763,10 @@ def locate_prior_state(
         repo: ``owner/name`` repository slug.
         pr_number: Pull request whose state is being resumed.
         current_run_id: Run to exclude, if known.
+        run_attempt: ``GITHUB_RUN_ATTEMPT`` of the running attempt. On a
+            rerun (``> 1``) whose earlier attempt left state artifacts the
+            current run is selected instead, so a rerun resumes itself
+            (#2506).
         gh_api: Injectable GitHub API caller.
         now: Clock used for the retention cutoff; defaults to UTC now.
 
@@ -608,6 +774,20 @@ def locate_prior_state(
         Newest eligible run and optional older same-PR seed.
     """
     clock = now if now is not None else datetime.now(tz=UTC)
+    if current_run_id is not None and run_attempt is not None:
+        own = can_resume_own_prior_attempt(
+            repo=repo,
+            pr_number=pr_number,
+            run_id=current_run_id,
+            attempt=run_attempt,
+            gh_api=gh_api,
+        )
+        if own:
+            _log_locate(
+                f"selected run-id={current_run_id}: own attempt "
+                f"{run_attempt - 1} state",
+            )
+            return LocatedPrior(run_id=current_run_id)
     path = (
         f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
         f"?event={WORKFLOW_EVENT}&status=completed"
@@ -677,6 +857,156 @@ def locate_prior_run_id(
     ).run_id
 
 
+def is_lint_run_for_head(run: WorkflowRun, *, head_sha: str) -> bool:
+    """Return whether a run is the untrusted lint workflow for ``head_sha``.
+
+    The listing is already filtered by ``head_sha`` server-side; this is the
+    client-side check that makes the pin real (#2571): a run whose recorded
+    head differs from the PR head, or whose payload omitted it, is never a
+    source of facts about this head.
+
+    Args:
+        run: Candidate workflow run.
+        head_sha: PR head commit the review is looking at.
+
+    Returns:
+        True when event, workflow path, and head all match.
+    """
+    return (
+        bool(head_sha)
+        and run.head_sha == head_sha
+        and run.event == LINT_WORKFLOW_EVENT
+        and run.path == LINT_WORKFLOW_PATH
+    )
+
+
+def has_lint_report_artifact(artifacts: Sequence[Artifact]) -> bool:
+    """Return whether a run's artifacts include an unexpired lint report.
+
+    Args:
+        artifacts: Artifacts listed on the run.
+
+    Returns:
+        True when :data:`LINT_REPORT_ARTIFACT` is present and not expired.
+    """
+    return any(
+        artifact.name == LINT_REPORT_ARTIFACT and not artifact.expired
+        for artifact in artifacts
+    )
+
+
+def fetch_pr_head_sha(
+    repo: str,
+    pr_number: int,
+    *,
+    gh_api: GhApi = _gh_api,
+) -> str:
+    """Return the current head commit of a pull request.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        pr_number: Pull request number.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The head sha, or an empty string when it cannot be read.
+    """
+    payload = _call_with_retry(f"repos/{repo}/pulls/{pr_number}", gh_api)
+    if not isinstance(payload, Mapping):
+        return ""
+    head = payload.get("head")
+    if not isinstance(head, Mapping):
+        return ""
+    sha = head.get("sha")
+    return sha if isinstance(sha, str) else ""
+
+
+def locate_lint_report(
+    *,
+    repo: str,
+    head_sha: str,
+    gh_api: GhApi = _gh_api,
+) -> LocatedLintReport:
+    """Find the docker-ci run holding the lint report for one PR head.
+
+    Walks the workflow's runs for ``head_sha`` newest-first and returns the
+    first one carrying an unexpired :data:`LINT_REPORT_ARTIFACT`. Run status
+    is deliberately not required to be ``completed``: the lint job uploads
+    its report while sibling jobs may still be running, and a report that is
+    already there is a report for this head.
+
+    Args:
+        repo: ``owner/name`` repository slug.
+        head_sha: PR head commit the review is looking at.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The located run, or ``run_id=None`` when no report exists yet.
+    """
+    if not head_sha:
+        _log_locate("lint report: no head sha; nothing to look for")
+        return LocatedLintReport(run_id=None)
+    path = (
+        f"repos/{repo}/actions/workflows/{LINT_WORKFLOW_FILENAME}/runs"
+        f"?event={LINT_WORKFLOW_EVENT}&head_sha={head_sha}"
+    )
+    for item in _yield_api_pages(
+        path,
+        "workflow_runs",
+        per_page=RUNS_PER_PAGE,
+        gh_api=gh_api,
+    ):
+        run = parse_workflow_run(item)
+        if run is None:
+            continue
+        if not is_lint_run_for_head(run, head_sha=head_sha):
+            _log_locate(
+                f"lint report: skip run-id={run.run_id}: "
+                f"head {run.head_sha or '?'} is not {head_sha}",
+            )
+            continue
+        if not has_lint_report_artifact(
+            fetch_artifacts(repo, run.run_id, gh_api=gh_api),
+        ):
+            _log_locate(f"lint report: run-id={run.run_id} has no report yet")
+            continue
+        _log_locate(f"lint report: selected run-id={run.run_id} for {head_sha}")
+        return LocatedLintReport(run_id=run.run_id, head_sha=head_sha)
+    _log_locate(f"lint report: none for head {head_sha}")
+    return LocatedLintReport(run_id=None, head_sha=head_sha)
+
+
+def locate_lint_report_from_env(
+    env: Mapping[str, str],
+    *,
+    gh_api: GhApi = _gh_api,
+) -> LocatedLintReport:
+    """Resolve the lint-report run from process environment.
+
+    The head is read from the pull request itself, not from the event
+    payload, so the pin follows what ``lintro review --pr`` is about to fetch.
+    Any missing value or API failure is fail-safe: no run, so the review
+    proceeds without linter facts.
+
+    Args:
+        env: Process environment.
+        gh_api: Injectable GitHub API caller.
+
+    Returns:
+        The located run, or ``run_id=None``.
+    """
+    repo = env.get("GITHUB_REPOSITORY", "").strip()
+    pr_number = _parse_optional_int(env.get("PR_NUMBER"))
+    if not repo or pr_number is None or pr_number <= 0:
+        return LocatedLintReport(run_id=None)
+    try:
+        head_sha = fetch_pr_head_sha(repo, pr_number, gh_api=gh_api)
+        return locate_lint_report(repo=repo, head_sha=head_sha, gh_api=gh_api)
+    except Exception as exc:
+        _log_locate(f"lint report locator exception: {type(exc).__name__}")
+        return LocatedLintReport(run_id=None)
+
+
 def write_run_id(run_id: int | None, output_path: Path | None) -> None:
     """Write ``run-id=`` for ``actions/download-artifact``.
 
@@ -735,11 +1065,13 @@ def locate_state_from_env(
     if not repo or pr_number is None or pr_number <= 0:
         return LocatedPrior(run_id=None)
     current_run_id = _parse_optional_int(env.get("GITHUB_RUN_ID"))
+    run_attempt = _parse_optional_int(env.get("GITHUB_RUN_ATTEMPT"))
     try:
         return locate_prior_state(
             repo=repo,
             pr_number=pr_number,
             current_run_id=current_run_id,
+            run_attempt=run_attempt,
             gh_api=gh_api,
             now=now,
         )
@@ -1257,6 +1589,13 @@ def build_parser() -> argparse.ArgumentParser:
         "locate",
         help="Write run-id= for the latest eligible prior-state run.",
     )
+    subparsers.add_parser(
+        "lint-report",
+        help=(
+            "Print run-id= and head-sha= for the docker-ci run holding the "
+            "lint JSON report of the PR's current head (empty when none)."
+        ),
+    )
     upload = subparsers.add_parser(
         "upload",
         help="Upload ai-review-state/ from inside the review step.",
@@ -1290,6 +1629,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "lint-report":
+        lint_report = locate_lint_report_from_env(os.environ)
+        run_id = "" if lint_report.run_id is None else str(lint_report.run_id)
+        sys.stdout.write(f"run-id={run_id}\nhead-sha={lint_report.head_sha}\n")
+        return 0
     if args.command == "upload":
         uploaded = upload_from_env(
             os.environ,
