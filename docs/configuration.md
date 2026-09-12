@@ -331,10 +331,12 @@ configuration.
 #### JSON output
 
 In `--output-format json` the tallies appear under `summary`, alongside `total_issues`,
-`total_net_resolved` and `total_remaining`. The `summary.health_score` object is
-**gone** — this is a breaking change for anything that read it. `severity_delta` appears
-only when a comparable baseline exists; on a first run the key is absent rather than
-zero. The **stdout** document looks like this:
+`total_net_resolved` and `total_remaining`. `summary.total_fixed` carries the same value
+as `total_net_resolved` and is **deprecated**: read the new key. It will be removed in a
+later release. The `summary.health_score` object is **gone** — this is a breaking change
+for anything that read it. `severity_delta` appears only when a comparable baseline
+exists; on a first run the key is absent rather than zero. The **stdout** document looks
+like this:
 
 ```json
 {
@@ -1003,7 +1005,10 @@ detected before the mutation phase minus the residual measured after it. It is n
 called "fixed" because no tool reported it — it is the difference between two
 measurements, and a finding one tool fixed and another reintroduced nets out of it. The
 word "fixed" is kept only where a tool reports its own fix count. In the JSON report the
-keys are `net_resolved` per tool and `summary.total_net_resolved` for the run.
+keys are `net_resolved` per tool and `summary.total_net_resolved` for the run. The
+previous spellings still appear with the same values and are **deprecated**, to be
+removed in a later release: `fixed` per tool, `summary.total_fixed`,
+`fixed_issues_count` in the JSONL stream and `fixed_count` in the MCP tool summary.
 
 **Which tools the pass covers.** The central verify pass covers the mutating tools that
 declare `CHECK`. Format-only tools — prettier, oxfmt, rustfmt and shfmt — do not declare
@@ -1049,8 +1054,9 @@ checker such as golangci-lint aggregates one result across module roots, so miss
 deadline on one root leaves the others unchecked. An unknown residual fails the run, and
 it is never rendered as a measured after-count: the summary prints `unknown` in the net
 resolved and remaining columns with the reason beside it, and the JSON report carries
-`"remaining": null`, `"net_resolved": null` and `"residual_unknown": true`. The tool's
-pre-fix findings are still listed, because those _were_ measured.
+`"remaining": null`, `"net_resolved": null` (and `"fixed": null`) plus
+`"residual_unknown": true`. The tool's pre-fix findings are still listed, because those
+_were_ measured.
 
 **Mutation runs one tool at a time.** Two mutating capabilities in flight over the same
 file would race on its bytes, so within a `format` run each batch dispatches one tool at

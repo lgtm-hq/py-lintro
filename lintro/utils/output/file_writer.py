@@ -359,6 +359,8 @@ def write_output_file(
             "summary": {
                 "total_issues": total_issues,
                 "total_net_resolved": total_fixed,
+                # Deprecated alias of ``total_net_resolved``, same value.
+                "total_fixed": total_fixed,
                 "tools_run": len(all_results),
                 # Timeouts are execution failures, not findings, so they never
                 # appear in ``total_issues``; a consumer reads them here.

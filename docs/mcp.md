@@ -104,7 +104,8 @@ quietly leaving the workspace modified.
       "status": "passed",
       "issue_count": 0,
       "duration": 0.66,
-      "net_resolved": 2
+      "net_resolved": 2,
+      "fixed_count": 2
     }
   ],
   "summary": { "total_findings": 0, "tools_run": 1, "success": true },
@@ -116,7 +117,8 @@ quietly leaving the workspace modified.
 
 `findings` here is the _residue_: what the formatters could not fix. How much the run
 resolved on net — issues detected before the mutation phase minus the residual measured
-after it — is `net_resolved` on each tool summary.
+after it — is `net_resolved` on each tool summary. `fixed_count` carries the same value
+and is deprecated; it will be removed in a later release.
 
 Notes and limits:
 

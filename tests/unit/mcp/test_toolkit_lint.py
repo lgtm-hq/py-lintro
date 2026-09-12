@@ -327,6 +327,7 @@ def test_format_reports_only_the_findings_it_could_not_fix(tmp_path: Path) -> No
     assert_that(rules).contains("F821")
     assert_that(rules).does_not_contain("F401")
     assert_that(payload["tools"][0]["net_resolved"]).is_greater_than(0)
+    assert_that(payload["tools"][0]["fixed_count"]).is_greater_than(0)
 
 
 def test_format_on_a_clean_workspace_reports_no_changes(tmp_path: Path) -> None:

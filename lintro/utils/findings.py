@@ -152,6 +152,9 @@ class ToolRunSummary:
         }
         if self.net_resolved is not None:
             data["net_resolved"] = self.net_resolved
+            # Deprecated alias of ``net_resolved``, carrying the same value
+            # so existing MCP consumers keep working.
+            data["fixed_count"] = self.net_resolved
         if self.skip_reason:
             data["skip_reason"] = self.skip_reason
         return data

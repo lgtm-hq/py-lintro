@@ -90,6 +90,8 @@ def test_handler_initializes_totals() -> None:
     totals = handler.get_totals()
 
     assert_that(totals).contains_key("issues", "net_resolved", "remaining")
+    # The deprecated alias is still tracked.
+    assert_that(totals).contains_key("fixed")
     assert_that(totals["issues"]).is_equal_to(0)
 
 
@@ -133,6 +135,7 @@ def test_handle_result_tracks_fix_counts(mock_fix_result: ToolResult) -> None:
 
     totals = handler.get_totals()
     assert_that(totals["net_resolved"]).is_equal_to(3)
+    assert_that(totals["fixed"]).is_equal_to(3)
     assert_that(totals["remaining"]).is_equal_to(1)
 
 
@@ -363,7 +366,9 @@ def test_result_to_dict_includes_fix_counts(mock_fix_result: ToolResult) -> None
     data = handler._result_to_dict(mock_fix_result)
 
     assert_that(data).contains_key("net_resolved_count", "remaining_issues_count")
+    assert_that(data).contains_key("fixed_issues_count")
     assert_that(data["net_resolved_count"]).is_equal_to(3)
+    assert_that(data["fixed_issues_count"]).is_equal_to(3)
 
 
 def test_create_streaming_handler_with_format() -> None:

@@ -42,14 +42,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   overlapping mutators out of the same batch (#2606).
 - **output**: the before-minus-after figure is labelled **net resolved**, not "fixed" —
   it is the difference between two measurements, not any tool's reported fix count, and
-  a finding one tool fixed and another reintroduced nets out of it. Breaking for
-  consumers of the machine-readable reports: `summary.total_fixed` is now
-  `summary.total_net_resolved`, a result's `fixed` is now `net_resolved`, the JSONL
-  stream's `fixed_issues_count` is now `net_resolved_count`, and the MCP tool summary's
-  `fixed_count` is now `net_resolved`. In the console the summary column reads
-  `Net Resolved`, the totals row reads `Net Resolved (Native)`, the plain-text report
-  line reads `Total Net Resolved:` and the final status line reads `N net resolved`.
-  "Fixed" is kept where a tool reports its own fix count.
+  a finding one tool fixed and another reintroduced nets out of it. In the console the
+  summary column reads `Net Resolved`, the totals row reads `Net Resolved (Native)`, the
+  plain-text report line reads `Total Net Resolved:` and the final status line reads
+  `N net resolved`. "Fixed" is kept where a tool reports its own fix count.
+- **output**: the machine-readable reports gain `summary.total_net_resolved`, a result's
+  `net_resolved`, the JSONL stream's `net_resolved_count` and the MCP tool summary's
+  `net_resolved`. Nothing is removed: every existing key is still emitted with the same
+  value, so no consumer breaks.
 - **plugins**: `DEFAULT_EXCLUDE_PATTERNS` moved to `lintro.utils.path_filtering` and is
   now a `tuple[str, ...]` instead of a `list[str]`. It is still re-exported from
   `lintro.plugins.base` and `lintro.plugins.file_discovery`, so imports keep working,
@@ -58,6 +58,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `list(DEFAULT_EXCLUDE_PATTERNS) + [...]`.
 
 ### Deprecated
+
+- **output**: `summary.total_fixed`, a result's `fixed`, the JSONL stream's
+  `fixed_issues_count` and the MCP tool summary's `fixed_count` are deprecated in favour
+  of `summary.total_net_resolved`, `net_resolved`, `net_resolved_count` and
+  `net_resolved`. Both spellings carry the same value; the old ones are removed in a
+  later release. The figure is a before-minus-after difference, not a tool's own fix
+  count, and the new names say so.
 
 ### Removed
 

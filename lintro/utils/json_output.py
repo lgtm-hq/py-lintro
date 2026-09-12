@@ -135,6 +135,10 @@ def serialize_tool_result(
             # counts are null rather than zero: a consumer must be able to
             # tell "nothing left" from "nobody looked".
             data["net_resolved"] = None
+            # ``fixed`` is the deprecated spelling of ``net_resolved``, kept
+            # at the same value so existing consumers keep working. It will
+            # be removed in a later release.
+            data["fixed"] = None
             data["remaining"] = None
             data["residual_unknown"] = True
             data["residual_unknown_reason"] = result.residual_unknown_reason
@@ -142,6 +146,8 @@ def serialize_tool_result(
             fixed = getattr(result, "fixed_issues_count", None)
             remaining = getattr(result, "remaining_issues_count", None)
             data["net_resolved"] = fixed if fixed is not None else 0
+            # Deprecated alias of ``net_resolved``; see above.
+            data["fixed"] = data["net_resolved"]
             data["remaining"] = remaining if remaining is not None else 0
     metadata = getattr(result, "metadata", None)
     if isinstance(metadata, dict) and metadata:
@@ -195,6 +201,9 @@ def create_json_output(
         "summary": {
             "total_issues": total_issues,
             "total_net_resolved": total_fixed if action_enum == Action.FIX else 0,
+            # Deprecated alias of ``total_net_resolved``, carrying the same
+            # value so existing consumers keep working.
+            "total_fixed": total_fixed if action_enum == Action.FIX else 0,
             # In CHECK/TEST mode nothing is fixed, so remaining mirrors the
             # total issues rather than the misleading constant 0.
             "total_remaining": (

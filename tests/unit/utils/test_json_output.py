@@ -72,6 +72,8 @@ def test_serialize_tool_result_fix_mode_defaults_unset_counts_to_zero() -> None:
     data = serialize_tool_result(result, action=Action.FIX)
 
     assert_that(data["net_resolved"]).is_equal_to(0)
+    # The deprecated alias is still emitted, with the same value.
+    assert_that(data["fixed"]).is_equal_to(0)
     assert_that(data["remaining"]).is_equal_to(0)
 
 
@@ -150,6 +152,7 @@ def test_file_and_stdout_serializers_parity_fix_mode(
     # Merged/deduped count: detected [E001, E002] + remaining [E002] -> 2
     assert_that(stdout_result["issues_count"]).is_equal_to(2)
     assert_that(stdout_result["net_resolved"]).is_equal_to(1)
+    assert_that(stdout_result["fixed"]).is_equal_to(1)
     assert_that(stdout_result["remaining"]).is_equal_to(1)
 
 
@@ -168,6 +171,32 @@ def test_check_mode_total_remaining_mirrors_total_issues(
 
     assert_that(data["summary"]["total_remaining"]).is_equal_to(5)
     assert_that(data["summary"]["total_issues"]).is_equal_to(5)
+
+
+def test_the_summary_carries_net_resolved_and_its_deprecated_alias(
+    check_result_with_issue: ToolResult,
+) -> None:
+    """Both spellings of the before-minus-after total are emitted.
+
+    ``total_net_resolved`` is the name the figure earned — issues detected
+    before the mutation phase minus the residual measured after it — and
+    ``total_fixed`` is kept beside it, at the same value, so consumers that
+    read the old key keep working until it is removed (#1743).
+
+    Args:
+        check_result_with_issue: A result carrying one finding.
+    """
+    data = create_json_output(
+        action=Action.FIX,
+        results=[check_result_with_issue],
+        total_issues=5,
+        total_fixed=3,
+        total_remaining=2,
+        exit_code=1,
+    )
+
+    assert_that(data["summary"]["total_net_resolved"]).is_equal_to(3)
+    assert_that(data["summary"]["total_fixed"]).is_equal_to(3)
 
 
 def test_create_json_output_includes_summary_and_fix_suggestions_together() -> None:

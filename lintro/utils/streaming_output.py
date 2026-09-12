@@ -46,6 +46,8 @@ class StreamingResultHandler:
         self._totals = {
             "issues": 0,
             "net_resolved": 0,
+            # Deprecated alias of ``net_resolved``, kept in step with it.
+            "fixed": 0,
             "remaining": 0,
             "tools_run": 0,
             "tools_failed": 0,
@@ -117,6 +119,7 @@ class StreamingResultHandler:
             remaining = getattr(result, "remaining_issues_count", None)
             if fixed is not None:
                 self._totals["net_resolved"] += fixed
+                self._totals["fixed"] += fixed
             if remaining is not None:
                 self._totals["remaining"] += remaining
 
@@ -184,6 +187,8 @@ class StreamingResultHandler:
             data["initial_issues_count"] = result.initial_issues_count
         if result.fixed_issues_count is not None:
             data["net_resolved_count"] = result.fixed_issues_count
+            # Deprecated alias of ``net_resolved_count``, same value.
+            data["fixed_issues_count"] = result.fixed_issues_count
         if result.remaining_issues_count is not None:
             data["remaining_issues_count"] = result.remaining_issues_count
         if result.residual_unknown:
