@@ -46,7 +46,7 @@ class AINotAvailableError(AIError):
     """AI dependencies are not installed.
 
     Raised when AI features are requested but the required packages
-    (anthropic, openai) are not available. The error message includes
+    are not available. The error message includes
     installation instructions.
     """
 

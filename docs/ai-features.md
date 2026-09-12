@@ -7,7 +7,10 @@ interactive fix suggestions on top of standard linting results.
 >
 > ```bash
 > pip install -e '.[ai]'
-> export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY for OpenAI
+> # Set the API-key variable your chosen provider declares — see "Providers".
+> export ANTHROPIC_API_KEY=sk-ant-...   # anthropic
+> export CURSOR_API_KEY=...            # cursor
+> export OPENAI_API_KEY=sk-...         # openai
 > ```
 
 ## Quick Start
@@ -17,7 +20,8 @@ interactive fix suggestions on top of standard linting results.
 # .lintro-config.yaml
 # ai:
 #   enabled: true
-#   provider: anthropic
+#   provider: anthropic | cursor | openai   # required, no default
+#   transport: api | cli                    # no default; doctor flags it unset
 
 # Run check — AI summary is generated automatically (1 API call)
 lintro check
@@ -201,8 +205,8 @@ degrades gracefully to a skipped result rather than failing the run.
 # .lintro-config.yaml
 ai:
   enabled: true
-  provider: anthropic
-  transport: api
+  provider: anthropic # or cursor / openai — required, no default
+  transport: api # or cli — no default; doctor flags it unset
 tools:
   idiom-review:
     options:
@@ -869,10 +873,11 @@ ai:
   enabled: true # master switch (AND-ed with the toggles below)
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
-  provider: anthropic # or "openai" / "cursor" ("cursor" needs transport: cli)
+  provider: anthropic # "anthropic" | "cursor" | "openai"; no default
   transport: api # "api" (SDK) or "cli" (local agent binary); no default
-  # model: claude-sonnet-4-6  # uses provider default if omitted
-  # api_key_env: ANTHROPIC_API_KEY   # uses provider default if omitted
+  # Omit `model` and `api_key_env` to take the chosen provider's defaults
+  # (`lintro doctor` prints the API-key variable in effect, `lintro status` the
+  # model); set them only to override.
 ```
 
 ### Feature Toggles
@@ -921,8 +926,8 @@ ai:
   lint: true # AI lint summaries during chk/fmt
   review: true # the `lintro review` AI diff review
 
-  # Provider: "anthropic", "openai" or "cursor" ("cursor" is CLI-only).
-  # (default: anthropic)
+  # Provider: "anthropic", "cursor" or "openai" ("cursor" is CLI-only).
+  # No default — set it explicitly whenever ai.lint or ai.review is enabled.
   provider: anthropic
 
   # How to invoke the provider: "api" (SDK) or "cli" (local agent binary).
@@ -930,8 +935,8 @@ ai:
   # "cursor" requires "cli". See "Transports".
   transport: api
 
-  # Model override (uses provider default if omitted). (str, default: none)
-  # model: claude-sonnet-4-6
+  # Model override; omit to take the chosen provider's default. (str, default: none)
+  # model: claude-sonnet-4-6  # example: an anthropic model id
 
   # Custom env var for API key (uses provider default if omitted).
   # (str, default: none)
@@ -1273,8 +1278,8 @@ CI runs the same test, so a metadata change without the paste-back fails the bui
 | Provider  | Default model       | API key env         | Transports             | CLI binary |
 | --------- | ------------------- | ------------------- | ---------------------- | ---------- |
 | Anthropic | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | `api` (default), `cli` | `claude`   |
-| OpenAI    | `gpt-4o`            | `OPENAI_API_KEY`    | `api` (default), `cli` | `codex`    |
 | Cursor    | `auto`              | `CURSOR_API_KEY`    | `cli` (default)        | `agent`    |
+| OpenAI    | `gpt-4o`            | `OPENAI_API_KEY`    | `api` (default), `cli` | `codex`    |
 
 <!-- END SNAPSHOT: provider-table -->
 
@@ -1298,15 +1303,18 @@ enforceable on an `unpriceable` transport — see the Cursor section below.
 | Anthropic | `claude-sonnet-4-20250514`  | $3.00  | $15.00 |
 | Anthropic | `claude-haiku-4-5-20251001` | $0.80  | $4.00  |
 | Anthropic | `claude-opus-4-20250514`    | $15.00 | $75.00 |
+| Cursor    | `auto`                      | $0.00  | $0.00  |
+| Cursor    | `gpt-5.3-codex-fast`        | $0.00  | $0.00  |
 | OpenAI    | `gpt-4o`                    | $2.50  | $10.00 |
 | OpenAI    | `gpt-4o-mini`               | $0.15  | $0.60  |
 | OpenAI    | `gpt-4-turbo`               | $10.00 | $30.00 |
 | OpenAI    | `o1`                        | $15.00 | $60.00 |
 | OpenAI    | `o1-mini`                   | $1.10  | $4.40  |
-| Cursor    | `auto`                      | $0.00  | $0.00  |
-| Cursor    | `gpt-5.3-codex-fast`        | $0.00  | $0.00  |
 
 <!-- END SNAPSHOT: model-pricing-table -->
+
+The three are peers: lintro picks none of them for you, and `ai.provider` has no
+default. Sections are alphabetical.
 
 #### [Anthropic](https://docs.anthropic.com/)
 
@@ -1317,26 +1325,12 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ```yaml
 ai:
   provider: anthropic
-  # model: claude-sonnet-4-6  # default
+  transport: api # or cli
+  # model: claude-sonnet-4-6  # provider default
 ```
 
 See the [Anthropic API docs](https://docs.anthropic.com/en/api/) for model options and
 pricing.
-
-#### [OpenAI](https://platform.openai.com/docs/)
-
-```bash
-export OPENAI_API_KEY=sk-...
-```
-
-```yaml
-ai:
-  provider: openai
-  # model: gpt-4o  # default
-```
-
-See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
-options and pricing.
 
 #### [Cursor](https://docs.cursor.com/en/cli/overview)
 
@@ -1348,7 +1342,7 @@ export CURSOR_API_KEY=...
 ai:
   provider: cursor
   transport: cli # cursor is CLI-only
-  # model: auto  # default
+  # model: auto  # provider default
 ```
 
 The `agent` CLI bills against a Cursor subscription rather than per token, so its models
@@ -1367,6 +1361,22 @@ cap was set (`cap_is_enforced` in `lintro/ai/review/cost_cap.py`, #2154):
   `CostBudget(max_cost_usd=ai_config.max_cost_usd)` unconditionally
   (`lintro/ai/orchestrator.py`), so a YAML cap does stop those, priced off the same
   fallback estimate.
+
+#### [OpenAI](https://platform.openai.com/docs/)
+
+```bash
+export OPENAI_API_KEY=sk-...
+```
+
+```yaml
+ai:
+  provider: openai
+  transport: api # or cli
+  # model: gpt-4o  # provider default
+```
+
+See the [OpenAI API docs](https://platform.openai.com/docs/api-reference/) for model
+options and pricing.
 
 #### Measuring a provider choice
 

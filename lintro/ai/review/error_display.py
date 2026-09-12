@@ -72,10 +72,14 @@ def _format_error(error: AIError | ValueError) -> tuple[str, str, list[str]]:
             str(error),
             [
                 (
-                    "For Cursor: set CURSOR_API_KEY or run `agent login` "
-                    "(requires agent CLI on PATH)"
+                    "Set the API-key variable your provider declares "
+                    "(`lintro doctor` prints it), or log the provider's CLI in"
                 ),
-                "For Anthropic/OpenAI: set the provider API key env var",
+                (
+                    "CLI transports may authenticate from a login session "
+                    "instead of a key — see https://github.com/lgtm-hq/py-lintro/"
+                    "blob/main/docs/ai-review-transports.md"
+                ),
             ],
         )
     if isinstance(error, AIRateLimitError):
@@ -140,7 +144,10 @@ def _format_execution_error(error: ReviewExecutionError) -> tuple[str, str, list
                 "agentic git — allow 600s+"
             ),
             "Narrow scope with --path for large diffs",
-            "Switch to anthropic/openai for faster direct API calls",
+            (
+                "Use `transport: api` if your provider serves one — direct "
+                "SDK calls avoid the CLI agent loop"
+            ),
             *hints,
         ]
     title = "chunk review" if error.chunk_index is not None else "review"

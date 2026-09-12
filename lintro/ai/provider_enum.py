@@ -12,11 +12,30 @@ from enum import StrEnum, auto
 
 
 class AIProvider(StrEnum):
-    """Supported AI providers."""
+    """Supported AI providers.
+
+    Members are declared alphabetically and must stay that way. Declaration
+    order is the order every provider-shaped surface iterates in — the plugin
+    registry, ``lintro.ai.registry.all_metadata()``, the doctor and status
+    panels, the generated provider tables in ``docs/ai-features.md`` — so it is
+    the one place a ranking could leak in. Alphabetical is the only order that
+    encodes no preference, and it makes "declaration order" and "alphabetical"
+    the same order, so no surface has to choose (#2143).
+    """
 
     ANTHROPIC = auto()
-    OPENAI = auto()
     CURSOR = auto()
+    OPENAI = auto()
+
+
+def accepted_provider_names() -> list[str]:
+    """Return accepted provider names in alphabetical order.
+
+    Returns:
+        Provider names with no implied ranking, for ``click.Choice`` and other
+        callers that need the values rather than a rendered string.
+    """
+    return sorted(member.value for member in AIProvider)
 
 
 def accepted_provider_values() -> str:
@@ -25,7 +44,7 @@ def accepted_provider_values() -> str:
     Returns:
         Comma-separated provider names with no implied ranking.
     """
-    return ", ".join(sorted(member.value for member in AIProvider))
+    return ", ".join(accepted_provider_names())
 
 
 def provider_required_error() -> str:
