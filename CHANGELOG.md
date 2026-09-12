@@ -102,12 +102,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   actionlint, bandit, cargo-audit, cargo-deny, clippy, golangci-lint, mypy, osv-scanner,
   rustfmt, stylelint, trufflehog, typos and yamllint. The summary table reads the flag
   before falling back to matching the message text, so a tool whose wording the suffix
-  list does not recognise is still annotated.
-
-  Not covered by the flag, and still classified by their message: wrappers that decline
-  to run at all without setting `skipped` — vale and commitlint emit a
-  `Skipping <name>: ...` result — and pip-audit's declined-after-match branch, which
-  matched files and refused them (see above) rather than finding none.
+  list does not recognise is still annotated. Two shapes are deliberately not covered
+  and are still classified by their message: wrappers that decline to run at all without
+  setting `skipped` (vale and commitlint emit a `Skipping <name>: ...` result), and
+  pip-audit's declined-after-match branch, which matched files and refused them rather
+  than finding none.
 
 ### Security
 
