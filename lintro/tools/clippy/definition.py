@@ -33,7 +33,7 @@ from lintro.tools.core.batch_runner import (
     batch_fix_timeout_result,
     run_batch_check,
 )
-from lintro.tools.core.cargo import find_cargo_root
+from lintro.tools.core.cargo import cargo_package_args, resolve_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -47,11 +47,19 @@ CLIPPY_DEFAULT_TIMEOUT: int = 120
 CLIPPY_FILE_PATTERNS: list[str] = ["*.rs", "Cargo.toml"]
 
 
-def _build_clippy_command(fix: bool = False) -> list[str]:
+def _build_clippy_command(
+    fix: bool = False,
+    selection: list[str] | None = None,
+) -> list[str]:
     """Build the cargo clippy command.
 
     Args:
         fix: Whether to include --fix flag.
+        selection: Package-selection arguments from
+            ``lintro.tools.core.cargo.cargo_package_args``. Without them a
+            workspace root that sets ``default-members`` would lint only
+            those members, so a touched crate outside the set would report
+            clean.
 
     Returns:
         List of command arguments.
@@ -59,6 +67,7 @@ def _build_clippy_command(fix: bool = False) -> list[str]:
     cmd = [
         "cargo",
         "clippy",
+        *(selection or []),
         "--all-targets",
         "--all-features",
         "--message-format=json",
@@ -186,16 +195,20 @@ class ClippyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = find_cargo_root(ctx.files)
+        resolved = resolve_cargo_root(ctx.files, tool_label="clippy")
+        cargo_root = resolved.root
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No Cargo.toml found; skipping clippy.",
+                output=resolved.skip_message("clippy"),
                 issues_count=0,
             )
 
-        cmd = _build_clippy_command(fix=False)
+        cmd = _build_clippy_command(
+            fix=False,
+            selection=cargo_package_args(ctx.files, cargo_root),
+        )
 
         # Clippy's exit status is the verdict; the raw output is only worth
         # surfacing when the command failed with nothing parsed out of it,
@@ -232,19 +245,21 @@ class ClippyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = find_cargo_root(ctx.files)
+        resolved = resolve_cargo_root(ctx.files, tool_label="clippy")
+        cargo_root = resolved.root
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No Cargo.toml found; skipping clippy.",
+                output=resolved.skip_message("clippy"),
                 issues_count=0,
                 initial_issues_count=0,
                 fixed_issues_count=0,
                 remaining_issues_count=0,
             )
 
-        check_cmd = _build_clippy_command(fix=False)
+        selection = cargo_package_args(ctx.files, cargo_root)
+        check_cmd = _build_clippy_command(fix=False, selection=selection)
 
         # First, count issues before fixing
         try:
@@ -268,7 +283,7 @@ class ClippyPlugin(BaseToolPlugin):
         initial_count = len(initial_issues)
 
         # Run fix
-        fix_cmd = _build_clippy_command(fix=True)
+        fix_cmd = _build_clippy_command(fix=True, selection=selection)
         try:
             success_fix, output_fix = run_subprocess_with_timeout(
                 tool=self,
