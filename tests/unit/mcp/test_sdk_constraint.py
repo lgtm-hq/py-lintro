@@ -12,7 +12,7 @@ from assertpy import assert_that
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
 _UV_LOCK = _REPO_ROOT / "uv.lock"
-_MCP_FLOOR = "mcp>=2,<3"
+_MCP_FLOOR = "mcp>=2.2,<3"
 _SOURCE_ROOTS = (_REPO_ROOT / "lintro", _REPO_ROOT / "tests")
 
 

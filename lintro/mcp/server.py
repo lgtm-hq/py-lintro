@@ -30,11 +30,19 @@ if TYPE_CHECKING:
     from mcp.types import CallToolResult
 
 __all__ = [
+    "DEFAULT_TOOL_LIST_TTL_SECONDS",
     "build_default_registry",
     "create_mcp_server",
     "run_stdio_server",
     "run_stdio_server_async",
 ]
+
+# How long a client may treat a ``tools/list`` result as fresh (#2577). The
+# SDK's default is ``ttlMs: 0``, immediately stale, which tells a spec-following
+# client to re-list before every call. The registry is fixed for the life of
+# the process, so a minute is conservative; ``0`` marks the list immediately
+# stale (the hint is always attached).
+DEFAULT_TOOL_LIST_TTL_SECONDS: float = 60.0
 
 _EMPTY_OBJECT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -187,18 +195,33 @@ def create_mcp_server(
     *,
     workspace: Path,
     registry: McpToolRegistry | None = None,
+    tool_list_ttl_seconds: float = DEFAULT_TOOL_LIST_TTL_SECONDS,
 ) -> Any:
     """Create an MCP ``Server`` rooted at ``workspace``.
 
     Args:
         workspace: Workspace root for path guards and ``lintro_ping``.
         registry: Optional pre-built registry; defaults to built-in tools.
+        tool_list_ttl_seconds: Freshness hint attached to every
+            ``tools/list`` result (the wire ``ttlMs``); ``0`` marks the list
+            immediately stale.
 
     Returns:
         Configured ``mcp.server.Server`` instance.
+
+    Raises:
+        ValueError: If ``tool_list_ttl_seconds`` is negative.
     """
     import mcp.types as types
-    from mcp.server import Server
+    from mcp.server import CacheHint, Server
+
+    from lintro import __version__
+
+    if tool_list_ttl_seconds < 0:
+        raise ValueError(
+            f"tool_list_ttl_seconds must be >= 0, got {tool_list_ttl_seconds}",
+        )
+    tool_list_hint = CacheHint(ttl_ms=int(tool_list_ttl_seconds * 1000))
 
     workspace_root = workspace.resolve()
     tool_registry = registry or build_default_registry(workspace=workspace_root)
@@ -293,8 +316,10 @@ def create_mcp_server(
 
     return Server(
         "lintro",
+        version=__version__,
         on_list_tools=list_tools,
         on_call_tool=call_tool,
+        cache_hints={"tools/list": tool_list_hint},
     )
 
 

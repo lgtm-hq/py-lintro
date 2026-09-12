@@ -248,3 +248,78 @@ def test_regenerate_version_artifacts_invokes_both_generators(
     assert_that(invoked).is_equal_to(
         ["generate-tool-versions.py", "generate-builtin-tool-index.py"],
     )
+
+
+def _program_arguments(cmd: list[str]) -> list[str]:
+    """Return the positional (non-option) arguments of a Nuitka command.
+
+    Args:
+        cmd: The full Nuitka argv.
+
+    Returns:
+        Every argument after ``-m nuitka`` that is not an option.
+    """
+    return [arg for arg in cmd[3:] if not arg.startswith("--")]
+
+
+def test_build_nuitka_command_compiles_the_package_not_a_file_inside_it() -> None:
+    """Nuitka must get the ``lintro`` package in ``-m`` mode (#2577).
+
+    Handing it ``lintro/__main__.py`` put ``lintro/`` on the module search
+    path, where lintro's own ``lintro/mcp`` shadowed the SDK's top-level
+    ``mcp`` package and every ``lintro mcp`` release crashed on import.
+    """
+    build_macos = _load_build_macos_module()
+    package_dir = str(build_macos.PROJECT_ROOT / "lintro")
+
+    with patch.object(Path, "exists", return_value=True):
+        cmd = build_macos.build_nuitka_command(arch="arm64")
+
+    assert_that(cmd).contains("--python-flag=-m")
+    assert_that(cmd[-1]).is_equal_to(package_dir)
+    inside_package = [
+        arg for arg in _program_arguments(cmd) if arg.startswith(package_dir + os.sep)
+    ]
+    assert_that(inside_package).is_empty()
+    assert_that(cmd.index("--python-flag=-m")).is_less_than(len(cmd) - 1)
+
+
+def test_build_nuitka_command_bundles_the_mcp_sdk() -> None:
+    """The SDK and its metadata are named explicitly (#2577).
+
+    Nothing in lintro imports the SDK at module level, so ``--follow-imports``
+    alone leaves it out; ``httpx2`` reads its distribution metadata at import
+    time, so the metadata has to ship too.
+    """
+    build_macos = _load_build_macos_module()
+
+    with patch.object(Path, "exists", return_value=True):
+        cmd = build_macos.build_nuitka_command(arch="arm64")
+
+    assert_that(cmd).contains(
+        "--include-package=mcp",
+        "--include-package=mcp_types",
+        "--include-distribution-metadata=httpx2",
+        "--include-distribution-metadata=httpcore2",
+        "--include-distribution-metadata=mcp",
+    )
+
+
+@pytest.mark.parametrize(
+    "package",
+    ["mcp", "mcp_types", "pydantic", "starlette", "anyio", "httpx", "httpx2"],
+)
+def test_build_nuitka_command_ships_the_sdk_stack_as_bytecode(package: str) -> None:
+    """The SDK's runtime stack must not be compiled to C (#2577).
+
+    Bundling it compiled would put the macOS build back over the #2514 cap.
+
+    Args:
+        package: A package in the SDK's runtime stack.
+    """
+    build_macos = _load_build_macos_module()
+
+    with patch.object(Path, "exists", return_value=True):
+        cmd = build_macos.build_nuitka_command(arch="arm64")
+
+    assert_that(cmd).contains(f"--noinclude-custom-mode={package}:bytecode")

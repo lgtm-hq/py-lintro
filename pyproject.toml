@@ -77,7 +77,7 @@ ai = ["anthropic>=0.39.0", "openai>=1.50.0"]
 # `Server` API (`on_list_tools` / `on_call_tool`), explicit `ListToolsResult`,
 # and snake_case type fields (`input_schema`, `is_error`).
 # Ceiling: 3.x is not yet a supported migration.
-mcp = ["mcp>=2,<3"]
+mcp = ["mcp>=2.2,<3"]
 # Semgrep is intentionally absent: it ships from the isolated lockfile
 # ``requirements-semgrep.txt`` (#2104) so its pins cannot collide with
 # lintro's shared resolver. sqlfluff and pip-audit remain here.
@@ -134,7 +134,7 @@ dev = [
   # Kept in the default dev group (not just the optional `mcp` extra) so the
   # MCP server tests really execute in CI, which syncs `--extra full` plus the
   # default groups. Without it they would importorskip into a silent pass.
-  "mcp>=2,<3",
+  "mcp>=2.2,<3",
   "pytest-asyncio>=1.3.0",
   # Randomises test order every run so nothing may depend on declaration
   # order or on state a neighbour left behind (#2315).
@@ -574,7 +574,7 @@ constraint-dependencies = [
   "starlette>=1.3.1",
   # cryptography: OpenSSL-backed high-severity advisory (GHSA-537c-gmf6-5ccf);
   # PKCS#7 Bleichenbacher oracle (GHSA-g6cj-pr64-35w5)
-  "cryptography>=50.0.0",
+  "cryptography>=50.0.1",
   # python-multipart: parser resource-exhaustion DoS
   # (GHSA-5rvq-cxj2-64vf, GHSA-pp6c-gr5w-3c5g)
   "python-multipart>=0.0.30",
