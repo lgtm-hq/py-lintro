@@ -97,14 +97,18 @@ workflow runs an AI diff review and prints the JSON result to the job log.
   the unit tests.
 - 🔑 **Bring-your-own credential** — runs the `cli` transport. Provider and model come
   from the `LINTRO_AI_PROVIDER` / `LINTRO_AI_MODEL` Actions variables. When those
-  variables are unset the workflow falls through to the committed defaults (`anthropic`,
-  empty model). Operators can set them to `cursor` and `cursor-grok-4.6-high` for
-  current dogfood. Cursor uses `CURSOR_API_KEY`; Anthropic uses the pinned `claude` CLI
-  authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (a Claude subscription session).
-  `ANTHROPIC_API_KEY` is deliberately **not** in scope, and `LINTRO_CLI_BARE: never`
-  keeps `--bare` off the command line so an OAuth session is actually used (#1838). CLI
-  versions are pinned in `docker/ai-tools.Dockerfile` and installed from npm at those
-  exact versions.
+  variables are unset, `ai-review.yml` still passes `LINTRO_AI_PROVIDER: anthropic` and
+  `run-ai-review.sh` falls back the same way (`${LINTRO_AI_PROVIDER:-anthropic}`), and
+  that env overlay wins over the committed `.lintro-config.yaml`, so the workflow — not
+  the config — makes the choice. Those two CI-side literals are the deliberate
+  exceptions to #2143's no-default rule, which governs the shipped product; #2143's
+  workflow restructure removes both. Operators can set the variables to `cursor` and
+  `cursor-grok-4.6-high` for current dogfood. Cursor uses `CURSOR_API_KEY`; Anthropic
+  uses the pinned `claude` CLI authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (a Claude
+  subscription session). `ANTHROPIC_API_KEY` is deliberately **not** in scope, and
+  `LINTRO_CLI_BARE: never` keeps `--bare` off the command line so an OAuth session is
+  actually used (#1838). CLI versions are pinned in `docker/ai-tools.Dockerfile` and
+  installed from npm at those exact versions.
 - 💸 **Operator-set spend ceiling (advisory under the CLI transport)** — the trusted
   base config ships **no** `ai.max_cost_usd`, so there is no committed default cap. A PR
   still cannot raise spend: the workflow installs lintro from the base ref and forwards

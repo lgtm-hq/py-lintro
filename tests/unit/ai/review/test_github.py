@@ -15,7 +15,9 @@ from lintro.ai.exceptions import (
     AIRateLimitError,
 )
 from lintro.ai.models.github_api_response import GitHubApiResponse
+from lintro.ai.provider_enum import AIProvider
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.errors_taxonomy import ReviewErrorKind
 from lintro.ai.review.github import (
     GITHUB_COMMENT_HARD_LIMIT,
     MAX_COMMENT_CHARS,
@@ -33,6 +35,10 @@ from lintro.ai.review.github import (
     sanitize_comment_text,
 )
 from lintro.ai.review.github_contract import cap_body
+from lintro.ai.review.github_errors import (
+    ERROR_ONLY_HEADLINE,
+    describe_kind,
+)
 from lintro.ai.review.inline_fix import plan_inline_fix
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
@@ -204,12 +210,49 @@ def test_run_mechanics_marks_estimated_with_tilde(
 
 
 def test_format_error_comment_auth() -> None:
-    """Authentication errors render a specific message."""
+    """Authentication errors render a specific, provider-neutral message.
+
+    The guidance points at whichever variable the configured provider
+    declares rather than naming a vendor's: lintro has no default provider
+    (#2143), so a sticky that named one would be wrong for the other two.
+    """
     body = format_error_comment(error=AIAuthenticationError("bad key"))
 
     assert_that(body).contains("authentication failed")
-    assert_that(body).contains("ANTHROPIC_API_KEY")
+    assert_that(body).contains("API-key secret", "configured", "provider")
     assert_that(body).contains(STICKY_MARKER)
+
+
+def test_sticky_static_copy_names_no_provider() -> None:
+    """Assert lintro's own error copy never names a vendor.
+
+    The guard is deliberately scoped to the *static* copy — every
+    :data:`KIND_COPY` entry plus the error-only headline — rather than to a
+    rendered comment. A rendered body also carries the provider's own cause
+    text and a model footer, and both legitimately name a vendor: an
+    anthropic 401 says so in its own words. Asserting over the whole body
+    would make this guard fail on a faithfully surfaced upstream message,
+    which is not the thing #2143 forbids.
+
+    The match is case-insensitive because the copy this replaced was prose:
+    "For Cursor: …" would slip past a lower-case comparison.
+    """
+    static_copy = [ERROR_ONLY_HEADLINE]
+    for kind in ReviewErrorKind:
+        static_copy.extend(describe_kind(kind=kind))
+
+    named = sorted(
+        {
+            provider.value
+            for provider in AIProvider
+            for text in static_copy
+            if provider.value in text.lower()
+        },
+    )
+    assert_that(named).described_as(
+        "lintro's own error copy must point at the configured provider, "
+        "never at a vendor",
+    ).is_empty()
 
 
 def test_format_error_comment_rate_limit() -> None:

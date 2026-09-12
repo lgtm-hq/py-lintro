@@ -42,7 +42,11 @@ from lintro.ai.exceptions import (
     AIProviderRequiredError,
 )
 from lintro.ai.paths import resolve_workspace_root
-from lintro.ai.provider_enum import AIProvider, provider_required_error
+from lintro.ai.provider_enum import (
+    accepted_provider_names,
+    accepted_provider_values,
+    provider_required_error,
+)
 from lintro.ai.providers import get_provider
 from lintro.ai.review.checklist_display import (
     build_prompt_question_map,
@@ -549,11 +553,14 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
     "--provider",
     "provider_override",
     type=click.Choice(
-        [member.value for member in AIProvider],
+        accepted_provider_names(),
         case_sensitive=False,
     ),
     default=None,
-    help="Override ai.provider for this invocation.",
+    help=(
+        "Override ai.provider for this invocation. No provider is the "
+        f"default; one of: {accepted_provider_values()}."
+    ),
 )
 @click.option(
     "--model",

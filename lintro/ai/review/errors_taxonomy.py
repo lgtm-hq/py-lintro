@@ -292,8 +292,9 @@ _SHARED_SIGNATURES: dict[ReviewErrorKind, ErrorMatcher] = {
 KIND_COPY: dict[ReviewErrorKind, tuple[str, str]] = {
     ReviewErrorKind.AUTH_FAILED: (
         "authentication failed (invalid or missing API key)",
-        "Check the provider API key configured for this workflow (e.g. the "
-        "`ANTHROPIC_API_KEY` or `OPENAI_API_KEY` secret).",
+        "Check the API-key secret this workflow passes for the configured "
+        "provider — each provider declares its own variable "
+        "(`lintro doctor` prints the one in effect).",
     ),
     ReviewErrorKind.INSUFFICIENT_CREDITS: (
         "the provider reported no available quota or credits — the account "

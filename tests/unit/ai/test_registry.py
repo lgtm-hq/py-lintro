@@ -260,7 +260,7 @@ def test_facade_loads_the_builtin_plugins_itself() -> None:
         register_provider(_FakeAnthropicPlugin())
         assert_that(get_default_model("anthropic")).is_equal_to("fake-model")
         assert_that(list(declared_cli_providers())).is_equal_to(
-            [AIProvider.OPENAI, AIProvider.CURSOR],
+            [AIProvider.CURSOR, AIProvider.OPENAI],
         )
     finally:
         restore_registered(saved)

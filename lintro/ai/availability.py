@@ -22,7 +22,7 @@ from lintro.ai.liveness import (
     LivenessState,
     check_liveness_sync,
 )
-from lintro.ai.provider_enum import AIProvider
+from lintro.ai.provider_enum import AIProvider, accepted_provider_values
 from lintro.ai.registry import metadata_for
 
 __all__ = [
@@ -119,11 +119,10 @@ def is_provider_available(
 
     provider_enum = _resolve_provider(provider)
     if provider_enum is None:
-        supported = ", ".join(p.value for p in AIProvider)
         logger.warning(
             "Unknown AI provider {!r}; supported providers: {}",
             provider,
-            supported,
+            accepted_provider_values(),
         )
         return False
 
