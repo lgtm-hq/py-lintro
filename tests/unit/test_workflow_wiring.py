@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import re
 import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
+import sys
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -6059,6 +6061,34 @@ def _api_smoke_rows() -> list[dict[str, str]]:
     return cast(list[dict[str, str]], data["providers"])
 
 
+def _api_smoke_matrix() -> list[dict[str, str]]:
+    """Return the Actions matrix the smoke table expands to.
+
+    Built by the script the workflow itself runs, so the egress entry a row
+    reaches the runner with is the one asserted here.
+
+    Returns:
+        The matrix include entries, one per table row.
+
+    Raises:
+        RuntimeError: When the runner script cannot be imported.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "ai_provider_run_smoke_wiring",
+        _API_SMOKE_TABLE.with_name("run_smoke.py"),
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - import plumbing
+        msg = "unable to load the provider smoke runner"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    # Registered before execution: the script's frozen dataclass resolves its
+    # own module through sys.modules while the class body runs.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    rows = module.load_table(path=_API_SMOKE_TABLE)
+    return cast(list[dict[str, str]], module.build_matrix(rows=rows)["include"])
+
+
 def test_provider_api_smoke_runs_weekly_and_on_demand() -> None:
     """The live provider signal must be scheduled, since nothing else is.
 
@@ -6135,20 +6165,91 @@ def test_provider_api_smoke_is_driven_by_the_committed_table() -> None:
     ).contains("${{ matrix.egress }}")
     rows = _api_smoke_rows()
     assert_that(rows).is_not_empty()
+    egress = {entry["name"]: entry["egress"] for entry in _api_smoke_matrix()}
     for row in rows:
-        host = urlparse(row["base_url"]).hostname
+        parsed = urlparse(row["base_url"])
+        host = parsed.hostname
         # Without this, a row whose base_url does not parse yields host None
         # and the check below becomes the vacuous 'None:443' is absent — the
         # guard would pass on exactly the row that breaks egress.
         assert_that(host).described_as(
             f"{row['name']} base_url {row['base_url']!r} must parse to a host",
         ).is_not_none()
+        # The allowlist entry is what the row is actually allowed to dial. A
+        # row that reaches the matrix without one, or with one naming another
+        # host or port, fails the weekly run on blocked egress with an opaque
+        # network error instead of the provider's own verdict.
+        assert_that(egress).described_as(
+            "every table row must reach the matrix with an egress entry",
+        ).contains_key(row["name"])
+        assert_that(egress[row["name"]]).described_as(
+            f"{row['name']} egress must allow its own base_url host",
+        ).is_equal_to(f"{host}:{parsed.port or 443}")
         assert_that(allowlist).described_as(
             f"{row['name']} host must not be hard-coded here",
         ).does_not_contain(f"{host}:443")
 
     resolve = workflow["jobs"]["resolve-table"]["steps"][-1]
     assert_that(str(resolve["run"])).contains("--emit-matrix")
+
+
+#: The Actions results service, which upload-artifact and download-artifact
+#: talk to. Under ``egress-policy: block`` a job that moves an artifact
+#: without these on its allowlist fails on blocked egress, and the failure
+#: reads as the artifact being absent rather than as a network block.
+_ARTIFACT_ENDPOINTS: tuple[str, ...] = (
+    "pipelines.actions.githubusercontent.com:443",
+    "results-receiver.actions.githubusercontent.com:443",
+)
+
+
+def test_artifact_jobs_allowlist_the_actions_results_service() -> None:
+    """Every blocked job here that moves an artifact must be able to reach it.
+
+    The provider smoke uploads its error text and the annotate job downloads
+    it; that hop is what puts the provider's own words on the tracker issue,
+    so it must not depend on the results service being reachable by accident.
+
+    Scoped to this workflow on purpose: ten pre-existing jobs elsewhere in the
+    repo move artifacts under a blocked policy without naming these hosts and
+    are green today, so a repo-wide rule belongs in its own change rather than
+    riding along here.
+    """
+    offenders: list[str] = []
+    for path in [_REPO_ROOT / ".github" / "workflows" / _API_SMOKE_WORKFLOW]:
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if not isinstance(workflow, dict):
+            continue
+        for job_name, job in (workflow.get("jobs") or {}).items():
+            steps = job.get("steps") or [] if isinstance(job, dict) else []
+            uses = [str(step.get("uses", "")) for step in steps]
+            moves_artifact = any(
+                action.startswith(
+                    ("actions/upload-artifact@", "actions/download-artifact@"),
+                )
+                for action in uses
+            )
+            harden = next(
+                (
+                    step
+                    for step in steps
+                    if str(step.get("uses", "")).startswith("step-security/")
+                ),
+                None,
+            )
+            if not moves_artifact or harden is None:
+                continue
+            with_block = harden.get("with") or {}
+            if str(with_block.get("egress-policy", "")) != "block":
+                continue
+            allowlist = str(with_block.get("allowed-endpoints", ""))
+            missing = [host for host in _ARTIFACT_ENDPOINTS if host not in allowlist]
+            if missing:
+                offenders.append(f"{path.name}:{job_name} missing {missing}")
+
+    assert_that(offenders).described_as(
+        "a blocked job that moves an artifact must allowlist the results service",
+    ).is_empty()
 
 
 def test_provider_api_smoke_failures_are_visible_on_main() -> None:
@@ -6172,12 +6273,18 @@ def test_provider_api_smoke_failures_are_visible_on_main() -> None:
     assert_that(condition).contains("always()")
     assert_that(condition).contains("github.ref == 'refs/heads/main'")
 
-    script = (
-        _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke" / "report-commit-status.sh"
-    ).read_text(encoding="utf-8")
-    assert_that(script).contains("ai-provider-smoke/${SMOKE_NAME}")
-    # A row with no secret must not be reported as a pass.
-    assert_that(script).contains('state="pending"')
+    # What the status script *does* — the context it posts under and the
+    # pending-not-green rule for a call that was never made — is asserted by
+    # running it against a stubbed `gh` in
+    # tests/scripts/test_ai_provider_smoke.py. Pinning its source text here
+    # would break on a rename that changes no behaviour, and would equally be
+    # satisfied by a comment. This test owns the wiring: that the job runs
+    # that script at all, with the permission and the condition it needs.
+    assert_that(
+        (_REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke")
+        .joinpath("report-commit-status.sh")
+        .is_file(),
+    ).is_true()
 
     # No job here may swallow its own verdict: the whole workflow exists to
     # make a failure arrive somewhere.

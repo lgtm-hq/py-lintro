@@ -50,10 +50,11 @@ class ReplayResult:
         session_id: Session id the parser recovered, when the CLI reports one.
         cost_estimate: Cost in USD the parser attributed to the call — read
             from the capture where the CLI reports one (claude's
-            ``total_cost_usd``) and estimated from the token counts where it
-            does not. Pinned so a break in cost extraction shows up here
-            rather than falling back to an estimate that still looks
-            plausible downstream.
+            ``total_cost_usd``), estimated from the token counts where it does
+            not (codex), and a flat ``0.0`` where the parser reports none at
+            all (cursor, which is costed later in the transport). Pinned so a
+            break in cost extraction shows up here rather than falling back to
+            an estimate that still looks plausible downstream.
     """
 
     content: str

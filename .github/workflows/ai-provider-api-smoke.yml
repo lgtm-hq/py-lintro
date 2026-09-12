@@ -102,6 +102,10 @@ jobs:
       - name: Harden Runner
         # Exact hosts only. The provider host comes from the table row, so a
         # new provider cannot be added without its egress arriving with it.
+        # The two actions.githubusercontent.com hosts are the Actions results
+        # service the error-text upload talks to (ai-review.yml documents the
+        # same pair); without them a failing row's own words never leave the
+        # job, which is the whole point of the upload.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -114,6 +118,8 @@ jobs:
             pypi.org:443
             files.pythonhosted.org:443
             astral.sh:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
             ${{ matrix.egress }}
 
       - name: Checkout
@@ -203,6 +209,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Harden Runner
+        # The actions.githubusercontent.com pair is the Actions results
+        # service the error-text download talks to.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -212,6 +220,8 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

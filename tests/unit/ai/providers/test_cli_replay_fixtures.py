@@ -14,8 +14,10 @@ output.
 
 The expectation files pin the cost the parser attributed to each call as
 well, so a break in cost extraction is caught here rather than falling back to
-an estimate that still looks plausible downstream; a change to lintro's own
-pricing table therefore also asks for a re-record.
+an estimate that still looks plausible downstream. Only the codex golden is
+priced from lintro's own table, so a pricing change asks for a re-record of
+that one; claude's cost is read from the capture and cursor's parser reports a
+flat zero.
 
 Re-record with ``scripts/ci/record_cli_fixture.sh`` when a CLI pin moves.
 """

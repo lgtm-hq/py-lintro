@@ -40,11 +40,14 @@ Environment:
   SMOKE_KEY_ENV  The row's credential variable NAME, quoted in a skip status.
   SMOKE_OUTCOME  The smoke script's outcome: success, failure or skipped.
   SMOKE_STEP     The smoke step's outcome, used when the script wrote none.
+                 'skipped' there means the step never ran (an earlier step
+                 failed) and reports pending; anything else is a failure.
   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_SERVER_URL, GITHUB_RUN_ID
 
-States: success (the provider answered), pending (the row's credential variable
-is empty, so nothing was called and nothing may look green) and failure
-(anything else, credit exhaustion included).
+States: success (the provider answered), pending (nothing was called, so nothing
+may look green — either the row's credential variable is empty or the smoke step
+never ran because an earlier step failed) and failure (anything else, credit
+exhaustion included).
 EOF
 	exit 0
 fi
@@ -55,9 +58,21 @@ fi
 
 outcome="${SMOKE_OUTCOME:-}"
 if [[ -z "$outcome" ]]; then
-	# The script never reported — it died before it could, or the step never
-	# ran. That is a failure about this provider, not an absence of news.
-	outcome="${SMOKE_STEP:-failure}"
+	# The script never reported. Two different things hide behind that, and
+	# only one of them is about the provider:
+	#
+	#   * the step ran and died (or reported nothing) — a failure about this
+	#     provider, which is what an empty outcome used to mean; and
+	#   * the step never ran at all, because an earlier step in the job
+	#     failed. Nothing was asked of the provider, so nothing may be said
+	#     about it: that reports *pending*, like an unset credential, but
+	#     with its own description so the checks tab does not claim a
+	#     credential is missing when one is sitting right there.
+	if [[ "${SMOKE_STEP:-}" == "skipped" ]]; then
+		outcome="infra"
+	else
+		outcome="failure"
+	fi
 fi
 
 case "$outcome" in
@@ -68,6 +83,10 @@ success)
 skipped)
 	state="pending"
 	description="skipped: no credential in ${SMOKE_KEY_ENV:-unknown}"
+	;;
+infra)
+	state="pending"
+	description="infra failure before the smoke ran — see the run"
 	;;
 *)
 	state="failure"

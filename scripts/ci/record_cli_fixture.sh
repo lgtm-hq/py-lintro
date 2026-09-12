@@ -30,7 +30,7 @@ PROMPT="Reply with the single word: pong"
 # comment lines rather than a line range, so editing the header cannot
 # silently mis-slice --help.
 usage() {
-	sed -n '/^# Re-record an agent-CLI replay fixture/,/^# quota: it makes one real call/p' \
+	sed -n '/^# Re-record an agent-CLI replay fixture/,/^# Recording spends quota: it makes one real call/p' \
 		"${BASH_SOURCE[0]}"
 }
 

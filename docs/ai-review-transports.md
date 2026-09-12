@@ -126,12 +126,12 @@ the session outside the home directory.
 
 What CI proves about each transport, and how often (#2600):
 
-| Check                                          | Transport | Runs                     | Spends quota |
-| ---------------------------------------------- | --------- | ------------------------ | ------------ |
-| CLI flag surface (Tier 1)                      | `cli`     | PR / push / merge group  | no           |
-| CLI output replay fixtures                     | `cli`     | every PR / push          | no           |
-| CLI invocation smoke (Tier 2, **manual only**) | `cli`     | `workflow_dispatch` only | yes          |
-| Provider API smoke                             | `api`     | weekly + dispatch        | yes (cents)  |
+| Check                                          | Transport | Runs                          | Spends quota |
+| ---------------------------------------------- | --------- | ----------------------------- | ------------ |
+| CLI flag surface (Tier 1)                      | `cli`     | every PR / push / merge group | no           |
+| CLI output replay fixtures                     | `cli`     | every PR / push / merge group | no           |
+| CLI invocation smoke (Tier 2, **manual only**) | `cli`     | `workflow_dispatch` only      | yes          |
+| Provider API smoke                             | `api`     | weekly + dispatch             | yes (cents)  |
 
 **The CLI invocation smoke is manual-only.** It used to run weekly and failed every
 Monday from 2026-08-10 on an exhausted prepaid balance without reaching anyone: it gates

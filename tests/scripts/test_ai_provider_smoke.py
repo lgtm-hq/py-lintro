@@ -11,6 +11,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
+import shutil
+import subprocess  # nosec B404 - runs the repo's own script with a fixed argv
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -26,6 +29,7 @@ from lintro.ai.provider_enum import AIProvider
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SMOKE_DIR = _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke"
 _TABLE = _SMOKE_DIR / "providers.json"
+_STATUS_SCRIPT = _SMOKE_DIR / "report-commit-status.sh"
 
 #: Placeholder credential-variable *name* for the table-validation rows. It
 #: names a variable; it is not a credential, and no test here ever holds one.
@@ -448,6 +452,103 @@ def test_a_wrong_answer_carrying_the_credential_is_redacted(
             _FAKE_CREDENTIAL,
         )
         assert_that(text).contains("RedactedProviderError")
+
+
+def _run_status_script(*, tmp_path: Path, env: dict[str, str]) -> dict[str, str]:
+    """Run the commit-status script against a stub ``gh`` and return its call.
+
+    The script's only output is a GitHub API call, so the stub records the
+    flags it was handed; asserting on those is asserting on behaviour rather
+    than on how the shell spells its variables.
+
+    Args:
+        tmp_path: Temporary directory for the stub and its recording.
+        env: Environment the script runs with, on top of the stub's PATH.
+
+    Returns:
+        The ``-f key=value`` pairs the script passed to ``gh``.
+    """
+    recording = tmp_path / "gh-args.txt"
+    stub_dir = tmp_path / "bin"
+    stub_dir.mkdir()
+    stub = stub_dir / "gh"
+    stub.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$GH_RECORDING"\n',
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+
+    bash = shutil.which("bash") or "/bin/bash"
+    result = subprocess.run(  # nosec B603 - fixed argv, shell=False, no user input
+        [bash, str(_STATUS_SCRIPT)],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "PATH": f"{stub_dir}:{os.environ['PATH']}",
+            "GH_RECORDING": str(recording),
+            **env,
+        },
+    )
+    assert_that(result.returncode).described_as(result.stderr).is_equal_to(0)
+
+    fields: dict[str, str] = {}
+    args = recording.read_text(encoding="utf-8").splitlines()
+    for flag, value in zip(args, args[1:], strict=False):
+        if flag == "-f" and "=" in value:
+            key, _, raw = value.partition("=")
+            fields[key] = raw
+    return fields
+
+
+@pytest.mark.parametrize(
+    ("env", "state", "detail"),
+    [
+        ({"SMOKE_OUTCOME": "success"}, "success", "answered"),
+        ({"SMOKE_OUTCOME": "skipped"}, "pending", _EXAMPLE_ENV),
+        ({"SMOKE_OUTCOME": "failure"}, "failure", "smoke failed"),
+        ({"SMOKE_STEP": "skipped"}, "pending", "infra failure before the smoke"),
+        ({"SMOKE_STEP": "failure"}, "failure", "smoke failed"),
+        ({}, "failure", "smoke failed"),
+    ],
+)
+def test_the_commit_status_never_paints_an_uncalled_row_green(
+    tmp_path: Path,
+    env: dict[str, str],
+    state: str,
+    detail: str,
+) -> None:
+    """Only an answered provider gets a green tick on main.
+
+    A call that was never made must not look like a pass, so both ways of not
+    calling report *pending*: an unset credential, and a smoke step that never
+    ran because an earlier one failed. They carry different descriptions —
+    claiming a missing credential when one is present sends the reader to the
+    wrong place. A step that ran and reported nothing is a failure.
+
+    Args:
+        tmp_path: Temporary directory for the stub GitHub CLI.
+        env: Outcome variables under test.
+        state: Commit-status state the script must post.
+        detail: Substring the status description must carry.
+    """
+    fields = _run_status_script(
+        tmp_path=tmp_path,
+        env={
+            "SMOKE_NAME": "example-api",
+            "SMOKE_KEY_ENV": _EXAMPLE_ENV,
+            "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+            "GITHUB_SHA": "0" * 40,
+            "SMOKE_OUTCOME": "",
+            "SMOKE_STEP": "",
+            **env,
+        },
+    )
+
+    assert_that(fields["state"]).is_equal_to(state)
+    assert_that(fields["context"]).is_equal_to("ai-provider-smoke/example-api")
+    assert_that(fields["description"]).contains(detail)
 
 
 def test_an_unknown_row_name_fails_loudly(smoke: ModuleType) -> None:
