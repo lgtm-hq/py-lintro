@@ -345,6 +345,7 @@ like this:
   "summary": {
     "total_issues": 3,
     "total_net_resolved": 0,
+    "total_fixed": 0,
     "total_remaining": 3,
     "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
     "severity_delta": { "error": -4, "warning": 2, "info": 0, "total": -2 }
@@ -363,6 +364,7 @@ rest of their `summary` object differs from the stdout document by design — it
   "summary": {
     "total_issues": 3,
     "total_net_resolved": 0,
+    "total_fixed": 0,
     "tools_run": 12,
     "timed_out_tools": [],
     "severity_counts": { "error": 1, "warning": 2, "info": 0, "total": 3 },
@@ -394,6 +396,7 @@ A timed-out tool reports:
   "summary": {
     "total_issues": 0,
     "total_net_resolved": 0,
+    "total_fixed": 0,
     "total_remaining": 0,
     "timed_out_tools": ["mypy"]
   },

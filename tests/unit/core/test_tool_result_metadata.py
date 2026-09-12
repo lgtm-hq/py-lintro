@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import warnings
 
+import pytest
 from assertpy import assert_that
 
 from lintro.enums.capability import Cap
@@ -155,3 +156,59 @@ def test_capability_survives_the_verify_fold() -> None:
 def test_capability_defaults_to_none() -> None:
     """A result not produced by a capability names none."""
     assert_that(ToolResult(name="ruff").capability).is_none()
+
+
+@pytest.mark.parametrize(
+    ("fixed", "remaining"),
+    [
+        (None, 0),
+        (2, None),
+        (2, 0),
+    ],
+)
+def test_an_unknown_residual_may_not_carry_a_measured_count(
+    fixed: int | None,
+    remaining: int | None,
+) -> None:
+    """The model refuses "unknown" beside a number.
+
+    ``residual_unknown`` means the verify pass took no after-measurement
+    (#1743), so a result that still carries ``fixed_issues_count`` or
+    ``remaining_issues_count`` would render "unknown" in one column and a
+    count nobody measured in the next. A producer that folds incorrectly has
+    to fail here, where the contradiction is, rather than at the display.
+
+    Args:
+        fixed: Net resolved count the producer wrongly kept, or ``None``.
+        remaining: Residual count the producer wrongly kept, or ``None``.
+    """
+    with pytest.raises(ValueError, match="must be None when residual_unknown"):
+        ToolResult(
+            name="ruff",
+            success=False,
+            issues_count=2,
+            fixed_issues_count=fixed,
+            remaining_issues_count=remaining,
+            residual_unknown=True,
+            residual_unknown_reason="the verify check timed out",
+        )
+
+
+def test_an_unknown_residual_with_both_counts_cleared_is_valid() -> None:
+    """The shape the fold produces constructs without complaint.
+
+    ``issues_count`` stays populated in this state: it is the before-count,
+    the pre-fix findings carried forward, not a residual.
+    """
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=2,
+        initial_issues_count=2,
+        residual_unknown=True,
+        residual_unknown_reason="the verify check timed out",
+    )
+
+    assert_that(result.fixed_issues_count).is_none()
+    assert_that(result.remaining_issues_count).is_none()
+    assert_that(result.issues_count).is_equal_to(2)

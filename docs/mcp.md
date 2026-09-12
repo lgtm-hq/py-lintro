@@ -93,7 +93,8 @@ configuration or only work inside a git work tree. If restoring a file ever fail
 call reports `execution_error` with `detail.reason == "restore_failed"` rather than
 quietly leaving the workspace modified.
 
-`dry_run: false` runs the same way but keeps the writes.
+`dry_run: false` runs the same way but keeps the writes. That is the response shown
+here, because `net_resolved` is only a figure about the tree you keep:
 
 ```json
 {
@@ -109,7 +110,7 @@ quietly leaving the workspace modified.
     }
   ],
   "summary": { "total_findings": 0, "tools_run": 1, "success": true },
-  "dry_run": true,
+  "dry_run": false,
   "changed_files": ["bad.py"],
   "diffs": [{ "file": "bad.py", "diff": "--- a/bad.py\n+++ b/bad.py\n@@ ..." }]
 }
@@ -119,6 +120,11 @@ quietly leaving the workspace modified.
 resolved on net — issues detected before the mutation phase minus the residual measured
 after it — is `net_resolved` on each tool summary. `fixed_count` carries the same value
 and is deprecated; it will be removed in a later release.
+
+A dry run returns the same shape with `"dry_run": true`, but read its counts with the
+rollback in mind: the formatters really ran and the verify pass really measured them,
+and then every changed file was restored, so `net_resolved` describes writes the call
+deliberately threw away. `findings` and `diffs` are what a dry run is for.
 
 Notes and limits:
 

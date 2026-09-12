@@ -32,6 +32,14 @@ class ToolResult:
         - ``issues_count`` should mirror ``remaining_issues_count`` for
           backward compatibility in format-mode summaries
 
+    When ``residual_unknown`` is set the run-level verify pass (#1743) never
+    measured an after-state, so there is no count to mirror:
+    ``fixed_issues_count`` and ``remaining_issues_count`` are both ``None``
+    (enforced below) and ``issues_count`` is a **before**-count — the number of
+    pre-fix findings carried forward, which is what ``issues`` holds. It is not
+    a residual, and consumers must render "unknown" rather than presenting it
+    as one.
+
     The ``issues`` field can contain parsed issue objects (tool-specific) to
     support unified table formatting.
 
@@ -152,6 +160,21 @@ class ToolResult:
         if self.residual_unknown_reason and not self.residual_unknown:
             raise ValueError(
                 "residual_unknown_reason can only be set when " "residual_unknown=True",
+            )
+
+        if self.residual_unknown and (
+            self.fixed_issues_count is not None
+            or self.remaining_issues_count is not None
+        ):
+            # "Unknown" beside a hard number is the one rendering this state
+            # exists to prevent: the display would print "unknown" in one
+            # column and a measurement nobody took in the next. A producer
+            # that folds incorrectly fails here rather than downstream.
+            raise ValueError(
+                "fixed_issues_count and remaining_issues_count must be None "
+                "when residual_unknown=True: "
+                f"fixed={self.fixed_issues_count}, "
+                f"remaining={self.remaining_issues_count}",
             )
 
         if (

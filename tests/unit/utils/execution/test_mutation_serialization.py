@@ -26,10 +26,11 @@ from lintro.tools import tool_manager
 from lintro.utils.execution.parallel_executor import run_tools_parallel
 from lintro.utils.unified_config import UnifiedConfigManager
 
-#: How long a tool waits for its batch mate to arrive. Generous next to the
-#: microseconds a concurrent dispatch needs, and paid twice (once per tool)
-#: only on the serialized path, where the wait is the point.
-_BARRIER_TIMEOUT_SECONDS: float = 1.0
+#: How long a tool waits for its batch mate to arrive. It has to outlast a
+#: scheduler stall on a loaded runner, or a healthy concurrent dispatch would
+#: read as a serialized one; it is paid as wall time only on the serialized
+#: path, where waiting is the point.
+_BARRIER_TIMEOUT_SECONDS: float = 10.0
 
 
 class _Definition:
@@ -77,14 +78,20 @@ class _RecordingTool:
         self._barrier = barrier
         self.concurrent = False
 
-    def _run(self) -> ToolResult:
+    def _run(self, *, capability: str) -> ToolResult:
         """Record a start, wait for the other tools, then record an end.
+
+        Args:
+            capability: Which entry point the dispatcher routed to. Recorded
+                in the event markers so an inverted route — ``check`` under a
+                mutating action, or ``fix`` under a read-only one — fails the
+                test instead of looking identical to the right one.
 
         Returns:
             ToolResult: A clean result for this tool.
         """
         with self._lock:
-            self._events.append(f"start:{self.name}")
+            self._events.append(f"start:{self.name}:{capability}")
         try:
             self._barrier.wait(timeout=_BARRIER_TIMEOUT_SECONDS)
             self.concurrent = True
@@ -92,7 +99,7 @@ class _RecordingTool:
             # Nobody else was inside at the same time.
             self.concurrent = False
         with self._lock:
-            self._events.append(f"end:{self.name}")
+            self._events.append(f"end:{self.name}:{capability}")
         return ToolResult(
             name=self.name,
             success=True,
@@ -113,7 +120,7 @@ class _RecordingTool:
         Returns:
             ToolResult: A clean result for this tool.
         """
-        return self._run()
+        return self._run(capability="fix")
 
     def check(self, _paths: list[str], _options: dict[str, Any]) -> ToolResult:
         """Run the recording body as a read-only capability.
@@ -125,7 +132,7 @@ class _RecordingTool:
         Returns:
             ToolResult: A clean result for this tool.
         """
-        return self._run()
+        return self._run(capability="check")
 
 
 def _dispatch(
@@ -200,6 +207,11 @@ def test_mutating_tools_never_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
         assert_that(events[index]).starts_with("start:")
         assert_that(events[index + 1]).starts_with("end:")
         assert_that(ended).is_equal_to(started)
+    # The dispatcher routed to ``fix``: a batch serialized around ``check``
+    # would satisfy the overlap assertions above and still be wrong.
+    assert_that([event.endswith(":fix") for event in events]).is_equal_to(
+        [True] * 4,
+    )
     assert_that([tool.concurrent for tool in tools.values()]).is_equal_to(
         [False, False],
     )
@@ -223,4 +235,4 @@ def test_check_mode_still_runs_a_batch_concurrently(
     assert_that([tool.concurrent for tool in tools.values()]).is_equal_to(
         [True, True],
     )
-    assert_that(events[:2]).contains("start:ruff", "start:black")
+    assert_that(events[:2]).contains("start:ruff:check", "start:black:check")

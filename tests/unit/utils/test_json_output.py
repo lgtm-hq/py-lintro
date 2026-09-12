@@ -13,6 +13,7 @@ from lintro.enums.action import Action
 from lintro.enums.output_format import OutputFormat
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
+from lintro.utils.execution.exit_codes import aggregate_tool_results
 from lintro.utils.json_output import create_json_output, serialize_tool_result
 from lintro.utils.output.file_writer import write_output_file
 
@@ -75,6 +76,83 @@ def test_serialize_tool_result_fix_mode_defaults_unset_counts_to_zero() -> None:
     # The deprecated alias is still emitted, with the same value.
     assert_that(data["fixed"]).is_equal_to(0)
     assert_that(data["remaining"]).is_equal_to(0)
+
+
+def test_an_unknown_residual_serializes_as_null_rather_than_zero() -> None:
+    """The third state must not reach JSON as a measured after-count.
+
+    When the verify pass could not measure a tool's residual (#1743) the
+    counts are absent, not zero. A consumer has to be able to tell "nothing
+    left" from "nobody looked", so both spellings of the net figure and the
+    remaining count are ``null`` and the reason travels with the flag.
+    """
+    result = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=2,
+        output="ruff raw output",
+        issues=[_StubIssue(), _StubIssue(code="E002")],
+        initial_issues_count=2,
+        residual_unknown=True,
+        residual_unknown_reason="the verify check timed out",
+    )
+
+    data = serialize_tool_result(result, action=Action.FIX)
+
+    assert_that(data["remaining"]).is_none()
+    assert_that(data["net_resolved"]).is_none()
+    # The deprecated alias must not fall back to the int-coalescing branch.
+    assert_that(data["fixed"]).is_none()
+    assert_that(data["residual_unknown"]).is_true()
+    assert_that(data["residual_unknown_reason"]).is_equal_to(
+        "the verify check timed out",
+    )
+
+
+def test_the_summary_totals_skip_a_tool_whose_residual_is_unknown() -> None:
+    """An unmeasured residual contributes to neither run total.
+
+    ``aggregate_tool_results`` is what the executor hands ``create_json_output``,
+    and it reads the cleared counts: a tool with no measurement adds nothing to
+    ``total_net_resolved`` or ``total_remaining``, so the run's totals stay the
+    sum of what was actually measured. The run still fails on the result's own
+    ``success=False``.
+    """
+    unknown = ToolResult(
+        name="ruff",
+        success=False,
+        issues_count=2,
+        issues=[_StubIssue(), _StubIssue(code="E002")],
+        initial_issues_count=2,
+        residual_unknown=True,
+        residual_unknown_reason="the verify check timed out",
+    )
+    measured = ToolResult(
+        name="taplo",
+        success=False,
+        issues_count=1,
+        issues=[_StubIssue(code="E003")],
+        initial_issues_count=4,
+        fixed_issues_count=3,
+        remaining_issues_count=1,
+    )
+
+    total_issues, total_fixed, total_remaining = aggregate_tool_results(
+        [unknown, measured],
+        Action.FIX,
+    )
+    data = create_json_output(
+        action=Action.FIX,
+        results=[unknown, measured],
+        total_issues=total_issues,
+        total_fixed=total_fixed,
+        total_remaining=total_remaining,
+        exit_code=1,
+    )
+
+    assert_that(data["summary"]["total_net_resolved"]).is_equal_to(3)
+    assert_that(data["summary"]["total_fixed"]).is_equal_to(3)
+    assert_that(data["summary"]["total_remaining"]).is_equal_to(1)
 
 
 def test_serialize_tool_result_includes_output_and_issues(
