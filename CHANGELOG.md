@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.158.0] - 2026-09-12
+
+### Added
+
+- **ci**: weekly provider API smoke, manual-only CLI smoke, replay fixtures (#2614)
+  (81378a4)
+
 ## [0.157.1] - 2026-09-12
 
 ### Fixed
