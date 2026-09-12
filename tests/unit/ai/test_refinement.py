@@ -79,6 +79,7 @@ async def test_refine_returns_empty_when_no_unverified_keys(tmp_path: Path) -> N
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
+    ai_config.rate_limit_max_retries = 0
     ai_config.retry_base_delay = 1.0
     ai_config.retry_max_delay = 30.0
     ai_config.retry_backoff_factor = 2.0
@@ -109,6 +110,7 @@ async def test_refine_parses_detail_strings_correctly(tmp_path: Path) -> None:
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
+    ai_config.rate_limit_max_retries = 0
     ai_config.retry_base_delay = 1.0
     ai_config.retry_max_delay = 30.0
     ai_config.retry_backoff_factor = 2.0
@@ -168,6 +170,7 @@ async def test_refine_skips_when_revert_fails(tmp_path: Path) -> None:
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
+    ai_config.rate_limit_max_retries = 0
     ai_config.retry_base_delay = 1.0
     ai_config.retry_max_delay = 30.0
     ai_config.retry_backoff_factor = 2.0
@@ -200,6 +203,7 @@ async def test_refine_skips_when_parse_returns_none(tmp_path: Path) -> None:
     ai_config = MagicMock()
     ai_config.fallback_models = []
     ai_config.max_retries = 0
+    ai_config.rate_limit_max_retries = 0
     ai_config.retry_base_delay = 1.0
     ai_config.retry_max_delay = 30.0
     ai_config.retry_backoff_factor = 2.0

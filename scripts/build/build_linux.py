@@ -47,6 +47,14 @@ INCLUDE_DATA_DIRS = [
     "lintro/assets=lintro/assets",
 ]
 
+# Packages Nuitka ships as bytecode instead of compiling to C (#2514).
+# Hard-coded on purpose: were these read from the environment, an unset
+# variable would silently produce a compiled build again.
+BYTECODE_PACKAGES = [
+    "lintro",
+    "pygments",
+]
+
 # Non-Python data files required at runtime.
 INCLUDE_DATA_FILES = [
     "lintro/tools/manifest.json=lintro/tools/manifest.json",
@@ -99,6 +107,15 @@ def build_nuitka_command(*, verbose: bool = False) -> list[str]:
         cmd.append(f"--include-package={pkg}")
 
     cmd.append("--include-package-data=lintro")
+
+    # #2514: compiling these to C produced 1,527 C units and macOS arm64 build
+    # steps of 26-28 minutes against the 25-minute cap (Intel 20-25, Linux
+    # 16-21); as bytecode it is 340 units and 6-12 minutes on every runner,
+    # with identical behaviour. `bytecode` is the anti-bloat plugin's mode,
+    # the same one that already ships `rich` uncompiled. lintro/__main__.py is
+    # the entry point and stays compiled.
+    for package in BYTECODE_PACKAGES:
+        cmd.append(f"--noinclude-custom-mode={package}:bytecode")
 
     for data_dir in INCLUDE_DATA_DIRS:
         data_path = PROJECT_ROOT / data_dir.split("=")[0]

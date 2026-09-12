@@ -39,7 +39,8 @@
         "suggested_change": null,
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
-        "origin": null
+        "origin": null,
+        "posted_inline": true
       },
       {
         "severity": "P2",
@@ -64,7 +65,8 @@
         "suggested_change": null,
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
-        "origin": null
+        "origin": null,
+        "posted_inline": true
       }
     ],
     "input_tokens": 1200,
@@ -144,7 +146,8 @@
         "suggested_change": null,
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
-        "origin": null
+        "origin": null,
+        "posted_inline": true
       },
       {
         "severity": "P1",
@@ -169,7 +172,8 @@
         "suggested_change": null,
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
-        "origin": null
+        "origin": null,
+        "posted_inline": true
       }
     ],
     "input_tokens": 900,

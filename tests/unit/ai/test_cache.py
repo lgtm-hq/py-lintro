@@ -25,16 +25,25 @@ def _make_suggestion(
     code: str = "E001",
     original_code: str = "x",
     suggested_code: str = "y",
-    **kwargs: str | int | float,
 ) -> AIFixSuggestion:
-    """Create a minimal AIFixSuggestion for tests."""
+    """Create a minimal AIFixSuggestion for tests.
+
+    Args:
+        file: Path recorded on the suggestion.
+        line: 1-based line number the suggestion targets.
+        code: Linter error code.
+        original_code: Source text the suggestion replaces.
+        suggested_code: Replacement source text.
+
+    Returns:
+        An AIFixSuggestion built from the given fields and model defaults.
+    """
     return AIFixSuggestion(
         file=file,
         line=line,
         code=code,
         original_code=original_code,
         suggested_code=suggested_code,
-        **kwargs,
     )
 
 
@@ -79,6 +88,7 @@ def test_cache_hit_returns_data(tmp_path: Path) -> None:
     result = get_cached_suggestion(root, "content", "E001", 10, "msg")
     assert_that(result).is_not_none()
     assert_that(result).is_instance_of(AIFixSuggestion)
+    assert result is not None  # narrow type for mypy; asserted above
     assert_that(result.file).is_equal_to("test.py")
     assert_that(result.original_code).is_equal_to("x")
     assert_that(result.suggested_code).is_equal_to("y")

@@ -11,6 +11,8 @@ if TYPE_CHECKING:
     pass
 
 __all__ = [
+    "FIX_BATCH_CLI_SCHEMA",
+    "FIX_BATCH_KEY",
     "FIX_CLI_SCHEMA",
     "REVIEW_CLI_SCHEMA",
     "SUMMARY_CLI_SCHEMA",
@@ -230,29 +232,51 @@ FIX_CLI_SCHEMA: dict[str, object] = {
     },
 }
 
+#: Property holding the batch fix array inside :data:`FIX_BATCH_CLI_SCHEMA`.
+#:
+#: The decoder in :mod:`lintro.ai.fix_parsing` unwraps this key, so the name is
+#: shared rather than spelled twice.
+FIX_BATCH_KEY = "fixes"
+
+_FIX_BATCH_ITEMS_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "required": [
+        "line",
+        "original_code",
+        "suggested_code",
+        "explanation",
+        "confidence",
+        "risk_level",
+    ],
+    "additionalProperties": False,
+    "properties": {
+        "line": {"type": "integer"},
+        "original_code": {"type": "string"},
+        "suggested_code": {"type": "string"},
+        "explanation": {"type": "string"},
+        "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+        "risk_level": {
+            "type": "string",
+            "enum": ["safe-style", "behavioral-risk"],
+        },
+    },
+}
+
+#: Batch fix schema (#2573).
+#:
+#: The array is wrapped in an object because the CLI transport forwards
+#: ``--json-schema`` as a tool input schema, and the API rejects anything whose
+#: top level is not ``object``
+#: (``tools.N.custom.input_schema.type: Input should be 'object'``). Every
+#: exported CLI schema must therefore stay an object at the root.
 FIX_BATCH_CLI_SCHEMA: dict[str, object] = {
-    "type": "array",
-    "items": {
-        "type": "object",
-        "required": [
-            "line",
-            "original_code",
-            "suggested_code",
-            "explanation",
-            "confidence",
-            "risk_level",
-        ],
-        "additionalProperties": False,
-        "properties": {
-            "line": {"type": "integer"},
-            "original_code": {"type": "string"},
-            "suggested_code": {"type": "string"},
-            "explanation": {"type": "string"},
-            "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
-            "risk_level": {
-                "type": "string",
-                "enum": ["safe-style", "behavioral-risk"],
-            },
+    "type": "object",
+    "required": [FIX_BATCH_KEY],
+    "additionalProperties": False,
+    "properties": {
+        FIX_BATCH_KEY: {
+            "type": "array",
+            "items": _FIX_BATCH_ITEMS_SCHEMA,
         },
     },
 }

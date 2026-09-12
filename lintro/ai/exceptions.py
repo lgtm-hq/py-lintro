@@ -72,7 +72,26 @@ class AIRateLimitError(AIProviderError):
 
     Raised when the provider returns a rate limit error. Users should
     wait and retry, or switch to a different provider/model.
+
+    Attributes:
+        retry_after: Seconds the provider asked the caller to wait, taken
+            from the HTTP ``Retry-After`` header when the vendor sent one.
+            ``None`` when the header was absent or unparseable;
+            :func:`~lintro.ai.retry.with_retry` then falls back to its
+            exponential backoff.
     """
+
+    retry_after: float | None
+
+    def __init__(self, *args: object, retry_after: float | None = None) -> None:
+        """Initialize the error.
+
+        Args:
+            *args: Standard exception arguments (typically the message).
+            retry_after: Parsed ``Retry-After`` value in seconds, if any.
+        """
+        super().__init__(*args)
+        self.retry_after = retry_after
 
 
 class AIProviderRegistrationError(AIError):

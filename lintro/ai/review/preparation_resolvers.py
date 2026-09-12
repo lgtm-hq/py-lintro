@@ -18,7 +18,10 @@ from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.exceptions import ReviewPreparationError
 from lintro.ai.review.lint_bridge import (
+    LintReportError,
     format_lint_results_for_prompt,
+    load_lint_report,
+    restrict_lint_results_to_files,
     run_lint_on_changed_files,
 )
 
@@ -185,3 +188,65 @@ def build_lint_digest(
     digest = format_lint_results_for_prompt(results=results)
     issues = sum(result.issues_count or 0 for result in results)
     return (digest or None), len(results), issues
+
+
+#: Header wording for a run that asked for a saved lint report and got none.
+#: Fixed text so CI logs, the posted header, and the docs say the same thing.
+LINT_FACTS_UNAVAILABLE: str = "linter facts unavailable for this head"
+
+
+def lint_facts_missing_note(reason: str) -> str:
+    """Render the header note for a review that was given no lint report.
+
+    The CI wiring passes the reason through ``--lint-report-missing`` (#2571)
+    so the posted comment says the review ran without deterministic lint
+    facts, in the same words the Actions log uses.
+
+    Args:
+        reason: Why no report was available, e.g. ``no linting-json-report
+            for head <sha> after 600s``.
+
+    Returns:
+        str: ``"<LINT_FACTS_UNAVAILABLE>: <reason>"``, or an empty string when
+        the reason is blank so callers can assign it unconditionally.
+    """
+    reason = reason.strip()
+    return f"{LINT_FACTS_UNAVAILABLE}: {reason}" if reason else ""
+
+
+def build_lint_digest_from_report(
+    *,
+    context: ReviewContext,
+    report_path: Path,
+) -> tuple[str | None, int, int, str]:
+    """Digest a saved lintro JSON report for the prompt (``--lint-report``).
+
+    The report was produced elsewhere — in CI, by the untrusted lint job on
+    the PR head (#2571) — so nothing is executed here: the file is loaded,
+    validated, restricted to the review's changed files, and formatted exactly
+    as a ``--with-lint`` run would be. A report that cannot be used is not an
+    error: the review proceeds from the diff alone and the returned note says
+    why, for the review header.
+
+    Args:
+        context: Collected review context.
+        report_path: Path to the saved report.
+
+    Returns:
+        tuple[str | None, int, int, str]: The prompt digest (None when
+        empty), the number of tools in the report, the issues kept after
+        restricting to changed files, and the header note (empty when the
+        report was usable).
+    """
+    try:
+        results = load_lint_report(report_path)
+    except LintReportError as exc:
+        logger.warning("{}: {}", LINT_FACTS_UNAVAILABLE, exc)
+        return None, 0, 0, f"{LINT_FACTS_UNAVAILABLE}: {exc}"
+    restricted = restrict_lint_results_to_files(
+        results=results,
+        changed_files=[file.path for file in context.changed_files],
+    )
+    digest = format_lint_results_for_prompt(results=restricted)
+    issues = sum(result.issues_count or 0 for result in restricted)
+    return (digest or None), len(results), issues, ""

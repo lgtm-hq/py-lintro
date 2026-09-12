@@ -171,9 +171,43 @@ Consequences for operators:
   promotes it when it matches the binary it was about to upload. A killed runner can no
   longer strip a good binary off a published release, which is what the
   `softprops/action-gh-release` overwrite path did on `v0.147.3`. The
-  `Generate Man Page` and `Create Universal Binary` jobs still upload with
-  `softprops/action-gh-release`; their assets are regenerated cheaply, so the swap was
-  not extended to them.
+  `Generate Man Page` job still uploads with `softprops/action-gh-release`; its asset is
+  regenerated cheaply, so the swap was not extended to it.
+
+### Dispatching `build-binary.yml` by hand
+
+`get-release-info` resolves the latest published release whenever no `release_tag` input
+is supplied, so before #2484 a bare `workflow_dispatch` republished main-HEAD binaries,
+the man page and the universal binary onto a shipped release — three such dispatches
+overwrote four `v0.151.1` assets and broke the Homebrew arm64 checksum. Every publishing
+step and the `homebrew-dispatch` job are now gated on
+`inputs.release_tag != '' || inputs.upload_to_release == true`.
+
+- **Plain dispatch** (leave `upload_to_release` off): builds, verifies and uploads run
+  artifacts only. Nothing on any release is touched. This is the safe way to test a
+  build from a branch.
+- **Repair dispatch** (`upload_to_release: true`, **run from the release tag**):
+  republishes the built binaries onto the release `get-release-info` resolves. Use it
+  only to restore assets a broken run left behind; download the artifacts from the tag
+  run first if you want to compare checksums.
+  - **Select the release tag as the dispatch ref** ("Use workflow from" in the UI, or
+    `gh workflow run build-binary.yml --ref <tag> ...`). The workflow checks out the ref
+    it was dispatched from, but `get-release-info` resolves the _latest published
+    release_ regardless — so a repair dispatched from `main` compiles main-HEAD and
+    publishes it onto a shipped release under that release's asset names, which is the
+    same corruption #2484 is about, just with the gate honoured. The full invariant:
+    only the _latest published_ release can be repaired this way, the dispatch ref has
+    to be that release's tag, and dispatching from any older tag publishes that ref's
+    binaries onto the current latest release's asset names. Repairing an older release
+    needs a different path (see the incident notes on #2484).
+  - **There is no `arch` input to get wrong.** Since #2579 the workflow builds exactly
+    the three release assets — `lintro-macos-arm64`, `lintro-linux-x64`,
+    `lintro-linux-arm64` — unconditionally, so a repair dispatch restores all of them
+    and, on a stable release, re-pings the tap with the arm64 checksum. Intel Macs are
+    served from PyPI by the Homebrew formula and have no asset to repair.
+- **The tag pipeline is unaffected.** `publish-pypi-on-tag.yml` calls this workflow with
+  `release_tag`, which satisfies the first disjunct; `upload_to_release` is a
+  dispatch-only input and never reaches the `workflow_call` path.
 
 ## Token patterns
 

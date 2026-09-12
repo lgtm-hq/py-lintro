@@ -35,7 +35,8 @@
     "reviewed_paths": [],
     "skipped_files": [],
     "coverage_degradations": [],
-    "synthesis": null
+    "synthesis": null,
+    "lint_facts_note": ""
   },
   "summary": "No review output.",
   "checklist": [],

@@ -50,6 +50,7 @@ __all__ = [
     "format_cross_chunk_note",
     "format_inline_post_cause",
     "format_inline_post_note",
+    "format_lint_facts_note",
     "format_partial_review_label",
     "format_run_mechanics",
     "format_synthesis_note_line",
@@ -160,6 +161,27 @@ def format_coverage_limited_warning(*, metadata: ReviewMetadata) -> str:
         f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}** — "
         f"{sanitize_comment_text(detail, limit=400)}"
     )
+
+
+def format_lint_facts_note(*, metadata: ReviewMetadata) -> str:
+    """Render the header note for a run that reviewed without linter facts.
+
+    ``--lint-report`` feeds the untrusted lint job's saved report into the
+    prompt (#2571). When that report was asked for but could not be used, the
+    review still runs from the diff alone, and this line says so under the
+    header, where a scanning reader meets it, so a round without deterministic
+    facts is never mistaken for one that had them.
+
+    Args:
+        metadata: Review run metadata.
+
+    Returns:
+        A blockquote note, or an empty string when there is nothing to say.
+    """
+    note = metadata.lint_facts_note.strip()
+    if not note:
+        return ""
+    return f"> ℹ️ **Linter facts** — {sanitize_comment_text(note, limit=300)}"
 
 
 _INLINE_POST_CAUSES: dict[InlinePostFailureKind, str] = {

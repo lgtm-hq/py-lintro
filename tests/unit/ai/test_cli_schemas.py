@@ -8,7 +8,10 @@ from typing import Any, cast
 import pytest
 from assertpy import assert_that
 
+from lintro.ai import cli_schemas
 from lintro.ai.cli_schemas import (
+    FIX_BATCH_CLI_SCHEMA,
+    FIX_BATCH_KEY,
     REVIEW_CLI_SCHEMA,
     SUMMARY_CLI_SCHEMA,
     cli_schema_for_fix,
@@ -51,7 +54,70 @@ def test_cli_schema_for_fix_supports_batch_mode() -> None:
     assert single is not None  # narrow type for mypy
     assert batch is not None  # narrow type for mypy
     assert_that(single.schema["type"]).is_equal_to("object")
-    assert_that(batch.schema["type"]).is_equal_to("array")
+    assert_that(batch.schema["type"]).is_equal_to("object")
+    batch_properties = cast(dict[str, Any], batch.schema["properties"])
+    assert_that(batch_properties[FIX_BATCH_KEY]["type"]).is_equal_to("array")
+
+
+#: Every schema module :mod:`lintro.ai.cli_schemas` exports, derived from
+#: ``__all__`` rather than listed by hand so a newly exported schema is held to
+#: the contract below without anyone remembering to add it here.
+_EXPORTED_CLI_SCHEMAS = {
+    name: cast(dict[str, Any], getattr(cli_schemas, name))
+    for name in cli_schemas.__all__
+    if name.endswith("_CLI_SCHEMA")
+}
+
+
+def test_the_cli_schema_registry_is_derived_and_complete() -> None:
+    """The derived registry must hold every schema, not silently none.
+
+    A rename that broke the ``_CLI_SCHEMA`` suffix would empty the registry and
+    turn the parametrised contract below into zero tests.
+    """
+    assert_that(sorted(_EXPORTED_CLI_SCHEMAS)).is_equal_to(
+        [
+            "FIX_BATCH_CLI_SCHEMA",
+            "FIX_CLI_SCHEMA",
+            "REVIEW_CLI_SCHEMA",
+            "SUMMARY_CLI_SCHEMA",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "schema"),
+    sorted(_EXPORTED_CLI_SCHEMAS.items()),
+)
+def test_every_cli_schema_is_an_object_at_the_root(
+    name: str,
+    schema: dict[str, object],
+) -> None:
+    """Every CLI schema must be ``type: object`` at the top level (#2573).
+
+    Claude Code forwards ``--json-schema`` as a tool input schema, and the API
+    rejects any other root type with
+    ``tools.N.custom.input_schema.type: Input should be 'object'``. The batch
+    fix schema shipped as an array and broke ``--fix`` on the CLI transport.
+
+    Args:
+        name: Schema constant name, for the failure message.
+        schema: The schema under test.
+    """
+    assert_that(schema["type"]).described_as(name).is_equal_to("object")
+
+
+def test_fix_batch_cli_schema_wraps_the_array_in_a_fixes_property() -> None:
+    """The batch fix array lives under ``fixes`` on an object root (#2573)."""
+    assert_that(FIX_BATCH_CLI_SCHEMA["required"]).is_equal_to([FIX_BATCH_KEY])
+    properties = cast(dict[str, Any], FIX_BATCH_CLI_SCHEMA["properties"])
+    fixes = properties[FIX_BATCH_KEY]
+    assert_that(fixes["type"]).is_equal_to("array")
+    assert_that(fixes["items"]["required"]).contains(
+        "line",
+        "original_code",
+        "suggested_code",
+    )
 
 
 def test_parse_review_response_payload_accepts_fenced_json() -> None:

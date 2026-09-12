@@ -400,37 +400,3 @@ def _archive_body(
         trimmed.append(candidate)
     trimmed.append(footer)
     return assemble(sections=trimmed)
-
-
-def _history_mini_summary(*, run: RunRecord) -> str:
-    """Render one prior round's recap under the history table.
-
-    The round line names the verdict; the line under it is the model's own
-    one-sentence account of that round when it wrote one, because "🔴 1 · 🟠 2"
-    says how many things were wrong and never what they were. A record with no
-    stored narrative — a legacy one, or a round whose model returned no summary
-    — falls back to the severity counts.
-
-    Args:
-        run: Prior run record to summarize.
-
-    Returns:
-        Markdown for the recap, as a round line plus its detail line.
-    """
-    outcome = run.outcome
-    short = _short_sha(sha=run.identity.sha)
-    where = f" · `{short}`" if short else ""
-    verdict = verdict_label(verdict=outcome.verdict).lower()
-    head = (
-        f"**Round {run.identity.round}**{where} · "
-        f"{VERDICT_EMOJI[outcome.verdict]} {verdict}"
-        + (" · ⚠️ partial" if run.coverage.partial else "")
-    )
-    # Table-safe *and* collapsible-safe: the recap sits inside the history
-    # <details>, so a model-written closing tag would end it early.
-    narrative = _DETAILS_TAG_RE.sub(
-        r"&lt;\1\2",
-        _cell(text=outcome.narrative, limit=NARRATIVE_LIMIT),
-    )
-    detail = narrative or f"🔴 {outcome.p1} · 🟠 {outcome.p2} · 🟡 {outcome.p3}"
-    return f"{head}\n{detail}"

@@ -21,6 +21,107 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.156.1] - 2026-09-12
+
+### Changed
+
+- **adr**: record the review shape and protocol decisions as ADR-0010 (#2588) (b5097a3)
+
+### Fixed
+
+- **ai**: wrap the CLI batch fix schema and surface provider errors (#2592) (c64d0df)
+
+## [0.156.0] - 2026-09-11
+
+### Added
+
+- **release**: drop the Intel and universal macOS binaries (#2585) (cf65e74)
+
+### Changed
+
+- **release**: point Intel Mac npm users at Homebrew or PyPI and send the tap a single
+  macOS checksum (#2579)
+
+### Removed
+
+- **release**: drop the macOS `x86_64` and universal binaries; Apple silicon keeps the
+  prebuilt binary (#2579)
+
+## [0.155.0] - 2026-09-11
+
+### Added
+
+- **review**: gate inline posting on finding confidence and route notes to the sticky
+  (#2583) (1b0e60f)
+
+## [0.154.1] - 2026-09-11
+
+### Fixed
+
+- **review**: stop emitting positive checklist confirmations as findings (#2581)
+  (197120e)
+
+## [0.154.0] - 2026-09-11
+
+### Added
+
+- **review**: feed the untrusted lint job's report to the dogfood review (#2576)
+  (9adae8f)
+
+### Changed
+
+- **release**: ship lintro and pygments as bytecode in the binary builds (#2568)
+  (ffa6c03)
+
+## [0.153.9] - 2026-09-11
+
+### Fixed
+
+- **discovery**: stop excluding source files whose name contains "cache" (#2575)
+  (ffabb0e)
+
+## [0.153.8] - 2026-09-11
+
+### Fixed
+
+- **pytest**: honour per-invocation options when building the check command (#2543)
+  (b9842f1)
+
+## [0.153.7] - 2026-09-11
+
+### Fixed
+
+- **ci**: make a plain build-binary dispatch side-effect free and check caller grants
+  (#2563) (f796b0f)
+
+## [0.153.6] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: fit the sticky archive and count pruned fixed rows honestly (#2544)
+  (79a6640)
+
+## [0.153.5] - 2026-09-10
+
+### Fixed
+
+- **ci**: resume AI review reruns, cap the job at 38 minutes, serialise it, and honour
+  Retry-After (#2547) (83f2bcc)
+
+## [0.153.4] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: record the findings cap only when a chunk actually hits it (#2564)
+  (f9edc68)
+
+## [0.153.3] - 2026-09-10
+
+### Fixed
+
+- **ai/review**: degrade to the main pass when a deeper `call_ai` pass fails (#2545)
+  (664fdb5)
+
 ## [0.153.2] - 2026-09-10
 
 ### Fixed

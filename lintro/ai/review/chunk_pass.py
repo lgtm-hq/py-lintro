@@ -28,12 +28,16 @@ from typing import TYPE_CHECKING
 from lintro.ai.enums import AITransport
 from lintro.ai.review.adversarial_pass import run_adversarial_pass
 from lintro.ai.review.checklist_pass import generate_extra_checklist
-from lintro.ai.review.cli_limits import resolve_cli_findings_cap
+from lintro.ai.review.cli_limits import (
+    findings_cap_was_hit,
+    resolve_cli_findings_cap,
+)
 from lintro.ai.review.depth_degradation import run_degradable_depth_pass
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 from lintro.ai.review.merge import ChunkReviewPartial, merge_findings
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.progress import NullReviewProgress, StepTrackingProgress
 from lintro.ai.review.response_pipeline import (
@@ -46,7 +50,6 @@ from lintro.ai.review.session import aborted_before_completion, is_cost_cap_stop
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 
 if TYPE_CHECKING:
-    from lintro.ai.review.models.coverage_degradation import CoverageDegradation
     from lintro.ai.review.models.review_chunk import ReviewChunk
     from lintro.ai.review.session import ChunkRunPlan
 
@@ -114,7 +117,7 @@ async def review_chunk(
     # Gate before the main provider call so intra-chunk (depth-2/3) work
     # cannot overshoot the budget between the per-chunk checks.
     plan.budget.check()
-    response, elapsed, chunk_degradations = await invoke_chunk_review(
+    call = await invoke_chunk_review(
         request=ChunkReviewRequest(
             chunk=chunk,
             context=plan.context,
@@ -138,19 +141,42 @@ async def review_chunk(
         ),
     )
     response, payload = await parse_review_payload_with_recovery(
-        response=response,
+        response=call.response,
         chunk=chunk,
         provider=plan.provider,
         ai_config=ai_config,
         budget=plan.budget,
         repo_root=plan.repo_root,
         use_one_shot=plan.use_one_shot,
-        elapsed=elapsed,
+        elapsed=call.elapsed,
     )
+    main_pass = payload_to_partial(response=response, payload=payload)
+    # The cap is recorded only once the parsed answer reached it: a ceiling
+    # nobody bumped into cost the run no findings, so recording it would make
+    # every capped-transport review read as degraded (#2283). Counted on the
+    # main pass alone, before the depth-3 sweep merges its own findings in.
+    cap_degradations: tuple[CoverageDegradation, ...] = ()
+    if findings_cap_was_hit(
+        findings_count=len(main_pass.findings),
+        findings_cap=call.findings_cap,
+    ):
+        cap_degradations = (
+            CoverageDegradation(
+                reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+                chunk_index=chunk_index,
+                # ``call.findings_cap`` is never None here: the helper only
+                # reports a hit when a real ceiling was in force.
+                findings_cap=call.findings_cap or 0,
+            ),
+        )
     partial = replace(
-        payload_to_partial(response=response, payload=payload),
+        main_pass,
         files=tuple(chunk.files),
-        coverage_degradations=(*depth_degradations, *chunk_degradations),
+        coverage_degradations=(
+            *depth_degradations,
+            *call.degradations,
+            *cap_degradations,
+        ),
     )
 
     if extra_checklist_usage is not None:

@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NoReturn
 
@@ -419,7 +419,9 @@ def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
         dict[str, Any]: The finding as the MCP contract carries it. ``origin``
         appears only when the finding came from a non-chunk pass, so a run
         without the cross-chunk synthesis pass (#2269) serializes exactly as
-        it did before that pass existed.
+        it did before that pass existed. ``posted_inline`` (#2572) is always
+        present: the payload keeps every finding, and the flag says which
+        ones the posting policy would open a thread for.
     """
     payload: dict[str, Any] = {
         "file": finding.file,
@@ -437,6 +439,7 @@ def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
         ),
         "checklist_ids": list(finding.checklist_ids),
         "source": finding.source,
+        "posted_inline": finding.posted_inline,
     }
     if finding.origin is not None:
         payload["origin"] = str(finding.origin)
@@ -705,6 +708,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     from lintro.ai.providers import get_provider
     from lintro.ai.review.exceptions import ReviewPreparationError
     from lintro.ai.review.patch_validation import validate_result_suggested_patches
+    from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
     from lintro.ai.review.preparation import (
         execute_review,
         prepare_review,
@@ -781,6 +785,16 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     # same head-content validation as the CLI's terminal, JSON, and --post
     # surfaces rather than handing an agent a patch that no longer applies.
     result = validate_result_suggested_patches(result=result, context=prepared.context)
+    # #2572: the same posting policy the CLI applies before --post, so the
+    # payload's ``posted_inline`` flags and ``readiness_verdict`` match what a
+    # posted round would show rather than reporting every finding as inline.
+    result = replace(
+        result,
+        findings=apply_posting_policy(
+            findings=result.findings,
+            policy=PostingPolicy.from_ai_config(prepared.ai_config),
+        ),
+    )
     return _review_payload(result=result, budget=budget)
 
 

@@ -319,6 +319,56 @@ review:
   auto_resolve: true # default; set false to resolve threads by hand
 ```
 
+### Confidence gate on inline posting
+
+Every finding carries a model-reported `confidence` (`high`, `medium`, `low`) and a
+`kind` (`finding` or `question`). `lintro review --post` opens an inline thread only for
+findings that clear the posting policy; the rest become _notes_:
+
+- **Inline** — `confidence` at or above `ai.review_inline_min_confidence` (default
+  `medium`), and `kind: finding` unless `ai.review_post_questions_inline` is `true`, in
+  which case questions that clear the same floor open threads too. These open threads,
+  count in the review body's header, feed the derived verdict, and are tracked across
+  rounds.
+- **Notes** — everything else: `low` confidence findings, and questions unless
+  `ai.review_post_questions_inline` is `true`. Notes render in the sticky comment under
+  a collapsed **💬 Notes and questions (N)** block, each linked to its `file:line` at
+  the reviewed commit. They open no thread, are excluded from the verdict, the severity
+  tiles, the open-findings table and the fix prompts, and open no record of their own.
+  Notes are round-scoped, like the summary and the reasoning block: nothing persists
+  them, so a sticky comment re-rendered from state alone — a converged skip, an error
+  surface — shows no notes block. The comment posted by the round that routed them still
+  carries it.
+
+A note never resolves an existing thread. When a finding posted inline in an earlier
+round comes back as a note, its record is carried forward open — the model still asserts
+it, only below the floor, or as a question the policy does not post — so the thread
+stays, the round does not count it as fixed, and the notes entry is tagged with the
+reason: _(below the inline confidence floor this round)_ for a finding, _(questions are
+not posted inline)_ for a question. Notes are paired to prior records one at a time, so
+a sibling at another line that stopped being reported still resolves. The record
+resolves only once the finding stops being reported at all, and a finding whose
+confidence recovers matches the record it already had rather than reappearing as new.
+
+Nothing is dropped. JSON and MCP output keep every finding and add `posted_inline`
+(`true` / `false`) per finding so a consumer can tell a thread from a note. The terminal
+verdict, the JSON `readiness_verdict`, and the exit code all use the inline subset: a P1
+routed to notes does not fail the process. With the default floor that means a `low`
+confidence P1; with `review_inline_min_confidence: low` no confidence is below the
+floor, so every P1 finding blocks again.
+
+```yaml
+# .lintro-config.yaml
+ai:
+  review_inline_min_confidence: medium # low | medium | high
+  review_post_questions_inline: false # true opens a thread per question
+```
+
+Set `review_inline_min_confidence: low` to restore posting every `kind: finding` entry
+inline. Questions stay in the notes block regardless of the floor — set
+`review_post_questions_inline: true` to open threads for them too. The two keys are
+independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
+
 ### When inline comments cannot be posted
 
 A finding always has a surface. When GitHub refuses the inline review batch — or a
@@ -363,13 +413,34 @@ total, `--output json` carries `suggestions_dropped` plus a
 `suggestions_dropped_by_reason` tally alongside a per-finding `suggestion_dropped` tag,
 and the sticky comment states the count and reasons.
 
+### Linter facts in the review prompt
+
+The review protocol puts facts before opinion: the model is given the deterministic
+linter results for the changed files before it reads the diff. Two flags feed them.
+`--with-lint` runs the check tools in-process on the working tree, which is right when
+the tree _is_ the revision under review (a local branch or `--uncommitted`).
+`--lint-report PATH` reads a saved lintro JSON report instead
+(`lintro chk --output-format json`, or the `.lintro/artifacts/json/results.json` side
+channel CI emits) and is the form the dogfood review uses: the trusted `--pr` job checks
+out the base branch and never executes PR code, so the untrusted `docker-ci` lint job
+lints the PR head, uploads the report as the `linting-json-report` artifact, and the
+review job downloads it for the exact head SHA it is reviewing. Either way the digest is
+restricted to the changed files, size-capped, fenced into the prompt as untrusted data
+alongside the diff, and never acted on by lintro itself. A report that is missing,
+oversized, or malformed is not fatal: the review runs from the diff alone and the posted
+header says `linter facts unavailable for this head`. The two flags are mutually
+exclusive.
+
 ### Review coverage completeness
 
 A capped CLI review is **not a guaranteed full finding set**. Under `--transport cli`,
 every chunk prompt carries the `ai.cli_max_findings_per_call` ceiling, and a chunk that
 still exhausts the provider's output-token cap is retried once at a tighter ceiling. In
 both cases every chunk is still reviewed — but the model was told to stop at N findings,
-so lower-severity issues beyond the cap may exist and go unreported.
+so lower-severity issues beyond the cap may exist and go unreported. A configured
+ceiling is only recorded as a coverage degradation once a chunk's answer actually
+reaches it, so a CLI run whose chunks all came back under the cap is coverage-complete
+and renders exactly like an uncapped one.
 
 That is recorded and surfaced rather than left silent:
 
@@ -694,6 +765,9 @@ only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
 otherwise flip that verdict run-to-run: borderline findings must be P3, and every
 finding `description` must name the rubric boundary it used.
 
+Only findings the posting policy routes inline count (see "Confidence gate on inline
+posting"): a `low` confidence finding or an open question never moves the verdict.
+
 A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
 Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
@@ -777,6 +851,16 @@ Reading the block:
 - GitHub posting happens after the result is rendered, so it is outside the measured
   window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
   existing consumers.
+
+### Review design record
+
+What the review mechanism promises — its shape (parallel file-group chunks,
+findings-only chunk output, one synthesis call, one verification call, transport
+neutrality, posting tiers), its six protocol layers, and the interim merge policy for a
+partial-review red check — is recorded in
+[ADR-0010](adr/0010-review-shape-and-protocol.md). The invariants the architecture holds
+are in [ADR-0008](adr/0008-ai-review-architecture-invariants.md), resume and artifact
+state in [ADR-0007](adr/0007-review-resume-and-artifact-state.md).
 
 ## Configuration
 
@@ -876,6 +960,16 @@ ai:
   # Max retries for transient API errors. (int 0–10, default: 2)
   max_retries: 2
 
+  # Retries for HTTP 429 (rate limit) only; other transient failures keep
+  # max_retries. When the provider sends Retry-After, lintro waits that long
+  # instead of its backoff, capped at a fixed, non-configurable 300 seconds:
+  # a longer advertised wait is clamped to 300 seconds and still honored.
+  # Only a malformed or already-elapsed Retry-After falls back to the
+  # exponential backoff. Exhausting this budget fails with a message naming
+  # the rate limit and asking for a rerun.
+  # (int 0–20, default: 6)
+  rate_limit_max_retries: 6
+
   # API request timeout in seconds. (float >= 1.0, default: 60.0)
   api_timeout: 60.0
 
@@ -937,6 +1031,20 @@ ai:
   # Minimum confidence for AI fix suggestions; anything below the threshold is
   # discarded. (one of: low | medium | high, default: low)
   min_confidence: low
+
+  # ── Review inline posting (#2572) ─────────────────────────────
+  # Lowest model-reported confidence a review finding needs to open an inline
+  # PR thread. Findings below it stay in JSON/MCP output but are routed to the
+  # sticky comment's collapsed "Notes and questions" block, where they never
+  # affect the verdict. Unlike `min_confidence` above, which discards
+  # low-confidence AI fix suggestions, this one reroutes review findings
+  # instead of dropping them. (one of: low | medium | high, default: medium)
+  review_inline_min_confidence: medium
+
+  # Post question-kind review entries as inline threads. Off by default:
+  # questions go to the "Notes and questions" block so an open question never
+  # blocks a merge under a zero-unresolved-threads rule. (bool, default: false)
+  review_post_questions_inline: false
 
   # Restrict AI processing to matching paths / rules (glob patterns).
   # Empty means "no filter". (list[str], default: [])
@@ -1614,11 +1722,14 @@ AI API calls use exponential backoff retry:
 - **Retried errors:** rate limits, transient provider errors
 - **Not retried:** authentication errors (fail immediately)
 
-AI failures never break the main linting flow. If the provider is unavailable, you get
-your normal linting results with a one-line notice:
+By default (`ai.fail_on_ai_error: false`) AI failures never break the main linting flow.
+If the provider is unavailable, you get your normal linting results with a one-line
+notice naming the exception class and the first line of the provider's message (secrets
+redacted); the full traceback stays at debug level. With `ai.fail_on_ai_error: true` the
+provider error is re-raised instead, so the run exits non-zero:
 
 ```text
-AI: enhancement unavailable
+AI: enhancement unavailable (AIProviderError: claude exited with status 1)
 ```
 
 ### Non-JSON review responses

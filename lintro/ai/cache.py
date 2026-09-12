@@ -131,6 +131,11 @@ def cache_suggestion(
         issue_message: Linter message text.
         suggestion: AIFixSuggestion to cache.
         max_entries: Maximum cache entries before LRU eviction.
+
+    Raises:
+        BaseException: Re-raised unchanged after the temporary file is removed,
+            so a failed or interrupted write never leaves a partial entry in
+            the cache directory.
     """
     key = _cache_key(file_content, issue_code, issue_line, issue_message)
     cache_dir = workspace_root / CACHE_DIR

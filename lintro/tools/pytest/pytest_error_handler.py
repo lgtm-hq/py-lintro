@@ -27,7 +27,7 @@ class PytestErrorHandler:
 
     def handle_timeout_error(
         self,
-        timeout_val: int,
+        timeout_val: int | float,
         cmd: list[str],
         initial_count: int = 0,
     ) -> ToolResult:

@@ -47,7 +47,8 @@
     ],
     "skipped_files": [],
     "coverage_degradations": [],
-    "synthesis": null
+    "synthesis": null,
+    "lint_facts_note": ""
   },
   "summary": "Session gate now fails closed, but a hardcoded key landed with it.\n\nToken decoding gained an unverified fast path.",
   "checklist": [
@@ -88,7 +89,8 @@
       "suggested_change": null,
       "suggestion_dropped": null,
       "cross_chunk_contradiction": null,
-      "origin": null
+      "origin": null,
+      "posted_inline": true
     },
     {
       "severity": "P2",
@@ -113,7 +115,8 @@
       "suggested_change": null,
       "suggestion_dropped": null,
       "cross_chunk_contradiction": null,
-      "origin": null
+      "origin": null,
+      "posted_inline": true
     },
     {
       "severity": "P2",
@@ -138,7 +141,8 @@
       "suggested_change": null,
       "suggestion_dropped": null,
       "cross_chunk_contradiction": null,
-      "origin": null
+      "origin": null,
+      "posted_inline": true
     }
   ],
   "pr_summary": {
