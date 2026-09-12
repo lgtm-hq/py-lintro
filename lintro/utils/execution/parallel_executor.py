@@ -1,6 +1,14 @@
 """Parallel tool execution utilities.
 
-This module provides functions for running tools in parallel using async execution.
+This module provides functions for running tools in parallel using async
+execution.
+
+Mutation is the exception. Under a mutating action (``Action.FIX``) the
+batches still run in derived DAG order, but each batch dispatches one tool at
+a time: two mutators that overlap on a file would race on its bytes, and the
+loser's write is simply gone. Read-only actions — ``check``, and the
+run-level verify pass, which is configured with ``Action.CHECK`` — keep the
+full fan-out.
 """
 
 from __future__ import annotations
@@ -85,7 +93,11 @@ def run_tools_parallel(
     max_fix_retries: int = 3,
     diff_base: str | None = None,
 ) -> list[ToolResult]:
-    """Run tools in parallel using async executor.
+    """Run tools through the async executor, batch by batch.
+
+    Under a read-only action every tool in a batch runs concurrently. Under a
+    mutating action the batch is dispatched one tool at a time, so no two
+    mutating capabilities are ever in flight at once (#1743).
 
     Args:
         tools_to_run: List of tool names to run.
@@ -115,6 +127,18 @@ def run_tools_parallel(
     # sequential run (#1742).
     batches = tool_manager.get_parallel_batches(tools_to_run)
     logger.debug(f"Parallel execution batches: {batches}")
+
+    # The mutation phase runs one tool at a time. Two mutating capabilities
+    # that overlap on a file race on its bytes: each reads, rewrites and writes
+    # the whole file, so the second write drops the first tool's edit and the
+    # verify pass reports the difference as an unexplained residual. Reading
+    # is safe, so ``check`` runs — and so does the verify pass, which is
+    # configured with ``Action.CHECK`` — stay fully parallel. This is a bridge
+    # until the scheduler gains an overlap rule that can keep disjoint
+    # mutators concurrent.
+    serialize_mutations = action == Action.FIX
+    if serialize_mutations:
+        logger.debug("Mutating action: batches run one tool at a time")
 
     all_results: list[ToolResult] = []
     executor = AsyncToolExecutor(max_workers=max_workers)
@@ -230,23 +254,31 @@ def run_tools_parallel(
                         description=desc,
                     )
 
-                # Run batch in parallel with progress callback. Use the
-                # loop-aware runner so the executor works both from the CLI
-                # (no running loop) and when embedded in an already-running
-                # event loop.
-                batch_results = _run_coroutine_blocking(
-                    executor.run_tools_parallel(
-                        tools=tools_with_instances,
-                        paths=paths,
-                        action=action,
-                        on_result=on_tool_complete,
-                        max_fix_retries=max_fix_retries,
-                    ),
+                # Run the batch with the progress callback. Use the loop-aware
+                # runner so the executor works both from the CLI (no running
+                # loop) and when embedded in an already-running event loop.
+                # A mutating action dispatches one tool per group, so no two
+                # mutators are ever in flight over the same file at once; a
+                # read-only action dispatches the whole batch as one group.
+                groups: list[list[tuple[str, BaseToolPlugin]]] = (
+                    [[pair] for pair in tools_with_instances]
+                    if serialize_mutations
+                    else [tools_with_instances]
                 )
+                for group in groups:
+                    group_results = _run_coroutine_blocking(
+                        executor.run_tools_parallel(
+                            tools=group,
+                            paths=paths,
+                            action=action,
+                            on_result=on_tool_complete,
+                            max_fix_retries=max_fix_retries,
+                        ),
+                    )
 
-                # Collect results
-                for _, result in batch_results:
-                    all_results.append(result)
+                    # Collect results
+                    for _, result in group_results:
+                        all_results.append(result)
 
     finally:
         executor.shutdown()

@@ -193,10 +193,20 @@ def _execute_tools_parallel(
         list[ToolResult]: Results for every tool that ran.
     """
     logger = ctx.logger
-    logger.console_output(
-        text=f"Running {len(tools_to_run)} tools in parallel "
-        f"(max {ctx.lintro_config.execution.max_workers} workers)",
-    )
+    if ctx.action == Action.FIX:
+        # Say what actually happens: the mutation phase runs one tool at a
+        # time (#1743), so announcing a worker count here would be a lie.
+        logger.console_output(
+            text=(
+                f"Running {len(tools_to_run)} tools, one at a time "
+                "(mutating tools are not run concurrently)"
+            ),
+        )
+    else:
+        logger.console_output(
+            text=f"Running {len(tools_to_run)} tools in parallel "
+            f"(max {ctx.lintro_config.execution.max_workers} workers)",
+        )
     all_results = run_tools_parallel(
         tools_to_run=tools_to_run,
         paths=paths,
