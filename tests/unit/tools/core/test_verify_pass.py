@@ -394,7 +394,10 @@ def test_an_empty_scope_still_reports_an_outcome_per_verifying_tool(
 
     assert_that([o.tool for o in outcomes]).is_equal_to(["ruff"])
     assert_that(outcomes[0].result).is_none()
-    assert_that(outcomes[0].ran).is_true()
+    # UNCHANGED, not VERIFIED: nothing was rewritten, so the tool's pre-fix
+    # findings stand. VERIFIED would let the fold treat the scope as
+    # re-checked and zero the residual, and UNKNOWN would fail the run.
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNCHANGED)
     assert_that(ruff.seen_files).is_none()
 
 
@@ -1358,8 +1361,12 @@ def test_run_verify_pass_treats_a_no_files_check_as_verifying_nothing(
         configure=lambda *, tool_name: cast("VerifiableTool", ruff),
     )
 
-    assert_that(outcomes[0].ran).is_true()
     assert_that(outcomes[0].result).is_none()
+    # A tool that discovered none of the scope's files rewrote none of them
+    # either, so this is UNCHANGED — its pre-fix findings stand. Mapping it to
+    # UNKNOWN would fail every mixed-language ``fmt`` run, and to VERIFIED
+    # would drop those findings as fixed.
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNCHANGED)
 
 
 def test_fold_never_reads_a_skipped_check_as_a_clean_verdict() -> None:
@@ -1615,13 +1622,30 @@ def test_every_nothing_examined_result_is_flagged() -> None:
     assert_that(unflagged).is_empty()
 
 
-def test_typos_reports_an_all_binary_candidate_set_as_no_files() -> None:
+def test_typos_reports_an_all_binary_candidate_set_as_no_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Typos builds its own no-files result, so it must stamp the flag too.
 
-    The message is ``None`` there, so the display's prose fallback cannot see
-    it at all — only the structured flag can.
+    The message is ``None`` there, so neither the display's prose fallback nor
+    the package-wide "No ..." tripwire can see it — only the structured flag
+    can. Driven through the public ``check`` entry point rather than the
+    helper alone, so a ``check`` that stopped routing through the helper and
+    built the result inline would fail here.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: pytest monkeypatch fixture.
     """
-    result = TyposPlugin()._no_files_result(cwd="/repo")
+    monkeypatch.setattr(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        lambda *_args, **_kwargs: None,
+    )
+    binary = tmp_path / "logo.png"
+    binary.write_bytes(b"\x89PNG\r\n\x1a\n\x00binary")
+
+    result = TyposPlugin().check([str(binary)], {})
 
     assert_that(result.no_files).is_true()
     assert_that(result.success).is_true()

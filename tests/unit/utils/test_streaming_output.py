@@ -410,11 +410,13 @@ def test_result_to_dict_reports_an_unknown_residual_instead_of_counts() -> None:
 
 
 def test_totals_ignore_a_result_whose_residual_is_unknown() -> None:
-    """An unmeasured residual adds nothing to either running total.
+    """An unmeasured residual adds nothing to either *derived* total.
 
-    The cleared counts must not leak into the totals dict as zeroes or as the
-    pre-fix number; only measured results are summed. The failure still
-    reaches the run through ``tools_failed``.
+    "Net resolved" and "remaining" are after-counts, and none was taken, so
+    the cleared counts must leak into neither — not as zeroes and not as the
+    pre-fix number. ``issues`` is the exception and deliberately so: those two
+    findings were measured, before the mutation phase, and the run reports
+    them. The failure reaches the run through ``tools_failed``.
     """
     handler = StreamingResultHandler(output_format="grid", action=Action.FIX)
 
@@ -424,6 +426,8 @@ def test_totals_ignore_a_result_whose_residual_is_unknown() -> None:
     assert_that(totals["net_resolved"]).is_equal_to(0)
     assert_that(totals["fixed"]).is_equal_to(0)
     assert_that(totals["remaining"]).is_equal_to(0)
+    # The pre-fix findings still count: they were measured.
+    assert_that(totals["issues"]).is_equal_to(2)
     assert_that(totals["tools_failed"]).is_equal_to(1)
 
 

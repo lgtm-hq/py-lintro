@@ -649,8 +649,14 @@ def test_a_declined_setup_py_is_not_reported_as_matched_nothing(
         "lintro.plugins.execution_preparation.verify_tool_version",
         return_value=None,
     ):
-        result = pip_audit_plugin.check([str(pkg / "setup.py")], {})
+        # Mocked like every other test in this module, even though the
+        # declined branch returns before the audit loop: if that branch ever
+        # regresses, this must fail on the assertion rather than shell out to
+        # the real pip-audit binary and wait on the network.
+        with patch.object(pip_audit_plugin, "_run_subprocess_result") as run:
+            result = pip_audit_plugin.check([str(pkg / "setup.py")], {})
 
+    run.assert_not_called()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.no_files).is_false()

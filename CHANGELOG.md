@@ -95,11 +95,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the roots that finished produced plus `timed_out=True`; the run-level verify pass now
   treats that partial answer as no answer, so every pre-fix finding survives and the run
   reports a failure instead of counting the difference as fixed.
-- **tools**: every plugin-built "nothing was examined" result now carries the structured
-  `no_files` flag (actionlint, bandit, cargo-audit, cargo-deny, clippy, golangci-lint,
-  mypy, osv-scanner, pip-audit, rustfmt, stylelint, trufflehog, typos, yamllint). The
-  summary table reads the flag before falling back to matching the message text, so a
-  tool whose wording the suffix list does not recognise is still annotated.
+- **tools**: the hand-built "nothing was examined" results now carry the structured
+  `no_files` flag. The framework's own early return
+  (`lintro.plugins.execution_preparation`) stamps it for every tool whose discovery
+  matched nothing, and these thirteen wrappers stamp the results they build themselves:
+  actionlint, bandit, cargo-audit, cargo-deny, clippy, golangci-lint, mypy, osv-scanner,
+  rustfmt, stylelint, trufflehog, typos and yamllint. The summary table reads the flag
+  before falling back to matching the message text, so a tool whose wording the suffix
+  list does not recognise is still annotated.
+
+  Not covered by the flag, and still classified by their message: wrappers that decline
+  to run at all without setting `skipped` — vale and commitlint emit a
+  `Skipping <name>: ...` result — and pip-audit's declined-after-match branch, which
+  matched files and refused them (see above) rather than finding none.
 
 ### Security
 

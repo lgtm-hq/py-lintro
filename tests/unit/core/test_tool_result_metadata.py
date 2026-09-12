@@ -99,8 +99,11 @@ def test_post_init_still_validates_issue_counts() -> None:
 def test_no_files_defaults_to_false_and_is_settable() -> None:
     """``no_files`` marks "nothing was examined", and defaults to off.
 
-    The run-level verify pass (#1743) reads this flag to tell a clean verdict
-    apart from a successful non-event, so a real result must not carry it.
+    Two consumers read it: ``lintro.tools.core.verify_pass.run_verify_pass``,
+    which must tell a clean verdict apart from a successful non-event, and
+    ``lintro.utils.meaningful_run.result_inspected_files``, which gates the
+    badge and the severity baseline on whether anything was measured at all.
+    A real result must not carry it.
     """
     real = ToolResult(name="ruff", success=True, issues_count=0)
     assert_that(real.no_files).is_false()
@@ -162,6 +165,7 @@ def test_capability_defaults_to_none() -> None:
     ("fixed", "remaining"),
     [
         (None, 0),
+        (0, None),
         (2, None),
         (2, 0),
     ],
@@ -170,7 +174,12 @@ def test_an_unknown_residual_may_not_carry_a_measured_count(
     fixed: int | None,
     remaining: int | None,
 ) -> None:
-    """The model refuses "unknown" beside a number.
+    """The model refuses "unknown" beside a number, zero included.
+
+    The falsy counts are in the matrix on purpose: a validator that regressed
+    from ``is not None`` to truthiness would accept ``fixed_issues_count=0``
+    and ``remaining_issues_count=0`` beside the flag, which is exactly the
+    "unknown, and also zero" rendering this rejects.
 
     ``residual_unknown`` means the verify pass took no after-measurement
     (#1743), so a result that still carries ``fixed_issues_count`` or
@@ -189,6 +198,25 @@ def test_an_unknown_residual_may_not_carry_a_measured_count(
             issues_count=2,
             fixed_issues_count=fixed,
             remaining_issues_count=remaining,
+            residual_unknown=True,
+            residual_unknown_reason="the verify check timed out",
+        )
+
+
+def test_an_unknown_residual_may_not_report_success() -> None:
+    """The other half of the contract: an unmeasured residual fails the run.
+
+    Condition 4 of this change is that verification failure fails the run and
+    is never presented as a measured after-count. The counts half was already
+    enforced; a result that admits it measured nothing while claiming
+    ``success=True`` would exit 0 on an outcome nobody knows, so the model
+    refuses it too.
+    """
+    with pytest.raises(ValueError, match="success must be False"):
+        ToolResult(
+            name="ruff",
+            success=True,
+            issues_count=2,
             residual_unknown=True,
             residual_unknown_reason="the verify check timed out",
         )

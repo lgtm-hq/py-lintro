@@ -120,7 +120,8 @@ class ToolResult:
     # remaining" — the count after the mutation phase was never taken, so
     # ``fixed_issues_count`` and ``remaining_issues_count`` are cleared to
     # ``None`` and consumers must render "unknown" rather than a number. The
-    # run fails either way.
+    # run fails either way, which is enforced below: ``success`` must be
+    # False whenever this is set.
     residual_unknown: bool = field(default=False)
     residual_unknown_reason: str | None = field(default=None)
 
@@ -160,6 +161,15 @@ class ToolResult:
         if self.residual_unknown_reason and not self.residual_unknown:
             raise ValueError(
                 "residual_unknown_reason can only be set when " "residual_unknown=True",
+            )
+
+        if self.residual_unknown and self.success:
+            # The other half of the same contract: an unmeasured residual
+            # fails the run. A result that claims success while admitting it
+            # never measured anything would exit 0 on a run whose outcome
+            # nobody knows.
+            raise ValueError(
+                "success must be False when residual_unknown=True",
             )
 
         if self.residual_unknown and (
