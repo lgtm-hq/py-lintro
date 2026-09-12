@@ -11,6 +11,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **core**: `lintro format` (alias `fmt`) now runs as a mutate-then-verify pipeline.
+  Every mutating capability (`FIX`, `FORMAT`) runs in derived DAG order, and then a
+  single verify pass runs the `CHECK` capability of the same tools; that one pass is the
+  run's authoritative residual count, replacing the per-plugin "lint again after
+  formatting" each mutating tool carried privately. A per-tool self-verify could not see
+  cross-tool interference — if ruff fixes a file and prettier then reformats it, ruff's
+  own post-fix lint has already run — so counts reported after a multi-tool format run
+  are now measured once, at the end, over the final bytes on disk. `fixed` is derived as
+  initial minus residual rather than self-reported. The verify pass is narrowed by file
+  fingerprint: only files whose stat moved between a pre- and post-mutation snapshot are
+  re-checked, degrading to every file handed to a mutating capability when fingerprints
+  cannot be trusted. `lintro check` stays read-only — no snapshot, no verify pass — and
+  so does `format --dry-run`.
+
 ### Changed
 
 - **plugins**: `DEFAULT_EXCLUDE_PATTERNS` moved to `lintro.utils.path_filtering` and is

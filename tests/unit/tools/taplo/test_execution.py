@@ -192,8 +192,6 @@ def test_fix_with_mocked_subprocess_success(
                 (False, format_issue_output),  # initial format check
                 (True, ""),  # lint check
                 (True, ""),  # fix command
-                (True, ""),  # final format check
-                (True, ""),  # final lint check
             ],
         ):
             result = taplo_plugin.fix([str(test_file)], {})
@@ -256,6 +254,12 @@ def test_fix_measures_before_it_writes_and_never_re_lints(
             result = taplo_plugin.fix([str(test_file)], {})
 
     assert_that(run_subprocess.call_count).is_equal_to(3)
+    # A swap that keeps the count at three but makes the last call another
+    # read-only probe would be the deleted self-verify wearing a disguise, so
+    # pin the writing command itself rather than only how many ran.
+    write_argv = run_subprocess.call_args_list[2].kwargs["cmd"]
+    assert_that(write_argv).contains("fmt")
+    assert_that(write_argv).does_not_contain("--check")
     assert_that(result.success).is_true()
     assert_that(result.initial_issues_count).is_equal_to(2)
     assert_that(result.initial_issues).is_length(2)
@@ -293,8 +297,6 @@ def test_fix_with_no_changes_needed(
                 (True, ""),  # initial format check - no issues
                 (True, ""),  # initial lint check - no issues
                 (True, ""),  # fix command
-                (True, ""),  # final format check
-                (True, ""),  # final lint check
             ],
         ):
             result = taplo_plugin.fix([str(test_file)], {})
