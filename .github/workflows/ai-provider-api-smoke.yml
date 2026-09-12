@@ -1,0 +1,234 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: AI - Provider API Smoke
+
+# Weekly live API smoke, one job per funded provider (#2600, epic #2598).
+#
+# What this replaces: the only live provider test in the repo used to be the
+# Tier 2 CLI invocation smoke on a weekly cron. It failed every Monday since
+# 2026-08-10 on "Credit balance is too low", gated nothing, and reached nobody
+# — a scheduled failure is a red X in a run list no human reads. It also tested
+# the wrong thing: the CLI transport is session- and subscription-bound and
+# drifts with each vendor release, while the API path is a base URL, a key and
+# a model.
+#
+# Three properties make this one visible where that one was not:
+#
+#   * The matrix comes from `scripts/ci/ai_provider_smoke/providers.json`, so
+#     each job is named for its provider (`anthropic-api`, `zai-api`, ...) and
+#     adding a provider is a table row plus a secret, never a workflow edit.
+#   * Every job posts a commit status `ai-provider-smoke/<name>` against main's
+#     HEAD, so failure is red on the branch and not only inside this run.
+#   * A failure opens or pings the deduplicated main-failure issue through the
+#     shared notifier — the same mechanism dogfood-nightly uses — under its own
+#     label, and the provider's error text is commented onto that issue so
+#     credit exhaustion and integration breakage are distinguishable at a
+#     glance.
+#
+# A row whose secret is unset is *skipped with a notice* and a pending commit
+# status. It must never read as a pass: a green tick for a call that was never
+# made is the failure mode this workflow exists to remove.
+
+'on':
+  schedule:
+    # Weekly (Monday 05:17 UTC). Inherited from the CLI smoke this replaces,
+    # so the weekly provider signal keeps its slot after that tier went
+    # manual-only.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ai-provider-api-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Dedup key for the shared main-failure notifier, and the key the error
+  # detail comment looks the issue up by. One constant, two consumers.
+  SMOKE_WORKFLOW_KEY: ai-provider-api-smoke
+
+jobs:
+  resolve-table:
+    name: 🧮 Resolve provider table
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the table and its loader
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.table.outputs.matrix }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/ai_provider_smoke
+          sparse-checkout-cone-mode: false
+
+      - name: Expand the provider table into a matrix
+        id: table
+        # The loader validates every row (protocol, https base URL, secret
+        # name, model) and fails the job on a malformed table, so a typo costs
+        # one cheap job instead of four confusing ones.
+        run: python3 scripts/ci/ai_provider_smoke/run_smoke.py --emit-matrix
+
+  smoke:
+    # The row name IS the job name and the commit-status context, so the
+    # checks tab explains itself without anyone reading this file.
+    name: ${{ matrix.name }}
+    needs: [resolve-table]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout lintro and its provider code path
+      statuses: write # report ai-provider-smoke/<name> on main's HEAD
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve-table.outputs.matrix) }}
+    steps:
+      - name: Harden Runner
+        # Exact hosts only. The provider host comes from the table row, so a
+        # new provider cannot be added without its egress arriving with it.
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            astral.sh:443
+            ${{ matrix.egress }}
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python and uv
+        uses: ./.github/actions/setup-env
+        env:
+          # The smoke needs lintro and the `ai` extra, not the linting tool
+          # binaries — skipping them keeps a weekly alarm cheap.
+          BOOTSTRAP_SKIP_INSTALL_TOOLS: '1'
+
+      - name: Run the provider smoke
+        id: smoke
+        env:
+          # Indexed by the table's key_secret, which is what makes a new
+          # provider a row plus a secret rather than a workflow edit. An unset
+          # secret resolves to '' and the script reports a visible skip.
+          LINTRO_SMOKE_API_KEY: ${{ secrets[matrix.key_secret] }}
+          SMOKE_PROVIDER: ${{ matrix.name }}
+        run: >-
+          uv run --extra ai python scripts/ci/ai_provider_smoke/run_smoke.py
+          --provider "${SMOKE_PROVIDER}"
+          --error-file "smoke-error.md"
+
+      - name: Upload the provider error text
+        if: always() && steps.smoke.outputs.outcome == 'failure'
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smoke-error-${{ matrix.name }}
+          path: smoke-error.md
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Report the commit status on main
+        # Main only: a branch dispatch must not paint main's HEAD. `always()`
+        # because the status is the whole point of the job — a failure that
+        # reports nothing is the defect this workflow replaces.
+        if: always() && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SMOKE_NAME: ${{ matrix.name }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outputs.outcome }}
+          SMOKE_SECRET: ${{ matrix.key_secret }}
+          SMOKE_STEP: ${{ steps.smoke.outcome }}
+        run: scripts/ci/ai_provider_smoke/report-commit-status.sh
+
+  notify-failure:
+    needs: [resolve-table, smoke]
+    # Main-only, and on any failure — credit exhaustion included. A manual
+    # dispatch from a feature branch must not open or ping the tracker.
+    if: failure() && github.ref == 'refs/heads/main'
+    # Deduplicated failure issue, the same mechanism dogfood-nightly and the
+    # release workflows use: the first failure opens
+    # `fix(ci): main workflow failed: main (ai-provider-api-smoke)`, repeats
+    # comment on it. The labels are deliberately NOT the generic bug/ci pair —
+    # `ai-provider-smoke` is what makes a provider alarm distinguishable from
+    # a #2212-style main failure at a glance.
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@b0d71b2b37fd205bf12118f5084612ceeea09208 # v0.69.9
+    permissions:
+      actions: read # read workflow/job metadata for the failure context
+      contents: read # repository context for the issue body
+      issues: write # open or ping the deduplicated failure issue
+    with:
+      workflow-key: ai-provider-api-smoke
+      failure-issue-labels: 'bug,ci,ai,ai-provider-smoke'
+      tooling-ref: 'b0d71b2b37fd205bf12118f5084612ceeea09208' # v0.69.9
+
+  annotate-failure-issue:
+    name: 🧾 Quote provider errors on the tracker
+    needs: [notify-failure]
+    # Runs after the notifier so the issue exists to annotate. It creates
+    # nothing itself: no issue, no second dedup key — it finds the notifier's
+    # issue by the notifier's own title and comments the error text there.
+    if: always() && needs.notify-failure.result != 'skipped'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the comment script
+      issues: write # comment the provider error text on the tracker issue
+    timeout-minutes: 10
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci/ai_provider_smoke
+          sparse-checkout-cone-mode: false
+
+      - name: Download the recorded provider errors
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: smoke-error-*
+          path: smoke-errors
+          merge-multiple: false
+
+      - name: Comment the provider errors on the tracker issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/ci/ai_provider_smoke/post_error_details.py
+          --errors-dir smoke-errors
+          --workflow-key "${SMOKE_WORKFLOW_KEY}"
+          --branch main

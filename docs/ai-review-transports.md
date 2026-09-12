@@ -122,6 +122,40 @@ rather than pinning a slug that would break on the next rename. Set `ai.model` (
 detected from `$CODEX_HOME/auth.json` — `CODEX_HOME`, not `$HOME`, because CI restores
 the session outside the home directory.
 
+## CI support levels per transport
+
+What CI proves about each transport, and how often (#2600):
+
+| Check                                          | Transport | Runs                     | Spends quota |
+| ---------------------------------------------- | --------- | ------------------------ | ------------ |
+| CLI flag surface (Tier 1)                      | `cli`     | every PR / push          | no           |
+| CLI output replay fixtures                     | `cli`     | every PR / push          | no           |
+| CLI invocation smoke (Tier 2, **manual only**) | `cli`     | `workflow_dispatch` only | yes          |
+| Provider API smoke                             | `api`     | weekly + dispatch        | yes (cents)  |
+
+**The CLI invocation smoke is manual-only.** It used to run weekly and failed every
+Monday from 2026-08-10 on an exhausted prepaid balance without reaching anyone: it gates
+nothing, and its credentials are subscription- and session-bound, so they cannot be kept
+green by design. Drift between manual runs is accepted; run it from the Actions tab
+(`AI - CLI Contract Tests` → Run workflow) after a CLI pin bump or before trusting a
+CLI-transport change.
+
+**The weekly live signal is the API smoke**
+(`.github/workflows/ai-provider-api-smoke.yml`), one job per funded provider from
+`scripts/ci/ai_provider_smoke/providers.json`. Each row declares a protocol (`anthropic`
+or `openai`), base URL, key secret and model, so a gateway is a row rather than code. A
+failure — credit exhaustion included — posts a red `ai-provider-smoke/<row>` commit
+status on `main` and files the error text on the deduplicated tracker issue under the
+`ai-provider-smoke` label. A row whose secret is unset reports a pending status and a
+skip notice, never a pass.
+
+**Parser drift is caught for free.**
+`tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl` holds what each agent CLI actually
+printed for a trivial prompt at the pinned version, and the Tier 1 replay test parses it
+with the real transport parser on every PR. Re-record with
+`scripts/ci/record_cli_fixture.sh <cli>` when a pin in `docker/ai-tools.Dockerfile`
+moves.
+
 ## Reported numbers
 
 Per-run sticky state records `transport`, `auth_mode`, and `cost_basis` (`billed` /

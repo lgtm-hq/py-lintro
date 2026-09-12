@@ -11,6 +11,7 @@ from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import pytest
 import yaml
@@ -4782,8 +4783,9 @@ def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> Non
     egress instead (#2481; the Codex subscription hosts are the case that
     reddened every lane).
 
-    Secrets: Tier 2 runs on schedule / dispatch today, but the round-trip work
-    in #2515 adds a ``pull_request`` trigger. Every provider credential is
+    Secrets: Tier 2 runs on dispatch only today (#2600 removed the cron that
+    reached it unwatched), but the round-trip work in #2515 adds a
+    ``pull_request`` trigger. Every provider credential is
     therefore routed through one gate expression that also demands a
     same-repository head, so a fork PR resolves each secret to the empty
     string rather than reading it.
@@ -4801,8 +4803,7 @@ def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> Non
     # provider credential.
     gate = _normalize_github_expr(str(job["env"][_AI_CONTRACT_GATE_ENV]))
     assert_that(gate).is_equal_to(
-        "${{ github.event_name == 'schedule'"
-        " || github.event_name == 'workflow_dispatch'"
+        "${{ github.event_name == 'workflow_dispatch'"
         f" || github.event.{_GITHUB_PULL_REQUEST_EVENT}"
         ".head.repo.full_name == github.repository }}",
     )
@@ -6026,3 +6027,193 @@ def test_docker_ci_changed_scope_publishes_the_lint_json_report() -> None:
         encoding="utf-8",
     )
     assert_that(script).contains("-e GITHUB_ACTIONS=true")
+
+
+# ---------------------------------------------------------------------------
+# Weekly provider API smoke (#2600)
+# ---------------------------------------------------------------------------
+#
+# The CLI smoke this replaces failed every Monday from 2026-08-10 and reached
+# nobody: it gated nothing, and a scheduled failure is a red X in a run list.
+# Three properties are what make the replacement visible, and none of them can
+# be seen by reading one job — so they are pinned here.
+
+_API_SMOKE_WORKFLOW = "ai-provider-api-smoke.yml"
+_API_SMOKE_JOB = "smoke"
+_API_SMOKE_KEY = "ai-provider-api-smoke"
+_API_SMOKE_TABLE = (
+    _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke" / "providers.json"
+)
+
+
+def _api_smoke_rows() -> list[dict[str, str]]:
+    """Return the committed provider smoke table.
+
+    Read rather than restated: the table is the single site a provider is
+    added at, and a test that repeated its rows would stop proving that.
+
+    Returns:
+        The table's provider rows.
+    """
+    data = json.loads(_API_SMOKE_TABLE.read_text(encoding="utf-8"))
+    return cast(list[dict[str, str]], data["providers"])
+
+
+def test_provider_api_smoke_runs_weekly_and_on_demand() -> None:
+    """The live provider signal must be scheduled, since nothing else is.
+
+    Tier 2 of the CLI contract suite gave up its cron in the same change, so
+    this workflow carries the weekly cadence for every live provider check in
+    the repo. A dispatch trigger stays alongside it so a fix can be proven
+    without waiting a week.
+    """
+    triggers = _load_workflow(name=_API_SMOKE_WORKFLOW)["on"]
+    assert_that(triggers).contains_key("schedule")
+    assert_that(triggers).contains_key("workflow_dispatch")
+    crons = [entry["cron"] for entry in triggers["schedule"]]
+    assert_that(crons).is_length(1)
+    # Weekly: a day-of-week field that is not a wildcard.
+    assert_that(crons[0].split()[4]).is_not_equal_to("*")
+
+
+def test_cli_invocation_smoke_is_manual_only() -> None:
+    """Tier 2 must not be reachable by a cron any more (#2600).
+
+    Its credentials are subscription- and session-bound, so it cannot be kept
+    green by design; running it unwatched produced a year's worth of red that
+    meant nothing. Three places have to agree, or the demotion is cosmetic:
+    the workflow declares no schedule, the job gates on dispatch alone, and
+    the job name says so where a reader will see it.
+    """
+    workflow = _load_workflow(name=_AI_CONTRACT_WORKFLOW)
+    assert_that(workflow["on"]).does_not_contain_key("schedule")
+
+    job = workflow["jobs"][_AI_CONTRACT_TIER2_JOB]
+    assert_that(_normalize_github_expr(str(job["if"]))).is_equal_to(
+        "github.event_name == 'workflow_dispatch'",
+    )
+    assert_that(job["name"]).contains("manual only")
+
+    # The docstring of the tier's own suite is where a contributor learns the
+    # cadence; a stale "scheduled" there re-teaches the thing just removed.
+    smoke_suite = (
+        _REPO_ROOT / "tests" / "contract" / "test_cli_invocation_smoke.py"
+    ).read_text(encoding="utf-8")
+    assert_that(smoke_suite).contains("manual only")
+
+
+def test_provider_api_smoke_is_driven_by_the_committed_table() -> None:
+    """The matrix, the job name and the egress all come from the table.
+
+    Adding a provider must cost a row and a secret. A matrix written into the
+    workflow, or an allowlist that names hosts, would quietly reintroduce the
+    workflow edit — and an unlisted host fails the call on blocked egress
+    rather than on the provider's own verdict.
+    """
+    workflow = _load_workflow(name=_API_SMOKE_WORKFLOW)
+    job = workflow["jobs"][_API_SMOKE_JOB]
+
+    assert_that(str(job["strategy"]["matrix"])).contains(
+        "needs.resolve-table.outputs.matrix",
+    )
+    assert_that(job["strategy"]["fail-fast"]).is_false()
+    assert_that(str(job["name"])).contains("matrix.name")
+
+    harden = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("step-security/")
+    )
+    allowlist = str(harden["with"]["allowed-endpoints"])
+    assert_that(allowlist).described_as(
+        "the provider host must come from the matrix row, not a literal list",
+    ).contains("${{ matrix.egress }}")
+    rows = _api_smoke_rows()
+    assert_that(rows).is_not_empty()
+    for row in rows:
+        host = urlparse(row["base_url"]).hostname
+        assert_that(allowlist).described_as(
+            f"{row['name']} host must not be hard-coded here",
+        ).does_not_contain(f"{host}:443")
+
+    resolve = workflow["jobs"]["resolve-table"]["steps"][-1]
+    assert_that(str(resolve["run"])).contains("--emit-matrix")
+
+
+def test_provider_api_smoke_failures_are_visible_on_main() -> None:
+    """A failure must redden main and reach a human, not just this run.
+
+    Two independent channels, because the single channel the CLI smoke had
+    (the run list) is what failed for a month: a commit status on main's HEAD,
+    and the deduplicated tracker issue. The status step is ``always()`` —
+    reporting only on success is how a red job goes unseen.
+    """
+    workflow = _load_workflow(name=_API_SMOKE_WORKFLOW)
+    job = workflow["jobs"][_API_SMOKE_JOB]
+
+    assert_that(job["permissions"]["statuses"]).is_equal_to("write")
+    status_step = next(
+        step
+        for step in job["steps"]
+        if "report-commit-status.sh" in str(step.get("run", ""))
+    )
+    condition = _normalize_github_expr(str(status_step["if"]))
+    assert_that(condition).contains("always()")
+    assert_that(condition).contains("github.ref == 'refs/heads/main'")
+
+    script = (
+        _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke" / "report-commit-status.sh"
+    ).read_text(encoding="utf-8")
+    assert_that(script).contains("ai-provider-smoke/${SMOKE_NAME}")
+    # A row with no secret must not be reported as a pass.
+    assert_that(script).contains('state="pending"')
+
+    # No job here may swallow its own verdict: the whole workflow exists to
+    # make a failure arrive somewhere.
+    for name, smoke_job in workflow["jobs"].items():
+        assert_that(smoke_job).described_as(name).does_not_contain_key(
+            "continue-on-error",
+        )
+        for step in smoke_job.get("steps", []):
+            assert_that(step).described_as(
+                f"{name}/{step.get('name')}",
+            ).does_not_contain_key("continue-on-error")
+
+
+def test_provider_api_smoke_files_a_distinctly_labelled_tracker_issue() -> None:
+    """Failures reuse the shared filer, under their own label.
+
+    Reusing ``reusable-main-failure-notifier.yml`` is what keeps one dedup
+    marker mechanism in the repo rather than two. The label is what keeps a
+    credit-exhaustion alarm distinguishable from a generic main failure at a
+    glance, so it must not be the plain bug/ci pair every other caller uses.
+    """
+    workflow = _load_workflow(name=_API_SMOKE_WORKFLOW)
+    notify = workflow["jobs"]["notify-failure"]
+
+    assert_that(str(notify["uses"])).contains(
+        "lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml",
+    )
+    condition = _normalize_github_expr(str(notify["if"]))
+    assert_that(condition).contains("failure()")
+    assert_that(condition).contains("github.ref == 'refs/heads/main'")
+    assert_that(notify["with"]["workflow-key"]).is_equal_to(_API_SMOKE_KEY)
+    labels = str(notify["with"]["failure-issue-labels"]).split(",")
+    assert_that(labels).contains("ai-provider-smoke")
+    assert_that(notify["permissions"]["issues"]).is_equal_to("write")
+
+    # The error text is what makes the issue actionable, and it reaches the
+    # tracker through the notifier's own issue — never through a second filer.
+    annotate = workflow["jobs"]["annotate-failure-issue"]
+    assert_that(annotate["needs"]).contains("notify-failure")
+    assert_that(annotate["permissions"]["issues"]).is_equal_to("write")
+    comment_step = next(
+        step
+        for step in annotate["steps"]
+        if "post_error_details.py" in str(step.get("run", ""))
+    )
+    assert_that(str(comment_step["run"])).contains("--workflow-key")
+    details = (
+        _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke" / "post_error_details.py"
+    ).read_text(encoding="utf-8")
+    assert_that(details).does_not_contain("issue create")

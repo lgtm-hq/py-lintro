@@ -1,0 +1,42 @@
+{
+  "$comment": [
+    "Weekly live API smoke table (#2600). One row per funded provider; the row",
+    "name is the job name and the commit-status context, so the checks tab",
+    "explains itself. Adding a provider is a row plus a repository secret named",
+    "by key_secret — never a workflow edit. A row whose secret is unset reports",
+    "a visible skip notice and a pending commit status, never a pass.",
+    "protocol selects which of lintro's own API providers drives the call:",
+    "'anthropic' and 'openai' are the two wire protocols lintro implements, and",
+    "gateways (kimi, z.ai) reuse them through base_url."
+  ],
+  "providers": [
+    {
+      "name": "anthropic-api",
+      "protocol": "anthropic",
+      "base_url": "https://api.anthropic.com",
+      "key_secret": "ANTHROPIC_API_KEY",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "name": "openai-api",
+      "protocol": "openai",
+      "base_url": "https://api.openai.com/v1",
+      "key_secret": "OPENAI_API_KEY",
+      "model": "gpt-4o-mini"
+    },
+    {
+      "name": "kimi-api",
+      "protocol": "anthropic",
+      "base_url": "https://api.moonshot.ai/anthropic",
+      "key_secret": "KIMI_API_KEY",
+      "model": "kimi-k2-turbo-preview"
+    },
+    {
+      "name": "zai-api",
+      "protocol": "anthropic",
+      "base_url": "https://api.z.ai/api/anthropic",
+      "key_secret": "ZAI_AUTH_TOKEN",
+      "model": "glm-4.6"
+    }
+  ]
+}
