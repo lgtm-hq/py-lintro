@@ -21,6 +21,16 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.156.1] - 2026-09-12
+
+### Changed
+
+- **adr**: record the review shape and protocol decisions as ADR-0010 (#2588) (b5097a3)
+
+### Fixed
+
+- **ai**: wrap the CLI batch fix schema and surface provider errors (#2592) (c64d0df)
+
 ## [0.156.0] - 2026-09-11
 
 ### Added
