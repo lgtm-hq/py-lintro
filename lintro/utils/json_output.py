@@ -130,10 +130,19 @@ def serialize_tool_result(
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:
-        fixed = getattr(result, "fixed_issues_count", None)
-        remaining = getattr(result, "remaining_issues_count", None)
-        data["fixed"] = fixed if fixed is not None else 0
-        data["remaining"] = remaining if remaining is not None else 0
+        if getattr(result, "residual_unknown", False):
+            # The verify pass could not measure the residual (#1743). Both
+            # counts are null rather than zero: a consumer must be able to
+            # tell "nothing left" from "nobody looked".
+            data["fixed"] = None
+            data["remaining"] = None
+            data["residual_unknown"] = True
+            data["residual_unknown_reason"] = result.residual_unknown_reason
+        else:
+            fixed = getattr(result, "fixed_issues_count", None)
+            remaining = getattr(result, "remaining_issues_count", None)
+            data["fixed"] = fixed if fixed is not None else 0
+            data["remaining"] = remaining if remaining is not None else 0
     metadata = getattr(result, "metadata", None)
     if isinstance(metadata, dict) and metadata:
         normalized_metadata = normalize_tool_metadata(metadata)

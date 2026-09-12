@@ -21,6 +21,16 @@ from lintro.utils.tool_metadata import get_ai_count
 # Constants
 DEFAULT_REMAINING_COUNT: str = "?"
 
+# Shown in the count columns when the run-level verify pass could not measure
+# a tool's residual (#1743). The check crashed, timed out or was skipped, so
+# there is no after-count: printing a number here — the pre-fix one, or a zero
+# — would report a measurement the run never made.
+UNKNOWN_RESIDUAL_DISPLAY: str = "unknown"
+
+# Note shown beside an unknown residual, so the reason is not buried in the
+# tool's own output block.
+UNKNOWN_RESIDUAL_NOTE: str = "residual unknown"
+
 # Note shown when a tool passed without inspecting a single file. A zero-file
 # run and a genuinely clean run are both ``PASS 0``; without this note they are
 # indistinguishable, which is how a fully excluded scan reads as green (#1678).
@@ -397,10 +407,18 @@ def print_summary_table(
                 # Prefer standardized counts from ToolResult
                 remaining_std = getattr(result, "remaining_issues_count", None)
                 fixed_std = getattr(result, "fixed_issues_count", None)
+                residual_unknown = bool(
+                    getattr(result, "residual_unknown", False),
+                )
 
-                if remaining_std is not None:
+                if residual_unknown:
+                    # No after-count was taken. Say so rather than falling
+                    # through to the output parser, which would read the
+                    # pre-fix number off the tool's own text.
+                    remaining_count: int | str = UNKNOWN_RESIDUAL_DISPLAY
+                elif remaining_std is not None:
                     try:
-                        remaining_count: int | str = int(remaining_std)
+                        remaining_count = int(remaining_std)
                     except (ValueError, TypeError):
                         remaining_count = DEFAULT_REMAINING_COUNT
                 else:
@@ -425,7 +443,11 @@ def print_summary_table(
                         elif not success:
                             remaining_count = DEFAULT_REMAINING_COUNT
 
-                if fixed_std is not None:
+                fixed_display_value: int | str
+                if residual_unknown:
+                    # The before-minus-after figure needs an after.
+                    fixed_display_value = UNKNOWN_RESIDUAL_DISPLAY
+                elif fixed_std is not None:
                     try:
                         fixed_display_value = int(fixed_std)
                     except (ValueError, TypeError):
@@ -436,8 +458,12 @@ def print_summary_table(
                     except (ValueError, TypeError):
                         fixed_display_value = 0
 
-                # Fixed issues display
-                fixed_display: str = f"{_GREEN}{fixed_display_value}{_RESET}"
+                # Net resolved display
+                fixed_display: str = (
+                    f"{_YELLOW}{fixed_display_value}{_RESET}"
+                    if isinstance(fixed_display_value, str)
+                    else f"{_GREEN}{fixed_display_value}{_RESET}"
+                )
                 ai_applied_value = _get_ai_applied_count(result)
                 ai_applied_display: str = f"{_GREEN}{ai_applied_value}{_RESET}"
                 ai_verified_value = _get_ai_verified_count(result)
@@ -445,6 +471,8 @@ def print_summary_table(
                 ai_unverified_value = _get_ai_unverified_count(result)
                 if ai_unverified_value > 0:
                     notes_display = f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
+                elif residual_unknown:
+                    notes_display = f"{_YELLOW}{UNKNOWN_RESIDUAL_NOTE}{_RESET}"
                 elif _is_no_files_result(result_output, result):
                     notes_display = f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
                 else:

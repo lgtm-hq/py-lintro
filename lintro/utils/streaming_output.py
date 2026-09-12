@@ -186,6 +186,11 @@ class StreamingResultHandler:
             data["fixed_issues_count"] = result.fixed_issues_count
         if result.remaining_issues_count is not None:
             data["remaining_issues_count"] = result.remaining_issues_count
+        if result.residual_unknown:
+            # Neither count is present above: the verify pass never measured
+            # one (#1743). Flag it so a reader does not infer zero.
+            data["residual_unknown"] = True
+            data["residual_unknown_reason"] = result.residual_unknown_reason
 
         # Include issues if available
         if result.issues:

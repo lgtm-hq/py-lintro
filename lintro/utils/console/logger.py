@@ -231,6 +231,12 @@ class ThreadSafeConsoleLogger:
                 total_ai_applied += _get_ai_count(result, "applied_count")
                 total_ai_verified += _get_ai_count(result, "verified_count")
 
+                if getattr(result, "residual_unknown", False):
+                    # The verify pass could not measure this tool's residual
+                    # (#1743), so it contributes to neither total. The run
+                    # already fails on the result's own ``success=False``.
+                    continue
+
                 if fixed_std is not None:
                     total_fixed += fixed_std
                 else:

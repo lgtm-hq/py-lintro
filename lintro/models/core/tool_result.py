@@ -27,7 +27,8 @@ class ToolResult:
     For fix/format operations:
         - ``initial_issues_count`` is the number of issues detected before fixes
         - ``fixed_issues_count`` is the number of issues the tool auto-fixed
-        - ``remaining_issues_count`` is the number of issues still remaining
+        - ``remaining_issues_count`` is the number of issues still remaining,
+          or ``None`` when ``residual_unknown`` says it was never measured
         - ``issues_count`` should mirror ``remaining_issues_count`` for
           backward compatibility in format-mode summaries
 
@@ -105,6 +106,16 @@ class ToolResult:
     # directly in a test).
     duration_seconds: float | None = field(default=None)
 
+    # Set when the run-level verify pass (#1743) could not measure this
+    # tool's residual: its ``CHECK`` raised, timed out, was skipped, or the
+    # tool could not be resolved. This is a third state beside "clean" and "N
+    # remaining" — the count after the mutation phase was never taken, so
+    # ``fixed_issues_count`` and ``remaining_issues_count`` are cleared to
+    # ``None`` and consumers must render "unknown" rather than a number. The
+    # run fails either way.
+    residual_unknown: bool = field(default=False)
+    residual_unknown_reason: str | None = field(default=None)
+
     # Which capability produced this result: ``CHECK`` outside a fix run, and
     # the tool's mutating capability (``FIX``/``FORMAT``) inside one. It keeps
     # that value after the verify pass folds its ``CHECK`` residual into the
@@ -131,6 +142,16 @@ class ToolResult:
         if self.skip_reason and not self.skipped:
             raise ValueError(
                 "skip_reason can only be set when skipped=True",
+            )
+
+        if self.residual_unknown and not self.residual_unknown_reason:
+            raise ValueError(
+                "residual_unknown_reason is required when residual_unknown=True",
+            )
+
+        if self.residual_unknown_reason and not self.residual_unknown:
+            raise ValueError(
+                "residual_unknown_reason can only be set when " "residual_unknown=True",
             )
 
         if (

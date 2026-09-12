@@ -21,13 +21,18 @@ from assertpy import assert_that
 import lintro.tools as lintro_tools
 from lintro.enums.action import Action
 from lintro.enums.capability import Cap
+from lintro.enums.verify_status import VerifyStatus
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.tools.core import verify_pass
 from lintro.tools.core.verify_pass import (
     COARSE_MTIME_REASON,
+    CRASHED_REASON,
+    SKIPPED_REASON,
+    TIMED_OUT_REASON,
     UNREADABLE_REASON,
+    UNRESOLVABLE_REASON,
     VERIFY_NOTE_TEMPLATE,
     VerifyBaseline,
     VerifyOutcome,
@@ -670,8 +675,8 @@ def test_the_floor_hands_tools_the_original_scan_paths(
 def test_a_check_that_raises_carries_every_pre_fix_issue_and_fails() -> None:
     """A verify we could not run must not read as "everything was fixed".
 
-    ``ran=False`` means the residual is unknown, so the fold falls back to the
-    tool's pre-fix findings for every file and refuses to report success.
+    ``UNKNOWN`` means the residual was never measured, so the fold reports the
+    tool's pre-fix findings, no after-count at all, and a failure.
     """
     mutation = ToolResult(
         name="taplo",
@@ -688,12 +693,21 @@ def test_a_check_that_raises_carries_every_pre_fix_issue_and_fails() -> None:
 
     fold_verify_results(
         mutation_results=results,
-        verify_results=[VerifyOutcome(tool="taplo", result=None, ran=False)],
+        verify_results=[
+            VerifyOutcome(
+                tool="taplo",
+                result=None,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason=CRASHED_REASON.format(error="OSError: boom"),
+            ),
+        ],
         scope=VerifyScope(files=("/repo/a.toml", "/repo/b.toml"), narrowed=True),
     )
 
-    assert_that(results[0].remaining_issues_count).is_equal_to(2)
-    assert_that(results[0].fixed_issues_count).is_equal_to(0)
+    assert_that(results[0].issues_count).is_equal_to(2)
+    assert_that(results[0].remaining_issues_count).is_none()
+    assert_that(results[0].fixed_issues_count).is_none()
+    assert_that(results[0].residual_unknown).is_true()
     assert_that(results[0].success).is_false()
 
 
@@ -718,7 +732,13 @@ def test_nothing_rewritten_keeps_the_issues_the_fix_pass_could_not_fix() -> None
 
     fold_verify_results(
         mutation_results=results,
-        verify_results=[VerifyOutcome(tool="taplo", result=None, ran=True)],
+        verify_results=[
+            VerifyOutcome(
+                tool="taplo",
+                result=None,
+                status=VerifyStatus.UNCHANGED,
+            ),
+        ],
         scope=VerifyScope(files=(), narrowed=True),
     )
 
@@ -1299,7 +1319,8 @@ def test_run_verify_pass_reports_a_skipped_check_as_unverified(
     )
 
     assert_that([o.tool for o in outcomes]).is_equal_to(["ruff"])
-    assert_that(outcomes[0].ran).is_false()
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].unknown_reason).is_equal_to(SKIPPED_REASON)
     assert_that(outcomes[0].result).is_none()
 
 
@@ -1474,7 +1495,8 @@ def test_run_verify_pass_reports_a_timed_out_check_as_unverified(
         configure=lambda *, tool_name: cast("VerifiableTool", golangci),
     )
 
-    assert_that(outcomes[0].ran).is_false()
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].unknown_reason).is_equal_to(TIMED_OUT_REASON)
     assert_that(outcomes[0].result).is_none()
 
 
@@ -1591,3 +1613,204 @@ def test_typos_reports_an_all_binary_candidate_set_as_no_files() -> None:
     assert_that(result.no_files).is_true()
     assert_that(result.success).is_true()
     assert_that(result.issues_count).is_equal_to(0)
+
+
+def _unknown_mutation() -> ToolResult:
+    """Build the mutation result the unknown-residual cases fold into.
+
+    Returns:
+        ToolResult: A tool that detected two issues and claims it fixed both.
+    """
+    return ToolResult(
+        name="ruff",
+        success=True,
+        output="Fixed 2 issue(s)",
+        issues_count=0,
+        issues=[],
+        initial_issues=[_issue("/repo/a.py"), _issue("/repo/b.py")],
+        initial_issues_count=2,
+        fixed_issues_count=2,
+        remaining_issues_count=0,
+        capability=Cap.FIX,
+    )
+
+
+@pytest.mark.parametrize(
+    ("cause", "check_result", "raises", "expected_reason"),
+    [
+        (
+            "crashed",
+            None,
+            OSError("ruff: command not found"),
+            CRASHED_REASON.format(error="OSError: ruff: command not found"),
+        ),
+        (
+            "timed_out",
+            ToolResult(
+                name="ruff",
+                success=False,
+                output="ruff timed out",
+                issues_count=1,
+                issues=[_issue("/repo/a.py")],
+                timed_out=True,
+            ),
+            None,
+            TIMED_OUT_REASON,
+        ),
+        (
+            "skipped",
+            ToolResult(
+                name="ruff",
+                success=True,
+                issues_count=0,
+                skipped=True,
+                skip_reason="ruff 0.1.0 is older than the required 0.5.0",
+            ),
+            None,
+            SKIPPED_REASON,
+        ),
+    ],
+)
+def test_a_failed_verification_reports_the_residual_as_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+    cause: str,
+    check_result: ToolResult | None,
+    raises: Exception | None,
+    expected_reason: str,
+) -> None:
+    """Each way of failing to verify lands in the same third state.
+
+    "Residual unknown" is not "residual zero" and not "residual N": no
+    after-count was taken, so none is reported. The pre-fix findings stand,
+    both derived counts are cleared, and the run fails.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        cause: Name of the failure being exercised.
+        check_result: What ``check`` returns, when it returns.
+        raises: What ``check`` raises instead, when it raises.
+        expected_reason: The reason the outcome must carry.
+    """
+    del cause
+
+    class _Tool:
+        """Check double that fails in the way this case describes."""
+
+        definition = _FakeDefinition(
+            claims=[Claim(patterns=["*.py"], capabilities={Cap.FIX, Cap.CHECK})],
+        )
+
+        def check(
+            self,
+            paths: list[str],
+            options: dict[str, object],
+        ) -> ToolResult:
+            """Fail to answer, one way or the other.
+
+            Args:
+                paths: Files handed to the verify pass.
+                options: Ignored runtime options.
+
+            Returns:
+                ToolResult: The canned partial result, when there is one.
+
+            Raises:
+                Exception: The canned failure, when there is one.
+            """
+            del paths, options
+            if raises is not None:
+                raise raises
+            assert check_result is not None
+            return check_result
+
+    tool = _Tool()
+    _register(monkeypatch, {"ruff": cast("_FakeTool", tool)})
+
+    scope = VerifyScope(files=("/repo/a.py", "/repo/b.py"), narrowed=True)
+    outcomes = run_verify_pass(
+        tools_to_run=["ruff"],
+        scope=scope,
+        configure=lambda *, tool_name: cast("VerifiableTool", tool),
+    )
+
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].unknown_reason).is_equal_to(expected_reason)
+    assert_that(outcomes[0].ran).is_false()
+
+    results = [_unknown_mutation()]
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=outcomes,
+        scope=scope,
+    )
+
+    folded = results[0]
+    assert_that(folded.residual_unknown).is_true()
+    assert_that(folded.residual_unknown_reason).is_equal_to(expected_reason)
+    # The measured before-count survives; nothing after it is invented.
+    assert_that(folded.initial_issues_count).is_equal_to(2)
+    assert_that(folded.issues_count).is_equal_to(2)
+    assert_that(folded.fixed_issues_count).is_none()
+    assert_that(folded.remaining_issues_count).is_none()
+    assert_that(folded.success).is_false()
+    assert_that(folded.output).contains("residual unknown")
+
+
+def test_an_unresolvable_tool_is_a_third_unknown_cause(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A name the registry cannot resolve is unknown, not verified.
+
+    Nothing is known about the tool, including whether its own
+    ``remaining=0`` means anything, so the pass says so explicitly rather than
+    letting the mutation result stand.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+
+    class _Manager:
+        """Registry stand-in that resolves nothing."""
+
+        def get_tool(self, name: str) -> object:
+            """Fail to resolve any name.
+
+            Args:
+                name: Registry key.
+
+            Returns:
+                object: Never returns.
+
+            Raises:
+                KeyError: Always.
+            """
+            raise KeyError(name)
+
+    monkeypatch.setattr(lintro_tools, "tool_manager", _Manager())
+
+    outcomes = run_verify_pass(
+        tools_to_run=["ghost"],
+        scope=VerifyScope(files=("/repo/a.py",), narrowed=True),
+        configure=lambda *, tool_name: cast("VerifiableTool", object()),
+    )
+
+    assert_that(outcomes[0].status).is_equal_to(VerifyStatus.UNKNOWN)
+    assert_that(outcomes[0].unknown_reason).is_equal_to(UNRESOLVABLE_REASON)
+
+
+def test_an_unknown_outcome_must_carry_its_reason() -> None:
+    """The model refuses an unknown state with nothing to display.
+
+    The reason reaches the user in the summary's notes column and in the
+    tool's output block, so an empty one would render as a bare "unknown".
+    """
+    with pytest.raises(ValueError, match="unknown_reason is required"):
+        VerifyOutcome(tool="ruff", result=None, status=VerifyStatus.UNKNOWN)
+
+    with pytest.raises(ValueError, match="only valid on an UNKNOWN status"):
+        VerifyOutcome(
+            tool="ruff",
+            result=None,
+            status=VerifyStatus.UNCHANGED,
+            unknown_reason=TIMED_OUT_REASON,
+        )

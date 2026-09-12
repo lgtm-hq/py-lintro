@@ -68,6 +68,7 @@ from loguru import logger
 
 from lintro.enums.action import Action
 from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
+from lintro.enums.verify_status import VerifyStatus
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.file_cache import FingerprintSnapshot, snapshot_fingerprints
@@ -83,6 +84,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "COARSE_MTIME_REASON",
+    "CRASHED_REASON",
+    "RESIDUAL_UNKNOWN_TEMPLATE",
+    "SKIPPED_REASON",
+    "TIMED_OUT_REASON",
+    "UNRESOLVABLE_REASON",
     "UnresolvableToolError",
     "NARROWED_REASON",
     "UNREADABLE_REASON",
@@ -91,6 +97,7 @@ __all__ = [
     "VerifyBaseline",
     "VerifyOutcome",
     "VerifyScope",
+    "VerifyStatus",
     "capture_verify_baseline",
     "fold_verify_results",
     "resolve_result_capability",
@@ -107,6 +114,29 @@ COARSE_MTIME_REASON: str = "coarse mtime resolution"
 
 #: Floor reason: at least one candidate file could not be stat'ed.
 UNREADABLE_REASON: str = "some files could not be fingerprinted"
+
+#: Why a residual is unknown: the ``CHECK`` raised before it could answer.
+CRASHED_REASON: str = "the verify check could not run ({error})"
+
+#: Why a residual is unknown: the ``CHECK`` burned its deadline. A partial
+#: answer over part of the scope is not an answer over the scope.
+TIMED_OUT_REASON: str = "the verify check timed out"
+
+#: Why a residual is unknown: the ``CHECK`` returned without executing, a
+#: version gate being the usual cause.
+SKIPPED_REASON: str = "the verify check was skipped before it ran"
+
+#: Why a residual is unknown: the registry could not resolve the tool, so
+#: nothing is known about it — including its own ``remaining`` count.
+UNRESOLVABLE_REASON: str = "the tool could not be resolved"
+
+#: Note appended to a tool's output when its residual could not be measured.
+#: Displayed instead of an after-count, never beside one.
+RESIDUAL_UNKNOWN_TEMPLATE: str = (
+    "Verify pass: residual unknown — {reason}. The {detected} issue(s) "
+    "detected before the mutation phase are reported as-is; this run fails "
+    "because the count after it was never measured."
+)
 
 #: Note appended to a tool's output when the verify pass and the fix pass
 #: disagree about the residual. Lifted out of ``_fold_one`` so the tests and
@@ -289,23 +319,44 @@ def _verify_targets(tool_names: Sequence[str]) -> list[tuple[str, bool]]:
 class VerifyOutcome:
     """What the verify pass could say about one tool.
 
+    Three states, not two. ``VERIFIED`` and ``UNCHANGED`` are both verdicts:
+    the residual was measured, or nothing needed measuring because nothing was
+    rewritten. ``UNKNOWN`` is the absence of a verdict, and the fold keeps it
+    that way — the tool's residual is reported as unknown rather than as a
+    number nobody measured.
+
     Attributes:
         tool: The verifying tool's registry name.
-        result: Its ``CHECK`` result, or ``None`` when no check was run —
-            either because nothing was rewritten or because the check raised.
-        ran: False when the check raised, when the registry could not
-            resolve the tool at all, or when the check returned without
-            executing (a version gate skipped it). A ``None`` result with
-            ``ran=True`` means nothing needed re-checking — nothing was
-            rewritten, or the tool discovered none of the scope's files — so
-            the fold keeps the mutation phase's pre-fix findings (which may
-            still fail the run); ``ran=False`` means "we could not tell",
-            which fails.
+        result: Its ``CHECK`` result, or ``None`` when no check answered.
+        status: Which of the three outcomes this is.
+        unknown_reason: Why the residual could not be measured. Set on
+            ``UNKNOWN`` and rendered next to the tool, empty otherwise.
     """
 
     tool: str
     result: ToolResult | None
-    ran: bool = True
+    status: VerifyStatus = VerifyStatus.VERIFIED
+    unknown_reason: str = ""
+
+    def __post_init__(self) -> None:
+        """Validate that an unknown outcome carries its reason.
+
+        Raises:
+            ValueError: If the status and the reason disagree.
+        """
+        if self.status is VerifyStatus.UNKNOWN and not self.unknown_reason:
+            raise ValueError("unknown_reason is required when status is UNKNOWN")
+        if self.unknown_reason and self.status is not VerifyStatus.UNKNOWN:
+            raise ValueError("unknown_reason is only valid on an UNKNOWN status")
+
+    @property
+    def ran(self) -> bool:
+        """Report whether the pass reached a verdict for this tool.
+
+        Returns:
+            bool: False only when the residual is unknown.
+        """
+        return self.status is not VerifyStatus.UNKNOWN
 
 
 @dataclass(frozen=True)
@@ -576,12 +627,25 @@ def run_verify_pass(
         if not resolvable:
             # Nothing is known about this tool, so nothing about its residual
             # can be trusted either.
-            outcomes.append(VerifyOutcome(tool=name, result=None, ran=False))
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=None,
+                    status=VerifyStatus.UNKNOWN,
+                    unknown_reason=UNRESOLVABLE_REASON,
+                ),
+            )
             continue
         if not scope.files:
             # Nothing was rewritten, so nothing needs re-checking. The tool's
             # pre-fix findings are still its post-fix findings.
-            outcomes.append(VerifyOutcome(tool=name, result=None, ran=True))
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=None,
+                    status=VerifyStatus.UNCHANGED,
+                ),
+            )
             continue
         started = time.monotonic()
         try:
@@ -603,21 +667,44 @@ def run_verify_pass(
                 f"{type(exc).__name__}: {exc}",
             )
             logger.opt(exception=True).debug(f"Verify pass failed for {name}")
-            outcomes.append(VerifyOutcome(tool=name, result=None, ran=False))
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=None,
+                    status=VerifyStatus.UNKNOWN,
+                    unknown_reason=CRASHED_REASON.format(
+                        error=f"{type(exc).__name__}: {exc}",
+                    ),
+                ),
+            )
             continue
         if result.timed_out:
             # A timed-out CHECK examined only part of its target set — a
             # multi-root aggregator such as golangci-lint still returns the
             # findings the roots that finished produced — so it is no verdict
             # over the scope at all.
-            outcomes.append(VerifyOutcome(tool=name, result=None, ran=False))
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=None,
+                    status=VerifyStatus.UNKNOWN,
+                    unknown_reason=TIMED_OUT_REASON,
+                ),
+            )
             continue
         if result.skipped:
             # The check returned without executing — a version gate, most
             # often. ``success=True, issues_count=0`` is the shape of a clean
             # verdict, but no file was examined, so trusting it would drop the
             # tool's pre-fix findings as "fixed". Report it as unverified.
-            outcomes.append(VerifyOutcome(tool=name, result=None, ran=False))
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=None,
+                    status=VerifyStatus.UNKNOWN,
+                    unknown_reason=SKIPPED_REASON,
+                ),
+            )
             continue
         if result.no_files:
             # The tool's own discovery matched none of the scope's files, so
@@ -625,11 +712,23 @@ def run_verify_pass(
             # the union over every mutating tool, so a tool that rewrote
             # nothing is handed another tool's files — and it means this tool
             # rewrote nothing either. Its pre-fix findings simply stand.
-            outcomes.append(VerifyOutcome(tool=name, result=None, ran=True))
+            outcomes.append(
+                VerifyOutcome(
+                    tool=name,
+                    result=None,
+                    status=VerifyStatus.UNCHANGED,
+                ),
+            )
             continue
         result.capability = Cap.CHECK
         result.duration_seconds = time.monotonic() - started
-        outcomes.append(VerifyOutcome(tool=name, result=result, ran=True))
+        outcomes.append(
+            VerifyOutcome(
+                tool=name,
+                result=result,
+                status=VerifyStatus.VERIFIED,
+            ),
+        )
     return outcomes
 
 
@@ -680,6 +779,49 @@ def _verified_paths(
     return covered
 
 
+def _fold_unknown(
+    *,
+    mutation: ToolResult,
+    outcome: VerifyOutcome,
+) -> ToolResult:
+    """Mark a tool's residual as unmeasured rather than inventing a number.
+
+    "The check could not tell us" is a third state beside "clean" and "N
+    remaining", and it has to survive all the way to the display. Carrying the
+    pre-fix findings and calling the difference ``fixed`` would report a
+    measurement this run never took: the only honest after-count is none at
+    all. The run fails, so an unknown residual can never be read as a pass.
+
+    Args:
+        mutation: The tool's mutation-phase result.
+        outcome: The tool's ``UNKNOWN`` verify outcome.
+
+    Returns:
+        ToolResult: ``mutation`` carrying its pre-fix findings, no fixed or
+        remaining count, and the reason the residual is unknown.
+    """
+    detected = _pre_fix_issues(mutation)
+    note = RESIDUAL_UNKNOWN_TEMPLATE.format(
+        reason=outcome.unknown_reason,
+        detected=len(detected),
+    )
+    output = mutation.output or ""
+    mutation.output = f"{output}\n{note}" if output.strip() else note
+    mutation.issues = detected
+    mutation.issues_count = len(detected)
+    if mutation.initial_issues_count is None:
+        mutation.initial_issues_count = len(detected)
+    # No after-count exists, so none is reported. Consumers key off
+    # ``residual_unknown`` and render "unknown" rather than filling the gap
+    # with a zero or with the pre-fix number.
+    mutation.fixed_issues_count = None
+    mutation.remaining_issues_count = None
+    mutation.residual_unknown = True
+    mutation.residual_unknown_reason = outcome.unknown_reason
+    mutation.success = False
+    return mutation
+
+
 def _fold_one(
     *,
     mutation: ToolResult,
@@ -698,18 +840,18 @@ def _fold_one(
         fixed count, and a note when the two disagreed. The pre-fix issue list
         is preserved so the "detected / remaining" view still renders.
     """
+    if outcome.status is VerifyStatus.UNKNOWN:
+        return _fold_unknown(mutation=mutation, outcome=outcome)
     verify = outcome.result
-    # A verify that could not run has verified nothing, so every pre-fix issue
-    # is carried and the run reports a failure rather than a silent zero. The
-    # same holds for a CHECK that ran but produced no verdict. An execution
-    # error comes back as ``success=False`` with no parsed issues, so it fails
-    # the guard on its own. A timeout does not: a multi-root aggregator can
-    # time out on one root and still return the findings the other roots
-    # produced, which is a partial answer and therefore no answer over the
-    # scope. A skipped or no-files result is the same fail-open wearing
-    # ``success=True``. ``run_verify_pass`` already converts all three to
-    # ``result=None``, and the guard below keeps a hand-built outcome from
-    # re-opening the hole.
+    # An ``UNCHANGED`` outcome carries no result: nothing was rewritten, or
+    # the tool discovered none of the scope's files, so its pre-fix findings
+    # stand as its post-fix findings. Everything that could not answer at all
+    # left through ``_fold_unknown`` above. The guard below repeats the shape
+    # checks anyway so a hand-built ``VERIFIED`` outcome cannot smuggle a
+    # skipped, timed-out or no-files result in as a verdict: a timeout in
+    # particular looks like an answer — a multi-root aggregator returns the
+    # findings the roots that finished produced — and is not one over the
+    # scope.
     check_answered = (
         verify is not None
         and not verify.skipped
@@ -759,7 +901,7 @@ def _fold_one(
     # is still a leftover. The mutation phase's own flag is still ANDed in so
     # an execution failure that produced no issues stays a failure, and so is
     # the verify's, so a broken check cannot read as clean.
-    mutation.success = mutation.success and outcome.ran and residual == 0
+    mutation.success = mutation.success and residual == 0
     if verify is not None:
         mutation.success = mutation.success and verify.success
         if verify.duration_seconds is not None:
