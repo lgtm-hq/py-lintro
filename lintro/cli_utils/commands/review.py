@@ -142,6 +142,7 @@ class ReviewCommandOptions:
         output_format: ``--output`` value (``terminal`` or ``json``).
         with_lint: Whether ``--with-lint`` was passed.
         lint_report: ``--lint-report`` value, or None.
+        lint_report_missing: ``--lint-report-missing`` reason, or None.
         context_window: ``--context-window`` value, or None.
         timeout: ``--timeout`` value in seconds, or None.
         path_filter: ``--path`` values.
@@ -172,6 +173,7 @@ class ReviewCommandOptions:
     output_format: str = "terminal"
     with_lint: bool = False
     lint_report: Path | None = None
+    lint_report_missing: str | None = None
     context_window: int | None = None
     timeout: float | None = None
     path_filter: tuple[str, ...] = ()
@@ -517,6 +519,18 @@ def _advisory_failure_error(results: list[ToolResult]) -> AIError:
         "include in the review instead of running the tools. Restricted "
         "to the changed files; an unusable report is noted in the review "
         "header, not fatal. Cannot be combined with --with-lint."
+    ),
+)
+@click.option(
+    "--lint-report-missing",
+    "lint_report_missing",
+    type=str,
+    default=None,
+    hidden=True,
+    help=(
+        "Why no --lint-report is being passed (CI wiring, #2571). Rendered "
+        "as the review header's linter-facts note so a review that ran "
+        "without deterministic lint facts says so."
     ),
 )
 @click.option(
@@ -903,6 +917,7 @@ def _prepare(
         strictness=options.strictness,
         with_lint=options.with_lint,
         lint_report=options.lint_report,
+        lint_report_missing=options.lint_report_missing,
         semantic_chunks=options.semantic_chunks,
         timeout=options.timeout,
         custom_agent_mode=lintro_config.review.custom_agents,

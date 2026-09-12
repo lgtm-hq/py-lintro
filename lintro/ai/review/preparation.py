@@ -42,6 +42,7 @@ from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.preparation_resolvers import (
+    LINT_FACTS_UNAVAILABLE,
     apply_timeout,
     build_lint_digest,
     build_lint_digest_from_report,
@@ -115,6 +116,9 @@ class ReviewRunRequest:
         lint_report: Saved lintro JSON report to digest instead of running
             the tools (``--lint-report``, #2571). Takes precedence over
             ``with_lint``; the CLI rejects the two together.
+        lint_report_missing: Why the caller has no report to pass
+            (``--lint-report-missing``). Surfaces as the header's
+            linter-facts note when ``lint_report`` is None.
         semantic_chunks: Force semantic chunking for this run. Config's
             ``review.force_semantic_chunking`` can enable it independently.
         timeout: Per-run API timeout override in seconds, or None.
@@ -135,6 +139,7 @@ class ReviewRunRequest:
     strictness: str | None = None
     with_lint: bool = False
     lint_report: Path | None = None
+    lint_report_missing: str | None = None
     semantic_chunks: bool = False
     timeout: float | None = None
     custom_agent_mode: CustomAgentMode | None = None
@@ -170,8 +175,9 @@ class PreparedReview:
             prompt, or None.
         lint_tool_count: Number of lint tools that ran for the digest.
         lint_issue_count: Total issues those tools reported.
-        lint_note: Why a requested ``--lint-report`` could not be used
-            (#2571), for the review header. Empty otherwise.
+        lint_note: Why a requested ``--lint-report`` could not be used, or
+            why none was passed (#2571), for the review header. Empty
+            otherwise.
         context_collection_seconds: Wall-clock seconds spent collecting the
             diff context. Excluded from equality: it measures the run, not the
             preparation.
@@ -310,6 +316,8 @@ def prepare_review(
             context=context,
             lintro_config=request.lintro_config,
         )
+    elif request.lint_report_missing:
+        lint_note = f"{LINT_FACTS_UNAVAILABLE}: {request.lint_report_missing}"
     else:
         lint_digest, lint_tool_count, lint_issue_count = None, 0, 0
 

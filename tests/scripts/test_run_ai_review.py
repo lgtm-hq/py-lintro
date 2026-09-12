@@ -667,11 +667,11 @@ def test_workflow_serializes_ai_review_repo_wide() -> None:
 
 
 def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
-    """The job budget is pinned at 51 minutes (#2506, #2571).
+    """The job budget is pinned at 53 minutes (#2506, #2571).
 
-    51 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
+    53 is the smallest value ``test_review_timeout_fits_inside_the_job_timeout``
     allows with the 1800 s per-chunk CLI timeout and the 600 s wall-clock
-    lint-report wait: ceil(1800 / 60) + 7 min setup + 10 min wait + 3 min for
+    lint-report wait: ceil(1800 / 60) + 7 min setup + 10 min wait + 5 min for
     one locate straddling the deadline + 1 min posting margin (38 before the
     wait). Measured review durations over the last 40 runs are
     median 10 to 14 min and p75 21 min, so the ceiling is not what a healthy
@@ -682,7 +682,7 @@ def test_ai_review_job_timeout_is_the_coupling_floor() -> None:
     """
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
-    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(51)
+    assert_that(loaded["jobs"]["ai-review"]["timeout-minutes"]).is_equal_to(53)
 
 
 def test_workflow_runs_on_every_pr_without_a_paths_filter() -> None:
@@ -1231,9 +1231,10 @@ def test_missing_lint_report_degrades_to_a_header_note() -> None:
     """No report for this head means a visible note, never an abort.
 
     When nothing was downloaded the script passes no ``--lint-report`` at
-    all and lintro renders its fixed "unavailable" wording in the review
-    header. The script's own log line uses the same words so the Actions log
-    and the posted comment agree.
+    all; it passes ``--lint-report-missing`` with the reason instead, and
+    lintro renders the fixed "linter facts unavailable for this head" note
+    in the review header. The script's own log line uses the same words so
+    the Actions log and the posted comment agree.
     """
     text = "\n".join(_executable_shell_lines())
 
@@ -1320,6 +1321,7 @@ def _run_review_with_lint_stubs(
     report_appears_on_poll: int | None,
     wait_seconds: int,
     poll_seconds: str = "1",
+    download_fails: bool = False,
 ) -> tuple[str, list[str], int]:
     """Run the script end to end with ``gh`` and ``uv`` stubbed.
 
@@ -1335,6 +1337,7 @@ def _run_review_with_lint_stubs(
             first carries the report; ``None`` means it never appears.
         wait_seconds: ``LINT_REPORT_WAIT_SECONDS`` override.
         poll_seconds: ``LINT_REPORT_POLL_SECONDS`` override; defaults to 1 s.
+        download_fails: Make the stubbed ``gh run download`` exit non-zero.
 
     Returns:
         The script's combined output, the recorded ``uv`` argv, and the
@@ -1368,6 +1371,10 @@ def _run_review_with_lint_stubs(
         f"""
         set -euo pipefail
         if [[ "$1" == "run" && "$2" == "download" ]]; then
+            if [[ "${{LINT_STUB_DOWNLOAD_FAILS:-0}}" == "1" ]]; then
+                echo "stub: download failed" >&2
+                exit 1
+            fi
             dir=""
             while [[ $# -gt 0 ]]; do
                 if [[ "$1" == "--dir" ]]; then dir="$2"; shift; fi
@@ -1412,6 +1419,7 @@ def _run_review_with_lint_stubs(
         "LINTRO_REVIEW_STATE_DIR": str(state_dir),
         "LINT_REPORT_POLL_SECONDS": poll_seconds,
         "LINT_REPORT_WAIT_SECONDS": str(wait_seconds),
+        "LINT_STUB_DOWNLOAD_FAILS": "1" if download_fails else "0",
     }
     # Output goes to a file, not a captured pipe: the script's heartbeat
     # ``sleep`` outlives the EXIT trap and would hold a pipe open for 15 s.
@@ -1488,6 +1496,10 @@ def test_lint_report_never_appearing_falls_back_after_the_bound(
     assert_that(argv).does_not_contain("--lint-report")
     assert_that(argv).does_not_contain("--with-lint")
     assert_that(argv).contains("--pr", str(_LINT_PR_NUMBER), "--post")
+    missing = argv[argv.index("--lint-report-missing") + 1]
+    assert_that(missing).matches(
+        rf"^no linting-json-report for head {_LINT_HEAD_SHA} after [0-9]+s$",
+    )
 
 
 def test_lint_report_fallback_passes_no_report_argument_at_all(
@@ -1963,9 +1975,10 @@ def test_review_timeout_fits_inside_the_job_timeout() -> None:
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
     job_timeout_minutes = loaded["jobs"]["ai-review"]["timeout-minutes"]
 
-    # One locate may straddle the wall-clock deadline: two gh sequences of
-    # three 30 s attempts each (scripts/ci/review_state_artifacts.py).
-    locate_overshoot_minutes = 3
+    # One locate may straddle the wall-clock deadline: three gh sequences
+    # (PR head, run listing, artifact listing) of three 30 s attempts each
+    # plus retry sleeps (scripts/ci/review_state_artifacts.py), ~4.6 min.
+    locate_overshoot_minutes = 5
     budget = review_timeout_minutes + setup_overhead_minutes
     budget += lint_report_wait_minutes + locate_overshoot_minutes
     budget += posting_margin_minutes
@@ -2150,3 +2163,27 @@ def test_lint_report_last_poll_sleeps_only_the_remaining_wait(
     assert_that(output).does_not_contain("retrying in 3s")
     assert_that(listings).is_between(1, 3)
     assert_that(output).matches(r"after [2-9]s")
+
+
+def test_lint_report_download_failure_falls_back_with_the_reason(
+    tmp_path: Path,
+) -> None:
+    """A located run whose download fails still reviews, without the flag.
+
+    The locator finds the run on its first poll, ``gh run download`` exits
+    non-zero, and the script passes ``--lint-report-missing`` naming the
+    failed run instead of a report path.
+    """
+    output, argv, listings = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=30,
+        download_fails=True,
+    )
+
+    assert_that(listings).is_equal_to(1)
+    assert_that(output).contains("download of run 777 failed")
+    assert_that(argv).does_not_contain("--lint-report")
+    assert_that(argv).contains("--lint-report-missing")
+    missing = argv[argv.index("--lint-report-missing") + 1]
+    assert_that(missing).is_equal_to("download of docker-ci run 777 failed")

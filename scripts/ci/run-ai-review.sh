@@ -316,7 +316,8 @@ echo "CLI timeout ${CLI_REVIEW_TIMEOUT_SECONDS}s; persist-on-SIGTERM enabled."
 # review_state_artifacts.py lint-report); this script downloads only the run
 # it named, and only that one artifact. Every failure path is fail-safe:
 # without a report the review runs with no --lint-report flag at all, and
-# lintro renders the single "linter facts unavailable for this head" note in
+# --lint-report-missing carries the reason so lintro renders the single
+# "linter facts unavailable for this head" note in
 # the review header.
 #
 # Bounded wait: docker-ci.yml and ai-review.yml start on the same push, and
@@ -374,9 +375,11 @@ if [[ -n "$lint_run_id" ]]; then
 		echo "[ai-review] linter facts: linting-json-report from docker-ci run ${lint_run_id} (head ${lint_head_sha}) after ${lint_waited}s"
 	else
 		echo "[ai-review] linter facts unavailable for this head: download of run ${lint_run_id} failed"
+		lint_report_arg=(--lint-report-missing "download of docker-ci run ${lint_run_id} failed")
 	fi
 else
 	echo "[ai-review] linter facts unavailable for this head: no linting-json-report for head ${lint_head_sha:-unknown} after ${lint_waited}s"
+	lint_report_arg=(--lint-report-missing "no linting-json-report for head ${lint_head_sha:-unknown} after ${lint_waited}s")
 fi
 # Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
 # ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.

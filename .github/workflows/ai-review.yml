@@ -147,14 +147,15 @@ jobs:
     # budget must cover setup (~7 min) + the bounded wall-clock wait for the
     # exact-head lint report (up to 10 min, LINT_REPORT_WAIT_SECONDS in
     # scripts/ci/run-ai-review.sh, #2571) + one locate that may straddle
-    # that deadline (3 min: two gh sequences, three 30 s attempts each) +
+    # that deadline (5 min: three gh sequences of three 30 s attempts each,
+    # plus retry sleeps) +
     # one per-chunk CLI timeout (30 min) + a 1 min posting margin, so
     # lintro's own timeout always fires before the runner kills the job — a
     # runner kill truncates the JSON envelope the outcome classifier reads
     # (#1916). Invariant enforced by tests/scripts/test_run_ai_review.py;
     # bump the values together.
     #
-    # 51 (38 before the lint-report wait; 120, and 75/50/30 before that) is
+    # 53 (38 before the lint-report wait; 120, and 75/50/30 before that) is
     # that floor: with the 1800 s per-chunk CLI timeout, the 600 s wait and
     # the locate allowance the coupling test allows nothing smaller.
     # Measured basis over the last 40 runs: median 10 to 14 min, p75 21 min,
@@ -163,7 +164,7 @@ jobs:
     # budget checkpoints its state (#2156) and, since #2506, a rerun resumes
     # its *own* previous attempt instead of only completed earlier runs, so
     # each attempt makes progress rather than re-reviewing the whole diff.
-    timeout-minutes: 51
+    timeout-minutes: 53
     # Repo-wide serialisation (#2506). The workflow-level group above is
     # per-PR with cancel-in-progress, so a push still supersedes its own
     # PR's review; it keeps the default queue: single because a stale
@@ -194,7 +195,7 @@ jobs:
     # middle review — and AI Review is not in auto-rerun-on-infra-failure's
     # workflow list, so nothing would rerun it. queue: max raises the depth
     # to 100 pending runs, which is what "queued reviews wait, not cancel"
-    # requires. The cost is accepted by design: with the 51 min cap above, a
+    # requires. The cost is accepted by design: with the 53 min cap above, a
     # deep queue can leave a review pending for hours before it starts.
     concurrency:
       group: ai-review-repo-wide
