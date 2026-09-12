@@ -2,7 +2,7 @@
 
 - Include all **{checklist_count}** checklist entries in `checklist` (even if answer is
   "no").
-- Every checklist **yes** must have a corresponding finding (link via `checklist_ids`).
+- Finding nothing is a normal result; an empty findings array is valid.
 - Do not duplicate findings — merge related checklist items when they share a root
   cause.
 - Prioritize cross-file integration bugs over isolated nits.

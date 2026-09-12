@@ -25,6 +25,10 @@ class FindingMatchResult:
         regressed: Findings that were resolved and are reported again.
         outcomes: Map of ``fingerprint#ordinal`` to the transition assigned in
             this round. Records untouched by this round are absent.
+        note_carries: ``(fingerprint, line)`` of each note (#2572) that was
+            paired with a prior open record and kept it open. Keyed by what
+            the round reported rather than by record key, so the sticky can
+            tag the note it rendered without rebuilding the pairing.
     """
 
     records: tuple[FindingRecord, ...] = field(default_factory=tuple)
@@ -33,6 +37,7 @@ class FindingMatchResult:
     resolved: tuple[FindingRecord, ...] = field(default_factory=tuple)
     regressed: tuple[FindingRecord, ...] = field(default_factory=tuple)
     outcomes: dict[str, FindingMatchOutcome] = field(default_factory=dict)
+    note_carries: frozenset[tuple[str, int]] = field(default_factory=frozenset)
 
     def outcome_for(self, *, record: FindingRecord) -> FindingMatchOutcome | None:
         """Return the transition assigned to ``record`` in this round.

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import difflib
 import json
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from lintro.ai.cli_schemas import FIX_BATCH_KEY
 from lintro.ai.paths import relative_path
 
 if TYPE_CHECKING:
@@ -103,14 +104,44 @@ def parse_fix_response(
     )
 
 
+def _batch_items(data: object, file_path: str) -> list[Any] | None:
+    """Return the fix entries carried by a decoded batch payload.
+
+    Args:
+        data: Decoded batch response, either the wrapped object the CLI
+            schema requests or a bare array.
+        file_path: Path to the file, used for the debug log only.
+
+    Returns:
+        The list of fix entries, or ``None`` when the payload carries none.
+    """
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        fixes = data.get(FIX_BATCH_KEY)
+        if isinstance(fixes, list):
+            return fixes
+        logger.debug(
+            f"Batch response object has no {FIX_BATCH_KEY!r} array for {file_path}",
+        )
+        return None
+    logger.debug(f"Batch response is not an array or fixes object for {file_path}")
+    return None
+
+
 def parse_batch_response(
     content: str,
     file_path: str,
 ) -> list[AIFixSuggestion]:
     """Parse a batch AI response into a list of AIFixSuggestions.
 
+    Accepts the wrapped object the CLI transport now requests
+    (``{"fixes": [...]}``, see :data:`lintro.ai.cli_schemas.FIX_BATCH_CLI_SCHEMA`)
+    as well as a bare array, which older transcripts and cache entries hold.
+
     Args:
-        content: Raw AI response content (expected JSON array).
+        content: Raw AI response content (a JSON object carrying ``fixes``, or
+            a bare JSON array).
         file_path: Path to the file.
 
     Returns:
@@ -124,12 +155,12 @@ def parse_batch_response(
         logger.debug(f"Failed to parse batch AI response for {file_path}")
         return []
 
-    if not isinstance(data, list):
-        logger.debug(f"Batch response is not an array for {file_path}")
+    items = _batch_items(data, file_path)
+    if items is None:
         return []
 
     results: list[AIFixSuggestion] = []
-    for item in data:
+    for item in items:
         if not isinstance(item, dict):
             continue
         original = item.get("original_code", "")

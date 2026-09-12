@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lintro.ai.review.posting_policy import PostingPolicy
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -37,6 +42,8 @@ class StickyRequest:
         repo: ``owner/name`` slug used to link finding titles to their threads.
         pr_number: Pull request number used for the same links.
         departed_paths: Paths that left the diff this round.
+        posting_policy: Policy the findings were marked under, so the
+            notes block can name the confidence floor it rendered at.
     """
 
     result: ReviewResult
@@ -53,3 +60,4 @@ class StickyRequest:
     repo: str = ""
     pr_number: int | None = None
     departed_paths: frozenset[str] | None = None
+    posting_policy: PostingPolicy | None = None

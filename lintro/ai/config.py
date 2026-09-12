@@ -246,6 +246,22 @@ class AIConfig(BaseModel):
         ),
     )
     max_retries: int = Field(default=2, ge=0, le=10)
+    rate_limit_max_retries: int = Field(
+        default=6,
+        ge=0,
+        le=20,
+        description=(
+            "Retry attempts for HTTP 429 (rate limit) only; other transient "
+            "failures keep max_retries. A rate limit clears on its own, and "
+            "providers advertise the wait through Retry-After, which lintro "
+            "waits instead of its exponential backoff, capped at a fixed, "
+            "non-configurable 300 seconds — a longer advertised wait is "
+            "clamped to 300 seconds and still honored. Only a malformed or "
+            "already-elapsed Retry-After falls back to the exponential "
+            "backoff. Exhausting this budget fails with a message naming "
+            "the rate limit."
+        ),
+    )
     api_timeout: float = Field(default=60.0, ge=1.0)
     validate_after_group: bool = False
     show_cost_estimate: bool = True
@@ -365,6 +381,25 @@ class AIConfig(BaseModel):
             "diff in the prompt even for large diffs. Only enable this for "
             "trusted diffs with no secrets concern when the efficiency of "
             "delegated git retrieval on very large diffs is required."
+        ),
+    )
+    review_inline_min_confidence: ConfidenceLevel = Field(
+        default=ConfidenceLevel.MEDIUM,
+        description=(
+            "Lowest model-reported confidence a review finding needs to be "
+            "posted as an inline PR thread (#2572). Findings below it are "
+            "kept in JSON and MCP output but routed to the sticky comment's "
+            "collapsed 'Notes and questions' block, where they never affect "
+            "the derived verdict. One of 'low', 'medium', 'high'."
+        ),
+    )
+    review_post_questions_inline: bool = Field(
+        default=False,
+        description=(
+            "Post question-kind review entries as inline PR threads. Off by "
+            "default: questions go to the sticky comment's 'Notes and "
+            "questions' block so an open question never blocks a merge under "
+            "a zero-unresolved-threads rule."
         ),
     )
     cli_max_diff_tokens: int = Field(
@@ -715,6 +750,7 @@ class AIConfig(BaseModel):
             fallback_models=tuple(self.fallback_models),
             max_tokens=self.max_tokens,
             max_retries=self.max_retries,
+            rate_limit_max_retries=self.rate_limit_max_retries,
             api_timeout=self.api_timeout,
             retry_base_delay=self.retry_base_delay,
             retry_max_delay=self.retry_max_delay,

@@ -24,9 +24,16 @@ import asyncio
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.cli_schemas import (
+    FIX_BATCH_CLI_SCHEMA,
+    FIX_CLI_SCHEMA,
+    REVIEW_CLI_SCHEMA,
+    SUMMARY_CLI_SCHEMA,
+)
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIAuthenticationError
+from lintro.ai.json_response import CliSchemaRequest, load_json_object
 from lintro.ai.liveness import LIVENESS_TIMEOUT, LivenessResult, LivenessState
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers import get_provider
@@ -171,3 +178,63 @@ def test_live_cli_completes_a_minimal_invocation(
         f"{instance.name} did not answer the prompt it was given",
     ).contains("pong")
     assert_that(response.model).is_not_empty()
+
+
+#: Every schema lintro attaches to a CLI call, keyed by the name it sends.
+#:
+#: Claude Code forwards ``--json-schema`` as a *tool input schema*, so a schema
+#: the API rejects (anything not ``type: object`` at the root) fails every real
+#: ``--fix`` run while passing every offline test (#2573).
+_CLI_SCHEMAS: dict[str, dict[str, object]] = {
+    "lintro_fix": FIX_CLI_SCHEMA,
+    "lintro_fix_batch": FIX_BATCH_CLI_SCHEMA,
+    "lintro_review": REVIEW_CLI_SCHEMA,
+    "lintro_summary": SUMMARY_CLI_SCHEMA,
+}
+
+#: Prompt for the schema invocations. The schema, not the prose, decides the
+#: shape, so the prompt only has to be cheap and answerable.
+SCHEMA_PROMPT = (
+    "Return a minimal, syntactically valid result for the given schema. "
+    "Use empty strings and empty arrays wherever the schema allows."
+)
+
+#: Cap on a schema response. Enough for an empty-ish structured object without
+#: letting a runaway generation turn a smoke test into a bill.
+SCHEMA_MAX_TOKENS = 1024
+
+
+@pytest.mark.parametrize(("schema_name", "schema"), sorted(_CLI_SCHEMAS.items()))
+def test_live_cli_accepts_every_request_schema(
+    cli_provider: AIProvider,
+    schema_name: str,
+    schema: dict[str, object],
+) -> None:
+    """Every CLI schema must be accepted and answered with a JSON object.
+
+    Args:
+        cli_provider: Provider under test.
+        schema_name: The schema identifier lintro sends.
+        schema: The schema lintro sends.
+    """
+    instance = _build_provider(cli_provider)
+    _resolve_liveness(instance)
+
+    try:
+        response = asyncio.run(
+            instance.complete(
+                SCHEMA_PROMPT,
+                max_tokens=SCHEMA_MAX_TOKENS,
+                timeout=SMOKE_TIMEOUT,
+                cli_schema=CliSchemaRequest(schema=schema, schema_name=schema_name),
+            ),
+        )
+    except AIAuthenticationError as exc:
+        unmet_precondition(
+            f"{instance.name}: CLI is not authenticated (link 3 of 3) — {exc}",
+        )
+
+    payload = load_json_object(content=response.content)
+    assert_that(payload).described_as(
+        f"{instance.name} returned no object for {schema_name}",
+    ).is_instance_of(dict)

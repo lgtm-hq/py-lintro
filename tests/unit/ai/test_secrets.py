@@ -30,6 +30,11 @@ def test_normal_variable_assignments() -> None:
 # -- scan_for_secrets: pattern detection (parametrized) -----------------------
 
 
+#: A segmented Anthropic-style key, assembled at runtime so no credential-shaped
+#: literal is committed (secret scanners flag the literal form).
+_SEGMENTED_ANTHROPIC_KEY = "sk-" + "ant-" + "api03-" + "A" * 24
+
+
 @pytest.mark.parametrize(
     ("description", "text", "expected_pattern"),
     [
@@ -99,6 +104,11 @@ def test_normal_variable_assignments() -> None:
             "sk-",
         ),
         (
+            "segmented Anthropic key",
+            f"{_SEGMENTED_ANTHROPIC_KEY}\n",
+            "sk-",
+        ),
+        (
             "RSA private key",
             (
                 "-----BEGIN RSA PRIVATE KEY-----\n"
@@ -140,6 +150,7 @@ def test_normal_variable_assignments() -> None:
         "aws-secret-key",
         "github-pat",
         "openai-key",
+        "segmented-anthropic-key",
         "rsa-private-key",
         "ec-private-key",
         "generic-private-key",
@@ -165,8 +176,9 @@ def test_detects_secret_pattern(
         ("short password", "password = 'short'\n"),
         ("short ghp_ prefix", "ghp_short\n"),
         ("short sk- prefix", "sk-short\n"),
+        ("short segmented sk- prefix", "sk-ant-api03-short\n"),
     ],
-    ids=["short-password", "short-ghp", "short-sk"],
+    ids=["short-password", "short-ghp", "short-sk", "short-segmented-sk"],
 )
 def test_does_not_detect_short_values(description: str, text: str) -> None:
     """Short values ({description}) are not flagged as secrets."""
@@ -221,6 +233,11 @@ def test_redact_clean_text_unchanged() -> None:
             "sk-abcdefghij",
         ),
         (
+            "segmented Anthropic key",
+            f"key = {_SEGMENTED_ANTHROPIC_KEY}\n",
+            "api03",
+        ),
+        (
             "RSA private key",
             (
                 "-----BEGIN RSA PRIVATE KEY-----\n"
@@ -235,6 +252,7 @@ def test_redact_clean_text_unchanged() -> None:
         "password",
         "github-pat",
         "openai-key",
+        "segmented-anthropic-key",
         "private-key",
     ],
 )

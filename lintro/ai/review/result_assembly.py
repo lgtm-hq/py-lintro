@@ -214,6 +214,7 @@ def assemble_review_result(
             *(synthesis.degradations if synthesis is not None else ()),
         ),
         synthesis=synthesis.outcome if synthesis is not None else None,
+        lint_facts_note=options.lint_note,
     )
 
     completed_files = {path for item in outcome.partials for path in item.files}
@@ -443,6 +444,7 @@ def empty_review_result(
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),
+        lint_facts_note=options.lint_note,
         phase_timings={
             "context_collection": max(context_collection_seconds, 0.0),
             "provider": 0.0,

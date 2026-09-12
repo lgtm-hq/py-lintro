@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Fake ``claude`` CLI: canned structured responses for lintro's CLI transport.
+
+Used by ``scripts/build/drive_interactive_review.py`` so the built binary's
+interactive AI review can be driven on a release runner with no provider
+credentials and no network. ``--help`` answers from the captured help text
+next to this file, because lintro gates every flag it sends on that surface.
+"""
+
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+HERE = os.path.dirname(os.path.abspath(__file__))
+if "--help" in args:
+    with open(os.path.join(HERE, "help.txt"), encoding="utf-8") as handle:
+        print(handle.read())
+    sys.exit(0)
+if "--version" in args:
+    print("2.1.267 (Claude Code)")
+    sys.exit(0)
+schema = args[args.index("--json-schema") + 1] if "--json-schema" in args else ""
+sys.stdin.read()
+if '"original_code"' in schema:
+    payload = [
+        {
+            "line": 1,
+            "original_code": "import os",
+            "suggested_code": "# import removed",
+            "explanation": "Remove unused import os",
+            "confidence": "high",
+            "risk_level": "behavioral-risk",
+        },
+        {
+            "line": 2,
+            "original_code": "import sys",
+            "suggested_code": "# import removed",
+            "explanation": "Remove unused import sys",
+            "confidence": "high",
+            "risk_level": "behavioral-risk",
+        },
+    ]
+else:
+    payload = {
+        "overview": "Two unused imports.",
+        "key_patterns": ["unused imports"],
+        "priority_actions": ["remove them"],
+        "triage_suggestions": [],
+        "estimated_effort": "1 minute",
+    }
+print(
+    json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": json.dumps(payload),
+            "structured_output": payload,
+            "session_id": "fake-session",
+            "usage": {"input_tokens": 10, "output_tokens": 10},
+            "total_cost_usd": 0.0,
+        },
+    ),
+)

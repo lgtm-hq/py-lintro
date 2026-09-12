@@ -29,6 +29,16 @@ OPENAI_METADATA = ProviderMetadata(
     provider=AIProvider.OPENAI,
     display_name="OpenAI",
     default_model="gpt-4o",
+    # Deliberately no CLI default (#2537): under a ChatGPT-plan session codex
+    # serves only the models that plan offers, and asking for an API-catalogue
+    # model fails the call outright ("The 'gpt-4o' model is not supported when
+    # using Codex with a ChatGPT account"). The plan catalogue is per-account
+    # and moves fast — one live account offered gpt-6-astra, gpt-5.6-sol,
+    # gpt-5.6-terra, gpt-5.6-luna and gpt-5.5, and no gpt-4o — so pinning any
+    # slug here would recreate this bug on the next rename, for accounts that
+    # never had it. None means lintro sends no --model and codex picks its own
+    # default, which is by construction one the session can use.
+    cli_default_model=None,
     default_api_key_env="OPENAI_API_KEY",
     supported_transports=frozenset({AITransport.API, AITransport.CLI}),
     default_transport=AITransport.API,

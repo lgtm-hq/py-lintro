@@ -10,12 +10,14 @@ import re
 import sys
 import time
 import zipfile
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1198,3 +1200,500 @@ def test_inline_suffix_uses_the_cancel_budget_by_default(
     assert_that(artifacts._CHECKPOINT_UPLOAD_BUDGET_SECONDS).is_greater_than(
         artifacts._CANCEL_UPLOAD_BUDGET_SECONDS,
     )
+
+
+def _own_attempt_gh_api(
+    *,
+    current_run_artifacts: list[dict[str, Any]],
+    run_event: str = "pull_request_target",
+    run_prs: list[dict[str, int]] | None = None,
+) -> Callable[[str], dict[str, Any]]:
+    """Build a ``gh api`` fake for the rerun-resume tests (#2506).
+
+    Run 500 is the current run; run 200 is an older completed run that
+    still carries state, so a fall-back selection is observable.
+
+    Args:
+        current_run_artifacts: Artifacts attached to run 500.
+        run_event: Trigger event reported for run 500.
+        run_prs: ``pull_requests`` reported for run 500.
+
+    Returns:
+        A callable accepting a REST path and returning a JSON mapping.
+    """
+
+    def gh_api(path: str) -> dict[str, Any]:
+        if path == "repos/lgtm-hq/py-lintro/actions/runs/500":
+            return {
+                "id": 500,
+                "event": run_event,
+                "status": "in_progress",
+                "path": ".github/workflows/ai-review.yml",
+                "created_at": "2026-08-24T04:00:00Z",
+                "pull_requests": run_prs if run_prs is not None else [{"number": 15}],
+            }
+        if "workflows/" in path:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 200,
+                        "event": "pull_request_target",
+                        "status": "completed",
+                        "path": ".github/workflows/ai-review.yml",
+                        "created_at": "2026-08-24T02:00:00Z",
+                        "pull_requests": [{"number": 15}],
+                    },
+                ],
+            }
+        if "runs/500/artifacts" in path:
+            return {"artifacts": current_run_artifacts}
+        if "runs/200/artifacts" in path:
+            return {
+                "artifacts": [
+                    {
+                        "id": 2,
+                        "name": "lintro-review-state-pr-15-attempt-1-inline",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    return gh_api
+
+
+def _rerun_env(*, attempt: str) -> dict[str, str]:
+    """Return the locator environment for one attempt of run 500.
+
+    Args:
+        attempt: ``GITHUB_RUN_ATTEMPT`` value.
+
+    Returns:
+        Environment mapping for ``locate_state_from_env``.
+    """
+    return {
+        "GITHUB_REPOSITORY": "lgtm-hq/py-lintro",
+        "PR_NUMBER": "15",
+        "GITHUB_RUN_ID": "500",
+        "GITHUB_RUN_ATTEMPT": attempt,
+    }
+
+
+def test_rerun_resumes_its_own_previous_attempt(artifacts: ModuleType) -> None:
+    """Attempt 2 selects its own run id when attempt 1 left state (#2506)."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-ckpt-15",
+                "expired": False,
+            },
+        ],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(500)
+
+
+def test_first_attempt_never_resumes_the_current_run(artifacts: ModuleType) -> None:
+    """Attempt 1 falls back to the newest completed run."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-ckpt-15",
+                "expired": False,
+            },
+        ],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="1"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_without_own_state_falls_back(artifacts: ModuleType) -> None:
+    """Attempt 2 with no earlier-attempt artifact keeps the old behaviour."""
+    gh_api = _own_attempt_gh_api(current_run_artifacts=[])
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_ignores_expired_and_same_attempt_state(artifacts: ModuleType) -> None:
+    """Only a strictly older, non-expired attempt counts as resumable."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": True,
+            },
+            {
+                "id": 2,
+                "name": "lintro-review-state-pr-15-attempt-2-ckpt-3",
+                "expired": False,
+            },
+        ],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_resume_requires_a_trusted_current_run(artifacts: ModuleType) -> None:
+    """An untrusted trigger on the current run disqualifies self-resume."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": False,
+            },
+        ],
+        run_event="workflow_dispatch",
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_rerun_resume_rejects_a_current_run_for_another_pr(
+    artifacts: ModuleType,
+) -> None:
+    """A current run that lists a different PR is not a resume source."""
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": False,
+            },
+        ],
+        run_prs=[{"number": 99}],
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_state_artifact_attempt_parses_the_generated_name(
+    artifacts: ModuleType,
+) -> None:
+    """``state_artifact_name`` round-trips through the attempt parser."""
+    name = artifacts.state_artifact_name(pr_number=15, attempt=4, suffix="ckpt-2")
+
+    assert_that(artifacts.state_artifact_attempt(name, pr_number=15)).is_equal_to(4)
+    assert_that(artifacts.state_artifact_attempt(name, pr_number=1)).is_none()
+    legacy = "lintro-review-state-pr-15-inline"
+    assert_that(artifacts.state_artifact_attempt(legacy, pr_number=15)).is_none()
+
+
+def test_rerun_resume_retries_a_failed_current_run_lookup(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One transient ``gh api`` failure must not reject the current run.
+
+    Without the retry the locator would fall back to run 200 — older
+    state this attempt has already superseded.
+
+    Args:
+        artifacts: The loaded helper module.
+        monkeypatch: Fixture used to neutralize the retry sleep.
+    """
+    monkeypatch.setattr(artifacts, "_retry_sleep", lambda _seconds: None)
+    inner = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-inline",
+                "expired": False,
+            },
+        ],
+    )
+    run_lookups = 0
+
+    def gh_api(path: str) -> dict[str, Any] | None:
+        """Fail the first current-run lookup, then delegate.
+
+        Args:
+            path: REST path requested by the locator.
+
+        Returns:
+            The payload, or ``None`` on the first run lookup.
+        """
+        nonlocal run_lookups
+        if path == "repos/lgtm-hq/py-lintro/actions/runs/500":
+            run_lookups += 1
+            if run_lookups == 1:
+                return None
+        return inner(path)
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(500)
+    assert_that(run_lookups).is_equal_to(2)
+
+
+HEAD = "0123456789abcdef0123456789abcdef01234567"
+OTHER_HEAD = "fedcba9876543210fedcba9876543210fedcba98"
+
+
+def _lint_run(
+    run_id: int,
+    *,
+    head_sha: str,
+    path: str = ".github/workflows/docker-ci.yml",
+) -> dict[str, Any]:
+    """Build a docker-ci workflow-run payload.
+
+    Args:
+        run_id: Actions run id.
+        head_sha: Head commit recorded on the run.
+        path: Workflow path recorded on the run.
+
+    Returns:
+        A raw run mapping as the Actions API returns it.
+    """
+    return {
+        "id": run_id,
+        "event": "pull_request",
+        "status": "in_progress",
+        "path": path,
+        "created_at": "2026-09-11T01:00:00Z",
+        "head_sha": head_sha,
+    }
+
+
+def _lint_gh_api(
+    runs: list[dict[str, Any]],
+    artifacts_by_run: dict[int, list[dict[str, Any]]],
+) -> Callable[[str], dict[str, Any] | None]:
+    """Fake ``gh api`` serving the PR head, a run listing, and artifacts.
+
+    Args:
+        runs: Runs returned for the docker-ci listing, regardless of query.
+        artifacts_by_run: Artifact payloads keyed by run id.
+
+    Returns:
+        The fake API callable.
+    """
+
+    def gh_api(path: str) -> dict[str, Any] | None:
+        if path.startswith("repos/lgtm-hq/py-lintro/pulls/15"):
+            return {"head": {"sha": HEAD}}
+        if path.startswith(
+            "repos/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml/runs",
+        ):
+            return {"workflow_runs": runs}
+        for run_id, payloads in artifacts_by_run.items():
+            if path.startswith(
+                f"repos/lgtm-hq/py-lintro/actions/runs/{run_id}/artifacts",
+            ):
+                return {"artifacts": payloads}
+        return {"artifacts": []}
+
+    return gh_api
+
+
+def test_lint_report_locator_pins_the_exact_head_sha(artifacts: ModuleType) -> None:
+    """Only a run whose recorded head equals the PR head can supply facts.
+
+    The listing is filtered server-side, but the client re-checks every run:
+    a newer run for a different head, and a run whose payload omitted the
+    head, are both skipped even when they carry the artifact.
+    """
+    report = [{"name": "linting-json-report", "expired": False}]
+    gh_api = _lint_gh_api(
+        runs=[
+            _lint_run(300, head_sha=OTHER_HEAD),
+            {**_lint_run(250, head_sha=HEAD), "head_sha": ""},
+            _lint_run(200, head_sha=HEAD),
+        ],
+        artifacts_by_run={300: report, 250: report, 200: report},
+    )
+
+    located = artifacts.locate_lint_report_from_env(
+        {"GITHUB_REPOSITORY": "lgtm-hq/py-lintro", "PR_NUMBER": "15"},
+        gh_api=gh_api,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+    assert_that(located.head_sha).is_equal_to(HEAD)
+
+
+def test_lint_report_locator_needs_the_artifact_not_a_completed_run(
+    artifacts: ModuleType,
+) -> None:
+    """The artifact decides, not run status.
+
+    A run for the right head without the report (yet) is skipped; an
+    in-progress run that already uploaded it is selected.
+    """
+    gh_api = _lint_gh_api(
+        runs=[_lint_run(300, head_sha=HEAD), _lint_run(200, head_sha=HEAD)],
+        artifacts_by_run={
+            300: [{"name": "linting-report", "expired": False}],
+            200: [{"name": "linting-json-report", "expired": False}],
+        },
+    )
+
+    located = artifacts.locate_lint_report(
+        repo="lgtm-hq/py-lintro",
+        head_sha=HEAD,
+        gh_api=gh_api,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_lint_report_locator_skips_expired_and_foreign_workflow_reports(
+    artifacts: ModuleType,
+) -> None:
+    """An expired report, or one on another workflow, is not a source of facts."""
+    gh_api = _lint_gh_api(
+        runs=[
+            _lint_run(300, head_sha=HEAD),
+            _lint_run(200, head_sha=HEAD, path=".github/workflows/other.yml"),
+        ],
+        artifacts_by_run={
+            300: [{"name": "linting-json-report", "expired": True}],
+            200: [{"name": "linting-json-report", "expired": False}],
+        },
+    )
+
+    located = artifacts.locate_lint_report(
+        repo="lgtm-hq/py-lintro",
+        head_sha=HEAD,
+        gh_api=gh_api,
+    )
+
+    assert_that(located.run_id).is_none()
+    assert_that(located.head_sha).is_equal_to(HEAD)
+
+
+def test_lint_report_locator_is_empty_without_a_head_or_on_api_failure(
+    artifacts: ModuleType,
+) -> None:
+    """Missing inputs and API failures degrade to no run, never an exception."""
+    assert_that(
+        artifacts.locate_lint_report(
+            repo="lgtm-hq/py-lintro",
+            head_sha="",
+            gh_api=lambda _p: None,
+        ).run_id,
+    ).is_none()
+    assert_that(
+        artifacts.locate_lint_report_from_env(
+            {"PR_NUMBER": "15"},
+            gh_api=lambda _p: None,
+        ).run_id,
+    ).is_none()
+
+    def exploding(_path: str) -> dict[str, Any]:
+        raise RuntimeError("boom")
+
+    located = artifacts.locate_lint_report_from_env(
+        {"GITHUB_REPOSITORY": "lgtm-hq/py-lintro", "PR_NUMBER": "15"},
+        gh_api=exploding,
+    )
+    assert_that(located.run_id).is_none()
+
+
+def test_lint_report_subcommand_prints_run_id_and_head(
+    artifacts: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``lint-report`` writes the key=value lines run-ai-review.sh parses.
+
+    Args:
+        artifacts: Loaded helper module.
+        monkeypatch: Pytest monkeypatch fixture.
+        capsys: Pytest capture fixture.
+    """
+    monkeypatch.setattr(
+        artifacts,
+        "locate_lint_report_from_env",
+        lambda _env, **_kw: artifacts.LocatedLintReport(run_id=200, head_sha=HEAD),
+    )
+
+    exit_code = artifacts.main(["lint-report"])
+
+    assert_that(exit_code).is_equal_to(0)
+    assert_that(capsys.readouterr().out).is_equal_to(f"run-id=200\nhead-sha={HEAD}\n")
+
+
+def test_lint_report_artifact_contract_is_pinned_across_files(
+    artifacts: ModuleType,
+) -> None:
+    """The artifact name, report path, and note wording agree across files.
+
+    docker-ci.yml uploads the report, the locator names the artifact,
+    run-ai-review.sh downloads it and passes the file, and lintro renders the
+    note. Each lives in a different language, so this reads the literals out
+    of every file and compares them to each other; a rename in one place
+    fails here instead of 404-ing forever behind the fail-safe note (#2571).
+    """
+    from lintro.ai.review.preparation_resolvers import LINT_FACTS_UNAVAILABLE
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "docker-ci.yml").read_text(
+            encoding="utf-8",
+        ),
+    )
+    uploads = [
+        step
+        for step in workflow["jobs"]["dogfooding-lint-changed"]["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact@")
+        and step.get("with", {}).get("name") == artifacts.LINT_REPORT_ARTIFACT
+    ]
+    assert_that(uploads).is_length(1)
+    uploaded_path = Path(uploads[0]["with"]["path"])
+
+    script = (REPO_ROOT / "scripts" / "ci" / "run-ai-review.sh").read_text(
+        encoding="utf-8",
+    )
+    downloaded_name = re.search(r"--name (\S+)", script)
+    report_path = re.search(r'lint_report_path="\$\{lint_report_dir\}/([^"]+)"', script)
+    assert_that(downloaded_name).is_not_none()
+    assert_that(report_path).is_not_none()
+    assert downloaded_name is not None and report_path is not None
+    assert_that(downloaded_name.group(1)).is_equal_to(artifacts.LINT_REPORT_ARTIFACT)
+    # A single-file artifact downloads under its own basename.
+    assert_that(report_path.group(1)).is_equal_to(uploaded_path.name)
+    assert_that(script).contains(LINT_FACTS_UNAVAILABLE)

@@ -28,6 +28,7 @@ __all__ = [
     "CLI_TRANSPORT_DIFF_TOKEN_BUDGET",
     "DiffSize",
     "assert_cli_diff_within_ceiling",
+    "findings_cap_was_hit",
     "is_cli_output_exhaustion",
     "is_output_exhaustion_error",
     "measure_diff_size",
@@ -214,3 +215,22 @@ def is_cli_output_exhaustion(error: BaseException) -> bool:
     if not isinstance(error, AIProviderError):
         return False
     return is_output_exhaustion_error(str(error))
+
+
+def findings_cap_was_hit(*, findings_count: int, findings_cap: int | None) -> bool:
+    """Return whether a chunk's parsed answer reached its per-call ceiling.
+
+    A configured cap is not itself a coverage limit: the model only had to
+    leave findings out when it emitted as many as it was allowed to. A chunk
+    that returned exactly ``findings_cap`` findings counts as a hit, because
+    the prompt told it to stop there and summarize any overflow (#2283).
+
+    Args:
+        findings_count: Number of findings parsed from the chunk answer.
+        findings_cap: The ceiling in force for that answer, or ``None`` when
+            the call was uncapped.
+
+    Returns:
+        True when a real ceiling was in force and the answer reached it.
+    """
+    return findings_cap is not None and findings_count >= findings_cap

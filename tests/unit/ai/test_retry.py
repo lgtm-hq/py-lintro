@@ -287,3 +287,212 @@ def test_retry_preserves_function_metadata() -> None:
 
     assert_that(my_function.__name__).is_equal_to("my_function")
     assert_that(my_function.__doc__).starts_with("My docstring.")
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_retry_after_replaces_the_backoff_on_429(mock_sleep: MagicMock) -> None:
+    """A 429 carrying ``Retry-After: 3`` waits exactly 3 s, then retries (#2506).
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    call_count = 0
+
+    @with_retry(max_retries=3, base_delay=30.0, max_delay=60.0)
+    async def fn() -> str:
+        """Rate limit once with a server-advertised wait, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIRateLimitError: On the first attempt.
+        """
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise AIRateLimitError("429", retry_after=3.0)
+        return "ok"
+
+    result = await fn()
+    assert_that(result).is_equal_to("ok")
+    assert_that(call_count).is_equal_to(2)
+    mock_sleep.assert_awaited_once_with(3.0)
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_rate_limit_uses_its_own_larger_budget(mock_sleep: MagicMock) -> None:
+    """429 retries run to ``rate_limit_max_retries``, not ``max_retries``.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    call_count = 0
+
+    @with_retry(max_retries=1, rate_limit_max_retries=4, base_delay=0.1)
+    async def fn() -> str:
+        """Rate limit three times, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIRateLimitError: On the first three attempts.
+        """
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 3:
+            raise AIRateLimitError("429")
+        return "ok"
+
+    assert_that(await fn()).is_equal_to("ok")
+    assert_that(call_count).is_equal_to(4)
+    assert_that(mock_sleep.await_count).is_equal_to(3)
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_exhausted_rate_limit_asks_for_a_rerun(mock_sleep: MagicMock) -> None:
+    """Exhausting the 429 budget names the rate limit and asks to rerun.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    call_count = 0
+
+    @with_retry(max_retries=5, rate_limit_max_retries=2, base_delay=0.1)
+    async def fn() -> str:
+        """Always rate limit.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            AIRateLimitError: Always.
+        """
+        nonlocal call_count
+        call_count += 1
+        raise AIRateLimitError("Anthropic rate limit exceeded: 429")
+
+    with pytest.raises(AIRateLimitError) as excinfo:
+        await fn()
+
+    message = str(excinfo.value)
+    assert_that(message).contains("rate limit")
+    assert_that(message).contains("rerun")
+    assert_that(call_count).is_equal_to(3)
+    assert_that(mock_sleep.await_count).is_equal_to(2)
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_non_rate_limit_keeps_the_default_budget(mock_sleep: MagicMock) -> None:
+    """A 5xx still stops at ``max_retries`` even with a larger 429 budget.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    call_count = 0
+
+    @with_retry(
+        max_retries=1,
+        rate_limit_max_retries=6,
+        base_delay=2.0,
+        backoff_factor=2.0,
+    )
+    async def fn() -> str:
+        """Always fail with a transient provider error.
+
+        Returns:
+            Never returns.
+
+        Raises:
+            AIProviderError: Always.
+        """
+        nonlocal call_count
+        call_count += 1
+        raise AIProviderError("server error")
+
+    with pytest.raises(AIProviderError):
+        await fn()
+
+    assert_that(call_count).is_equal_to(2)
+    assert_that(mock_sleep.await_count).is_equal_to(1)
+    # Backoff, not a Retry-After: jittered ±20 % around base_delay.
+    slept = mock_sleep.await_args_list[0].args[0]
+    assert_that(slept).is_between(1.6, 2.4)
+
+
+def test_rate_limit_budget_must_not_be_negative() -> None:
+    """A negative 429 budget is rejected at decoration time."""
+    with pytest.raises(ValueError, match="rate_limit_max_retries"):
+        with_retry(rate_limit_max_retries=-1)
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_budgets_are_counted_independently(mock_sleep: MagicMock) -> None:
+    """Alternating 5xx and 429 failures never spend each other's budget.
+
+    With one shared counter the fourth failure below would exhaust
+    ``max_retries=2`` even though only two provider errors were seen.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    call_count = 0
+
+    @with_retry(max_retries=2, rate_limit_max_retries=2, base_delay=0.1)
+    async def fn() -> str:
+        """Alternate the two transient error types, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIProviderError: On the first and third attempts.
+            AIRateLimitError: On the second and fourth attempts.
+        """
+        nonlocal call_count
+        call_count += 1
+        if call_count in (1, 3):
+            raise AIProviderError("server error")
+        if call_count in (2, 4):
+            raise AIRateLimitError("429")
+        return "ok"
+
+    assert_that(await fn()).is_equal_to("ok")
+    assert_that(call_count).is_equal_to(5)
+    assert_that(mock_sleep.await_count).is_equal_to(4)
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_rate_limits_do_not_shorten_the_transient_budget(
+    mock_sleep: MagicMock,
+) -> None:
+    """A leading 429 leaves the full ``max_retries`` for provider errors.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    call_count = 0
+
+    @with_retry(max_retries=2, rate_limit_max_retries=1, base_delay=0.1)
+    async def fn() -> str:
+        """Rate limit once, then fail twice transiently, then succeed.
+
+        Returns:
+            A fixed marker value.
+
+        Raises:
+            AIRateLimitError: On the first attempt.
+            AIProviderError: On the second and third attempts.
+        """
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            raise AIRateLimitError("429")
+        if call_count <= 3:
+            raise AIProviderError("server error")
+        return "ok"
+
+    assert_that(await fn()).is_equal_to("ok")
+    assert_that(call_count).is_equal_to(4)
+    assert_that(mock_sleep.await_count).is_equal_to(3)

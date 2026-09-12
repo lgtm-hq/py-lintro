@@ -594,3 +594,33 @@ def test_skip_reasons_survive_a_full_reviewed_list(
     assert_that(body).contains(
         "- `docs/README.md` — skipped (outside the requested --path filter)",
     )
+
+
+def test_header_announces_missing_linter_facts(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A round that asked for a lint report and got none says so under the header."""
+    result = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            lint_facts_note="linter facts unavailable for this head: no report",
+        ),
+    )
+
+    body = _body(result=result, prior_state=ReviewState())
+
+    header, _, rest = body.partition("\n\n")
+    assert_that(header).contains("🔎 **Lintro review")
+    assert_that(rest).starts_with(
+        "> ℹ️ **Linter facts** — linter facts unavailable for this head: no report",
+    )
+
+
+def test_header_is_silent_when_linter_facts_were_not_requested(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The default round renders no linter-facts line at all."""
+    body = _body(result=sample_review_result, prior_state=ReviewState())
+
+    assert_that(body).does_not_contain("Linter facts")

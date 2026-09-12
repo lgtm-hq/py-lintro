@@ -82,7 +82,7 @@ jobs:
     # explicit `false` — a publish that really did fail — stops the version PR.
     if: always() && needs.publish-gate.outputs.publish_green != 'false'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36 # v0.69.8
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@b0d71b2b37fd205bf12118f5084612ceeea09208 # v0.69.9
     with:
       ecosystems: python
       auto-merge: true
@@ -94,7 +94,7 @@ jobs:
       # line so minor/major bumps do not go stale and block the unattended
       # release PR (#1372). Logic lives in dedicated scripts, not inline runs.
       version-update-script: scripts/ci/finalize-version-pr.py
-      tooling-ref: 'f0e999fd9934a43c8d1d6a1c68ee2d1a8a978f36' # v0.69.8
+      tooling-ref: 'b0d71b2b37fd205bf12118f5084612ceeea09208' # v0.69.9
       egress-policy: block
       # Paired with release-auto-tag.yml (egress-preset: github-tooling).
       # Guarded by test_release_workflows_use_paired_egress_presets.

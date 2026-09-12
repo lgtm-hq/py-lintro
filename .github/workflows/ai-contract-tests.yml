@@ -105,8 +105,34 @@ jobs:
       contents: read # checkout the contract suite and the image pin
       packages: read # pull the pinned lintro-ai-tools image from GHCR
     timeout-minutes: 25
+    # Trusted-event gate for the provider credentials (#2481). Tier 2 runs on
+    # schedule / dispatch today, and the `if:` above keeps it there; the
+    # same-repository head clause is what keeps the secrets safe when the
+    # review round-trip (#2515) adds a `pull_request` trigger, because a fork
+    # head would then evaluate to false and every secret below resolves to ''.
+    # Job-level env carries only this boolean — never a secret — so the
+    # credentials stay scoped to the two steps that need them.
+    #
+    # Deliberately NOT pinned to refs/heads/main. `schedule` only ever runs
+    # the default branch, and `workflow_dispatch` requires write access, so
+    # neither event can be reached from a fork or by an untrusted actor. A
+    # branch dispatch is the point: #2481 requires a green Tier 2 on the PR
+    # branch before the wiring merges, and main-only would make dispatch a
+    # no-op tier that can never prove a change. The trust boundary here is
+    # write access, which is the same boundary that governs main itself.
+    env:
+      # yamllint disable-line rule:line-length
+      AI_CONTRACT_SECRETS_ALLOWED: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Harden Runner
+        # Every host any dogfood lane can reach (.github/workflows/ai-review.yml
+        # AI_REVIEW_*_EGRESS). Dogfood allowlists them one provider at a time
+        # because a single run picks one provider; Tier 2 drives all three
+        # lanes in one job, so it allowlists the union — otherwise a lane that
+        # authenticates in dogfood dies here on egress instead. auth.openai.com
+        # and chatgpt.com are the Codex subscription-session hosts; without
+        # them the restored session cannot be exchanged and the codex lane
+        # 401s. Exact hosts only: no wildcards on this job.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -122,7 +148,15 @@ jobs:
             files.pythonhosted.org:443
             api.anthropic.com:443
             api.openai.com:443
+            auth.openai.com:443
+            chatgpt.com:443
             api.cursor.com:443
+            downloads.cursor.com:443
+            api2.cursor.sh:443
+            api3.cursor.sh:443
+            agentn.global.api5.cursor.sh:443
+            repo42.cursor.sh:443
+            api.z.ai:443
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -134,14 +168,85 @@ jobs:
         run: |
           echo "ref=$(python3 scripts/ci/ai_tools_image_pin.py)" >>"$GITHUB_OUTPUT"
 
+      - name: Restore Codex subscription session
+        id: codex-session
+        # A corrupt secret must cost one lane, not three. The script rejects a
+        # CODEX_AUTH_JSON that is not valid base64 of a JSON object and exits
+        # 1, deleting the partial file; without continue-on-error that step
+        # failure ends the job, and the anthropic and cursor lanes never run.
+        # With it, the run reaches the smoke step with no session, the codex
+        # lane reports link 3 of 3 unauthenticated, and the job still goes red
+        # — the verdict stays with the step that owns it. This is the one
+        # step here allowed to swallow its own failure, asserted as such in
+        # tests/scripts/test_ai_contract_tests_workflow.py.
+        continue-on-error: true
+        # Same credential and the same script as the dogfood openai lane
+        # (#2472): decode CODEX_AUTH_JSON into $HOME/.codex/auth.json. Codex
+        # has no OAuth-token env var, and CODEX_API_KEY would bill metered API
+        # credits instead of the ChatGPT-plan subscription. The runner script
+        # mounts that directory into the contract container as CODEX_HOME.
+        # Injected after
+        # the checkout, like dogfood does. An unset secret warns and exits 0 —
+        # the tier then reports an unauthenticated codex lane, never a pass.
+        env:
+          # yamllint disable-line rule:line-length
+          CODEX_AUTH_JSON: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && secrets.CODEX_AUTH_JSON || '' }}
+        run: scripts/ci/restore-codex-session.sh
+
       - name: Run tier-2 invocation smoke
         env:
           IMAGE: ${{ steps.image.outputs.ref }}
           TIER: '2'
           # Credentials are forwarded, never defaulted: an unset secret must
           # reach the suite as unset so it reports a visible skip naming the
-          # missing link, rather than a pass.
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          # missing link, rather than a pass. Each lane carries exactly the
+          # credential the dogfood review uses, so a green Tier 2 proves the
+          # credential the review will actually run on.
+          #
+          # anthropic: the subscription OAuth token, not ANTHROPIC_API_KEY —
+          # that account's balance is depleted, and its mere presence would
+          # flip the CLI to bare (API-key) mode. LINTRO_CLI_BARE=never pins
+          # the decision regardless (#1838/#1859).
+          #
+          # The dogfood review has two anthropic configurations and picks
+          # between them on ZAI_BASE_URL (#2472 lane 2): with the variable
+          # empty the pinned `claude` binary talks to api.anthropic.com on the
+          # subscription token; with it set, the same binary is pointed at the
+          # z.ai gateway and authenticated with ZAI_AUTH_TOKEN instead. The
+          # three expressions below are the dogfood ones with the provider
+          # selection swapped for this job's gate — Tier 2 has no provider
+          # variable, it always drives all three lanes — so whichever
+          # configuration the review is in, Tier 2 proves that credential and
+          # never both at once. tests/unit/test_workflow_wiring.py derives
+          # them from ai-review.yml and fails if the two drift.
+          # yamllint disable-line rule:line-length
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL == '') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          # yamllint disable-line rule:line-length
+          ANTHROPIC_BASE_URL: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL || '' }}
+          # yamllint disable-line rule:line-length
+          ANTHROPIC_AUTH_TOKEN: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.ZAI_BASE_URL && secrets.ZAI_AUTH_TOKEN || '' }}
+          LINTRO_CLI_BARE: 'never'
+          # Keep the claude CLI's egress to api.anthropic.com only, and keep
+          # the image's pinned CLI pinned — an autoupdate would swap the very
+          # binary this tier exists to verify.
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
+          DISABLE_AUTOUPDATER: '1'
+          # The dogfood review's model overlay (#2471/#1971), mirrored for
+          # parity so the two jobs read the same variable. One value reaches
+          # every lane: the review runs one provider per run, Tier 2 runs all
+          # three in one job, and there is no per-lane split here because the
+          # container gets a single environment for the whole pytest run. A
+          # provider-specific slug therefore reddens the lanes it does not
+          # belong to — set it only while experimenting with the provider it
+          # names, and expect the other two to fail; otherwise leave it unset.
+          # Unset is the default and the normal state: each lane then resolves
+          # its own default, which for codex means deferring to the CLI under
+          # a subscription session (#2537).
+          # yamllint disable-line rule:line-length
+          LINTRO_AI_MODEL: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && vars.LINTRO_AI_MODEL || '' }}
+          # cursor: the same API key the dogfood cursor lane uses.
+          # yamllint disable-line rule:line-length
+          CURSOR_API_KEY: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && secrets.CURSOR_API_KEY || '' }}
+          # openai: no key here on purpose — the lane authenticates through
+          # the session restored by the step above.
         run: scripts/ci/run-ai-contract-tests.sh

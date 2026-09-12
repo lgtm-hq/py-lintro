@@ -16,18 +16,21 @@ from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_constants import STICKY_FOOTER, STICKY_MARKER
 from lintro.ai.review.github_contract import RenderLimits
+from lintro.ai.review.github_notes import format_partial_review_label
 from lintro.ai.review.github_render import (
     Section,
     _format_checklist_appendix_markdown,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.sticky_plan import StickyPlan
+from lintro.ai.review.posting_policy import PostingPolicy
 from lintro.ai.review.sticky.cells import _open_prompt_findings
 from lintro.ai.review.sticky.findings import (
     _degraded_details,
     _findings_round_section,
 )
 from lintro.ai.review.sticky.history import _history_section, _this_run_section
+from lintro.ai.review.sticky.notes import _notes_section
 from lintro.ai.review.sticky.sections import (
     _coverage_limited_row,
     _coverage_section,
@@ -86,6 +89,14 @@ def state_sections(
     limits: RenderLimits,
 ) -> list[Section]:
     """Order the sections of a board re-rendered from state alone.
+
+    No notes block (#2572, #2583): notes are round-scoped, like the summary
+    and the model's reasoning. They are the round's routed findings, not
+    tracked state — nothing persists them — so a board re-rendered without a
+    result (a converged skip, an error surface) carries the previous round's
+    notes no more than it carries that round's summary. The last real round's
+    comment still shows them; this render is a state-derived board, not a
+    replay of the round that produced it.
 
     Args:
         plan: Resolved inputs, with ``result`` left as ``None``.
@@ -152,6 +163,7 @@ def round_sections(
                 round_number=plan.round_number,
                 head_sha=plan.head_sha,
                 verdict=plan.verdict,
+                partial=format_partial_review_label(metadata=result.metadata),
             ),
         ),
         Section(
@@ -181,6 +193,17 @@ def round_sections(
                 failure=plan.inline_failure,
                 checklist_display=plan.checklist_display,
                 question_map=plan.question_map,
+                limit=limits.open,
+            ),
+        ),
+        Section(
+            name="notes",
+            text=_notes_section(
+                result=result,
+                repo=plan.repo,
+                head_sha=plan.head_sha,
+                carries=plan.match.note_carries,
+                policy=plan.posting_policy or PostingPolicy(),
                 limit=limits.open,
             ),
         ),

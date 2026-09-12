@@ -10,9 +10,12 @@ run still renders byte-identically to before the signal existed.
 
 from __future__ import annotations
 
+import importlib.util
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -30,6 +33,7 @@ from lintro.ai.review.cli_limits import (
 )
 from lintro.ai.review.coverage_degradation import (
     COVERAGE_LIMITED_HEADLINE,
+    PARTIAL_REVIEW_LABEL,
     describe_coverage_degradations,
 )
 from lintro.ai.review.display import render_review_terminal
@@ -51,6 +55,7 @@ from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review_async
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.response_pipeline import (
+    ChunkCallResult,
     ChunkReviewRequest,
     invoke_chunk_review,
 )
@@ -301,7 +306,7 @@ def test_review_body_carries_the_warning_only_when_capped(
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
     # Production-independent copy: the detail sentence, not just the headline.
     assert_that(clean).does_not_contain("may go unreported")
-    assert_that(capped).contains("ran under a 12-finding per-call cap")
+    assert_that(capped).contains("hit the 12-finding per-call cap")
     assert_that(capped).contains("may go unreported")
 
 
@@ -480,16 +485,31 @@ def _chunk_and_context(*, repo_root: str) -> tuple[ReviewChunk, ReviewContext]:
     return chunk, context
 
 
-def _ok_response() -> AIResponse:
+def _ok_response(*, findings: int = 0) -> AIResponse:
     """Return a minimal well-formed chunk review response.
 
+    Args:
+        findings: How many distinct findings the answer carries. The count is
+            what decides whether a per-call cap was hit (#2283), so it is the
+            only interesting variable in this payload.
+
     Returns:
-        A parseable provider response with no findings.
+        A parseable provider response carrying ``findings`` findings.
     """
     payload = {
         "summary": {"headline": "Adds a constant.", "walkthrough": []},
         "checklist": [],
-        "findings": [],
+        "findings": [
+            {
+                "severity": "P3",
+                "category": "style",
+                "title": f"Nit {index}",
+                "file": "src/a.py",
+                "line": index + 1,
+                "description": f"Minor point {index}.",
+            }
+            for index in range(findings)
+        ],
         "verdict_reasoning": {
             "deciding_factor": "Nothing blocks.",
             "failure_mechanism": "n/a",
@@ -507,13 +527,13 @@ def _ok_response() -> AIResponse:
     )
 
 
-async def _degradations_for(
+async def _chunk_call_for(
     *,
     tmp_path: Path,
     max_findings: int | None,
     exhaust_first_call: bool,
-) -> tuple[CoverageDegradation, ...]:
-    """Drive the chunk-review seam and return what it recorded.
+) -> ChunkCallResult:
+    """Drive the chunk-review seam and return what it reported.
 
     Args:
         tmp_path: Temporary directory used as the repository root.
@@ -522,7 +542,8 @@ async def _degradations_for(
             output-token exhaustion error so the tighter-cap retry runs.
 
     Returns:
-        The coverage degradations the chunk call recorded.
+        The chunk call result, carrying the degradations it recorded and the
+        findings cap that was in force for the answer it returns.
     """
     chunk, context = _chunk_and_context(repo_root=str(tmp_path))
     provider = MagicMock()
@@ -548,7 +569,7 @@ async def _degradations_for(
         "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        _response, _elapsed, degradations = await invoke_chunk_review(
+        return await invoke_chunk_review(
             request=ChunkReviewRequest(
                 chunk=chunk,
                 context=context,
@@ -572,29 +593,27 @@ async def _degradations_for(
                 chunk_index=3,
             ),
         )
-    return degradations
 
 
-async def test_chunk_review_records_the_applied_findings_cap(
+async def test_chunk_review_reports_the_cap_without_recording_it(
     tmp_path: Path,
 ) -> None:
-    """A capped chunk call records the cap it was given.
+    """A capped chunk call reports its ceiling but records no degradation.
+
+    The call site decides whether the ceiling bit, from the parsed finding
+    count; the call itself only says which ceiling was in force (#2283).
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    degradations = await _degradations_for(
+    call = await _chunk_call_for(
         tmp_path=tmp_path,
         max_findings=CLI_MAX_FINDINGS_PER_CALL,
         exhaust_first_call=False,
     )
 
-    assert_that(degradations).is_length(1)
-    assert_that(degradations[0].reason).is_equal_to(
-        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-    )
-    assert_that(degradations[0].findings_cap).is_equal_to(CLI_MAX_FINDINGS_PER_CALL)
-    assert_that(degradations[0].chunk_index).is_equal_to(3)
+    assert_that(call.degradations).is_empty()
+    assert_that(call.findings_cap).is_equal_to(CLI_MAX_FINDINGS_PER_CALL)
 
 
 async def test_chunk_review_records_the_exhaustion_retry(
@@ -605,20 +624,21 @@ async def test_chunk_review_records_the_exhaustion_retry(
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    degradations = await _degradations_for(
+    call = await _chunk_call_for(
         tmp_path=tmp_path,
         max_findings=CLI_MAX_FINDINGS_PER_CALL,
         exhaust_first_call=True,
     )
 
-    reasons = [item.reason for item in degradations]
+    reasons = [item.reason for item in call.degradations]
     assert_that(reasons).is_equal_to(
-        [
-            CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-            CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
-        ],
+        [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
     )
-    assert_that(degradations[-1].findings_cap).is_equal_to(CLI_FINDINGS_RETRY_CAP)
+    assert_that(call.degradations[-1].findings_cap).is_equal_to(CLI_FINDINGS_RETRY_CAP)
+    assert_that(call.degradations[-1].chunk_index).is_equal_to(3)
+    # The answer that came back is the retry's, so the cap the caller gates on
+    # is the tightened one.
+    assert_that(call.findings_cap).is_equal_to(CLI_FINDINGS_RETRY_CAP)
 
 
 async def test_uncapped_chunk_review_records_nothing(
@@ -629,26 +649,31 @@ async def test_uncapped_chunk_review_records_nothing(
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    degradations = await _degradations_for(
+    call = await _chunk_call_for(
         tmp_path=tmp_path,
         max_findings=None,
         exhaust_first_call=False,
     )
 
-    assert_that(degradations).is_empty()
+    assert_that(call.degradations).is_empty()
+    assert_that(call.findings_cap).is_none()
 
 
-async def test_cli_run_metadata_carries_the_cap_end_to_end(
-    tmp_path: Path,
-) -> None:
-    """A full CLI run surfaces the cap on the result metadata.
+#: Per-call ceiling used by the end-to-end CLI runs below. Small enough that
+#: a chunk answer can reach it without inventing a dozen findings.
+_END_TO_END_CAP = 2
 
-    Locks the orchestrator wiring: if the per-chunk degradations stop being
-    aggregated onto ``ReviewMetadata``, a capped CLI review would present as
-    an unlimited one again.
+
+async def _cli_run(*, tmp_path: Path, findings: int) -> ReviewResult:
+    """Run a one-chunk CLI review whose single answer carries ``findings``.
 
     Args:
-        tmp_path: Pytest temporary directory fixture.
+        tmp_path: Temporary directory used as the repository root.
+        findings: How many findings the replayed chunk answer returns, which
+            decides whether the :data:`_END_TO_END_CAP` ceiling was reached.
+
+    Returns:
+        The completed review result.
     """
     _chunk, context = _chunk_and_context(repo_root=str(tmp_path))
     provider = MagicMock()
@@ -661,9 +686,9 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
 
     with patch(
         "lintro.ai.review.provider_call.call_ai",
-        new=AsyncMock(return_value=_ok_response()),
+        new=AsyncMock(return_value=_ok_response(findings=findings)),
     ):
-        result = await run_review_async(
+        return await run_review_async(
             context=context,
             options=ReviewSessionOptions(
                 provider=provider,
@@ -671,6 +696,7 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
                     enabled=True,
                     review=True,
                     transport=AITransport.CLI,
+                    cli_max_findings_per_call=_END_TO_END_CAP,
                 ),
                 depth=1,
                 checklist_items=[],
@@ -679,11 +705,160 @@ async def test_cli_run_metadata_carries_the_cap_end_to_end(
             ),
         )
 
-    assert_that(result.metadata.findings_coverage_complete).is_false()
-    assert_that(result.metadata.findings_cap_applied).is_equal_to(
-        CLI_MAX_FINDINGS_PER_CALL,
-    )
+
+async def test_cli_run_below_the_cap_stays_coverage_complete(
+    tmp_path: Path,
+) -> None:
+    """A configured ceiling nobody reached is not a coverage degradation.
+
+    Before #2283 the cap was recorded whenever it was *configured*, so every
+    CLI review came back degraded. This is the loud failure mode for a
+    regression back to that.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP - 1)
+
+    assert_that(result.metadata.coverage_degradations).is_empty()
+    assert_that(result.metadata.findings_coverage_complete).is_true()
+    assert_that(result.metadata.findings_cap_applied).is_none()
     assert_that(result.metadata.partial).is_false()
+
+
+async def test_cli_run_that_hits_the_cap_records_it_end_to_end(
+    tmp_path: Path,
+) -> None:
+    """A chunk answering with exactly K findings records the cap it reached.
+
+    Locks the orchestrator wiring: if the per-chunk degradation stops being
+    aggregated onto ``ReviewMetadata``, a genuinely capped CLI review would
+    present as an unlimited one again.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP)
+
+    assert_that(result.metadata.coverage_degradations).is_length(1)
+    recorded = result.metadata.coverage_degradations[0]
+    assert_that(recorded.reason).is_equal_to(
+        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+    )
+    assert_that(recorded.findings_cap).is_equal_to(_END_TO_END_CAP)
+    assert_that(recorded.chunk_index).is_equal_to(0)
+    assert_that(result.metadata.findings_coverage_complete).is_false()
+    assert_that(result.metadata.findings_cap_applied).is_equal_to(_END_TO_END_CAP)
+    assert_that(result.metadata.partial).is_false()
+    assert_that(
+        describe_coverage_degradations(metadata=result.metadata),
+    ).contains(f"1 of 1 chunk hit the {_END_TO_END_CAP}-finding per-call cap")
+
+
+#: The CI classifier that turns a review envelope into a check outcome. It is
+#: a script, not an importable package module, so it is loaded by path.
+_CLASSIFIER_SCRIPT = (
+    Path(__file__).resolve().parents[4]
+    / "scripts"
+    / "ci"
+    / "classify_review_outcome.py"
+)
+
+
+def _classify_run(*, result: ReviewResult) -> Any:
+    """Classify a real run's JSON envelope the way the CI check does.
+
+    Args:
+        result: The review result whose ``--output json`` envelope is classified.
+
+    Returns:
+        The classifier's ``OutcomeReport``. Typed loosely because the
+        classifier is a CI script loaded by path, not an importable module.
+
+    Raises:
+        RuntimeError: When the classifier script cannot be loaded.
+    """
+    spec = importlib.util.spec_from_file_location(
+        "classify_review_outcome_2283",
+        _CLASSIFIER_SCRIPT,
+    )
+    if spec is None or spec.loader is None:
+        msg = f"Unable to load module from {_CLASSIFIER_SCRIPT}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    # Registered before execution: the script's dataclasses resolve their
+    # string annotations through ``sys.modules`` at class-creation time.
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module.classify(
+        status=0,
+        output=json.dumps(review_result_to_dict(result=result)),
+        transport="cli",
+    )
+
+
+async def test_below_cap_cli_run_classifies_as_reviewed(tmp_path: Path) -> None:
+    """The CI check is green for a CLI round no chunk capped.
+
+    This is the outcome #2283 exists to restore: before it, every CLI round
+    classified ``degraded`` and the AI Review check was red on every PR.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP - 1)
+
+    report = _classify_run(result=result)
+
+    assert_that(report.outcome.value).is_equal_to("reviewed")
+    assert_that(report.exit_code).is_equal_to(0)
+
+
+async def test_cli_run_that_hits_the_cap_classifies_as_degraded(
+    tmp_path: Path,
+) -> None:
+    """A genuinely capped chunk still reddens the CI check.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP)
+
+    report = _classify_run(result=result)
+
+    assert_that(report.outcome.value).is_equal_to("degraded")
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.detail).contains("findings_cap_applied")
+
+
+async def test_below_cap_cli_run_renders_like_an_uncapped_run(
+    tmp_path: Path,
+) -> None:
+    """Every surface of a below-cap CLI run matches its uncapped counterpart.
+
+    Terminal, JSON, review body and sticky are compared byte for byte against
+    the same result with an explicitly empty degradation tuple — the shape an
+    uncapped transport produces (#2283).
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP - 1)
+    uncapped = _with_degradations(result=result, degradations=())
+
+    assert_that(_terminal(result=result)).is_equal_to(_terminal(result=uncapped))
+    assert_that(_body(result=result)).is_equal_to(_body(result=uncapped))
+    assert_that(_sticky(result=result)).is_equal_to(_sticky(result=uncapped))
+    assert_that(review_result_to_dict(result=result)).is_equal_to(
+        review_result_to_dict(result=uncapped),
+    )
+    for surface in (
+        _terminal(result=result),
+        _body(result=result),
+        _sticky(result=result),
+    ):
+        assert_that(surface).does_not_contain(COVERAGE_LIMITED_HEADLINE)
+        assert_that(surface).does_not_contain(PARTIAL_REVIEW_LABEL)
 
 
 def test_partial_and_capped_run_does_not_claim_every_chunk_reviewed() -> None:
@@ -719,7 +894,7 @@ def test_partial_and_capped_run_does_not_claim_every_chunk_reviewed() -> None:
     )
     text = describe_coverage_degradations(metadata=partial)
     assert_that(text).does_not_contain("Every chunk was reviewed")
-    assert_that(text).contains("Lower-severity issues beyond the cap")
+    assert_that(text).contains("Lower-severity findings in those chunks")
 
 
 def test_run_record_coverage_limited_uses_strict_bool_parsing() -> None:
@@ -776,7 +951,7 @@ def test_capped_and_retried_chunk_counts_once_in_the_description() -> None:
 
     text = describe_coverage_degradations(metadata=metadata)
 
-    assert_that(text).contains("1 of 1 chunk ran under a 25-finding per-call cap")
+    assert_that(text).contains("1 of 1 chunk hit the 25-finding per-call cap")
     assert_that(text).contains("1 chunk retried at a tighter 12-finding cap")
     assert_that(text).does_not_contain("of 2 chunks")
 
@@ -972,7 +1147,7 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk(
 
     text = describe_coverage_degradations(metadata=metadata)
 
-    assert_that(text).contains("1 of 1 chunk ran under a 25-finding per-call cap")
+    assert_that(text).contains("1 of 1 chunk hit the 25-finding per-call cap")
     assert_that(text).does_not_contain("of 2 chunks")
     assert_that(text).contains(clause)
     # The synthesis row's placeholder cap of 0 must never win the min(): the

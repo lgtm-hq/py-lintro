@@ -217,6 +217,27 @@ class PytestPlugin(BaseToolPlugin):
             self.result_processor.config = self.pytest_config
         # error_handler holds only the immutable tool name; safe to share.
 
+    def _resolve_timeout_seconds(self, options: dict[str, Any]) -> int | float:
+        """Resolve the pytest subprocess timeout from an options mapping.
+
+        Delegates the acceptance rule to
+        :func:`~lintro.plugins.execution_preparation.get_effective_timeout`,
+        which every tool shares, and layers only display normalisation on top:
+        ``set_options`` stores a configured timeout as a float, so an integral
+        result is handed back as an ``int`` and timeout messages read ``600s``
+        rather than ``600.0s``.
+
+        Args:
+            options: Effective options for one invocation.
+
+        Returns:
+            int | float: Timeout in seconds. A finite, positive number in
+                ``options`` is used directly; otherwise the value falls back to
+                the persisted plugin options, then to the pytest default.
+        """
+        seconds = self._get_effective_timeout(options.get("timeout"))
+        return int(seconds) if seconds.is_integer() else seconds
+
     def _parse_output(
         self,
         output: str,
@@ -260,6 +281,17 @@ class PytestPlugin(BaseToolPlugin):
         # Merge runtime options
         merged_options = dict(self.options)
         merged_options.update(options)
+
+        # Resolve the timeout once, before anything reads it, and write it
+        # back unconditionally. The argv, the collection subprocess, the
+        # banner, the kill deadline and the timeout message then all read this
+        # one value, so they cannot disagree. A ``None`` override means "not
+        # specified for this invocation" and falls through to the persisted
+        # options and then the default, so it must be written back too:
+        # leaving it alone would omit ``--timeout`` from the argv while the
+        # deadline still enforced the persisted value.
+        timeout_val = self._resolve_timeout_seconds(merged_options)
+        merged_options["timeout"] = timeout_val
 
         # Check version requirements
         version_result = self._verify_tool_version()
@@ -312,7 +344,12 @@ class PytestPlugin(BaseToolPlugin):
                 return handle_parametrize_help(self)
 
         # Normal test execution
-        cmd, auto_junitxml_path = build_check_command(self, target_files, fix=False)
+        cmd, auto_junitxml_path = build_check_command(
+            self,
+            target_files,
+            fix=False,
+            options=merged_options,
+        )
 
         logger.debug(f"Running pytest with command: {' '.join(cmd)}")
         logger.debug(f"Target files: {target_files}")
@@ -326,19 +363,34 @@ class PytestPlugin(BaseToolPlugin):
                 issues_count=0,
             )
 
-        total_available_tests = self.executor.prepare_test_execution(target_files)
-
-        # Display run configuration summary
-        self.executor.display_run_config(total_available_tests, target_files)
-
         try:
+            # Collection runs inside the timeout handler: it is a pytest
+            # subprocess held to the same deadline, so a collection that times
+            # out must surface as a timed-out ToolResult rather than escaping
+            # as subprocess.TimeoutExpired (collect_tests_once catches only
+            # OSError, ValueError and RuntimeError).
+            total_available_tests = self.executor.prepare_test_execution(
+                target_files,
+                timeout=timeout_val,
+            )
+
+            # Display run configuration summary
+            self.executor.display_run_config(
+                total_available_tests,
+                target_files,
+                options=merged_options,
+            )
+
             # Record start time to filter out stale junitxml files
             import time
 
             subprocess_start_time = time.time()
 
             # Execute tests using executor
-            success, output, return_code = self.executor.execute_tests(cmd)
+            success, output, return_code = self.executor.execute_tests(
+                cmd,
+                timeout=timeout_val,
+            )
 
             # Parse output
             issues = self._parse_output(
@@ -373,14 +425,6 @@ class PytestPlugin(BaseToolPlugin):
             )
 
         except subprocess.TimeoutExpired:
-            timeout_opt = self.options.get("timeout", PYTEST_DEFAULT_TIMEOUT)
-            if isinstance(timeout_opt, int):
-                timeout_val = timeout_opt
-            elif timeout_opt is not None:
-                timeout_val = int(str(timeout_opt))
-            else:
-                timeout_val = PYTEST_DEFAULT_TIMEOUT
-
             if self.error_handler is None:
                 return ToolResult(
                     name=self.definition.name,
