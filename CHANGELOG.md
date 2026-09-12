@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.157.1] - 2026-09-12
+
+### Fixed
+
+- **cargo**: resolve nested workspaces and reject parent package-only roots (#2539)
+  (e7d1e4a)
+
 ## [0.157.0] - 2026-09-12
 
 ### Added
