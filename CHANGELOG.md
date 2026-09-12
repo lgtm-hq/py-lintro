@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.156.4] - 2026-09-12
+
+### Fixed
+
+- **ci**: refuse to promote a tools-image candidate built from a stale manifest (#2542)
+  (c6dda8c)
+
 ## [0.156.3] - 2026-09-12
 
 ### Fixed
