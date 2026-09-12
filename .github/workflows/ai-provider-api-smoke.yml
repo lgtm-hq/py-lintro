@@ -221,14 +221,26 @@ jobs:
           sparse-checkout-cone-mode: false
 
       - name: Download the recorded provider errors
+        # There may be none: the artifact is only uploaded once the smoke step
+        # has written an error file, so a crash before that (dependency
+        # install, import, a failed resolve-table) leaves nothing to download
+        # while the notifier still files its issue. ``ignore`` keeps that from
+        # failing this job — the run is already red, and a second red X on the
+        # annotation job is noise, not signal. Nothing is swallowed: the
+        # comment step below is what reports, and it is skipped only when
+        # there is genuinely nothing to quote.
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: smoke-error-*
           path: smoke-errors
           merge-multiple: false
+          if-no-files-found: ignore
 
       - name: Comment the provider errors on the tracker issue
+        # Nothing downloaded means no provider ever recorded an error, so
+        # there is nothing to say on the tracker issue.
+        if: hashFiles('smoke-errors/**') != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-

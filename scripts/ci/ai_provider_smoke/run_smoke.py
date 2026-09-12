@@ -19,7 +19,7 @@ Two subcommands:
 
 ``--emit-matrix``
     Print (and, under Actions, publish) the GitHub matrix built from the table,
-    including the ``host:443`` each row needs on the harden-runner allowlist.
+    including the ``host:port`` each row needs on the harden-runner allowlist.
 
 ``--provider NAME``
     Run the smoke for one row. The credential arrives in the environment named
@@ -68,8 +68,17 @@ _NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _ENV_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 #: The smoke prompt. Trivially cheap, and the answer is checkable — a provider
-#: that returns an empty envelope must not be counted as a pass.
+#: that returns an empty envelope, or any answer other than the word asked
+#: for, must not be counted as a pass.
 SMOKE_PROMPT: Final[str] = "Reply with the single word: pong"
+
+#: Characters kept from an unexpected answer when it is reported. Long enough
+#: to recognise an error envelope, short enough not to paste a page into an
+#: issue comment.
+_ANSWER_EXCERPT: Final[int] = 200
+
+#: Punctuation stripped from both ends before the answer is compared.
+_ANSWER_TRIM: Final[str] = " \t\r\n.!?'\"`*"
 
 #: Cap on the smoke response: enough for a word, small enough that a runaway
 #: generation cannot turn a smoke test into a bill.
@@ -102,12 +111,20 @@ class ProviderRow:
 
     @property
     def egress(self) -> str:
-        """Return the ``host:443`` this row needs on the egress allowlist.
+        """Return the ``host:port`` this row needs on the egress allowlist.
+
+        The port is read from the base URL rather than assumed: a row pointing
+        at ``https://gateway.example:8443`` connects to 8443, and an allowlist
+        entry naming 443 would have harden-runner block the call with an opaque
+        network error instead of the provider's own verdict. A port
+        ``urlparse`` cannot use raises here, which is why :func:`_validate_row`
+        rejects one before a row ever reaches the matrix.
 
         Returns:
-            The base URL's host with the HTTPS port.
+            The base URL's host with its port, defaulting to the HTTPS port.
         """
-        return f"{urlparse(self.base_url).hostname}:443"
+        parsed = urlparse(self.base_url)
+        return f"{parsed.hostname}:{parsed.port or 443}"
 
     def as_matrix_entry(self) -> dict[str, str]:
         """Return the row as a GitHub Actions matrix include entry.
@@ -172,6 +189,18 @@ def _validate_row(*, entry: Any, index: int) -> ProviderRow:
     parsed = urlparse(row.base_url)
     if parsed.scheme != "https" or not parsed.hostname:
         _fail_table(f"row {row.name} base_url {row.base_url!r} is not an https URL")
+    # urlparse defers the port check to attribute access, so ``host:99999`` or
+    # ``host:https`` parses here and only blows up where the allowlist entry is
+    # built — in the workflow, not in this cheap validation step.
+    try:
+        port = parsed.port
+    except ValueError:
+        _fail_table(f"row {row.name} base_url {row.base_url!r} has an invalid port")
+    else:
+        if port is not None and not 1 <= port <= 65535:
+            _fail_table(
+                f"row {row.name} base_url {row.base_url!r} has an invalid port",
+            )
     if not _ENV_NAME_RE.match(row.key_env):
         _fail_table(
             f"row {row.name} key_env {row.key_env!r} is not an env variable name",
@@ -350,6 +379,22 @@ def _credential_appears_in(text: str, *, env_name: str) -> bool:
     return bool(value) and value in text
 
 
+def _normalized_answer(text: str) -> str:
+    """Return the response reduced to what the expected answer is compared on.
+
+    Providers wrap a one-word answer differently: trailing punctuation, a
+    quoted word, a capital. None of that is drift worth reddening main for, so
+    the comparison is case-folded and stripped of surrounding punctuation.
+
+    Args:
+        text: The provider's response content, already stripped.
+
+    Returns:
+        The comparable form of the answer.
+    """
+    return text.casefold().strip(_ANSWER_TRIM)
+
+
 def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None) -> int:
     """Run the smoke for one row and report it the way CI reads it.
 
@@ -381,10 +426,22 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
         content = asyncio.run(_complete(row=row, credential_env=credential_env))
     except Exception as exc:  # every failure is news here, none is fatal
         detail = _safe_detail(f"{type(exc).__name__}: {exc}", env_name=credential_env)
-    if detail is None and not content.strip():
-        # An empty envelope is a failure of the provider, not a pass: the
-        # whole point of a prompt with a checkable answer.
-        detail = "EmptyResponse: provider returned an empty response body"
+    if detail is None:
+        answer = content.strip()
+        if not answer:
+            # An empty envelope is a failure of the provider, not a pass: the
+            # whole point of a prompt with a checkable answer.
+            detail = "EmptyResponse: provider returned an empty response body"
+        elif _normalized_answer(answer) != "pong":
+            # A gateway that answers at all but answers something else — an
+            # error envelope rendered as prose, a refusal, a model that
+            # ignored the prompt — is a failure too. The prompt was chosen so
+            # the answer is checkable; checking only that it is non-empty
+            # would throw that away.
+            detail = (
+                "UnexpectedResponse: expected 'pong', got "
+                f"{answer[:_ANSWER_EXCERPT]!r}"
+            )
 
     if detail is not None:
         print(f"::error title={row.name} smoke failed::{detail}")
