@@ -2,7 +2,8 @@
 
 The tiers are separated by cost. Tier 1 reads only ``--version`` and ``--help``,
 so it is free and can gate every change. Tier 2 makes a real call, so it spends
-quota and runs on a schedule.
+quota and runs manually only (#2600 removed its cron; the weekly live signal is
+the provider API smoke).
 
 What both tiers must never do is skip *quietly*. Every unmet precondition names
 which link of the ``presence -> liveness -> invoke`` chain broke, and in the CI
@@ -24,7 +25,8 @@ import pytest
 REQUIRE_BINARIES_ENV: Final[str] = "LINTRO_CONTRACT_REQUIRE_BINARIES"
 
 #: Opt-in for tier 2. Real invocations cost quota, so they never run implicitly —
-#: not on a developer machine, and not as a side effect of ``pytest tests/``.
+#: not on a developer machine, not as a side effect of ``pytest tests/``, and
+#: (since #2600) not on a schedule: the tier is dispatch-only.
 ENABLE_TIER2_ENV: Final[str] = "LINTRO_CONTRACT_TIER2"
 
 _TRUTHY: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})

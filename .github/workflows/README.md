@@ -30,9 +30,9 @@ comments so Renovate can track digest updates. Policy is enforced by
   (`🧾 AI CLI Flag Surface (Tier 1)`) runs `--version`/`--help` on every `pull_request`
   / `push` / `merge_group` with no path filter, so the context always reports and is
   safe to require on `checks-py-lintro` (16132640). Tier 2
-  (`🔥 AI CLI Invocation Smoke (Tier 2)`) is schedule/`workflow_dispatch` only and must
-  stay non-required (live credentials). Admin ruleset PUT (not PATCH; preserve
-  `bypass_actors` from a live GET):
+  (`🔥 AI CLI Invocation Smoke (Tier 2, manual only)`) is `workflow_dispatch` only
+  (#2600 removed its cron) and must stay non-required (live credentials). Admin ruleset
+  PUT (not PATCH; preserve `bypass_actors` from a live GET):
 
   ```bash
   # Context string must match the job name in ai-contract-tests.yml —
@@ -61,6 +61,15 @@ comments so Renovate can track digest updates. Policy is enforced by
 
   Resulting `required_status_checks` must be the previous twelve contexts plus
   `🧾 AI CLI Flag Surface (Tier 1)` — never Tier 2.
+
+- **ai-provider-api-smoke.yml** — Weekly live API smoke, one job per funded provider
+  (#2600). The matrix comes from `scripts/ci/ai_provider_smoke/providers.json`, so a new
+  provider is a table row plus a repository secret, never a workflow edit. Each row
+  sends one trivial prompt through lintro's own API provider code path and posts a
+  commit status `ai-provider-smoke/<row>` on `main`'s HEAD — `pending` (not green) when
+  the row's secret is unset. Failures open/ping the deduplicated
+  `reusable-main-failure-notifier.yml` issue under the `ai-provider-smoke` label, and
+  the provider's error text is commented onto it.
 
 ## Release
 

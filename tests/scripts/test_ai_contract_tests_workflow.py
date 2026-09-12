@@ -86,7 +86,7 @@ def test_tier1_runs_on_every_pull_request(workflow: Any) -> None:
 
 
 def test_tier1_is_not_gated_on_the_event_type(workflow: Any) -> None:
-    """Tier 1 must run for every trigger, including the weekly schedule.
+    """Tier 1 must run for every trigger the workflow declares.
 
     Args:
         workflow: The parsed workflow mapping.
@@ -97,13 +97,16 @@ def test_tier1_is_not_gated_on_the_event_type(workflow: Any) -> None:
 def test_tier2_never_runs_on_a_pull_request(workflow: Any) -> None:
     """Real invocations spend quota, so they stay off the PR hot path.
 
+    Manual only since #2600: the cron that used to reach this tier failed every
+    Monday on an exhausted prepaid balance and reached nobody.
+
     Args:
         workflow: The parsed workflow mapping.
     """
     # Exact, not substring: an added `|| github.event_name == 'push'` would slip
     # past independent contains() checks while widening what spends quota.
     assert_that(workflow["jobs"][TIER2_JOB]["if"]).is_equal_to(
-        "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'",
+        "github.event_name == 'workflow_dispatch'",
     )
 
 

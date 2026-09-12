@@ -1620,8 +1620,11 @@ developer's login.
   is hit. Review metadata records per-phase timings (see "Review phase timings" above)
   so wall-clock regressions are visible in JSON / MCP output.
 - **Two tiers of contract testing.** The flag-surface tier runs `--version` / `--help`
-  only — no credential, no quota — on every PR. The real-invocation tier spends quota
-  and runs weekly, gated behind the free tier.
+  only — no credential, no quota — on every PR, alongside the recorded-output replay
+  fixtures that catch CLI parser drift for free. The real-invocation tier spends quota
+  and is **manual only** (`workflow_dispatch`), gated behind the free tier; the weekly
+  live provider signal is the API smoke instead (#2600, see
+  `docs/ai-review-transports.md`).
 
 Security notes: provider API keys are secrets — store them in the repository/org secret
 store (or a local shell profile), never in `.lintro-config.yaml`, which only names the

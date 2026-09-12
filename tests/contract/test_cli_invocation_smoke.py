@@ -5,8 +5,13 @@ renamed JSON field, a changed exit convention, or a credential that authenticate
 but has no credits all pass a ``--help`` check and fail every real review. Only an
 invocation catches those, so this tier makes one.
 
-It costs quota, so it is opt-in and scheduled rather than run on the pull-request
-hot path, and it walks the full chain before spending anything:
+It costs quota, so it is opt-in and **manual only** — ``workflow_dispatch`` on
+``ai-contract-tests.yml``, never a cron and never the pull-request hot path
+(#2600: the cron that used to run this tier failed every Monday on an exhausted
+prepaid balance and reached nobody). The weekly live provider signal is
+``ai-provider-api-smoke.yml``, which exercises the API path instead. Drift
+between manual runs of this tier is accepted. It walks the full chain before
+spending anything:
 
     is_available()  ->  check_liveness()  ->  invoke
 
@@ -154,8 +159,9 @@ def test_live_cli_completes_a_minimal_invocation(
     except AIAuthenticationError as exc:
         # CLI liveness is presence-only, so an unauthenticated CLI only reveals
         # itself here. That is a missing precondition (link 3 of 3), not
-        # behavioural drift — and in the scheduled gate, where the credential is
+        # behavioural drift — and in the contract gate, where the credential is
         # supposed to be provided, unmet_precondition turns it into a failure.
+        # That gate is the manual dispatch now: this tier has no cron (#2600).
         #
         # This branch reaches a logged-out `claude`: the CLI prints "Not logged in
         # · Please run /login" on *stdout* with empty stderr, and the transport

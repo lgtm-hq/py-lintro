@@ -11,11 +11,20 @@ name: AI - CLI Contract Tests
 #
 # Two tiers, split by cost:
 #
-#   Tier 1 (every PR + push + weekly) — flag surface. Runs `--version` and
-#     `--help` only, so it needs no credential and spends no quota. Free enough to
-#     be a required check.
-#   Tier 2 (weekly + manual) — real invocation. Walks presence -> liveness ->
+#   Tier 1 (every PR + push) — flag surface. Runs `--version` and `--help`
+#     only, so it needs no credential and spends no quota. Free enough to be a
+#     required check.
+#   Tier 2 (manual only) — real invocation. Walks presence -> liveness ->
 #     invoke per provider and spends quota, so it stays off the PR hot path.
+#
+# Tier 2 is MANUAL ONLY since #2600. It used to run on a weekly cron, where it
+# failed every Monday from 2026-08-10 on an exhausted prepaid balance and
+# reached nobody: it gates nothing, and a scheduled failure is a red X in a run
+# list. Its credentials are subscription- and session-bound, so they cannot be
+# kept green by design. The weekly provider signal now comes from
+# `ai-provider-api-smoke.yml`, which tests the API path (base URL, key, model),
+# reports a commit status on main and files the error on the tracker. Drift
+# between manual Tier 2 runs is accepted.
 #
 # NO PATH FILTER, deliberately. A path-filtered required check never reports on
 # the PRs it filters out, and those PRs then hang forever in the merge queue
@@ -38,10 +47,10 @@ name: AI - CLI Contract Tests
   # this workflow never schedules.
   merge_group:
     types: [checks_requested]
-  schedule:
-    # Weekly (Monday 05:17 UTC), after the ai-tools image rebuild at 03:47 so the
-    # scheduled run exercises the freshly published CLIs.
-    - cron: '17 5 * * 1'
+  # No `schedule:` (#2600). The cron that used to live here only ever reddened
+  # Tier 2, invisibly; the weekly live signal moved to ai-provider-api-smoke.yml
+  # and Tier 2 became dispatch-only. Tier 1 runs on every PR, so it loses
+  # nothing by losing a weekly repeat of itself.
   workflow_dispatch:
 
 permissions: {}
@@ -94,9 +103,10 @@ jobs:
         run: scripts/ci/run-ai-contract-tests.sh
 
   tier2-invocation-smoke:
-    name: 🔥 AI CLI Invocation Smoke (Tier 2)
-    # Scheduled and manual only: this tier spends provider quota.
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    name: 🔥 AI CLI Invocation Smoke (Tier 2, manual only)
+    # Manual only: this tier spends provider quota, and #2600 removed the cron
+    # that used to run it unwatched.
+    if: github.event_name == 'workflow_dispatch'
     # Gated on the free tier: there is no point spending quota to discover a
     # problem `--help` already proved.
     needs: [tier1-flag-surface]
@@ -106,23 +116,23 @@ jobs:
       packages: read # pull the pinned lintro-ai-tools image from GHCR
     timeout-minutes: 25
     # Trusted-event gate for the provider credentials (#2481). Tier 2 runs on
-    # schedule / dispatch today, and the `if:` above keeps it there; the
+    # dispatch only today, and the `if:` above keeps it there; the
     # same-repository head clause is what keeps the secrets safe when the
     # review round-trip (#2515) adds a `pull_request` trigger, because a fork
     # head would then evaluate to false and every secret below resolves to ''.
     # Job-level env carries only this boolean — never a secret — so the
     # credentials stay scoped to the two steps that need them.
     #
-    # Deliberately NOT pinned to refs/heads/main. `schedule` only ever runs
-    # the default branch, and `workflow_dispatch` requires write access, so
-    # neither event can be reached from a fork or by an untrusted actor. A
+    # Deliberately NOT pinned to refs/heads/main. `workflow_dispatch` requires
+    # write access, so the event cannot be reached from a fork or by an
+    # untrusted actor. A
     # branch dispatch is the point: #2481 requires a green Tier 2 on the PR
     # branch before the wiring merges, and main-only would make dispatch a
     # no-op tier that can never prove a change. The trust boundary here is
     # write access, which is the same boundary that governs main itself.
     env:
       # yamllint disable-line rule:line-length
-      AI_CONTRACT_SECRETS_ALLOWED: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
+      AI_CONTRACT_SECRETS_ALLOWED: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - name: Harden Runner
         # Every host any dogfood lane can reach (.github/workflows/ai-review.yml
