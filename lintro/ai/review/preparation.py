@@ -303,6 +303,9 @@ def prepare_review(
     )
     checklist_text, _prompt_mapping = format_checklist_for_prompt(items=selected_items)
 
+    lint_digest: str | None = None
+    lint_tool_count = 0
+    lint_issue_count = 0
     lint_note = ""
     if request.lint_report is not None:
         lint_digest, lint_tool_count, lint_issue_count, lint_note = (
@@ -317,9 +320,8 @@ def prepare_review(
             lintro_config=request.lintro_config,
         )
     elif request.lint_report_missing:
+        # No report and no tool run: the header note is the only lint surface.
         lint_note = lint_facts_missing_note(request.lint_report_missing)
-    else:
-        lint_digest, lint_tool_count, lint_issue_count = None, 0, 0
 
     strictness = resolve_review_strictness(request)
     custom_agent_mode = resolve_custom_agent_mode(request)
