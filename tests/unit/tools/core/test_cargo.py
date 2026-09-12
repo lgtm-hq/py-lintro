@@ -7,13 +7,20 @@ several packages without one — are what the Rust definitions depend on.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.core.cargo import cargo_package_args, find_cargo_root
+from lintro.tools.core.cargo import (
+    CargoRoot,
+    CargoRootIssue,
+    cargo_package_args,
+    find_cargo_root,
+    resolve_cargo_root,
+)
 
 
 def _package(root: Path, name: str) -> Path:
@@ -599,3 +606,333 @@ def test_package_args_fall_back_to_the_whole_workspace(tmp_path: Path) -> None:
     args = cargo_package_args([str(first), str(second)], tmp_path.resolve())
 
     assert_that(args).is_equal_to(["--workspace"])
+
+
+def test_a_virtual_workspace_owns_its_own_root_manifest(tmp_path: Path) -> None:
+    """The root ``Cargo.toml`` is an input, and the workspace owns it.
+
+    Clippy's file patterns (``*.rs`` and ``Cargo.toml``) always hand the
+    workspace's own manifest to discovery, so the workspace directory is one
+    of the input roots. A virtual manifest declares no ``[package]``, so it
+    would not own itself unless the manifest's own directory counts as a
+    member outright.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[workspace]\nmembers = ["crates/a", "crates/b"]\n')
+    crates = tmp_path / "crates"
+    crates.mkdir()
+    first = _package(crates, "a")
+    second = _package(crates, "b")
+
+    resolved = find_cargo_root([str(manifest), str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_virtual_workspace_owns_the_cargo_deny_input_shape(tmp_path: Path) -> None:
+    """``cargo deny`` discovery hands over every manifest plus ``deny.toml``.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[workspace]\nmembers = ["crates/a", "crates/b"]\n')
+    deny = tmp_path / "deny.toml"
+    deny.write_text('[bans]\nmultiple-versions = "warn"\n')
+    crates = tmp_path / "crates"
+    crates.mkdir()
+    first = _package(crates, "a")
+    second = _package(crates, "b")
+
+    resolved = find_cargo_root(
+        [
+            str(manifest),
+            str(deny),
+            str(first.parent.parent / "Cargo.toml"),
+            str(second.parent.parent / "Cargo.toml"),
+        ],
+    )
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_virtual_workspace_still_resolves_to_the_common_ancestor(
+    tmp_path: Path,
+) -> None:
+    """The pre-workspace-check answer is preserved for the common layout.
+
+    Before ownership was checked, a multi-root input resolved to the common
+    ancestor of its roots. For a virtual workspace whose own manifest is an
+    input, that ancestor is the workspace root, and it has to stay the answer.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[workspace]\nmembers = ["crates/a", "crates/b"]\n')
+    crates = tmp_path / "crates"
+    crates.mkdir()
+    first = _package(crates, "a")
+    second = _package(crates, "b")
+    inputs = [str(manifest), str(first), str(second)]
+    ancestor = Path(
+        os.path.commonpath([str(tmp_path.resolve()), str(first), str(second)]),
+    )
+
+    assert_that(find_cargo_root(inputs)).is_equal_to(ancestor)
+
+
+def test_package_args_widen_to_the_workspace_for_a_virtual_root(
+    tmp_path: Path,
+) -> None:
+    """A virtual root has no package name, so the selection is the workspace.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    manifest = tmp_path / "Cargo.toml"
+    manifest.write_text('[workspace]\nmembers = ["crates/a"]\n')
+    crates = tmp_path / "crates"
+    crates.mkdir()
+    first = _package(crates, "a")
+
+    args = cargo_package_args([str(manifest), str(first)], tmp_path.resolve())
+
+    assert_that(args).is_equal_to(["--workspace"])
+
+
+def test_an_inherited_workspace_dependency_path_is_followed(tmp_path: Path) -> None:
+    """``workspace = true`` keeps the path in ``[workspace.dependencies]``.
+
+    The member manifest names no path at all, so the helper crate is a member
+    only if the workspace's own dependency table is consulted.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["a"]\n\n'
+        '[workspace.dependencies]\nhelper = { path = "helper" }\n',
+    )
+    first = _package(tmp_path, "a")
+    (tmp_path / "a" / "Cargo.toml").write_text(
+        '[package]\nname = "a"\n\n[dependencies]\nhelper = { workspace = true }\n',
+    )
+    helper = _package(tmp_path, "helper")
+
+    resolved = find_cargo_root([str(first), str(helper)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_target_specific_dependency_path_is_followed(tmp_path: Path) -> None:
+    """A ``[target.'cfg(...)'.dependencies]`` path carries a member in too.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["a"]\n')
+    first = _package(tmp_path, "a")
+    (tmp_path / "a" / "Cargo.toml").write_text(
+        '[package]\nname = "a"\n\n'
+        '[target."cfg(unix)".dependencies]\nb = { path = "../b" }\n',
+    )
+    second = _package(tmp_path, "b")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_an_absolute_member_path_stays_absolute(tmp_path: Path) -> None:
+    """Cargo reads a leading ``/`` as an absolute path, so lintro does too.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+    members = ", ".join(
+        f'"{(tmp_path / name).resolve().as_posix()}"' for name in ("a", "b")
+    )
+    (tmp_path / "Cargo.toml").write_text(f"[workspace]\nmembers = [{members}]\n")
+
+    resolved = find_cargo_root([str(first), str(second)])
+
+    assert_that(resolved).is_equal_to(tmp_path.resolve())
+
+
+def test_a_missing_manifest_is_reported_as_the_skip_reason(tmp_path: Path) -> None:
+    """No manifest anywhere keeps the original wording.
+
+    Args:
+        tmp_path: Temporary directory holding a bare source file.
+    """
+    stray = tmp_path / "stray.rs"
+    stray.write_text("fn main() {}\n")
+
+    resolved = resolve_cargo_root([str(stray)])
+
+    assert_that(resolved.issue).is_equal_to(CargoRootIssue.NO_MANIFEST)
+    assert_that(resolved.skip_message("clippy")).is_equal_to(
+        "No Cargo.toml found; skipping clippy.",
+    )
+
+
+def test_separate_drives_are_reported_as_the_skip_reason(tmp_path: Path) -> None:
+    """An uncomputable common ancestor names the drives in the message.
+
+    Args:
+        tmp_path: Temporary directory holding two unrelated crates.
+    """
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    with patch(
+        "lintro.tools.core.cargo.os.path.commonpath",
+        side_effect=ValueError("paths don't have the same drive"),
+    ):
+        resolved = resolve_cargo_root([str(first), str(second)])
+
+    assert_that(resolved.issue).is_equal_to(CargoRootIssue.SEPARATE_DRIVES)
+    assert_that(resolved.skip_message("clippy")).contains("separate drives")
+    assert_that(resolved.skip_message("clippy")).ends_with("skipping clippy.")
+
+
+def test_split_repositories_are_reported_as_the_skip_reason(tmp_path: Path) -> None:
+    """Crates in sibling repositories say so rather than claim no manifest.
+
+    Args:
+        tmp_path: Temporary directory holding both repositories.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["one/a"]\n')
+    for name in ("one", "two"):
+        repository = tmp_path / name
+        repository.mkdir()
+        (repository / ".git").mkdir()
+    first = _package(tmp_path / "one", "a")
+    second = _package(tmp_path / "two", "b")
+
+    resolved = resolve_cargo_root([str(first), str(second)])
+
+    assert_that(resolved.issue).is_equal_to(CargoRootIssue.SPLIT_REPOSITORIES)
+    assert_that(resolved.skip_message("clippy")).contains("separate repositories")
+    assert_that(resolved.skip_message("clippy")).ends_with("skipping clippy.")
+
+
+def test_a_package_only_ancestor_is_reported_as_the_skip_reason(
+    tmp_path: Path,
+) -> None:
+    """A ``[package]``-only ancestor names itself in the message.
+
+    Args:
+        tmp_path: Temporary directory holding the package-only ancestor.
+    """
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "outer"\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    resolved = resolve_cargo_root([str(first), str(second)])
+
+    assert_that(resolved.issue).is_equal_to(CargoRootIssue.PACKAGE_ONLY_ANCESTOR)
+    assert_that(resolved.skip_message("clippy")).contains("only a package")
+    assert_that(resolved.skip_message("clippy")).ends_with("skipping clippy.")
+
+
+def test_a_repository_boundary_stop_is_reported_as_the_skip_reason(
+    tmp_path: Path,
+) -> None:
+    """Stopping at ``.git`` says the repository holds no owning workspace.
+
+    Args:
+        tmp_path: Temporary directory holding the outer manifest.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[workspace]\nmembers = ["repo/a", "repo/b"]\n',
+    )
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    first = _package(repository, "a")
+    second = _package(repository, "b")
+
+    resolved = resolve_cargo_root([str(first), str(second)])
+
+    assert_that(resolved.issue).is_equal_to(CargoRootIssue.REPOSITORY_BOUNDARY)
+    assert_that(resolved.skip_message("clippy")).contains("inside the repository")
+    assert_that(resolved.skip_message("clippy")).ends_with("skipping clippy.")
+
+
+def test_an_unowned_member_set_is_reported_as_the_skip_reason(
+    tmp_path: Path,
+) -> None:
+    """A workspace listing other crates says nothing owns the inputs.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["x"]\n')
+    _package(tmp_path, "x")
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    resolved = resolve_cargo_root([str(first), str(second)])
+
+    assert_that(resolved.issue).is_equal_to(CargoRootIssue.NO_OWNING_WORKSPACE)
+    assert_that(resolved.skip_message("clippy")).contains(
+        "No workspace Cargo.toml owns every Cargo root",
+    )
+
+
+def test_a_resolved_root_falls_back_to_the_generic_skip_message() -> None:
+    """A root with no recorded reason still produces a usable sentence.
+
+    ``skip_message`` is only read when no root was found, so the fallback is
+    defensive; it still has to name the tool rather than raise.
+    """
+    resolved = CargoRoot(root=Path("/tmp"), issue=None)
+
+    assert_that(resolved.skip_message("clippy")).is_equal_to(
+        "No Cargo.toml found; skipping clippy.",
+    )
+
+
+def test_a_bare_root_member_pattern_is_ignored(tmp_path: Path) -> None:
+    """A member entry naming the filesystem root contributes no member.
+
+    Args:
+        tmp_path: Temporary directory used as the workspace root.
+    """
+    (tmp_path / "Cargo.toml").write_text('[workspace]\nmembers = ["/", "a", "b"]\n')
+    first = _package(tmp_path, "a")
+    second = _package(tmp_path, "b")
+
+    assert_that(find_cargo_root([str(first), str(second)])).is_equal_to(
+        tmp_path.resolve(),
+    )
+
+
+def test_a_package_only_ancestor_at_the_boundary_is_reported(tmp_path: Path) -> None:
+    """Hitting ``.git`` on a ``[package]``-only manifest names the package.
+
+    The repository boundary and the package-only ancestor coincide, and the
+    more specific reason is the one reported.
+
+    Args:
+        tmp_path: Temporary directory holding the repository.
+    """
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    (repository / ".git").mkdir()
+    (repository / "Cargo.toml").write_text('[package]\nname = "outer"\n')
+    first = _package(repository, "a")
+    second = _package(repository, "b")
+
+    resolved = resolve_cargo_root([str(first), str(second)])
+
+    assert_that(resolved.issue).is_equal_to(CargoRootIssue.PACKAGE_ONLY_ANCESTOR)
+    assert_that(resolved.skip_message("cargo-deny")).contains("only a package")
+    assert_that(resolved.skip_message("cargo-deny")).ends_with("skipping cargo-deny.")

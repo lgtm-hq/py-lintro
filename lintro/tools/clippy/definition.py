@@ -33,7 +33,7 @@ from lintro.tools.core.batch_runner import (
     batch_fix_timeout_result,
     run_batch_check,
 )
-from lintro.tools.core.cargo import cargo_package_args, find_cargo_root
+from lintro.tools.core.cargo import cargo_package_args, resolve_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -195,12 +195,13 @@ class ClippyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = find_cargo_root(ctx.files)
+        resolved = resolve_cargo_root(ctx.files, tool_label="clippy")
+        cargo_root = resolved.root
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No Cargo.toml found; skipping clippy.",
+                output=resolved.skip_message("clippy"),
                 issues_count=0,
             )
 
@@ -244,12 +245,13 @@ class ClippyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = find_cargo_root(ctx.files)
+        resolved = resolve_cargo_root(ctx.files, tool_label="clippy")
+        cargo_root = resolved.root
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No Cargo.toml found; skipping clippy.",
+                output=resolved.skip_message("clippy"),
                 issues_count=0,
                 initial_issues_count=0,
                 fixed_issues_count=0,

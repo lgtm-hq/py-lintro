@@ -27,7 +27,7 @@ from lintro.tools.core.batch_runner import (
     batch_fix_timeout_result,
     run_batch_check,
 )
-from lintro.tools.core.cargo import find_cargo_root
+from lintro.tools.core.cargo import resolve_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -133,12 +133,13 @@ class RustfmtPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = find_cargo_root(ctx.files, tool_label="rustfmt")
+        resolved = resolve_cargo_root(ctx.files, tool_label="rustfmt")
+        cargo_root = resolved.root
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No Cargo.toml found; skipping rustfmt.",
+                output=resolved.skip_message("rustfmt"),
                 issues_count=0,
             )
 
@@ -177,12 +178,13 @@ class RustfmtPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = find_cargo_root(ctx.files, tool_label="rustfmt")
+        resolved = resolve_cargo_root(ctx.files, tool_label="rustfmt")
+        cargo_root = resolved.root
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No Cargo.toml found; skipping rustfmt.",
+                output=resolved.skip_message("rustfmt"),
                 issues_count=0,
                 initial_issues_count=0,
                 fixed_issues_count=0,

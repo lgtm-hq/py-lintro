@@ -58,6 +58,31 @@ def test_check_without_cargo_toml_skips(
     assert_that(result.output).contains("No Cargo.toml found")
 
 
+def test_check_names_the_actual_rejection_reason(
+    clippy_plugin: ClippyPlugin,
+    tmp_path: Path,
+) -> None:
+    """A package-only ancestor is reported as such, not as a missing manifest.
+
+    Args:
+        clippy_plugin: The ClippyPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    (tmp_path / "Cargo.toml").write_text('[package]\nname = "outer"\n')
+    for name in ("a", "b"):
+        crate = tmp_path / name
+        crate.mkdir()
+        (crate / "Cargo.toml").write_text(f'[package]\nname = "{name}"\n')
+        (crate / "lib.rs").write_text("pub fn f() {}\n")
+
+    result = clippy_plugin.check([str(tmp_path)], {})
+
+    assert_that(result.success).is_true()
+    assert_that(result.output).does_not_contain("No Cargo.toml found")
+    assert_that(result.output).contains("only a package")
+    assert_that(result.output).ends_with("skipping clippy.")
+
+
 def test_check_with_clean_run(clippy_plugin: ClippyPlugin, tmp_path: Path) -> None:
     """Check reports success when clippy finds no issues.
 

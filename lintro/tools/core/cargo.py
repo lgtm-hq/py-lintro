@@ -16,12 +16,21 @@ from __future__ import annotations
 
 import os
 import tomllib
+from dataclasses import dataclass
+from enum import StrEnum, auto
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-__all__ = ["CARGO_MANIFEST", "cargo_package_args", "find_cargo_root"]
+__all__ = [
+    "CARGO_MANIFEST",
+    "CargoRoot",
+    "CargoRootIssue",
+    "cargo_package_args",
+    "find_cargo_root",
+    "resolve_cargo_root",
+]
 
 #: The manifest file that marks a Cargo package or workspace root.
 CARGO_MANIFEST: str = "Cargo.toml"
@@ -36,6 +45,77 @@ _DEPENDENCY_TABLES: tuple[str, ...] = (
     "dev-dependencies",
     "build-dependencies",
 )
+
+
+class CargoRootIssue(StrEnum):
+    """Reason a set of paths has no directory a Cargo command can run from."""
+
+    #: No path has a ``Cargo.toml`` above it at all.
+    NO_MANIFEST = auto()
+    #: The roots sit on drives with no shared ancestor.
+    SEPARATE_DRIVES = auto()
+    #: The roots sit in repositories that do not contain one another.
+    SPLIT_REPOSITORIES = auto()
+    #: The only manifest above the roots declares ``[package]`` alone.
+    PACKAGE_ONLY_ANCESTOR = auto()
+    #: The walk reached the repository boundary without an owning workspace.
+    REPOSITORY_BOUNDARY = auto()
+    #: No ``[workspace]`` manifest anywhere above the roots owns them all.
+    NO_OWNING_WORKSPACE = auto()
+
+
+#: User-facing explanation per rejection reason, formatted with the tool name.
+_SKIP_MESSAGES: dict[CargoRootIssue, str] = {
+    CargoRootIssue.NO_MANIFEST: "No Cargo.toml found; skipping {tool}.",
+    CargoRootIssue.SEPARATE_DRIVES: (
+        "Cargo roots span separate drives, so they share no workspace root; "
+        "skipping {tool}."
+    ),
+    CargoRootIssue.SPLIT_REPOSITORIES: (
+        "Cargo roots lie in separate repositories, so no manifest above them "
+        "all is related to them; skipping {tool}."
+    ),
+    CargoRootIssue.PACKAGE_ONLY_ANCESTOR: (
+        "The nearest shared Cargo.toml declares only a package, not a "
+        "workspace, so running there would cover one crate; skipping {tool}."
+    ),
+    CargoRootIssue.REPOSITORY_BOUNDARY: (
+        "No workspace Cargo.toml inside the repository owns every Cargo root; "
+        "skipping {tool}."
+    ),
+    CargoRootIssue.NO_OWNING_WORKSPACE: (
+        "No workspace Cargo.toml owns every Cargo root; skipping {tool}."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class CargoRoot:
+    """The outcome of resolving a Cargo working directory.
+
+    Attributes:
+        root: The directory a Cargo command should run from, or ``None``
+            when the paths resolve to no usable root.
+        issue: Why no root was found. ``None`` exactly when ``root`` is set.
+    """
+
+    root: Path | None
+    issue: CargoRootIssue | None
+
+    def skip_message(self, tool_label: str) -> str:
+        """Explain the rejection in the tool's own skip output.
+
+        Args:
+            tool_label: Tool name to name in the message.
+
+        Returns:
+            A sentence naming the reason no Cargo root was usable. Falls back
+            to the generic wording when there is no recorded reason, which
+            only happens when a root was found.
+        """
+        if self.issue is None:
+            return f"No Cargo.toml found; skipping {tool_label}."
+        return _SKIP_MESSAGES[self.issue].format(tool=tool_label)
 
 
 def _read_manifest(manifest: Path) -> dict[str, Any] | None:
@@ -66,10 +146,12 @@ def _resolve_patterns(base: Path, patterns: Any) -> set[Path]:
             strings. Anything else contributes nothing.
 
     Returns:
-        The directories the patterns name. Entries holding a glob character
-        are expanded against ``base``; the rest are joined onto it. A pattern
-        the platform cannot expand — one escaping ``base`` with ``..``, say —
-        contributes no matches instead of raising.
+        The directories the patterns name. An absolute entry stays absolute,
+        the way Cargo reads it; a relative one is joined onto ``base``.
+        Entries holding a glob character are expanded against whichever of
+        the two they are anchored to. A pattern the platform cannot expand —
+        one escaping ``base`` with ``..``, say — contributes no matches
+        instead of raising.
     """
     resolved: set[Path] = set()
     if not isinstance(patterns, list):
@@ -77,18 +159,27 @@ def _resolve_patterns(base: Path, patterns: Any) -> set[Path]:
     for pattern in patterns:
         if not isinstance(pattern, str):
             continue
-        cleaned = pattern.strip("/")
+        cleaned = pattern.rstrip("/")
         if not cleaned:
             continue
-        if any(character in cleaned for character in "*?["):
+        candidate = Path(cleaned)
+        anchor = Path(candidate.anchor) if candidate.is_absolute() else base
+        relative = (
+            str(candidate.relative_to(candidate.anchor))
+            if candidate.is_absolute()
+            else cleaned
+        )
+        if not relative or relative == ".":
+            continue
+        if any(character in relative for character in "*?["):
             try:
-                matches = list(base.glob(cleaned))
+                matches = list(anchor.glob(relative))
             except (ValueError, OSError, NotImplementedError) as exc:
                 logger.debug("Unusable Cargo member pattern {!r}: {}", pattern, exc)
                 continue
             resolved.update(match for match in matches if match.is_dir())
         else:
-            resolved.add(base / cleaned)
+            resolved.add(anchor / relative)
     return {path.resolve() for path in resolved}
 
 
@@ -105,6 +196,25 @@ def _is_within(path: Path, directory: Path) -> bool:
     return path == directory or directory in path.parents
 
 
+def _dependency_tables(container: dict[str, Any]) -> list[Any]:
+    """Collect a table's dependency tables, plain and target-specific.
+
+    Args:
+        container: A parsed manifest, or its ``[workspace]`` table, which
+            carries the same dependency and ``target`` keys.
+
+    Returns:
+        The raw values of every dependency table found, unvalidated.
+    """
+    tables: list[Any] = [container.get(name) for name in _DEPENDENCY_TABLES]
+    targets = container.get("target")
+    if isinstance(targets, dict):
+        for target in targets.values():
+            if isinstance(target, dict):
+                tables.extend(target.get(name) for name in _DEPENDENCY_TABLES)
+    return tables
+
+
 def _path_dependencies(manifest_dir: Path, data: dict[str, Any]) -> set[Path]:
     """Collect the directories a manifest's ``path`` dependencies point at.
 
@@ -114,14 +224,15 @@ def _path_dependencies(manifest_dir: Path, data: dict[str, Any]) -> set[Path]:
 
     Returns:
         The resolved directories named by ``path`` entries in the plain and
-        target-specific dependency tables.
+        target-specific dependency tables, and in the ``[workspace]`` copies
+        of both. A member that inherits a dependency with ``workspace = true``
+        keeps the path only in ``[workspace.dependencies]``, so that table
+        counts towards membership too.
     """
-    tables: list[Any] = [data.get(name) for name in _DEPENDENCY_TABLES]
-    targets = data.get("target")
-    if isinstance(targets, dict):
-        for target in targets.values():
-            if isinstance(target, dict):
-                tables.extend(target.get(name) for name in _DEPENDENCY_TABLES)
+    tables: list[Any] = list(_dependency_tables(data))
+    workspace = data.get("workspace")
+    if isinstance(workspace, dict):
+        tables.extend(_dependency_tables(workspace))
     directories: set[Path] = set()
     for table in tables:
         if not isinstance(table, dict):
@@ -184,15 +295,17 @@ def _workspace_owns(manifest_dir: Path, data: dict[str, Any], roots: set[Path]) 
     Returns:
         ``True`` when ``data`` declares a ``[workspace]`` table whose members
         include every root — directly, through a glob, as the manifest's own
-        ``[package]``, or as a ``path`` dependency inside the workspace — and
-        no root falls under ``workspace.exclude``.
+        directory, or as a ``path`` dependency inside the workspace — and no
+        root falls under ``workspace.exclude``. The manifest's own directory
+        always counts: a command run from a workspace root covers it whether
+        or not the manifest also declares ``[package]``, and the root
+        ``Cargo.toml`` is itself an input the Rust tools discover.
     """
     workspace = data.get("workspace")
     if not isinstance(workspace, dict):
         return False
     members = _resolve_patterns(manifest_dir, workspace.get("members"))
-    if "package" in data:
-        members.add(manifest_dir)
+    members.add(manifest_dir)
     excluded = _resolve_patterns(manifest_dir, workspace.get("exclude"))
     members = _with_path_dependencies(manifest_dir, members, excluded)
     return all(
@@ -250,7 +363,7 @@ def _nearest_workspace_root(
     start: Path,
     boundary: Path | None,
     roots: set[Path],
-) -> Path | None:
+) -> tuple[Path | None, CargoRootIssue | None]:
     """Walk upward from ``start`` to the workspace that owns every root.
 
     A workspace that does not list all of the roots — because they sit in an
@@ -266,19 +379,30 @@ def _nearest_workspace_root(
         roots: Package directories the workspace has to own.
 
     Returns:
-        The directory owning the nearest ``Cargo.toml`` whose ``[workspace]``
-        table covers every root, or ``None`` when the walk reaches the
-        boundary or the filesystem root without finding one.
+        A ``(root, issue)`` pair. ``root`` is the directory owning the
+        nearest ``Cargo.toml`` whose ``[workspace]`` table covers every root,
+        with ``issue`` ``None``. When the walk reaches the boundary or the
+        filesystem root without finding one, ``root`` is ``None`` and
+        ``issue`` names why: a ``[package]``-only ancestor was passed, the
+        repository boundary was hit, or nothing above the roots owns them.
     """
+    package_only = False
     for candidate in [start, *start.parents]:
         manifest = candidate / CARGO_MANIFEST
         if manifest.is_file():
             data = _read_manifest(manifest)
-            if data is not None and _workspace_owns(candidate, data, roots):
-                return candidate
+            if data is not None:
+                if _workspace_owns(candidate, data, roots):
+                    return candidate, None
+                if "package" in data and "workspace" not in data:
+                    package_only = True
         if candidate == boundary:
-            break
-    return None
+            if package_only:
+                return None, CargoRootIssue.PACKAGE_ONLY_ANCESTOR
+            return None, CargoRootIssue.REPOSITORY_BOUNDARY
+    if package_only:
+        return None, CargoRootIssue.PACKAGE_ONLY_ANCESTOR
+    return None, CargoRootIssue.NO_OWNING_WORKSPACE
 
 
 def _nearest_manifest_dirs(paths: list[str]) -> list[Path]:
@@ -302,19 +426,21 @@ def _nearest_manifest_dirs(paths: list[str]) -> list[Path]:
     return roots
 
 
-def find_cargo_root(
+def resolve_cargo_root(
     paths: list[str],
     *,
     tool_label: str | None = None,
-) -> Path | None:
-    """Return the directory a Cargo command should run from.
+) -> CargoRoot:
+    """Return the directory a Cargo command should run from, with the reason.
 
     Each path is walked upward to the nearest ``Cargo.toml``. When the paths
     resolve to a single package that package's directory is returned. When they
     straddle several packages the walk continues upward from their common
     ancestor until a ``[workspace]`` manifest whose members cover every one of
     those packages is found, so a nested member set resolves to the workspace
-    root rather than to one of its members. An ancestor manifest that declares
+    root rather than to one of its members. A workspace manifest always covers
+    its own directory, so the root ``Cargo.toml`` the Rust tools discover does
+    not make the workspace look unowned. An ancestor manifest that declares
     only ``[package]`` is rejected — running Cargo there would act on that
     crate alone — and so is a workspace that excludes the packages or never
     lists them. The walk stops at the outermost repository containing
@@ -330,15 +456,15 @@ def find_cargo_root(
             layout to the user. When ``None`` the failure is silent.
 
     Returns:
-        The Cargo root to use, or ``None`` when no usable root exists.
+        The Cargo root to use, or the reason no usable root exists.
     """
     roots = _nearest_manifest_dirs(paths)
     if not roots:
-        return None
+        return CargoRoot(root=None, issue=CargoRootIssue.NO_MANIFEST)
 
     unique_roots = set(roots)
     if len(unique_roots) == 1:
-        return roots[0]
+        return CargoRoot(root=roots[0], issue=None)
 
     try:
         common = Path(os.path.commonpath([str(root) for root in unique_roots]))
@@ -349,7 +475,7 @@ def find_cargo_root(
                 "common workspace root. Skipping {}.",
                 tool_label,
             )
-        return None
+        return CargoRoot(root=None, issue=CargoRootIssue.SEPARATE_DRIVES)
 
     boundary, split = _repository_boundary(unique_roots)
     if split:
@@ -361,11 +487,11 @@ def find_cargo_root(
                 ", ".join(str(root) for root in sorted(unique_roots)),
                 tool_label,
             )
-        return None
+        return CargoRoot(root=None, issue=CargoRootIssue.SPLIT_REPOSITORIES)
 
-    workspace_root = _nearest_workspace_root(common, boundary, unique_roots)
+    workspace_root, issue = _nearest_workspace_root(common, boundary, unique_roots)
     if workspace_root is not None:
-        return workspace_root
+        return CargoRoot(root=workspace_root, issue=None)
 
     if tool_label is not None:
         logger.warning(
@@ -375,7 +501,28 @@ def find_cargo_root(
             ", ".join(str(root) for root in unique_roots),
             tool_label,
         )
-    return None
+    return CargoRoot(root=None, issue=issue)
+
+
+def find_cargo_root(
+    paths: list[str],
+    *,
+    tool_label: str | None = None,
+) -> Path | None:
+    """Return the directory a Cargo command should run from.
+
+    Thin wrapper over :func:`resolve_cargo_root` for callers that do not need
+    to explain a rejection.
+
+    Args:
+        paths: File or directory paths to search upward from.
+        tool_label: Tool name used to explain an unresolvable multi-root
+            layout to the user. When ``None`` the failure is silent.
+
+    Returns:
+        The Cargo root to use, or ``None`` when no usable root exists.
+    """
+    return resolve_cargo_root(paths, tool_label=tool_label).root
 
 
 def cargo_package_args(paths: list[str], cargo_root: Path) -> list[str]:

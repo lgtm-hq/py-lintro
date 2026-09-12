@@ -20,7 +20,7 @@ from lintro.parsers.cargo_deny.cargo_deny_parser import parse_cargo_deny_output
 from lintro.plugins.base import BaseToolPlugin
 from lintro.plugins.protocol import ToolDefinition
 from lintro.plugins.registry import register_tool
-from lintro.tools.core.cargo import find_cargo_root
+from lintro.tools.core.cargo import resolve_cargo_root
 from lintro.tools.core.option_validators import (
     filter_none_options,
     validate_positive_int,
@@ -140,12 +140,13 @@ class CargoDenyPlugin(BaseToolPlugin):
         if isinstance(ctx, ToolResult):
             return ctx
 
-        cargo_root = find_cargo_root(ctx.files)
+        resolved = resolve_cargo_root(ctx.files, tool_label="cargo-deny")
+        cargo_root = resolved.root
         if cargo_root is None:
             return ToolResult(
                 name=self.definition.name,
                 success=True,
-                output="No Cargo.toml found; skipping cargo-deny.",
+                output=resolved.skip_message("cargo-deny"),
                 issues_count=0,
             )
 
