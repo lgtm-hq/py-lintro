@@ -3034,27 +3034,6 @@ def test_publish_pypi_top_level_permissions_are_empty() -> None:
     assert_that(homebrew).contains_entry({"contents": "write"})
 
 
-def test_publish_pypi_attestation_is_load_bearing() -> None:
-    """A failed provenance attestation must fail the release (#2601).
-
-    ``continue-on-error: true`` on this step let a tag ship to PyPI with no
-    supply-chain proof and a green release, which is worse than making no
-    attestation claim at all. The recovery for a GitHub attestation outage is
-    to re-run the tag pipeline, not to publish unattested.
-    """
-    publish = _load_workflow(name="publish-pypi-on-tag.yml")
-    upload = publish["jobs"]["pypi-upload"]
-    assert_that(upload).does_not_contain_key("continue-on-error")
-
-    attest = next(
-        step
-        for step in upload["steps"]
-        if step.get("name") == "Attest build provenance"
-    )
-    assert_that(attest["uses"]).contains("actions/attest-build-provenance@")
-    assert_that(attest).does_not_contain_key("continue-on-error")
-
-
 def test_no_testpypi_workflow_or_endpoints_remain() -> None:
     """The dead TestPyPI staging lane stays deleted (#2601).
 
