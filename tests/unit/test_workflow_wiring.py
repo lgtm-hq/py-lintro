@@ -6563,3 +6563,54 @@ def test_provider_api_smoke_files_a_distinctly_labelled_tracker_issue() -> None:
         _REPO_ROOT / "scripts" / "ci" / "ai_provider_smoke" / "post_error_details.py"
     ).read_text(encoding="utf-8")
     assert_that(details).does_not_contain("issue create")
+
+
+_GHCR_CLEANUP_LANE_JOBS = (
+    "prune-untagged",
+    "sweep-ci-tags",
+    "sweep-sha-tags",
+    "sweep-tools-candidates",
+    "prune-untagged-base",
+)
+
+
+def test_ghcr_cleanup_reports_its_verdict_on_main() -> None:
+    """The weekly prune carries the epic's visibility contract (#2598, #2603).
+
+    The prune failed for five weeks unseen because a scheduled failure is only
+    a red X in a run list. The verdict must land on main's HEAD as a commit
+    status from a job that runs on every outcome and summarises every lane
+    job, and a failure must reach the shared main-failure filer under the
+    lane's own label.
+    """
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    jobs = cleanup["jobs"]
+
+    report = jobs["report-status"]
+    assert_that(report["needs"]).contains(*_GHCR_CLEANUP_LANE_JOBS)
+    condition = _normalize_github_expr(str(report["if"]))
+    assert_that(condition).contains("always()")
+    assert_that(condition).contains("github.ref == 'refs/heads/main'")
+    assert_that(report["permissions"]["statuses"]).is_equal_to("write")
+    report_steps = [
+        step
+        for step in report["steps"]
+        if step.get("run") == "scripts/ci/maintenance/report-workflow-commit-status.sh"
+    ]
+    assert_that(report_steps).is_length(1)
+    env = report_steps[0]["env"]
+    assert_that(env["STATUS_CONTEXT"]).is_equal_to("ghcr-cleanup")
+    assert_that(str(env["JOB_RESULTS"])).contains("needs.*.result")
+
+    notify = jobs["notify-failure"]
+    assert_that(notify["needs"]).contains(*_GHCR_CLEANUP_LANE_JOBS)
+    assert_that(str(notify["uses"])).contains(
+        "lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml",
+    )
+    condition = _normalize_github_expr(str(notify["if"]))
+    assert_that(condition).contains("failure()")
+    assert_that(condition).contains("github.ref == 'refs/heads/main'")
+    assert_that(notify["with"]["workflow-key"]).is_equal_to("ghcr-cleanup")
+    labels = str(notify["with"]["failure-issue-labels"]).split(",")
+    assert_that(labels).contains("ghcr-cleanup")
+    assert_that(notify["permissions"]["issues"]).is_equal_to("write")
