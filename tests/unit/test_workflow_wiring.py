@@ -6661,3 +6661,70 @@ def test_ghcr_cleanup_reports_its_verdict_on_main() -> None:
     labels = str(notify["with"]["failure-issue-labels"]).split(",")
     assert_that(labels).contains("ghcr-cleanup")
     assert_that(notify["permissions"]["issues"]).is_equal_to("write")
+
+
+#: Number-typed ``workflow_call`` inputs of every lgtm-ci reusable this repo
+#: calls, read from the callees at the canonical pin (see
+#: ``test_lgtm_ci_refs_match_canonical_pin``). Refresh when a pin bump adds a
+#: number input; ``timeout-minutes`` is on every reusable and is listed once.
+_LGTM_CI_NUMBER_INPUTS: dict[str, frozenset[str]] = {
+    "reusable-ghcr-cleanup.yml": frozenset(
+        {
+            "build-cache-pr-age-days",
+            "keep-latest",
+            "main-retention-days",
+            "min-age-days",
+            "prerelease-retention-days",
+        },
+    ),
+    "reusable-build-python-dist.yml": frozenset({"artifact-retention-days"}),
+    "reusable-test-python.yml": frozenset({"coverage-threshold"}),
+}
+_LGTM_CI_NUMBER_INPUTS_COMMON: frozenset[str] = frozenset({"timeout-minutes"})
+_BLOCK_SCALAR_WITH = re.compile(r"^      (?P<key>[a-z-]+):\s*[>|][-+]?\s*$")
+
+
+def test_number_typed_reusable_inputs_are_never_block_scalars() -> None:
+    """A number input must receive a number, not a folded string (#2603).
+
+    A ``>-`` block scalar hands the callee the *string* ``'7'`` even when the
+    expression inside evaluates to a number, and GitHub rejects the reusable
+    call at plan time (``Unexpected value '7'``): the job never exists, no
+    log is written, and the run only shows the caller's other jobs. That is
+    how both prune legs vanished from ghcr-cleanup run 34754126197. Boolean
+    and string inputs tolerate the folded form, so the rule is scoped to the
+    number-typed inputs of each callee.
+    """
+    offenders: list[str] = []
+    for path in sorted((_REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        current_job: str | None = None
+        number_keys: frozenset[str] = frozenset()
+        for index, line in enumerate(lines, start=1):
+            job_match = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+            if job_match:
+                current_job = job_match.group(1)
+                number_keys = frozenset()
+                continue
+            uses_match = re.match(
+                r"^    uses: lgtm-hq/lgtm-ci/\.github/workflows/([^@\s]+)@",
+                line,
+            )
+            if uses_match:
+                callee = uses_match.group(1)
+                number_keys = (
+                    _LGTM_CI_NUMBER_INPUTS.get(
+                        callee,
+                        frozenset(),
+                    )
+                    | _LGTM_CI_NUMBER_INPUTS_COMMON
+                )
+                continue
+            scalar = _BLOCK_SCALAR_WITH.match(line)
+            if scalar and scalar.group("key") in number_keys:
+                offenders.append(
+                    f"{path.name}::{current_job}::{scalar.group('key')}:{index}",
+                )
+    assert_that(offenders).described_as(
+        "number-typed lgtm-ci inputs passed as block scalars",
+    ).is_empty()

@@ -59,8 +59,12 @@ jobs:
       packages: write # delete untagged GHCR package versions via Packages API
     with:
       package-name: py-lintro
-      min-age-days: >-
-        ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      # Bare expression, never a block scalar: a folded `>-` turns the number
+      # into the string '7' and the number-typed input rejects the call at plan
+      # time ("Unexpected value '7'"), which is how the prune legs vanished
+      # from run 34754126197 (#2603).
+      # yamllint disable-line rule:line-length
+      min-age-days: ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
@@ -210,8 +214,12 @@ jobs:
       packages: write # delete untagged GHCR package versions via Packages API
     with:
       package-name: py-lintro-base
-      min-age-days: >-
-        ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      # Bare expression, never a block scalar: a folded `>-` turns the number
+      # into the string '7' and the number-typed input rejects the call at plan
+      # time ("Unexpected value '7'"), which is how the prune legs vanished
+      # from run 34754126197 (#2603).
+      # yamllint disable-line rule:line-length
+      min-age-days: ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
