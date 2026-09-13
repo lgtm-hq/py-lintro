@@ -24,12 +24,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   replaces the temporary one-tool-at-a-time mutation phase: a `format` run is parallel
   again, inside batches the scheduler has proved independent.
 - **core**: for two tools that contend over one scope the **winner** is the authority —
-  it runs last, so its write survives, and it keeps `FORMAT` while the loser's `FORMAT`
-  is demoted there and its `CHECK` stays enabled (#1744). The winner is chosen by a
-  configured override, then `FIX` before `FORMAT`, then fewer mutating capabilities,
-  then tool id, and the decision is re-resolved on every run.
-  `lintro check --explain-order` and `lintro doctor` name the winner, the loser, the
-  scope and the rule.
+  it runs last, so where both rewrite a file its layout is the one left on disk, and
+  every other tool's `FORMAT` is recorded as demoted for that scope while its `CHECK`
+  stays enabled (#1744). The winner is chosen by a configured override, then `FIX`
+  before `FORMAT`, then fewer mutating capabilities, then tool id, and the decision is
+  re-resolved on every run. `lintro check --explain-order`, `lintro doctor` and
+  `lintro init` name the winner, the loser, the scope and the rule. The record sets
+  order and reporting; the one per-tool format switch that exists today (ruff's, when
+  black is selected) still follows the pre-existing ruff/black policy until a follow-up
+  wires it to the record.
 - **config**: new `execution.precedence`, a list of `[winner, loser]` tool pairs that
   overrides the derived write precedence. Contradictory pairs fail planning with a
   message naming both tools and the config key, rather than falling back silently.

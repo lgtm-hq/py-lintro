@@ -101,18 +101,99 @@ def test_overlapping_mutators_never_share_a_batch_but_disjoint_ones_do(
 ) -> None:
     """The central rule, in one assertion pair.
 
-    ruff and typos both rewrite ``module.py``, so they are separated; hadolint
-    and yamllint touch nothing in common and keep running together.
+    ruff and typos both rewrite ``module.py``, so they are separated. ruff and
+    taplo are both mutators with non-empty candidate sets that do not
+    intersect — ``module.py`` against the two TOML files — so they keep running
+    together. The second half has to be a *mutator* pair: a rule that
+    over-serialised every writer (which is what #2452's bridge did) would
+    still pass an assertion made with two read-only linters.
 
     Args:
         tree: Mixed-language scan root.
     """
     overlapping = _depth(_batches(["ruff", "typos"], tree=tree))
-    disjoint = _batches(["hadolint", "yamllint"], tree=tree)
+    disjoint = _batches(["ruff", "taplo"], tree=tree)
 
     assert_that(overlapping["ruff"]).is_not_equal_to(overlapping["typos"])
     assert_that(disjoint).is_length(1)
-    assert_that(disjoint[0]).contains("hadolint", "yamllint")
+    assert_that(disjoint[0]).contains("ruff", "taplo")
+
+
+def test_read_only_tools_are_never_split_by_a_mutating_run(tree: Path) -> None:
+    """A ``CHECK``-only pair shares a batch even when the action mutates.
+
+    Args:
+        tree: Mixed-language scan root.
+    """
+    batches = _batches(["hadolint", "yamllint"], tree=tree)
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).contains("hadolint", "yamllint")
+
+
+def test_a_contradictory_pair_and_its_reverse_fail_planning() -> None:
+    """One pair and its reverse contradict as surely as a longer loop does.
+
+    Indexing by the unordered pair would let the second silently overwrite the
+    first, which is the fail-open the cycle rejection exists to close.
+    """
+    claims = {
+        "one_fixer": _claims((["*.py"], {Cap.FIX})),
+        "two_fixer": _claims((["*.py"], {Cap.FIX})),
+    }
+    precedence = [["one_fixer", "two_fixer"], ["two_fixer", "one_fixer"]]
+
+    assert_that(derive_order).raises(OrderPlanningError).when_called_with(
+        claims,
+        precedence=precedence,
+    )
+    try:
+        derive_order(claims, precedence=precedence)
+    except OrderPlanningError as exc:
+        message = str(exc)
+    assert_that(message).contains("one_fixer")
+    assert_that(message).contains("two_fixer")
+    assert_that(message).contains(PRECEDENCE_CONFIG_KEY)
+
+
+def test_repeating_the_same_pair_is_not_a_contradiction() -> None:
+    """Saying the same thing twice is not a loop."""
+    claims = {
+        "one_fixer": _claims((["*.py"], {Cap.FIX})),
+        "two_fixer": _claims((["*.py"], {Cap.FIX})),
+    }
+
+    derived = derive_order(
+        claims,
+        precedence=[["one_fixer", "two_fixer"], ["one_fixer", "two_fixer"]],
+    )
+
+    assert_that(list(derived.tools)).is_equal_to(["two_fixer", "one_fixer"])
+
+
+def test_the_demotion_rule_names_what_actually_decided() -> None:
+    """A phase edge that inverts the pairwise rank is labelled as such.
+
+    ``one_tool`` is ``FIX`` on ``*.b`` and ``FORMAT`` on ``*.a``; ``two_tool``
+    is ``FIX`` on ``*.a``. The two rank equally, so the pairwise rule would
+    name the alphabetically last tool — but the phase edge on ``*.a`` puts
+    ``two_tool`` first, so ``one_tool`` wins. The record must not print a
+    reason that argues for the other tool.
+    """
+    derived = derive_order(
+        {
+            "one_tool": _claims(
+                (["*.b"], {Cap.FIX}),
+                (["*.a"], {Cap.FORMAT}),
+            ),
+            "two_tool": _claims((["*.a"], {Cap.FIX, Cap.FORMAT})),
+        },
+    )
+
+    assert_that(derived.demotions).is_length(1)
+    demotion = derived.demotions[0]
+    assert_that(demotion.winner).is_equal_to("one_tool")
+    assert_that(demotion.rule).is_equal_to("derived phase order")
 
 
 def test_scheduling_twice_yields_the_same_plan(tree: Path) -> None:

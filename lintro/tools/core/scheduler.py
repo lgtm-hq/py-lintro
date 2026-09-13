@@ -320,10 +320,18 @@ def _scopes_from_claims(
 ) -> dict[str, ToolScope]:
     """Build unresolved scopes straight from declared claims.
 
-    Used when the caller named no scan paths (``lintro config``,
-    ``list-tools``, and every unit test that hands the scheduler synthetic
-    claims). No filesystem is touched, so overlap falls back to the
-    conservative pattern comparison in
+    Used by callers that hand :func:`derive_order` claims directly rather
+    than tool names — library callers and the unit tests that build synthetic
+    claims for tools no registry knows. It deliberately does *not* consult the
+    registry: a synthetic name has no definition, and resolving it would turn
+    every such tool into an unknown project-scoped writer instead of the
+    claims it was given. Production never reaches this path;
+    :func:`build_order_report` always supplies scopes from
+    :func:`~lintro.tools.core.tool_scopes.resolve_tool_scopes`, which can see
+    ``partitionable`` and can tell an unresolvable name from a registered tool
+    that declares nothing. Without a definition to read, the two therefore
+    differ on exactly those two questions. No filesystem is touched either
+    way, so overlap falls back to the conservative pattern comparison in
     :mod:`lintro.tools.core.tool_scopes`.
 
     Args:
@@ -427,6 +435,39 @@ def _precedence_rule(left: ToolScope, right: ToolScope) -> str:
     return "alphabetical tool id"
 
 
+def _demotion_rule(
+    left: ToolScope,
+    right: ToolScope,
+    *,
+    winner: str,
+    configured: bool,
+) -> str:
+    """Name the rule that actually chose the format owner.
+
+    The winner comes from the linear extension, not from comparing the pair,
+    and a phase edge can invert the pairwise answer — a tool that is ``FIX``
+    on one pattern and ``FORMAT`` on another is ordered by the pattern they
+    share, not by its rank. Naming the pairwise rule in that case would print
+    a reason that argues for the other tool, so the label falls back to what
+    did decide.
+
+    Args:
+        left: One tool's scope.
+        right: The other tool's scope.
+        winner: The tool the sequence put last.
+        configured: Whether ``execution.precedence`` named this pair.
+
+    Returns:
+        A short phrase naming the deciding rule.
+    """
+    if configured:
+        return "configured precedence"
+    pairwise = max((left, right), key=_precedence_rank).tool
+    if pairwise != winner:
+        return "derived phase order"
+    return _precedence_rule(left, right)
+
+
 def _override_map(
     precedence: Sequence[Sequence[str]],
 ) -> dict[tuple[str, str], str]:
@@ -439,15 +480,33 @@ def _override_map(
 
     Returns:
         Mapping of the alphabetically sorted pair to the winning tool id.
+
+    Raises:
+        OrderPlanningError: When one pair and its reverse are both configured.
+            Indexing by the unordered pair would otherwise let the second
+            silently overwrite the first, and a contradiction that resolves to
+            "whichever was written last" is the fail-open this rule exists to
+            close — the same reason a configured cycle is rejected.
     """
     indexed: dict[tuple[str, str], str] = {}
     for pair in precedence:
         parts = [str(part).lower() for part in pair]
+        # A malformed or self-referential pair is rejected by the config
+        # loader before it gets here; skipping it keeps a direct API caller
+        # from crashing the scheduler on input no config file can produce.
         if len(parts) != 2 or parts[0] == parts[1]:
             continue
         winner, loser = parts
-        first, second = sorted((winner, loser))
-        indexed[(first, second)] = winner
+        key = (min(winner, loser), max(winner, loser))
+        previous = indexed.get(key)
+        if previous is not None and previous != winner:
+            raise OrderPlanningError(
+                f"Configured tool precedence is contradictory: both "
+                f"[{winner}, {loser}] and [{loser}, {winner}] appear in "
+                f"{PRECEDENCE_CONFIG_KEY}. Keep one of the two pairs so the "
+                "tools form an order rather than a loop.",
+            )
+        indexed[key] = winner
     return indexed
 
 
@@ -588,10 +647,11 @@ def _conflict_edges(
                     ),
                 )
             if left.declares_format and right.declares_format:
-                rule = (
-                    "configured precedence"
-                    if pair in override_pairs
-                    else _precedence_rule(left, right)
+                rule = _demotion_rule(
+                    left,
+                    right,
+                    winner=winner_name,
+                    configured=pair in override_pairs,
                 )
                 candidates.append(
                     FormatDemotion(

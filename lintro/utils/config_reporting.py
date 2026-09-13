@@ -8,7 +8,11 @@ from tool claims rather than configured, and it is reported by the commands
 that can resolve it — ``lintro config``, ``lintro check --explain-order`` and
 ``lintro doctor``. The same is true of write precedence (#2606): this report
 names the rule and the key that overrides it, and the resolved winner per
-scope comes from those commands, which can see the run's scan scope.
+scope comes from those commands. Only the two that run with scan paths —
+``check --explain-order`` and ``fmt --explain-order`` — resolve it from the
+files each tool would be handed; ``lintro config``, ``doctor`` and
+``list-tools`` have no scan scope and fall back to asking whether two
+patterns could match one file, which over-approximates.
 """
 
 from loguru import logger

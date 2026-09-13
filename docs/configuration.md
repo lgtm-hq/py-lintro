@@ -1131,26 +1131,50 @@ in order:
 4. the tool id, alphabetically.
 
 **One format owner per overlapping scope.** When several conflicting tools declare
-`FORMAT`, only the winner formats. Every other tool's `FORMAT` is demoted **for that
-scope** and its `CHECK` stays enabled, so the loser keeps reporting — it just stops
-writing. The decision is re-resolved on every run, not frozen at `lintro init`, and it
-is printed by `lintro check --explain-order` and `lintro doctor`:
+`FORMAT`, the scheduler names one of them the owner and records every other tool's
+`FORMAT` as demoted **for that scope**. The demoted tool's `CHECK` stays enabled, so it
+keeps reporting. The decision is re-resolved on every run, not frozen at `lintro init`,
+and it is printed by `lintro check --explain-order`, `lintro doctor` and `lintro init`:
 
 ```text
   Format ownership (1):
     *.py: black owns FORMAT; ruff(format) demoted (FIX runs before FORMAT; override with execution.precedence)
 ```
 
+What the record does today is set the **write order**: the owner runs last, so where two
+formatters both rewrite a file its layout is the one left on disk. The one place a
+demoted `FORMAT` is additionally switched off at the tool level is ruff when black is
+selected — the [Ruff vs Black policy](#ruff-vs-black-policy-python) below, which
+predates this rule and still lives in the executor's tool configuration rather than
+reading the record. Wiring every formatter's stages to the derived record is a
+follow-up; until it lands, treat the reported owner as the authority on **order and
+reporting**, and the ruff/black switch as unchanged.
+
 **Overriding it.** `execution.precedence` takes `[winner, loser]` pairs. The winner has
-authority on every scope the two share:
+authority on every scope the two share — it is ordered last, and it is the tool the
+reports name as the owner:
 
 ```yaml
 execution:
   precedence:
-    - [ruff, black] # ruff, not black, owns Python formatting
+    - [ruff, black] # order ruff last, and report ruff as the Python FORMAT owner
 ```
 
-Contradictory pairs are a hard error, never a silent fallback:
+Note the limit that follows from the paragraph above: this reverses the order and the
+reported owner, but it does not by itself re-enable ruff's formatter — that switch still
+follows the ruff/black policy. Set ruff's `format` (and `format_check`) tool options
+explicitly if you want ruff to do the formatting.
+
+Contradictory pairs are a hard error, never a silent fallback. That covers a pair and
+its reverse:
+
+```text
+Configured tool precedence is contradictory: both [ruff, black] and [black, ruff] appear
+in execution.precedence. Keep one of the two pairs so the tools form an order rather
+than a loop.
+```
+
+and a longer loop closed by several pairs:
 
 ```text
 Configured tool precedence is contradictory: one_fixer <-> two_fixer on *.py. Remove or

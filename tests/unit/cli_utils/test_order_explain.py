@@ -2,17 +2,22 @@
 
 from __future__ import annotations
 
+from typing import NoReturn
+
 import pytest
 from assertpy import assert_that
 
+import lintro.cli_utils.order_explain as order_explain
 from lintro.cli_utils.order_explain import (
     DERIVED_NOTE,
     EXPLAIN_HEADER,
     MAX_DOCTOR_CONSTRAINTS,
+    MAX_DOCTOR_DEMOTIONS,
     MAX_EDGES_PER_TOOL,
     emit_order_explanation,
     format_doctor_order_section,
     format_order_report,
+    format_ownership_notice,
 )
 from lintro.enums.capability import Cap
 from lintro.tools.core.scheduler import (
@@ -206,3 +211,95 @@ def test_doctor_section_names_the_format_owner() -> None:
     assert_that(lines).contains(
         "    *.py: black owns FORMAT, ruff demoted (fewer mutating capabilities)",
     )
+
+
+def test_format_ownership_notice_reports_a_contending_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``lintro init`` says who will own FORMAT and which key changes it.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    demotion = FormatDemotion(
+        winner="black",
+        loser="ruff",
+        scope="*.py",
+        rule="fewer mutating capabilities",
+    )
+    monkeypatch.setattr(
+        order_explain,
+        "build_order_report",
+        lambda _names, **_kwargs: _report(demotions=(demotion,)),
+    )
+
+    lines = format_ownership_notice(["ruff", "black"])
+
+    assert_that(lines).contains("  Format ownership:")
+    assert_that(lines).contains(
+        "    *.py: black owns FORMAT, ruff demoted (fewer mutating capabilities)",
+    )
+    assert_that(lines[-1]).contains("execution.precedence")
+
+
+def test_format_ownership_notice_is_silent_when_nothing_contends(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No contention means no advisory line at all.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        order_explain,
+        "build_order_report",
+        lambda _names, **_kwargs: _report(),
+    )
+
+    assert_that(format_ownership_notice(["ruff"])).is_empty()
+
+
+def test_format_ownership_notice_never_fails_init(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unusable config must not take ``lintro init`` down with it.
+
+    The notice is advisory, so a scheduler that cannot answer degrades to
+    silence rather than to a traceback on the command that writes the config.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+
+    def _raise(_names: object, **_kwargs: object) -> NoReturn:
+        """Stand in for a scheduler that cannot resolve the selection.
+
+        Args:
+            _names: Ignored tool names.
+            **_kwargs: Ignored keyword arguments.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError("unresolvable")
+
+    monkeypatch.setattr(order_explain, "build_order_report", _raise)
+
+    assert_that(format_ownership_notice(["ruff", "black"])).is_empty()
+
+
+def test_doctor_section_truncates_a_long_demotion_list() -> None:
+    """A wide contending set cannot flood the compact doctor section."""
+    demotions = tuple(
+        FormatDemotion(
+            winner="black",
+            loser=f"tool{index}",
+            scope="*.py",
+            rule="alphabetical tool id",
+        )
+        for index in range(MAX_DOCTOR_DEMOTIONS + 2)
+    )
+
+    lines = format_doctor_order_section(_report(demotions=demotions))
+
+    assert_that(lines).contains("    ... and 2 more demotion(s)")

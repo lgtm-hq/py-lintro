@@ -423,6 +423,11 @@ def init_command(
             ),
         )
 
+    # Both templates enable ruff and black, the canonical contending FORMAT
+    # pair, so the notice belongs on the static path as much as the detected
+    # one.
+    _print_ownership_notice(console, tool_names)
+
     if not static:
         effective_profile = profile or ("minimal" if minimal else "recommended")
         # Always print the Detected line so init output is consistent across
@@ -432,7 +437,6 @@ def init_command(
         console.print(
             f"  [dim]Detected: {detected_display} | Profile: {effective_profile}[/dim]",
         )
-        _print_ownership_notice(console, tool_names)
         console.print()
         console.print("  [bold]Recommended:[/bold]")
         console.print(

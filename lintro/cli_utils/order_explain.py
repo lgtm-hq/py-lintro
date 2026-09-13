@@ -111,6 +111,24 @@ def _format_cycle(cycle: OrderCycle) -> list[str]:
     ]
 
 
+def _format_demotion_record(record: FormatDemotion) -> str:
+    """Render one demotion as the compact line doctor and init both print.
+
+    The full ``--explain-order`` listing uses ``record.reason`` instead, which
+    the scheduler composes and which also names the override key.
+
+    Args:
+        record: The demotion to render.
+
+    Returns:
+        A single line naming the scope, the owner, the demoted tool and why.
+    """
+    return (
+        f"{record.scope}: {record.winner} owns FORMAT, "
+        f"{record.loser} demoted ({record.rule})"
+    )
+
+
 def _format_demotions(demotions: Sequence[FormatDemotion]) -> list[str]:
     """Render the format-owner decisions the scheduler made (#1744).
 
@@ -193,11 +211,7 @@ def format_doctor_order_section(report: DerivedOrder) -> list[str]:
     if hidden > 0:
         lines.append(f"    ... and {hidden} more constrained tool(s)")
     shown_demotions = report.demotions[:MAX_DOCTOR_DEMOTIONS]
-    lines.extend(
-        f"    {record.scope}: {record.winner} owns FORMAT, "
-        f"{record.loser} demoted ({record.rule})"
-        for record in shown_demotions
-    )
+    lines.extend(f"    {_format_demotion_record(record)}" for record in shown_demotions)
     hidden_demotions = len(report.demotions) - len(shown_demotions)
     if hidden_demotions > 0:
         lines.append(f"    ... and {hidden_demotions} more demotion(s)")
@@ -227,9 +241,7 @@ def format_ownership_notice(tool_names: Sequence[str]) -> list[str]:
         return []
     lines = ["  Format ownership:"]
     lines.extend(
-        f"    {record.scope}: {record.winner} owns FORMAT, "
-        f"{record.loser} demoted ({record.rule})"
-        for record in report.demotions
+        f"    {_format_demotion_record(record)}" for record in report.demotions
     )
     lines.append("    Change it with execution.precedence in your config.")
     return lines

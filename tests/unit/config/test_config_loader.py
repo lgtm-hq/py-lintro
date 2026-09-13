@@ -205,3 +205,57 @@ def test_pyproject_plural_tools_table_disables_a_tool(
     config = load_config()
 
     assert_that(config.is_tool_enabled("trufflehog")).is_false()
+
+
+def test_execution_precedence_reaches_the_model_lowercased(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured write precedence survives the loader, normalised.
+
+    The scheduler matches derived edges on lowercase tool ids, so a pair
+    spelled in the user's preferred case has to arrive lowercased or the
+    override is silently inert against the very tools it names. Asserting on
+    the public seam rather than on the parser keeps that wiring pinned even if
+    the helper is renamed or inlined.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture for chdir.
+    """
+    clear_pyproject_cache()
+
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        "execution:\n  precedence:\n    - [Ruff, BLACK]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    config = load_config()
+
+    assert_that([tuple(pair) for pair in config.execution.precedence]).is_equal_to(
+        [("ruff", "black")],
+    )
+
+
+def test_execution_precedence_rejects_a_non_string_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YAML ``null`` must not become the tool named "none".
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+        monkeypatch: Pytest monkeypatch fixture for chdir.
+    """
+    clear_pyproject_cache()
+
+    config_file = tmp_path / ".lintro-config.yaml"
+    config_file.write_text(
+        "execution:\n  precedence:\n    - [~, black]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert_that(load_config).raises(ValueError).when_called_with()

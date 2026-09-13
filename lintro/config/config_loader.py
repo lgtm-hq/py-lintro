@@ -664,12 +664,20 @@ def _parse_precedence(raw: Any) -> list[tuple[str, str]]:
         )
     pairs: list[tuple[str, str]] = []
     for entry in raw:
-        if not isinstance(entry, (list, tuple)) or len(entry) != 2:
+        if (
+            not isinstance(entry, (list, tuple))
+            or len(entry) != 2
+            or not all(isinstance(part, str) for part in entry)
+        ):
+            # A non-string part must be rejected rather than coerced: YAML
+            # spells a missing value as ``null``, and ``str(None)`` is the
+            # name "none", which would sail past the empty-name check below
+            # and become an inert override nobody can see is wrong.
             raise ValueError(
-                "execution.precedence entries must be [winner, loser] pairs, "
-                f"got {entry!r}",
+                "execution.precedence entries must be [winner, loser] pairs "
+                f"of tool names, got {entry!r}",
             )
-        winner, loser = (str(part).strip().lower() for part in entry)
+        winner, loser = (part.strip().lower() for part in entry)
         if not winner or not loser:
             raise ValueError(
                 f"execution.precedence tool names must be non-empty, got {entry!r}",
