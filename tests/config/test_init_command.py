@@ -169,3 +169,51 @@ def test_default_template_has_sensible_defaults() -> None:
     assert_that(parsed["tools"]["ruff"]["enabled"]).is_true()
     assert_that(parsed["defaults"]["mypy"]["strict"]).is_true()
     assert_that(parsed["defaults"]["mypy"]["ignore_missing_imports"]).is_true()
+
+
+def test_static_init_explains_format_ownership(
+    runner: CliRunner,
+    tmp_path: Path,
+) -> None:
+    """``--static`` writes the contending ruff+black pair, so it must explain it.
+
+    The template enables both, which is exactly the pair the ownership notice
+    exists to describe; printing it only on the detected path would omit it
+    from the one config guaranteed to contain the contention.
+
+    Args:
+        runner: Click test runner instance.
+        tmp_path: Temporary directory path for test files.
+    """
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(init_command, ["--static"])
+
+        assert_that(result.exit_code).is_equal_to(0)
+        assert_that(result.output).contains("Format ownership:")
+        assert_that(result.output).contains("owns FORMAT")
+        assert_that(result.output).contains("execution.precedence")
+
+
+def test_init_omits_the_notice_when_nothing_contends(
+    runner: CliRunner,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A config whose tools never contend gets no ownership line.
+
+    Args:
+        runner: Click test runner instance.
+        tmp_path: Temporary directory path for test files.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    import lintro.cli_utils.commands.init as init_module
+
+    monkeypatch.setattr(init_module, "format_ownership_notice", lambda _names: [])
+
+    with runner.isolated_filesystem(temp_dir=tmp_path):
+        result = runner.invoke(init_command, ["--static"])
+
+        # Without this the negative assertion below is satisfied by any run
+        # that crashed before reaching the notice.
+        assert_that(result.exit_code).is_equal_to(0)
+        assert_that(result.output).does_not_contain("Format ownership:")

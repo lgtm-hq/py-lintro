@@ -1,10 +1,10 @@
-"""The mutation phase never runs two mutating tools at once (#1743).
+"""A batch runs concurrently under every action (#2606).
 
-``lintro format`` rewrites files. Two mutating capabilities in flight over the
-same file race on its bytes — each reads, rewrites and writes the whole file,
-so the loser's edit is simply gone and the verify pass reports the difference
-as an unexplained residual. Read-only actions have no such hazard and keep the
-full fan-out, which is what the check-mode test here pins.
+#2452 shipped a bridge: the mutation phase dispatched one tool at a time,
+because the scheduler could still put two writers of one file in one batch.
+#2606 removed that bridge by moving the guarantee into the batching — two
+tools whose run-scoped write sets overlap are no longer in the same batch — so
+a batch is safe to dispatch concurrently whether it mutates or only reads.
 
 These run through the real ``AsyncToolExecutor`` rather than a double: the
 property under test *is* concurrency, and a fake dispatcher would assert the
@@ -162,12 +162,13 @@ def _dispatch(
         for name in ("ruff", "black")
     }
     monkeypatch.setattr(tool_manager, "get_tool", lambda name: tools[name])
-    # One batch holding both tools: the batching itself is #1742's and is not
-    # what this test is about.
+    # One batch holding both tools: whether these two *belong* in one batch is
+    # the scheduler's decision (#2606) and is pinned in the scheduler tests.
+    # What is pinned here is that a batch is dispatched as a batch.
     monkeypatch.setattr(
         tool_manager,
         "get_parallel_batches",
-        lambda names: [list(names)],
+        lambda names, **_kwargs: [list(names)],
     )
     monkeypatch.setattr(
         parallel_module,
@@ -191,39 +192,33 @@ def _dispatch(
     return events, tools
 
 
-def test_mutating_tools_never_overlap(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A ``fix`` batch runs one tool at a time, start to end.
+def test_a_mutating_batch_runs_concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``fix`` batch fans out: the #2452 serialisation bridge is gone.
 
     Args:
         monkeypatch: pytest monkeypatch fixture.
     """
     events, tools = _dispatch(monkeypatch=monkeypatch, action=Action.FIX)
 
-    # Every start is immediately followed by its own end: no interleaving.
-    assert_that(events).is_length(4)
-    for index in range(0, len(events), 2):
-        started = events[index].removeprefix("start:")
-        ended = events[index + 1].removeprefix("end:")
-        assert_that(events[index]).starts_with("start:")
-        assert_that(events[index + 1]).starts_with("end:")
-        assert_that(ended).is_equal_to(started)
-    # The dispatcher routed to ``fix``: a batch serialized around ``check``
-    # would satisfy the overlap assertions above and still be wrong.
-    assert_that([event.endswith(":fix") for event in events]).is_equal_to(
-        [True] * 4,
-    )
+    # Both tools were inside their run at the same instant: the barrier
+    # released rather than breaking.
     assert_that([tool.concurrent for tool in tools.values()]).is_equal_to(
-        [False, False],
+        [True, True],
     )
+    # The dispatcher routed to ``fix``: a concurrent ``check`` batch would
+    # satisfy the assertion above and still be the wrong capability.
+    assert_that(events[:2]).contains("start:ruff:fix", "start:black:fix")
 
 
 def test_check_mode_still_runs_a_batch_concurrently(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Read-only dispatch keeps the fan-out the serialization must not cost.
+    """Read-only dispatch fans out too.
 
     The verify pass configures its tools with ``Action.CHECK``, so this is
-    also the pin that serializing mutation did not serialize verification.
+    also the pin that verification is never serialised.
 
     Args:
         monkeypatch: pytest monkeypatch fixture.

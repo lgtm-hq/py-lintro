@@ -38,6 +38,13 @@ class ExecutionConfig(BaseModel):
             True/False explicitly enables/disables.
         max_fix_retries: Maximum number of fix→verify cycles for converging
             formatters (default: 3). Some formatters need multiple passes.
+        precedence: Manual write-precedence overrides for tools that can
+            rewrite the same file, as ``[winner, loser]`` pairs. The winner
+            has authority on every scope the two share: it runs **last**, so
+            its write is the one that survives, and it keeps ``FORMAT`` while
+            the loser's ``FORMAT`` is demoted (its ``CHECK`` still runs).
+            Pairs that contradict each other fail planning rather than
+            falling back silently.
         artifacts: Side-channel artifact formats to write alongside the
             primary output. Supports all output formats: json, csv,
             markdown, html, sarif, plain. When ``GITHUB_ACTIONS=true``
@@ -53,4 +60,5 @@ class ExecutionConfig(BaseModel):
     max_workers: int = Field(default_factory=_get_default_max_workers, ge=1, le=32)
     auto_install_deps: bool | None = None
     max_fix_retries: int = Field(default=3, ge=1, le=10)
+    precedence: list[tuple[str, str]] = Field(default_factory=list)
     artifacts: list[ArtifactFormat] = Field(default_factory=list)

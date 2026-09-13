@@ -13,9 +13,10 @@ What the pass does **not** cover: a mutator that declares no ``CHECK`` claim —
 prettier, oxfmt, rustfmt and shfmt — is never asked for a residual and keeps
 its own result contract, including whatever post-format checking it does for
 itself. Making every mutator declare ``CHECK`` is a follow-up (#2607). The pass
-also reports the *final state* of each file rather than who wrote it last,
-which is why the mutation phase runs one tool at a time (#2606) until the
-scheduler can keep overlapping mutators out of one batch.
+also reports the *final state* of each file rather than who wrote it last.
+Attribution is not its job and does not need to be: since #2606 the scheduler
+derives write-conflict edges, so two tools that could rewrite the same file
+are never in flight at once and a residual can no longer be a lost write.
 
 Scope narrowing
 ---------------
@@ -673,8 +674,7 @@ def run_verify_pass(
             # the residual is unknown rather than measured. The traceback
             # stays at debug so the default level keeps one line per tool.
             logger.warning(
-                f"Verify pass for {name} could not run: "
-                f"{type(exc).__name__}: {exc}",
+                f"Verify pass for {name} could not run: {type(exc).__name__}: {exc}",
             )
             logger.opt(exception=True).debug(f"Verify pass failed for {name}")
             outcomes.append(
