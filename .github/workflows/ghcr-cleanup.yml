@@ -68,6 +68,10 @@ jobs:
       # input is empty — scheduled runs always prune at 7 days.
       # yamllint disable-line rule:line-length
       min-age-days: ${{ fromJSON(inputs.min_age_days || '7') }}
+      # Bare number literal, never a string: the reusable's default 10-minute
+      # job timeout cancelled the py-lintro prune leg mid-enumeration (run
+      # 34774902409), so the caller forwards a raised budget (#2603).
+      timeout-minutes: 30
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
@@ -226,6 +230,10 @@ jobs:
       # input is empty — scheduled runs always prune at 7 days.
       # yamllint disable-line rule:line-length
       min-age-days: ${{ fromJSON(inputs.min_age_days || '7') }}
+      # Bare number literal, never a string: the reusable's default 10-minute
+      # job timeout cancelled the py-lintro prune leg mid-enumeration (run
+      # 34774902409), so the caller forwards a raised budget (#2603).
+      timeout-minutes: 30
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
