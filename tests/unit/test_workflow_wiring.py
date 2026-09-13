@@ -6728,3 +6728,94 @@ def test_number_typed_reusable_inputs_are_never_block_scalars() -> None:
     assert_that(offenders).described_as(
         "number-typed lgtm-ci inputs passed as block scalars",
     ).is_empty()
+
+_RELEASE_IMAGE_JOBS = ("docker-base", "docker-full", "docker-ai")
+
+
+def test_every_pushed_reusable_docker_call_carries_provenance_and_sbom(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """Release images carry the same evidence as the tool images (#2630).
+
+    ``reusable-docker.yml`` gates its GitHub attestation on ``provenance``, so
+    an opt-out drops the attestation as well as the BuildKit provenance. Every
+    call that can push must therefore pass both flags; the backfill dispatch
+    shares the release jobs, so it is covered by the same assertion.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    missing: dict[str, dict[str, Any]] = {}
+    for workflow_name, workflow in parsed_workflows.items():
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            uses = str(job.get("uses", ""))
+            if "reusable-docker.yml" not in uses:
+                continue
+            with_block = job.get("with") or {}
+            if str(with_block.get("push", "")).strip() in ("", "false"):
+                continue
+            evidence = {
+                key: with_block.get(key)
+                for key in ("provenance", "sbom", "cosign-sign", "scan")
+            }
+            if not all(evidence[key] is True for key in evidence):
+                missing[f"{workflow_name}::{job_id}"] = evidence
+    assert_that(missing).described_as("pushed image jobs lacking evidence").is_empty()
+
+    publish = parsed_workflows["docker-build-publish.yml"]
+    for job_id in _RELEASE_IMAGE_JOBS:
+        with_block = publish["jobs"][job_id]["with"]
+        assert_that(str(with_block["scan-exit-code"])).described_as(job_id).is_equal_to(
+            "0",
+        )
+
+
+def test_main_promotion_attests_the_promoted_digests() -> None:
+    """``ghcr.io/lgtm-hq/py-lintro:main`` carries a GitHub attestation (#2630).
+
+    The ``publish`` job promotes ``ci-<run_id>`` digests to ``main``/``sha-*``
+    and cosign-signs them; without an attestation step the rolling tags had a
+    signature and nothing else. The pushed ``ci-*`` builds must also attach
+    BuildKit provenance and an SBOM, because promotion by digest keeps
+    exactly what the build attached.
+    """
+    ci = _load_workflow(name="docker-ci.yml")
+
+    build_steps = ci["jobs"]["docker-build"]["steps"]
+    pushed = [
+        step
+        for step in build_steps
+        if "build-push-action" in str(step.get("uses", ""))
+        and (step.get("with") or {}).get("push") is True
+    ]
+    assert_that(pushed).is_length(2)
+    for step in pushed:
+        with_block = step["with"]
+        assert_that(str(with_block.get("provenance"))).described_as(
+            step["name"],
+        ).is_equal_to("mode=max")
+        assert_that(with_block.get("sbom")).described_as(step["name"]).is_true()
+
+    publish = ci["jobs"]["publish"]
+    assert_that(publish["permissions"]["attestations"]).is_equal_to("write")
+    assert_that(publish["permissions"]["id-token"]).is_equal_to("write")
+    attest_steps = [
+        step
+        for step in publish["steps"]
+        if "actions/attest-build-provenance@" in str(step.get("uses", ""))
+    ]
+    subjects = {
+        (step["with"]["subject-name"], str(step["with"]["subject-digest"]))
+        for step in attest_steps
+    }
+    assert_that(subjects).is_equal_to(
+        {
+            ("ghcr.io/lgtm-hq/py-lintro", "${{ steps.promote.outputs.digest }}"),
+            (
+                "ghcr.io/lgtm-hq/py-lintro-base",
+                "${{ steps.promote-base.outputs.digest }}",
+            ),
+        },
+    )
+    for step in attest_steps:
+        assert_that(step["with"].get("push-to-registry")).is_true()

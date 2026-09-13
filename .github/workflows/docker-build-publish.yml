@@ -141,9 +141,14 @@ jobs:
       no-cache: >-
         ${{ github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
-      provenance: false
-      sbom: false
+      # Same evidence as the tool images (#2630): BuildKit provenance and SBOM
+      # attached to the index, the GitHub attestation the reusable gates on
+      # `provenance`, a cosign keyless signature, and a report-only scan.
+      provenance: true
+      sbom: true
       cosign-sign: true
+      scan: true
+      scan-exit-code: '0'
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
       egress-preset: docker
@@ -210,9 +215,14 @@ jobs:
       no-cache: >-
         ${{ github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
-      provenance: false
-      sbom: false
+      # Same evidence as the tool images (#2630): BuildKit provenance and SBOM
+      # attached to the index, the GitHub attestation the reusable gates on
+      # `provenance`, a cosign keyless signature, and a report-only scan.
+      provenance: true
+      sbom: true
       cosign-sign: true
+      scan: true
+      scan-exit-code: '0'
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
       egress-preset: docker
@@ -287,9 +297,14 @@ jobs:
       no-cache: >-
         ${{ github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '' }}
-      provenance: false
-      sbom: false
+      # Same evidence as the tool images (#2630): BuildKit provenance and SBOM
+      # attached to the index, the GitHub attestation the reusable gates on
+      # `provenance`, a cosign keyless signature, and a report-only scan.
+      provenance: true
+      sbom: true
       cosign-sign: true
+      scan: true
+      scan-exit-code: '0'
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
       egress-preset: docker

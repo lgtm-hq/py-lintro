@@ -113,6 +113,37 @@ Details:
   Renovate's native Docker digest support manage bumps (this repository does exactly
   that for the root `Dockerfile`).
 
+### Verify an image
+
+Every published image, the release images `py-lintro`, `py-lintro-base` and
+`py-lintro-ai` as well as the tools images, carries three kinds of evidence: a Sigstore
+Cosign keyless signature, BuildKit provenance and SBOM attestations attached to the
+image index, and a GitHub build-provenance attestation. The tag publish, the manual
+backfill and the `main` promotion all produce the same set, so a rolling `main` tag
+verifies the same way as a release.
+
+```bash
+# Resolve the digest of the tag you intend to run
+DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
+  --format '{{ .Manifest.Digest }}')
+
+# GitHub build-provenance attestation (signed by this repository's workflow)
+gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" --repo lgtm-hq/py-lintro
+
+# Cosign keyless signature, bound to the publishing workflow's OIDC identity
+cosign verify "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --certificate-identity-regexp '^https://github.com/lgtm-hq/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# BuildKit provenance and SBOM attached to the index (non-empty for each platform)
+docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --format '{{ json .Provenance }}'
+docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --format '{{ json .SBOM }}'
+```
+
+Substitute `py-lintro-base` or `py-lintro-ai` for the other release images.
+
 ### Using the Published Image
 
 ```bash

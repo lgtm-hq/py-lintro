@@ -151,7 +151,7 @@ permissions:
 | `test-ci.yml`              | `contents: read` (+ per-job)       | Unit tests            |
 | `publish-pypi-on-tag.yml`  | `contents: write, id-token: write` | Release + OIDC        |
 | `build-binary.yml`         | `contents: write`                  | Upload release assets |
-| `docker-build-publish.yml` | `contents: read, packages: write`  | Push to GHCR          |
+| `docker-build-publish.yml` | `contents: read` (+ per-job)       | Push to GHCR          |
 
 ## Supply Chain Security
 
@@ -161,6 +161,11 @@ Software Bill of Materials (SBOM) is generated for each release using:
 
 - `cyclonedx-bom` for Python dependencies
 - Attestation artifacts for verification
+- BuildKit SBOM and provenance attestations on every published container image
+  (`py-lintro`, `py-lintro-base`, `py-lintro-ai` and the tools images), plus a GitHub
+  build-provenance attestation and a Cosign keyless signature on each image digest; the
+  tag publish, the manual backfill and the `main` promotion all produce the same
+  evidence. See "Verify an image" in `docs/docker.md`.
 
 ### Dependency Updates
 
