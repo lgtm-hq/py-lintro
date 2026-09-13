@@ -587,6 +587,86 @@ def test_fold_keeps_pre_fix_issues_for_files_the_pass_did_not_verify() -> None:
     assert_that(folded.success).is_false()
 
 
+def test_fold_supersedes_pre_fix_findings_when_a_project_check_answers_clean() -> None:
+    """A clean project-scoped CHECK answers for files the scope never named.
+
+    rustfmt's fix runs ``cargo fmt --all`` from the crate root, so its
+    mutation footprint (the crate) can strictly exceed its discovery
+    footprint: the pre-fix check found a file outside the run's scan paths,
+    the fix rewrote it, and the narrowed verify scope can neither list it
+    nor receive a finding for it. The crate-wide answered verdict covers
+    that file anyway, so carrying its pre-fix finding as a survivor would
+    fail a run whose files are already formatted (#2607).
+    """
+    mutation = ToolResult(
+        name="rustfmt",
+        success=True,
+        issues_count=0,
+        issues=[],
+        initial_issues=[_issue("/repo/untouched.rs")],
+        initial_issues_count=1,
+        fixed_issues_count=1,
+        remaining_issues_count=0,
+        cwd="/repo",
+        capability=Cap.FORMAT,
+    )
+    verify = ToolResult(name="rustfmt", success=True, issues_count=0, issues=[])
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[VerifyOutcome(tool="rustfmt", result=verify)],
+        scope=VerifyScope(files=("/repo/src/main.rs",), narrowed=True),
+    )
+
+    folded = results[0]
+    assert_that(folded.remaining_issues_count).is_equal_to(0)
+    assert_that(folded.issues or []).is_empty()
+    assert_that(folded.success).is_true()
+
+
+def test_fold_keeps_pre_fix_findings_when_a_project_check_does_not_answer() -> None:
+    """Without an answered project CHECK, out-of-scope pre-fix findings stand.
+
+    The wholesale supersession is earned only by an answered verdict: a
+    timed-out crate-wide check said nothing about the files outside the
+    scope, so the conservative per-file behavior keeps the survivor.
+    """
+    mutation = ToolResult(
+        name="rustfmt",
+        success=True,
+        issues_count=0,
+        issues=[],
+        initial_issues=[_issue("/repo/untouched.rs")],
+        initial_issues_count=1,
+        fixed_issues_count=1,
+        remaining_issues_count=0,
+        cwd="/repo",
+        capability=Cap.FORMAT,
+    )
+    verify = ToolResult(name="rustfmt", success=True, issues_count=0, issues=[])
+    results = [mutation]
+
+    fold_verify_results(
+        mutation_results=results,
+        verify_results=[
+            VerifyOutcome(
+                tool="rustfmt",
+                result=verify,
+                status=VerifyStatus.UNKNOWN,
+                unknown_reason="check timed out",
+            ),
+        ],
+        scope=VerifyScope(files=("/repo/src/main.rs",), narrowed=True),
+    )
+
+    folded = results[0]
+    assert_that([i.file for i in folded.issues or []]).is_equal_to(
+        ["/repo/untouched.rs"],
+    )
+    assert_that(folded.success).is_false()
+
+
 def test_fold_leaves_a_tool_without_a_verify_result_alone() -> None:
     """A tool with no verify outcome (a FORMAT-only external plugin) keeps its numbers."""
     mutation = ToolResult(
@@ -1041,7 +1121,11 @@ def test_a_finding_with_no_file_never_verifies_anything() -> None:
 
     golangci-lint parks findings it cannot place under a ``(module)``
     placeholder. Those name no file, so they can neither be matched to a
-    fingerprinted path nor supersede one.
+    fingerprinted path nor supersede one. The pre-fix finding on ``a.go``
+    still goes away, but by the module-wide rule, not by path matching:
+    golangci-lint is project-scoped, its answered CHECK examined ``a.go``
+    and reported nothing for it, so the pre-fix finding is superseded
+    wholesale and only the unplaceable finding remains.
     """
     mutation = ToolResult(
         name="golangci_lint",
@@ -1070,8 +1154,10 @@ def test_a_finding_with_no_file_never_verifies_anything() -> None:
         scope=VerifyScope(files=(), narrowed=True),
     )
 
-    # The unplaceable finding plus the pre-fix one it did not answer for.
-    assert_that(results[0].remaining_issues_count).is_equal_to(2)
+    # The unplaceable finding remains; the pre-fix one was superseded by the
+    # answered module-wide check, not matched to any file.
+    assert_that(results[0].remaining_issues_count).is_equal_to(1)
+    assert_that([i.file for i in results[0].issues or []]).is_equal_to([""])
 
 
 def test_a_tool_the_registry_cannot_resolve_is_reported_unverified(

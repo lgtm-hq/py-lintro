@@ -196,6 +196,29 @@ class VerifiableTool(Protocol):
         ...  # pragma: no cover - protocol declaration
 
 
+def _definition_for(tool_name: str) -> object:
+    """Resolve a tool definition out of the registry.
+
+    Args:
+        tool_name: Registry key of the tool.
+
+    Returns:
+        The tool's definition object.
+
+    Raises:
+        UnresolvableToolError: If the registry cannot resolve the name.
+    """
+    # Imported here rather than at module scope: ``lintro.tools.__init__``
+    # re-exports this module, so a top-level import would close a cycle. The
+    # scheduler resolves its own claims the same way.
+    from lintro.tools import tool_manager
+
+    try:
+        return tool_manager.get_tool(tool_name).definition
+    except (AttributeError, KeyError, ValueError, RuntimeError) as exc:
+        raise UnresolvableToolError(tool_name) from exc
+
+
 def _claims_for(tool_name: str) -> list[Claim]:
     """Read a tool's declared claims, tolerating an unresolvable name.
 
@@ -208,16 +231,29 @@ def _claims_for(tool_name: str) -> list[Claim]:
     Raises:
         UnresolvableToolError: If the registry cannot resolve the name.
     """
-    # Imported here rather than at module scope: ``lintro.tools.__init__``
-    # re-exports this module, so a top-level import would close a cycle. The
-    # scheduler resolves its own claims the same way.
-    from lintro.tools import tool_manager
+    return list(getattr(_definition_for(tool_name), "claims", None) or ())
 
+
+def _is_project_check(tool_name: str) -> bool:
+    """Report whether a tool's ``CHECK`` answers over its whole project.
+
+    A definition with ``partitionable=False`` ignores per-file arguments and
+    checks from its root (rustfmt and clippy-style), so an answered verdict
+    covers every file the tool could ever report on — not just the ones the
+    run's scope named.
+
+    Args:
+        tool_name: Registry key of the tool.
+
+    Returns:
+        True for project-scoped checks. An unresolvable name returns False
+        so the fold keeps its conservative per-file behavior.
+    """
     try:
-        definition = tool_manager.get_tool(tool_name).definition
-    except (AttributeError, KeyError, ValueError, RuntimeError) as exc:
-        raise UnresolvableToolError(tool_name) from exc
-    return list(getattr(definition, "claims", None) or ())
+        definition = _definition_for(tool_name)
+    except UnresolvableToolError:
+        return False
+    return getattr(definition, "partitionable", False) is False
 
 
 def _claims_or_none(tool_name: str) -> list[Claim] | None:
@@ -838,6 +874,7 @@ def _fold_one(
     mutation: ToolResult,
     outcome: VerifyOutcome,
     scope: VerifyScope,
+    project_check: bool = False,
 ) -> ToolResult:
     """Replace a mutation result's residual with the authoritative one.
 
@@ -845,6 +882,10 @@ def _fold_one(
         mutation: The tool's mutation-phase result.
         outcome: The tool's verify-pass outcome.
         scope: The file set the verify pass covered.
+        project_check: True when the tool's ``CHECK`` examines its whole
+            project rather than the files it was handed; an answered verdict
+            from such a check supersedes the tool's pre-fix findings
+            wholesale.
 
     Returns:
         ToolResult: ``mutation`` with the verify pass's residual, the derived
@@ -875,10 +916,19 @@ def _fold_one(
         verify=verify if check_answered else None,
         fallback_cwd=mutation.cwd,
     )
+    # A project-scoped CHECK answers over the tool's whole footprint, which
+    # can strictly exceed its discovery footprint: rustfmt's fix runs
+    # ``cargo fmt --all`` from the crate root even when the run handed it a
+    # subset of the crate, so a file the discovery scope never named can
+    # still have been rewritten, and a clean answered verdict re-examined
+    # every file the tool could ever report on. Its pre-fix findings are
+    # superseded wholesale — what its CHECK reports is the residual.
+    project_check_answered = check_answered and project_check
     survivors: list[BaseIssue] = [
         issue
         for issue in _pre_fix_issues(mutation)
-        if _issue_path(issue, cwd=mutation.cwd) not in verified_paths
+        if not project_check_answered
+        and _issue_path(issue, cwd=mutation.cwd) not in verified_paths
     ]
     if check_answered and verify is not None and verify.issues:
         # Only an answered CHECK contributes findings. A partial one — a
@@ -941,12 +991,18 @@ def fold_verify_results(
     including any post-format checking it does for itself, until #2607 makes
     every mutator declare ``CHECK``.
 
+    For a project-scoped ``CHECK`` (``partitionable=False``), an answered
+    verdict is authoritative over the tool's whole footprint, so the fold
+    supersedes all of that tool's pre-fix findings, not just the ones on
+    files the scope named.
+
     Args:
         mutation_results: Results from the mutation phase, mutated in place.
         verify_results: Outcomes from the verify pass.
         scope: The file set the verify pass covered.
     """
     by_name = {outcome.tool: outcome for outcome in verify_results}
+    project_checks = frozenset(name for name in by_name if _is_project_check(name))
     for index, mutation in enumerate(mutation_results):
         if mutation.skipped or mutation.timed_out:
             continue
@@ -957,4 +1013,5 @@ def fold_verify_results(
             mutation=mutation,
             outcome=outcome,
             scope=scope,
+            project_check=mutation.name in project_checks,
         )

@@ -1046,8 +1046,10 @@ JSONL stream (read `net_resolved_count`) and `fixed_count` in the MCP tool summa
 central verify pass covers every tool that can rewrite a file, the four formatters that
 used to be `FORMAT`-only (prettier, oxfmt, rustfmt and shfmt) included since #2607. It
 is the only source of residuals: no tool keeps a private post-mutation recheck, and a
-tool's own post-fix opinion is discarded, not added. Declaring `CHECK` also means
-`lintro check` runs those four formatters in check mode.
+tool's own post-fix opinion is discarded, not added. Declaring `CHECK` does not
+change which tools `lintro check` runs — check-run selection has always included
+every registered tool; the capability is what the fmt run's verify pass reads when
+it decides who reports residuals.
 
 This is the only place cross-tool interference is visible. If ruff fixes a file and
 prettier then reformats it, ruff's own post-fix lint already ran; a run-level pass sees

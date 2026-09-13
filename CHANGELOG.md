@@ -13,11 +13,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- `lintro check` now runs prettier, oxfmt, rustfmt and shfmt in check mode. Every
-  mutating capability declares `CHECK`, so the central verify pass covers every
+- Every mutating capability declares `CHECK`, so the central verify pass covers every
   formatter and is the only source of residuals; rustfmt's private post-format recheck
   and dotenv-linter's per-file recheck are gone, and the console no longer guesses a
-  remaining count from a tool's prose output (#2607).
+  remaining count from a tool's prose output (#2607). `lintro check` tool selection is
+  unchanged — it already ran the four formatters; the `CHECK` capability is read by the
+  fmt run's verify pass, not by check-run selection.
 
 ### Deprecated
 
