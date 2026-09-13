@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.159.1] - 2026-09-13
+
+### Fixed
+
+- **release**: call mirror-release from the tag publish pipeline (#2617) (27518dd)
+
 ## [0.159.0] - 2026-09-13
 
 ### Added
