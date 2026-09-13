@@ -72,18 +72,19 @@ tiers: the confidence gate and the notes block, `ai.review_inline_min_confidence
 
 The review runs as six layers. A layer is a source of trust, not a pipeline stage name.
 
-| #   | Layer                                                                                                            | Delivered by                                                                     |
-| --- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| 1   | **Facts from deterministic tools.** The model is given the linters' results for the PR before it speaks.         | [#2571](https://github.com/lgtm-hq/py-lintro/issues/2571) (milestone 0 item 0.1) |
-| 2   | **Post-change context.** The model reasons about the combined post-PR state, not a per-chunk slice of it.        | [#2269](https://github.com/lgtm-hq/py-lintro/issues/2269)                        |
-| 3   | **Rubric plus generated questions.** A fixed rubric, plus questions the model generates for this change.         | lintro-ops #24 milestone 0                                                       |
-| 4   | **Refute before posting.** A finding is challenged before it becomes an inline thread.                           | lintro-ops #24 milestone 0; the verification call in decision A                  |
-| 5   | **Human-gated memory.** What the reviewer carries between rounds is admitted by a human, not by the model alone. | lintro-ops #24 milestone 0                                                       |
-| 6   | **Eval-gated changes.** A change to the reviewer ships when the eval corpus says it is an improvement.           | the eval harness milestone, which milestone 0 runs ahead of                      |
+| #   | Layer                                                                                                            | Delivered by                                                                                                                                                                                                                                                                     |
+| --- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Facts from deterministic tools.** The model is given the linters' results for the PR before it speaks.         | [#2571](https://github.com/lgtm-hq/py-lintro/issues/2571) (milestone 0 item 0.1)                                                                                                                                                                                                 |
+| 2   | **Post-change context.** The model reasons about the combined post-PR state, not a per-chunk slice of it.        | [#2269](https://github.com/lgtm-hq/py-lintro/issues/2269)                                                                                                                                                                                                                        |
+| 3   | **Rubric plus generated questions.** A fixed rubric, plus questions the model generates for this change.         | lintro-ops #24 milestone 0                                                                                                                                                                                                                                                       |
+| 4   | **Refute before posting.** A finding is challenged before it becomes an inline thread.                           | lintro-ops #24 milestone 0 (item 0.11); the verification call in decision A — one call per round, not one per finding (lintro-ops #10's per-finding wording is amended to match before transfer; measuring it on the eval harness is layer 6 work, not a dependency of the call) |
+| 5   | **Human-gated memory.** What the reviewer carries between rounds is admitted by a human, not by the model alone. | lintro-ops #24 milestone 5 (items 16 and 17)                                                                                                                                                                                                                                     |
+| 6   | **Eval-gated changes.** A change to the reviewer ships when the eval corpus says it is an improvement.           | the eval harness milestone, which milestone 0 runs ahead of                                                                                                                                                                                                                      |
 
-Layers 1 to 5 are milestone 0 work. Layer 6 belongs to the eval harness milestone; #2555
-records that milestone 0 "runs ahead of the eval harness and is transferred here issue
-by issue at pickup".
+Layers 1 to 4 are milestone 0 work. Layer 5 is milestone 5 work (lintro-ops #24 items 16
+and 17): reviewer memory lands there, behind its human gate and eval guard, not in
+milestone 0. Layer 6 belongs to the eval harness milestone; #2555 records that milestone
+0 "runs ahead of the eval harness and is transferred here issue by issue at pickup".
 
 ### C. Tracking
 
@@ -92,6 +93,12 @@ protocol, 11 issues) runs ahead of M1, and its issues are transferred into py-li
 by one at pickup, verbatim. [#2555](https://github.com/lgtm-hq/py-lintro/issues/2555) is
 the public umbrella and the home for every transferred issue; it is where the work is
 visible to contributors who cannot see lintro-ops.
+
+Release cadence: py-lintro cuts one release per merged PR — the release train opens a
+version PR after every merge and merges it. lintro-ops #24's "one completed milestone =
+one release" is the bookkeeping half of that flow: the milestone's release version PR is
+the one merged after the milestone's last sub-issue, and merging it is what closes the
+milestone (pickup protocol step 7). It does not hold back individual sub-issue releases.
 
 ### D. Interim merge policy
 
