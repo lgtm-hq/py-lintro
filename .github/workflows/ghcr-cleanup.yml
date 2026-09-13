@@ -53,7 +53,7 @@ permissions: {}
 jobs:
   prune-untagged:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@b0d71b2b37fd205bf12118f5084612ceeea09208 # v0.69.9
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@737747b1b8590900afc41a72efdd372e244ea39d # v0.69.10
     permissions:
       contents: read # checkout repo and lgtm-ci tooling sparse checkout
       packages: write # delete untagged GHCR package versions via Packages API
@@ -62,7 +62,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: 'b0d71b2b37fd205bf12118f5084612ceeea09208' # v0.69.9
+      tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -204,7 +204,7 @@ jobs:
 
   prune-untagged-base:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@b0d71b2b37fd205bf12118f5084612ceeea09208 # v0.69.9
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@737747b1b8590900afc41a72efdd372e244ea39d # v0.69.10
     permissions:
       contents: read # checkout repo and lgtm-ci tooling sparse checkout
       packages: write # delete untagged GHCR package versions via Packages API
@@ -213,7 +213,7 @@ jobs:
       min-age-days: >-
         ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
       dry-run: ${{ inputs.dry_run == true }}
-      tooling-ref: 'b0d71b2b37fd205bf12118f5084612ceeea09208' # v0.69.9
+      tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -233,3 +233,69 @@ jobs:
       runner-image: ubuntu-24.04
     secrets:
       token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Visibility contract (#2598): a scheduled failure is a red X in a run list
+  # no human reads, which is how the prune failed for five weeks (#2603). The
+  # verdict goes onto main's HEAD as one commit status so the checks tab shows
+  # it, and a failure opens or pings the deduplicated main-failure issue.
+  report-status:
+    name: 📣 Report the cleanup verdict on main
+    needs:
+      - prune-untagged
+      - sweep-ci-tags
+      - sweep-sha-tags
+      - sweep-tools-candidates
+      - prune-untagged-base
+    # always(): the status is the whole point of the job. A failure that
+    # skipped it would be invisible, which is the failure mode being removed.
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # checkout report-workflow-commit-status.sh
+      statuses: write # report ghcr-cleanup on main's HEAD
+    timeout-minutes: 5
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Report the commit status on main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          STATUS_CONTEXT: ghcr-cleanup
+          # yamllint disable-line rule:line-length
+          JOB_RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: scripts/ci/maintenance/report-workflow-commit-status.sh
+
+  notify-failure:
+    needs:
+      - prune-untagged
+      - sweep-ci-tags
+      - sweep-sha-tags
+      - sweep-tools-candidates
+      - prune-untagged-base
+    # Main-only: a manual dispatch from a feature branch must not open or
+    # ping the tracker. Deduplicated failure issue, the same mechanism
+    # dogfood-nightly and the provider smoke use: the first failure opens
+    # `fix(ci): main workflow failed: ghcr-cleanup`, later ones comment on
+    # it. The lane label keeps a prune failure distinguishable from a generic
+    # main failure at a glance.
+    if: failure() && github.ref == 'refs/heads/main'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@737747b1b8590900afc41a72efdd372e244ea39d # v0.69.10
+    permissions:
+      actions: read # read workflow/job metadata for the failure context
+      contents: read # repository context for the issue body
+      issues: write # open or ping the deduplicated failure issue
+    with:
+      workflow-key: ghcr-cleanup
+      failure-issue-labels: 'bug,ci,infrastructure,ghcr-cleanup'
+      tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
