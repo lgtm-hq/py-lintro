@@ -134,6 +134,17 @@ binary is the single delete-plus-rename API pair at the end; a kill there leaves
 `<asset>.new` in place and the next attempt promotes it from the reuse check. So
 **Re-run failed jobs** mostly re-drives the publish steps rather than repeating a build.
 
+For the npm leg itself, a re-run over already-published packages is read-first (#2631):
+each package already on the registry is checked with `npm dist-tag ls`, and when the
+requested tag already points at that version nothing is written — necessary, because the
+publish-scoped OIDC token cannot run `npm dist-tag add` at all (npm/cli#8547). If the
+tag points elsewhere (drift), the reconcile write is attempted once, and when the
+registry refuses it the package gets a `::warning::` naming the expected and actual tags
+plus a line in the job summary — while the remaining packages still publish. The run
+exits non-zero only after every package has been processed, so a half-published release
+completes first and any leftover drift is repaired with classic auth:
+`npm dist-tag add @lgtm-hq/<package>@<version> <tag>`.
+
 Do **not** dispatch `Publish - npm` live as a substitute — it cannot authenticate, and
 the `guard` job now refuses it outright. A `dry_run: true` dispatch remains available
 for exercising the packaging steps.

@@ -19,6 +19,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **npm**: a live re-run of the npm publish no longer aborts at the first
+  already-published package (#2631). The dist-tag reconcile now reads before it writes
+  (`npm dist-tag ls`), treats "tag already correct" as success, and — when the tag
+  really has drifted and the OIDC trusted-publishing token refuses the write — warns per
+  package, publishes the remaining packages, and fails at the end instead of stranding
+  the release half-published.
+
 ### Security
 
 ## [0.159.4] - 2026-09-13
