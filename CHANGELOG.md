@@ -13,6 +13,19 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.159.3] - 2026-09-13
+
+### Changed
+
+- **release**: version 0.159.2 (#2625) (e6de0c1)
 - **core**: two tools that can rewrite the same file never share a parallel batch
   (#2606). Overlap is computed from the run-scoped candidate files each mutating tool
   would actually be handed, canonicalised with `realpath`, so `Cargo.toml` relates to
@@ -37,13 +50,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   overrides the derived write precedence. Contradictory pairs fail planning with a
   message naming both tools and the config key, rather than falling back silently.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
-### Security
+- **core**: overlapping mutators never share a batch; precedence, demotion, idempotence
+  (#2621) (6355d4e)
 
 ## [0.159.2] - 2026-09-13
 
