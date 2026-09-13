@@ -3053,6 +3053,17 @@ def test_no_testpypi_workflow_or_endpoints_remain() -> None:
     assert_that(allowed).does_not_contain("test.pypi.org:443")
     assert_that(allowed).does_not_contain("upload.test.pypi.org:443")
 
+    # The upload job carries its own harden-runner allowlist; a staging host
+    # must not creep back in there either.
+    harden = next(
+        step
+        for step in publish["jobs"]["pypi-upload"]["steps"]
+        if "harden-runner" in str(step.get("uses", ""))
+    )
+    upload_allowed = set(str(harden["with"]["allowed-endpoints"]).split())
+    assert_that(upload_allowed).does_not_contain("test.pypi.org:443")
+    assert_that(upload_allowed).does_not_contain("upload.test.pypi.org:443")
+
 
 def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     """Release SBOM must gate publishes on high/critical vulns (#1118)."""
