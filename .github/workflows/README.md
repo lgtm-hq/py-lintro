@@ -89,7 +89,10 @@ comments so Renovate can track digest updates. Policy is enforced by
   `scripts/ci/mirror/`; see `docs/pre-commit.md`). It cannot use `release: published`:
   the release is created with `GITHUB_TOKEN`, whose actions GitHub does not raise
   workflow events for, so that trigger fired zero times across ~30 releases (#2599).
-  `workflow_dispatch` with a `release_tag` stays for manual backfill.
+  `workflow_dispatch` with a `release_tag` stays for manual backfill. A `mirror-token`
+  guard job gates the call, so while `MIRROR_REPO_TOKEN` is unset the mirror bump is
+  skipped with a `::warning::` and a step-summary line instead of failing the tag run
+  (#2622).
 
 Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
 are traceable from the Actions list rather than the default commit subject. The mirror
