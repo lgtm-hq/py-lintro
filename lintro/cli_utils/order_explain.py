@@ -247,6 +247,54 @@ def format_ownership_notice(tool_names: Sequence[str]) -> list[str]:
     return lines
 
 
+class _QuietLogger:
+    """Logger shim that discards the diff preflight's console output.
+
+    ``--explain-order`` explains a run rather than performing one, so the
+    warnings ``resolve_diff_scope`` would print about an unresolvable ref
+    belong to the real invocation, not to its preview.
+    """
+
+    @staticmethod
+    def console_output(**kwargs: object) -> None:
+        """Discard one console line.
+
+        Args:
+            **kwargs: Ignored console-output arguments.
+        """
+
+
+def _explained_diff_base(diff_base: str | None, paths: Sequence[str]) -> str | None:
+    """Resolve ``--diff`` the way the run would, without reporting on it.
+
+    The raw CLI value can be the "use the default branch" sentinel, which is
+    not a ref, so handing it straight to file discovery would scope the
+    explanation to nothing recognisable. Resolution failures fall back to the
+    full scan, which is what the explanation showed before this scoping
+    existed — an advisory preview must not be the thing that fails.
+
+    Args:
+        diff_base: Raw ``--diff`` value, or ``None``.
+        paths: Scan targets the run would use.
+
+    Returns:
+        The resolved base ref, or ``None`` to explain an unnarrowed run.
+    """
+    if diff_base is None:
+        return None
+    try:
+        from lintro.utils.execution.run_preflight import resolve_diff_scope
+
+        scope = resolve_diff_scope(
+            diff_base=diff_base,
+            paths=list(paths),
+            logger=_QuietLogger(),
+        )
+    except (ValueError, OSError, RuntimeError):
+        return None
+    return None if scope.failed else scope.base
+
+
 def explain_order_lines(
     tools: str | None,
     action: str,
@@ -254,6 +302,9 @@ def explain_order_lines(
     *,
     ignore_conflicts: bool = False,
     dry_run: bool = False,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    diff_base: str | None = None,
 ) -> list[str]:
     """Build the ``--explain-order`` output for a would-be run.
 
@@ -268,6 +319,9 @@ def explain_order_lines(
         ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
         dry_run: Mirror of ``fmt --dry-run``. A dry run rewrites nothing, so
             it batches as a read-only run and must be explained as one.
+        exclude: Mirror of the run's ``--exclude``.
+        include_venv: Mirror of the run's ``--include-venv``.
+        diff_base: Raw ``--diff`` value the run was given, or ``None``.
 
     Returns:
         Plain-text lines, ready to print one per line.
@@ -285,10 +339,17 @@ def explain_order_lines(
     # from the paths the run would have scanned. ``fmt --dry-run`` is a
     # read-only preview, so it must be explained with the batches it would
     # actually use rather than the mutating ones.
+    # The whole scope, not just the paths: overlap is resolved from the files
+    # each tool would actually be handed, so an explanation that dropped the
+    # excludes or the diff base would report conflicts and demotions for files
+    # the run could never touch.
     return format_order_report(
         build_order_report(
             selection.to_run,
             paths=list(paths) or None,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=_explained_diff_base(diff_base, paths),
             write_conflicts=action != "check" and not dry_run,
         ),
     )
@@ -301,6 +362,9 @@ def emit_order_explanation(
     paths: Sequence[str],
     ignore_conflicts: bool = False,
     dry_run: bool = False,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    diff_base: str | None = None,
 ) -> NoReturn:
     """Print the ``--explain-order`` output and exit without running any tool.
 
@@ -311,6 +375,9 @@ def emit_order_explanation(
         ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
         dry_run: Mirror of ``fmt --dry-run``, which rewrites nothing and
             therefore batches as a read-only run.
+        exclude: Mirror of the run's ``--exclude``.
+        include_venv: Mirror of the run's ``--include-venv``.
+        diff_base: Raw ``--diff`` value the run was given, or ``None``.
 
     Raises:
         SystemExit: Always. ``0`` once the order is printed, ``1`` when the
@@ -323,6 +390,9 @@ def emit_order_explanation(
             paths,
             ignore_conflicts=ignore_conflicts,
             dry_run=dry_run,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=diff_base,
         )
     except ValueError as exc:
         click.echo(str(exc), err=True)

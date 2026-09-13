@@ -946,25 +946,30 @@ them keeps working and needs no edit to succeed. The one hard break is
 `lintro list-tools --show-conflicts`, which is removed and now fails as an unknown
 option — use `lintro check --explain-order` to see what orders a run instead.
 
-Derivation rules:
+Derivation rules for **phase edges** — the per-pattern `FIX` → `FORMAT` → `CHECK`
+ordering. They are not the whole graph: a second class of edge, derived from the files
+each mutating tool would actually be handed, is added on top of them and is described
+under [Write precedence](#write-precedence-overlapping-mutators). Where the two disagree
+the write-conflict edge is the one that decides, so read the "no edge" rows below as "no
+_phase_ edge".
 
-| Rule              | Behaviour                                                                                   |
-| ----------------- | ------------------------------------------------------------------------------------------- |
-| Phase per pattern | A tool occupies the earliest phase it holds there: `FIX` → `FORMAT` → `CHECK`               |
-| One invocation    | A tool that both fixes and checks a pattern sits in `FIX`; its diagnostics come out with it |
-| Edges             | Every earlier-phase tool precedes every later-phase tool for that pattern                   |
-| Ties              | Equal phases derive no edge, so the tie breaks alphabetically                               |
-| Broad claims      | Only `*` subsumes: it joins every group, while `*.py` never joins `test_*.py`               |
-| Project-scoped    | A claim with no patterns (osv-scanner) derives no edges                                     |
-| Cycles            | Reported before ordering, naming the tools and the patterns whose edges closed them         |
+| Rule              | Behaviour                                                                                                                        |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Phase per pattern | A tool occupies the earliest phase it holds there: `FIX` → `FORMAT` → `CHECK`                                                    |
+| One invocation    | A tool that both fixes and checks a pattern sits in `FIX`; its diagnostics come out with it                                      |
+| Edges             | Every earlier-phase tool precedes every later-phase tool for that pattern                                                        |
+| Ties              | Equal phases derive no phase edge; two _writers_ that share a file still get a conflict edge                                     |
+| Broad claims      | Only `*` subsumes: `*.py` never joins the `test_*.py` group, though two writers of one `test_a.py` still conflict                |
+| Project-scoped    | A claim with no patterns (osv-scanner) derives no phase edge; a patternless _writer_ conflicts with every writer under its roots |
+| Cycles            | Reported before ordering, naming the tools and the patterns whose edges closed them                                              |
 
 The pairings this recovers include `ruff → black` on Python, `oxlint → oxfmt` on JS/TS,
 `stylelint → prettier` on CSS, `prettier → html-validate` on HTML and
 `shfmt → shellcheck` on shell.
 
-Parallel runs use the same graph: two tools share a batch only when no derived edge
-separates them, so a mutator and a tool that must observe its writes never run
-concurrently.
+Parallel runs use the same graph — both classes of edge — so two tools share a batch
+only when no derived edge separates them, so a mutator and a tool that must observe its
+writes never run concurrently.
 
 ### Inspecting the order
 

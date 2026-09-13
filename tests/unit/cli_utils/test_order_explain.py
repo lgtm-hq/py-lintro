@@ -355,3 +355,82 @@ def test_explain_forwards_the_scope_and_the_mutating_flag(
 
     assert_that(captured["paths"]).is_equal_to(["src"])
     assert_that(captured["write_conflicts"]).is_equal_to(expected)
+
+
+def test_explain_forwards_the_whole_run_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Excludes and the diff base reach the scheduler, not just the paths.
+
+    Overlap is resolved from the files each tool would actually be handed, so
+    an explanation that dropped the excludes or the diff base would report
+    conflicts and demotions for files the run could never touch.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    captured: dict[str, object] = {}
+
+    def _capture(names: object, **kwargs: object) -> DerivedOrder:
+        """Record the scheduler call and return an empty report.
+
+        Args:
+            names: Tool names the explanation resolved.
+            **kwargs: Scheduler keyword arguments to record.
+
+        Returns:
+            DerivedOrder: An empty report.
+        """
+        captured["names"] = names
+        captured.update(kwargs)
+        return _report(tools=())
+
+    monkeypatch.setattr(order_explain, "build_order_report", _capture)
+    monkeypatch.setattr(
+        order_explain,
+        "_explained_diff_base",
+        lambda _base, _paths: "origin/main",
+    )
+
+    order_explain.explain_order_lines(
+        "ruff",
+        "fmt",
+        ["src"],
+        exclude="build,dist",
+        include_venv=True,
+        diff_base="HEAD~1",
+    )
+
+    assert_that(captured["exclude"]).is_equal_to("build,dist")
+    assert_that(captured["include_venv"]).is_true()
+    assert_that(captured["diff_base"]).is_equal_to("origin/main")
+
+
+def test_an_unresolvable_diff_base_explains_the_unnarrowed_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A preview must not be the thing that fails on a bad ref.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+
+    def _raise(**_kwargs: object) -> NoReturn:
+        """Stand in for a diff base that cannot be resolved.
+
+        Args:
+            **_kwargs: Ignored preflight arguments.
+
+        Raises:
+            RuntimeError: Always.
+        """
+        raise RuntimeError("no such ref")
+
+    monkeypatch.setattr(
+        "lintro.utils.execution.run_preflight.resolve_diff_scope",
+        _raise,
+    )
+
+    assert_that(
+        order_explain._explained_diff_base("nope", ["src"]),
+    ).is_none()

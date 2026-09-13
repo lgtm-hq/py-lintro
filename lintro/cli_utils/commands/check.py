@@ -249,6 +249,9 @@ def check_command(
             action=DEFAULT_ACTION,
             paths=path_list,
             ignore_conflicts=ignore_conflicts,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=diff_base,
         )
 
     # Build tool-specific options string
