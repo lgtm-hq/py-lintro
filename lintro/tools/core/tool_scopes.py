@@ -201,6 +201,17 @@ def resolve_tool_scopes(
         include_venv: Whether virtual-environment directories are in scope.
         diff_base: Resolved ``--diff`` base ref, or ``None``.
 
+    There is deliberately no ``incremental`` parameter. ``--incremental``
+    narrows what each tool is *handed*, so threading it here would narrow the
+    candidate sets too and could only ever *remove* conflict edges — on the
+    strength of a per-tool mtime cache, the same evidence
+    :mod:`lintro.tools.core.verify_pass` keeps a documented floor for. An
+    overlap missed because a cache called a file unchanged is a lost write; an
+    overlap found for a file neither tool ends up touching costs one batch.
+    The asymmetry decides it: the verify pass narrows because a wrong answer
+    there is a wasted check, and this does not because a wrong answer here is
+    a race.
+
     Returns:
         One :class:`ToolScope` per name, keyed by the lowercased name.
     """

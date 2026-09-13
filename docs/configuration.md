@@ -928,12 +928,17 @@ defaults:
 
 ### Tool Ordering Configuration
 
-**Execution order is not configurable.** Since #1742 it is _derived_ from what each tool
+**Execution order is not authored.** Since #1742 it is _derived_ from what each tool
 declares it touches and what it does to it, so it is complete, verifiable and the same
 everywhere lintro reports it. The scalar `tool_order`, `tool_order_custom`,
 `tool_priorities` and `definition.priority` settings are deleted; so is the
 `[tool.lintro.post_checks]` table, whose only real job — running black after ruff — now
 falls out of the model.
+
+There is exactly one configurable input, and it is a tie-break rather than an order:
+`execution.precedence` names which of two tools that can write the same file has
+authority over the other. Everything else about the order still follows from the claims
+— see [Write precedence](#write-precedence-overlapping-mutators).
 
 **Upgrading.** Leftover `tool_order`, `tool_order_custom`, `tool_priorities` or
 `[tool.lintro.post_checks]` keys warn as unknown and are ignored; a run that carried
@@ -1097,11 +1102,18 @@ tool's edit. The derived scheduler closes that by deriving a second class of edg
 alongside the per-pattern `FIX` → `FORMAT` → `CHECK` ordering.
 
 **Overlap is decided by files, not by globs.** Every mutating tool's run-scoped
-candidate list is resolved the way the verify pass resolves it — the run's paths,
-excludes, `--incremental` and `--diff` all apply — and canonicalised with `realpath`.
-Two writers conflict when those sets intersect. So `Cargo.toml` (clippy) relates to
-`*.toml` (taplo), and `*.py` relates to `test_*.py`, neither of which a string
-comparison of the patterns would ever find.
+candidate list is resolved the way the verify pass resolves it — the run's paths, its
+excludes and `--diff` all apply — and canonicalised with `realpath`. Two writers
+conflict when those sets intersect. So `Cargo.toml` (clippy) relates to `*.toml`
+(taplo), and `*.py` relates to `test_*.py`, neither of which a string comparison of the
+patterns would ever find.
+
+`--incremental` is the deliberate exception: it narrows what each tool is _handed_, but
+conflict planning ignores it and compares the unnarrowed sets. Narrowing can only
+_remove_ edges, and the evidence it would rest on is a per-tool mtime cache — the same
+kind of evidence the verify pass keeps a documented floor for. An overlap missed because
+a cache called a file unchanged is a lost write; an overlap found for a file neither
+tool ends up touching costs one batch.
 
 Three cases cannot be answered by a file list, and all three split the batch rather than
 risk a lost write:

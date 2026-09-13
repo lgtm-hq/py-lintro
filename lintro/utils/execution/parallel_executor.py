@@ -129,7 +129,10 @@ def run_tools_parallel(
     # sequential run (#1742).
     # Under a mutating action the batching is handed the run's scan scope so
     # overlap is decided by the files each tool would actually be given
-    # (#2606) rather than by comparing glob strings.
+    # (#2606) rather than by comparing glob strings. ``incremental`` is
+    # deliberately not passed: narrowing the candidate sets could only remove
+    # conflict edges, and an overlap missed because a mtime cache called a
+    # file unchanged is a lost write. Over-approximating costs one batch.
     batches = tool_manager.get_parallel_batches(
         tools_to_run,
         action=action,

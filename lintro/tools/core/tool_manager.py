@@ -35,10 +35,13 @@ class ToolManager:
     - Tool execution order, derived from declared claims
     - Tool configuration management
 
-    Execution order is not configurable: it is derived from what each tool
+    Execution order is not authored: it is derived from what each tool
     declares it touches and what it does to it (``FIX`` -> ``FORMAT`` ->
     ``CHECK`` per pattern), so it is complete, verifiable and identical
-    everywhere it is reported.
+    everywhere it is reported. ``execution.precedence`` is the one
+    configurable input, and it is a tie-break rather than an order: it names
+    which of two tools that can write the same file has authority over the
+    other (#2606).
     """
 
     _initialized: bool = field(default=False, init=False)
