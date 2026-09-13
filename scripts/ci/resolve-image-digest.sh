@@ -22,8 +22,11 @@ set -euo pipefail
 #      docker-ci promoted for the exact commit this run checked out. Both tag
 #      shapes are tried because the two publishers disagree: docker-ci's
 #      promote step asks docker/metadata-action for `format=long` while the
-#      release build emits the default short form. Coherent by construction:
-#      image and manifest come from the same tree.
+#      release build emits the default short form. The tag is a hint, not
+#      proof: tags are mutable and the short form is seven characters, so a
+#      candidate is accepted only once its own
+#      `org.opencontainers.image.revision` label says it was built from this
+#      commit. A candidate that does not attest to it is ignored, not used.
 #   2. `<repo>:<FALLBACK_TAG>` (default `latest`)  the newest published
 #      release. docker-ci only promotes `sha-` tags for main pushes that ran
 #      the docker pipeline, so a nightly on a docs-only HEAD has no per-commit
@@ -56,6 +59,8 @@ Environment:
   IMAGE_REPO    Optional. Image repository
                 (default: ghcr.io/lgtm-hq/py-lintro).
   COMMIT_TAG_PREFIX  Optional. Per-commit tag prefix (default: sha-).
+                A per-commit candidate is used only when its
+                org.opencontainers.image.revision label names COMMIT_SHA.
   FALLBACK_TAG  Optional. Tag used when no per-commit image exists
                 (default: latest).
   DOCKER_BIN    Optional. Docker executable (default: docker). Tests point
@@ -87,6 +92,8 @@ image_repo="${IMAGE_REPO:-ghcr.io/lgtm-hq/py-lintro}"
 commit_tag_prefix="${COMMIT_TAG_PREFIX:-sha-}"
 fallback_tag="${FALLBACK_TAG:-latest}"
 docker_bin="${DOCKER_BIN:-docker}"
+
+lower() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]'; }
 
 log_info() { echo "[INFO] $*"; }
 log_warn() { echo "::warning::$*"; }
@@ -133,7 +140,7 @@ image_label() {
 		' 2>/dev/null || true
 }
 
-commit_sha_lower="$(printf '%s' "$commit_sha" | tr '[:upper:]' '[:lower:]')"
+commit_sha_lower="$(lower "$commit_sha")"
 commit_tags=(
 	"${commit_tag_prefix}${commit_sha_lower}"
 	"${commit_tag_prefix}${commit_sha_lower:0:7}"
@@ -143,16 +150,29 @@ tag=""
 digest=""
 
 for candidate in "${commit_tags[@]}"; do
-	if digest="$(resolve_digest "${image_repo}:${candidate}")"; then
-		source="commit"
-		tag="$candidate"
-		log_info "Resolved the per-commit image for ${commit_sha} via ${candidate}"
-		break
+	candidate_digest="$(resolve_digest "${image_repo}:${candidate}")" || continue
+	# Trust the image's own attestation, never the tag that led to it. A
+	# stale, re-pointed or (at seven characters) ambiguous tag would otherwise
+	# hand this run an image built from some other commit and verify it
+	# against THIS commit's manifest — the mismatch this script exists to
+	# prevent, reintroduced through the preferred path.
+	candidate_revision="$(
+		image_label "${image_repo}@${candidate_digest}" \
+			org.opencontainers.image.revision
+	)"
+	if [[ "$(lower "$candidate_revision")" != "$commit_sha_lower" ]]; then
+		log_warn "${image_repo}:${candidate} does not attest to ${commit_sha} (revision: '${candidate_revision:-none}'); ignoring it"
+		continue
 	fi
+	digest="$candidate_digest"
+	source="commit"
+	tag="$candidate"
+	log_info "Resolved the per-commit image for ${commit_sha} via ${candidate}"
+	break
 done
 
 if [[ -z "$source" ]]; then
-	log_warn "No per-commit image for ${commit_sha} (tried: ${commit_tags[*]}); falling back to :${fallback_tag}"
+	log_warn "No per-commit image attesting to ${commit_sha} (tried: ${commit_tags[*]}); falling back to :${fallback_tag}"
 	if ! digest="$(resolve_digest "${image_repo}:${fallback_tag}")"; then
 		log_error "Could not resolve ${image_repo}:${fallback_tag}"
 		log_error "The nightly has no image to lint with; failing loudly rather than skipping coverage."
@@ -168,7 +188,7 @@ revision="$(image_label "$image" org.opencontainers.image.revision)"
 [[ -n "$version" ]] || version="unknown"
 
 if [[ "$source" == "commit" ]]; then
-	# The image was promoted for this very commit, so the checkout already
+	# The image attested to this very commit above, so the checkout already
 	# holds the manifest it must be verified against.
 	manifest_ref="$commit_sha"
 else
