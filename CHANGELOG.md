@@ -21,6 +21,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.159.4] - 2026-09-13
+
+### Fixed
+
+- **ci**: report the GHCR cleanup verdict on main and auto-file failures (#2628)
+  (67cba5b)
+- **release**: drop the dead TestPyPI lane (#2618) (b8f104c)
+
 ## [0.159.3] - 2026-09-13
 
 ### Changed
