@@ -3034,6 +3034,37 @@ def test_publish_pypi_top_level_permissions_are_empty() -> None:
     assert_that(homebrew).contains_entry({"contents": "write"})
 
 
+def test_no_testpypi_workflow_or_endpoints_remain() -> None:
+    """The dead TestPyPI staging lane stays deleted (#2601).
+
+    ``publish-testpypi.yml`` never ran once, so it was a secret and an
+    environment kept alive for nothing. Releases are verified by installing
+    from real PyPI. The egress assertion is what stops the lane creeping back
+    in as an allowlisted upload host on the production build job.
+    """
+    workflow_dir = _REPO_ROOT / ".github" / "workflows"
+    matches = sorted(path.name for path in workflow_dir.glob("*testpypi*"))
+    assert_that(matches).is_empty()
+
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    build_with = publish["jobs"]["pypi-build"]["with"]
+    allowed = set(build_with["allowed-endpoints"].split())
+    assert_that(build_with["allowed-endpoints-mode"]).is_equal_to("replace")
+    assert_that(allowed).does_not_contain("test.pypi.org:443")
+    assert_that(allowed).does_not_contain("upload.test.pypi.org:443")
+
+    # The upload job carries its own harden-runner allowlist; a staging host
+    # must not creep back in there either.
+    harden = next(
+        step
+        for step in publish["jobs"]["pypi-upload"]["steps"]
+        if "harden-runner" in str(step.get("uses", ""))
+    )
+    upload_allowed = set(str(harden["with"]["allowed-endpoints"]).split())
+    assert_that(upload_allowed).does_not_contain("test.pypi.org:443")
+    assert_that(upload_allowed).does_not_contain("upload.test.pypi.org:443")
+
+
 def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     """Release SBOM must gate publishes on high/critical vulns (#1118)."""
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
