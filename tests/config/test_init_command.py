@@ -188,6 +188,7 @@ def test_static_init_explains_format_ownership(
     with runner.isolated_filesystem(temp_dir=tmp_path):
         result = runner.invoke(init_command, ["--static"])
 
+        assert_that(result.exit_code).is_equal_to(0)
         assert_that(result.output).contains("Format ownership:")
         assert_that(result.output).contains("owns FORMAT")
         assert_that(result.output).contains("execution.precedence")
@@ -212,4 +213,7 @@ def test_init_omits_the_notice_when_nothing_contends(
     with runner.isolated_filesystem(temp_dir=tmp_path):
         result = runner.invoke(init_command, ["--static"])
 
+        # Without this the negative assertion below is satisfied by any run
+        # that crashed before reaching the notice.
+        assert_that(result.exit_code).is_equal_to(0)
         assert_that(result.output).does_not_contain("Format ownership:")

@@ -253,6 +253,7 @@ def explain_order_lines(
     paths: Sequence[str],
     *,
     ignore_conflicts: bool = False,
+    dry_run: bool = False,
 ) -> list[str]:
     """Build the ``--explain-order`` output for a would-be run.
 
@@ -265,6 +266,8 @@ def explain_order_lines(
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would scan, used for language detection.
         ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
+        dry_run: Mirror of ``fmt --dry-run``. A dry run rewrites nothing, so
+            it batches as a read-only run and must be explained as one.
 
     Returns:
         Plain-text lines, ready to print one per line.
@@ -279,12 +282,14 @@ def explain_order_lines(
     )
     # Explain what *this* invocation would do: a mutating action derives
     # write-conflict edges, a read-only one does not, and overlap is decided
-    # from the paths the run would have scanned.
+    # from the paths the run would have scanned. ``fmt --dry-run`` is a
+    # read-only preview, so it must be explained with the batches it would
+    # actually use rather than the mutating ones.
     return format_order_report(
         build_order_report(
             selection.to_run,
             paths=list(paths) or None,
-            write_conflicts=action != "check",
+            write_conflicts=action != "check" and not dry_run,
         ),
     )
 
@@ -295,6 +300,7 @@ def emit_order_explanation(
     action: str,
     paths: Sequence[str],
     ignore_conflicts: bool = False,
+    dry_run: bool = False,
 ) -> NoReturn:
     """Print the ``--explain-order`` output and exit without running any tool.
 
@@ -303,6 +309,8 @@ def emit_order_explanation(
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would have scanned.
         ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
+        dry_run: Mirror of ``fmt --dry-run``, which rewrites nothing and
+            therefore batches as a read-only run.
 
     Raises:
         SystemExit: Always. ``0`` once the order is printed, ``1`` when the
@@ -314,6 +322,7 @@ def emit_order_explanation(
             action,
             paths,
             ignore_conflicts=ignore_conflicts,
+            dry_run=dry_run,
         )
     except ValueError as exc:
         click.echo(str(exc), err=True)

@@ -433,7 +433,15 @@ def patterns_may_overlap(left: str, right: str) -> bool:
         return fnmatch.fnmatch(left, right)
     if not right_wild:
         return fnmatch.fnmatch(right, left)
-    return _wild_extension(left) == _wild_extension(right)
+    left_ext, right_ext = _wild_extension(left), _wild_extension(right)
+    if left_ext is None or right_ext is None:
+        # One side's reach is not bounded by a literal extension, so the
+        # extension test cannot prove anything: ``.env.*`` and ``*.env`` both
+        # match ``.env.env``, and ``Dockerfile.*`` and ``*.py`` both match
+        # ``Dockerfile.py``. Answering "disjoint" here would be a false
+        # negative, and a false negative is a lost write.
+        return True
+    return left_ext == right_ext
 
 
 def _wild_extension(pattern: str) -> str | None:
@@ -444,8 +452,10 @@ def _wild_extension(pattern: str) -> str | None:
 
     Returns:
         The extension after the final dot when it holds no wildcard, else
-        ``None`` — which compares unequal to nothing and therefore keeps the
-        answer conservative only when both sides are ``None``.
+        ``None``, meaning "this pattern's reach is not bounded by an
+        extension". The caller must read ``None`` as *unknown* rather than as
+        a value to compare: comparing it would call an unbounded pattern
+        disjoint from every extension it does not literally equal.
     """
     _, dot, ext = pattern.rpartition(".")
     if not dot or not ext or any(ch in ext for ch in "*?["):

@@ -10,10 +10,11 @@ exactly as it did before.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NoReturn
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.enums.action import Action
 from lintro.enums.capability import Cap
@@ -23,10 +24,16 @@ from lintro.tools.core.scheduler import (
     EdgeSource,
     OrderPlanningError,
     build_order_report,
+    configured_precedence,
     derive_order,
 )
 from lintro.tools.core.tool_manager import ToolManager
-from lintro.tools.core.tool_scopes import resolve_tool_scopes, write_conflict
+from lintro.tools.core.tool_scopes import (
+    ToolScope,
+    patterns_may_overlap,
+    resolve_tool_scopes,
+    write_conflict,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -411,3 +418,168 @@ def test_candidates_are_canonical_paths_not_spellings(tmp_path: Path) -> None:
     assert_that(str(link)).is_not_equal_to(str(real))
     assert_that(through_link.candidates).is_equal_to(through_real.candidates)
     assert_that(write_conflict(through_real, through_link)).is_true()
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        (".env.*", "*.env"),
+        ("Dockerfile.*", "*.py"),
+        ("*.py", "test_*.py"),
+        ("Cargo.toml", "*.toml"),
+        ("*", "*.py"),
+    ],
+)
+def test_patterns_that_can_match_one_file_are_never_called_disjoint(
+    left: str,
+    right: str,
+) -> None:
+    """The no-paths fallback answers "provably disjoint?", never "equal?".
+
+    ``.env.env`` matches ``.env.*`` and ``*.env``; ``Dockerfile.py`` matches
+    ``Dockerfile.*`` and ``*.py``. An extension test cannot bound a pattern
+    whose extension is itself a wildcard, so an unknown extension has to mean
+    "may overlap" — reading it as a value to compare turns "cannot tell" into
+    "provably disjoint", and a false negative here is a lost write.
+
+    Args:
+        left: One glob pattern.
+        right: The other glob pattern.
+    """
+    assert_that(patterns_may_overlap(left, right)).is_true()
+    assert_that(patterns_may_overlap(right, left)).is_true()
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [("*.py", "*.toml"), ("*.py", "*.pyi"), ("Cargo.toml", "Cargo.lock")],
+)
+def test_provably_disjoint_patterns_stay_disjoint(left: str, right: str) -> None:
+    """Erring towards True must not collapse into "everything overlaps".
+
+    Args:
+        left: One glob pattern.
+        right: The other glob pattern.
+    """
+    assert_that(patterns_may_overlap(left, right)).is_false()
+
+
+def test_a_missing_scope_entry_is_not_a_free_pass() -> None:
+    """A claimed writer absent from a supplied scope map still conflicts.
+
+    Defaulting a missing entry to an empty scope would read as "declares
+    nothing", which exempts a mutating tool from every conflict edge — the
+    exact race the rule closes.
+    """
+    claims = {
+        "one_fixer": _claims((["*.py"], {Cap.FIX})),
+        "two_fixer": _claims((["*.py"], {Cap.FIX})),
+    }
+    # ``two_fixer`` is missing; a defaults-only substitute for it would make
+    # it a non-writer and drop the pair's only edge.
+    partial = {
+        "one_fixer": ToolScope(
+            tool="one_fixer",
+            patterns=("*.py",),
+            mutating_capabilities=frozenset({Cap.FIX}),
+        ),
+    }
+
+    derived = derive_order(claims, scopes=partial)
+
+    assert_that(
+        [edge for edge in derived.edges if edge.source is EdgeSource.OVERLAP],
+    ).is_length(1)
+
+
+def test_an_override_accepts_the_cli_spelling_of_a_tool_id() -> None:
+    """``golangci-lint`` in config must reach the id ``golangci_lint``.
+
+    Registry ids are inconsistent about the separator — ``golangci_lint`` and
+    ``astro-check`` are both real — so neither "always underscore" nor "always
+    hyphen" canonicalises a name. It is resolved against the ids in the run
+    instead, which cannot invent a tool that is not there.
+    """
+    derived = derive_order(
+        {
+            "golangci_lint": _claims((["*.go"], {Cap.FIX})),
+            "ruff": _claims((["*.py"], {Cap.FIX})),
+        },
+        precedence=[["golangci-lint", "ruff"]],
+    )
+
+    assert_that(
+        [edge.source for edge in derived.edges],
+    ).contains(EdgeSource.OVERRIDE)
+    assert_that(list(derived.tools)).is_equal_to(["ruff", "golangci_lint"])
+
+
+def test_a_narrowed_scan_scope_still_finds_the_conflict(tree: Path) -> None:
+    """Scoping the run to one file keeps the writers of that file apart.
+
+    ``--diff`` and an explicit file argument both narrow what the run hands
+    each tool, and overlap is resolved from those narrowed sets. Narrowing
+    must not erase a conflict on a file both tools still reach.
+
+    Args:
+        tree: Mixed-language scan root.
+    """
+    only_python = [str(tree / "module.py")]
+
+    depth = _depth(
+        ToolManager().get_parallel_batches(
+            ["ruff", "typos"],
+            action=Action.FIX,
+            paths=only_python,
+        ),
+    )
+
+    assert_that(depth["ruff"]).is_not_equal_to(depth["typos"])
+
+
+def test_a_narrowed_scan_scope_frees_tools_it_separates(tree: Path) -> None:
+    """Two writers scoped to different files may share a batch.
+
+    Args:
+        tree: Mixed-language scan root.
+    """
+    batches = ToolManager().get_parallel_batches(
+        ["ruff", "taplo"],
+        action=Action.FIX,
+        paths=[str(tree / "module.py"), str(tree / "settings.toml")],
+    )
+
+    assert_that(batches).is_length(1)
+    assert_that(batches[0]).contains("ruff", "taplo")
+
+
+def test_an_unreadable_config_says_the_override_was_dropped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Failing open on a bad config must not be silent.
+
+    A user whose override was dropped would otherwise see the derived order
+    and believe it was theirs.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+    """
+    import lintro.config as config_module
+
+    def _raise() -> NoReturn:
+        """Stand in for a configuration that cannot be read.
+
+        Raises:
+            ValueError: Always.
+        """
+        raise ValueError("unparseable")
+
+    monkeypatch.setattr(config_module, "get_config", _raise)
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)))
+    try:
+        assert_that(configured_precedence()).is_empty()
+    finally:
+        logger.remove(sink)
+
+    assert_that("\n".join(messages)).contains(PRECEDENCE_CONFIG_KEY)

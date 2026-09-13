@@ -131,3 +131,69 @@ def test_parse_precedence_rejects_a_self_pair() -> None:
     assert_that(_parse_precedence).raises(ValueError).when_called_with(
         [["ruff", "ruff"]],
     )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ruff",
+        [["ruff"]],
+        [["ruff", "black", "typos"]],
+        [["ruff", 1]],
+        [[None, "black"]],
+        [[" ", "black"]],
+        [["ruff", "ruff"]],
+    ],
+    ids=[
+        "scalar-not-a-list",
+        "one-element-entry",
+        "three-element-entry",
+        "non-string-part",
+        "null-part",
+        "blank-name",
+        "tool-against-itself",
+    ],
+)
+def test_parse_precedence_rejects_malformed_input(raw: object) -> None:
+    """Every rejection path names the key the user has to edit.
+
+    The parser is the only place a precedence pair is validated, so a shape it
+    lets through becomes an override that silently matches nothing.
+
+    Args:
+        raw: The malformed value as YAML or TOML would produce it.
+    """
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence).raises(ValueError).when_called_with(raw)
+    with pytest.raises(ValueError, match="execution.precedence"):
+        _parse_precedence(raw)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [None, [], ()],
+    ids=["absent", "empty-list", "empty-tuple"],
+)
+def test_parse_precedence_accepts_an_empty_override(raw: object) -> None:
+    """No configured precedence is not an error; it is the default.
+
+    Args:
+        raw: A value meaning "nothing configured".
+    """
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence(raw)).is_empty()
+
+
+def test_parse_precedence_keeps_a_repeated_pair() -> None:
+    """The parser normalises; it does not de-duplicate.
+
+    Collapsing a pair and its reverse is the scheduler's job, and it raises
+    there rather than letting one silently win.
+    """
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(
+        _parse_precedence([["ruff", "black"], ["ruff", "black"]]),
+    ).is_equal_to([("ruff", "black"), ("ruff", "black")])

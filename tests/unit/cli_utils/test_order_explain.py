@@ -303,3 +303,55 @@ def test_doctor_section_truncates_a_long_demotion_list() -> None:
     lines = format_doctor_order_section(_report(demotions=demotions))
 
     assert_that(lines).contains("    ... and 2 more demotion(s)")
+
+
+@pytest.mark.parametrize(
+    ("action", "dry_run", "expected"),
+    [("fmt", False, True), ("fmt", True, False), ("check", False, False)],
+)
+def test_explain_forwards_the_scope_and_the_mutating_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    dry_run: bool,
+    expected: bool,
+) -> None:
+    """The explanation is built for the invocation it claims to describe.
+
+    A mutating run derives write-conflict edges and a read-only one does not,
+    so ``--explain-order`` has to pass the run's paths and the right flag or
+    it prints an order that invocation would never have used. ``fmt
+    --dry-run`` rewrites nothing, so it belongs on the read-only side.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture.
+        action: Action the invocation would perform.
+        dry_run: Whether the invocation previews rather than writes.
+        expected: Whether write conflicts should be derived.
+    """
+    captured: dict[str, object] = {}
+
+    def _capture(names: object, **kwargs: object) -> DerivedOrder:
+        """Record the scheduler call and return an empty report.
+
+        Args:
+            names: Tool names the explanation resolved.
+            **kwargs: Scheduler keyword arguments to record.
+
+        Returns:
+            DerivedOrder: An empty report.
+        """
+        captured["names"] = names
+        captured.update(kwargs)
+        return _report(tools=())
+
+    monkeypatch.setattr(order_explain, "build_order_report", _capture)
+
+    order_explain.explain_order_lines(
+        "ruff",
+        action,
+        ["src"],
+        dry_run=dry_run,
+    )
+
+    assert_that(captured["paths"]).is_equal_to(["src"])
+    assert_that(captured["write_conflicts"]).is_equal_to(expected)

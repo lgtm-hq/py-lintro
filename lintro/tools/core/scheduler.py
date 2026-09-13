@@ -66,6 +66,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING
 
+from loguru import logger
+
 from lintro.enums.capability import Cap
 from lintro.tools.core.tool_scopes import (
     ToolScope,
@@ -468,8 +470,35 @@ def _demotion_rule(
     return _precedence_rule(left, right)
 
 
+def _relaxed_tool_index(tools: Sequence[str]) -> dict[str, str]:
+    """Index this run's tool ids by a spelling-insensitive key.
+
+    Registry ids are inconsistent about the separator — ``golangci_lint`` and
+    ``astro-check`` are both real — so neither "always underscore" nor "always
+    hyphen" can canonicalise a name a user typed. Matching against the ids
+    actually in the run does, and it cannot invent a tool that is not there.
+
+    Args:
+        tools: Tool ids in this run.
+
+    Returns:
+        Mapping of relaxed key to tool id, omitting any key two ids share.
+    """
+    index: dict[str, str] = {}
+    clashes: set[str] = set()
+    for tool in tools:
+        key = tool.lower().replace("-", "_")
+        if key in index and index[key] != tool:
+            clashes.add(key)
+        index[key] = tool
+    for key in clashes:
+        del index[key]
+    return index
+
+
 def _override_map(
     precedence: Sequence[Sequence[str]],
+    tools: Sequence[str] = (),
 ) -> dict[tuple[str, str], str]:
     """Index configured ``[winner, loser]`` pairs by the unordered pair.
 
@@ -477,6 +506,10 @@ def _override_map(
         precedence: Pairs from ``execution.precedence``. The first element
             has authority: it runs last, so its write survives, and it keeps
             ``FORMAT``.
+        tools: Tool ids in this run. A configured name is resolved against
+            them ignoring ``-``/``_``, so ``golangci-lint`` — the spelling the
+            CLI accepts everywhere else — reaches the id ``golangci_lint``
+            instead of becoming an override that matches nothing.
 
     Returns:
         Mapping of the alphabetically sorted pair to the winning tool id.
@@ -488,9 +521,13 @@ def _override_map(
             "whichever was written last" is the fail-open this rule exists to
             close — the same reason a configured cycle is rejected.
     """
+    index = _relaxed_tool_index(tools)
     indexed: dict[tuple[str, str], str] = {}
     for pair in precedence:
-        parts = [str(part).lower() for part in pair]
+        parts = [
+            index.get(str(part).lower().replace("-", "_"), str(part).lower())
+            for part in pair
+        ]
         # A malformed or self-referential pair is rejected by the config
         # loader before it gets here; skipping it keeps a direct API caller
         # from crashing the scheduler on input no config file can produce.
@@ -870,12 +907,20 @@ def derive_order(
         resolved = (
             dict(scopes) if scopes is not None else _scopes_from_claims(claims_by_tool)
         )
-        run_scopes = {name: resolved.get(name, ToolScope(tool=name)) for name in tools}
+        # A name missing from a caller-supplied map must not fall back to a
+        # defaults-only scope: that reads as "declares nothing", which exempts
+        # a mutating tool from every conflict edge — the exact race this rule
+        # closes. Fall back to what its claims say instead.
+        from_claims = _scopes_from_claims(claims_by_tool)
+        run_scopes = {
+            name: resolved[name] if name in resolved else from_claims[name]
+            for name in tools
+        }
         conflict_edges, demotions = _conflict_edges(
             tools,
             run_scopes,
             edges,
-            _override_map(precedence),
+            _override_map(precedence, tools),
         )
         edges.extend(conflict_edges)
 
@@ -905,7 +950,15 @@ def configured_precedence() -> tuple[tuple[str, str], ...]:
         from lintro.config import get_config
 
         raw = getattr(get_config().execution, "precedence", None) or ()
-    except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
+    except (ImportError, OSError, ValueError, AttributeError, RuntimeError) as exc:
+        # Fail open — ordering must not be the thing an unusable config fails
+        # on — but never silently: a user whose override was dropped would
+        # otherwise see the derived order and believe it was theirs.
+        logger.warning(
+            f"Ignoring {PRECEDENCE_CONFIG_KEY}: the configuration could not "
+            f"be read ({type(exc).__name__}: {exc}). The derived write "
+            "precedence is in effect.",
+        )
         return ()
     pairs: list[tuple[str, str]] = []
     for entry in raw:

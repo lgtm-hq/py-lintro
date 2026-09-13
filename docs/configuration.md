@@ -1196,9 +1196,10 @@ a loop.
 
 **Performance shape.** A broad-pattern mutator is a serialisation point: typos claims
 `*`, so it overlaps every other writer and is a batch of one until it narrows its claim.
-Pattern-disjoint groups stay parallel — hadolint and yamllint still share a batch. Real
-projects mix file types, so two or three batches is the common case, and splitting when
-in doubt costs one batch while not splitting costs a lost edit.
+Pattern-disjoint groups stay parallel — ruff (`*.py`) and taplo (`*.toml`) still share a
+batch, and both of those are writers, which is what makes the example worth anything.
+Real projects mix file types, so two or three batches is the common case, and splitting
+when in doubt costs one batch while not splitting costs a lost edit.
 
 ### Ruff vs Black Policy (Python)
 
