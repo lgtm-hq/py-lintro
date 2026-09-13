@@ -217,14 +217,45 @@ jobs:
         uploads.github.com:443
         pipelines.actions.githubusercontent.com:443
 
+  mirror-token:
+    name: Check mirror token
+    # Secrets are not readable from a job-level ``if``, so the presence of
+    # MIRROR_REPO_TOKEN is resolved in a step and re-exported as an output the
+    # mirror job can gate on. Until the owner creates the secret the mirror
+    # bump is skipped with a warning instead of failing the whole tag run
+    # (#2622).
+    needs: [github-release]
+    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      has_token: ${{ steps.probe.outputs.has_token }}
+    steps:
+      - name: Probe MIRROR_REPO_TOKEN
+        id: probe
+        env:
+          TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
+        run: |
+          msg="MIRROR_REPO_TOKEN is not set; lintro-pre-commit mirror bump skipped"
+          if [ -n "$TOKEN" ]; then
+            echo "has_token=true" >>"$GITHUB_OUTPUT"
+            echo "MIRROR_REPO_TOKEN is set; mirror bump will run." \
+              >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "has_token=false" >>"$GITHUB_OUTPUT"
+            echo "::warning::${msg}"
+            echo "${msg}." >>"$GITHUB_STEP_SUMMARY"
+          fi
+
   mirror-release:
     name: Bump lintro-pre-commit mirror
     # The mirror bump cannot run off `release: published`: this pipeline
     # creates the release with GITHUB_TOKEN and GitHub suppresses workflow
     # events for it, so mirror-release.yml never fired (#2599). Calling it
     # here is the only trigger that sees the automated release train.
-    needs: [github-release]
-    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    needs: [github-release, mirror-token]
+    # yamllint disable-line rule:line-length
+    if: ${{ !startsWith(github.ref_name, 'actions-v') && needs.mirror-token.outputs.has_token == 'true' }}
     uses: ./.github/workflows/mirror-release.yml
     permissions:
       # read: sparse checkout of scripts/ci/mirror in this repo. Mirror-side

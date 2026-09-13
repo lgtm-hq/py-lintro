@@ -3037,6 +3037,64 @@ def test_tag_pipeline_calls_the_mirror_after_the_github_release() -> None:
             ).is_greater_than_or_equal_to(level)
 
 
+def test_mirror_token_guard_probes_the_secret_into_an_output() -> None:
+    """A guard job turns the unreadable secret into a job output (#2622).
+
+    Secrets cannot be referenced from a job-level ``if``, so the only way to
+    gate the mirror call on ``MIRROR_REPO_TOKEN`` existing is to read it into
+    a step env var and re-export the verdict. The job itself needs nothing
+    from the repo, hence ``permissions: {}``.
+    """
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["mirror-token"]
+
+    assert_that(job["permissions"]).is_equal_to({})
+    assert_that(job["needs"]).contains("github-release")
+    assert_that(job["outputs"]["has_token"]).is_equal_to(
+        "${{ steps.probe.outputs.has_token }}",
+    )
+
+    step = next(s for s in _job_steps(workflow, job="mirror-token") if "run" in s)
+    assert_that(step["id"]).is_equal_to("probe")
+    assert_that(step["env"]["TOKEN"]).is_equal_to(
+        "${{ secrets.MIRROR_REPO_TOKEN }}",
+    )
+    run = step["run"]
+    assert_that(run).contains("has_token=true")
+    assert_that(run).contains("has_token=false")
+    assert_that(run).contains("$GITHUB_OUTPUT")
+    assert_that(run).contains("$GITHUB_STEP_SUMMARY")
+
+
+def test_mirror_token_guard_warns_when_the_secret_is_absent() -> None:
+    """The skip is loud: an annotation plus a step-summary line (#2622)."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    step = next(s for s in _job_steps(workflow, job="mirror-token") if "run" in s)
+    message = "MIRROR_REPO_TOKEN is not set; lintro-pre-commit mirror bump skipped"
+
+    run = step["run"]
+    assert_that(run).contains(f'msg="{message}"')
+    assert_that(run).contains('echo "::warning::${msg}"')
+    assert_that(run).contains('echo "${msg}." >>"$GITHUB_STEP_SUMMARY"')
+
+
+def test_mirror_release_is_gated_on_the_token_guard() -> None:
+    """The mirror call waits for the guard and runs only when it says true.
+
+    Without this the job fails every tag at checkout with "Input required and
+    not supplied: token", reddening an otherwise complete release run (#2622).
+    The ``actions-v`` recursion guard stays alongside the new condition.
+    """
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["mirror-release"]
+
+    assert_that(job["needs"]).contains("github-release", "mirror-token")
+    assert_that(job["if"]).contains(
+        "needs.mirror-token.outputs.has_token == 'true'",
+    )
+    assert_that(job["if"]).contains("!startsWith(github.ref_name, 'actions-v')")
+
+
 def test_mirror_release_job_is_read_only_in_source_repo() -> None:
     """Cross-repo writes use MIRROR_REPO_TOKEN; source-repo perms stay read-only."""
     workflow = _load_workflow(name="mirror-release.yml")
