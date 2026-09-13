@@ -6629,9 +6629,25 @@ def test_ghcr_cleanup_reports_its_verdict_on_main() -> None:
         if step.get("run") == "scripts/ci/maintenance/report-workflow-commit-status.sh"
     ]
     assert_that(report_steps).is_length(1)
+    # The wired script must exist: a rename or move would otherwise only fail
+    # at the scheduled run's first execution after it (lintro-review P3).
+    assert_that(
+        (
+            _REPO_ROOT
+            / "scripts"
+            / "ci"
+            / "maintenance"
+            / "report-workflow-commit-status.sh"
+        ).is_file(),
+    ).is_true()
     env = report_steps[0]["env"]
     assert_that(env["STATUS_CONTEXT"]).is_equal_to("ghcr-cleanup")
-    assert_that(str(env["JOB_RESULTS"])).contains("needs.*.result")
+    # Pin the whole expression: the status must summarise every lane job, so
+    # the mapping has to stay the full needs.*.result join, not just mention
+    # the wildcard anywhere (lintro-review P3).
+    assert_that(str(env["JOB_RESULTS"])).is_equal_to(
+        "${{ join(needs.*.result, ' ') }}",
+    )
 
     notify = jobs["notify-failure"]
     assert_that(notify["needs"]).contains(*_GHCR_CLEANUP_LANE_JOBS)
