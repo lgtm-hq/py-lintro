@@ -57,9 +57,22 @@ def _dist_tag_log(result: subprocess.CompletedProcess[str]) -> str:
         result: The completed run produced by ``_run``.
 
     Returns:
-        str: The text after the ``---DISTTAG---`` marker.
+        str: The text after the ``---DISTTAG---`` marker, up to the
+            ``---DISTTAGLS---`` section.
     """
-    return result.stdout.split("---DISTTAG---", 1)[1]
+    return result.stdout.split("---DISTTAG---", 1)[1].split("---DISTTAGLS---", 1)[0]
+
+
+def _dist_tag_ls_log(result: subprocess.CompletedProcess[str]) -> str:
+    """Return the recorded ``npm dist-tag ls`` invocations, one per line.
+
+    Args:
+        result: The completed run produced by ``_run``.
+
+    Returns:
+        str: The text after the ``---DISTTAGLS---`` marker.
+    """
+    return result.stdout.split("---DISTTAGLS---", 1)[1]
 
 
 def _write_stub(bin_dir: Path, name: str, body: str) -> None:
@@ -119,7 +132,8 @@ def _run(
     *,
     extra_env: dict[str, str] | None = None,
     view_body: str | None = None,
-    dist_tag_body: str = "exit 0",
+    dist_tag_body: str | None = None,
+    dist_tag_ls_body: str | None = None,
     log_name: str = "npm.log",
 ) -> subprocess.CompletedProcess[str]:
     """Run publish_packages.sh with stub ``npm``/``node`` on PATH.
@@ -130,8 +144,15 @@ def _run(
         extra_env: Extra environment variables for the script.
         view_body: Optional bash body for ``npm view`` handling. When omitted
             ``npm view`` reports E404 (version not yet published).
-        dist_tag_body: Bash body for ``npm dist-tag`` handling. Defaults to
-            success; every invocation is recorded for assertions.
+        dist_tag_body: Bash body for ``npm dist-tag add`` handling. Defaults
+            to an OIDC-trusted-publishing rejection: the registry refuses the
+            write under the publish-scoped token (npm/cli#8547), which is the
+            reality the script runs under. Tests that need the write to
+            succeed pass an explicit ``exit 0``; every invocation is recorded.
+        dist_tag_ls_body: Bash body for ``npm dist-tag ls`` handling. Defaults
+            to success with an empty listing (the requested tag is absent, so
+            the script falls through to the write path). Tests feed a listing
+            such as ``latest: 9.9.9`` to steer the read-before-write path.
         log_name: File the npm stub appends its argv to for assertions.
 
     Returns:
@@ -144,16 +165,31 @@ def _run(
     _fake_npm_dir(root)
     log = tmp_path / log_name
     dist_tag_log = tmp_path / "dist-tag.log"
+    dist_tag_ls_log = tmp_path / "dist-tag-ls.log"
 
     view = view_body or (
         'echo "npm error code E404" >&2\n'
         'echo "npm error 404 Not Found - GET registry" >&2\n'
         "exit 1"
     )
+    add_body = (
+        dist_tag_body
+        if dist_tag_body is not None
+        else (
+            'echo "npm error code E403" >&2\n'
+            'echo "npm error 403 Forbidden - PUT registry/-/package/dist-tags" >&2\n'
+            "exit 1"
+        )
+    )
+    ls_body = dist_tag_ls_body if dist_tag_ls_body is not None else "exit 0"
     npm = (
         f'if [[ "$1" == "view" ]]; then\n{view}\nfi\n'
         f'if [[ "$1" == "dist-tag" ]]; then\n'
-        f'echo "dist-tag $*" >> "{dist_tag_log}"\n{dist_tag_body}\nfi\n'
+        f'if [[ "$2" == "ls" ]]; then\n'
+        f'echo "dist-tag $*" >> "{dist_tag_ls_log}"\n{ls_body}\n'
+        f"else\n"
+        f'echo "dist-tag $*" >> "{dist_tag_log}"\n{add_body}\n'
+        f"fi\nfi\n"
         f'if [[ "$1" == "publish" ]]; then\n'
         f'echo "publish $(basename "$PWD") $*" >> "{log}"\n{npm_body}\nfi\n'
     )
@@ -191,13 +227,15 @@ def _run(
     result_log = log.read_text() if log.exists() else ""
     sleep_record = sleep_log.read_text() if sleep_log.exists() else ""
     dist_tag_record = dist_tag_log.read_text() if dist_tag_log.exists() else ""
+    dist_tag_ls_record = dist_tag_ls_log.read_text() if dist_tag_ls_log.exists() else ""
     # Fold stderr (warnings/errors) into stdout, then append the publish, sleep,
-    # and dist-tag logs so a single ``result.stdout`` carries everything the
-    # assertions inspect.
+    # dist-tag, and dist-tag-ls logs so a single ``result.stdout`` carries
+    # everything the assertions inspect.
     result.stdout = (
         f"{result.stdout}\n{result.stderr}\n"
         f"---LOG---\n{result_log}\n---SLEEP---\n{sleep_record}\n"
         f"---DISTTAG---\n{dist_tag_record}"
+        f"\n---DISTTAGLS---\n{dist_tag_ls_record}"
     )
     return result
 
@@ -572,7 +610,14 @@ def test_already_published_versions_are_skipped(tmp_path: Path) -> None:
         'echo "npm error 404 Not Found" >&2\n'
         "exit 1"
     )
-    result = _run(tmp_path, npm_body="exit 0", view_body=view_body)
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        view_body=view_body,
+        # The registry read shows the tag already correct, so the skip path
+        # writes nothing (the default add stub would reject under OIDC).
+        dist_tag_ls_body='echo "latest: 9.9.9"\nexit 0',
+    )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("Skipping @lgtm-hq/lintro-darwin-arm64")
     # Only the three remaining packages actually publish.
@@ -595,7 +640,11 @@ def test_publish_conflict_is_treated_as_idempotent_success(tmp_path: Path) -> No
         "fi\n"
         "exit 0"
     )
-    result = _run(tmp_path, npm_body=npm_body)
+    result = _run(
+        tmp_path,
+        npm_body=npm_body,
+        dist_tag_ls_body='echo "latest: 9.9.9"\nexit 0',
+    )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("idempotent success")
     # All four packages are attempted; the meta package still publishes.
@@ -639,11 +688,14 @@ def test_dry_run_publishes_without_existence_check(tmp_path: Path) -> None:
     assert_that(log.strip().splitlines()).is_length(len(_PACKAGES))
 
 
-def test_skip_path_reconciles_dist_tag(tmp_path: Path) -> None:
-    """The npm view skip path still reconciles the requested dist-tag.
+def test_skip_path_with_tag_already_correct_writes_nothing(tmp_path: Path) -> None:
+    """The npm view skip path writes nothing when the tag already matches.
 
-    A version already on the registry is not re-published, so the tag a fresh
-    publish would have applied atomically must be re-applied explicitly.
+    A live re-run hits this for every already-published package: the
+    read-before-write check sees ``latest`` already pointing at the version
+    and returns without the ``npm dist-tag add`` that OIDC trusted publishing
+    would reject (npm/cli#8547). The rejecting default add stub proves the
+    write path is never entered.
     """
     # npm view reports the darwin package as present, others E404.
     view_body = (
@@ -655,17 +707,96 @@ def test_skip_path_reconciles_dist_tag(tmp_path: Path) -> None:
         'echo "npm error 404 Not Found" >&2\n'
         "exit 1"
     )
-    result = _run(tmp_path, npm_body="exit 0", view_body=view_body)
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        view_body=view_body,
+        dist_tag_ls_body='echo "latest: 9.9.9"\nexit 0',
+    )
     assert_that(result.returncode).is_equal_to(0)
-    tags = _dist_tag_log(result).strip().splitlines()
-    assert_that(tags).is_length(1)
-    assert_that(tags[0]).contains("add @lgtm-hq/lintro-darwin-arm64@9.9.9 latest")
+    assert_that(result.stdout).contains("already points at")
+    # The read happened, and no write was attempted after it.
+    ls_lines = _dist_tag_ls_log(result).strip().splitlines()
+    assert_that(ls_lines).is_length(1)
+    assert_that(ls_lines[0]).contains("ls @lgtm-hq/lintro-darwin-arm64")
+    assert_that(_dist_tag_log(result).strip()).is_equal_to("")
     # Skipped packages are never re-published.
     assert_that(_publish_log(result)).does_not_contain("darwin")
 
 
-def test_conflict_path_reconciles_dist_tag(tmp_path: Path) -> None:
-    """An EPUBLISHCONFLICT idempotent success also reconciles the dist-tag."""
+def test_skip_path_reconciles_dist_tag_when_it_drifted(tmp_path: Path) -> None:
+    """A drifted tag on an already-published version still tries the write.
+
+    The read shows ``latest`` pointing elsewhere, so the script must attempt
+    the (OIDC-doomed) write, record the drift as a warning, publish the
+    remaining packages, and exit non-zero only at the end.
+    """
+    # darwin-arm64 and linux-arm64 are already published; the rest are not.
+    view_body = (
+        'if grep -qE "darwin-arm64|linux-arm64" <<<"$*"; then\n'
+        '  echo "9.9.9"\n'
+        "  exit 0\n"
+        "fi\n"
+        'echo "npm error code E404" >&2\n'
+        'echo "npm error 404 Not Found" >&2\n'
+        "exit 1"
+    )
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        view_body=view_body,
+        dist_tag_ls_body='echo "latest: 8.8.8"\nexit 0',
+    )
+    assert_that(result.returncode).is_not_equal_to(0)
+    # One drift warning per already-published package, with the remediation.
+    assert_that(result.stdout.count("::warning::Dist-tag drift")).is_equal_to(2)
+    assert_that(result.stdout).contains("npm/cli#8547")
+    assert_that(result.stdout).contains("dist-tag drift remains")
+    # The two missing packages were still published despite the drift.
+    log = _publish_log(result)
+    assert_that(log).contains("linux-x64")
+    assert_that(log).contains("lintro")
+    # Both drifted packages got exactly one write attempt each.
+    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(2)
+
+
+def test_two_of_four_already_published_completes_the_rest(tmp_path: Path) -> None:
+    """A re-run over a half-published release finishes it and exits 0.
+
+    The #1682 acceptance criterion: with two of the four packages already on
+    the registry and their dist-tag already correct, the run skips those two
+    without a single write, publishes the remaining two, and succeeds.
+    """
+    view_body = (
+        'if grep -qE "darwin-arm64|linux-arm64" <<<"$*"; then\n'
+        '  echo "9.9.9"\n'
+        "  exit 0\n"
+        "fi\n"
+        'echo "npm error code E404" >&2\n'
+        'echo "npm error 404 Not Found" >&2\n'
+        "exit 1"
+    )
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        view_body=view_body,
+        dist_tag_ls_body='echo "latest: 9.9.9"\nexit 0',
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).does_not_contain("::warning::")
+    # The two present packages are skipped, not re-published.
+    assert_that(_publish_log(result)).does_not_contain("darwin")
+    assert_that(_publish_log(result)).does_not_contain("linux-arm64")
+    # The two missing packages were published.
+    log = _publish_log(result).strip().splitlines()
+    assert_that(log).is_length(2)
+    # The reconcile read happened twice; no write was ever attempted.
+    assert_that(_dist_tag_ls_log(result).strip().splitlines()).is_length(2)
+    assert_that(_dist_tag_log(result).strip()).is_equal_to("")
+
+
+def test_conflict_path_with_tag_already_correct_writes_nothing(tmp_path: Path) -> None:
+    """An EPUBLISHCONFLICT idempotent success also skips the write on a match."""
     npm_body = (
         'if [[ "$(basename "$PWD")" == "linux-arm64" ]]; then\n'
         '  echo "npm error code EPUBLISHCONFLICT" >&2\n'
@@ -675,12 +806,77 @@ def test_conflict_path_reconciles_dist_tag(tmp_path: Path) -> None:
         "fi\n"
         "exit 0"
     )
-    result = _run(tmp_path, npm_body=npm_body)
+    result = _run(
+        tmp_path,
+        npm_body=npm_body,
+        dist_tag_ls_body='echo "latest: 9.9.9"\nexit 0',
+    )
     assert_that(result.returncode).is_equal_to(0)
     assert_that(result.stdout).contains("idempotent success")
-    tags = _dist_tag_log(result).strip().splitlines()
-    assert_that(tags).is_length(1)
-    assert_that(tags[0]).contains("add @lgtm-hq/lintro-linux-arm64@9.9.9 latest")
+    assert_that(result.stdout).contains("already points at")
+    assert_that(_dist_tag_log(result).strip()).is_equal_to("")
+
+
+def test_conflict_path_drift_still_publishes_the_rest(tmp_path: Path) -> None:
+    """A drifted tag on the conflict path defers the failure to the end.
+
+    The conflict package counts as published; its unreconciled tag becomes a
+    drift warning, and the packages after it still publish before the run
+    exits non-zero.
+    """
+    npm_body = (
+        'if [[ "$(basename "$PWD")" == "darwin-arm64" ]]; then\n'
+        '  echo "npm error code EPUBLISHCONFLICT" >&2\n'
+        '  echo "npm error You cannot publish over the previously published '
+        'versions: 9.9.9." >&2\n'
+        "  exit 1\n"
+        "fi\n"
+        "exit 0"
+    )
+    result = _run(
+        tmp_path,
+        npm_body=npm_body,
+        dist_tag_ls_body='echo "latest: 8.8.8"\nexit 0',
+    )
+    assert_that(result.returncode).is_not_equal_to(0)
+    assert_that(result.stdout).contains("::warning::Dist-tag drift")
+    assert_that(result.stdout).contains("dist-tag drift remains")
+    # The packages after the conflict were still published.
+    log = _publish_log(result)
+    assert_that(log).contains("linux-x64")
+    assert_that(log).contains("lintro")
+
+
+def test_dist_tag_ls_failure_falls_back_to_the_write(tmp_path: Path) -> None:
+    """A failed registry read falls back to the write instead of faking success.
+
+    If ``npm dist-tag ls`` cannot prove the tag is correct (network blip), the
+    script must not treat the tag as reconciled: it attempts the write, which
+    a permissive stub lets succeed, and the run stays green.
+    """
+    view_body = (
+        'if grep -qE "darwin-arm64" <<<"$*"; then\n'
+        '  echo "9.9.9"\n'
+        "  exit 0\n"
+        "fi\n"
+        'echo "npm error code E404" >&2\n'
+        'echo "npm error 404 Not Found" >&2\n'
+        "exit 1"
+    )
+    result = _run(
+        tmp_path,
+        npm_body="exit 0",
+        view_body=view_body,
+        dist_tag_ls_body='echo "npm error code ECONNRESET" >&2\nexit 1',
+        dist_tag_body="exit 0",
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).does_not_contain("already points at")
+    # The read failed, so the write was attempted exactly once and succeeded.
+    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(1)
+    assert_that(_dist_tag_log(result)).contains(
+        "add @lgtm-hq/lintro-darwin-arm64@9.9.9 latest",
+    )
 
 
 def test_fresh_publish_does_not_call_dist_tag(tmp_path: Path) -> None:
@@ -693,36 +889,34 @@ def test_fresh_publish_does_not_call_dist_tag(tmp_path: Path) -> None:
     result = _run(tmp_path, npm_body="exit 0")
     assert_that(result.returncode).is_equal_to(0)
     assert_that(_publish_log(result).strip().splitlines()).is_length(len(_PACKAGES))
+    # Neither a reconcile read nor a write: fresh publishes need neither.
     assert_that(_dist_tag_log(result).strip()).is_equal_to("")
+    assert_that(_dist_tag_ls_log(result).strip()).is_equal_to("")
 
 
-def test_dist_tag_failure_on_skip_path_is_fatal(tmp_path: Path) -> None:
-    """A rejected dist-tag reconciliation fails loudly instead of passing silently.
+def test_dist_tag_failure_on_skip_path_is_deferred_drift(tmp_path: Path) -> None:
+    """An unreconcilable tag fails the run at the end, not at the package.
 
     Trusted-publishing (OIDC) tokens are publish-scoped, so the registry can
-    reject ``npm dist-tag`` with an auth error; the script must surface that
-    as a non-zero exit rather than claim a reconcile it could not perform.
+    reject ``npm dist-tag add`` with an auth error. Every already-published
+    package drifts (each read proves the tag absent, each write is refused),
+    each gets a ::warning::, and the run exits non-zero after the loop — but
+    the loop itself still processes every package first (#2631).
     """
     # npm view reports every version as present, so each package hits the skip
-    # path; the dist-tag stub then rejects the reconcile with an auth error.
+    # path; the default dist-tag stub rejects the write with an auth error.
     view_body = 'echo "9.9.9"\nexit 0'
-    dist_tag_body = (
-        'echo "npm error code E403" >&2\n'
-        'echo "npm error 403 Forbidden - PUT registry/-/package/dist-tags" >&2\n'
-        "exit 1"
-    )
-    result = _run(
-        tmp_path,
-        npm_body="exit 0",
-        view_body=view_body,
-        dist_tag_body=dist_tag_body,
-    )
+    result = _run(tmp_path, npm_body="exit 0", view_body=view_body)
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("could not reconcile dist-tag")
     assert_that(result.stdout).contains("npm/cli#8547")
-    # Auth rejections are never retried: exactly one dist-tag attempt.
-    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(1)
-    # The run aborts at the first unreconciled tag: nothing is published.
+    assert_that(result.stdout).contains("dist-tag drift remains")
+    # One warning and one write attempt per already-published package.
+    assert_that(result.stdout.count("::warning::Dist-tag drift")).is_equal_to(
+        len(_PACKAGES),
+    )
+    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(len(_PACKAGES))
+    # Nothing is published: every version was already on the registry.
     assert_that(_publish_log(result).strip()).is_equal_to("")
 
 
@@ -763,7 +957,12 @@ def test_dist_tag_transient_error_is_retried_then_succeeds(tmp_path: Path) -> No
 
 
 def test_dist_tag_transient_error_exhausts_attempts(tmp_path: Path) -> None:
-    """A persistent transient dist-tag failure is fatal after bounded retries."""
+    """A persistent transient dist-tag failure drifts every skipped package.
+
+    Each package gets the full bounded retries (2 here) on its reconcile
+    write; the failures are recorded and the run goes red after the loop
+    instead of stranding the remaining packages.
+    """
     view_body = 'echo "9.9.9"\nexit 0'
     dist_tag_body = 'echo "npm error 502 Bad Gateway" >&2\nexit 1'
     result = _run(
@@ -775,13 +974,17 @@ def test_dist_tag_transient_error_exhausts_attempts(tmp_path: Path) -> None:
     )
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("after 2 attempts on a transient error")
-    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(2)
-    # The run aborts at the first unreconciled tag: nothing is published.
+    assert_that(result.stdout).contains("dist-tag drift remains")
+    # Every package is still reconciled (and retried) — none strands the rest.
+    assert_that(_dist_tag_log(result).strip().splitlines()).is_length(
+        2 * len(_PACKAGES),
+    )
+    # Nothing is published: every version was already on the registry.
     assert_that(_publish_log(result).strip()).is_equal_to("")
 
 
-def test_dist_tag_failure_on_conflict_path_is_fatal(tmp_path: Path) -> None:
-    """A dist-tag failure turns a conflict idempotent success into a loud failure."""
+def test_dist_tag_failure_on_conflict_path_defers_the_failure(tmp_path: Path) -> None:
+    """A dist-tag failure on the conflict path still fails the run, at the end."""
     npm_body = (
         'if [[ "$(basename "$PWD")" == "darwin-arm64" ]]; then\n'
         '  echo "npm error code EPUBLISHCONFLICT" >&2\n'
@@ -793,10 +996,11 @@ def test_dist_tag_failure_on_conflict_path_is_fatal(tmp_path: Path) -> None:
     result = _run(tmp_path, npm_body=npm_body, dist_tag_body=dist_tag_body)
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stdout).contains("could not reconcile dist-tag")
-    # The run aborts at the first hard failure: later packages never publish.
+    # The drifted conflict package no longer strands the rest of the release:
+    # every package is still processed before the deferred failure.
     log = _publish_log(result)
-    assert_that(log).does_not_contain("linux-x64")
-    assert_that(log).does_not_contain("lintro")
+    assert_that(log).contains("linux-x64")
+    assert_that(log).contains("lintro")
 
 
 def test_dry_run_conflict_does_not_call_dist_tag(tmp_path: Path) -> None:
