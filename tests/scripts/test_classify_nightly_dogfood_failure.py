@@ -64,6 +64,7 @@ def _decide(module: ModuleType, **environ: str) -> Any:
         The module's ``Decision`` for the simulated run.
     """
     base = {
+        "RESOLVE_RESULT": "success",
         "LINT_RESULT": "success",
         "SKIP_GATE_RESULT": "success",
         "VERIFY_RESULT": "success",
@@ -202,6 +203,19 @@ def test_pinned_digest_failure_always_pings(module: ModuleType) -> None:
     assert_that(decision.notify).is_true()
     assert_that(decision.action_required).is_true()
     assert_that(decision.reason).contains("verify-pinned-image-tools")
+
+
+def test_unresolved_image_always_pings(module: ModuleType) -> None:
+    """A night that could not resolve an image reports the lost coverage.
+
+    ``resolve-image`` has no retry and every lint job depends on it, so its
+    failure means the nightly ran nothing at all (#2602). That is a coverage
+    gap the tracker must hear about, not a quiet green.
+    """
+    decision = _decide(module, RESOLVE_RESULT="failure")
+
+    assert_that(decision.notify).is_true()
+    assert_that(decision.reason).contains("resolve-image")
 
 
 def test_a_real_failure_beside_a_kill_keeps_action_required(

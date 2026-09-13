@@ -496,10 +496,9 @@
       "extractVersionTemplate": "^(?<version>[0-9]+\\.[0-9]+\\.[0-9]+)$"
     },
     {
-      "description": "Pinned py-lintro release image (nightly dogfood + docker-ci fork fallback, #1751); all pin sites bump together",
+      "description": "Pinned py-lintro release image for the docker-ci fork-PR fallback (#1751); the nightly dogfood run resolves its image at run time instead (#2602)",
       "customType": "regex",
       "managerFilePatterns": [
-        "\\.github/workflows/dogfood-nightly\\.yml",
         "\\.github/workflows/docker-ci\\.yml"
       ],
       "matchStrings": [
