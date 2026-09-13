@@ -11,6 +11,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.159.0] - 2026-09-13
+
+### Added
+
+- **core**: run format as mutate-then-verify with a fingerprint-narrowed verify pass
+  (#2452) (44026a7)
 - **core**: `lintro format` (alias `fmt`) now runs as a mutate-then-verify pipeline.
   Every mutating capability (`FIX`, `FORMAT`) runs in derived DAG order, and then a
   single verify pass runs the `CHECK` capability of the same tools; for every mutator
@@ -107,8 +123,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   setting `skipped` (vale and commitlint emit a `Skipping <name>: ...` result), and
   pip-audit's declined-after-match branch, which matched files and refused them rather
   than finding none.
-
-### Security
 
 ## [0.158.0] - 2026-09-12
 
