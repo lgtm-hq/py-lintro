@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.160.1] - 2026-09-13
+
+### Fixed
+
+- **ci**: raise the GHCR prune legs' timeout to 30 minutes (#2647) (b9c1f5c)
+
 ## [0.160.0] - 2026-09-13
 
 ### Added
