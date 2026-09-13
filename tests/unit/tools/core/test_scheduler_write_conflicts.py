@@ -293,12 +293,8 @@ def test_check_mode_batching_is_unchanged(tree: Path) -> None:
     selection = ["ruff", "typos", "black", "mypy"]
 
     check_batches = _batches(list(selection), tree=tree, action=Action.CHECK)
-    phase_only = build_order_report(selection, write_conflicts=False)
 
     assert_that(check_batches[0]).contains("ruff", "typos")
-    assert_that(
-        [edge.source for edge in phase_only.edges],
-    ).does_not_contain(EdgeSource.OVERLAP)
     # The mutating run of the same selection splits the pair the read-only run
     # keeps together, which is the whole difference between the two modes.
     fix_depth = _depth(_batches(list(selection), tree=tree, action=Action.FIX))

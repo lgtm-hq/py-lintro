@@ -43,10 +43,13 @@ Derivation rules:
   formatter outranks a multi-capability tool), then the alphabetically last
   tool id.
 - **Format-owner demotion (#1744).** When several conflicting tools declare
-  ``FORMAT`` on one scope, only the winner formats it; every other tool's
-  ``FORMAT`` is demoted for that scope while its ``CHECK`` stays enabled. The
-  demotion is recorded on :class:`DerivedOrder` so explain, doctor and init
-  can report it.
+  ``FORMAT`` on one scope, the winner is named the owner and every other
+  tool's ``FORMAT`` is recorded as demoted for that scope, its ``CHECK``
+  untouched. The demotion is realised through ordering — the owner runs
+  last, so its bytes are the ones that survive — and is recorded on
+  :class:`DerivedOrder` so explain, doctor and init can report it. Switching
+  the demoted capability off at the executor layer is the deferred
+  follow-up; nothing here disables a tool.
 - **Project-scoped claims.** A claim with no patterns (osv-scanner) is not
   addressed by pattern and therefore produces no *phase* edges. A
   project-scoped *writer* still conflicts with every writer under its roots.
@@ -165,7 +168,9 @@ class FormatDemotion:
         winner: Tool that keeps ``FORMAT`` on the scope — the authority, and
             the last writer of it.
         loser: Tool whose ``FORMAT`` is demoted there. Its ``CHECK`` stays
-            enabled, so it keeps reporting; it just stops writing.
+            enabled, so it keeps reporting. The demotion is recorded, not
+            enforced: the tool still runs, and the owner's write survives
+            because the owner runs last.
         scope: The overlapping scope, as a pattern-shaped label.
         rule: Which precedence rule decided it.
     """

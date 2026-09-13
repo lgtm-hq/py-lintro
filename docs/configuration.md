@@ -1145,7 +1145,7 @@ in order:
 2. `FIX` before `FORMAT` — a fix rewrites structure and leaves layout dirty;
 3. the tool with **fewer** mutating capabilities runs last, so a dedicated formatter
    outranks a multi-capability tool (this is why black, not ruff, formats Python);
-4. the tool id, alphabetically.
+4. the alphabetically **last** tool id runs last.
 
 **One format owner per overlapping scope.** When several conflicting tools declare
 `FORMAT`, the scheduler names one of them the owner and records every other tool's
