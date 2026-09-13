@@ -3019,6 +3019,61 @@ def test_ghcr_cleanup_sweeps_ephemeral_ci_tags() -> None:
     )
 
 
+def _resolve_prune_min_age_days(expression: str, *, dispatch_input: str) -> int:
+    """Resolve the prune ``min-age-days`` expression for a dispatch input.
+
+    Mirrors GitHub expression semantics for the ``fromJSON(A || B)`` form:
+    ``||`` yields the first operand whose string value is non-empty, and
+    ``fromJSON`` parses the chosen string as JSON. Substitution reduces the
+    expression to string literals only; the operands are matched literally,
+    never ``eval()``-ed.
+    """
+    inner = _normalize_github_expr(expression)
+    assert inner.startswith("${{") and inner.endswith("}}")
+    inner = inner[3:-2].strip()
+    match = re.fullmatch(r"fromJSON\((.+?)\s*\|\|\s*(.+?)\)", inner)
+    assert match is not None, f"unexpected min-age-days form: {inner}"
+    left, right = (operand.strip() for operand in match.groups())
+    values = {"inputs.min_age_days": dispatch_input}
+    left_value = values.get(left, left.strip("'\""))
+    right_value = values.get(right, right.strip("'\""))
+    chosen = left_value or right_value
+    parsed = json.loads(chosen)
+    assert isinstance(parsed, int), f"min-age-days is not a number: {chosen!r}"
+    return parsed
+
+
+@pytest.mark.parametrize(
+    ("dispatch_input", "expected"),
+    [
+        ("", 7),  # scheduled path: the dispatch input is empty -> '7' default
+        ("7", 7),  # dispatched default arrives as the string '7'
+        ("14", 14),  # dispatched override coerces to a number
+    ],
+)
+def test_ghcr_cleanup_prune_min_age_resolves_to_a_number(
+    dispatch_input: str,
+    expected: int,
+) -> None:
+    """The prune min-age resolves to a number on every trigger path (#2603).
+
+    A number-typed ``workflow_dispatch`` input arrives as a string and the
+    scheduled path leaves the input empty; either passed straight through,
+    the reusable call is rejected at plan time ("Unexpected value '7'",
+    runs 34766253077 and 34766393903). The ``|| '7'`` default makes the
+    empty scheduled case resolve to 7 days.
+    """
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    for job_name in ("prune-untagged", "prune-untagged-base"):
+        expression = str(cleanup["jobs"][job_name]["with"]["min-age-days"])
+        assert_that(
+            _resolve_prune_min_age_days(
+                expression,
+                dispatch_input=dispatch_input,
+            ),
+        ).is_equal_to(expected)
+
+
 def test_publish_pypi_top_level_permissions_are_empty() -> None:
     """The tag publisher grants no scopes at the top level (#2511).
 
