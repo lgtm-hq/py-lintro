@@ -3074,6 +3074,22 @@ def test_ghcr_cleanup_prune_min_age_resolves_to_a_number(
         ).is_equal_to(expected)
 
 
+def test_ghcr_cleanup_prune_legs_forward_a_number_timeout() -> None:
+    """The caller raises the reusable's prune job timeout to 30 (#2603).
+
+    The reusable defaults ``timeout-minutes`` to 10, and its default cancelled
+    the ``py-lintro`` untagged prune leg mid-enumeration (run 34774902409) —
+    the leg never reported, so the sweep silently lost a package. Both prune
+    callers must forward a bare number literal (the plan-time string gotcha
+    from the min-age fix applies here too), not a block scalar or string.
+    """
+    cleanup = _load_workflow(name="ghcr-cleanup.yml")
+    for job_name in ("prune-untagged", "prune-untagged-base"):
+        timeout = cleanup["jobs"][job_name]["with"]["timeout-minutes"]
+        assert_that(timeout).described_as(job_name).is_instance_of(int)
+        assert_that(timeout).described_as(job_name).is_equal_to(30)
+
+
 def test_publish_pypi_top_level_permissions_are_empty() -> None:
     """The tag publisher grants no scopes at the top level (#2511).
 
