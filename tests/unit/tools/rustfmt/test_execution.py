@@ -201,12 +201,8 @@ def test_fix_with_mocked_subprocess_success(
         if call_count == 1:
             # First check - issues found
             return (False, "Diff in src/main.rs:1:")
-        elif call_count == 2:
-            # Fix command
-            return (True, "")
-        else:
-            # Verification - no issues
-            return (True, "")
+        # Fix command; there is no verification call (#2607)
+        return (True, "")
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
@@ -217,8 +213,8 @@ def test_fix_with_mocked_subprocess_success(
 
     assert_that(result.success).is_true()
     assert_that(result.fixed_issues_count).is_equal_to(1)
-    # Verify the mock was called expected number of times (check + fix + verify)
-    assert_that(call_count).is_equal_to(3)
+    # Verify the mock was called expected number of times (check + fix)
+    assert_that(call_count).is_equal_to(2)
 
 
 def test_fix_with_nothing_to_fix(

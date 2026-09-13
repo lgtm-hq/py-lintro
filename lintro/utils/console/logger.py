@@ -21,8 +21,6 @@ from lintro.enums.severity_level import SeverityLevel
 from lintro.enums.tool_name import ToolName
 from lintro.utils.console.constants import (
     BORDER_LENGTH,
-    RE_CANNOT_AUTOFIX,
-    RE_REMAINING_OR_CANNOT,
     get_tool_emoji,
 )
 from lintro.utils.display_helpers import (
@@ -228,7 +226,7 @@ class ThreadSafeConsoleLogger:
             for result in tool_results:
                 fixed_std = getattr(result, "fixed_issues_count", None)
                 remaining_std = getattr(result, "remaining_issues_count", None)
-                success = getattr(result, "success", True)
+                getattr(result, "success", True)
                 total_ai_applied += _get_ai_count(result, "applied_count")
                 total_ai_verified += _get_ai_count(result, "verified_count")
 
@@ -243,24 +241,12 @@ class ThreadSafeConsoleLogger:
                 else:
                     total_fixed += getattr(result, "issues_count", 0)
 
-                if remaining_std is not None:
-                    if isinstance(remaining_std, int):
-                        total_remaining += remaining_std
-                elif not success:
-                    pass
-                else:
-                    output = getattr(result, "output", "")
-                    if output and (
-                        "remaining" in output.lower()
-                        or "cannot be auto-fixed" in output.lower()
-                    ):
-                        remaining_match = RE_CANNOT_AUTOFIX.search(output)
-                        if not remaining_match:
-                            remaining_match = RE_REMAINING_OR_CANNOT.search(
-                                output.lower(),
-                            )
-                        if remaining_match:
-                            total_remaining += int(remaining_match.group(1))
+                if isinstance(remaining_std, int):
+                    total_remaining += remaining_std
+                # A result with no structured residual adds nothing: the
+                # prose fallback that read a number off the tool's own text
+                # is retired (#2607); the verify pass is the only source of
+                # residuals.
 
             self._print_totals_table(
                 action=action,

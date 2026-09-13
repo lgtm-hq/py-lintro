@@ -11,8 +11,6 @@ from typing import Any
 from lintro.enums.action import Action
 from lintro.enums.tool_name import ToolName, normalize_tool_name
 from lintro.utils.console import (
-    RE_CANNOT_AUTOFIX,
-    RE_REMAINING_OR_CANNOT,
     get_summary_value,
     get_tool_emoji,
 )
@@ -425,26 +423,12 @@ def print_summary_table(
                     except (ValueError, TypeError):
                         remaining_count = DEFAULT_REMAINING_COUNT
                 else:
-                    # Parse output to determine remaining issues
-                    remaining_count = 0
-                    if result_output and (
-                        "remaining" in result_output.lower()
-                        or "cannot be auto-fixed" in result_output.lower()
-                    ):
-                        remaining_match = RE_CANNOT_AUTOFIX.search(
-                            result_output,
-                        )
-                        if not remaining_match:
-                            remaining_match = RE_REMAINING_OR_CANNOT.search(
-                                result_output.lower(),
-                            )
-                        if remaining_match:
-                            try:
-                                remaining_count = int(remaining_match.group(1))
-                            except (ValueError, TypeError):
-                                remaining_count = DEFAULT_REMAINING_COUNT
-                        elif not success:
-                            remaining_count = DEFAULT_REMAINING_COUNT
+                    # No structured residual. The prose fallback that used to
+                    # read a number off the tool's own text is retired: every
+                    # mutator declares CHECK, so the verify pass is the only
+                    # source of residuals (#2607). A legacy result shape with
+                    # no count shows "?" rather than a guess.
+                    remaining_count = 0 if success else DEFAULT_REMAINING_COUNT
 
                 fixed_display_value: int | str
                 if residual_unknown:

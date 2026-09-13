@@ -14,7 +14,6 @@ from unittest.mock import patch
 from assertpy import assert_that
 
 from lintro.enums.tool_type import ToolType
-from lintro.parsers.dotenv_linter.dotenv_linter_issue import DotenvLinterIssue
 from lintro.tools.dotenv_linter.definition import (
     DOTENV_LINTER_DEFAULT_TIMEOUT,
     DotenvLinterPlugin,
@@ -223,11 +222,10 @@ def test_fix_preserves_issue_count_invariant(
         dest_name=".env",
     )
 
-    # First check finds 2 issues; fix succeeds; re-check finds none.
+    # First check finds 2 issues; fix succeeds. No re-check (#2607).
     subprocess_returns = [
         (False, CHECK_OUTPUT_WITH_ISSUES),  # initial check
         (True, "Fixing .env\nAll warnings are fixed. Total: 2\n"),  # fix
-        (True, "Checking .env\n\nNo problems found\n"),  # re-check
     ]
 
     with (
@@ -252,11 +250,17 @@ def test_fix_preserves_issue_count_invariant(
     ).is_equal_to(result.initial_issues_count or 0)
 
 
-def test_fix_reports_remaining_when_not_all_fixed(
+def test_fix_makes_no_private_recheck(
     dotenv_linter_plugin: DotenvLinterPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix counts issues that remain after the fix pass."""
+    """A successful fix reports every pre-fix issue as fixed (#2607).
+
+    dotenv-linter cannot fix every check, but what survives is measured once
+    by the run-level verify pass. ``fix`` therefore runs exactly two
+    subprocesses per file, the check and the fix; a third call would be the
+    per-file recheck this test forbids.
+    """
     env_file = copy_sample(
         tmp_path,
         "tools",
@@ -264,20 +268,11 @@ def test_fix_reports_remaining_when_not_all_fixed(
         "dotenv_linter",
         "dotenv_linter_violations.env",
         dest_name=".env",
-    )
-
-    remaining_output = (
-        "Checking .env\n"
-        ".env:2 LowercaseKey: The foo key should be in uppercase\n"
-        "\n"
-        "Found 1 problems\n"
     )
     subprocess_returns = [
         (False, CHECK_OUTPUT_WITH_ISSUES),  # initial check: 2 issues
         (True, "Fixing .env\n"),  # fix
-        (False, remaining_output),  # re-check: 1 remains
     ]
-
     with (
         patch(
             "lintro.plugins.execution_preparation.verify_tool_version",
@@ -287,59 +282,13 @@ def test_fix_reports_remaining_when_not_all_fixed(
             dotenv_linter_plugin,
             "_run_subprocess",
             side_effect=subprocess_returns,
-        ),
+        ) as run,
     ):
         result = dotenv_linter_plugin.fix([str(env_file)], {})
 
+    assert_that(run.call_count).is_equal_to(2)
+    assert_that(result.success).is_true()
     assert_that(result.initial_issues_count).is_equal_to(2)
-    assert_that(result.fixed_issues_count).is_equal_to(1)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
-    assert_that(result.success).is_false()
-
-
-def test_fix_marks_surviving_issues_not_fixable(
-    dotenv_linter_plugin: DotenvLinterPlugin,
-    tmp_path: Path,
-) -> None:
-    """Issues that survive an attempted fix are reported as non-fixable."""
-    env_file = copy_sample(
-        tmp_path,
-        "tools",
-        "dotenv",
-        "dotenv_linter",
-        "dotenv_linter_violations.env",
-        dest_name=".env",
-    )
-
-    remaining_output = (
-        "Checking .env\n"
-        ".env:2 LowercaseKey: The foo key should be in uppercase\n"
-        "\n"
-        "Found 1 problems\n"
-    )
-    subprocess_returns = [
-        (False, CHECK_OUTPUT_WITH_ISSUES),
-        (True, "Fixing .env\n"),
-        (False, remaining_output),
-    ]
-
-    with (
-        patch(
-            "lintro.plugins.execution_preparation.verify_tool_version",
-            return_value=None,
-        ),
-        patch.object(
-            dotenv_linter_plugin,
-            "_run_subprocess",
-            side_effect=subprocess_returns,
-        ),
-    ):
-        result = dotenv_linter_plugin.fix([str(env_file)], {})
-
-    assert_that(result.issues).is_not_empty()
-    remaining = [
-        issue for issue in (result.issues or []) if isinstance(issue, DotenvLinterIssue)
-    ]
-    assert_that([issue.fixable for issue in remaining]).contains_only(False)
-    # issues_count reflects what the re-check reported, matching ``issues``.
-    assert_that(result.issues_count).is_equal_to(len(remaining))
+    assert_that(result.fixed_issues_count).is_equal_to(2)
+    assert_that(result.remaining_issues_count).is_equal_to(0)
+    assert_that(result.issues).is_empty()

@@ -36,7 +36,7 @@ def test_fix_populates_initial_issues(
         timeout: int,
         cwd: str | None = None,
     ) -> tuple[bool, str]:
-        """Mock subprocess for check→fix→verify.
+        """Mock subprocess for check→fix.
 
         Args:
             cmd: Command list.
@@ -102,64 +102,44 @@ def test_fix_initial_issues_none_when_no_issues(
     assert_that(result.initial_issues).is_none()
 
 
-def test_fix_partial_fix_preserves_initial_issues(
+def test_fix_trusts_a_successful_fix_and_makes_no_private_recheck(
     rustfmt_plugin: RustfmtPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix preserves initial_issues when some issues remain after fix.
+    """A successful ``cargo fmt`` reports every pre-fix diff as fixed (#2607).
+
+    The residual is measured once by the run-level verify pass, so ``fix``
+    runs exactly two subprocesses: the pre-fix check and the write. A third
+    call would be the private recheck this test forbids.
 
     Args:
         rustfmt_plugin: The RustfmtPlugin instance to test.
         tmp_path: Temporary directory path for test files.
     """
-    cargo_toml = tmp_path / "Cargo.toml"
-    cargo_toml.write_text('[package]\nname = "test"\nversion = "0.1.0"')
-
-    test_file = tmp_path / "src" / "main.rs"
-    test_file.parent.mkdir(parents=True, exist_ok=True)
-    test_file.write_text("fn main(){}")
-
-    call_count = 0
-
-    def mock_run(
-        cmd: list[str],
-        timeout: int,
-        cwd: str | None = None,
-    ) -> tuple[bool, str]:
-        """Mock subprocess where fix doesn't resolve all issues.
-
-        Args:
-            cmd: Command list.
-            timeout: Timeout in seconds.
-            cwd: Working directory.
-
-        Returns:
-            Tuple of (success, output).
-        """
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            # Initial check: 2 issues (different files for dedup)
-            return (False, "Diff in src/main.rs:1:\nDiff in src/lib.rs:1:")
-        elif call_count == 2:
-            return (True, "")
-        else:
-            # Verify: 1 issue remains
-            return (False, "Diff in src/lib.rs:1:")
+    source = _cargo_crate(tmp_path)
+    side_effect = [
+        (False, "Diff in src/main.rs:1:\nDiff in src/lib.rs:1:"),
+        (True, ""),
+    ]
 
     with patch(
         "lintro.plugins.execution_preparation.verify_tool_version",
         return_value=None,
     ):
-        with patch.object(rustfmt_plugin, "_run_subprocess", side_effect=mock_run):
-            result = rustfmt_plugin.fix([str(test_file)], {})
+        with patch.object(
+            rustfmt_plugin,
+            "_run_subprocess",
+            side_effect=side_effect,
+        ) as run:
+            result = rustfmt_plugin.fix([str(source)], {})
 
-    assert_that(result.success).is_false()
-    assert_that(result.initial_issues).is_not_none()
+    assert_that(run.call_count).is_equal_to(2)
+    assert_that(result.success).is_true()
     assert_that(result.initial_issues).is_length(2)
     assert_that(result.initial_issues_count).is_equal_to(2)
-    assert_that(result.fixed_issues_count).is_equal_to(1)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.fixed_issues_count).is_equal_to(2)
+    assert_that(result.remaining_issues_count).is_equal_to(0)
+    assert_that(result.issues).is_empty()
 
 
 def _cargo_crate(tmp_path: Path) -> Path:
@@ -188,12 +168,10 @@ _TIMEOUT = subprocess.TimeoutExpired(cmd=["cargo", "fmt"], timeout=30)
 @pytest.mark.parametrize(
     ("scenario", "side_effect"),
     [
-        ("clean_verify", [(False, _DIFF), (True, ""), (True, "")]),
-        ("remaining_after_fix", [(False, _DIFF), (True, ""), (False, _DIFF)]),
+        ("clean_fix", [(False, _DIFF), (True, "")]),
         ("failed_fix", [(False, _DIFF), (False, "error: could not write")]),
         ("timeout_on_initial_check", [_TIMEOUT]),
         ("timeout_on_fix", [(False, _DIFF), _TIMEOUT]),
-        ("timeout_on_verify", [(False, _DIFF), (True, ""), _TIMEOUT]),
     ],
 )
 def test_every_fix_result_records_the_crate_root_as_its_cwd(
@@ -240,9 +218,9 @@ def test_every_fix_subprocess_runs_from_the_crate_root(
 ) -> None:
     """``cargo fmt`` is only meaningful from the crate root.
 
-    ``fix`` runs three subprocesses — the pre-fix check, the write, the
-    post-fix check — and each must be launched from the directory holding
-    ``Cargo.toml``. Run from anywhere else, ``cargo fmt`` formats a different
+    ``fix`` runs two subprocesses — the pre-fix check and the write; the
+    residual is the verify pass's job (#2607) — and each must be launched
+    from the directory holding ``Cargo.toml``. Run from anywhere else, ``cargo fmt`` formats a different
     crate or none at all, and the paths its parser reports stop lining up with
     the ``cwd`` stamped on the result. The stamp is pinned above; this pins the
     execution it describes.
@@ -284,6 +262,6 @@ def test_every_fix_subprocess_runs_from_the_crate_root(
         ):
             rustfmt_plugin.fix([str(source)], {})
 
-    # Three invocations, every one of them from the crate root.
-    assert_that(seen_cwds).is_length(3)
+    # Two invocations, every one of them from the crate root.
+    assert_that(seen_cwds).is_length(2)
     assert_that(set(seen_cwds)).is_equal_to({str(tmp_path)})

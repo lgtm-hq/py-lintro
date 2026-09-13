@@ -191,11 +191,14 @@ def test_resolve_result_capability_is_none_for_a_check_only_tool(
 def test_verifying_tools_skips_a_format_only_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prettier is FORMAT-only, so it is never asked for a residual."""
+    """A FORMAT-only claim (an external plugin's) is never asked for a residual.
+
+    No built-in declares one since #2607, so the shape is registered here.
+    """
     _register(
         monkeypatch,
         {
-            "prettier": _FakeTool(
+            "fakefmt": _FakeTool(
                 definition=_FakeDefinition(
                     claims=[Claim(patterns=["*.css"], capabilities={Cap.FORMAT})],
                 ),
@@ -210,7 +213,7 @@ def test_verifying_tools_skips_a_format_only_tool(
         },
     )
 
-    assert_that(verifying_tools(["prettier", "ruff"])).is_equal_to(["ruff"])
+    assert_that(verifying_tools(["fakefmt", "ruff"])).is_equal_to(["ruff"])
 
 
 def test_capture_verify_baseline_covers_only_mutating_patterns(
@@ -585,9 +588,9 @@ def test_fold_keeps_pre_fix_issues_for_files_the_pass_did_not_verify() -> None:
 
 
 def test_fold_leaves_a_tool_without_a_verify_result_alone() -> None:
-    """A FORMAT-only tool keeps its own numbers, unchanged."""
+    """A tool with no verify outcome (a FORMAT-only external plugin) keeps its numbers."""
     mutation = ToolResult(
-        name="prettier",
+        name="fakefmt",
         success=True,
         issues_count=0,
         initial_issues_count=4,
@@ -1118,7 +1121,7 @@ def test_an_empty_candidate_set_needs_no_scope_at_all() -> None:
 def test_resolve_result_capability_reports_format_for_a_format_only_tool(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Prettier holds ``FORMAT`` alone, so that is what its result represents.
+    """A tool holding ``FORMAT`` alone represents its result as ``FORMAT``.
 
     Args:
         monkeypatch: pytest monkeypatch fixture.
@@ -1126,7 +1129,7 @@ def test_resolve_result_capability_reports_format_for_a_format_only_tool(
     _register(
         monkeypatch,
         {
-            "prettier": _FakeTool(
+            "fakefmt": _FakeTool(
                 definition=_FakeDefinition(
                     claims=[Claim(patterns=["*.css"], capabilities={Cap.FORMAT})],
                 ),
@@ -1135,7 +1138,7 @@ def test_resolve_result_capability_reports_format_for_a_format_only_tool(
     )
 
     assert_that(
-        resolve_result_capability(tool_name="prettier", action=Action.FIX),
+        resolve_result_capability(tool_name="fakefmt", action=Action.FIX),
     ).is_equal_to(Cap.FORMAT)
 
 

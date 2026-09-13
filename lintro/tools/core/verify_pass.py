@@ -9,11 +9,12 @@ can see cross-tool interference: if ruff fixes a file and prettier then
 reformats it, ruff's own post-fix lint already ran, and the new scheduler
 deliberately sequences more mutating tools over the same files.
 
-What the pass does **not** cover: a mutator that declares no ``CHECK`` claim —
-prettier, oxfmt, rustfmt and shfmt — is never asked for a residual and keeps
-its own result contract, including whatever post-format checking it does for
-itself. Making every mutator declare ``CHECK`` is a follow-up (#2607). The pass
-also reports the *final state* of each file rather than who wrote it last.
+Every built-in mutator declares ``CHECK`` (#2607: prettier, oxfmt, rustfmt
+and shfmt were the last ``FORMAT``-only claims), so this pass is the only
+source of residuals and no tool keeps a private post-mutation recheck. An
+external plugin that declares no ``CHECK`` claim is never asked for a residual
+and keeps its own result contract. The pass also reports the *final state* of
+each file rather than who wrote it last.
 Attribution is not its job and does not need to be: since #2606 the scheduler
 derives write-conflict edges, so two tools that could rewrite the same file
 are never in flight at once and a residual can no longer be a lost write.
@@ -162,10 +163,10 @@ class UnresolvableToolError(LookupError):
     """Raised when the registry cannot resolve a tool the run selected.
 
     Distinguishing this from "declares no claims" is what stops the verify
-    pass failing open: prettier legitimately declares no ``CHECK``, and its
-    mutation result stands. A name that cannot be resolved is a different
-    thing — nothing is known about it, so its self-reported ``remaining=0``
-    must not be trusted either.
+    pass failing open: an external plugin may legitimately declare no
+    ``CHECK``, and its mutation result stands. A name that cannot be
+    resolved is a different thing — nothing is known about it, so its
+    self-reported ``remaining=0`` must not be trusted either.
     """
 
 
@@ -292,8 +293,8 @@ def verifying_tools(tool_names: Sequence[str]) -> list[str]:
 
     Returns:
         The subset that can verify, in the same order. A tool with no
-        ``CHECK`` claim (prettier is ``FORMAT``-only) has no residual to
-        report and is not asked for one.
+        ``CHECK`` claim (no built-in since #2607; an external plugin may)
+        has no residual to report and is not asked for one.
     """
     return [name for name, resolvable in _verify_targets(tool_names) if resolvable]
 

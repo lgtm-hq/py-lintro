@@ -13,8 +13,6 @@ from lintro.utils.console.constants import (
     DEFAULT_EMOJI,
     DEFAULT_REMAINING_COUNT,
     INFO_BORDER_LENGTH,
-    RE_CANNOT_AUTOFIX,
-    RE_REMAINING_OR_CANNOT,
     TOOL_EMOJIS,
     get_summary_value,
     get_tool_emoji,
@@ -56,8 +54,6 @@ __all__ = [
     "BORDER_LENGTH",
     "INFO_BORDER_LENGTH",
     "DEFAULT_REMAINING_COUNT",
-    "RE_CANNOT_AUTOFIX",
-    "RE_REMAINING_OR_CANNOT",
     # Functions
     "get_tool_emoji",
     "get_summary_value",

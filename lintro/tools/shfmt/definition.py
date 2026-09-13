@@ -61,7 +61,7 @@ class ShfmtPlugin(BaseToolPlugin):
             claims=[
                 Claim(
                     patterns=SHFMT_FILE_PATTERNS,
-                    capabilities={Cap.FORMAT},
+                    capabilities={Cap.FORMAT, Cap.CHECK},
                 ),
             ],
             reads_tree=True,

@@ -13,6 +13,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- `lintro check` now runs prettier, oxfmt, rustfmt and shfmt in check mode. Every
+  mutating capability declares `CHECK`, so the central verify pass covers every
+  formatter and is the only source of residuals; rustfmt's private post-format recheck
+  and dotenv-linter's per-file recheck are gone, and the console no longer guesses a
+  remaining count from a tool's prose output (#2607).
+
 - **core**: two tools that can rewrite the same file never share a parallel batch
   (#2606). Overlap is computed from the run-scoped candidate files each mutating tool
   would actually be handed, canonicalised with `realpath`, so `Cargo.toml` relates to

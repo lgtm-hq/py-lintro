@@ -15,7 +15,15 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.core.fix_runner import PerFileFixPolicy, VerifyMode
+from lintro.models.core.tool_result import ToolResult
+from lintro.parsers.dotenv_linter.dotenv_linter_parser import (
+    parse_dotenv_linter_output,
+)
+from lintro.tools.core.fix_runner import (
+    PerFileFixPolicy,
+    VerifyMode,
+    run_per_file_fix,
+)
 from lintro.tools.dotenv_linter.definition import DotenvLinterPlugin
 from lintro.tools.shfmt.definition import ShfmtPlugin
 from lintro.tools.sqlfluff.definition import SqlfluffPlugin
@@ -60,6 +68,38 @@ def _sqlfluff_violations(count: int) -> str:
 
 #: One dotenv-linter finding in its default text format.
 DOTENV_FINDING: str = ".env:1 LowercaseKey: The foo key should be in uppercase\n"
+
+
+def _fix_with_verification(plugin: DotenvLinterPlugin, path: Path) -> ToolResult:
+    """Run the per-file runner with an explicit ``AFTER_SUCCESS`` policy.
+
+    No built-in drives ``AFTER_SUCCESS`` since #2607 (every built-in declares
+    ``CHECK`` and leaves the residual to the run-level verify pass), but the
+    mode stays public API for external plugins, so the runner branch is
+    exercised with the policy spelled out here rather than through a tool.
+
+    Args:
+        plugin: The dotenv-linter plugin supplying commands and parser.
+        path: The file to fix.
+
+    Returns:
+        The aggregated fix result.
+    """
+    ctx = plugin.prepare(paths=[str(path)], options={}, no_files_message="none")
+    assert not isinstance(ctx, ToolResult)
+    return run_per_file_fix(
+        ctx,
+        plugin=plugin,
+        check_command=plugin._check_command,
+        fix_command=plugin._fix_command,
+        parse=lambda output: parse_dotenv_linter_output(output=output),
+        policy=PerFileFixPolicy(
+            check_failure_message="dotenv-linter check failed",
+            verify=VerifyMode.AFTER_SUCCESS,
+            verify_failure_message="dotenv-linter recheck failed",
+            report_verify_output=True,
+        ),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -197,7 +237,7 @@ def test_verification_failure_conservatively_keeps_the_initial_issues(
             (False, "dotenv-linter: cannot read"),
         ],
     ):
-        result = plugin.fix([str(env_file)], {})
+        result = _fix_with_verification(plugin, env_file)
 
     assert_that(result.success).is_false()
     assert_that(result.initial_issues_count).is_equal_to(1)
@@ -231,7 +271,7 @@ def test_verification_after_a_successful_fix_scores_the_survivors(
             (True, ""),
         ],
     ):
-        result = plugin.fix([str(env_file)], {})
+        result = _fix_with_verification(plugin, env_file)
 
     assert_that(result.success).is_true()
     assert_that(result.initial_issues_count).is_equal_to(1)

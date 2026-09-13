@@ -1042,11 +1042,12 @@ removed in a later release: `fixed` per tool (read `net_resolved`),
 JSONL stream (read `net_resolved_count`) and `fixed_count` in the MCP tool summary (read
 `net_resolved`).
 
-**Which tools the pass covers.** The central verify pass covers the mutating tools that
-declare `CHECK`. Format-only tools — prettier, oxfmt, rustfmt and shfmt — do not declare
-it, so they are not asked for a residual and keep their own result contract, including
-whatever post-format checking they do themselves. Making every mutator declare `CHECK`
-is a follow-up (#2607), not this change.
+**Which tools the pass covers.** Every mutating capability declares `CHECK`, so the
+central verify pass covers every tool that can rewrite a file, the four formatters that
+used to be `FORMAT`-only (prettier, oxfmt, rustfmt and shfmt) included since #2607. It
+is the only source of residuals: no tool keeps a private post-mutation recheck, and a
+tool's own post-fix opinion is discarded, not added. Declaring `CHECK` also means
+`lintro check` runs those four formatters in check mode.
 
 This is the only place cross-tool interference is visible. If ruff fixes a file and
 prettier then reformats it, ruff's own post-fix lint already ran; a run-level pass sees
