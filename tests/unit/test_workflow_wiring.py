@@ -6729,6 +6729,7 @@ def test_number_typed_reusable_inputs_are_never_block_scalars() -> None:
         "number-typed lgtm-ci inputs passed as block scalars",
     ).is_empty()
 
+
 _RELEASE_IMAGE_JOBS = ("docker-base", "docker-full", "docker-ai")
 
 
