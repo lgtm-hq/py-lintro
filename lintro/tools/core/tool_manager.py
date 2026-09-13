@@ -4,7 +4,9 @@ This module provides the ToolManager class for managing tool registration and
 execution ordering using the plugin registry system. Ordering is derived from
 the claims each tool declares (:mod:`lintro.tools.core.scheduler`, #1742); the
 scalar ``priority`` system and the unused ``conflicts_with`` machinery it
-replaced are gone.
+replaced are gone — #2606 re-confirmed that neither leaves any residue, and
+adds write-conflict edges to the same derivation rather than a third ordering
+system beside it.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from lintro.enums.action import Action
 from lintro.plugins.discovery import discover_all_tools
 from lintro.plugins.registry import ToolRegistry
 from lintro.tools.core.scheduler import (
@@ -32,10 +35,13 @@ class ToolManager:
     - Tool execution order, derived from declared claims
     - Tool configuration management
 
-    Execution order is not configurable: it is derived from what each tool
+    Execution order is not authored: it is derived from what each tool
     declares it touches and what it does to it (``FIX`` -> ``FORMAT`` ->
     ``CHECK`` per pattern), so it is complete, verifiable and identical
-    everywhere it is reported.
+    everywhere it is reported. ``execution.precedence`` is the one
+    configurable input, and it is a tie-break rather than an order: it names
+    which of two tools that can write the same file has authority over the
+    other (#2606).
     """
 
     _initialized: bool = field(default=False, init=False)
@@ -135,7 +141,16 @@ class ToolManager:
 
         return normalized_names
 
-    def get_parallel_batches(self, tool_names: list[str]) -> list[list[str]]:
+    def get_parallel_batches(
+        self,
+        tool_names: list[str],
+        *,
+        action: Action = Action.FIX,
+        paths: list[str] | None = None,
+        exclude: str | None = None,
+        include_venv: bool = False,
+        diff_base: str | None = None,
+    ) -> list[list[str]]:
         """Group tools into batches that may run concurrently.
 
         Batches come from the same derived DAG that orders a sequential run:
@@ -144,6 +159,13 @@ class ToolManager:
         writes (ruff before black on ``*.py``). Tools with no derived relation
         share a batch, which is a proven independence rather than an unstated
         assumption.
+
+        Under a mutating action that independence has to cover writes as well
+        as reads, so the scheduler also derives write-conflict edges (#2606):
+        two tools whose run-scoped candidate sets intersect never share a
+        batch, and the batch that results is safe to dispatch concurrently.
+        Under a read-only action nothing is rewritten, so no conflict edge is
+        derived and check-mode batching is byte-for-byte what it was.
 
         Names are lowercased and de-duplicated the same way
         :meth:`get_tool_execution_order` does them, so neither entry point can
@@ -154,6 +176,14 @@ class ToolManager:
 
         Args:
             tool_names: Tool names to batch, in derived execution order.
+            action: Action the batches will be dispatched under. Only a
+                mutating action derives write-conflict edges.
+            paths: Scan targets, used to resolve each tool's candidate files.
+                When omitted, overlap falls back to conservative pattern
+                comparison, which splits more rather than less.
+            exclude: Comma-separated CLI exclude patterns, or ``None``.
+            include_venv: Whether virtual-environment directories are in scope.
+            diff_base: Resolved ``--diff`` base ref, or ``None``.
 
         Returns:
             Batches of normalised tool names, in derived execution order.
@@ -162,8 +192,16 @@ class ToolManager:
             return []
 
         normalized_names = self._normalize_tool_names(tool_names)
+        report = build_order_report(
+            normalized_names,
+            paths=paths,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=diff_base,
+            write_conflicts=action == Action.FIX,
+        )
         predecessors: dict[str, set[str]] = {name: set() for name in normalized_names}
-        for edge in build_order_report(normalized_names).edges:
+        for edge in report.edges:
             predecessors[edge.after].add(edge.before)
 
         level: dict[str, int] = {}

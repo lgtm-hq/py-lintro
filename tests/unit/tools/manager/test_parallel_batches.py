@@ -166,7 +166,7 @@ def test_get_parallel_batches_serialises_a_stalled_graph(
     monkeypatch.setattr(
         tool_manager_module,
         "build_order_report",
-        lambda _names: cyclic,
+        lambda _names, **_kwargs: cyclic,
         raising=True,
     )
 
@@ -200,7 +200,7 @@ def test_get_parallel_batches_keeps_a_cycle_successor_last(
     monkeypatch.setattr(
         tool_manager_module,
         "build_order_report",
-        lambda _names: cyclic,
+        lambda _names, **_kwargs: cyclic,
         raising=True,
     )
 

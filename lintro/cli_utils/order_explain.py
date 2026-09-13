@@ -25,7 +25,12 @@ if TYPE_CHECKING:
 
     from rich.console import Console
 
-    from lintro.tools.core.scheduler import DerivedOrder, OrderCycle, OrderEdge
+    from lintro.tools.core.scheduler import (
+        DerivedOrder,
+        FormatDemotion,
+        OrderCycle,
+        OrderEdge,
+    )
 
 #: Header printed above every explanation.
 EXPLAIN_HEADER: str = "Execution order (derived from tool claims)"
@@ -41,6 +46,9 @@ MAX_EDGES_PER_TOOL: int = 5
 
 #: Cap on the tools listed with their constraints in the doctor section.
 MAX_DOCTOR_CONSTRAINTS: int = 5
+
+#: Cap on the format-owner demotions listed in the doctor section.
+MAX_DOCTOR_DEMOTIONS: int = 3
 
 
 def _predecessors(report: DerivedOrder) -> dict[str, list[OrderEdge]]:
@@ -103,6 +111,41 @@ def _format_cycle(cycle: OrderCycle) -> list[str]:
     ]
 
 
+def _format_demotion_record(record: FormatDemotion) -> str:
+    """Render one demotion as the compact line doctor and init both print.
+
+    The full ``--explain-order`` listing uses ``record.reason`` instead, which
+    the scheduler composes and which also names the override key.
+
+    Args:
+        record: The demotion to render.
+
+    Returns:
+        A single line naming the scope, the owner, the demoted tool and why.
+    """
+    return (
+        f"{record.scope}: {record.winner} owns FORMAT, "
+        f"{record.loser} demoted ({record.rule})"
+    )
+
+
+def _format_demotions(demotions: Sequence[FormatDemotion]) -> list[str]:
+    """Render the format-owner decisions the scheduler made (#1744).
+
+    Args:
+        demotions: Demotions recorded on the derived order.
+
+    Returns:
+        Lines naming the winner, the loser, the scope and the reason, or a
+        single line saying nothing contended.
+    """
+    if not demotions:
+        return ["  Format ownership (0): no two tools contend for one scope."]
+    lines = [f"  Format ownership ({len(demotions)}):"]
+    lines.extend(f"    {record.reason}" for record in demotions)
+    return lines
+
+
 def format_order_report(report: DerivedOrder) -> list[str]:
     """Render the full execution-order explanation.
 
@@ -133,6 +176,8 @@ def format_order_report(report: DerivedOrder) -> list[str]:
         )
     else:
         lines.append("  Cycles (0): the derived graph is a DAG.")
+    lines.append("")
+    lines.extend(_format_demotions(report.demotions))
     return lines
 
 
@@ -153,7 +198,8 @@ def format_doctor_order_section(report: DerivedOrder) -> list[str]:
         f"    {DERIVED_NOTE}",
         f"    tools: {len(report.tools)}"
         f"  constraints: {len(report.edges)}"
-        f"  cycles: {len(report.cycles)}",
+        f"  cycles: {len(report.cycles)}"
+        f"  format demotions: {len(report.demotions)}",
     ]
     shown = constrained[:MAX_DOCTOR_CONSTRAINTS]
     lines.extend(
@@ -164,8 +210,89 @@ def format_doctor_order_section(report: DerivedOrder) -> list[str]:
     hidden = len(constrained) - len(shown)
     if hidden > 0:
         lines.append(f"    ... and {hidden} more constrained tool(s)")
+    shown_demotions = report.demotions[:MAX_DOCTOR_DEMOTIONS]
+    lines.extend(f"    {_format_demotion_record(record)}" for record in shown_demotions)
+    hidden_demotions = len(report.demotions) - len(shown_demotions)
+    if hidden_demotions > 0:
+        lines.append(f"    ... and {hidden_demotions} more demotion(s)")
     lines.append("    Run 'lintro check --explain-order' for the full order.")
     return lines
+
+
+def format_ownership_notice(tool_names: Sequence[str]) -> list[str]:
+    """Report the format-owner decisions a selection implies (#1744, #2606).
+
+    Used by ``lintro init`` so a generated config says up front which tool
+    will own formatting where two of them contend, and which config key
+    changes it. Resolution itself happens on every run, not here.
+
+    Args:
+        tool_names: Tools the config enables.
+
+    Returns:
+        Plain-text lines, or an empty list when nothing contends or the
+        scheduler could not answer — an advisory notice must not fail init.
+    """
+    try:
+        report = build_order_report(tool_names)
+    except (ValueError, OSError):
+        return []
+    if not report.demotions:
+        return []
+    lines = ["  Format ownership:"]
+    lines.extend(
+        f"    {_format_demotion_record(record)}" for record in report.demotions
+    )
+    lines.append("    Change it with execution.precedence in your config.")
+    return lines
+
+
+class _QuietLogger:
+    """Logger shim that discards the diff preflight's console output.
+
+    ``--explain-order`` explains a run rather than performing one, so the
+    warnings ``resolve_diff_scope`` would print about an unresolvable ref
+    belong to the real invocation, not to its preview.
+    """
+
+    @staticmethod
+    def console_output(**kwargs: object) -> None:
+        """Discard one console line.
+
+        Args:
+            **kwargs: Ignored console-output arguments.
+        """
+
+
+def _explained_diff_base(diff_base: str | None, paths: Sequence[str]) -> str | None:
+    """Resolve ``--diff`` the way the run would, without reporting on it.
+
+    The raw CLI value can be the "use the default branch" sentinel, which is
+    not a ref, so handing it straight to file discovery would scope the
+    explanation to nothing recognisable. Resolution failures fall back to the
+    full scan, which is what the explanation showed before this scoping
+    existed — an advisory preview must not be the thing that fails.
+
+    Args:
+        diff_base: Raw ``--diff`` value, or ``None``.
+        paths: Scan targets the run would use.
+
+    Returns:
+        The resolved base ref, or ``None`` to explain an unnarrowed run.
+    """
+    if diff_base is None:
+        return None
+    try:
+        from lintro.utils.execution.run_preflight import resolve_diff_scope
+
+        scope = resolve_diff_scope(
+            diff_base=diff_base,
+            paths=list(paths),
+            logger=_QuietLogger(),
+        )
+    except (ValueError, OSError, RuntimeError):
+        return None
+    return None if scope.failed else scope.base
 
 
 def explain_order_lines(
@@ -174,6 +301,10 @@ def explain_order_lines(
     paths: Sequence[str],
     *,
     ignore_conflicts: bool = False,
+    dry_run: bool = False,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    diff_base: str | None = None,
 ) -> list[str]:
     """Build the ``--explain-order`` output for a would-be run.
 
@@ -186,6 +317,11 @@ def explain_order_lines(
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would scan, used for language detection.
         ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
+        dry_run: Mirror of ``fmt --dry-run``. A dry run rewrites nothing, so
+            it batches as a read-only run and must be explained as one.
+        exclude: Mirror of the run's ``--exclude``.
+        include_venv: Mirror of the run's ``--include-venv``.
+        diff_base: Raw ``--diff`` value the run was given, or ``None``.
 
     Returns:
         Plain-text lines, ready to print one per line.
@@ -198,7 +334,25 @@ def explain_order_lines(
         ignore_conflicts=ignore_conflicts,
         scan_roots=list(paths),
     )
-    return format_order_report(build_order_report(selection.to_run))
+    # Explain what *this* invocation would do: a mutating action derives
+    # write-conflict edges, a read-only one does not, and overlap is decided
+    # from the paths the run would have scanned. ``fmt --dry-run`` is a
+    # read-only preview, so it must be explained with the batches it would
+    # actually use rather than the mutating ones.
+    # The whole scope, not just the paths: overlap is resolved from the files
+    # each tool would actually be handed, so an explanation that dropped the
+    # excludes or the diff base would report conflicts and demotions for files
+    # the run could never touch.
+    return format_order_report(
+        build_order_report(
+            selection.to_run,
+            paths=list(paths) or None,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=_explained_diff_base(diff_base, paths),
+            write_conflicts=action != "check" and not dry_run,
+        ),
+    )
 
 
 def emit_order_explanation(
@@ -207,6 +361,10 @@ def emit_order_explanation(
     action: str,
     paths: Sequence[str],
     ignore_conflicts: bool = False,
+    dry_run: bool = False,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    diff_base: str | None = None,
 ) -> NoReturn:
     """Print the ``--explain-order`` output and exit without running any tool.
 
@@ -215,6 +373,11 @@ def emit_order_explanation(
         action: ``"check"`` or ``"fmt"``.
         paths: Paths the run would have scanned.
         ignore_conflicts: Mirror of the run's ``--ignore-conflicts``.
+        dry_run: Mirror of ``fmt --dry-run``, which rewrites nothing and
+            therefore batches as a read-only run.
+        exclude: Mirror of the run's ``--exclude``.
+        include_venv: Mirror of the run's ``--include-venv``.
+        diff_base: Raw ``--diff`` value the run was given, or ``None``.
 
     Raises:
         SystemExit: Always. ``0`` once the order is printed, ``1`` when the
@@ -226,6 +389,10 @@ def emit_order_explanation(
             action,
             paths,
             ignore_conflicts=ignore_conflicts,
+            dry_run=dry_run,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=diff_base,
         )
     except ValueError as exc:
         click.echo(str(exc), err=True)

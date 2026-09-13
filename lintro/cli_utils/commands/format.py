@@ -214,6 +214,10 @@ def format_command(
             tools=tools,
             action=DEFAULT_ACTION,
             paths=normalized_paths,
+            dry_run=dry_run,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=diff_base,
         )
 
     # Run the AI-aware pipeline: execute, AI-enhance, render.

@@ -156,6 +156,8 @@ Release automation:
 - Merges to `main` run `release-version-pr.yml` to open a version bump PR; after merge,
   `release-auto-tag.yml` creates the tag.
 - Tag push publishes to PyPI (OIDC) and creates a GitHub Release with artifacts.
+- There is no TestPyPI staging lane. Releases are verified by installing the published
+  package from PyPI, plus the binary and MCP gates.
 - The `lintro-pre-commit` mirror bump is skipped with a visible warning in the run
   summary until the `MIRROR_REPO_TOKEN` secret exists; the release itself stays green.
 

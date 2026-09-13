@@ -188,6 +188,10 @@ conflicting tools are batched sequentially. Controlled via `execution.parallel` 
 **Tasks:**
 
 - [x] Identify independent tool groups (no conflicts) — `get_parallel_batches`
+- [x] Keep two tools that can rewrite the same file out of one batch, with a
+      deterministic, overridable write precedence and a single `FORMAT` owner per
+      overlapping scope ([#2606](https://github.com/lgtm-hq/py-lintro/issues/2606),
+      closing [#1744](https://github.com/lgtm-hq/py-lintro/issues/1744))
 - [x] Implement async/concurrent execution — `AsyncToolExecutor`
 - [x] Handle result aggregation
 - [x] Config-driven toggle (`execution.parallel`) instead of a `--parallel` CLI flag

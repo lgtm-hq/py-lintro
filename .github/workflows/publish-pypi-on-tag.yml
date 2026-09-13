@@ -121,9 +121,7 @@ jobs:
         pipelines.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
-        test.pypi.org:443
         upload.pypi.org:443
-        upload.test.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
         github-releases.githubusercontent.com:443

@@ -629,6 +629,8 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         optional_fields["max_workers"] = data["max_workers"]
     if "artifacts" in data:
         optional_fields["artifacts"] = data["artifacts"]
+    if "precedence" in data:
+        optional_fields["precedence"] = _parse_precedence(data["precedence"])
 
     return ExecutionConfig(
         enabled_tools=enabled_tools,
@@ -638,6 +640,54 @@ def _parse_execution_config(data: dict[str, Any]) -> ExecutionConfig:
         max_fix_retries=max_fix_retries,
         **optional_fields,
     )
+
+
+def _parse_precedence(raw: Any) -> list[tuple[str, str]]:
+    """Parse ``execution.precedence`` into ``(winner, loser)`` pairs.
+
+    Args:
+        raw: The value as YAML/TOML produced it.
+
+    Returns:
+        Lowercased pairs, in the order given.
+
+    Raises:
+        ValueError: If the value is not a list of two-element tool-name pairs,
+            or a pair names the same tool twice.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError(
+            "execution.precedence must be a list of [winner, loser] pairs, "
+            f"got {type(raw).__name__}",
+        )
+    pairs: list[tuple[str, str]] = []
+    for entry in raw:
+        if (
+            not isinstance(entry, (list, tuple))
+            or len(entry) != 2
+            or not all(isinstance(part, str) for part in entry)
+        ):
+            # A non-string part must be rejected rather than coerced: YAML
+            # spells a missing value as ``null``, and ``str(None)`` is the
+            # name "none", which would sail past the empty-name check below
+            # and become an inert override nobody can see is wrong.
+            raise ValueError(
+                "execution.precedence entries must be [winner, loser] pairs "
+                f"of tool names, got {entry!r}",
+            )
+        winner, loser = (part.strip().lower() for part in entry)
+        if not winner or not loser:
+            raise ValueError(
+                f"execution.precedence tool names must be non-empty, got {entry!r}",
+            )
+        if winner == loser:
+            raise ValueError(
+                f"execution.precedence pair names one tool twice: {entry!r}",
+            )
+        pairs.append((winner, loser))
+    return pairs
 
 
 def _parse_tool_config(tool_name: str, data: dict[str, Any]) -> LintroToolConfig:

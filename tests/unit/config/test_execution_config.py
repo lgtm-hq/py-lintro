@@ -99,3 +99,101 @@ def test_get_default_max_workers_fallback_on_zero() -> None:
     with patch.object(os, "cpu_count", return_value=0):
         result = _get_default_max_workers()
         assert_that(result).is_equal_to(4)
+
+
+def test_execution_config_precedence_defaults_to_empty() -> None:
+    """No configured write precedence means the derived rules decide alone."""
+    assert_that(ExecutionConfig().precedence).is_empty()
+
+
+def test_parse_precedence_lowercases_pairs() -> None:
+    """Tool ids are normalised the same way the scheduler normalises them."""
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence([["Ruff", "BLACK"]])).is_equal_to(
+        [("ruff", "black")],
+    )
+
+
+def test_parse_precedence_rejects_a_malformed_entry() -> None:
+    """A precedence entry that is not a pair is a config error, not a guess."""
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence).raises(ValueError).when_called_with(
+        [["ruff"]],
+    )
+
+
+def test_parse_precedence_rejects_a_self_pair() -> None:
+    """A tool cannot take precedence over itself."""
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence).raises(ValueError).when_called_with(
+        [["ruff", "ruff"]],
+    )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "ruff",
+        [["ruff"]],
+        [["ruff", "black", "typos"]],
+        [["ruff", 1]],
+        [[None, "black"]],
+        [[" ", "black"]],
+        [["ruff", "ruff"]],
+    ],
+    ids=[
+        "scalar-not-a-list",
+        "one-element-entry",
+        "three-element-entry",
+        "non-string-part",
+        "null-part",
+        "blank-name",
+        "tool-against-itself",
+    ],
+)
+def test_parse_precedence_rejects_malformed_input(raw: object) -> None:
+    """Every rejection path names the key the user has to edit.
+
+    The parser is the only place a precedence pair is validated, so a shape it
+    lets through becomes an override that silently matches nothing.
+
+    Args:
+        raw: The malformed value as YAML or TOML would produce it.
+    """
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence).raises(ValueError).when_called_with(raw)
+    with pytest.raises(ValueError, match="execution.precedence"):
+        _parse_precedence(raw)
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [None, [], ()],
+    ids=["absent", "empty-list", "empty-tuple"],
+)
+def test_parse_precedence_accepts_an_empty_override(raw: object) -> None:
+    """No configured precedence is not an error; it is the default.
+
+    Args:
+        raw: A value meaning "nothing configured".
+    """
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence(raw)).is_empty()
+
+
+def test_parse_precedence_keeps_a_repeated_pair() -> None:
+    """The parser normalises; it does not de-duplicate.
+
+    Collapsing a pair and its reverse is the scheduler's job, and it raises
+    there rather than letting one silently win.
+    """
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(
+        _parse_precedence([["ruff", "black"], ["ruff", "black"]]),
+    ).is_equal_to([("ruff", "black"), ("ruff", "black")])

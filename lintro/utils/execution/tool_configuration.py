@@ -294,11 +294,14 @@ def configure_tool_for_execution(
     if effective_tool_auto_install:
         tool.set_options(auto_install=True)
 
-    # Format authority on ``*.py`` (#1735 rule (d): fewest mutating
-    # capabilities wins). When black is in the run it owns FORMAT, so ruff is
-    # demoted to its FIX capability and its formatting stages are switched off
-    # unless the user explicitly asked for them. The derived DAG already puts
-    # ruff before black; this stops the two from formatting the same file.
+    # Format authority on ``*.py``. The rule itself — fewest mutating
+    # capabilities wins — now lives in the scheduler (#1744, #2606), which
+    # records the demotion and reports it through explain, doctor and init:
+    # black owns FORMAT, so ruff is demoted to its FIX capability and its
+    # formatting stages are switched off unless the user explicitly asked for
+    # them. Applying that record here rather than repeating its conclusion is
+    # blocked by layering (``lintro.utils`` may not import ``lintro.tools``)
+    # and is left to the follow-up that lifts the executor into its own layer.
     if "black" in selected_tools and tool_name == ToolName.RUFF.value:
         tool_config = config_manager.get_tool_config(tool_name)
         lintro_tool_cfg = tool_config.lintro_tool_config or {}
