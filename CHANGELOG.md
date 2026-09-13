@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.159.7] - 2026-09-13
+
+### Fixed
+
+- **ci**: coerce the GHCR prune min-age dispatch input to a number (#2645) (ef73a30)
+
 ## [0.159.6] - 2026-09-13
 
 ### Fixed
