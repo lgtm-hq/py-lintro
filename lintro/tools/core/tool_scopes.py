@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import fnmatch
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from lintro.enums.capability import MUTATING_CAPABILITIES, Cap
@@ -204,10 +204,7 @@ def resolve_tool_scopes(
     Returns:
         One :class:`ToolScope` per name, keyed by the lowercased name.
     """
-    from lintro.utils.path_filtering import (
-        setup_exclude_patterns,
-        walk_files_with_excludes,
-    )
+    from lintro.utils.path_filtering import setup_exclude_patterns
 
     scan_paths = list(paths or ())
     resolve = bool(scan_paths)
@@ -242,20 +239,8 @@ def resolve_tool_scopes(
         project_scoped = bool(capabilities) and (
             patternless or getattr(definition, "partitionable", False) is False
         )
-        candidates: frozenset[str] = frozenset()
-        if resolve and capabilities and patterns and not project_scoped:
-            candidates = _canonical(
-                walk_files_with_excludes(
-                    paths=scan_paths,
-                    file_patterns=sorted(patterns),
-                    exclude_patterns=exclude_patterns,
-                    include_venv=include_venv,
-                    diff_base=diff_base,
-                ),
-            )
         scopes[name] = ToolScope(
             tool=name,
-            candidates=candidates,
             roots=roots if project_scoped else frozenset(),
             patterns=tuple(sorted(patterns)),
             mutating_capabilities=frozenset(capabilities),
@@ -264,7 +249,67 @@ def resolve_tool_scopes(
             known=True,
             resolved=resolve,
         )
+
+    if resolve:
+        _fill_candidates(
+            scopes,
+            paths=scan_paths,
+            exclude_patterns=exclude_patterns,
+            include_venv=include_venv,
+            diff_base=diff_base,
+        )
     return scopes
+
+
+def _fill_candidates(
+    scopes: dict[str, ToolScope],
+    *,
+    paths: list[str],
+    exclude_patterns: list[str],
+    include_venv: bool,
+    diff_base: str | None,
+) -> None:
+    """Walk the tree for the writers whose candidate lists decide an overlap.
+
+    The walk is deliberately skipped unless at least two writers are in the
+    run: with one writer (or none) nothing can conflict, so resolving the
+    files would cost a tree walk to answer a question nobody asked. This is
+    also why the walk is not shared with
+    :func:`lintro.tools.core.verify_pass.capture_verify_baseline`, which runs
+    moments later over the same patterns: that pass needs the union for every
+    mutating tool and applies ``--incremental`` per tool from its cache, and a
+    process-lifetime memo over filesystem state would be wrong for ``lintro
+    watch``, which scans repeatedly in one process. Folding the two walks
+    into one belongs with the executor refactor, not here.
+
+    Args:
+        scopes: Scopes to fill in place; only pattern-scoped writers are
+            walked for.
+        paths: Canonical scan targets.
+        exclude_patterns: Resolved exclude patterns.
+        include_venv: Whether virtual-environment directories are in scope.
+        diff_base: Resolved ``--diff`` base ref, or ``None``.
+    """
+    from lintro.utils.path_filtering import walk_files_with_excludes
+
+    writers = [scope for scope in scopes.values() if scope.is_writer]
+    if len(writers) < 2:
+        return
+    for scope in writers:
+        if scope.unbounded or not scope.patterns:
+            continue
+        scopes[scope.tool] = replace(
+            scope,
+            candidates=_canonical(
+                walk_files_with_excludes(
+                    paths=paths,
+                    file_patterns=list(scope.patterns),
+                    exclude_patterns=exclude_patterns,
+                    include_venv=include_venv,
+                    diff_base=diff_base,
+                ),
+            ),
+        )
 
 
 def _under_any_root(path: str, roots: frozenset[str]) -> bool:

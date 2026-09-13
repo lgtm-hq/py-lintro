@@ -322,8 +322,10 @@ def test_candidates_are_canonical_paths_not_spellings(tmp_path: Path) -> None:
     link = tmp_path / "link"
     link.symlink_to(real, target_is_directory=True)
 
-    through_real = resolve_tool_scopes(["ruff"], paths=[str(real)])["ruff"]
-    through_link = resolve_tool_scopes(["ruff"], paths=[str(link)])["ruff"]
+    # Two writers, because a lone writer cannot conflict and the candidate
+    # walk is deliberately skipped for it.
+    through_real = resolve_tool_scopes(["ruff", "black"], paths=[str(real)])["ruff"]
+    through_link = resolve_tool_scopes(["ruff", "black"], paths=[str(link)])["ruff"]
 
     assert_that(str(link)).is_not_equal_to(str(real))
     assert_that(through_link.candidates).is_equal_to(through_real.candidates)
