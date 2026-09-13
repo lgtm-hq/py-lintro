@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import subprocess  # nosec B404 - only TimeoutExpired is constructed here
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.tools.rustfmt.definition import RustfmtPlugin
@@ -158,3 +160,130 @@ def test_fix_partial_fix_preserves_initial_issues(
     assert_that(result.initial_issues_count).is_equal_to(2)
     assert_that(result.fixed_issues_count).is_equal_to(1)
     assert_that(result.remaining_issues_count).is_equal_to(1)
+
+
+def _cargo_crate(tmp_path: Path) -> Path:
+    """Create a minimal crate so ``find_cargo_root`` resolves to ``tmp_path``.
+
+    Args:
+        tmp_path: Temporary directory to build the crate in.
+
+    Returns:
+        Path: The Rust source file inside the crate.
+    """
+    (tmp_path / "Cargo.toml").write_text(
+        '[package]\nname = "test"\nversion = "0.1.0"',
+        encoding="utf-8",
+    )
+    source = tmp_path / "src" / "main.rs"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text("fn main(){}", encoding="utf-8")
+    return source
+
+
+_DIFF = "Diff in src/main.rs:1:"
+_TIMEOUT = subprocess.TimeoutExpired(cmd=["cargo", "fmt"], timeout=30)
+
+
+@pytest.mark.parametrize(
+    ("scenario", "side_effect"),
+    [
+        ("clean_verify", [(False, _DIFF), (True, ""), (True, "")]),
+        ("remaining_after_fix", [(False, _DIFF), (True, ""), (False, _DIFF)]),
+        ("failed_fix", [(False, _DIFF), (False, "error: could not write")]),
+        ("timeout_on_initial_check", [_TIMEOUT]),
+        ("timeout_on_fix", [(False, _DIFF), _TIMEOUT]),
+        ("timeout_on_verify", [(False, _DIFF), (True, ""), _TIMEOUT]),
+    ],
+)
+def test_every_fix_result_records_the_crate_root_as_its_cwd(
+    rustfmt_plugin: RustfmtPlugin,
+    tmp_path: Path,
+    scenario: str,
+    side_effect: list[object],
+) -> None:
+    """Rustfmt runs from the crate root, so its results must say so.
+
+    The parser reports paths like ``src/main.rs``, relative to the crate root.
+    The run-level verify pass (#1743) resolves each issue's file against
+    ``ToolResult.cwd`` to decide whether that file was rewritten, and falls
+    back to the process directory when it is unset — which would silently stop
+    matching. Every issue-bearing return path is covered, because a fix that
+    drops the stamp on one of them is a fix that drops it.
+
+    Args:
+        rustfmt_plugin: The RustfmtPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+        scenario: Name of the return path being exercised.
+        side_effect: Subprocess results (or timeouts) for that path.
+    """
+    del scenario
+    source = _cargo_crate(tmp_path)
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            rustfmt_plugin,
+            "_run_subprocess",
+            side_effect=side_effect,
+        ):
+            result = rustfmt_plugin.fix([str(source)], {})
+
+    assert_that(result.cwd).is_equal_to(str(tmp_path))
+
+
+def test_every_fix_subprocess_runs_from_the_crate_root(
+    rustfmt_plugin: RustfmtPlugin,
+    tmp_path: Path,
+) -> None:
+    """``cargo fmt`` is only meaningful from the crate root.
+
+    ``fix`` runs three subprocesses — the pre-fix check, the write, the
+    post-fix check — and each must be launched from the directory holding
+    ``Cargo.toml``. Run from anywhere else, ``cargo fmt`` formats a different
+    crate or none at all, and the paths its parser reports stop lining up with
+    the ``cwd`` stamped on the result. The stamp is pinned above; this pins the
+    execution it describes.
+
+    Args:
+        rustfmt_plugin: The RustfmtPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    source = _cargo_crate(tmp_path)
+    seen_cwds: list[str | None] = []
+
+    def _record(
+        cmd: list[str],
+        timeout: int,
+        cwd: str | None = None,
+    ) -> tuple[bool, str]:
+        """Record the working directory and report a clean run.
+
+        Args:
+            cmd: Command list.
+            timeout: Timeout in seconds.
+            cwd: Working directory the plugin asked for.
+
+        Returns:
+            Tuple of (success, output).
+        """
+        del cmd, timeout
+        seen_cwds.append(cwd)
+        return (True, "")
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            rustfmt_plugin,
+            "_run_subprocess",
+            side_effect=_record,
+        ):
+            rustfmt_plugin.fix([str(source)], {})
+
+    # Three invocations, every one of them from the crate root.
+    assert_that(seen_cwds).is_length(3)
+    assert_that(set(seen_cwds)).is_equal_to({str(tmp_path)})

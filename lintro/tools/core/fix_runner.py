@@ -50,16 +50,17 @@ class VerifyMode(StrEnum):
 
     Attributes:
         NEVER: Trust the fix command's exit status. A successful fix means
-            every issue detected before it ran was resolved.
+            every issue detected before it ran was resolved. Since #1743 this
+            is the right default for a tool lintro runs through ``fmt``: the
+            run-level verify pass measures the residual once, after every
+            mutating tool has finished, and a per-file re-lint here could only
+            repeat that measurement too early.
         AFTER_SUCCESS: Re-run the check command only when the fix command
             succeeded; a failed fix reports every initial issue as remaining.
-        ALWAYS: Re-run the check command even when the fix command failed,
-            because the tool can apply fixes partially while exiting non-zero.
     """
 
     NEVER = auto()
     AFTER_SUCCESS = auto()
-    ALWAYS = auto()
 
 
 @dataclass(frozen=True)
@@ -351,7 +352,7 @@ def _fix_one_file(
             error=str(exc),
         )
 
-    if not fix_success and policy.verify is not VerifyMode.ALWAYS:
+    if not fix_success:
         return _failed_fix(initial_issues=initial_issues, output=fix_output)
 
     if policy.verify is VerifyMode.NEVER:
@@ -494,4 +495,12 @@ def run_per_file_fix(
         remaining_issues_count=remaining_count,
         initial_issues=tally.initial_issues or None,
         timed_out=result.timed_out,
+        # The project root the per-file paths were resolved from — not the
+        # subprocess working directory, which this runner never sets. The
+        # run-level verify pass anchors a relative ``issue.file`` here when it
+        # decides whether the file was rewritten (#1743); today every
+        # ``ctx.files`` entry is absolute, so tools echo absolute paths and
+        # the anchor is unused, and an unresolved path keeps the pre-fix
+        # finding rather than clearing it.
+        cwd=ctx.cwd,
     )

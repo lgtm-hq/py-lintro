@@ -20,6 +20,7 @@ from lintro.enums.action import Action, normalize_action
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.models.core.tool_result import ToolResult
+from lintro.utils.execution.exit_codes import unknown_residual_tool_names
 from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
@@ -130,10 +131,25 @@ def serialize_tool_result(
     if result.parse_failures_count is not None:
         data["parse_failures_count"] = result.parse_failures_count
     if action == Action.FIX:
-        fixed = getattr(result, "fixed_issues_count", None)
-        remaining = getattr(result, "remaining_issues_count", None)
-        data["fixed"] = fixed if fixed is not None else 0
-        data["remaining"] = remaining if remaining is not None else 0
+        if getattr(result, "residual_unknown", False):
+            # The verify pass could not measure the residual (#1743). Both
+            # counts are null rather than zero: a consumer must be able to
+            # tell "nothing left" from "nobody looked".
+            data["net_resolved"] = None
+            # ``fixed`` is the deprecated spelling of ``net_resolved``, kept
+            # at the same value so existing consumers keep working. It will
+            # be removed in a later release.
+            data["fixed"] = None
+            data["remaining"] = None
+            data["residual_unknown"] = True
+            data["residual_unknown_reason"] = result.residual_unknown_reason
+        else:
+            fixed = getattr(result, "fixed_issues_count", None)
+            remaining = getattr(result, "remaining_issues_count", None)
+            data["net_resolved"] = fixed if fixed is not None else 0
+            # Deprecated alias of ``net_resolved``; see above.
+            data["fixed"] = data["net_resolved"]
+            data["remaining"] = remaining if remaining is not None else 0
     metadata = getattr(result, "metadata", None)
     if isinstance(metadata, dict) and metadata:
         normalized_metadata = normalize_tool_metadata(metadata)
@@ -160,7 +176,10 @@ def create_json_output(
         action: The action being performed (check, fmt, test).
         results: List of tool result objects.
         total_issues: Total number of issues found.
-        total_fixed: Total number of issues fixed (only for FIX action).
+        total_fixed: The net resolved figure — issues detected before the
+            mutation phase minus the residual measured after it. Serialized
+            as ``summary.total_net_resolved``; it is a difference between two
+            measurements rather than any tool's own fix count (#1743).
         total_remaining: Total number of issues remaining. In FIX mode this is
             the post-fix remaining count; in CHECK/TEST mode nothing is fixed,
             so it mirrors ``total_issues``.
@@ -182,6 +201,9 @@ def create_json_output(
         "results": [],
         "summary": {
             "total_issues": total_issues,
+            "total_net_resolved": total_fixed if action_enum == Action.FIX else 0,
+            # Deprecated alias of ``total_net_resolved``, carrying the same
+            # value so existing consumers keep working.
             "total_fixed": total_fixed if action_enum == Action.FIX else 0,
             # In CHECK/TEST mode nothing is fixed, so remaining mirrors the
             # total issues rather than the misleading constant 0.
@@ -192,6 +214,11 @@ def create_json_output(
             # failures, not findings, so they never appear in ``total_issues``;
             # this list is where a consumer reads them instead.
             "timed_out_tools": timed_out_tool_names(results),
+            # Names of tools whose residual the verify pass could not measure
+            # (#1743). The two derived totals above leave them out rather
+            # than folding a zero in, so this list is what tells a consumer
+            # which tools the numbers do not cover.
+            "residual_unknown_tools": unknown_residual_tool_names(list(results)),
         },
     }
     # Additive: include the severity tallies under summary when supplied so

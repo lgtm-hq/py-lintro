@@ -238,7 +238,7 @@ def test_write_plain_output_fix_action(
 
     content = output_path.read_text()
     assert_that(content).contains("Lintro Fix Report")
-    assert_that(content).contains("Total Fixed: 1")
+    assert_that(content).contains("Total Net Resolved: 1")
 
 
 def test_creates_parent_directories(

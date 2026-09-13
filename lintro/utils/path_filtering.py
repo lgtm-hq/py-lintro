@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pathspec
+from loguru import logger
+
+from lintro.utils.path_utils import find_lintro_ignore
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -30,6 +33,84 @@ PROJECT_ROOT_MARKERS: tuple[str, ...] = (
 # Bound the upward search for a project root so a far filesystem ancestor is
 # never treated as the anchor. Mirrors the ``.lintro-ignore`` search bound.
 _ROOT_SEARCH_MAX_DEPTH: int = 20
+
+
+# Default exclude patterns for file discovery. Applied by every plugin's
+# discovery and by the run-level verify pass, so they live in the lowest layer
+# both can reach (#1743). A tuple rather than a list: this is shared process-
+# wide state now, and an in-place ``append`` at any call site would silently
+# widen the exclude set for every later run in the same process.
+DEFAULT_EXCLUDE_PATTERNS: tuple[str, ...] = (
+    ".git",
+    ".hg",
+    ".svn",
+    # Cache excludes are anchored on the trailing slash so they match
+    # *directories* only. The bare glob ``*cache*`` used here previously also
+    # matched any file whose basename contained "cache" -- ``lintro/ai/cache.py``,
+    # ``tests/unit/utils/test_file_cache.py`` -- so those sources were invisible
+    # to every tool and nothing reported the skip (#2379).
+    "__pycache__/",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".mypy_cache/",
+    ".cache/",
+    # These two were only ever excluded because the `*cache*` glob happened to
+    # cover them; name them so dropping the glob does not un-exclude them.
+    # `terragrunt` vendors remote modules under `.terragrunt-cache`, and lintro
+    # writes its own AI suggestion cache, transcripts and raw responses under
+    # `.lintro-cache` (see lintro/ai/cache.py, lintro/ai/audit.py).
+    ".terragrunt-cache/",
+    ".lintro-cache/",
+    "*.pyc",
+    "*.pyo",
+    "*.pyd",
+    ".coverage",
+    "htmlcov",
+    "dist",
+    "build",
+    "*.egg-info",
+    # `terraform init` vendors provider plugins and remote modules here. Their
+    # .tf files are third-party downloads, so handing them to an IaC scanner
+    # reports findings nobody in this repository can fix. Detection prunes the
+    # directory too (lintro/utils/project_detection.py); both are needed,
+    # because pruning detection only decides whether the tool is selected.
+    ".terraform",
+)
+
+
+def setup_exclude_patterns(
+    exclude_patterns: list[str],
+) -> list[str]:
+    """Set up exclude patterns with defaults and .lintro-ignore.
+
+    Args:
+        exclude_patterns: Current exclude patterns to extend.
+
+    Returns:
+        Updated list of exclude patterns.
+    """
+    patterns = list(exclude_patterns)
+
+    # Add default exclude patterns
+    for pattern in DEFAULT_EXCLUDE_PATTERNS:
+        if pattern not in patterns:
+            patterns.append(pattern)
+
+    # Add .lintro-ignore patterns if present
+    try:
+        lintro_ignore_path = find_lintro_ignore()
+        if lintro_ignore_path and lintro_ignore_path.exists():
+            with open(lintro_ignore_path, encoding="utf-8") as f:
+                for line in f:
+                    line_stripped = line.strip()
+                    if not line_stripped or line_stripped.startswith("#"):
+                        continue
+                    if line_stripped not in patterns:
+                        patterns.append(line_stripped)
+    except (OSError, UnicodeDecodeError) as e:
+        logger.debug(f"Could not read .lintro-ignore: {e}")
+
+    return patterns
 
 
 @lru_cache(maxsize=32)

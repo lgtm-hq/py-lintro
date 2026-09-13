@@ -23,7 +23,6 @@ from lintro.plugins.registry import register_tool
 from lintro.tools.core.check_runner import PerFileCheckPolicy, run_per_file_check
 from lintro.tools.core.fix_runner import (
     PerFileFixPolicy,
-    VerifyMode,
     run_per_file_fix,
 )
 from lintro.tools.core.option_validators import (
@@ -249,11 +248,13 @@ class SqlfluffPlugin(BaseToolPlugin):
             parse=lambda output: parse_sqlfluff_output(output=output),
             policy=PerFileFixPolicy(
                 check_failure_message="sqlfluff lint failed before fix",
-                # sqlfluff fix can partially apply fixes while exiting
-                # non-zero (e.g. unfixable rules), so the surviving issues
-                # can only come from a fresh lint pass.
-                verify=VerifyMode.ALWAYS,
-                verify_failure_message="sqlfluff lint failed during verification",
+                # No self-verification. sqlfluff fix can partially apply fixes
+                # while exiting non-zero, so the surviving issues can only come
+                # from a fresh lint pass — and since #1743 that pass is the
+                # run-level verify pass, which also sees a later tool undoing
+                # this one's work. A failed fix command still reports every
+                # initial issue as remaining, so the pre-verify number errs
+                # towards over-reporting rather than under-reporting.
                 summarize=False,
             ),
         )

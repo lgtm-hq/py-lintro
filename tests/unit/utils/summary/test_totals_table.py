@@ -356,7 +356,7 @@ def test_totals_table_check_mode_does_not_contain_fix_rows(
         affected_files=2,
     )
     combined = "\n".join(output)
-    assert_that(combined).does_not_contain("Fixed Issues")
+    assert_that(combined).does_not_contain("Net Resolved")
     assert_that(combined).does_not_contain("Remaining Issues")
 
 
@@ -440,7 +440,7 @@ def test_totals_table_check_mode_shows_fmt_hint_for_same_input(
 def test_totals_table_fix_mode_contains_fixed_issues(
     console_capture: tuple[Callable[..., None], list[str]],
 ) -> None:
-    """Verify FIX mode table contains Fixed Issues row.
+    """Verify FIX mode table contains the Net Resolved row.
 
     Args:
         console_capture: Fixture for capturing console output.
@@ -454,7 +454,7 @@ def test_totals_table_fix_mode_contains_fixed_issues(
         affected_files=5,
     )
     combined = "\n".join(output)
-    assert_that(combined).contains("Fixed Issues")
+    assert_that(combined).contains("Net Resolved")
     assert_that(combined).contains("10")
 
 
@@ -582,3 +582,57 @@ def test_totals_table_contains_metric_count_headers(
     combined = "\n".join(output)
     assert_that(combined).contains("Metric")
     assert_that(combined).contains("Count")
+
+
+def test_totals_table_names_the_tools_it_could_not_measure(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """A residual nobody measured must not read as a measured zero (#1743).
+
+    The two derived totals cover only the tools the verify pass could measure,
+    so a run whose mutator ended in the third state would otherwise print
+    "Remaining Issues 0" directly under a tool row that says "unknown". The
+    table counts those tools in their own row and the line beneath names them.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.FIX,
+        total_fixed=3,
+        total_remaining=1,
+        affected_files=2,
+        residual_unknown_tools=["ruff"],
+    )
+
+    combined = "\n".join(output)
+    assert_that(combined).contains("Residual Unknown (tools)")
+    assert_that(combined).contains("Residual unknown for 1 tool (ruff)")
+    assert_that(combined).contains(
+        "the counts above cover only the tools the verify pass could measure",
+    )
+
+
+def test_totals_table_stays_quiet_when_every_tool_was_measured(
+    console_capture: tuple[Callable[..., None], list[str]],
+) -> None:
+    """The third-state row appears only when there is a third state to report.
+
+    Args:
+        console_capture: Fixture for capturing console output.
+    """
+    capture_func, output = console_capture
+
+    print_totals_table(
+        console_output_func=capture_func,
+        action=Action.FIX,
+        total_fixed=3,
+        total_remaining=1,
+        affected_files=2,
+    )
+
+    combined = "\n".join(output)
+    assert_that(combined).does_not_contain("Residual Unknown")

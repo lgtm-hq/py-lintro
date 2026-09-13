@@ -168,6 +168,10 @@ def sequential_totals(
     for result in all_results:
         total_issues += getattr(result, "issues_count", 0) or 0
         if action == Action.FIX:
+            if getattr(result, "residual_unknown", False):
+                # Nothing was measured for this tool (#1743); a zero here
+                # would be a measurement the run never took.
+                continue
             total_fixed += getattr(result, "fixed_issues_count", None) or 0
             total_remaining += getattr(result, "remaining_issues_count", None) or 0
     return total_issues, total_fixed, total_remaining

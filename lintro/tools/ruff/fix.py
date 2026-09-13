@@ -1,6 +1,14 @@
 """Ruff fix execution logic.
 
 Functions for running ruff fix commands and processing results.
+
+Since #1743 the remaining count this module computes is **not** the run's
+residual: ``lintro fmt`` discards it and takes the residual from the run-level
+verify pass, which alone can see a later tool (black, prettier) undoing ruff's
+work. What survives here is the pre-fix measurement — ``initial_issues_count``
+and ``initial_issues`` — which the verify pass subtracts from to report what
+ruff actually fixed. The counts are still filled in for callers that invoke
+``fix()`` directly, outside the executor.
 """
 
 import subprocess  # nosec B404 - subprocess used safely to execute ruff commands with controlled input
@@ -10,6 +18,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.parsers.base_issue import BaseIssue
+from lintro.parsers.ruff.ruff_format_issue import RuffFormatIssue
 from lintro.parsers.ruff.ruff_parser import (
     parse_ruff_format_check_output,
     parse_ruff_output,
@@ -20,6 +30,7 @@ from lintro.tools.core.timeout_utils import create_timeout_result
 # timeout (defined in lintro.tools.ruff.definition). Importing here preserves
 # the historical ``from ...ruff.fix import RUFF_DEFAULT_TIMEOUT`` entry point.
 from lintro.tools.ruff.definition import RUFF_DEFAULT_TIMEOUT
+from lintro.tools.ruff.paths import absolute_issue_paths
 
 if TYPE_CHECKING:
     from lintro.models.core.tool_result import ToolResult
@@ -136,8 +147,9 @@ def execute_ruff_fix(
             initial_issues_count=None,
             fixed_issues_count=None,
             remaining_issues_count=None,
+            cwd=ctx.cwd,
         )
-    initial_issues = parse_ruff_output(output=output_check)
+    initial_issues: list[BaseIssue] = list(parse_ruff_output(output=output_check))
     initial_count: int = len(initial_issues)
 
     # Also check formatting issues before fixing
@@ -176,9 +188,19 @@ def execute_ruff_fix(
                 fixed_issues_count=0,
                 remaining_issues_count=initial_count,
                 timed_out=True,
+                cwd=ctx.cwd,
             )
         format_files = parse_ruff_format_check_output(output=output_format_check)
         initial_format_count = len(format_files)
+        # Record the formatting findings as issues, not just as a count. The
+        # run-level verify pass (#1743) derives its residual from
+        # ``initial_issues`` for every file it did not re-check, so a finding
+        # that exists only as a number would silently become "fixed" whenever
+        # the pass cannot run.
+        initial_issues.extend(
+            RuffFormatIssue(file=path)
+            for path in absolute_issue_paths(files=format_files, cwd=ctx.cwd)
+        )
 
     # Track initial totals separately for accurate fixed/remaining math
     total_initial_count: int = initial_count + initial_format_count
@@ -215,6 +237,7 @@ def execute_ruff_fix(
                 fixed_issues_count=0,
                 remaining_issues_count=total_initial_count,
                 timed_out=True,
+                cwd=ctx.cwd,
             )
         remaining_issues = parse_ruff_output(output=output)
         remaining_count = len(remaining_issues)
@@ -304,6 +327,7 @@ def execute_ruff_fix(
                 fixed_issues_count=fixed_lint_count,
                 remaining_issues_count=total_initial_count - fixed_lint_count,
                 timed_out=True,
+                cwd=ctx.cwd,
             )
         # Formatting fixes are counted separately from lint fixes
         if initial_format_count > 0:
@@ -341,4 +365,7 @@ def execute_ruff_fix(
         remaining_issues_count=remaining_count,
         # Store pre-fix issues so the display layer can show what was fixed
         initial_issues=initial_issues if initial_issues else None,
+        # The run-level verify pass resolves each issue's file against this
+        # directory to decide whether the file was rewritten (#1743).
+        cwd=ctx.cwd,
     )

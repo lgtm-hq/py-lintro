@@ -32,6 +32,10 @@ class FakeToolResult:
     remaining_issues_count: int | None = None
     pytest_summary: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
+    # The verify pass's third state (#1743): the residual was never measured,
+    # so both counts above are None and consumers must render "unknown".
+    residual_unknown: bool = False
+    residual_unknown_reason: str | None = None
 
 
 @dataclass

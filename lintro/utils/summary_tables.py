@@ -21,6 +21,19 @@ from lintro.utils.tool_metadata import get_ai_count
 # Constants
 DEFAULT_REMAINING_COUNT: str = "?"
 
+# Shown in the count columns when the run-level verify pass could not measure
+# a tool's residual (#1743). The check crashed, timed out or was skipped, so
+# there is no after-count: printing a number here — the pre-fix one, or a zero
+# — would report a measurement the run never made.
+UNKNOWN_RESIDUAL_DISPLAY: str = "unknown"
+
+# Note shown beside an unknown residual, so the reason is not buried in the
+# tool's own output block.
+UNKNOWN_RESIDUAL_NOTE: str = "residual unknown"
+
+# TOTALS row counting the tools the derived totals had to leave out.
+UNKNOWN_RESIDUAL_ROW: str = "Residual Unknown (tools)"
+
 # Note shown when a tool passed without inspecting a single file. A zero-file
 # run and a genuinely clean run are both ``PASS 0``; without this note they are
 # indistinguishable, which is how a fully excluded scan reads as green (#1678).
@@ -131,15 +144,24 @@ def _get_ai_unverified_count(result: object) -> int:
     return get_ai_count(result, "unverified_count")
 
 
-def _is_no_files_result(output: object) -> bool:
+def _is_no_files_result(output: object, result: object = None) -> bool:
     """Report whether a tool result means "no files were inspected".
+
+    The structured ``no_files`` flag on ``ToolResult`` is the authority: it is
+    stamped by every producer of a "nothing to check" result. The prose match
+    stays as a fallback for legacy result shapes (plain objects and dicts built
+    in tests or by out-of-tree consumers) that carry only the message.
 
     Args:
         output: The tool result ``output`` value.
+        result: The tool result itself, when available.
 
     Returns:
-        True when the output is one of the framework's no-files messages.
+        True when the result is flagged as a no-files result, or its output is
+        one of the framework's no-files messages.
     """
+    if result is not None and getattr(result, "no_files", False):
+        return True
     if not isinstance(output, str):
         return False
     text = output.strip().rstrip(".")
@@ -388,10 +410,18 @@ def print_summary_table(
                 # Prefer standardized counts from ToolResult
                 remaining_std = getattr(result, "remaining_issues_count", None)
                 fixed_std = getattr(result, "fixed_issues_count", None)
+                residual_unknown = bool(
+                    getattr(result, "residual_unknown", False),
+                )
 
-                if remaining_std is not None:
+                if residual_unknown:
+                    # No after-count was taken. Say so rather than falling
+                    # through to the output parser, which would read the
+                    # pre-fix number off the tool's own text.
+                    remaining_count: int | str = UNKNOWN_RESIDUAL_DISPLAY
+                elif remaining_std is not None:
                     try:
-                        remaining_count: int | str = int(remaining_std)
+                        remaining_count = int(remaining_std)
                     except (ValueError, TypeError):
                         remaining_count = DEFAULT_REMAINING_COUNT
                 else:
@@ -416,7 +446,11 @@ def print_summary_table(
                         elif not success:
                             remaining_count = DEFAULT_REMAINING_COUNT
 
-                if fixed_std is not None:
+                fixed_display_value: int | str
+                if residual_unknown:
+                    # The before-minus-after figure needs an after.
+                    fixed_display_value = UNKNOWN_RESIDUAL_DISPLAY
+                elif fixed_std is not None:
                     try:
                         fixed_display_value = int(fixed_std)
                     except (ValueError, TypeError):
@@ -427,8 +461,12 @@ def print_summary_table(
                     except (ValueError, TypeError):
                         fixed_display_value = 0
 
-                # Fixed issues display
-                fixed_display: str = f"{_GREEN}{fixed_display_value}{_RESET}"
+                # Net resolved display
+                fixed_display: str = (
+                    f"{_YELLOW}{fixed_display_value}{_RESET}"
+                    if isinstance(fixed_display_value, str)
+                    else f"{_GREEN}{fixed_display_value}{_RESET}"
+                )
                 ai_applied_value = _get_ai_applied_count(result)
                 ai_applied_display: str = f"{_GREEN}{ai_applied_value}{_RESET}"
                 ai_verified_value = _get_ai_verified_count(result)
@@ -436,7 +474,9 @@ def print_summary_table(
                 ai_unverified_value = _get_ai_unverified_count(result)
                 if ai_unverified_value > 0:
                     notes_display = f"{_YELLOW}{ai_unverified_value} unresolved{_RESET}"
-                elif _is_no_files_result(result_output):
+                elif residual_unknown:
+                    notes_display = f"{_YELLOW}{UNKNOWN_RESIDUAL_NOTE}{_RESET}"
+                elif _is_no_files_result(result_output, result):
                     notes_display = f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
                 else:
                     notes_display = ""
@@ -485,7 +525,7 @@ def print_summary_table(
 
                 notes_display = (
                     f"{_YELLOW}{NO_FILES_NOTE}{_RESET}"
-                    if _is_no_files_result(result_output)
+                    if _is_no_files_result(result_output, result)
                     else ""
                 )
 
@@ -567,7 +607,7 @@ def print_summary_table(
             headers = [
                 "Tool",
                 "Status",
-                "Fixed",
+                "Net Resolved",
                 "AI-Applied",
                 "AI-Resolved",
                 "Remaining",
@@ -605,6 +645,7 @@ def print_totals_table(
     total_ai_applied: int = 0,
     total_ai_verified: int = 0,
     total_fixable: int = 0,
+    residual_unknown_tools: Sequence[str] = (),
 ) -> None:
     """Print a totals summary table for the run.
 
@@ -612,7 +653,9 @@ def print_totals_table(
         console_output_func: Function to output text to console.
         action: The action being performed.
         total_issues: Total number of issues found (CHECK/TEST mode).
-        total_fixed: Total number of native-tool issues fixed (FIX mode).
+        total_fixed: Net resolved by the native tools (FIX mode): issues
+            detected before the mutation phase minus the residual measured
+            after it, which is not any one tool's reported fix count (#1743).
         total_remaining: Total number of remaining issues (FIX mode).
         affected_files: Number of unique files with issues.
         severity_errors: Number of issues at ERROR severity.
@@ -624,6 +667,11 @@ def print_totals_table(
             (CHECK/TEST mode). When greater than zero, an "Auto-fixable" row is
             shown. The hint to run ``lintro fmt`` is emitted only in CHECK
             mode; TEST mode is read-only and never advertises ``fmt``.
+        residual_unknown_tools: Tools whose residual the verify pass could not
+            measure (#1743). They are excluded from ``total_fixed`` and
+            ``total_remaining``, so the table has to say so: without it a run
+            whose only mutator ended in the third state would print a measured
+            "0 remaining" under a tool row that reads "unknown".
     """
     try:
         import click
@@ -635,13 +683,19 @@ def print_totals_table(
         if action == Action.FIX:
             total_resolved = total_fixed + total_ai_verified
             rows: list[list[str | int]] = [
-                ["Fixed Issues (Native)", total_fixed],
+                ["Net Resolved (Native)", total_fixed],
                 ["AI Applied Fixes", total_ai_applied],
                 ["AI Resolved Fixes", total_ai_verified],
                 ["Total Resolved", total_resolved],
                 ["Remaining Issues", total_remaining],
                 ["Affected Files", affected_files],
             ]
+            if residual_unknown_tools:
+                # The counts above cover the measured tools only. Naming the
+                # rest here is what keeps them from reading as zeroes.
+                rows.append(
+                    [UNKNOWN_RESIDUAL_ROW, len(residual_unknown_tools)],
+                )
         else:
             rows = [
                 ["Total Issues", total_issues],
@@ -663,6 +717,18 @@ def print_totals_table(
         )
         console_output_func(text=table)
         console_output_func(text="")
+
+        if residual_unknown_tools:
+            named = ", ".join(residual_unknown_tools)
+            noun = "tool" if len(residual_unknown_tools) == 1 else "tools"
+            console_output_func(
+                text=(
+                    f"{_YELLOW}Residual unknown for {len(residual_unknown_tools)} "
+                    f"{noun} ({named}){_RESET} — the counts above cover only the "
+                    "tools the verify pass could measure"
+                ),
+            )
+            console_output_func(text="")
 
         # In check mode, nudge the user toward auto-fixing when the tools
         # report fixable issues. Only shown when at least one issue is

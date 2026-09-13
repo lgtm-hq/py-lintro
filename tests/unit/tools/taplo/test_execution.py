@@ -192,8 +192,6 @@ def test_fix_with_mocked_subprocess_success(
                 (False, format_issue_output),  # initial format check
                 (True, ""),  # lint check
                 (True, ""),  # fix command
-                (True, ""),  # final format check
-                (True, ""),  # final lint check
             ],
         ):
             result = taplo_plugin.fix([str(test_file)], {})
@@ -203,11 +201,16 @@ def test_fix_with_mocked_subprocess_success(
     assert_that(result.remaining_issues_count).is_equal_to(0)
 
 
-def test_fix_with_mocked_subprocess_partial_fix(
+def test_fix_measures_before_it_writes_and_never_re_lints(
     taplo_plugin: TaploPlugin,
     tmp_path: Path,
 ) -> None:
-    """Fix returns partial success when some issues cannot be fixed.
+    """Fix runs exactly three commands: format check, lint, then fmt.
+
+    Since #1743 taplo no longer re-runs ``fmt --check`` and ``lint`` in-process
+    to count what survived. What it still owns is the pre-fix measurement the
+    run-level verify pass subtracts its residual from — a fourth and fifth
+    subprocess call here would be that deleted implementation coming back.
 
     Args:
         taplo_plugin: The TaploPlugin instance to test.
@@ -246,16 +249,22 @@ def test_fix_with_mocked_subprocess_partial_fix(
                 (False, format_issue),  # initial format check
                 (False, lint_issue),  # initial lint check
                 (True, ""),  # fix command
-                (True, ""),  # final format check - format is fixed
-                (False, lint_issue),  # final lint check - syntax error remains
             ],
-        ):
+        ) as run_subprocess:
             result = taplo_plugin.fix([str(test_file)], {})
 
-    assert_that(result.success).is_false()
+    assert_that(run_subprocess.call_count).is_equal_to(3)
+    # A swap that keeps the count at three but makes the last call another
+    # read-only probe would be the deleted self-verify wearing a disguise, so
+    # pin the writing command itself rather than only how many ran.
+    write_argv = run_subprocess.call_args_list[2].kwargs["cmd"]
+    assert_that(write_argv).contains("fmt")
+    assert_that(write_argv).does_not_contain("--check")
+    assert_that(result.success).is_true()
     assert_that(result.initial_issues_count).is_equal_to(2)
-    assert_that(result.fixed_issues_count).is_equal_to(1)
-    assert_that(result.remaining_issues_count).is_equal_to(1)
+    assert_that(result.initial_issues).is_length(2)
+    assert_that(result.fixed_issues_count).is_equal_to(2)
+    assert_that(result.remaining_issues_count).is_equal_to(0)
 
 
 def test_fix_with_no_changes_needed(
@@ -288,8 +297,6 @@ def test_fix_with_no_changes_needed(
                 (True, ""),  # initial format check - no issues
                 (True, ""),  # initial lint check - no issues
                 (True, ""),  # fix command
-                (True, ""),  # final format check
-                (True, ""),  # final lint check
             ],
         ):
             result = taplo_plugin.fix([str(test_file)], {})
@@ -321,3 +328,47 @@ def test_fix_with_no_toml_files(
 
     assert_that(result.success).is_true()
     assert_that(result.output).contains("No .toml files")
+
+
+def test_fix_fails_when_the_format_command_fails(
+    taplo_plugin: TaploPlugin,
+    tmp_path: Path,
+) -> None:
+    """A `taplo fmt` that could not write must fail the result.
+
+    The run-level verify pass (#1743) replaced the post-fix re-lint, not the
+    exit status of the mutation command. A write error on an already-clean
+    file leaves nothing for a later CHECK to find, so a dropped failure would
+    read as a clean run with exit code 0 and taplo's stderr thrown away.
+
+    Args:
+        taplo_plugin: The TaploPlugin instance to test.
+        tmp_path: Temporary directory path for test files.
+    """
+    test_file = copy_sample(
+        tmp_path,
+        "tools",
+        "config",
+        "taplo",
+        "taplo_clean.toml",
+        dest_name="test.toml",
+    )
+
+    with patch(
+        "lintro.plugins.execution_preparation.verify_tool_version",
+        return_value=None,
+    ):
+        with patch.object(
+            taplo_plugin,
+            "_run_subprocess",
+            side_effect=[
+                (True, ""),  # initial format check: clean
+                (True, ""),  # initial lint check: clean
+                (False, "error: failed to write test.toml"),  # fmt fails
+            ],
+        ):
+            result = taplo_plugin.fix([str(test_file)], {})
+
+    assert_that(result.success).is_false()
+    assert_that(result.output).contains("failed to write test.toml")
+    assert_that(result.fixed_issues_count).is_equal_to(0)

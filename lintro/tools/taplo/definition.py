@@ -369,7 +369,7 @@ class TaploPlugin(BaseToolPlugin):
 
         logger.debug(f"[TaploPlugin] Fixing: {' '.join(fix_cmd)} (cwd={ctx.cwd})")
         try:
-            _, _ = self._run_subprocess(
+            fix_success, fix_output = self._run_subprocess(
                 cmd=fix_cmd,
                 timeout=ctx.timeout,
                 cwd=ctx.cwd,
@@ -381,63 +381,44 @@ class TaploPlugin(BaseToolPlugin):
                 initial_issues=initial_issues,
             )
 
-        # Check for remaining formatting issues
-        try:
-            final_success, final_output = self._run_subprocess(
-                cmd=check_cmd,
-                timeout=ctx.timeout,
+        # No post-fix re-lint here. Taplo used to re-run `fmt --check` and
+        # `lint` in-process to count what survived; #1743 replaced that (and
+        # the three other private implementations of the same idea) with the
+        # run-level verify pass, which is the only place that can also see a
+        # later tool undoing this one's work. What this method still owns is
+        # the pre-fix measurement the verify pass subtracts from — and the exit
+        # status of the mutation command itself, which no verify pass can
+        # recover: a `taplo fmt` that could not write reports nothing to find
+        # afterwards, so a dropped failure would read as a clean run.
+        if not fix_success:
+            failure_output = (fix_output or "").strip()
+            return ToolResult(
+                name=self.definition.name,
+                success=False,
+                output=f"taplo fmt failed.\n{failure_output}".strip(),
+                issues_count=initial_count,
+                issues=list(initial_issues),
+                initial_issues=initial_issues if initial_issues else None,
+                initial_issues_count=initial_count,
+                fixed_issues_count=0,
+                remaining_issues_count=initial_count,
                 cwd=ctx.cwd,
             )
-        except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(
-                timeout_val=ctx.timeout,
-                initial_count=initial_count,
-                initial_issues=initial_issues,
-            )
 
-        remaining_format_issues = parse_taplo_output(output=final_output)
-
-        # Re-check lint errors (these won't be fixed by formatting)
-        try:
-            _, final_lint_output = self._run_subprocess(
-                cmd=lint_cmd,
-                timeout=ctx.timeout,
-                cwd=ctx.cwd,
-            )
-        except subprocess.TimeoutExpired:
-            return self._handle_timeout_error(
-                timeout_val=ctx.timeout,
-                initial_count=initial_count,
-                initial_issues=initial_issues,
-            )
-
-        remaining_lint_issues = parse_taplo_output(output=final_lint_output)
-
-        all_remaining_issues = remaining_format_issues + remaining_lint_issues
-        remaining_count = len(all_remaining_issues)
-        fixed_count = max(0, initial_count - remaining_count)
-
-        # Build summary
-        summary: list[str] = []
-        if fixed_count > 0:
-            summary.append(f"Fixed {fixed_count} issue(s)")
-        if remaining_count > 0:
-            summary.append(
-                f"Found {remaining_count} issue(s) that cannot be auto-fixed",
-            )
-        elif remaining_count == 0 and fixed_count > 0:
-            summary.append("All issues were successfully auto-fixed")
-        final_summary = "\n".join(summary) if summary else "No fixes applied."
+        fixed_count = initial_count
+        final_summary = (
+            f"Fixed {fixed_count} issue(s)" if fixed_count else "No fixes applied."
+        )
 
         return ToolResult(
             name=self.definition.name,
-            success=(remaining_count == 0),
+            success=True,
             output=final_summary,
-            issues_count=remaining_count,
-            issues=all_remaining_issues,
+            issues_count=0,
+            issues=[],
             initial_issues=initial_issues if initial_issues else None,
             initial_issues_count=initial_count,
             fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
+            remaining_issues_count=0,
             cwd=ctx.cwd,
         )

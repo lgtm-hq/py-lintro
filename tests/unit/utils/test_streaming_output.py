@@ -89,7 +89,9 @@ def test_handler_initializes_totals() -> None:
     handler = StreamingResultHandler(output_format="grid", action=Action.CHECK)
     totals = handler.get_totals()
 
-    assert_that(totals).contains_key("issues", "fixed", "remaining")
+    assert_that(totals).contains_key("issues", "net_resolved", "remaining")
+    # The deprecated alias is still tracked.
+    assert_that(totals).contains_key("fixed")
     assert_that(totals["issues"]).is_equal_to(0)
 
 
@@ -132,6 +134,7 @@ def test_handle_result_tracks_fix_counts(mock_fix_result: ToolResult) -> None:
     handler.handle_result(mock_fix_result)
 
     totals = handler.get_totals()
+    assert_that(totals["net_resolved"]).is_equal_to(3)
     assert_that(totals["fixed"]).is_equal_to(3)
     assert_that(totals["remaining"]).is_equal_to(1)
 
@@ -362,8 +365,70 @@ def test_result_to_dict_includes_fix_counts(mock_fix_result: ToolResult) -> None
     handler = StreamingResultHandler(output_format="json", action=Action.FIX)
     data = handler._result_to_dict(mock_fix_result)
 
-    assert_that(data).contains_key("fixed_issues_count", "remaining_issues_count")
+    assert_that(data).contains_key("net_resolved_count", "remaining_issues_count")
+    assert_that(data).contains_key("fixed_issues_count")
+    assert_that(data["net_resolved_count"]).is_equal_to(3)
     assert_that(data["fixed_issues_count"]).is_equal_to(3)
+
+
+def _unknown_residual_result() -> ToolResult:
+    """Build the third-state result the streaming layer must not flatten.
+
+    Returns:
+        ToolResult: A fold output whose residual was never measured.
+    """
+    return ToolResult(
+        name="test_tool",
+        success=False,
+        output="Verify pass: residual unknown",
+        issues_count=2,
+        initial_issues_count=2,
+        residual_unknown=True,
+        residual_unknown_reason="the verify check timed out",
+    )
+
+
+def test_result_to_dict_reports_an_unknown_residual_instead_of_counts() -> None:
+    """No count is emitted for a residual nobody measured (#1743).
+
+    Both count keys are absent rather than zero, and the flag plus its reason
+    say why, so a JSONL consumer cannot read the gap as "nothing left".
+    """
+    handler = StreamingResultHandler(output_format="json", action=Action.FIX)
+
+    data = handler._result_to_dict(_unknown_residual_result())
+
+    assert_that(data).does_not_contain_key(
+        "net_resolved_count",
+        "fixed_issues_count",
+        "remaining_issues_count",
+    )
+    assert_that(data["residual_unknown"]).is_true()
+    assert_that(data["residual_unknown_reason"]).is_equal_to(
+        "the verify check timed out",
+    )
+
+
+def test_totals_ignore_a_result_whose_residual_is_unknown() -> None:
+    """An unmeasured residual adds nothing to either *derived* total.
+
+    "Net resolved" and "remaining" are after-counts, and none was taken, so
+    the cleared counts must leak into neither — not as zeroes and not as the
+    pre-fix number. ``issues`` is the exception and deliberately so: those two
+    findings were measured, before the mutation phase, and the run reports
+    them. The failure reaches the run through ``tools_failed``.
+    """
+    handler = StreamingResultHandler(output_format="grid", action=Action.FIX)
+
+    handler.handle_result(_unknown_residual_result())
+
+    totals = handler.get_totals()
+    assert_that(totals["net_resolved"]).is_equal_to(0)
+    assert_that(totals["fixed"]).is_equal_to(0)
+    assert_that(totals["remaining"]).is_equal_to(0)
+    # The pre-fix findings still count: they were measured.
+    assert_that(totals["issues"]).is_equal_to(2)
+    assert_that(totals["tools_failed"]).is_equal_to(1)
 
 
 def test_create_streaming_handler_with_format() -> None:

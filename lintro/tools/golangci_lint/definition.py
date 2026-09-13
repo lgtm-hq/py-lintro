@@ -278,6 +278,7 @@ class GolangciLintPlugin(BaseToolPlugin):
                 success=True,
                 output="No go.mod found; skipping golangci-lint.",
                 issues_count=0,
+                no_files=True,
             )
 
         cmd = _build_golangci_lint_command(fix=False)
@@ -362,6 +363,7 @@ class GolangciLintPlugin(BaseToolPlugin):
                 initial_issues_count=0,
                 fixed_issues_count=0,
                 remaining_issues_count=0,
+                no_files=True,
             )
 
         results = [

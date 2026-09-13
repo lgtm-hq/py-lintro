@@ -193,8 +193,60 @@ def test_execution_summary_fix_with_standardized_counts(
     logger.print_execution_summary(Action.FIX, results)
 
     rows = _totals_row(output=capsys.readouterr().out)
-    assert_that(rows).contains_entry({"Fixed Issues (Native)": 10})
+    assert_that(rows).contains_entry({"Net Resolved (Native)": 10})
     assert_that(rows).contains_entry({"Remaining Issues": 2})
+
+
+def test_execution_summary_omits_an_unknown_residual_from_the_totals(
+    fake_tool_result_factory: Callable[..., FakeToolResult],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A residual nobody measured contributes to neither total (#1743).
+
+    The guard matters because the fallback below it would otherwise fold the
+    tool's ``issues_count`` into "net resolved" — reporting the pre-fix
+    number as though the mutation phase had resolved it — while the remaining
+    column stayed at zero. Only the measured tool is summed; the run still
+    fails on the unknown tool's own ``success=False``.
+
+    Args:
+        fake_tool_result_factory: Factory for creating FakeToolResult instances.
+        capsys: Pytest stdout/stderr capture fixture.
+    """
+    logger = ThreadSafeConsoleLogger()
+    results = [
+        fake_tool_result_factory(
+            name="ruff",
+            success=False,
+            issues_count=2,
+            fixed_issues_count=None,
+            remaining_issues_count=None,
+            residual_unknown=True,
+            residual_unknown_reason="the verify check timed out",
+        ),
+        fake_tool_result_factory(
+            name="taplo",
+            success=True,
+            fixed_issues_count=3,
+            remaining_issues_count=1,
+        ),
+    ]
+
+    logger.print_execution_summary(Action.FIX, results)
+
+    output = capsys.readouterr().out
+    rows = _totals_row(output=output)
+    assert_that(rows).contains_entry({"Net Resolved (Native)": 3})
+    assert_that(rows).contains_entry({"Remaining Issues": 1})
+    # And the table says what those numbers do not cover, so "Remaining
+    # Issues 1" cannot be read as the whole run's measured residual.
+    assert_that(rows).contains_entry({"Residual Unknown (tools)": 1})
+    assert_that(output).contains("Residual unknown for 1 tool (ruff)")
+    # The per-tool row above says "unknown" in both count columns and carries
+    # the reason as its note, so the totals are not the only thing a reader
+    # has to go on.
+    assert_that(output).contains("unknown")
+    assert_that(output).contains("residual unknown")
 
 
 def test_execution_summary_fix_fallback_to_issues_count(
@@ -456,5 +508,5 @@ def test_execution_summary_fix_various_counts(
     logger.print_execution_summary(Action.FIX, results)
 
     rows = _totals_row(output=capsys.readouterr().out)
-    assert_that(rows).contains_entry({"Fixed Issues (Native)": fixed})
+    assert_that(rows).contains_entry({"Net Resolved (Native)": fixed})
     assert_that(rows).contains_entry({"Remaining Issues": expected_remaining})

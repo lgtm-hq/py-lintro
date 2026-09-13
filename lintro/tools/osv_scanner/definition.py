@@ -333,6 +333,7 @@ class OsvScannerPlugin(BaseToolPlugin):
                 success=True,
                 output="No paths to check.",
                 issues_count=0,
+                no_files=True,
             )
 
         # Version check

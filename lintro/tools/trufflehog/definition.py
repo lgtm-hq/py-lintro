@@ -263,6 +263,7 @@ class TrufflehogPlugin(BaseToolPlugin):
                 success=True,
                 output="No files to check.",
                 issues_count=0,
+                no_files=True,
             )
         # Resolution can turn a discovered entry into a path that does not
         # exist — a dangling symlink resolves to its absent target (#1716,

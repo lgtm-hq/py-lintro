@@ -530,6 +530,7 @@ class MypyPlugin(BaseToolPlugin):
                 success=True,
                 output="No .py/.pyi files found to check.",
                 issues_count=0,
+                no_files=True,
             )
 
         if not success and issues_count == 0:

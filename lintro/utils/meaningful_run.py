@@ -9,22 +9,25 @@ it wrong independently before this module existed (issue #1739):
   not measure the same population as a normal ``check``.
 
 A tool that finds nothing to do often still returns ``skipped=False`` and
-``success=True``, so its message is the only signal that nothing was looked
-at. That covers two shapes: "No <files> to check" for an empty file set, and
-"Skipping <tool>: ..." for a wrapper that declined to run at all (``vale`` and
-``stylelint`` use the latter without setting ``skipped``, unlike ``spectral``
-and ``commitlint``). :func:`result_inspected_files` classifies both.
+``success=True``. The authoritative signal is now structured:
+``ToolResult.no_files`` is set by every plugin that returns without examining
+a file, and :func:`result_inspected_files` reads it first. That removes the
+ambiguity this module used to document: ``bandit`` deliberately nulls its
+``output`` for the no-files case, so no text heuristic could tell it apart
+from the clean runs that also return empty output (``ruff``, ``pydoclint``,
+``semgrep``, ``gitleaks``). The flag can.
 
-Known limitation
-----------------
-The classification is a heuristic over the result's text, and one shape is
-genuinely ambiguous: an **empty** ``output`` means "clean pass" for some
-wrappers (``ruff``, ``pydoclint``, ``semgrep``, ``gitleaks`` all return no
-output when they inspected files and found nothing) and "nothing to do" for
-others (``bandit`` deliberately nulls its output for the no-files case, see
-``bandit.py``). Empty output is therefore treated as *inspected*, because the
-opposite would make every clean run look unmeasured. Issue #2369 removes the
-ambiguity by giving no-work results a structured signal instead of a message.
+The message heuristic is kept underneath it, not replaced, for results the
+flag cannot speak for: a plugin that has not been converted, an out-of-tree
+plugin, and the "declined to run at all" shape that is not an empty file set —
+"Skipping <tool>: ..." from ``vale`` and ``stylelint``, which do not set
+``skipped`` the way ``spectral`` and ``commitlint`` do. It covers two message
+families: "No <files> to check" for an empty file set and the skipping prefix
+for a wrapper that bailed.
+
+Empty ``output`` with the flag unset still counts as *inspected*: for an
+unconverted producer the opposite reading would make every clean run look
+unmeasured.
 """
 
 from __future__ import annotations
@@ -107,11 +110,17 @@ def result_inspected_files(result: ToolResult) -> bool:
         result: One tool's completed result.
 
     Returns:
-        bool: ``True`` when the tool was not skipped, did not time out, and
-        did not report an empty file or path set. See the module docstring for
-        why empty output counts as inspected.
+        bool: ``True`` when the tool was not skipped, did not time out, did
+        not flag ``no_files``, and did not report an empty file or path set in
+        its message. See the module docstring for why empty output with the
+        flag unset counts as inspected.
     """
     if result.skipped or result.timed_out:
+        return False
+    if result.no_files:
+        # The structured signal, set by the plugin that knows: it returned
+        # without examining a file. Read before the text so a producer that
+        # nulls its output (bandit) is classified correctly.
         return False
     text = f"{result.output or ''}\n{result.formatted_output or ''}"
     return not _reports_no_work(text)

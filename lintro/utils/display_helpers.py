@@ -120,7 +120,11 @@ def print_final_status_format(
 
     Args:
         console_output_func: Function to output text to console
-        total_fixed: int: The total number of issues fixed.
+        total_fixed: int: The net resolved figure — issues detected before
+            the mutation phase minus the residual measured after it. It is
+            displayed as "net resolved" rather than "fixed" because no tool
+            reported it: it is a difference between two measurements, and a
+            finding another tool reintroduced is netted out of it (#1743).
         total_remaining: int: The total number of remaining issues.
     """
     try:
@@ -130,11 +134,11 @@ def print_final_status_format(
             if total_fixed == 0:
                 final_msg: str = "✓ No issues found."
             else:
-                final_msg = f"✓ {total_fixed} fixed"
+                final_msg = f"✓ {total_fixed} net resolved"
             console_output_func(text=click.style(final_msg, fg="green", bold=True))
         else:
             if total_fixed > 0:
-                fixed_msg: str = f"✓ {total_fixed} fixed"
+                fixed_msg: str = f"✓ {total_fixed} net resolved"
                 console_output_func(text=click.style(fixed_msg, fg="green", bold=True))
             remaining_msg: str = f"✗ {total_remaining} remaining"
             console_output_func(text=click.style(remaining_msg, fg="red", bold=True))
@@ -146,11 +150,11 @@ def print_final_status_format(
             if total_fixed == 0:
                 final_msg = "✓ No issues found."
             else:
-                final_msg = f"✓ {total_fixed} fixed"
+                final_msg = f"✓ {total_fixed} net resolved"
             console_output_func(text=f"\033[92m{final_msg}\033[0m")  # green
         else:
             if total_fixed > 0:
-                fixed_msg = f"✓ {total_fixed} fixed"
+                fixed_msg = f"✓ {total_fixed} net resolved"
                 console_output_func(text=f"\033[92m{fixed_msg}\033[0m")  # green
             remaining_msg = f"✗ {total_remaining} remaining"
             console_output_func(text=f"\033[91m{remaining_msg}\033[0m")  # red

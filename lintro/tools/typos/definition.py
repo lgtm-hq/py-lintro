@@ -259,6 +259,7 @@ class TyposPlugin(BaseToolPlugin):
             issues_count=0,
             issues=[],
             cwd=cwd,
+            no_files=True,
         )
 
     def _run_batched(

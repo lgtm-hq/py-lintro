@@ -50,6 +50,10 @@ def test_check_no_python_files_returns_empty_output(tmp_path: Path) -> None:
     assert_that(result.issues_count).is_equal_to(0)
     assert_that(result.output).is_none()
     assert_that(result.parse_failures_count or 0).is_equal_to(0)
+    # The structured signal is the only thing that can classify this result:
+    # with the output nulled it is byte-identical to a clean pass, so the
+    # badge and the severity baseline read the flag, not the text.
+    assert_that(result.no_files).is_true()
 
 
 def test_check_empty_output_clean_pass_has_empty_output(tmp_path: Path) -> None:

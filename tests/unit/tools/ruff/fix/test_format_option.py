@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import cast
 from unittest.mock import MagicMock
 
@@ -119,3 +120,51 @@ def test_execute_ruff_fix_lint_fix_disabled(
         assert_that(command).does_not_contain("--fix")
     assert_that(result.success).is_true()
     assert_that(result.fixed_issues_count).is_equal_to(0)
+
+
+def test_format_findings_are_recorded_as_issues_not_only_as_a_count(
+    mock_ruff_tool: MagicMock,
+    sample_ruff_json_empty_output: str,
+    sample_ruff_format_check_output: str,
+) -> None:
+    """A format-only finding must survive into ``initial_issues``.
+
+    The run-level verify pass (#1743) derives its residual from
+    ``initial_issues`` for every file it did not re-check. A finding that
+    existed only as ``initial_format_count`` would therefore be counted as
+    fixed with zero residual whenever the pass could not run.
+
+    Args:
+        mock_ruff_tool: Mock RuffTool instance for testing.
+        sample_ruff_json_empty_output: Sample empty JSON output from ruff.
+        sample_ruff_format_check_output: Sample format check output from ruff.
+    """
+    mock_ruff_tool.options["format"] = True
+    mock_ruff_tool._run_subprocess.side_effect = [
+        (True, sample_ruff_json_empty_output),  # Initial lint check: clean
+        (False, sample_ruff_format_check_output),  # Format check: 2 files
+        (True, sample_ruff_json_empty_output),  # Lint fix
+        (True, ""),  # Format fix
+    ]
+
+    result = execute_ruff_fix(mock_ruff_tool, ["test.py"])
+
+    assert_that(result.initial_issues_count).is_equal_to(2)
+    assert_that(result.initial_issues).is_length(2)
+    assert_that(
+        [getattr(issue, "code", "") for issue in result.initial_issues or []],
+    ).is_equal_to(["FORMAT", "FORMAT"])
+    # Not merely absolute: joined against the directory ruff ran in, exactly
+    # the way execute_ruff_check canonicalises the same findings. The two go
+    # through one shared helper so a fix's initial_issues and a check's
+    # residual cannot key the same file under different names.
+    assert_that(
+        sorted(issue.file for issue in result.initial_issues or []),
+    ).is_equal_to(
+        sorted(
+            [
+                str(Path("/test/project") / "test.py"),
+                str(Path("/test/project") / "src" / "module.py"),
+            ],
+        ),
+    )

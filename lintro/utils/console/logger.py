@@ -30,6 +30,7 @@ from lintro.utils.display_helpers import (
     print_final_status,
     print_final_status_format,
 )
+from lintro.utils.execution.exit_codes import unknown_residual_tool_names
 from lintro.utils.tool_metadata import get_ai_count as _get_ai_count
 
 
@@ -231,6 +232,12 @@ class ThreadSafeConsoleLogger:
                 total_ai_applied += _get_ai_count(result, "applied_count")
                 total_ai_verified += _get_ai_count(result, "verified_count")
 
+                if getattr(result, "residual_unknown", False):
+                    # The verify pass could not measure this tool's residual
+                    # (#1743), so it contributes to neither total. The run
+                    # already fails on the result's own ``success=False``.
+                    continue
+
                 if fixed_std is not None:
                     total_fixed += fixed_std
                 else:
@@ -262,6 +269,7 @@ class ThreadSafeConsoleLogger:
                 affected_files=affected_files,
                 total_ai_applied=total_ai_applied,
                 total_ai_verified=total_ai_verified,
+                residual_unknown_tools=unknown_residual_tool_names(tool_results),
             )
             self._print_ascii_art(total_issues=total_remaining)
             logger.debug(
@@ -346,6 +354,7 @@ class ThreadSafeConsoleLogger:
         total_ai_applied: int = 0,
         total_ai_verified: int = 0,
         total_fixable: int = 0,
+        residual_unknown_tools: Sequence[str] = (),
     ) -> None:
         """Print the totals summary table for the run.
 
@@ -361,6 +370,8 @@ class ThreadSafeConsoleLogger:
             total_ai_applied: Total number of AI-applied fixes (FIX mode).
             total_ai_verified: Total number of AI-resolved fixes (FIX mode).
             total_fixable: Number of issues flagged as auto-fixable (CHECK mode).
+            residual_unknown_tools: Tools the verify pass could not measure,
+                excluded from the two derived totals (#1743).
         """
         from lintro.utils.summary_tables import print_totals_table
 
@@ -377,6 +388,7 @@ class ThreadSafeConsoleLogger:
             total_ai_applied=total_ai_applied,
             total_ai_verified=total_ai_verified,
             total_fixable=total_fixable,
+            residual_unknown_tools=residual_unknown_tools,
         )
 
     def _print_final_status(

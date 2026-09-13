@@ -166,6 +166,9 @@ class StylelintPlugin(BaseToolPlugin):
                 "CSS/SCSS/Less linting."
             ),
             issues_count=0,
+            # No config means stylelint examined no file, so the run-level
+            # verify pass (#1743) must not read this zero as a clean verdict.
+            no_files=True,
             cwd=cwd,
         )
 

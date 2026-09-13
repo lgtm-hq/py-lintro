@@ -8,7 +8,7 @@ called another (#2315).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from assertpy import assert_that
@@ -152,7 +152,7 @@ def test_print_totals_table_renders_fix_mode_metrics(
     )
 
     out = capsys.readouterr().out
-    assert_that(out).contains("Fixed Issues (Native)")
+    assert_that(out).contains("Net Resolved (Native)")
     assert_that(out).contains("AI Applied Fixes")
     assert_that(out).contains("AI Resolved Fixes")
     assert_that(out).contains("Total Resolved")
@@ -174,7 +174,7 @@ def test_print_totals_table_renders_fix_mode_metrics(
 )
 def test_print_totals_table_various_inputs(
     action: Action,
-    kwargs: dict[str, int],
+    kwargs: dict[str, Any],
     expected_metric: str,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -282,7 +282,7 @@ def test_print_final_status_format_reports_fixed_and_remaining(
     logger._print_final_status_format(10, 2)
 
     out = capsys.readouterr().out
-    assert_that(out).contains("10 fixed")
+    assert_that(out).contains("10 net resolved")
     assert_that(out).contains("2 remaining")
 
 
@@ -290,10 +290,10 @@ def test_print_final_status_format_reports_fixed_and_remaining(
     ("total_fixed", "total_remaining", "expected_text"),
     [
         (0, 0, "No issues found."),
-        (5, 0, "5 fixed"),
+        (5, 0, "5 net resolved"),
         (0, 3, "3 remaining"),
         (10, 5, "5 remaining"),
-        (100, 50, "100 fixed"),
+        (100, 50, "100 net resolved"),
     ],
 )
 def test_print_final_status_format_various_counts(

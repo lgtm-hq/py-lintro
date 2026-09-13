@@ -326,6 +326,7 @@ def test_format_reports_only_the_findings_it_could_not_fix(tmp_path: Path) -> No
     rules = {finding["rule"] for finding in payload["findings"]}
     assert_that(rules).contains("F821")
     assert_that(rules).does_not_contain("F401")
+    assert_that(payload["tools"][0]["net_resolved"]).is_greater_than(0)
     assert_that(payload["tools"][0]["fixed_count"]).is_greater_than(0)
 
 
