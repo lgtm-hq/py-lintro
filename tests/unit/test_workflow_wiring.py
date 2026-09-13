@@ -6786,6 +6786,142 @@ def test_every_pushed_reusable_docker_call_carries_provenance_and_sbom(
         )
 
 
+#: The only ``if`` guards a pushed reusable-docker caller may carry, keyed
+#: ``workflow::job`` and compared after GitHub-expression normalization. An
+#: absent guard maps to the empty string; any other condition — in
+#: particular a constant-false one — must land here through review first.
+_EVIDENCE_CALLER_IF_ALLOWLIST: dict[str, str] = {
+    "docker-ai-tools-publish.yml::ai-tools-image": "",
+    "docker-build-publish.yml::docker-base": (
+        "always() && !cancelled() && "
+        "(needs.validate-backfill-inputs.result == 'success' || "
+        "needs.validate-backfill-inputs.result == 'skipped') && "
+        "needs.resolve-endpoints.result == 'success'"
+    ),
+    "docker-build-publish.yml::docker-full": (
+        "always() && !cancelled() && "
+        "(needs.validate-backfill-inputs.result == 'success' || "
+        "needs.validate-backfill-inputs.result == 'skipped') && "
+        "needs.resolve-endpoints.result == 'success' && "
+        "needs.docker-base.result == 'success'"
+    ),
+    "docker-build-publish.yml::docker-ai": (
+        "always() && !cancelled() && "
+        "(needs.validate-backfill-inputs.result == 'success' || "
+        "needs.validate-backfill-inputs.result == 'skipped') && "
+        "needs.resolve-endpoints.result == 'success' && "
+        "needs.docker-full.result == 'success'"
+    ),
+    "docker-tools-candidate.yml::candidate-build": (
+        "github.actor == 'renovate[bot]' && " "needs.resolve-pr.result == 'success'"
+    ),
+    "docker-tools-promote.yml::publish-fallback": (
+        "needs.resolve.outputs.action == 'publish' && "
+        "github.ref == 'refs/heads/main'"
+    ),
+    "docker-tools-publish.yml::tools-image": "",
+}
+
+#: Same contract for the evidence steps of docker-ci.yml's own build/publish
+#: path, keyed by step name: the pushed CI-tag builds, the cosign signature
+#: and the two provenance attestations.
+_EVIDENCE_STEP_IF_ALLOWLIST: dict[str, str] = {
+    "Build and push Docker image (GHCR CI tag)": (
+        "needs.changes.outputs.pipeline != 'false' && "
+        "steps.fork-check.outputs.is-fork != 'true'"
+    ),
+    "Build and push Base Docker image (GHCR CI tag)": (
+        "needs.changes.outputs.pipeline != 'false' && "
+        "steps.fork-check.outputs.is-fork != 'true'"
+    ),
+    "Sign promoted digests (keyless)": "",
+    "Attest build provenance (promoted digest)": "",
+    "Attest build provenance (promoted base digest)": "",
+}
+
+
+def test_pushed_docker_callers_run_under_allowlisted_guards(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """A pushed reusable-docker call runs only under a reviewed guard (#2630).
+
+    The bypass guards in the provenance test reject constant-false ``if``
+    values outright; this pins the full non-constant condition of every
+    pushed caller against an explicit allowlist, so a new guard that skips
+    evidence production cannot slip in unreviewed, and rejects any caller
+    that is missing from the allowlist entirely.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    seen: set[str] = set()
+    for workflow_name, workflow in parsed_workflows.items():
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            if "reusable-docker.yml" not in str(job.get("uses", "")):
+                continue
+            push = (job.get("with") or {}).get("push", "")
+            if push is False or str(push).strip().lower() in ("", "false"):
+                continue
+            key = f"{workflow_name}::{job_id}"
+            seen.add(key)
+            assert_that(
+                _normalize_github_expr(str(job.get("if", ""))),
+            ).described_as(f"{key} if").is_equal_to(
+                _normalize_github_expr(_EVIDENCE_CALLER_IF_ALLOWLIST.get(key, "")),
+            )
+    assert_that(seen).described_as(
+        "pushed reusable-docker callers vs the guard allowlist",
+    ).is_equal_to(set(_EVIDENCE_CALLER_IF_ALLOWLIST))
+
+
+def test_docker_ci_evidence_steps_cannot_be_execution_bypassed() -> None:
+    """The CI build/publish path cannot skip or swallow its evidence (#2630).
+
+    CodeRabbit on #2640: the attestation assertions inspect ``with`` values
+    and attestation inputs, which pass even when the producing step never
+    ran — a constant-false ``if`` skips it, and ``continue-on-error: true``
+    carries an attestation or signature failure to a green job. The evidence
+    steps (the pushed CI-tag builds, the cosign signature, the two
+    attestations) and their jobs may carry no ``continue-on-error``, and
+    every ``if`` must match the allowlist verbatim.
+    """
+    ci = _load_workflow(name="docker-ci.yml")
+    for job_id in ("docker-build", "publish"):
+        job = ci["jobs"][job_id]
+        assert_that(job.get("continue-on-error")).described_as(
+            f"docker-ci.yml::{job_id} continue-on-error",
+        ).is_none()
+        condition = str(job.get("if", "")).strip()
+        if condition:
+            assert_that(condition.lower()).described_as(
+                f"docker-ci.yml::{job_id} if",
+            ).is_not_in(("false", "${{ false }}"))
+    evidence_steps = [
+        step
+        for job_id in ("docker-build", "publish")
+        for step in ci["jobs"][job_id]["steps"]
+        if (
+            "build-push-action" in str(step.get("uses", ""))
+            and (step.get("with") or {}).get("push") is True
+        )
+        or "cosign" in str(step.get("run", ""))
+        or "attest-build-provenance" in str(step.get("uses", ""))
+    ]
+    assert_that(evidence_steps).described_as("evidence steps found").is_length(5)
+    for step in evidence_steps:
+        name = str(step.get("name", ""))
+        assert_that(step.get("continue-on-error")).described_as(
+            f"{name} continue-on-error",
+        ).is_none()
+        assert_that(
+            _normalize_github_expr(str(step.get("if", ""))),
+        ).described_as(f"{name} if").is_equal_to(
+            _normalize_github_expr(_EVIDENCE_STEP_IF_ALLOWLIST.get(name, "")),
+        )
+
+
 def test_main_promotion_attests_the_promoted_digests() -> None:
     """``ghcr.io/lgtm-hq/py-lintro:main`` carries a GitHub attestation (#2630).
 
