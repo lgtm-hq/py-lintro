@@ -121,9 +121,7 @@ jobs:
         pipelines.actions.githubusercontent.com:443
         pypi.org:443
         files.pythonhosted.org:443
-        test.pypi.org:443
         upload.pypi.org:443
-        upload.test.pypi.org:443
         astral.sh:443
         releases.astral.sh:443
         github-releases.githubusercontent.com:443
@@ -141,7 +139,9 @@ jobs:
       contents: read
       # write: OIDC JWT for PyPI trusted publishing (this workflow file)
       id-token: write
-      # write: Sigstore provenance attestation after upload (best-effort)
+      # write: Sigstore provenance attestation after upload. Required, not
+      # best-effort: the attestation step has no continue-on-error, so a
+      # failure here fails the release (#2601).
       attestations: write
     steps:
       - name: Harden runner
@@ -182,8 +182,10 @@ jobs:
         with:
           repository-url: https://upload.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      # No continue-on-error: a release that ships without supply-chain
+      # provenance must fail loudly. Recovery when GitHub's attestation
+      # service is down is to re-run the tag pipeline (#2601).
       - name: Attest build provenance
-        continue-on-error: true
         # yamllint disable-line rule:line-length
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

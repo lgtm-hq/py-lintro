@@ -104,8 +104,6 @@ summary and opens/updates a deduplicated GitHub issue on `main` failures — hen
   (`docker-build-publish.yml`). Upload via `pypa/gh-action-pypi-publish` (OIDC trusted
   publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on `main`
   via `docker-ci` only (no duplicate quality on tag).
-- **publish-testpypi.yml** — TestPyPI: `reusable-build-python-dist` + caller upload job
-  (same three-step pattern with `repository-url: https://test.pypi.org/legacy/`)
 - **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
   (full + base images, registry cache at `:cache`, no-cache on version tags)
 - **docker-tools-candidate.yml** — On an in-repository `renovate/**` push that changes a

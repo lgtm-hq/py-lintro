@@ -2915,6 +2915,47 @@ def test_publish_pypi_top_level_permissions_are_empty() -> None:
     assert_that(homebrew).contains_entry({"contents": "write"})
 
 
+def test_publish_pypi_attestation_is_load_bearing() -> None:
+    """A failed provenance attestation must fail the release (#2601).
+
+    ``continue-on-error: true`` on this step let a tag ship to PyPI with no
+    supply-chain proof and a green release, which is worse than making no
+    attestation claim at all. The recovery for a GitHub attestation outage is
+    to re-run the tag pipeline, not to publish unattested.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    upload = publish["jobs"]["pypi-upload"]
+    assert_that(upload).does_not_contain_key("continue-on-error")
+
+    attest = next(
+        step
+        for step in upload["steps"]
+        if step.get("name") == "Attest build provenance"
+    )
+    assert_that(attest["uses"]).contains("actions/attest-build-provenance@")
+    assert_that(attest).does_not_contain_key("continue-on-error")
+
+
+def test_no_testpypi_workflow_or_endpoints_remain() -> None:
+    """The dead TestPyPI staging lane stays deleted (#2601).
+
+    ``publish-testpypi.yml`` never ran once, so it was a secret and an
+    environment kept alive for nothing. Releases are verified by installing
+    from real PyPI. The egress assertion is what stops the lane creeping back
+    in as an allowlisted upload host on the production build job.
+    """
+    workflow_dir = _REPO_ROOT / ".github" / "workflows"
+    matches = sorted(path.name for path in workflow_dir.glob("*testpypi*"))
+    assert_that(matches).is_empty()
+
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    build_with = publish["jobs"]["pypi-build"]["with"]
+    allowed = set(build_with["allowed-endpoints"].split())
+    assert_that(build_with["allowed-endpoints-mode"]).is_equal_to("replace")
+    assert_that(allowed).does_not_contain("test.pypi.org:443")
+    assert_that(allowed).does_not_contain("upload.test.pypi.org:443")
+
+
 def test_publish_pypi_sbom_fails_on_high_severity() -> None:
     """Release SBOM must gate publishes on high/critical vulns (#1118)."""
     publish = _load_workflow(name="publish-pypi-on-tag.yml")

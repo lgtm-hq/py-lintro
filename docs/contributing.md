@@ -156,6 +156,12 @@ Release automation:
 - Merges to `main` run `release-version-pr.yml` to open a version bump PR; after merge,
   `release-auto-tag.yml` creates the tag.
 - Tag push publishes to PyPI (OIDC) and creates a GitHub Release with artifacts.
+- The tag pipeline attests build provenance after the PyPI upload. That step is
+  load-bearing, not best-effort: if the attestation fails, the release job fails and the
+  release is not marked green. Recovery, for example when GitHub's attestation service
+  is down, is to re-run the tag pipeline once the service recovers.
+- There is no TestPyPI staging lane. Releases are verified by installing the published
+  package from PyPI, plus the binary and MCP gates.
 
 For detailed contribution guidelines, see the project documentation or contact a
 maintainer.
