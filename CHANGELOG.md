@@ -25,6 +25,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **release**: skip the mirror bump with a warning until `MIRROR_REPO_TOKEN` exists
+  (#2623) (2bac2a4)
 - **ci**: resolve the nightly dogfood image at run time (#2619) (1954fd2)
 
 ## [0.159.1] - 2026-09-13
