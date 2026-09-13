@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.159.6] - 2026-09-13
+
+### Fixed
+
+- **ci**: pass min-age-days to the GHCR prune as a bare expression (#2641) (d909828)
+
 ## [0.159.5] - 2026-09-13
 
 ### Changed
