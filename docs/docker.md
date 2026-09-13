@@ -130,10 +130,12 @@ DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
 # GitHub build-provenance attestation (signed by this repository's workflow)
 gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" --repo lgtm-hq/py-lintro
 
-# Cosign keyless signature, bound to this repository's publishing workflows
-# (docker-build-publish.yml for tags and backfills, docker-ci.yml for main)
+# Cosign keyless signature, bound to the workflow that did the signing:
+# docker-ci.yml signs the main promotion in-repo, while tag-published and
+# backfilled images are signed inside lgtm-ci's reusable-docker.yml —
+# Fulcio records the calling reusable workflow's path, not the caller's
 cosign verify "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
-  --certificate-identity-regexp '^https://github\.com/lgtm-hq/py-lintro/\.github/workflows/(docker-build-publish|docker-ci)\.yml@' \
+  --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/docker-ci\.yml|lgtm-ci/\.github/workflows/reusable-docker\.yml)@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # BuildKit provenance and SBOM attached to the index (non-empty for each platform)
