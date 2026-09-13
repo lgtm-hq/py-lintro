@@ -6764,6 +6764,18 @@ def test_every_pushed_reusable_docker_call_carries_provenance_and_sbom(
             }
             if not all(evidence[key] is True for key in evidence):
                 missing[f"{workflow_name}::{job_id}"] = evidence
+            # Execution bypasses defeat the evidence inputs: a
+            # ``continue-on-error`` job succeeds past an attestation failure,
+            # and a constant-false ``if`` skips production entirely while
+            # every ``with`` assertion above still passes.
+            assert_that(job.get("continue-on-error")).described_as(
+                f"{workflow_name}::{job_id} continue-on-error",
+            ).is_none()
+            condition = str(job.get("if", "")).strip()
+            if condition:
+                assert_that(condition.lower()).described_as(
+                    f"{workflow_name}::{job_id} if",
+                ).is_not_in(("false", "${{ false }}"))
     assert_that(missing).described_as("pushed image jobs lacking evidence").is_empty()
 
     publish = parsed_workflows["docker-build-publish.yml"]
