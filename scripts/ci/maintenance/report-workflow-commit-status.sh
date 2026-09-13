@@ -34,7 +34,8 @@ Environment:
   GITHUB_REPOSITORY, GITHUB_SHA, GITHUB_SERVER_URL, GITHUB_RUN_ID
 
 State: failure when any job failed or was cancelled, otherwise success. A
-skipped job is neither: it did not run, so it says nothing about the lane.
+skipped job is neither: it did not run, so it says nothing about the lane, and
+the success text says "no job failed" rather than claiming every job ran.
 USAGE
 	exit 0
 fi
@@ -63,9 +64,9 @@ for result in ${JOB_RESULTS}; do
 done
 
 if [[ "${state}" == "failure" ]]; then
-	description="${failed} of ${total} job(s) failed — see the run"
+	description="${failed} of ${total} job(s) failed or were cancelled — see the run"
 else
-	description="all ${total} job(s) succeeded"
+	description="no job failed or was cancelled (${total} summarised)"
 fi
 
 target_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID:-}"

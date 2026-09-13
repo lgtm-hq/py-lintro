@@ -53,6 +53,7 @@ teardown() {
 	run cat "${GH_LOG}"
 	[[ "$output" == *"repos/lgtm-hq/py-lintro/statuses/${GITHUB_SHA}"* ]]
 	[[ "$output" == *"state=success"* ]]
+	[[ "$output" == *"no job failed or was cancelled (3 summarised)"* ]]
 	[[ "$output" == *"context=ghcr-cleanup"* ]]
 	[[ "$output" == *"target_url=https://github.com/lgtm-hq/py-lintro/actions/runs/42"* ]]
 }
@@ -63,7 +64,7 @@ teardown() {
 	[[ "$output" == *"ghcr-cleanup: failure"* ]]
 	run cat "${GH_LOG}"
 	[[ "$output" == *"state=failure"* ]]
-	[[ "$output" == *"1 of 3 job(s) failed"* ]]
+	[[ "$output" == *"1 of 3 job(s) failed or were cancelled"* ]]
 }
 
 @test "report-workflow-commit-status: a cancelled job counts as a failure" {
