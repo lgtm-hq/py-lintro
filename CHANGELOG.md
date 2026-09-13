@@ -57,11 +57,26 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **core**: the mutation phase of a `format` run executes one tool at a time. Batching
-  and derived DAG order are unchanged, but two mutating capabilities are never in flight
-  at once, so one tool's write can no longer be lost to another's. `lintro check` and
-  the verify pass keep the full parallel fan-out. A bridge until the scheduler keeps
-  overlapping mutators out of the same batch (#2606).
+- **core**: two tools that can rewrite the same file never share a parallel batch
+  (#2606). Overlap is computed from the run-scoped candidate files each mutating tool
+  would actually be handed, canonicalised with `realpath`, so `Cargo.toml` relates to
+  `*.toml` and `*.py` relates to `test_*.py` — comparisons a glob-string test never
+  found. A project-scoped writer (`partitionable=False`, or a claim with no patterns), a
+  name the registry cannot resolve, and a run with no scan paths all split the batch
+  rather than risk a lost write. Read-only capabilities never conflict, so
+  `lintro check`, `format --dry-run` and the verify pass batch exactly as before. This
+  replaces the temporary one-tool-at-a-time mutation phase: a `format` run is parallel
+  again, inside batches the scheduler has proved independent.
+- **core**: for two tools that contend over one scope the **winner** is the authority —
+  it runs last, so its write survives, and it keeps `FORMAT` while the loser's `FORMAT`
+  is demoted there and its `CHECK` stays enabled (#1744). The winner is chosen by a
+  configured override, then `FIX` before `FORMAT`, then fewer mutating capabilities,
+  then tool id, and the decision is re-resolved on every run.
+  `lintro check --explain-order` and `lintro doctor` name the winner, the loser, the
+  scope and the rule.
+- **config**: new `execution.precedence`, a list of `[winner, loser]` tool pairs that
+  overrides the derived write precedence. Contradictory pairs fail planning with a
+  message naming both tools and the config key, rather than falling back silently.
 - **output**: the before-minus-after figure is labelled **net resolved**, not "fixed" —
   it is the difference between two measurements, not any tool's reported fix count, and
   a finding one tool fixed and another reintroduced nets out of it. In the console the

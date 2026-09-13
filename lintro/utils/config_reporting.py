@@ -6,7 +6,9 @@ warnings.
 Execution order is deliberately absent here. Since #1742 the order is derived
 from tool claims rather than configured, and it is reported by the commands
 that can resolve it — ``lintro config``, ``lintro check --explain-order`` and
-``lintro doctor``.
+``lintro doctor``. The same is true of write precedence (#2606): this report
+names the rule and the key that overrides it, and the resolved winner per
+scope comes from those commands, which can see the run's scan scope.
 """
 
 from loguru import logger
@@ -42,6 +44,10 @@ def get_config_report() -> str:
     lines.append("── Global Settings ──")
     lines.append(f"  Central line_length: {central_ll or 'Not configured'}")
     lines.append("  Tool order: derived from tool claims (lintro config)")
+    lines.append(
+        "  Write precedence: derived; overlapping mutators never share a "
+        "batch (override: execution.precedence)",
+    )
     lines.append("")
 
     # Per-tool configuration section

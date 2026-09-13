@@ -15,7 +15,12 @@ from lintro.cli_utils.order_explain import (
     format_order_report,
 )
 from lintro.enums.capability import Cap
-from lintro.tools.core.scheduler import DerivedOrder, OrderCycle, OrderEdge
+from lintro.tools.core.scheduler import (
+    DerivedOrder,
+    FormatDemotion,
+    OrderCycle,
+    OrderEdge,
+)
 
 GOLDEN_REPORT: list[str] = [
     "Execution order (derived from tool claims)",
@@ -29,6 +34,8 @@ GOLDEN_REPORT: list[str] = [
     "        after ruff — *.pyi: ruff(fix) -> black(format)",
     "",
     "  Cycles (0): the derived graph is a DAG.",
+    "",
+    "  Format ownership (0): no two tools contend for one scope.",
 ]
 
 
@@ -56,6 +63,7 @@ def _report(
     tools: tuple[str, ...] = ("ruff", "black"),
     edges: tuple[OrderEdge, ...] = (),
     cycles: tuple[OrderCycle, ...] = (),
+    demotions: tuple[FormatDemotion, ...] = (),
 ) -> DerivedOrder:
     """Build a derived order for rendering.
 
@@ -63,11 +71,17 @@ def _report(
         tools: Tools in derived order.
         edges: Derived edges.
         cycles: Cycles to include.
+        demotions: Format-owner demotions to include.
 
     Returns:
         The derived order.
     """
-    return DerivedOrder(tools=tools, edges=edges, cycles=cycles)
+    return DerivedOrder(
+        tools=tools,
+        edges=edges,
+        cycles=cycles,
+        demotions=demotions,
+    )
 
 
 def test_format_order_report_matches_golden() -> None:
@@ -119,7 +133,9 @@ def test_doctor_section_is_compact_and_capped() -> None:
 
     assert_that(lines[0]).is_equal_to("  Execution order (derived)")
     assert_that(lines[1]).is_equal_to(f"    {DERIVED_NOTE}")
-    assert_that(lines[2]).is_equal_to("    tools: 8  constraints: 7  cycles: 0")
+    assert_that(lines[2]).is_equal_to(
+        "    tools: 8  constraints: 7  cycles: 0  format demotions: 0",
+    )
     assert_that(lines).contains("    ... and 2 more constrained tool(s)")
     assert_that(lines[-1]).is_equal_to(
         "    Run 'lintro check --explain-order' for the full order.",
@@ -156,3 +172,37 @@ def test_emit_order_explanation_reports_an_unknown_tool(
 
     assert_that(excinfo.value.code).is_equal_to(1)
     assert_that(capsys.readouterr().err).is_not_empty()
+
+
+def test_format_order_report_names_the_format_owner() -> None:
+    """A demotion is reported with the winner, loser, scope and override key."""
+    demotion = FormatDemotion(
+        winner="black",
+        loser="ruff",
+        scope="*.py",
+        rule="fewer mutating capabilities",
+    )
+
+    lines = format_order_report(_report(demotions=(demotion,)))
+
+    assert_that(lines).contains("  Format ownership (1):")
+    assert_that(lines).contains(
+        "    *.py: black owns FORMAT; ruff(format) demoted "
+        "(fewer mutating capabilities; override with execution.precedence)",
+    )
+
+
+def test_doctor_section_names_the_format_owner() -> None:
+    """The compact doctor section carries the demotion too."""
+    demotion = FormatDemotion(
+        winner="black",
+        loser="ruff",
+        scope="*.py",
+        rule="fewer mutating capabilities",
+    )
+
+    lines = format_doctor_order_section(_report(demotions=(demotion,)))
+
+    assert_that(lines).contains(
+        "    *.py: black owns FORMAT, ruff demoted (fewer mutating capabilities)",
+    )

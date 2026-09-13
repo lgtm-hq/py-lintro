@@ -3,12 +3,12 @@
 This module provides functions for running tools in parallel using async
 execution.
 
-Mutation is the exception. Under a mutating action (``Action.FIX``) the
-batches still run in derived DAG order, but each batch dispatches one tool at
-a time: two mutators that overlap on a file would race on its bytes, and the
-loser's write is simply gone. Read-only actions — ``check``, and the
-run-level verify pass, which is configured with ``Action.CHECK`` — keep the
-full fan-out.
+Mutation is no longer the exception. Since #2606 the scheduler derives
+write-conflict edges, so two mutators whose run-scoped candidate sets overlap
+are already in different batches and a batch is safe to dispatch
+concurrently under any action. The temporary one-tool-at-a-time bridge #2452
+shipped is gone with it: what keeps a write from being lost is the batching,
+not the dispatch.
 """
 
 from __future__ import annotations
@@ -95,9 +95,11 @@ def run_tools_parallel(
 ) -> list[ToolResult]:
     """Run tools through the async executor, batch by batch.
 
-    Under a read-only action every tool in a batch runs concurrently. Under a
-    mutating action the batch is dispatched one tool at a time, so no two
-    mutating capabilities are ever in flight at once (#1743).
+    Every tool in a batch runs concurrently, under a mutating action as much
+    as a read-only one. Batches are derived from the same DAG that orders a
+    sequential run, and since #2606 that DAG separates any two tools whose
+    run-scoped write sets overlap, so concurrency inside a batch is a proven
+    independence rather than an assumption.
 
     Args:
         tools_to_run: List of tool names to run.
@@ -125,20 +127,18 @@ def run_tools_parallel(
     # Group tools into batches that can run in parallel. The batching lives on
     # the tool manager because it reads the same derived DAG that orders a
     # sequential run (#1742).
-    batches = tool_manager.get_parallel_batches(tools_to_run)
+    # Under a mutating action the batching is handed the run's scan scope so
+    # overlap is decided by the files each tool would actually be given
+    # (#2606) rather than by comparing glob strings.
+    batches = tool_manager.get_parallel_batches(
+        tools_to_run,
+        action=action,
+        paths=paths,
+        exclude=exclude,
+        include_venv=include_venv,
+        diff_base=diff_base,
+    )
     logger.debug(f"Parallel execution batches: {batches}")
-
-    # The mutation phase runs one tool at a time. Two mutating capabilities
-    # that overlap on a file race on its bytes: each reads, rewrites and writes
-    # the whole file, so the second write drops the first tool's edit and the
-    # verify pass reports the difference as an unexplained residual. Reading
-    # is safe, so ``check`` runs — and so does the verify pass, which is
-    # configured with ``Action.CHECK`` — stay fully parallel. This is a bridge
-    # until the scheduler gains an overlap rule that can keep disjoint
-    # mutators concurrent.
-    serialize_mutations = action == Action.FIX
-    if serialize_mutations:
-        logger.debug("Mutating action: batches run one tool at a time")
 
     all_results: list[ToolResult] = []
     executor = AsyncToolExecutor(max_workers=max_workers)
@@ -257,28 +257,21 @@ def run_tools_parallel(
                 # Run the batch with the progress callback. Use the loop-aware
                 # runner so the executor works both from the CLI (no running
                 # loop) and when embedded in an already-running event loop.
-                # A mutating action dispatches one tool per group, so no two
-                # mutators are ever in flight over the same file at once; a
-                # read-only action dispatches the whole batch as one group.
-                groups: list[list[tuple[str, BaseToolPlugin]]] = (
-                    [[pair] for pair in tools_with_instances]
-                    if serialize_mutations
-                    else [tools_with_instances]
+                # The whole batch is one dispatch: the scheduler already
+                # proved its members cannot write the same file.
+                batch_results = _run_coroutine_blocking(
+                    executor.run_tools_parallel(
+                        tools=tools_with_instances,
+                        paths=paths,
+                        action=action,
+                        on_result=on_tool_complete,
+                        max_fix_retries=max_fix_retries,
+                    ),
                 )
-                for group in groups:
-                    group_results = _run_coroutine_blocking(
-                        executor.run_tools_parallel(
-                            tools=group,
-                            paths=paths,
-                            action=action,
-                            on_result=on_tool_complete,
-                            max_fix_retries=max_fix_retries,
-                        ),
-                    )
 
-                    # Collect results
-                    for _, result in group_results:
-                        all_results.append(result)
+                # Collect results
+                for _, result in batch_results:
+                    all_results.append(result)
 
     finally:
         executor.shutdown()

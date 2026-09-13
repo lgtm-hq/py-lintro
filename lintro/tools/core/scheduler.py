@@ -20,32 +20,92 @@ Derivation rules:
   ``ruff -> black`` fall out of the model instead of needing the deleted
   ``[tool.lintro.post_checks]`` workaround.
 - **Edges.** Within a pattern, every earlier-phase tool precedes every
-  later-phase tool. Equal phases produce no edge: that is a proven
-  independence, so the tie breaks alphabetically.
+  later-phase tool. Equal *read-only* phases produce no edge: that is a
+  proven independence, so the tie breaks alphabetically.
 - **Pattern universe.** Patterns are compared literally, plus the single
   subsumption a universal claim gives: a tool claiming ``*`` (typos,
   gitleaks, trufflehog) joins every pattern group. No glob-to-glob semantics
-  beyond that are attempted, so ``*.py`` and ``test_*.py`` stay separate
-  groups.
+  beyond that are attempted for *phase* edges, so ``*.py`` and ``test_*.py``
+  stay separate groups there.
+- **Write conflicts (#2606).** Phase edges alone let two mutators share a
+  batch and race on one file's bytes. A second class of edge closes that: two
+  writers whose run-scoped candidate sets intersect
+  (:mod:`lintro.tools.core.tool_scopes`) never share a batch. Overlap is
+  computed from canonical (``realpath``) file identities, not from glob
+  strings, so ``Cargo.toml`` relates to ``*.toml`` and ``*.py`` relates to
+  ``test_*.py``. Read-only capabilities never produce a conflict edge, so
+  ``lintro check`` and the verify pass batch exactly as they did.
+- **Precedence.** For a conflicting pair the *winner* is the authoritative
+  writer: it runs last, so its write is the one that survives, and it keeps
+  ``FORMAT``. The winner is chosen by, in order: a user override
+  (``execution.precedence``), then ``FIX`` before ``FORMAT``, then the tool
+  with fewer mutating capabilities (the authority rule — a dedicated
+  formatter outranks a multi-capability tool), then the alphabetically last
+  tool id.
+- **Format-owner demotion (#1744).** When several conflicting tools declare
+  ``FORMAT`` on one scope, only the winner formats it; every other tool's
+  ``FORMAT`` is demoted for that scope while its ``CHECK`` stays enabled. The
+  demotion is recorded on :class:`DerivedOrder` so explain, doctor and init
+  can report it.
 - **Project-scoped claims.** A claim with no patterns (osv-scanner) is not
-  addressed by pattern and therefore produces no edges.
+  addressed by pattern and therefore produces no *phase* edges. A
+  project-scoped *writer* still conflicts with every writer under its roots.
 - **Cycles.** Detected before linearisation and reported with the tools and
-  the patterns whose edges close them. Linearisation stays deterministic and
-  total: a stalled topological sort emits the alphabetically first remaining
-  tool, so a cycle degrades ordering rather than failing a run.
+  the patterns whose edges close them. A derived cycle degrades ordering
+  rather than failing a run: a stalled topological sort emits the
+  alphabetically first remaining tool, so linearisation stays deterministic
+  and total. A cycle that a **configured** precedence override closed is
+  different — it is a user error with a named fix, so planning raises
+  :class:`OrderPlanningError` naming both tools and the config key rather
+  than silently falling back.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum, auto
 from typing import TYPE_CHECKING
 
 from lintro.enums.capability import Cap
+from lintro.tools.core.tool_scopes import (
+    ToolScope,
+    overlap_label,
+    resolve_tool_scopes,
+    write_conflict,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from lintro.models.core.claim import Claim
+
+#: Config key a user edits to change a precedence decision.
+PRECEDENCE_CONFIG_KEY: str = "execution.precedence"
+
+
+class EdgeSource(StrEnum):
+    """Why a derived edge exists.
+
+    Attributes:
+        PHASE: ``FIX`` -> ``FORMAT`` -> ``CHECK`` within one glob pattern.
+        OVERLAP: Two writers whose run-scoped candidate sets intersect.
+        OVERRIDE: A configured ``execution.precedence`` pair decided the
+            direction of an overlap.
+    """
+
+    PHASE = auto()
+    OVERLAP = auto()
+    OVERRIDE = auto()
+
+
+class OrderPlanningError(ValueError):
+    """Planning failed and cannot degrade into a usable order.
+
+    Raised only for a cycle a configured precedence override closed: the
+    derived rules alone are acyclic, so this is always a user error with a
+    named fix.
+    """
+
 
 #: Phases in the order they must run for one pattern.
 PHASE_ORDER: tuple[Cap, ...] = (Cap.FIX, Cap.FORMAT, Cap.CHECK)
@@ -60,9 +120,12 @@ class OrderEdge:
     Attributes:
         before: Tool that must run first.
         after: Tool that must run second.
-        pattern: Glob pattern whose claims produced the constraint.
+        pattern: Glob pattern, or overlap scope label, that produced the
+            constraint.
         before_capability: Phase ``before`` occupies on ``pattern``.
         after_capability: Phase ``after`` occupies on ``pattern``.
+        source: Why the edge exists. Defaults to :attr:`EdgeSource.PHASE` so
+            every existing construction keeps its meaning.
     """
 
     before: str
@@ -70,17 +133,56 @@ class OrderEdge:
     pattern: str
     before_capability: Cap
     after_capability: Cap
+    source: EdgeSource = EdgeSource.PHASE
 
     @property
     def reason(self) -> str:
         """Describe the edge in one human-readable clause.
 
         Returns:
-            A string such as ``"*.py: ruff(fix) -> black(format)"``.
+            A string such as ``"*.py: ruff(fix) -> black(format)"``, with
+            ``", overlapping candidates"`` appended for a write-conflict edge
+            and the config key named for a configured override.
         """
-        return (
+        clause = (
             f"{self.pattern}: {self.before}({self.before_capability}) -> "
             f"{self.after}({self.after_capability})"
+        )
+        if self.source is EdgeSource.OVERLAP:
+            return f"{clause}, overlapping candidates"
+        if self.source is EdgeSource.OVERRIDE:
+            return f"{clause}, overlapping candidates ({PRECEDENCE_CONFIG_KEY})"
+        return clause
+
+
+@dataclass(frozen=True)
+class FormatDemotion:
+    """One tool's ``FORMAT`` capability stood down in favour of another.
+
+    Attributes:
+        winner: Tool that keeps ``FORMAT`` on the scope — the authority, and
+            the last writer of it.
+        loser: Tool whose ``FORMAT`` is demoted there. Its ``CHECK`` stays
+            enabled, so it keeps reporting; it just stops writing.
+        scope: The overlapping scope, as a pattern-shaped label.
+        rule: Which precedence rule decided it.
+    """
+
+    winner: str
+    loser: str
+    scope: str
+    rule: str
+
+    @property
+    def reason(self) -> str:
+        """Describe the demotion in one human-readable clause.
+
+        Returns:
+            A string naming the winner, the loser, the scope and the rule.
+        """
+        return (
+            f"{self.scope}: {self.winner} owns FORMAT; {self.loser}(format) "
+            f"demoted ({self.rule}; override with {PRECEDENCE_CONFIG_KEY})"
         )
 
 
@@ -115,11 +217,14 @@ class DerivedOrder:
         edges: Every derived constraint, sorted.
         cycles: Cycles found before linearisation (empty when the graph is a
             DAG).
+        demotions: Format-owner demotions (#1744): one per tool whose
+            ``FORMAT`` stood down on an overlapping scope.
     """
 
     tools: tuple[str, ...]
     edges: tuple[OrderEdge, ...]
     cycles: tuple[OrderCycle, ...]
+    demotions: tuple[FormatDemotion, ...] = field(default=())
 
 
 def _claim_covers(claim_patterns: Sequence[str], pattern: str) -> bool:
@@ -208,6 +313,301 @@ def _edges_for_pattern(
                 ),
             )
     return edges
+
+
+def _scopes_from_claims(
+    claims_by_tool: Mapping[str, Sequence[Claim]],
+) -> dict[str, ToolScope]:
+    """Build unresolved scopes straight from declared claims.
+
+    Used when the caller named no scan paths (``lintro config``,
+    ``list-tools``, and every unit test that hands the scheduler synthetic
+    claims). No filesystem is touched, so overlap falls back to the
+    conservative pattern comparison in
+    :mod:`lintro.tools.core.tool_scopes`.
+
+    Args:
+        claims_by_tool: Claims keyed by tool name.
+
+    Returns:
+        One :class:`ToolScope` per tool, all with ``resolved=False``.
+    """
+    from lintro.enums.capability import MUTATING_CAPABILITIES
+
+    scopes: dict[str, ToolScope] = {}
+    for name, claims in claims_by_tool.items():
+        patterns: set[str] = set()
+        capabilities: set[Cap] = set()
+        patternless = False
+        declares_format = False
+        for claim in claims:
+            if Cap.FORMAT in claim.capabilities:
+                declares_format = True
+            if not (claim.capabilities & MUTATING_CAPABILITIES):
+                continue
+            capabilities |= set(claim.capabilities & MUTATING_CAPABILITIES)
+            if claim.patterns:
+                patterns.update(claim.patterns)
+            else:
+                patternless = True
+        scopes[name] = ToolScope(
+            tool=name,
+            patterns=tuple(sorted(patterns)),
+            mutating_capabilities=frozenset(capabilities),
+            declares_format=declares_format,
+            project_scoped=bool(capabilities) and patternless,
+            known=True,
+            resolved=False,
+        )
+    return scopes
+
+
+def _mutating_phase(scope: ToolScope) -> Cap:
+    """Return the phase a writer occupies, earliest first.
+
+    Args:
+        scope: The tool's run scope.
+
+    Returns:
+        ``FIX`` when the tool fixes, ``FORMAT`` when it only formats. An
+        unknown writer is treated as ``FIX`` so it never claims format
+        authority it never declared.
+    """
+    caps = scope.mutating_capabilities
+    if Cap.FORMAT in caps and Cap.FIX not in caps:
+        return Cap.FORMAT
+    return Cap.FIX
+
+
+#: Capability count attributed to a writer nothing is known about. Large
+#: enough to sort it before every declared writer under the "fewer mutating
+#: capabilities runs last" rule: a tool that never said what it does is given
+#: no authority over one that did.
+UNKNOWN_CAPABILITY_COUNT: int = 1_000_000
+
+
+def _precedence_rank(scope: ToolScope) -> tuple[int, int, str]:
+    """Rank a tool for write precedence; the larger rank runs last.
+
+    The three components are the derived precedence rules in order: ``FIX``
+    before ``FORMAT``, then the tool with fewer mutating capabilities last
+    (the authority rule — a dedicated formatter outranks a multi-capability
+    tool), then the tool id.
+
+    Args:
+        scope: The tool's run scope.
+
+    Returns:
+        A sort key. Larger means "runs later", which means "has authority".
+    """
+    if not scope.is_writer:
+        # Never in a conflict edge; the rank only has to be deterministic.
+        return (0, 0, scope.tool)
+    if not scope.known:
+        return (0, -UNKNOWN_CAPABILITY_COUNT, scope.tool)
+    phase = 1 if _mutating_phase(scope) is Cap.FORMAT else 0
+    return (phase, -len(scope.mutating_capabilities), scope.tool)
+
+
+def _precedence_rule(left: ToolScope, right: ToolScope) -> str:
+    """Name the rule that separates two writers.
+
+    Args:
+        left: One tool's scope.
+        right: The other tool's scope.
+
+    Returns:
+        A short phrase naming the deciding rule.
+    """
+    left_rank, right_rank = _precedence_rank(left), _precedence_rank(right)
+    if left_rank[0] != right_rank[0]:
+        return "FIX runs before FORMAT"
+    if left_rank[1] != right_rank[1]:
+        return "fewer mutating capabilities"
+    return "alphabetical tool id"
+
+
+def _override_map(
+    precedence: Sequence[Sequence[str]],
+) -> dict[tuple[str, str], str]:
+    """Index configured ``[winner, loser]`` pairs by the unordered pair.
+
+    Args:
+        precedence: Pairs from ``execution.precedence``. The first element
+            has authority: it runs last, so its write survives, and it keeps
+            ``FORMAT``.
+
+    Returns:
+        Mapping of the alphabetically sorted pair to the winning tool id.
+    """
+    indexed: dict[tuple[str, str], str] = {}
+    for pair in precedence:
+        parts = [str(part).lower() for part in pair]
+        if len(parts) != 2 or parts[0] == parts[1]:
+            continue
+        winner, loser = parts
+        first, second = sorted((winner, loser))
+        indexed[(first, second)] = winner
+    return indexed
+
+
+def _override_edges(
+    scopes: Mapping[str, ToolScope],
+    overrides: Mapping[tuple[str, str], str],
+) -> list[OrderEdge]:
+    """Turn configured precedence pairs into edges.
+
+    Args:
+        scopes: Run scopes keyed by tool name.
+        overrides: Configured precedence, keyed by sorted pair.
+
+    Returns:
+        One edge per configured pair whose tools are both in this run: the
+        loser runs first, the winner writes last.
+    """
+    edges: list[OrderEdge] = []
+    for (one, other), winner in sorted(overrides.items()):
+        if one not in scopes or other not in scopes:
+            continue
+        loser = one if winner == other else other
+        edges.append(
+            OrderEdge(
+                before=loser,
+                after=winner,
+                pattern=overlap_label(scopes[loser], scopes[winner]),
+                before_capability=_mutating_phase(scopes[loser]),
+                after_capability=_mutating_phase(scopes[winner]),
+                source=EdgeSource.OVERRIDE,
+            ),
+        )
+    return edges
+
+
+def _precedence_sequence(
+    tools: Sequence[str],
+    scopes: Mapping[str, ToolScope],
+    settled: Sequence[OrderEdge],
+) -> dict[str, int]:
+    """Rank every tool in one total order consistent with the settled edges.
+
+    Conflict edges are directed by this sequence rather than pair by pair.
+    Pairwise comparison is not transitive once phase edges are in the graph —
+    a tool can be ``FIX`` on one pattern and ``FORMAT`` on another — and an
+    intransitive comparison closes cycles. A linear extension cannot: every
+    derived edge points forward in it, so the combined graph is a DAG by
+    construction and the only thing that can point backwards is a configured
+    override, which is exactly the case that must fail loudly.
+
+    Args:
+        tools: Every tool in the graph.
+        scopes: Run scopes keyed by tool name.
+        settled: Edges the sequence must respect (phase edges and configured
+            overrides).
+
+    Returns:
+        Mapping of tool name to its position in the sequence.
+    """
+    successors = _adjacency(tools, settled)
+    indegree: dict[str, int] = dict.fromkeys(tools, 0)
+    for node in successors:
+        for nxt in successors[node]:
+            indegree[nxt] += 1
+
+    remaining = set(tools)
+    sequence: dict[str, int] = {}
+    while remaining:
+        ready = sorted(
+            (name for name in remaining if indegree[name] == 0),
+            key=lambda name: _precedence_rank(scopes[name]),
+        ) or sorted(remaining, key=lambda name: _precedence_rank(scopes[name]))
+        chosen = ready[0]
+        sequence[chosen] = len(sequence)
+        remaining.discard(chosen)
+        for nxt in successors[chosen]:
+            if nxt in remaining:
+                indegree[nxt] -= 1
+    return sequence
+
+
+def _conflict_edges(
+    tools: Sequence[str],
+    scopes: Mapping[str, ToolScope],
+    phase_edges: Sequence[OrderEdge],
+    overrides: Mapping[tuple[str, str], str],
+) -> tuple[list[OrderEdge], list[FormatDemotion]]:
+    """Derive write-conflict edges and the format demotions they imply.
+
+    Args:
+        tools: Every tool in the graph.
+        scopes: Run scopes keyed by tool name.
+        phase_edges: The ``FIX`` -> ``FORMAT`` -> ``CHECK`` edges already
+            derived per pattern.
+        overrides: Configured precedence, keyed by sorted pair.
+
+    Returns:
+        ``(edges, demotions)``. Both are sorted and deterministic.
+    """
+    override_edges = _override_edges(scopes, overrides)
+    sequence = _precedence_sequence(
+        tools,
+        scopes,
+        [*phase_edges, *override_edges],
+    )
+    settled = _reachability(_adjacency(tools, phase_edges))
+    override_pairs = set(overrides)
+
+    edges: list[OrderEdge] = list(override_edges)
+    candidates: list[FormatDemotion] = []
+    names = sorted(scopes)
+    for index, left_name in enumerate(names):
+        for right_name in names[index + 1 :]:
+            left, right = scopes[left_name], scopes[right_name]
+            if not write_conflict(left, right):
+                continue
+            winner_name, loser_name = (
+                (right_name, left_name)
+                if sequence[right_name] > sequence[left_name]
+                else (left_name, right_name)
+            )
+            pair = (left_name, right_name)
+            label = overlap_label(left, right)
+            already_ordered = (
+                winner_name in settled[loser_name] or pair in override_pairs
+            )
+            if not already_ordered:
+                # The pair is not separated yet, so the conflict edge is what
+                # keeps the two out of one batch.
+                edges.append(
+                    OrderEdge(
+                        before=loser_name,
+                        after=winner_name,
+                        pattern=label,
+                        before_capability=_mutating_phase(scopes[loser_name]),
+                        after_capability=_mutating_phase(scopes[winner_name]),
+                        source=EdgeSource.OVERLAP,
+                    ),
+                )
+            if left.declares_format and right.declares_format:
+                rule = (
+                    "configured precedence"
+                    if pair in override_pairs
+                    else _precedence_rule(left, right)
+                )
+                candidates.append(
+                    FormatDemotion(
+                        winner=winner_name,
+                        loser=loser_name,
+                        scope=label,
+                        rule=rule,
+                    ),
+                )
+    # In a chain of three formatters only the tool that loses to nobody owns
+    # FORMAT, so a record whose "winner" is itself demoted elsewhere names the
+    # wrong owner and is dropped.
+    demoted = {record.loser for record in candidates}
+    demotions = [record for record in candidates if record.winner not in demoted]
+    demotions.sort(key=lambda record: (record.loser, record.winner, record.scope))
+    return edges, demotions
 
 
 def _adjacency(
@@ -339,26 +739,120 @@ def _linearize(tools: Sequence[str], edges: Sequence[OrderEdge]) -> tuple[str, .
     return tuple(ordered)
 
 
-def derive_order(claims_by_tool: Mapping[str, Sequence[Claim]]) -> DerivedOrder:
+def _reject_configured_cycles(cycles: Sequence[OrderCycle]) -> None:
+    """Fail planning when a configured override closed a cycle.
+
+    The derived rules alone are acyclic, so a cycle holding an override edge
+    can only have come from ``execution.precedence``. That is a user error
+    with a named fix, and falling back to alphabetical would silently run the
+    opposite of what the user asked for.
+
+    Args:
+        cycles: Cycles found in the derived graph.
+
+    Raises:
+        OrderPlanningError: When any cycle contains an override edge.
+    """
+    offending = [
+        cycle
+        for cycle in cycles
+        if any(edge.source is EdgeSource.OVERRIDE for edge in cycle.edges)
+    ]
+    if not offending:
+        return
+    details = "; ".join(
+        f"{' <-> '.join(cycle.tools)} on {', '.join(cycle.patterns)}"
+        for cycle in offending
+    )
+    raise OrderPlanningError(
+        f"Configured tool precedence is contradictory: {details}. "
+        f"Remove or reverse one of the pairs in {PRECEDENCE_CONFIG_KEY} so "
+        "the tools form an order rather than a loop.",
+    )
+
+
+def derive_order(
+    claims_by_tool: Mapping[str, Sequence[Claim]],
+    *,
+    scopes: Mapping[str, ToolScope] | None = None,
+    precedence: Sequence[Sequence[str]] = (),
+    write_conflicts: bool = True,
+) -> DerivedOrder:
     """Derive an execution order from declared claims.
 
     Args:
         claims_by_tool: Claims keyed by tool name. A tool with no claims
             (commitlint) is unordered and keeps its alphabetical position.
+        scopes: Run-scoped write sets keyed by tool name. When omitted they
+            are built from ``claims_by_tool`` alone, which makes overlap fall
+            back to conservative pattern comparison.
+        precedence: Configured ``[winner, loser]`` pairs. The winner has
+            authority: it runs last and keeps ``FORMAT``.
+        write_conflicts: Whether to derive write-conflict edges. ``False``
+            for a read-only run, where nothing is rewritten and batching must
+            stay exactly as it was.
+
+    A configured precedence pair that closes a cycle fails planning with
+    :class:`OrderPlanningError` rather than degrading, because the derived
+    rules alone are acyclic and so the contradiction can only be the user's.
 
     Returns:
-        The derived order together with the edges and cycles behind it.
+        The derived order together with the edges, cycles and format-owner
+        demotions behind it.
     """
     tools = sorted(claims_by_tool)
     edges: list[OrderEdge] = []
     for pattern in _pattern_universe(claims_by_tool):
         edges.extend(_edges_for_pattern(claims_by_tool, pattern))
-    edges.sort(key=_edge_sort_key)
+
+    demotions: list[FormatDemotion] = []
+    if write_conflicts:
+        resolved = (
+            dict(scopes) if scopes is not None else _scopes_from_claims(claims_by_tool)
+        )
+        run_scopes = {name: resolved.get(name, ToolScope(tool=name)) for name in tools}
+        conflict_edges, demotions = _conflict_edges(
+            tools,
+            run_scopes,
+            edges,
+            _override_map(precedence),
+        )
+        edges.extend(conflict_edges)
+
+    # Two rules can derive the same constraint (a phase edge and an overlap
+    # edge on the same pair); the graph only needs it once.
+    edges = sorted(set(edges), key=_edge_sort_key)
+    cycles = _find_cycles(tools, edges)
+    _reject_configured_cycles(cycles)
     return DerivedOrder(
         tools=_linearize(tools, edges),
         edges=tuple(edges),
-        cycles=_find_cycles(tools, edges),
+        cycles=cycles,
+        demotions=tuple(demotions),
     )
+
+
+def configured_precedence() -> tuple[tuple[str, str], ...]:
+    """Read ``execution.precedence`` out of the resolved lintro config.
+
+    Ordering must not be the thing an unusable config fails on, so a config
+    that cannot be loaded contributes no override.
+
+    Returns:
+        ``(winner, loser)`` pairs, lowercased.
+    """
+    try:
+        from lintro.config import get_config
+
+        raw = getattr(get_config().execution, "precedence", None) or ()
+    except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
+        return ()
+    pairs: list[tuple[str, str]] = []
+    for entry in raw:
+        parts = [str(part).lower() for part in entry]
+        if len(parts) == 2:
+            pairs.append((parts[0], parts[1]))
+    return tuple(pairs)
 
 
 def collect_tool_claims(tool_names: Sequence[str]) -> dict[str, list[Claim]]:
@@ -392,17 +886,51 @@ def collect_tool_claims(tool_names: Sequence[str]) -> dict[str, list[Claim]]:
     return claims
 
 
-def build_order_report(tool_names: Sequence[str]) -> DerivedOrder:
+def build_order_report(
+    tool_names: Sequence[str],
+    *,
+    paths: Sequence[str] | None = None,
+    exclude: str | None = None,
+    include_venv: bool = False,
+    diff_base: str | None = None,
+    write_conflicts: bool = True,
+) -> DerivedOrder:
     """Derive the execution order for a set of tools, with its reasoning.
 
     Args:
         tool_names: Tool names to order (case-insensitive).
+        paths: Scan targets for this run. When given, write conflicts are
+            computed from the files each mutating tool would actually be
+            handed; when omitted they fall back to conservative pattern
+            comparison.
+        exclude: Comma-separated CLI exclude patterns, or ``None``.
+        include_venv: Whether virtual-environment directories are in scope.
+        diff_base: Resolved ``--diff`` base ref, or ``None``.
+        write_conflicts: Whether to derive write-conflict edges. ``False``
+            for a read-only run.
 
     Returns:
-        The derived order together with the edges and cycles behind it.
+        The derived order together with the edges, cycles and demotions
+        behind it.
     """
     normalized = [name.lower() for name in tool_names]
-    return derive_order(collect_tool_claims(normalized))
+    scopes = (
+        resolve_tool_scopes(
+            normalized,
+            paths=paths,
+            exclude=exclude,
+            include_venv=include_venv,
+            diff_base=diff_base,
+        )
+        if write_conflicts
+        else None
+    )
+    return derive_order(
+        collect_tool_claims(normalized),
+        scopes=scopes,
+        precedence=configured_precedence(),
+        write_conflicts=write_conflicts,
+    )
 
 
 def derive_execution_order(tool_names: Sequence[str]) -> list[str]:

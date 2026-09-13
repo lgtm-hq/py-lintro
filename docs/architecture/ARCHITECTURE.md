@@ -345,17 +345,20 @@ class ParserFactory:
 
 **Current (implemented, on by default):** Independent tools run in parallel. This is
 controlled by `execution.parallel` (default `true`) and bounded by
-`execution.max_workers` (default: CPU count, clamped 1-32). Tools that conflict on the
-same files are grouped into sequential batches via `get_parallel_batches`, while
-independent tools run concurrently. Parallelism only engages when more than one tool is
-selected. See `lintro/utils/execution/parallel_executor.py` and
-`lintro/utils/async_tool_executor.py`.
+`execution.max_workers` (default: CPU count, clamped 1-32). Tools that must observe each
+other's writes, and tools that could rewrite the same file, are grouped into sequential
+batches via `get_parallel_batches`, while independent tools run concurrently. Under a
+mutating action the batching is handed the run's scan scope so overlap is decided by the
+files each tool would actually be given — see
+[Write precedence](../configuration.md#write-precedence-overlapping-mutators).
+Parallelism only engages when more than one tool is selected. See
+`lintro/utils/execution/parallel_executor.py` and `lintro/utils/async_tool_executor.py`.
 
 ```python
 # Simplified from run_tools_parallel / AsyncToolExecutor
-def run_tools_parallel(tools_to_run, ..., max_workers):
-    # Conflict-aware grouping: tools touching the same files share a batch
-    batches = get_parallel_batches(tools_to_run, tool_manager)
+def run_tools_parallel(tools_to_run, paths, action, ..., max_workers):
+    # Conflict-aware grouping: no two tools in a batch can write the same file
+    batches = get_parallel_batches(tools_to_run, action=action, paths=paths)
     executor = AsyncToolExecutor(max_workers=max_workers)
     results = []
     for batch in batches:

@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.panel import Panel
 
 from lintro.cli_utils.onboarding import print_install_next_steps
+from lintro.cli_utils.order_explain import format_ownership_notice
 from lintro.tools.core.tool_registry import ManifestRegistry
 from lintro.utils.project_detection import detect_project_languages
 
@@ -82,6 +83,17 @@ tools:
   mypy:
     enabled: true
 """
+
+
+def _print_ownership_notice(console: Console, tool_names: list[str]) -> None:
+    """Print which tool owns FORMAT where two of them contend (#1744, #2606).
+
+    Args:
+        console: Rich console to print to.
+        tool_names: Tools the generated config enables.
+    """
+    for line in format_ownership_notice(tool_names):
+        console.print(f"[dim]{line}[/dim]")
 
 
 def _extract_tool_names(config_content: str) -> list[str]:
@@ -420,6 +432,7 @@ def init_command(
         console.print(
             f"  [dim]Detected: {detected_display} | Profile: {effective_profile}[/dim]",
         )
+        _print_ownership_notice(console, tool_names)
         console.print()
         console.print("  [bold]Recommended:[/bold]")
         console.print(

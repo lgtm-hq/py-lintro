@@ -25,7 +25,12 @@ if TYPE_CHECKING:
 
     from rich.console import Console
 
-    from lintro.tools.core.scheduler import DerivedOrder, OrderCycle, OrderEdge
+    from lintro.tools.core.scheduler import (
+        DerivedOrder,
+        FormatDemotion,
+        OrderCycle,
+        OrderEdge,
+    )
 
 #: Header printed above every explanation.
 EXPLAIN_HEADER: str = "Execution order (derived from tool claims)"
@@ -41,6 +46,9 @@ MAX_EDGES_PER_TOOL: int = 5
 
 #: Cap on the tools listed with their constraints in the doctor section.
 MAX_DOCTOR_CONSTRAINTS: int = 5
+
+#: Cap on the format-owner demotions listed in the doctor section.
+MAX_DOCTOR_DEMOTIONS: int = 3
 
 
 def _predecessors(report: DerivedOrder) -> dict[str, list[OrderEdge]]:
@@ -103,6 +111,23 @@ def _format_cycle(cycle: OrderCycle) -> list[str]:
     ]
 
 
+def _format_demotions(demotions: Sequence[FormatDemotion]) -> list[str]:
+    """Render the format-owner decisions the scheduler made (#1744).
+
+    Args:
+        demotions: Demotions recorded on the derived order.
+
+    Returns:
+        Lines naming the winner, the loser, the scope and the reason, or a
+        single line saying nothing contended.
+    """
+    if not demotions:
+        return ["  Format ownership (0): no two tools contend for one scope."]
+    lines = [f"  Format ownership ({len(demotions)}):"]
+    lines.extend(f"    {record.reason}" for record in demotions)
+    return lines
+
+
 def format_order_report(report: DerivedOrder) -> list[str]:
     """Render the full execution-order explanation.
 
@@ -133,6 +158,8 @@ def format_order_report(report: DerivedOrder) -> list[str]:
         )
     else:
         lines.append("  Cycles (0): the derived graph is a DAG.")
+    lines.append("")
+    lines.extend(_format_demotions(report.demotions))
     return lines
 
 
@@ -153,7 +180,8 @@ def format_doctor_order_section(report: DerivedOrder) -> list[str]:
         f"    {DERIVED_NOTE}",
         f"    tools: {len(report.tools)}"
         f"  constraints: {len(report.edges)}"
-        f"  cycles: {len(report.cycles)}",
+        f"  cycles: {len(report.cycles)}"
+        f"  format demotions: {len(report.demotions)}",
     ]
     shown = constrained[:MAX_DOCTOR_CONSTRAINTS]
     lines.extend(
@@ -164,7 +192,46 @@ def format_doctor_order_section(report: DerivedOrder) -> list[str]:
     hidden = len(constrained) - len(shown)
     if hidden > 0:
         lines.append(f"    ... and {hidden} more constrained tool(s)")
+    shown_demotions = report.demotions[:MAX_DOCTOR_DEMOTIONS]
+    lines.extend(
+        f"    {record.scope}: {record.winner} owns FORMAT, "
+        f"{record.loser} demoted ({record.rule})"
+        for record in shown_demotions
+    )
+    hidden_demotions = len(report.demotions) - len(shown_demotions)
+    if hidden_demotions > 0:
+        lines.append(f"    ... and {hidden_demotions} more demotion(s)")
     lines.append("    Run 'lintro check --explain-order' for the full order.")
+    return lines
+
+
+def format_ownership_notice(tool_names: Sequence[str]) -> list[str]:
+    """Report the format-owner decisions a selection implies (#1744, #2606).
+
+    Used by ``lintro init`` so a generated config says up front which tool
+    will own formatting where two of them contend, and which config key
+    changes it. Resolution itself happens on every run, not here.
+
+    Args:
+        tool_names: Tools the config enables.
+
+    Returns:
+        Plain-text lines, or an empty list when nothing contends or the
+        scheduler could not answer — an advisory notice must not fail init.
+    """
+    try:
+        report = build_order_report(tool_names)
+    except (ValueError, OSError):
+        return []
+    if not report.demotions:
+        return []
+    lines = ["  Format ownership:"]
+    lines.extend(
+        f"    {record.scope}: {record.winner} owns FORMAT, "
+        f"{record.loser} demoted ({record.rule})"
+        for record in report.demotions
+    )
+    lines.append("    Change it with execution.precedence in your config.")
     return lines
 
 
@@ -198,7 +265,16 @@ def explain_order_lines(
         ignore_conflicts=ignore_conflicts,
         scan_roots=list(paths),
     )
-    return format_order_report(build_order_report(selection.to_run))
+    # Explain what *this* invocation would do: a mutating action derives
+    # write-conflict edges, a read-only one does not, and overlap is decided
+    # from the paths the run would have scanned.
+    return format_order_report(
+        build_order_report(
+            selection.to_run,
+            paths=list(paths) or None,
+            write_conflicts=action != "check",
+        ),
+    )
 
 
 def emit_order_explanation(

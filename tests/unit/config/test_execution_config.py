@@ -99,3 +99,35 @@ def test_get_default_max_workers_fallback_on_zero() -> None:
     with patch.object(os, "cpu_count", return_value=0):
         result = _get_default_max_workers()
         assert_that(result).is_equal_to(4)
+
+
+def test_execution_config_precedence_defaults_to_empty() -> None:
+    """No configured write precedence means the derived rules decide alone."""
+    assert_that(ExecutionConfig().precedence).is_empty()
+
+
+def test_parse_precedence_lowercases_pairs() -> None:
+    """Tool ids are normalised the same way the scheduler normalises them."""
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence([["Ruff", "BLACK"]])).is_equal_to(
+        [("ruff", "black")],
+    )
+
+
+def test_parse_precedence_rejects_a_malformed_entry() -> None:
+    """A precedence entry that is not a pair is a config error, not a guess."""
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence).raises(ValueError).when_called_with(
+        [["ruff"]],
+    )
+
+
+def test_parse_precedence_rejects_a_self_pair() -> None:
+    """A tool cannot take precedence over itself."""
+    from lintro.config.config_loader import _parse_precedence
+
+    assert_that(_parse_precedence).raises(ValueError).when_called_with(
+        [["ruff", "ruff"]],
+    )

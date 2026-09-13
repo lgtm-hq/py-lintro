@@ -1084,17 +1084,85 @@ never a claim about a tool in this state. The TOTALS table says the same thing w
 `Residual Unknown (tools)` row. The tool's pre-fix findings are still listed, because
 those _were_ measured.
 
-**Mutation runs one tool at a time.** Two mutating capabilities in flight over the same
-file would race on its bytes, so within a `format` run each batch dispatches one tool at
-a time; `lintro check` and the verify pass itself keep the full parallel fan-out. This
-is a bridge until the scheduler learns to keep overlapping mutators out of the same
-batch ([#2606](https://github.com/lgtm-hq/py-lintro/issues/2606)).
+**Mutation runs in parallel, in safe batches.** Two mutating capabilities in flight over
+the same file would race on its bytes, so the scheduler keeps them out of the same batch
+— see [Write precedence](#write-precedence-overlapping-mutators). Within a batch the
+full parallel fan-out applies under `format` exactly as it does under `check`.
 
-**Limitation.** The verify pass reports the final state of each file. Within one lintro
-run, a write lost to concurrent mutators shows up as an unexplained residual that a
-re-run may fix; attribution lands with the provenance follow-up. Serializing the
-mutation phase (above) removes the concurrent-mutator case inside a single run until the
-scheduler rule lands in [#2606](https://github.com/lgtm-hq/py-lintro/issues/2606).
+### Write precedence (overlapping mutators)
+
+Two tools that can rewrite the same file must never run at the same time: each reads,
+rewrites and writes the whole file, so the second write silently discards the first
+tool's edit. The derived scheduler closes that by deriving a second class of edge
+alongside the per-pattern `FIX` → `FORMAT` → `CHECK` ordering.
+
+**Overlap is decided by files, not by globs.** Every mutating tool's run-scoped
+candidate list is resolved the way the verify pass resolves it — the run's paths,
+excludes, `--incremental` and `--diff` all apply — and canonicalised with `realpath`.
+Two writers conflict when those sets intersect. So `Cargo.toml` (clippy) relates to
+`*.toml` (taplo), and `*.py` relates to `test_*.py`, neither of which a string
+comparison of the patterns would ever find.
+
+Three cases cannot be answered by a file list, and all three split the batch rather than
+risk a lost write:
+
+- a **project-scoped writer** — one that declares no patterns, or whose definition is
+  `partitionable=False` (clippy, golangci-lint) — expands from the handed paths to a
+  whole project root, so it conflicts with every writer under that root;
+- an **unknown tool**, meaning a name the registry cannot resolve, gets a batch of its
+  own (a registered tool that deliberately declares no claims, such as commitlint, stays
+  unconstrained as before);
+- a caller that names **no scan paths** (`lintro config`, `lintro list-tools`) has no
+  candidate lists, so overlap falls back to asking whether two patterns _could_ match
+  one file.
+
+**Read-only capabilities never conflict.** `CHECK` reads, so `lintro check`,
+`lintro format --dry-run` and the verify pass batch exactly as they did before this rule
+existed.
+
+**Who writes last.** For a conflicting pair the _winner_ is the authority: it runs last,
+so its write is the one that survives, and it keeps `FORMAT`. The winner is chosen by,
+in order:
+
+1. a configured override, `execution.precedence`;
+2. `FIX` before `FORMAT` — a fix rewrites structure and leaves layout dirty;
+3. the tool with **fewer** mutating capabilities runs last, so a dedicated formatter
+   outranks a multi-capability tool (this is why black, not ruff, formats Python);
+4. the tool id, alphabetically.
+
+**One format owner per overlapping scope.** When several conflicting tools declare
+`FORMAT`, only the winner formats. Every other tool's `FORMAT` is demoted **for that
+scope** and its `CHECK` stays enabled, so the loser keeps reporting — it just stops
+writing. The decision is re-resolved on every run, not frozen at `lintro init`, and it
+is printed by `lintro check --explain-order` and `lintro doctor`:
+
+```text
+  Format ownership (1):
+    *.py: black owns FORMAT; ruff(format) demoted (FIX runs before FORMAT; override with execution.precedence)
+```
+
+**Overriding it.** `execution.precedence` takes `[winner, loser]` pairs. The winner has
+authority on every scope the two share:
+
+```yaml
+execution:
+  precedence:
+    - [ruff, black] # ruff, not black, owns Python formatting
+```
+
+Contradictory pairs are a hard error, never a silent fallback:
+
+```text
+Configured tool precedence is contradictory: one_fixer <-> two_fixer on *.py. Remove or
+reverse one of the pairs in execution.precedence so the tools form an order rather than
+a loop.
+```
+
+**Performance shape.** A broad-pattern mutator is a serialisation point: typos claims
+`*`, so it overlaps every other writer and is a batch of one until it narrows its claim.
+Pattern-disjoint groups stay parallel — hadolint and yamllint still share a batch. Real
+projects mix file types, so two or three batches is the common case, and splitting when
+in doubt costs one batch while not splitting costs a lost edit.
 
 ### Ruff vs Black Policy (Python)
 

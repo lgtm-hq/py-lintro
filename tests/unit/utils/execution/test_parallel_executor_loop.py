@@ -86,7 +86,7 @@ def patched_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         tool_manager,
         "get_parallel_batches",
-        lambda tools: [list(tools)],
+        lambda tools, **_kwargs: [list(tools)],
     )
     monkeypatch.setattr(
         tool_manager,
@@ -188,7 +188,7 @@ def test_parallel_executor_records_a_failed_result_for_an_uninitializable_tool(
     monkeypatch.setattr(
         tool_manager,
         "get_parallel_batches",
-        lambda tools: [list(tools)],
+        lambda tools, **_kwargs: [list(tools)],
     )
     monkeypatch.setattr(tool_manager, "get_tool", lambda name: object())
 
@@ -247,7 +247,7 @@ def test_parallel_executor_survives_a_batch_where_every_tool_fails(
     monkeypatch.setattr(
         tool_manager,
         "get_parallel_batches",
-        lambda tools: [list(tools)],
+        lambda tools, **_kwargs: [list(tools)],
     )
 
     def _raise(name: str) -> object:
