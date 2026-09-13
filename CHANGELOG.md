@@ -19,14 +19,24 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+### Security
+
+## [0.159.5] - 2026-09-13
+
+### Changed
+
+- **adr**: reconcile ADR-0010 with the verification issue and the milestone plan (#2636)
+  (ae5e76c)
+
+### Fixed
+
+- **npm**: dist-tag reconcile no longer aborts live re-runs under OIDC (#2637) (84ae03b)
 - **npm**: a live re-run of the npm publish no longer aborts at the first
   already-published package (#2631). The dist-tag reconcile now reads before it writes
   (`npm dist-tag ls`), treats "tag already correct" as success, and — when the tag
   really has drifted and the OIDC trusted-publishing token refuses the write — warns per
   package, publishes the remaining packages, and fails at the end instead of stranding
   the release half-published.
-
-### Security
 
 ## [0.159.4] - 2026-09-13
 
