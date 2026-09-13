@@ -59,12 +59,14 @@ jobs:
       packages: write # delete untagged GHCR package versions via Packages API
     with:
       package-name: py-lintro
-      # Bare expression, never a block scalar: a folded `>-` turns the number
-      # into the string '7' and the number-typed input rejects the call at plan
-      # time ("Unexpected value '7'"), which is how the prune legs vanished
-      # from run 34754126197 (#2603).
-      # yamllint disable-line rule:line-length
-      min-age-days: ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      # Short expression, never a block scalar or a compound `&&/||` guard: a
+      # folded `>-` turns the number into the string '7', and even the bare
+      # guard `${{ github.event_name != 'workflow_dispatch' && 7 || ... }}`
+      # was rejected at plan time ("Unexpected value '7'", runs 34754126197
+      # and 34766253077). The podex-proven form evaluates to the number 7 on
+      # schedule (the `inputs` context is empty) and to the typed dispatch
+      # input otherwise (#2603).
+      min-age-days: ${{ inputs.min_age_days || 7 }}
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
@@ -214,12 +216,14 @@ jobs:
       packages: write # delete untagged GHCR package versions via Packages API
     with:
       package-name: py-lintro-base
-      # Bare expression, never a block scalar: a folded `>-` turns the number
-      # into the string '7' and the number-typed input rejects the call at plan
-      # time ("Unexpected value '7'"), which is how the prune legs vanished
-      # from run 34754126197 (#2603).
-      # yamllint disable-line rule:line-length
-      min-age-days: ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      # Short expression, never a block scalar or a compound `&&/||` guard: a
+      # folded `>-` turns the number into the string '7', and even the bare
+      # guard `${{ github.event_name != 'workflow_dispatch' && 7 || ... }}`
+      # was rejected at plan time ("Unexpected value '7'", runs 34754126197
+      # and 34766253077). The podex-proven form evaluates to the number 7 on
+      # schedule (the `inputs` context is empty) and to the typed dispatch
+      # input otherwise (#2603).
+      min-age-days: ${{ inputs.min_age_days || 7 }}
       dry-run: ${{ inputs.dry_run == true }}
       tooling-ref: '737747b1b8590900afc41a72efdd372e244ea39d' # v0.69.10
       egress-policy: block
