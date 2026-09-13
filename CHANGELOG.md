@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.159.2] - 2026-09-13
+
+### Fixed
+
+- **ci**: resolve the nightly dogfood image at run time (#2619) (1954fd2)
+
 ## [0.159.1] - 2026-09-13
 
 ### Fixed
