@@ -104,7 +104,7 @@ class PrettierPlugin(BaseToolPlugin):
             claims=[
                 Claim(
                     patterns=PRETTIER_FILE_PATTERNS,
-                    capabilities={Cap.FORMAT},
+                    capabilities={Cap.FORMAT, Cap.CHECK},
                 ),
             ],
             reads_tree=True,

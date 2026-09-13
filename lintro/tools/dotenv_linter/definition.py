@@ -8,7 +8,7 @@ other common mistakes, and can automatically fix most of them.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from lintro._tool_versions import get_min_version
@@ -18,7 +18,6 @@ from lintro.enums.tool_name import ToolName
 from lintro.enums.tool_type import ToolType
 from lintro.models.core.claim import Claim
 from lintro.models.core.tool_result import ToolResult
-from lintro.parsers.dotenv_linter.dotenv_linter_issue import DotenvLinterIssue
 from lintro.parsers.dotenv_linter.dotenv_linter_parser import (
     parse_dotenv_linter_output,
 )
@@ -38,26 +37,11 @@ from lintro.tools.core.option_validators import (
 )
 
 if TYPE_CHECKING:
-    from lintro.parsers.base_issue import BaseIssue
+    pass
 
 # Constants for dotenv-linter configuration
 DOTENV_LINTER_DEFAULT_TIMEOUT: int = 30
 DOTENV_LINTER_FILE_PATTERNS: list[str] = [".env", ".env.*", "*.env"]
-
-
-def _mark_unfixable(issue: BaseIssue) -> BaseIssue:
-    """Clear an issue's ``fixable`` flag after a fix attempt failed to clear it.
-
-    Args:
-        issue: Issue that survived a dotenv-linter fix run.
-
-    Returns:
-        A copy of the issue that no longer advertises an auto-fix, or the
-        issue unchanged when it carries no ``fixable`` flag.
-    """
-    if isinstance(issue, DotenvLinterIssue):
-        return replace(issue, fixable=False)
-    return issue
 
 
 # Convert a CamelCase check name to snake_case for the docs deep-link.
@@ -270,12 +254,9 @@ class DotenvLinterPlugin(BaseToolPlugin):
             parse=lambda output: parse_dotenv_linter_output(output=output),
             policy=PerFileFixPolicy(
                 check_failure_message="dotenv-linter check failed",
-                # Re-check after a successful fix: dotenv-linter cannot fix
-                # every check, and surviving issues must not be offered for
-                # an auto-fix that was already attempted.
-                verify=VerifyMode.AFTER_SUCCESS,
-                verify_failure_message="dotenv-linter recheck failed",
-                remaining_transform=_mark_unfixable,
-                report_verify_output=True,
+                # No private recheck: dotenv-linter cannot fix every check,
+                # but what survives is measured once by the run-level verify
+                # pass, not by a per-file re-lint here (#2607).
+                verify=VerifyMode.NEVER,
             ),
         )

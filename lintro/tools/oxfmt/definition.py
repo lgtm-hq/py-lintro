@@ -81,7 +81,7 @@ class OxfmtPlugin(BaseToolPlugin):
             claims=[
                 Claim(
                     patterns=OXFMT_FILE_PATTERNS,
-                    capabilities={Cap.FORMAT},
+                    capabilities={Cap.FORMAT, Cap.CHECK},
                 ),
             ],
             reads_tree=True,

@@ -214,28 +214,41 @@ def test_fix_no_files_shows_zero(
     assert_that(combined).contains(NO_FILES_NOTE)
 
 
-def test_fix_parsing_remaining_from_output(
+def test_fix_never_reads_a_remaining_count_off_prose_output(
     console_capture: tuple[Callable[[str], None], list[str]],
     fake_tool_result_factory: Callable[..., FakeToolResult],
 ) -> None:
-    """Parse remaining issues from output when not explicitly provided.
+    """The prose fallback is retired: residuals come from the verify pass (#2607).
+
+    A legacy result with no structured count shows 0 when it succeeded and
+    "?" when it failed; the number in its own text is never consulted.
 
     Args:
         console_capture: Mock console output capture.
         fake_tool_result_factory: Factory for creating fake tool results.
     """
     capture, output = console_capture
-    result = fake_tool_result_factory(
+    succeeded = fake_tool_result_factory(
         name="black",
         success=True,
         issues_count=3,
         output="Found 2 issue(s) that cannot be auto-fixed",
     )
-
-    print_summary_table(capture, Action.FIX, [result])
-
+    print_summary_table(capture, Action.FIX, [succeeded])
     combined = "".join(output)
     assert_that(combined).contains("black")
+    assert_that(combined).does_not_contain("?")
+
+    output.clear()
+    failed = fake_tool_result_factory(
+        name="black",
+        success=False,
+        issues_count=3,
+        output="Found 2 issue(s) that cannot be auto-fixed",
+    )
+    print_summary_table(capture, Action.FIX, [failed])
+    combined = "".join(output)
+    assert_that(combined).contains("?")
 
 
 def test_fix_shows_ai_fixed_count_from_metadata(

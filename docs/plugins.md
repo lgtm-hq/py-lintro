@@ -332,10 +332,13 @@ def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
     )
 ```
 
-`VerifyMode` picks how surviving issues are counted: `NEVER` skips re-checking entirely
-and trusts the fix command's exit status, `AFTER_SUCCESS` re-checks only after a clean
-fix, and `ALWAYS` re-checks even when the fix exits non-zero (for tools that apply fixes
-partially).
+`VerifyMode` picks how surviving issues are counted. `NEVER` trusts the fix command's
+exit status and is what every built-in uses: declare `CHECK` in the tool's claim and the
+run-level verify pass measures the residual once, after every mutating tool has run,
+discarding the tool's own post-fix opinion (#2607). `AFTER_SUCCESS` re-checks each file
+after a clean fix and is for an external plugin that declares no `CHECK` claim, since
+nothing else will measure its residual. There is no mode that re-checks after a failed
+fix: a failed fix reports every initial issue as remaining.
 
 Both runners classify a single check-style invocation through the same
 `check_runner.check_one_file()` step, so a timeout, an execution error and a parser

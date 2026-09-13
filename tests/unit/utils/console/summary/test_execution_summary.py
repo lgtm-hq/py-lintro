@@ -309,11 +309,15 @@ def test_execution_summary_fix_failed_tool_handled(
         logger.print_execution_summary(Action.FIX, results)
 
 
-def test_execution_summary_fix_parses_remaining_from_output(
+def test_execution_summary_fix_ignores_prose_when_no_count_is_reported(
     fake_tool_result_factory: Callable[..., FakeToolResult],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """With no standardized count, the remaining total is read from the output.
+    """A remaining count is never read off a tool's prose output (#2607).
+
+    Every mutator declares ``CHECK``, so the verify pass is the only source of
+    residuals; a legacy result with no structured count contributes nothing
+    to the remaining total, whatever its text says.
 
     Args:
         fake_tool_result_factory: Factory for creating FakeToolResult instances.
@@ -326,27 +330,6 @@ def test_execution_summary_fix_parses_remaining_from_output(
             output="5 remaining issues that cannot be auto-fixed",
             remaining_issues_count=None,
         ),
-    ]
-
-    logger.print_execution_summary(Action.FIX, results)
-
-    assert_that(_totals_row(output=capsys.readouterr().out)).contains_entry(
-        {"Remaining Issues": 5},
-    )
-
-
-def test_execution_summary_fix_parses_cannot_autofix_from_output(
-    fake_tool_result_factory: Callable[..., FakeToolResult],
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    """The "cannot be auto-fixed" wording also yields the remaining total.
-
-    Args:
-        fake_tool_result_factory: Factory for creating FakeToolResult instances.
-        capsys: Pytest stdout/stderr capture fixture.
-    """
-    logger = ThreadSafeConsoleLogger()
-    results = [
         fake_tool_result_factory(
             success=True,
             output="Found 3 issues that cannot be auto-fixed",
@@ -357,7 +340,7 @@ def test_execution_summary_fix_parses_cannot_autofix_from_output(
     logger.print_execution_summary(Action.FIX, results)
 
     assert_that(_totals_row(output=capsys.readouterr().out)).contains_entry(
-        {"Remaining Issues": 3},
+        {"Remaining Issues": 0},
     )
 
 

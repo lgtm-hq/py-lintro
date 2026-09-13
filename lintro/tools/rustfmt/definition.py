@@ -84,7 +84,7 @@ class RustfmtPlugin(BaseToolPlugin):
             claims=[
                 Claim(
                     patterns=RUSTFMT_FILE_PATTERNS,
-                    capabilities={Cap.FORMAT},
+                    capabilities={Cap.FORMAT, Cap.CHECK},
                 ),
             ],
             reads_tree=True,
@@ -161,7 +161,7 @@ class RustfmtPlugin(BaseToolPlugin):
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
-        """Run `cargo fmt --all` then re-check for remaining issues.
+        """Run `cargo fmt --all` and report what the pre-fix check found as fixed.
 
         Args:
             paths: List of file or directory paths to fix.
@@ -253,41 +253,18 @@ class RustfmtPlugin(BaseToolPlugin):
                 cwd=str(cargo_root),
             )
 
-        # Re-check after fix to count remaining issues
-        try:
-            verify_success, output_after = run_subprocess_with_timeout(
-                tool=self,
-                cmd=check_cmd,
-                timeout=ctx.timeout,
-                cwd=str(cargo_root),
-                tool_name="rustfmt",
-            )
-        except subprocess.TimeoutExpired:
-            return batch_fix_timeout_result(
-                plugin=self,
-                timeout=ctx.timeout,
-                initial_issues=initial_issues,
-                cmd=check_cmd,
-                tool_name="rustfmt",
-                cwd=str(cargo_root),
-            )
-
-        remaining_issues = parse_rustfmt_output(output=output_after)
-        remaining_count = len(remaining_issues)
-        fixed_count = max(0, initial_count - remaining_count)
-
-        # Success requires both: verification passed AND no remaining issues
-        overall_success = verify_success and remaining_count == 0
-
+        # No private recheck: a successful `cargo fmt` resolved every diff the
+        # pre-fix check found, and the run-level verify pass (#1743) measures
+        # the residual once, after every mutating tool has run (#2607).
         return ToolResult(
             name=self.definition.name,
-            success=overall_success,
-            output=output_after if not overall_success else None,
-            issues_count=remaining_count,
-            issues=remaining_issues,
+            success=True,
+            output=None,
+            issues_count=0,
+            issues=[],
             initial_issues_count=initial_count,
-            fixed_issues_count=fixed_count,
-            remaining_issues_count=remaining_count,
+            fixed_issues_count=initial_count,
+            remaining_issues_count=0,
             initial_issues=initial_issues if initial_issues else None,
             # rustfmt runs from the crate root and its parser can report paths
             # relative to it. The run-level verify pass (#1743) resolves each
