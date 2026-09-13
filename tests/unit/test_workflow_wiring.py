@@ -6752,7 +6752,10 @@ def test_every_pushed_reusable_docker_call_carries_provenance_and_sbom(
             if "reusable-docker.yml" not in uses:
                 continue
             with_block = job.get("with") or {}
-            if str(with_block.get("push", "")).strip() in ("", "false"):
+            push = with_block.get("push", "")
+            # YAML ``push: false`` parses to a boolean; only an explicit false
+            # or an absent input marks a validate-only job.
+            if push is False or str(push).strip().lower() in ("", "false"):
                 continue
             evidence = {
                 key: with_block.get(key)

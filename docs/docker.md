@@ -130,9 +130,10 @@ DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
 # GitHub build-provenance attestation (signed by this repository's workflow)
 gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" --repo lgtm-hq/py-lintro
 
-# Cosign keyless signature, bound to the publishing workflow's OIDC identity
+# Cosign keyless signature, bound to this repository's publishing workflows
+# (docker-build-publish.yml for tags and backfills, docker-ci.yml for main)
 cosign verify "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
-  --certificate-identity-regexp '^https://github.com/lgtm-hq/' \
+  --certificate-identity-regexp '^https://github\.com/lgtm-hq/py-lintro/\.github/workflows/(docker-build-publish|docker-ci)\.yml@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # BuildKit provenance and SBOM attached to the index (non-empty for each platform)
