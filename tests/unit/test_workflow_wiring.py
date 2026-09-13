@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import re
 import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
@@ -2787,24 +2788,32 @@ def test_docker_ci_integration_passes_base_ref_for_version_lag() -> None:
 
 
 def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
-    """dogfood-nightly verifies the pinned release digest and notifies on fail."""
+    """dogfood-nightly verifies the resolved image and notifies on failure."""
     nightly = _load_workflow(name="dogfood-nightly.yml")
     jobs = nightly["jobs"]
     assert_that(jobs).contains_key("verify-pinned-image-tools")
 
     verify_job = jobs["verify-pinned-image-tools"]
+    assert_that(verify_job["needs"]).contains("resolve-image")
     verify_steps = [
         step
         for step in verify_job["steps"]
         if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
     ]
     assert_that(verify_steps).is_length(1)
-    # Verifies the same pinned release image the nightly dogfood run lints
-    # with. The reference carries both the release tag and the digest (#1751):
-    # the digest is what Docker resolves, the tag makes the pinned release
-    # readable and gives Renovate a version to bump.
-    assert_that(verify_steps[0]["env"]["IMAGE"]).matches(
-        r"ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}",
+    # The same image dogfood-full lints with, resolved once per run (#2602).
+    assert_that(verify_steps[0]["env"]["IMAGE"]).is_equal_to(
+        "${{ needs.resolve-image.outputs.image }}",
+    )
+    # And checked out at the commit that image was built from, so the gate
+    # reports genuine image-vs-manifest drift instead of pin lag.
+    checkout = next(
+        step
+        for step in verify_job["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert_that(checkout["with"]["ref"]).is_equal_to(
+        "${{ needs.resolve-image.outputs.manifest-ref }}",
     )
 
     # A pinned-digest failure must still reach the deduplicated failure
@@ -2812,6 +2821,116 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
     assert_that(jobs["notify-failure"]["needs"]).contains("classify-failure")
     assert_that(jobs["classify-failure"]["needs"]).contains(
         "verify-pinned-image-tools",
+    )
+
+
+# --- Nightly image resolution (#2602) ---------------------------------------
+#
+# The nightly used to lint with a hand-maintained
+# ``py-lintro:<version>@sha256:...`` pin repeated at five sites. Nothing moved
+# it, so it froze at 0.148.0 while main reached 0.156.x, and the digest-lag
+# gate failed every single night on mismatches that were pure pin lag — a
+# permanently red nightly that hid real regressions. The image is resolved at
+# run time now, and these tests are what stop a literal creeping back.
+
+# Every place the nightly names the image it lints with.
+_NIGHTLY_IMAGE_CONSUMERS = ("dogfood-full", "dogfood_full_retry")
+_NIGHTLY_IMAGE_STEP_CONSUMERS = ("dogfood-skip-gate", "dogfood_skip_gate_retry")
+
+
+def test_dogfood_nightly_carries_no_hard_coded_release_pin() -> None:
+    """No pinned release literal may return to dogfood-nightly.yml (#2602).
+
+    A pin here is only ever correct on the day it is written: the Renovate
+    docker datasource cannot page past the package's thousands of
+    ``sha-<commit>`` tags to find a newer release, and the release-time sync
+    script reaches CI without a token (lgtm-hq/lgtm-ci#849). So the literal
+    is banned outright rather than trusted to stay fresh.
+    """
+    text = (_REPO_ROOT / ".github" / "workflows" / "dogfood-nightly.yml").read_text(
+        encoding="utf-8",
+    )
+
+    assert_that(
+        re.findall(r"py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}", text),
+    ).is_empty()
+    # Not even a bare digest: resolution is the resolver job's job, and an
+    # image digest anywhere else in this file is a pin wearing a disguise.
+    assert_that(re.findall(r"py-lintro@?:?sha256:[a-f0-9]{64}", text)).is_empty()
+
+
+def test_dogfood_nightly_resolves_its_image_once() -> None:
+    """Every nightly image consumer reads the one resolved reference (#2602).
+
+    Five copies of one literal is how the pin went stale; five copies of one
+    expression would at least stay coherent, but a consumer that kept its own
+    literal would silently lint a different image than the gate verifies. Each
+    consumer must therefore read ``resolve-image`` and declare the dependency
+    that makes the ``needs`` context available to it.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    jobs = nightly["jobs"]
+    resolver = jobs["resolve-image"]
+
+    # Digest, version and the manifest ref all come from the one step, so a
+    # consumer can never pair one run's image with another run's manifest.
+    for output, key in (
+        ("image", "image"),
+        ("version", "version"),
+        ("manifest-ref", "manifest-ref"),
+    ):
+        assert_that(resolver["outputs"][output]).is_equal_to(
+            "${{ steps.resolve.outputs." + key + " }}",
+        )
+    resolve_step = next(
+        step for step in resolver["steps"] if step.get("id") == "resolve"
+    )
+    assert_that(resolve_step["run"]).contains("scripts/ci/resolve-image-digest.sh")
+    # The commit this run checked out is what the resolver prefers an image
+    # for; without it the preferred per-commit path cannot even be attempted.
+    assert_that(resolve_step["env"]["COMMIT_SHA"]).is_equal_to("${{ github.sha }}")
+
+    expression = "${{ needs.resolve-image.outputs.image }}"
+    for job_id in _NIGHTLY_IMAGE_CONSUMERS:
+        job = jobs[job_id]
+        assert_that(job["needs"]).described_as(job_id).contains("resolve-image")
+        assert_that(job["with"]["lintro-image"]).described_as(job_id).is_equal_to(
+            expression,
+        )
+    for job_id in _NIGHTLY_IMAGE_STEP_CONSUMERS:
+        job = jobs[job_id]
+        assert_that(job["needs"]).described_as(job_id).contains("resolve-image")
+        images = [
+            step["env"]["LINTRO_IMAGE"]
+            for step in job["steps"]
+            if "LINTRO_IMAGE" in (step.get("env") or {})
+        ]
+        assert_that(images).described_as(job_id).is_equal_to([expression])
+
+
+def test_dogfood_nightly_resolver_script_is_executable() -> None:
+    """The resolver the nightly invokes must exist and be runnable (#2602)."""
+    script = _REPO_ROOT / "scripts" / "ci" / "resolve-image-digest.sh"
+
+    assert_that(script.is_file()).is_true()
+    assert_that(os.access(script, os.X_OK)).is_true()
+
+
+def test_dogfood_nightly_classifier_sees_the_resolver() -> None:
+    """A resolver failure must reach the tracker, not vanish (#2602).
+
+    When ``resolve-image`` fails there is no image, so every lint job below it
+    is skipped and the night produces no coverage at all. Without the
+    resolver in the classifier's inputs that reads as "nothing failed" and the
+    tracker never hears about the gap.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    classify = nightly["jobs"]["classify-failure"]
+
+    assert_that(classify["needs"]).contains("resolve-image")
+    step = next(step for step in classify["steps"] if step.get("id") == "classify")
+    assert_that(step["env"]["RESOLVE_RESULT"]).is_equal_to(
+        "${{ needs.resolve-image.result }}",
     )
 
 
@@ -4301,8 +4420,11 @@ def test_renovate_does_not_track_cppcheck() -> None:
 # it must carry. Hard-coding the counts is deliberate: asserting only that the
 # surviving references agree would stay green if a refactor deleted all but one
 # pin, which is exactly the drift this guard exists to catch (#1751).
+#
+# dogfood-nightly.yml is deliberately absent: it resolves its image at run time
+# now (#2602) and must carry no pin at all — see
+# ``test_dogfood_nightly_carries_no_hard_coded_release_pin``.
 _PINNED_IMAGE_SITES = {
-    "dogfood-nightly.yml": 5,
     # One: docker-ci carries the pin in a single workflow-level
     # `env: LINTRO_FORK_FALLBACK_IMAGE` that every fork-fallback consumer
     # reads (#2297).
@@ -4313,12 +4435,11 @@ _PINNED_IMAGE_SITES = {
 def test_pinned_release_image_sites_share_one_reference() -> None:
     """Every pinned py-lintro release site must name the same release.
 
-    The nightly dogfood run and the docker-ci fork-PR fallback pin a released
-    ``py-lintro`` image by digest. The pin is deliberately frozen so the
-    digest-lag gate in ``scripts/ci/verify-image-manifest-tools.sh`` stays
-    meaningful, and Renovate bumps every site as one set (#1751). A partial
-    bump would leave the two workflows linting with different images while
-    both claim to use "the pinned release" — this asserts that cannot happen.
+    The docker-ci fork-PR fallback pins a released ``py-lintro`` image by
+    digest, because a fork build is never pushed to GHCR and has no image of
+    its own to lint with. Renovate bumps every site as one set (#1751), and a
+    partial bump would leave consumers linting with different images while all
+    claim to use "the pinned release" — this asserts that cannot happen.
 
     The pattern is the one Renovate itself is configured with, so a pin that
     is reworded out of the manager's reach fails here rather than silently

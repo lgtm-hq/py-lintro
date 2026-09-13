@@ -3,8 +3,10 @@
 # For license details, see the repository root LICENSE file.
 """Point the pinned py-lintro release image at the newest published release.
 
-The nightly dogfood run and the docker-ci fork-PR fallback pin a released
-``py-lintro`` image by tag and digest. The pin is what makes the digest-lag
+The docker-ci fork-PR fallback pins a released ``py-lintro`` image by tag and
+digest (fork builds are never pushed to GHCR, so a fork PR has no image of its
+own to lint with). The nightly dogfood run used to share that pin and now
+resolves its image at run time instead (#2602). The pin is what makes the digest-lag
 gate in ``verify-image-manifest-tools.sh`` meaningful, but nothing moved it
 automatically: it drifted from 0.80.3 to eleven minor versions behind before
 anyone noticed (#1590).
@@ -65,12 +67,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 # Counts are asserted so a partial rewrite is a failure rather than a silent
 # half-update — the same contract tests/unit/test_workflow_wiring.py enforces.
 PINNED_SITES: dict[str, int] = {
-    # 5: dogfood-full, its bounded retry, the digest-lag verifier, the
-    # skip gate and its bounded retry (#2246).
-    ".github/workflows/dogfood-nightly.yml": 5,
     # 1: the single workflow-level `env: LINTRO_FORK_FALLBACK_IMAGE` that all
     # four fork-fallback consumers read (#2297).
     ".github/workflows/docker-ci.yml": 1,
+    # dogfood-nightly.yml used to hold five sites here. It now resolves its
+    # image at run time (#2602) and carries no pin at all, so syncing it is
+    # both impossible and unnecessary — the failure this script exists to
+    # prevent (a frozen pin checked against a moving manifest) cannot happen
+    # there any more.
 }
 
 ORG = "lgtm-hq"
@@ -252,9 +256,11 @@ def apply_pin(*, version: str, digest: str, dry_run: bool = False) -> bool:
     replacement = f"ghcr.io/lgtm-hq/py-lintro:{version}@{digest}"
 
     # Two phases on purpose. Validating and writing in one pass would rewrite
-    # dogfood-nightly.yml and then bail on docker-ci.yml, leaving the workflows
-    # pinned to different images — the exact partial bump the wiring test in
-    # #1752 exists to catch, reached here without any failure being reported.
+    # an earlier file and then bail on a later one, leaving pin sites on
+    # different images — the exact partial bump the wiring test in #1752
+    # exists to catch, reached here without any failure being reported. One
+    # file is pinned today (#2602), but the invariant is about the shape of
+    # the loop, not the current length of the dict.
     planned: list[tuple[Path, str]] = []
     for relative_path, expected_sites in PINNED_SITES.items():
         path = _REPO_ROOT / relative_path
