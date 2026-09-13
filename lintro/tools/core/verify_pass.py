@@ -222,14 +222,14 @@ def _definition_for(tool_name: str) -> object:
 def _claims_for(tool_name: str) -> list[Claim]:
     """Read a tool's declared claims, tolerating an unresolvable name.
 
+    An unresolvable name propagates the ``UnresolvableToolError`` that
+    :func:`_definition_for` raises.
+
     Args:
         tool_name: Registry key of the tool.
 
     Returns:
         The tool's claims, or an empty list when it declares none.
-
-    Raises:
-        UnresolvableToolError: If the registry cannot resolve the name.
     """
     return list(getattr(_definition_for(tool_name), "claims", None) or ())
 
