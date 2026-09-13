@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import re
 import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
@@ -2787,24 +2788,32 @@ def test_docker_ci_integration_passes_base_ref_for_version_lag() -> None:
 
 
 def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
-    """dogfood-nightly verifies the pinned release digest and notifies on fail."""
+    """dogfood-nightly verifies the resolved image and notifies on failure."""
     nightly = _load_workflow(name="dogfood-nightly.yml")
     jobs = nightly["jobs"]
     assert_that(jobs).contains_key("verify-pinned-image-tools")
 
     verify_job = jobs["verify-pinned-image-tools"]
+    assert_that(verify_job["needs"]).contains("resolve-image")
     verify_steps = [
         step
         for step in verify_job["steps"]
         if step.get("run") == "scripts/ci/verify-image-manifest-tools.sh"
     ]
     assert_that(verify_steps).is_length(1)
-    # Verifies the same pinned release image the nightly dogfood run lints
-    # with. The reference carries both the release tag and the digest (#1751):
-    # the digest is what Docker resolves, the tag makes the pinned release
-    # readable and gives Renovate a version to bump.
-    assert_that(verify_steps[0]["env"]["IMAGE"]).matches(
-        r"ghcr\.io/lgtm-hq/py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}",
+    # The same image dogfood-full lints with, resolved once per run (#2602).
+    assert_that(verify_steps[0]["env"]["IMAGE"]).is_equal_to(
+        "${{ needs.resolve-image.outputs.image }}",
+    )
+    # And checked out at the commit that image was built from, so the gate
+    # reports genuine image-vs-manifest drift instead of pin lag.
+    checkout = next(
+        step
+        for step in verify_job["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    assert_that(checkout["with"]["ref"]).is_equal_to(
+        "${{ needs.resolve-image.outputs.manifest-ref }}",
     )
 
     # A pinned-digest failure must still reach the deduplicated failure
@@ -2812,6 +2821,116 @@ def test_dogfood_nightly_gates_pinned_digest_tools() -> None:
     assert_that(jobs["notify-failure"]["needs"]).contains("classify-failure")
     assert_that(jobs["classify-failure"]["needs"]).contains(
         "verify-pinned-image-tools",
+    )
+
+
+# --- Nightly image resolution (#2602) ---------------------------------------
+#
+# The nightly used to lint with a hand-maintained
+# ``py-lintro:<version>@sha256:...`` pin repeated at five sites. Nothing moved
+# it, so it froze at 0.148.0 while main reached 0.156.x, and the digest-lag
+# gate failed every single night on mismatches that were pure pin lag — a
+# permanently red nightly that hid real regressions. The image is resolved at
+# run time now, and these tests are what stop a literal creeping back.
+
+# Every place the nightly names the image it lints with.
+_NIGHTLY_IMAGE_CONSUMERS = ("dogfood-full", "dogfood_full_retry")
+_NIGHTLY_IMAGE_STEP_CONSUMERS = ("dogfood-skip-gate", "dogfood_skip_gate_retry")
+
+
+def test_dogfood_nightly_carries_no_hard_coded_release_pin() -> None:
+    """No pinned release literal may return to dogfood-nightly.yml (#2602).
+
+    A pin here is only ever correct on the day it is written: the Renovate
+    docker datasource cannot page past the package's thousands of
+    ``sha-<commit>`` tags to find a newer release, and the release-time sync
+    script reaches CI without a token (lgtm-hq/lgtm-ci#849). So the literal
+    is banned outright rather than trusted to stay fresh.
+    """
+    text = (_REPO_ROOT / ".github" / "workflows" / "dogfood-nightly.yml").read_text(
+        encoding="utf-8",
+    )
+
+    assert_that(
+        re.findall(r"py-lintro:\d+\.\d+\.\d+@sha256:[a-f0-9]{64}", text),
+    ).is_empty()
+    # Not even a bare digest: resolution is the resolver job's job, and an
+    # image digest anywhere else in this file is a pin wearing a disguise.
+    assert_that(re.findall(r"py-lintro@?:?sha256:[a-f0-9]{64}", text)).is_empty()
+
+
+def test_dogfood_nightly_resolves_its_image_once() -> None:
+    """Every nightly image consumer reads the one resolved reference (#2602).
+
+    Five copies of one literal is how the pin went stale; five copies of one
+    expression would at least stay coherent, but a consumer that kept its own
+    literal would silently lint a different image than the gate verifies. Each
+    consumer must therefore read ``resolve-image`` and declare the dependency
+    that makes the ``needs`` context available to it.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    jobs = nightly["jobs"]
+    resolver = jobs["resolve-image"]
+
+    # Digest, version and the manifest ref all come from the one step, so a
+    # consumer can never pair one run's image with another run's manifest.
+    for output, key in (
+        ("image", "image"),
+        ("version", "version"),
+        ("manifest-ref", "manifest-ref"),
+    ):
+        assert_that(resolver["outputs"][output]).is_equal_to(
+            "${{ steps.resolve.outputs." + key + " }}",
+        )
+    resolve_step = next(
+        step for step in resolver["steps"] if step.get("id") == "resolve"
+    )
+    assert_that(resolve_step["run"]).contains("scripts/ci/resolve-image-digest.sh")
+    # The commit this run checked out is what the resolver prefers an image
+    # for; without it the preferred per-commit path cannot even be attempted.
+    assert_that(resolve_step["env"]["COMMIT_SHA"]).is_equal_to("${{ github.sha }}")
+
+    expression = "${{ needs.resolve-image.outputs.image }}"
+    for job_id in _NIGHTLY_IMAGE_CONSUMERS:
+        job = jobs[job_id]
+        assert_that(job["needs"]).described_as(job_id).contains("resolve-image")
+        assert_that(job["with"]["lintro-image"]).described_as(job_id).is_equal_to(
+            expression,
+        )
+    for job_id in _NIGHTLY_IMAGE_STEP_CONSUMERS:
+        job = jobs[job_id]
+        assert_that(job["needs"]).described_as(job_id).contains("resolve-image")
+        images = [
+            step["env"]["LINTRO_IMAGE"]
+            for step in job["steps"]
+            if "LINTRO_IMAGE" in (step.get("env") or {})
+        ]
+        assert_that(images).described_as(job_id).is_equal_to([expression])
+
+
+def test_dogfood_nightly_resolver_script_is_executable() -> None:
+    """The resolver the nightly invokes must exist and be runnable (#2602)."""
+    script = _REPO_ROOT / "scripts" / "ci" / "resolve-image-digest.sh"
+
+    assert_that(script.is_file()).is_true()
+    assert_that(os.access(script, os.X_OK)).is_true()
+
+
+def test_dogfood_nightly_classifier_sees_the_resolver() -> None:
+    """A resolver failure must reach the tracker, not vanish (#2602).
+
+    When ``resolve-image`` fails there is no image, so every lint job below it
+    is skipped and the night produces no coverage at all. Without the
+    resolver in the classifier's inputs that reads as "nothing failed" and the
+    tracker never hears about the gap.
+    """
+    nightly = _load_workflow(name="dogfood-nightly.yml")
+    classify = nightly["jobs"]["classify-failure"]
+
+    assert_that(classify["needs"]).contains("resolve-image")
+    step = next(step for step in classify["steps"] if step.get("id") == "classify")
+    assert_that(step["env"]["RESOLVE_RESULT"]).is_equal_to(
+        "${{ needs.resolve-image.result }}",
     )
 
 
@@ -3020,14 +3139,120 @@ def test_mirror_release_job_has_timeout() -> None:
     assert_that(timeout).is_equal_to(20)
 
 
-def test_mirror_release_triggers_on_published_release() -> None:
-    """Mirror bump runs on release publish plus a manual dispatch fallback."""
+def test_mirror_release_is_called_not_release_triggered() -> None:
+    """Mirror bump is a reusable call plus a manual dispatch fallback.
+
+    A ``release: published`` trigger is unreachable here: the tag pipeline
+    creates the release with GITHUB_TOKEN and GitHub suppresses workflow
+    events for actions taken with that token, so the workflow logged zero runs across
+    every release since (#2599). ``push: tags`` carries the same recursion
+    guard, so ``workflow_call`` is the only trigger the automated train fires.
+    """
     workflow = _load_workflow(name="mirror-release.yml")
     triggers = workflow["on"]
 
-    assert_that(triggers).contains_key("release", "workflow_dispatch")
-    assert_that(triggers["release"]["types"]).contains("published")
+    assert_that(triggers).contains_key("workflow_call", "workflow_dispatch")
+    assert_that(triggers).does_not_contain_key("release")
+    assert_that(triggers).does_not_contain_key("push")
+    assert_that(triggers["workflow_call"]["inputs"]).contains_key("release_tag")
+    assert_that(
+        triggers["workflow_call"]["inputs"]["release_tag"]["required"],
+    ).is_true()
+    assert_that(triggers["workflow_call"]["secrets"]).contains_key(
+        "MIRROR_REPO_TOKEN",
+    )
     assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("release_tag")
+    assert_that(workflow["jobs"]["mirror-bump"]["env"]["RELEASE_TAG"]).is_equal_to(
+        "${{ inputs.release_tag }}",
+    )
+
+
+def test_tag_pipeline_calls_the_mirror_after_the_github_release() -> None:
+    """The tag pipeline is what fires the mirror bump, after the release job.
+
+    Pins the whole repair from #2599: a caller job exists, it waits for the
+    release the mirror mirrors, it passes the pushed tag, it hands over the
+    cross-repo token, and it grants at least what the callee's job requests
+    (a shortfall is a logless ``startup_failure``; see #2484/#2563).
+    """
+    caller = _load_workflow(name="publish-pypi-on-tag.yml")
+    callee = _load_workflow(name="mirror-release.yml")
+    job = caller["jobs"]["mirror-release"]
+
+    assert_that(job["uses"]).is_equal_to("./.github/workflows/mirror-release.yml")
+    assert_that(job["needs"]).contains("github-release")
+    assert_that(job["with"]["release_tag"]).is_equal_to("${{ github.ref_name }}")
+    assert_that(job["secrets"]["MIRROR_REPO_TOKEN"]).is_equal_to(
+        "${{ secrets.MIRROR_REPO_TOKEN }}",
+    )
+    # `secrets: inherit` would hand the call every org/repo secret.
+    assert_that(job["secrets"]).is_instance_of(dict)
+
+    granted = _effective_grant(job=job, workflow=caller)
+    for callee_job in callee["jobs"].values():
+        requested = _effective_grant(job=callee_job, workflow=callee)
+        for scope, level in requested.items():
+            assert_that(_granted_level(granted, scope=scope)).described_as(
+                f"caller grant for {scope}",
+            ).is_greater_than_or_equal_to(level)
+
+
+def test_mirror_token_guard_probes_the_secret_into_an_output() -> None:
+    """A guard job turns the unreadable secret into a job output (#2622).
+
+    Secrets cannot be referenced from a job-level ``if``, so the only way to
+    gate the mirror call on ``MIRROR_REPO_TOKEN`` existing is to read it into
+    a step env var and re-export the verdict. The job itself needs nothing
+    from the repo, hence ``permissions: {}``.
+    """
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["mirror-token"]
+
+    assert_that(job["permissions"]).is_equal_to({})
+    assert_that(job["needs"]).contains("github-release")
+    assert_that(job["outputs"]["has_token"]).is_equal_to(
+        "${{ steps.probe.outputs.has_token }}",
+    )
+
+    step = next(s for s in _job_steps(workflow, job="mirror-token") if "run" in s)
+    assert_that(step["id"]).is_equal_to("probe")
+    assert_that(step["env"]["TOKEN"]).is_equal_to(
+        "${{ secrets.MIRROR_REPO_TOKEN }}",
+    )
+    run = step["run"]
+    assert_that(run).contains("has_token=true")
+    assert_that(run).contains("has_token=false")
+    assert_that(run).contains("$GITHUB_OUTPUT")
+    assert_that(run).contains("$GITHUB_STEP_SUMMARY")
+
+
+def test_mirror_token_guard_warns_when_the_secret_is_absent() -> None:
+    """The skip is loud: an annotation plus a step-summary line (#2622)."""
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    step = next(s for s in _job_steps(workflow, job="mirror-token") if "run" in s)
+    message = "MIRROR_REPO_TOKEN is not set; lintro-pre-commit mirror bump skipped"
+
+    run = step["run"]
+    assert_that(run).contains(f'msg="{message}"')
+    assert_that(run).contains('echo "::warning::${msg}"')
+    assert_that(run).contains('echo "${msg}." >>"$GITHUB_STEP_SUMMARY"')
+
+
+def test_mirror_release_is_gated_on_the_token_guard() -> None:
+    """The mirror call waits for the guard and runs only when it says true.
+
+    Without this the job fails every tag at checkout with "Input required and
+    not supplied: token", reddening an otherwise complete release run (#2622).
+    The ``actions-v`` recursion guard stays alongside the new condition.
+    """
+    workflow = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = workflow["jobs"]["mirror-release"]
+
+    assert_that(job["needs"]).contains("github-release", "mirror-token")
+    assert_that(job["if"]).contains(
+        "needs.mirror-token.outputs.has_token == 'true'",
+    )
+    assert_that(job["if"]).contains("!startsWith(github.ref_name, 'actions-v')")
 
 
 def test_mirror_release_job_is_read_only_in_source_repo() -> None:
@@ -3090,12 +3315,13 @@ def test_mirror_release_skips_prereleases() -> None:
     workflow = _load_workflow(name="mirror-release.yml")
     steps = _job_steps(workflow, job="mirror-bump")
     guard = "steps.resolve.outputs.is_prerelease == 'false'"
-    github_guard = "!github.event.release.prerelease"
 
     for needle in ("wait-for-pypi-wheel.sh", "publish-mirror-release.sh"):
         step = next(s for s in steps if needle in s.get("run", ""))
         assert_that(step["if"]).contains(guard)
-        assert_that(step["if"]).contains(github_guard)
+        # The tag itself is the only prerelease signal on the call path: there
+        # is no release event payload to read `prerelease` from (#2599).
+        assert_that(step["if"]).does_not_contain("github.event.release")
         assert_that(step.get("env", {})).contains_key("LINTRO_VERSION")
 
     mirror_checkout = next(
@@ -3104,7 +3330,7 @@ def test_mirror_release_skips_prereleases() -> None:
         if s.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
     )
     assert_that(mirror_checkout["if"]).contains(guard)
-    assert_that(mirror_checkout["if"]).contains(github_guard)
+    assert_that(mirror_checkout["if"]).does_not_contain("github.event.release")
 
     setup_python = [
         s for s in steps if s.get("uses", "").startswith("actions/setup-python@")
@@ -4293,8 +4519,11 @@ def test_renovate_does_not_track_cppcheck() -> None:
 # it must carry. Hard-coding the counts is deliberate: asserting only that the
 # surviving references agree would stay green if a refactor deleted all but one
 # pin, which is exactly the drift this guard exists to catch (#1751).
+#
+# dogfood-nightly.yml is deliberately absent: it resolves its image at run time
+# now (#2602) and must carry no pin at all — see
+# ``test_dogfood_nightly_carries_no_hard_coded_release_pin``.
 _PINNED_IMAGE_SITES = {
-    "dogfood-nightly.yml": 5,
     # One: docker-ci carries the pin in a single workflow-level
     # `env: LINTRO_FORK_FALLBACK_IMAGE` that every fork-fallback consumer
     # reads (#2297).
@@ -4305,12 +4534,11 @@ _PINNED_IMAGE_SITES = {
 def test_pinned_release_image_sites_share_one_reference() -> None:
     """Every pinned py-lintro release site must name the same release.
 
-    The nightly dogfood run and the docker-ci fork-PR fallback pin a released
-    ``py-lintro`` image by digest. The pin is deliberately frozen so the
-    digest-lag gate in ``scripts/ci/verify-image-manifest-tools.sh`` stays
-    meaningful, and Renovate bumps every site as one set (#1751). A partial
-    bump would leave the two workflows linting with different images while
-    both claim to use "the pinned release" — this asserts that cannot happen.
+    The docker-ci fork-PR fallback pins a released ``py-lintro`` image by
+    digest, because a fork build is never pushed to GHCR and has no image of
+    its own to lint with. Renovate bumps every site as one set (#1751), and a
+    partial bump would leave consumers linting with different images while all
+    claim to use "the pinned release" — this asserts that cannot happen.
 
     The pattern is the one Renovate itself is configured with, so a pin that
     is reworded out of the manager's reach fails here rather than silently

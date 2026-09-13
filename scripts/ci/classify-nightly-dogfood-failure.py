@@ -51,6 +51,7 @@ value is the workflow's ``needs.<job>.result`` / ``needs.<job>.outputs.<name>``)
     SKIP_GATE_RETRY_RESULT, SKIP_GATE_RETRY_CONCLUSION,
     SKIP_GATE_RETRY_STATUS, SKIP_GATE_RETRY_EXIT_CODE
     VERIFY_RESULT, VERIFY_CONCLUSION
+    RESOLVE_RESULT, RESOLVE_CONCLUSION
     INFRA_FLAKE_SCRIPT  Override for is-infra-flake-failure.sh (tests only).
 
     The ``*_CONCLUSION`` values are forwarded to the shared classifier as
@@ -367,10 +368,20 @@ def build_units(*, environ: dict[str, str]) -> list[Unit]:
         environ: The environment mapping to read.
 
     Returns:
-        One :class:`Unit` per nightly job that can fail. The pinned-digest
-        verifier has no retry, so its pair always carries an empty retry.
+        One :class:`Unit` per nightly job that can fail. The image resolver
+        and the manifest verifier have no retry, so their pairs always carry
+        an empty retry.
     """
     return [
+        # A resolver failure means no image, so every lint job below is
+        # skipped and the night produces no coverage at all (#2602). Without
+        # this unit that reads as "nothing failed" and the tracker never
+        # hears about the gap.
+        Unit(
+            name="resolve-image",
+            primary=_attempt_from_env("RESOLVE", environ=environ),
+            retry=Attempt(),
+        ),
         Unit(
             name="dogfood-full",
             primary=_attempt_from_env("LINT", environ=environ),
