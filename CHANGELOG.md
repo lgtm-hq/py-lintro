@@ -13,13 +13,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- Every mutating capability declares `CHECK`, so the central verify pass covers every
-  formatter and is the only source of residuals; rustfmt's private post-format recheck
-  and dotenv-linter's per-file recheck are gone, and the console no longer guesses a
-  remaining count from a tool's prose output (#2607). `lintro check` tool selection is
-  unchanged — it already ran the four formatters; the `CHECK` capability is read by the
-  fmt run's verify pass, not by check-run selection.
-
 ### Deprecated
 
 ### Removed
@@ -27,6 +20,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.160.0] - 2026-09-13
+
+### Added
+
+- **tools**: every mutating capability declares CHECK (#2635) (8d5d658)
+
+### Changed
+
+- Every mutating capability declares `CHECK`, so the central verify pass covers every
+  formatter and is the only source of residuals; rustfmt's private post-format recheck
+  and dotenv-linter's per-file recheck are gone, and the console no longer guesses a
+  remaining count from a tool's prose output (#2607). `lintro check` tool selection is
+  unchanged — it already ran the four formatters; the `CHECK` capability is read by the
+  fmt run's verify pass, not by check-run selection.
 
 ## [0.159.7] - 2026-09-13
 
