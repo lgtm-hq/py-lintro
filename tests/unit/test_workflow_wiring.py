@@ -6822,6 +6822,21 @@ _EVIDENCE_CALLER_IF_ALLOWLIST: dict[str, str] = {
     "docker-tools-publish.yml::tools-image": "",
 }
 
+#: Same contract for the two docker-ci.yml jobs that hold the evidence steps,
+#: keyed by ``workflow::job``. A job-level guard such as ``false && always()``
+#: skips the whole job before any step runs, which the step allowlist below
+#: cannot see (CodeRabbit on #2640), so the job conditions are pinned too.
+_EVIDENCE_JOB_IF_ALLOWLIST: dict[str, str] = {
+    "docker-ci.yml::docker-build": "!cancelled()",
+    "docker-ci.yml::publish": (
+        "github.ref == 'refs/heads/main' && "
+        "github.event_name == 'push' && "
+        "needs.changes.outputs.pipeline != 'false' && "
+        "needs.code-quality-gate.outputs.result == 'success' && "
+        "needs.code-quality-gate.outputs.infra-flake != 'true'"
+    ),
+}
+
 #: Same contract for the evidence steps of docker-ci.yml's own build/publish
 #: path, keyed by step name: the pushed CI-tag builds, the cosign signature
 #: and the two provenance attestations.
@@ -6885,7 +6900,9 @@ def test_docker_ci_evidence_steps_cannot_be_execution_bypassed() -> None:
     carries an attestation or signature failure to a green job. The evidence
     steps (the pushed CI-tag builds, the cosign signature, the two
     attestations) and their jobs may carry no ``continue-on-error``, and
-    every ``if`` must match the allowlist verbatim.
+    every ``if``, job-level and step-level, must match its allowlist
+    verbatim: a job guard like ``false && always()`` is not constant-false
+    yet still skips every evidence step.
     """
     ci = _load_workflow(name="docker-ci.yml")
     for job_id in ("docker-build", "publish"):
@@ -6893,11 +6910,15 @@ def test_docker_ci_evidence_steps_cannot_be_execution_bypassed() -> None:
         assert_that(job.get("continue-on-error")).described_as(
             f"docker-ci.yml::{job_id} continue-on-error",
         ).is_none()
-        condition = str(job.get("if", "")).strip()
-        if condition:
-            assert_that(condition.lower()).described_as(
-                f"docker-ci.yml::{job_id} if",
-            ).is_not_in(("false", "${{ false }}"))
+        key = f"docker-ci.yml::{job_id}"
+        assert_that(key).described_as("evidence job allowlist").is_in(
+            *_EVIDENCE_JOB_IF_ALLOWLIST,
+        )
+        assert_that(
+            _normalize_github_expr(str(job.get("if", ""))),
+        ).described_as(f"{key} if").is_equal_to(
+            _normalize_github_expr(_EVIDENCE_JOB_IF_ALLOWLIST[key]),
+        )
     evidence_steps = [
         step
         for job_id in ("docker-build", "publish")

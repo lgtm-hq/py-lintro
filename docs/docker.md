@@ -127,13 +127,19 @@ verifies the same way as a release.
 DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
   --format '{{ .Manifest.Digest }}')
 
-# GitHub build-provenance attestation (signed by this repository's workflow)
-gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" --repo lgtm-hq/py-lintro
+# GitHub build-provenance attestation. The attestation is stored on this
+# repository, but the signer is the workflow that ran the attest step: a
+# release tag or backfill is attested inside lgtm-ci's reusable-docker.yml,
+# so gh must be told to accept that signer (its default expects a signer in
+# --repo); the main promotion is attested in-repo by docker-ci.yml.
+gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --repo lgtm-hq/py-lintro --signer-repo lgtm-hq/lgtm-ci   # release tags, backfills
+gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --repo lgtm-hq/py-lintro                                 # main promotion
 
-# Cosign keyless signature, bound to the workflow that did the signing:
-# docker-ci.yml signs the main promotion in-repo, while tag-published and
-# backfilled images are signed inside lgtm-ci's reusable-docker.yml —
-# Fulcio records the calling reusable workflow's path, not the caller's
+# Cosign keyless signature, bound to the same signer identities: Fulcio
+# records the reusable workflow's path for tag and backfill images and
+# docker-ci.yml's for the main promotion, so the regexp accepts both
 cosign verify "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
   --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/docker-ci\.yml|lgtm-ci/\.github/workflows/reusable-docker\.yml)@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
