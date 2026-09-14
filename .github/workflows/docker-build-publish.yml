@@ -3,12 +3,37 @@
 ---
 name: Build - Docker Image & Registry
 # Builds and publishes Docker images to GHCR via lgtm-ci reusable-docker.
-# Called by publish-pypi-on-tag.yml for release tag pushes.
+# Called by publish-pypi-on-tag.yml for release tag pushes in staging mode:
+# the images are built, scanned, attested and cosign-signed before the pypi
+# gate under run-scoped tags only, and the caller promotes the exported
+# index digests to the version tags after the GitHub release (#2562). The
+# former `release:` trigger is gone with the rebuild-on-tag path: a rebuild
+# on an edited release would move the version tags onto a digest nobody
+# attested before the gate.
 
 'on':
   workflow_call:
-  release:
-    types: [published, edited]
+    inputs:
+      staging:
+        description: >-
+          Build, scan, attest and sign the three images and push them under
+          run-scoped staging tags only (build-<run_id>, build-<run_id>-<slug>
+          and sha-<short>). No version or latest tag is written;
+          publish-pypi-on-tag.yml promotes the exported digests after the
+          release (#2562).
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      base-digest:
+        description: Index digest of ghcr.io/lgtm-hq/py-lintro-base
+        value: ${{ jobs.docker-base.outputs.digest }}
+      full-digest:
+        description: Index digest of ghcr.io/lgtm-hq/py-lintro
+        value: ${{ jobs.docker-full.outputs.digest }}
+      ai-digest:
+        description: Index digest of ghcr.io/lgtm-hq/py-lintro-ai
+        value: ${{ jobs.docker-ai.outputs.digest }}
   workflow_dispatch:
     inputs:
       force_publish:
@@ -107,18 +132,23 @@ jobs:
       file: Dockerfile
       target: base
       image-name: lgtm-hq/py-lintro-base
+      # Staging (#2562): no version, so the reusable emits no version,
+      # major.minor, major or latest tag; the merged index carries only the
+      # run-scoped build-<run_id> tag below plus sha-<short>. The negated
+      # form is deliberate: `inputs.staging && '' || <expr>` would fall
+      # through to <expr> because '' is falsy.
       version: >-
-        ${{ (github.event_name == 'workflow_dispatch'
+        ${{ !inputs.staging && (
+        (github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '')
         && needs.validate-backfill-inputs.outputs.backfill_version
-        || (startsWith(github.ref, 'refs/tags/')
-        && github.ref_name
-        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
+        || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '')
+        ) || '' }}
+      tags: ${{ inputs.staging && format('build-{0}', github.run_id) || '' }}
       push: >-
         ${{ github.event_name != 'pull_request'
         && (github.ref == 'refs/heads/main'
         || startsWith(github.ref, 'refs/tags/')
-        || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
         && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
         || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
@@ -126,7 +156,7 @@ jobs:
         ${{ github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
-        ${{ !(github.event_name == 'workflow_dispatch'
+        ${{ !inputs.staging && !(github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
@@ -181,18 +211,23 @@ jobs:
       file: Dockerfile
       target: full
       image-name: lgtm-hq/py-lintro
+      # Staging (#2562): no version, so the reusable emits no version,
+      # major.minor, major or latest tag; the merged index carries only the
+      # run-scoped build-<run_id> tag below plus sha-<short>. The negated
+      # form is deliberate: `inputs.staging && '' || <expr>` would fall
+      # through to <expr> because '' is falsy.
       version: >-
-        ${{ (github.event_name == 'workflow_dispatch'
+        ${{ !inputs.staging && (
+        (github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '')
         && needs.validate-backfill-inputs.outputs.backfill_version
-        || (startsWith(github.ref, 'refs/tags/')
-        && github.ref_name
-        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
+        || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '')
+        ) || '' }}
+      tags: ${{ inputs.staging && format('build-{0}', github.run_id) || '' }}
       push: >-
         ${{ github.event_name != 'pull_request'
         && (github.ref == 'refs/heads/main'
         || startsWith(github.ref, 'refs/tags/')
-        || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
         && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
         || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
@@ -200,7 +235,7 @@ jobs:
         ${{ github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
-        ${{ !(github.event_name == 'workflow_dispatch'
+        ${{ !inputs.staging && !(github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
@@ -263,18 +298,23 @@ jobs:
       file: Dockerfile
       target: ai
       image-name: lgtm-hq/py-lintro-ai
+      # Staging (#2562): no version, so the reusable emits no version,
+      # major.minor, major or latest tag; the merged index carries only the
+      # run-scoped build-<run_id> tag below plus sha-<short>. The negated
+      # form is deliberate: `inputs.staging && '' || <expr>` would fall
+      # through to <expr> because '' is falsy.
       version: >-
-        ${{ (github.event_name == 'workflow_dispatch'
+        ${{ !inputs.staging && (
+        (github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '')
         && needs.validate-backfill-inputs.outputs.backfill_version
-        || (startsWith(github.ref, 'refs/tags/')
-        && github.ref_name
-        || (github.event_name == 'release' && github.event.release.tag_name || '')) }}
+        || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '')
+        ) || '' }}
+      tags: ${{ inputs.staging && format('build-{0}', github.run_id) || '' }}
       push: >-
         ${{ github.event_name != 'pull_request'
         && (github.ref == 'refs/heads/main'
         || startsWith(github.ref, 'refs/tags/')
-        || github.event_name == 'release'
         || (github.event_name == 'workflow_dispatch'
         && (needs.validate-backfill-inputs.outputs.force_publish == 'true'
         || needs.validate-backfill-inputs.outputs.backfill_version != ''))) }}
@@ -282,7 +322,7 @@ jobs:
         ${{ github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_ref || '' }}
       tag-latest: >-
-        ${{ !(github.event_name == 'workflow_dispatch'
+        ${{ !inputs.staging && !(github.event_name == 'workflow_dispatch'
         && needs.validate-backfill-inputs.outputs.backfill_version != '') }}
       platforms: linux/amd64,linux/arm64
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'

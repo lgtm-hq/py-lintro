@@ -33,6 +33,10 @@ Environment:
   MAIN_SHA       Current main commit, compared against CANDIDATE_SHA by the
                  staleness guard (required when CANDIDATE_SHA is set)
   FORCE_PUBLISH  When "true", the staleness guard is skipped
+  EXPECTED_DIGEST
+                 When set, the digest CI_TAG resolves to must equal it or
+                 nothing is retagged (#2562: the release tags may only land
+                 on the digest the staging build attested)
   GITHUB_OUTPUT  When set, `digest=<sha256:...>` is appended for
                  downstream steps (e.g. cosign signing)
 EOF
@@ -131,6 +135,13 @@ digest="$(retry_registry docker buildx imagetools inspect \
 
 if [[ "$digest" != sha256:* ]]; then
 	echo "Could not resolve digest for ${source_ref} (got: ${digest})" >&2
+	exit 1
+fi
+
+expected_digest="${EXPECTED_DIGEST:-}"
+if [[ -n "$expected_digest" && "$digest" != "$expected_digest" ]]; then
+	echo "Refusing to promote ${source_ref}: resolved ${digest}," \
+		"but the build stage exported ${expected_digest}" >&2
 	exit 1
 fi
 
