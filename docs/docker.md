@@ -130,23 +130,28 @@ DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
   --format '{{ .Manifest.Digest }}')
 
 # GitHub build-provenance attestation. The attestation is stored on this
-# repository, but the signer is the workflow that ran the attest step: a
-# release tag or backfill is attested inside lgtm-ci's reusable-docker.yml,
-# the main promotion in-repo by docker-ci.yml. Pin the exact signer workflow
-# rather than only its repository, so no other workflow in either
-# repository can vouch for the image.
+# repository, but the signer is the workflow that ran the attest step. A
+# release tag or backfill is attested inside lgtm-ci: reusable-docker.yml
+# delegates to reusable-docker-build.yml (single platform) or
+# reusable-docker-multiplatform.yml (multi platform), and Fulcio records that
+# nested workflow, not the entry reusable. The main promotion is attested
+# in-repo by docker-ci.yml. --signer-repo pins the signer to lgtm-ci as a
+# whole; to pin the exact nested workflow, pass --signer-workflow with the
+# reusable-docker-build.yml or reusable-docker-multiplatform.yml path instead.
 gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
-  --repo lgtm-hq/py-lintro \
-  --signer-workflow lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml   # release tags, backfills
+  --repo lgtm-hq/py-lintro --signer-repo lgtm-hq/lgtm-ci                  # release tags, backfills
 gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
   --repo lgtm-hq/py-lintro \
   --signer-workflow lgtm-hq/py-lintro/.github/workflows/docker-ci.yml       # main promotion
 
-# Cosign keyless signature, bound to the same signer identities: Fulcio
-# records the reusable workflow's path for tag and backfill images and
-# docker-ci.yml's for the main promotion, so the regexp accepts both
-cosign verify "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
-  --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/docker-ci\.yml|lgtm-ci/\.github/workflows/reusable-docker\.yml)@' \
+# Cosign keyless signature, bound to the same signer identities: the nested
+# lgtm-ci build workflow for tag and backfill images, docker-ci.yml for the
+# main promotion, so the regexp accepts exactly those. lgtm-ci signs with
+# cosign's new bundle format (an OCI referrer, not a `.sig` tag), so verify
+# with cosign 2.5 or newer and pass --new-bundle-format; older cosign reports
+# "no signatures found".
+cosign verify --new-bundle-format "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/docker-ci\.yml|lgtm-ci/\.github/workflows/reusable-docker-(build|multiplatform)\.yml)@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # BuildKit provenance and SBOM attached to the index (non-empty for each platform)
