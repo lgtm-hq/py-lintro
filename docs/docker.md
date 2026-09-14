@@ -113,6 +113,51 @@ Details:
   Renovate's native Docker digest support manage bumps (this repository does exactly
   that for the root `Dockerfile`).
 
+### Verify an image
+
+Every published image, the release images `py-lintro`, `py-lintro-base` and
+`py-lintro-ai` as well as the tools images, carries three kinds of evidence: a Sigstore
+Cosign keyless signature, BuildKit provenance and SBOM attestations attached to the
+image index, and a GitHub build-provenance attestation. The tag publish and the manual
+backfill produce that set for all three release images; the `main` promotion produces it
+for `py-lintro` and `py-lintro-base`, the two images with a rolling `main` tag
+(`py-lintro-ai` is published from tags only), so a `main` tag verifies the same way as a
+release.
+
+```bash
+# Resolve the digest of the tag you intend to run
+DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
+  --format '{{ .Manifest.Digest }}')
+
+# GitHub build-provenance attestation. The attestation is stored on this
+# repository, but the signer is the workflow that ran the attest step: a
+# release tag or backfill is attested inside lgtm-ci's reusable-docker.yml,
+# the main promotion in-repo by docker-ci.yml. Pin the exact signer workflow
+# rather than only its repository, so no other workflow in either
+# repository can vouch for the image.
+gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml   # release tags, backfills
+gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/py-lintro/.github/workflows/docker-ci.yml       # main promotion
+
+# Cosign keyless signature, bound to the same signer identities: Fulcio
+# records the reusable workflow's path for tag and backfill images and
+# docker-ci.yml's for the main promotion, so the regexp accepts both
+cosign verify "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/docker-ci\.yml|lgtm-ci/\.github/workflows/reusable-docker\.yml)@' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+# BuildKit provenance and SBOM attached to the index (non-empty for each platform)
+docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --format '{{ json .Provenance }}'
+docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
+  --format '{{ json .SBOM }}'
+```
+
+Substitute `py-lintro-base` or `py-lintro-ai` for the other release images.
+
 ### Using the Published Image
 
 ```bash

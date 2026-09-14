@@ -6799,3 +6799,267 @@ def test_number_typed_reusable_inputs_are_never_block_scalars() -> None:
     assert_that(offenders).described_as(
         "number-typed lgtm-ci inputs passed as block scalars",
     ).is_empty()
+
+
+_RELEASE_IMAGE_JOBS = ("docker-base", "docker-full", "docker-ai")
+
+
+def test_every_pushed_reusable_docker_call_carries_provenance_and_sbom(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """Release images carry the same evidence as the tool images (#2630).
+
+    ``reusable-docker.yml`` gates its GitHub attestation on ``provenance``, so
+    an opt-out drops the attestation as well as the BuildKit provenance. Every
+    call that can push must therefore pass both flags; the backfill dispatch
+    shares the release jobs, so it is covered by the same assertion.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    missing: dict[str, dict[str, Any]] = {}
+    for workflow_name, workflow in parsed_workflows.items():
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            uses = str(job.get("uses", ""))
+            if "reusable-docker.yml" not in uses:
+                continue
+            with_block = job.get("with") or {}
+            push = with_block.get("push", "")
+            # YAML ``push: false`` parses to a boolean; only an explicit false
+            # or an absent input marks a validate-only job.
+            if push is False or str(push).strip().lower() in ("", "false"):
+                continue
+            evidence = {
+                key: with_block.get(key)
+                for key in ("provenance", "sbom", "cosign-sign", "scan")
+            }
+            if not all(evidence[key] is True for key in evidence):
+                missing[f"{workflow_name}::{job_id}"] = evidence
+            # Execution bypasses defeat the evidence inputs: a
+            # ``continue-on-error`` job succeeds past an attestation failure,
+            # and a constant-false ``if`` skips production entirely while
+            # every ``with`` assertion above still passes.
+            assert_that(job.get("continue-on-error")).described_as(
+                f"{workflow_name}::{job_id} continue-on-error",
+            ).is_none()
+            condition = str(job.get("if", "")).strip()
+            if condition:
+                assert_that(condition.lower()).described_as(
+                    f"{workflow_name}::{job_id} if",
+                ).is_not_in(("false", "${{ false }}"))
+    assert_that(missing).described_as("pushed image jobs lacking evidence").is_empty()
+
+    publish = parsed_workflows["docker-build-publish.yml"]
+    for job_id in _RELEASE_IMAGE_JOBS:
+        with_block = publish["jobs"][job_id]["with"]
+        assert_that(str(with_block["scan-exit-code"])).described_as(job_id).is_equal_to(
+            "0",
+        )
+
+
+#: The only ``if`` guards a pushed reusable-docker caller may carry, keyed
+#: ``workflow::job`` and compared after GitHub-expression normalization. An
+#: absent guard maps to the empty string; any other condition — in
+#: particular a constant-false one — must land here through review first.
+_EVIDENCE_CALLER_IF_ALLOWLIST: dict[str, str] = {
+    "docker-ai-tools-publish.yml::ai-tools-image": "",
+    "docker-build-publish.yml::docker-base": (
+        "always() && !cancelled() && "
+        "(needs.validate-backfill-inputs.result == 'success' || "
+        "needs.validate-backfill-inputs.result == 'skipped') && "
+        "needs.resolve-endpoints.result == 'success'"
+    ),
+    "docker-build-publish.yml::docker-full": (
+        "always() && !cancelled() && "
+        "(needs.validate-backfill-inputs.result == 'success' || "
+        "needs.validate-backfill-inputs.result == 'skipped') && "
+        "needs.resolve-endpoints.result == 'success' && "
+        "needs.docker-base.result == 'success'"
+    ),
+    "docker-build-publish.yml::docker-ai": (
+        "always() && !cancelled() && "
+        "(needs.validate-backfill-inputs.result == 'success' || "
+        "needs.validate-backfill-inputs.result == 'skipped') && "
+        "needs.resolve-endpoints.result == 'success' && "
+        "needs.docker-full.result == 'success'"
+    ),
+    "docker-tools-candidate.yml::candidate-build": (
+        "github.actor == 'renovate[bot]' && " "needs.resolve-pr.result == 'success'"
+    ),
+    "docker-tools-promote.yml::publish-fallback": (
+        "needs.resolve.outputs.action == 'publish' && "
+        "github.ref == 'refs/heads/main'"
+    ),
+    "docker-tools-publish.yml::tools-image": "",
+}
+
+#: Same contract for the two docker-ci.yml jobs that hold the evidence steps,
+#: keyed by ``workflow::job``. A job-level guard such as ``false && always()``
+#: skips the whole job before any step runs, which the step allowlist below
+#: cannot see (CodeRabbit on #2640), so the job conditions are pinned too.
+_EVIDENCE_JOB_IF_ALLOWLIST: dict[str, str] = {
+    "docker-ci.yml::docker-build": "!cancelled()",
+    "docker-ci.yml::publish": (
+        "github.ref == 'refs/heads/main' && "
+        "github.event_name == 'push' && "
+        "needs.changes.outputs.pipeline != 'false' && "
+        "needs.code-quality-gate.outputs.result == 'success' && "
+        "needs.code-quality-gate.outputs.infra-flake != 'true'"
+    ),
+}
+
+#: Same contract for the evidence steps of docker-ci.yml's own build/publish
+#: path, keyed by step name: the pushed CI-tag builds, the cosign signature
+#: and the two provenance attestations.
+_EVIDENCE_STEP_IF_ALLOWLIST: dict[str, str] = {
+    "Build and push Docker image (GHCR CI tag)": (
+        "needs.changes.outputs.pipeline != 'false' && "
+        "steps.fork-check.outputs.is-fork != 'true'"
+    ),
+    "Build and push Base Docker image (GHCR CI tag)": (
+        "needs.changes.outputs.pipeline != 'false' && "
+        "steps.fork-check.outputs.is-fork != 'true'"
+    ),
+    "Sign promoted digests (keyless)": "",
+    "Attest build provenance (promoted digest)": "",
+    "Attest build provenance (promoted base digest)": "",
+}
+
+
+def test_pushed_docker_callers_run_under_allowlisted_guards(
+    parsed_workflows: dict[str, dict[str, Any]],
+) -> None:
+    """A pushed reusable-docker call runs only under a reviewed guard (#2630).
+
+    The bypass guards in the provenance test reject constant-false ``if``
+    values outright; this pins the full non-constant condition of every
+    pushed caller against an explicit allowlist, so a new guard that skips
+    evidence production cannot slip in unreviewed, and rejects any caller
+    that is missing from the allowlist entirely.
+
+    Args:
+        parsed_workflows: Every workflow in the repository, parsed.
+    """
+    seen: set[str] = set()
+    for workflow_name, workflow in parsed_workflows.items():
+        for job_id, job in (workflow.get("jobs") or {}).items():
+            if not isinstance(job, dict):
+                continue
+            if "reusable-docker.yml" not in str(job.get("uses", "")):
+                continue
+            push = (job.get("with") or {}).get("push", "")
+            if push is False or str(push).strip().lower() in ("", "false"):
+                continue
+            key = f"{workflow_name}::{job_id}"
+            seen.add(key)
+            assert_that(
+                _normalize_github_expr(str(job.get("if", ""))),
+            ).described_as(f"{key} if").is_equal_to(
+                _normalize_github_expr(_EVIDENCE_CALLER_IF_ALLOWLIST.get(key, "")),
+            )
+    assert_that(seen).described_as(
+        "pushed reusable-docker callers vs the guard allowlist",
+    ).is_equal_to(set(_EVIDENCE_CALLER_IF_ALLOWLIST))
+
+
+def test_docker_ci_evidence_steps_cannot_be_execution_bypassed() -> None:
+    """The CI build/publish path cannot skip or swallow its evidence (#2630).
+
+    CodeRabbit on #2640: the attestation assertions inspect ``with`` values
+    and attestation inputs, which pass even when the producing step never
+    ran — a constant-false ``if`` skips it, and ``continue-on-error: true``
+    carries an attestation or signature failure to a green job. The evidence
+    steps (the pushed CI-tag builds, the cosign signature, the two
+    attestations) and their jobs may carry no ``continue-on-error``, and
+    every ``if``, job-level and step-level, must match its allowlist
+    verbatim: a job guard like ``false && always()`` is not constant-false
+    yet still skips every evidence step.
+    """
+    ci = _load_workflow(name="docker-ci.yml")
+    for job_id in ("docker-build", "publish"):
+        job = ci["jobs"][job_id]
+        assert_that(job.get("continue-on-error")).described_as(
+            f"docker-ci.yml::{job_id} continue-on-error",
+        ).is_none()
+        key = f"docker-ci.yml::{job_id}"
+        assert_that(key).described_as("evidence job allowlist").is_in(
+            *_EVIDENCE_JOB_IF_ALLOWLIST,
+        )
+        assert_that(
+            _normalize_github_expr(str(job.get("if", ""))),
+        ).described_as(f"{key} if").is_equal_to(
+            _normalize_github_expr(_EVIDENCE_JOB_IF_ALLOWLIST[key]),
+        )
+    evidence_steps = [
+        step
+        for job_id in ("docker-build", "publish")
+        for step in ci["jobs"][job_id]["steps"]
+        if (
+            "build-push-action" in str(step.get("uses", ""))
+            and (step.get("with") or {}).get("push") is True
+        )
+        or "cosign" in str(step.get("run", ""))
+        or "attest-build-provenance" in str(step.get("uses", ""))
+    ]
+    assert_that(evidence_steps).described_as("evidence steps found").is_length(5)
+    for step in evidence_steps:
+        name = str(step.get("name", ""))
+        assert_that(step.get("continue-on-error")).described_as(
+            f"{name} continue-on-error",
+        ).is_none()
+        assert_that(
+            _normalize_github_expr(str(step.get("if", ""))),
+        ).described_as(f"{name} if").is_equal_to(
+            _normalize_github_expr(_EVIDENCE_STEP_IF_ALLOWLIST.get(name, "")),
+        )
+
+
+def test_main_promotion_attests_the_promoted_digests() -> None:
+    """``ghcr.io/lgtm-hq/py-lintro:main`` carries a GitHub attestation (#2630).
+
+    The ``publish`` job promotes ``ci-<run_id>`` digests to ``main``/``sha-*``
+    and cosign-signs them; without an attestation step the rolling tags had a
+    signature and nothing else. The pushed ``ci-*`` builds must also attach
+    BuildKit provenance and an SBOM, because promotion by digest keeps
+    exactly what the build attached.
+    """
+    ci = _load_workflow(name="docker-ci.yml")
+
+    build_steps = ci["jobs"]["docker-build"]["steps"]
+    pushed = [
+        step
+        for step in build_steps
+        if "build-push-action" in str(step.get("uses", ""))
+        and (step.get("with") or {}).get("push") is True
+    ]
+    assert_that(pushed).is_length(2)
+    for step in pushed:
+        with_block = step["with"]
+        assert_that(str(with_block.get("provenance"))).described_as(
+            step["name"],
+        ).is_equal_to("mode=max")
+        assert_that(with_block.get("sbom")).described_as(step["name"]).is_true()
+
+    publish = ci["jobs"]["publish"]
+    assert_that(publish["permissions"]["attestations"]).is_equal_to("write")
+    assert_that(publish["permissions"]["id-token"]).is_equal_to("write")
+    attest_steps = [
+        step
+        for step in publish["steps"]
+        if "actions/attest-build-provenance@" in str(step.get("uses", ""))
+    ]
+    subjects = {
+        (step["with"]["subject-name"], str(step["with"]["subject-digest"]))
+        for step in attest_steps
+    }
+    assert_that(subjects).is_equal_to(
+        {
+            ("ghcr.io/lgtm-hq/py-lintro", "${{ steps.promote.outputs.digest }}"),
+            (
+                "ghcr.io/lgtm-hq/py-lintro-base",
+                "${{ steps.promote-base.outputs.digest }}",
+            ),
+        },
+    )
+    for step in attest_steps:
+        assert_that(step["with"].get("push-to-registry")).is_true()
