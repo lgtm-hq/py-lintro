@@ -48,6 +48,10 @@ mis = "mis"
 ands = "ands"
 # "edn" is the Clojure EDN file extension, listed in the review corpus schema.
 edn = "edn"
+# "intoto" is the in-toto attestation framework; `<asset>.intoto.jsonl` is the
+# Sigstore bundle name the release gate attaches next to every release asset
+# (#2562), which Scorecard's Signed-Releases check recognises.
+intoto = "intoto"
 
 [files]
 extend-exclude = [

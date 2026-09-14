@@ -124,7 +124,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `github_api.py`                                | Shared JSON helper for authenticated GitHub API calls                                                                            | Imported by scripts under `scripts/ci/`                                                                                    |
 | `smoke-test-ai-tools.sh`                       | Run every baked agent CLI in the ai-tools staging image                                                                          | `IMAGE=<ref> PLATFORM=linux/arm64 ./scripts/ci/smoke-test-ai-tools.sh`                                                     |
 | `cosign-sign-images.sh`                        | Sign promoted image digests with Cosign keyless OIDC                                                                             | `./scripts/ci/cosign-sign-images.sh --help`                                                                                |
-| `verify-image-attestations.sh`                 | Verify the GitHub build-provenance attestation of each staged image digest before promotion (#2562)                              | `IMAGES=<image@digest,...> ./scripts/ci/verify-image-attestations.sh`                                                      |
+| `verify-image-attestations.sh`                 | Verify the GitHub build-provenance attestation of each staged image digest before promotion (#2562)                              | `IMAGES='<image@digest> <image@digest>' ./scripts/ci/verify-image-attestations.sh` (whitespace/newline separated)          |
 | `write-release-manifest.py`                    | Write the release-manifest artifact (image digests per release image) for the tag pipeline (#2562)                               | `OUTPUT=<path> RUN_ID=<id> BASE_DIGEST=… FULL_DIGEST=… AI_DIGEST=… uv run python scripts/ci/write-release-manifest.py`     |
 | `coverage-badge-update.sh`                     | Generate and update coverage badge                                                                                               | `./scripts/ci/coverage-badge-update.sh --help`                                                                             |
 | `egress-audit-lite.sh`                         | Audit reachability of allowed endpoints                                                                                          | `./scripts/ci/egress-audit-lite.sh --help`                                                                                 |
@@ -231,6 +231,17 @@ in `lgtm-hq/homebrew-tap`.
 | --------------------- | -------------------------------------------- | ------------------------------------------------------------------------------- |
 | `wait-for-pypi.sh`    | Poll PyPI until package version is available | `./scripts/ci/homebrew/wait-for-pypi.sh lintro 1.0.0`                           |
 | `get-release-info.sh` | Resolve release tag and prerelease metadata  | `GITHUB_EVENT_NAME=workflow_dispatch ./scripts/ci/homebrew/get-release-info.sh` |
+
+### 🚦 Release Gate Scripts (`ci/release-gate/`)
+
+The last job before any irreversible write in `publish-pypi-on-tag.yml` (#2562): every
+build artifact is verified and the exact release bytes are assembled here.
+
+| Script                 | Purpose                                                                                                                                                                                        | Usage                                                                                                                                                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `verify_artifacts.sh`  | Verify `gh attestation` for every dist file and binary (per-kind signer workflow), check dist `SHA256SUMS`, download the Sigstore bundles, assemble `release-assets/` with a full `SHA256SUMS` | `GATE_DIR=gate OUT_DIR=release-assets ATTESTATION_REPO=lgtm-hq/py-lintro DIST_SIGNER_WORKFLOW=… BINARY_SIGNER_WORKFLOW=… ./scripts/ci/release-gate/verify_artifacts.sh`   |
+| `write_manifest.py`    | Write `release-manifest.json`: the image digests (via `write-release-manifest.py`) plus `files` (sha256, size, bundle) cross-checked against `SHA256SUMS`                                      | `ASSETS_DIR=release-assets OUTPUT=release-manifest.json RELEASE_TAG=… RUN_ID=… BASE_DIGEST=… FULL_DIGEST=… AI_DIGEST=… python3 scripts/ci/release-gate/write_manifest.py` |
+| `read_manifest_sha.sh` | Read one asset's sha256 from the manifest and export `arm64_sha256` for the Homebrew dispatch                                                                                                  | `./scripts/ci/release-gate/read_manifest_sha.sh release-manifest.json lintro-macos-arm64`                                                                                 |
 
 ### 🐳 Docker Scripts (`docker/`)
 

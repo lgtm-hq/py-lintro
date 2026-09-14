@@ -2879,15 +2879,14 @@ def test_publish_pypi_top_level_permissions_are_empty() -> None:
 
     Every job in ``publish-pypi-on-tag.yml`` declares its own ``permissions``
     block, so a top-level grant is dead configuration that only widens the
-    default token. The ``actions: read`` that the reusable binary stages need
-    belongs on the ``build-binaries`` and ``homebrew-tap`` caller jobs (#2440,
-    #2562).
+    default token. The ``actions: read`` the binary build stage needs belongs
+    on the ``build-binaries`` caller job (#2440, #2562); the tap dispatch is
+    read-only since the release reusable attaches the assets.
     """
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     assert_that(publish["permissions"]).is_equal_to({})
     homebrew = publish["jobs"]["homebrew-tap"]["permissions"]
-    assert_that(homebrew).contains_entry({"actions": "read"})
-    assert_that(homebrew).contains_entry({"contents": "write"})
+    assert_that(homebrew).is_equal_to({"contents": "read"})
     build = publish["jobs"]["build-binaries"]["permissions"]
     assert_that(build).contains_entry({"actions": "read"})
     assert_that(build).contains_entry({"contents": "read"})
@@ -3312,19 +3311,11 @@ def test_build_binary_ships_exactly_three_platform_binaries() -> None:
         {"generate-man-page", "build-macos", "build-linux"},
     )
     publish = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    # PR (c) of #2562: the release reusable attaches the binaries from the
+    # gate's artifact, so the publish stage is the tap dispatch alone.
     assert_that(set(publish["jobs"])).is_equal_to(
-        {
-            "get-release-info",
-            "upload-binaries",
-            "upload-man-page",
-            "homebrew-dispatch",
-        },
+        {"get-release-info", "homebrew-dispatch"},
     )
-    published_assets = sorted(
-        entry["asset"]
-        for entry in publish["jobs"]["upload-binaries"]["strategy"]["matrix"]["include"]
-    )
-    assert_that(published_assets).is_equal_to(sorted(_RELEASE_BINARY_ARTIFACTS))
 
     macos = workflow["jobs"]["build-macos"]
     assert_that(macos["strategy"]["matrix"]).is_equal_to({"arch": ["arm64"]})
@@ -3381,21 +3372,23 @@ def test_homebrew_dispatch_carries_one_macos_checksum() -> None:
     """
     workflow = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
     job = workflow["jobs"]["homebrew-dispatch"]
-    # Every binary and the man page must be on the release before the tap is
-    # told about the version (#2562: the uploads moved to the publish stage).
-    assert_that(job["needs"]).contains("upload-binaries", "upload-man-page")
+    # The binaries are on the release before this workflow is even called
+    # (github-release is upstream of the caller job); the checksum comes from
+    # the manifest the release gate wrote after verifying the asset (#2562).
+    assert_that(job["needs"]).is_equal_to(["get-release-info"])
     by_name = {step.get("name"): step for step in job["steps"]}
 
-    download = by_name["Download SHA256 artifact"]
+    download = by_name["Download release manifest"]
     assert_that(download["uses"]).contains("actions/download-artifact@")
     assert_that(download["with"]).is_equal_to(
-        {"name": "sha256-arm64", "path": "checksums/"},
+        {"name": "release-manifest", "path": "manifest/"},
     )
 
-    read = by_name["Read checksum"]
+    read = by_name["Read checksum from the release manifest"]
     assert_that(read["id"]).is_equal_to("checksums")
-    assert_that(read["run"]).contains("checksums/sha256-arm64.txt")
-    assert_that(read["run"]).contains("arm64_sha256=")
+    assert_that(read["run"]).contains("scripts/ci/release-gate/read_manifest_sha.sh")
+    assert_that(read["run"]).contains("lintro-macos-arm64")
+    assert_that(read["env"]["MANIFEST"]).is_equal_to("manifest/release-manifest.json")
     assert_that(read["run"]).does_not_contain("x86_64")
 
     dispatch = by_name["Dispatch formula update"]
@@ -3669,116 +3662,6 @@ def test_build_binary_save_sha256_falls_back_to_the_reused_checksum() -> None:
         )
 
 
-def test_publish_binaries_reuse_the_same_run_checksums() -> None:
-    """The publish stage keeps the ``steps.reuse`` semantics (#2435, #2562).
-
-    Each upload leg downloads the artifact the build stage produced, then runs
-    the same reuse check the build jobs run: when the release already carries
-    the asset with the SHA256 this run's own ``sha256-*`` artifact recorded,
-    the upload is skipped. The matrix must pair every published asset with the
-    checksum artifact the build stage writes for it, so the check can never
-    consult a checksum from another platform.
-    """
-    build = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
-    checksum_artifacts = {
-        str(step["with"]["name"]).replace("${{ matrix.arch }}", arch)
-        for job_id in ("build-macos", "build-linux")
-        for step in build["jobs"][job_id]["steps"]
-        if step.get("name") == "Upload SHA256 file"
-        for arch in ("arm64", "x64")
-    }
-
-    publish = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
-    job = publish["jobs"]["upload-binaries"]
-    assert_that(job["strategy"]["fail-fast"]).is_false()
-    matrix = job["strategy"]["matrix"]["include"]
-    assert_that(matrix).is_equal_to(
-        [
-            {"asset": "lintro-macos-arm64", "checksum": "sha256-arm64"},
-            {"asset": "lintro-linux-x64", "checksum": "sha256-linux-x64"},
-            {"asset": "lintro-linux-arm64", "checksum": "sha256-linux-arm64"},
-        ],
-    )
-    for entry in matrix:
-        assert_that(checksum_artifacts).described_as(entry["asset"]).contains(
-            entry["checksum"],
-        )
-
-    names = [step.get("name") for step in job["steps"]]
-    by_name = {step.get("name"): step for step in job["steps"]}
-    download = by_name["Download binary artifact"]
-    assert_that(download["uses"]).contains("actions/download-artifact@")
-    assert_that(download["with"]).is_equal_to(
-        {"name": "${{ matrix.asset }}", "path": "dist/nuitka/"},
-    )
-
-    check = by_name["Check for reusable release asset"]
-    assert_that(check["id"]).is_equal_to("reuse")
-    assert_that(check["run"]).contains("scripts/build/reuse_release_asset.sh")
-    assert_that(check["env"]).contains_key(
-        "GH_TOKEN",
-        "RELEASE_TAG",
-        "ASSET_NAME",
-        "CHECKSUM_ARTIFACT",
-    )
-    assert_that(check["env"]["CHECKSUM_ARTIFACT"]).is_equal_to("${{ matrix.checksum }}")
-    # The reused copy must not clobber the downloaded artifact.
-    assert_that(check["run"]).contains('"reused/$ASSET_NAME"')
-    assert_that(names.index("Download binary artifact")).is_less_than(
-        names.index("Check for reusable release asset"),
-    )
-    assert_that(names.index("Check for reusable release asset")).is_less_than(
-        names.index("Upload to release"),
-    )
-
-
-def test_build_binary_release_upload_swaps_instead_of_overwriting() -> None:
-    """The release upload never deletes the live asset before the new one lands.
-
-    ``softprops/action-gh-release`` (and ``gh release upload --clobber``)
-    delete first, which loses the binary when the runner dies mid-upload.
-    Since #2562 the only binary upload lives in the publish stage.
-    """
-    workflow = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
-    job = workflow["jobs"]["upload-binaries"]
-    steps = job["steps"]
-    by_name = {step.get("name"): step for step in steps}
-    upload = by_name["Upload to release"]
-
-    assert_that(upload.get("uses")).is_none()
-    assert_that(upload["run"]).contains("scripts/build/upload_release_asset.sh")
-    assert_that(upload["run"]).contains('"dist/nuitka/$ASSET_NAME"')
-    assert_that(upload["env"]).contains_key("GH_TOKEN")
-
-    guard = _normalize_github_expr(upload["if"])
-    assert_that(guard).contains("needs.get-release-info.outputs.release_tag != ''")
-    assert_that(guard).contains(_REUSE_GUARD)
-
-    # No step in this job may reintroduce a delete-then-upload overwrite.
-    for step in steps:
-        assert_that(step.get("with", {}) or {}).described_as(
-            str(step.get("name")),
-        ).does_not_contain_key("overwrite_files")
-        assert_that(step.get("run", "")).described_as(
-            str(step.get("name")),
-        ).does_not_contain("--clobber")
-
-    # And the build stage has no release upload at all.
-    build = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
-    for job_id, build_job in build["jobs"].items():
-        for step in build_job.get("steps") or []:
-            label = f"{job_id}:{step.get('name')}"
-            assert_that(str(step.get("name", ""))).described_as(label).does_not_contain(
-                "Upload to release",
-            )
-            assert_that(str(step.get("run", ""))).described_as(label).does_not_contain(
-                "upload_release_asset.sh",
-            )
-            assert_that(str(step.get("uses", ""))).described_as(label).does_not_contain(
-                "action-gh-release",
-            )
-
-
 def test_build_binary_jobs_may_read_their_own_run_artifacts() -> None:
     """The reuse check needs the release (contents) and the run's artifacts.
 
@@ -3799,16 +3682,17 @@ def test_build_binary_jobs_may_read_their_own_run_artifacts() -> None:
         )
 
     publish = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
-    permissions = publish["jobs"]["upload-binaries"]["permissions"]
-    assert_that(permissions).is_equal_to({"contents": "write", "actions": "read"})
+    permissions = publish["jobs"]["homebrew-dispatch"]["permissions"]
+    assert_that(permissions).is_equal_to({"contents": "read"})
 
 
 def test_build_stage_never_holds_contents_write() -> None:
     """No job in the build stage can write to the repository or a release.
 
     The point of the split (#2562) is that a binary is built, verified and
-    attested by jobs that cannot publish it; ``contents: write`` belongs to
-    the publish stage alone, and only its two upload jobs hold it.
+    attested by jobs that cannot publish it. Since PR (c) the only
+    ``contents: write`` in the tag pipeline is the github-release call; no
+    job of either binary workflow holds it.
     """
     build = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     assert_that(build["permissions"]).is_equal_to({})
@@ -3826,7 +3710,7 @@ def test_build_stage_never_holds_contents_write() -> None:
         if _granted_level(_effective_grant(job=job, workflow=publish), scope="contents")
         >= _PERMISSION_LEVELS["write"]
     }
-    assert_that(writers).is_equal_to({"upload-binaries", "upload-man-page"})
+    assert_that(writers).is_empty()
 
 
 def test_build_binaries_attest_the_finalized_binary() -> None:
@@ -4001,36 +3885,27 @@ def _job_ancestors(workflow: dict[str, Any], *, job_id: str) -> set[str]:
     return ancestors
 
 
-def test_build_binaries_have_no_path_to_pypi_upload() -> None:
-    """No binary build job is upstream of the PyPI upload (#2562).
+def test_build_stage_reaches_pypi_upload_only_through_the_gate() -> None:
+    """Build jobs feed the PyPI upload only via release-gate, never wait on it.
 
-    The build stage must be able to move ahead of the ``pypi`` approval gate
-    without ever becoming something the upload waits on in reverse: the
-    upload's transitive ``needs`` closure excludes the build call, while the
-    publish call depends on it, so a binary is on the release only after it
-    was built and attested in this run.
+    PR (a)/(b) asserted no build job was upstream of ``pypi-upload`` while
+    the builds still ran after the gate. PR (c) puts them ahead of it by
+    design, so the invariant becomes: the upload's only direct dependency is
+    the gate, every build job is upstream of the gate, and no build job has
+    the upload (or anything published) among its own ancestors.
     """
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
-    upstream_of_upload = _job_ancestors(publish, job_id="pypi-upload")
-    assert_that(upstream_of_upload).does_not_contain("build-binaries")
-    assert_that(upstream_of_upload).does_not_contain("homebrew-tap")
-    # PR (b): the Docker staging build and its digest manifest are build
-    # stage too, and the promote is a publish job.
-    assert_that(upstream_of_upload).does_not_contain(
-        "docker-build",
-        "docker-manifest",
-        "docker-promote",
-    )
-
-    assert_that(_job_ancestors(publish, job_id="homebrew-tap")).contains(
-        "build-binaries",
-    )
-    assert_that(_job_ancestors(publish, job_id="npm-publish")).contains(
-        "homebrew-tap",
-        "build-binaries",
-    )
-    # The build call runs for prereleases too (artifacts only); the publish
-    # call stays stable-only.
+    assert_that(publish["jobs"]["pypi-upload"]["needs"]).is_equal_to(["release-gate"])
+    gate_upstream = _job_ancestors(publish, job_id="release-gate")
+    assert_that(gate_upstream).contains(*_BUILD_STAGE_JOBS)
+    for job_id in (*_BUILD_STAGE_JOBS, "classify-tag"):
+        ancestors = _job_ancestors(publish, job_id=job_id)
+        assert_that(ancestors).described_as(job_id).does_not_contain(
+            "release-gate",
+            *_PUBLISH_JOBS,
+        )
+    # The build calls run for prereleases too (artifacts only); the publish
+    # calls stay stable-only.
     build_if = _normalize_github_expr(str(publish["jobs"]["build-binaries"]["if"]))
     assert_that(build_if).does_not_contain("is_prerelease")
     publish_if = _normalize_github_expr(str(publish["jobs"]["homebrew-tap"]["if"]))
@@ -6226,7 +6101,7 @@ def test_reusable_workflow_permission_check_covers_the_release_pipeline(
         _PUBLISH_BINARIES_WORKFLOW,
         "docker-build-publish.yml",
     )
-    for caller_job_id in ("build-binaries", "homebrew-tap"):
+    for caller_job_id in ("build-binaries",):
         caller_job = next(job for job_id, job, _ in calls if job_id == caller_job_id)
         grant = _effective_grant(
             job=caller_job,
@@ -6313,16 +6188,17 @@ def test_reusable_workflow_walk_fails_on_the_pre_2518_publish_workflow(
 
     #2440 gave build-binary.yml's compile jobs ``actions: read`` while the
     ``homebrew-tap`` caller still granted only ``contents: write``; #2518 added
-    the grant. Since #2562 that caller runs publish-binaries.yml, whose upload
-    legs carry the same ``actions: read`` for the reuse check. Replaying the
-    withheld grant against the real callee proves the walk catches it rather
-    than passing because nothing on disk is broken today.
+    the grant. Since #2562 the compile jobs live in build-binaries.yml behind
+    the ``build-binaries`` caller, which carries that ``actions: read`` for
+    the reuse check. Replaying the withheld grant against the real callee
+    proves the walk catches it rather than passing because nothing on disk is
+    broken today.
 
     Args:
         parsed_workflows: Every workflow in the repository, parsed.
     """
     publish = deepcopy(parsed_workflows["publish-pypi-on-tag.yml"])
-    caller_job = publish["jobs"]["homebrew-tap"]
+    caller_job = publish["jobs"]["build-binaries"]
     pre_2518_grant = {
         scope: value
         for scope, value in caller_job["permissions"].items()
@@ -6334,7 +6210,7 @@ def test_reusable_workflow_walk_fails_on_the_pre_2518_publish_workflow(
     caller_job["permissions"] = pre_2518_grant
 
     shortfalls = _permission_shortfalls(
-        caller_label="publish-pypi-on-tag.yml::homebrew-tap",
+        caller_label="publish-pypi-on-tag.yml::build-binaries",
         caller_grant=_effective_grant(job=caller_job, workflow=publish),
         callee_name=str(caller_job["uses"]).removeprefix(
             _LOCAL_WORKFLOW_CALL_PREFIX,
@@ -6345,7 +6221,7 @@ def test_reusable_workflow_walk_fails_on_the_pre_2518_publish_workflow(
     for message in shortfalls:
         assert_that(message).contains("requests actions=read")
     assert_that(" ".join(shortfalls)).contains(
-        f"{_PUBLISH_BINARIES_WORKFLOW}::upload-binaries",
+        f"{_BUILD_BINARY_WORKFLOW}::build-macos",
     )
 
 
@@ -7206,7 +7082,26 @@ def test_main_promotion_attests_the_promoted_digests() -> None:
         assert_that(step["with"].get("push-to-registry")).is_true()
 
 
-# --- #2562 PR (b): Docker staging before the gate, promote after -------------
+# --- #2562 PR (b)/(c): build stage, release gate, publish stage --------------
+
+#: Jobs that only build, verify or attest; none may wait on a publish job.
+_BUILD_STAGE_JOBS = ("sbom", "pypi-build", "build-binaries", "docker-build")
+
+#: Jobs that write to a channel; every one must be downstream of release-gate.
+_PUBLISH_JOBS = (
+    "pypi-upload",
+    "github-release",
+    "docker-promote",
+    "homebrew-tap",
+    "npm-publish",
+    "mirror-token",
+    "mirror-release",
+)
+
+_DIST_SIGNER_WORKFLOW = (
+    "lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml"
+)
+_BINARY_SIGNER_WORKFLOW = "lgtm-hq/py-lintro/.github/workflows/build-binaries.yml"
 
 _RELEASE_IMAGE_DIGEST_OUTPUTS = {
     "base-digest": "${{ jobs.docker-base.outputs.digest }}",
@@ -7253,9 +7148,11 @@ def test_docker_promote_depends_on_the_github_release() -> None:
     assert_that(promote["needs"]).contains(
         "classify-tag",
         "docker-build",
+        "release-gate",
         "github-release",
     )
     assert_that(_job_ancestors(publish, job_id="docker-promote")).contains(
+        "release-gate",
         "pypi-upload",
         "github-release",
         "docker-build",
@@ -7289,12 +7186,16 @@ def test_docker_promote_verifies_then_retags_then_signs_the_exported_digests() -
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     steps = _job_steps(publish, job="docker-promote")
     index_by_run = {str(step.get("run", "")): i for i, step in enumerate(steps)}
+    index_by_id = {str(step["id"]): i for i, step in enumerate(steps) if "id" in step}
     promotes = [
         step
         for step in steps
         if step.get("run") == "scripts/ci/promote-ci-docker-images.sh"
     ]
     assert_that(promotes).is_length(3)
+    assert_that({step["id"] for step in promotes}).is_equal_to(
+        {"promote-base", "promote-full", "promote-ai"},
+    )
     for step in promotes:
         env = step["env"]
         assert_that(env["CI_TAG"]).is_equal_to("build-${{ github.run_id }}")
@@ -7306,10 +7207,11 @@ def test_docker_promote_verifies_then_retags_then_signs_the_exported_digests() -
     )
     sign = index_by_run["scripts/ci/cosign-sign-images.sh"]
     verify = index_by_run["scripts/ci/verify-image-attestations.sh"]
-    first_promote = min(index_by_run[step["run"]] for step in promotes)
-    last_promote = max(index_by_run[step["run"]] for step in promotes)
-    assert_that(verify).is_less_than(first_promote)
-    assert_that(last_promote).is_less_than(sign)
+    # Indexed by step id: the three promote steps share one ``run`` string,
+    # so a run-keyed index collapses them onto the last one (Codex on #2658).
+    promote_indexes = [index_by_id[step["id"]] for step in promotes]
+    assert_that(verify).is_less_than(min(promote_indexes))
+    assert_that(max(promote_indexes)).is_less_than(sign)
     verify_step = steps[verify]
     assert_that(verify_step["env"]["ATTESTATION_REPO"]).is_equal_to("lgtm-hq/py-lintro")
     assert_that(verify_step["env"]["SIGNER_REPO"]).is_equal_to("lgtm-hq/lgtm-ci")
@@ -7378,23 +7280,30 @@ def test_docker_staging_build_passes_no_version_or_latest_tag() -> None:
 
 
 def test_release_manifest_is_retained_for_the_recovery_window() -> None:
-    """The three digests land in a 90-day ``release-manifest`` artifact."""
+    """The gate's manifest and assets are 90-day artifacts (#2562 PR (c))."""
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
-    manifest = publish["jobs"]["docker-manifest"]
-    assert_that(manifest["needs"]).is_equal_to(["docker-build"])
-    assert_that(manifest["permissions"]).is_equal_to({"contents": "read"})
-    steps = manifest["steps"]
-    uploads = [s for s in steps if "actions/upload-artifact@" in str(s.get("uses", ""))]
-    assert_that(uploads).is_length(1)
-    assert_that(uploads[0]["with"]["name"]).is_equal_to("release-manifest")
-    assert_that(uploads[0]["with"]["retention-days"]).is_equal_to(90)
-    assert_that(uploads[0]["with"]["if-no-files-found"]).is_equal_to("error")
+    gate = publish["jobs"]["release-gate"]
+    steps = gate["steps"]
+    uploads = {
+        str(s["with"]["name"]): s["with"]
+        for s in steps
+        if "actions/upload-artifact@" in str(s.get("uses", ""))
+    }
+    assert_that(set(uploads)).is_equal_to({"release-assets", "release-manifest"})
+    for name, with_block in uploads.items():
+        assert_that(with_block["retention-days"]).described_as(name).is_equal_to(90)
+        assert_that(with_block["if-no-files-found"]).described_as(name).is_equal_to(
+            "error",
+        )
     write = next(
         s
         for s in steps
-        if s.get("run") == "python3 scripts/ci/write-release-manifest.py"
+        if s.get("run") == "python3 scripts/ci/release-gate/write_manifest.py"
     )
-    assert_that(write["env"]["OUTPUT"]).is_equal_to(uploads[0]["with"]["path"])
+    assert_that(write["env"]["OUTPUT"]).is_equal_to(uploads["release-manifest"]["path"])
+    assert_that(write["env"]["ASSETS_DIR"] + "/").is_equal_to(
+        uploads["release-assets"]["path"],
+    )
     for var, output in (
         ("BASE_DIGEST", "base-digest"),
         ("FULL_DIGEST", "full-digest"),
@@ -7403,6 +7312,197 @@ def test_release_manifest_is_retained_for_the_recovery_window() -> None:
         assert_that(write["env"][var]).is_equal_to(
             f"${{{{ needs.docker-build.outputs.{output} }}}}",
         )
+    for script in (
+        "scripts/ci/write-release-manifest.py",
+        "scripts/ci/release-gate/write_manifest.py",
+        "scripts/ci/release-gate/verify_artifacts.sh",
+        "scripts/ci/release-gate/read_manifest_sha.sh",
+    ):
+        assert_that(os.access(_REPO_ROOT / script, os.X_OK)).described_as(
+            script,
+        ).is_true()
+
+
+# --- #2562 PR (c): the gate and the reorder ----------------------------------
+
+
+def test_release_gate_needs_every_build_job_and_verifies_per_signer() -> None:
+    """release-gate is fed by every build job and fails closed on each check.
+
+    dist/* was attested inside lgtm-ci's build reusable and the binaries
+    inside build-binaries.yml; a reusable signs as the called file, so the
+    gate passes per-kind signer workflows and never the entry workflow.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    gate = publish["jobs"]["release-gate"]
+    assert_that(set(gate["needs"])).is_equal_to({"classify-tag", *_BUILD_STAGE_JOBS})
+    assert_that(gate["permissions"]).is_equal_to(
+        {"contents": "read", "attestations": "read"},
+    )
+    assert_that(_normalize_github_expr(str(gate["if"]))).contains(
+        "github.ref_type == 'tag'",
+    )
+    steps = gate["steps"]
+    verify = next(
+        s
+        for s in steps
+        if s.get("run") == "scripts/ci/release-gate/verify_artifacts.sh"
+    )
+    env = verify["env"]
+    assert_that(env["ATTESTATION_REPO"]).is_equal_to("lgtm-hq/py-lintro")
+    assert_that(env["DIST_SIGNER_WORKFLOW"]).is_equal_to(_DIST_SIGNER_WORKFLOW)
+    assert_that(env["BINARY_SIGNER_WORKFLOW"]).is_equal_to(_BINARY_SIGNER_WORKFLOW)
+    assert_that(env).contains_key("GH_TOKEN")
+    downloaded = {
+        str((s.get("with") or {}).get("name") or (s.get("with") or {}).get("pattern"))
+        for s in steps
+        if "actions/download-artifact@" in str(s.get("uses", ""))
+    }
+    assert_that(downloaded).is_equal_to(
+        {"python-dist", "lintro-macos-*", "lintro-linux-*", "lintro-man-page"},
+    )
+    for step in steps:
+        if step.get("run") or "upload-artifact" in str(step.get("uses", "")):
+            assert_that(step.get("continue-on-error")).described_as(
+                str(step.get("name")),
+            ).is_none()
+            assert_that(step.get("if")).described_as(str(step.get("name"))).is_none()
+
+
+def test_every_publish_job_is_downstream_of_the_release_gate() -> None:
+    """Nothing writes to a channel unless release-gate passed (#2562)."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    for job_id in _PUBLISH_JOBS:
+        assert_that(_job_ancestors(publish, job_id=job_id)).described_as(
+            job_id,
+        ).contains("release-gate")
+
+
+def test_no_job_has_a_step_after_its_irreversible_step() -> None:
+    """The PyPI upload is the last step of its job, after attestation checks.
+
+    Once ``pypa/gh-action-pypi-publish`` succeeds no rerun can reach a later
+    step (#2618), so nothing may follow it; the attestation check precedes
+    it via ``prepare-pypi-upload`` with ``require-attestation``.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    irreversible = ("pypa/gh-action-pypi-publish@",)
+    for job_id, job in publish["jobs"].items():
+        steps = job.get("steps") or []
+        for index, step in enumerate(steps):
+            if any(marker in str(step.get("uses", "")) for marker in irreversible):
+                assert_that(index).described_as(job_id).is_equal_to(len(steps) - 1)
+    upload = publish["jobs"]["pypi-upload"]
+    assert_that(upload["needs"]).is_equal_to(["release-gate"])
+    assert_that(upload["environment"]).is_equal_to("pypi")
+    assert_that(upload["permissions"]).is_equal_to(
+        {"contents": "read", "attestations": "read", "id-token": "write"},
+    )
+    names = [str(step.get("uses", "")) for step in upload["steps"]]
+    assert_that(names[-1]).starts_with("pypa/gh-action-pypi-publish@")
+    assert_that(names[-2]).contains("actions/prepare-pypi-upload@")
+    prepare = upload["steps"][-2]["with"]
+    assert_that(str(prepare["require-attestation"])).is_equal_to("true")
+    assert_that(prepare["signer-workflow"]).is_equal_to(_DIST_SIGNER_WORKFLOW)
+    assert_that(" ".join(names)).does_not_contain("attest-build-provenance")
+
+
+def test_github_release_attaches_the_gated_assets_immutably() -> None:
+    """The release carries exactly what the gate assembled, never overwritten."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    release = publish["jobs"]["github-release"]
+    assert_that(release["needs"]).is_equal_to(["pypi-upload"])
+    with_block = release["with"]
+    assert_that(with_block["artifact-name"]).is_equal_to("release-assets")
+    assert_that(with_block["artifact-path"]).is_equal_to("release")
+    assert_that(with_block["checksums"]).is_true()
+    assert_that(with_block["immutable-assets"]).is_true()
+    assert_that(with_block).does_not_contain_key("files")
+    assert_that(release["permissions"]).is_equal_to({"contents": "write"})
+
+
+def test_build_binaries_and_dist_build_ahead_of_the_gate() -> None:
+    """The binary build hangs off classify-tag and the dist keeps 90 days."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    assert_that(publish["jobs"]["build-binaries"]["needs"]).is_equal_to(
+        ["classify-tag"],
+    )
     assert_that(
-        os.access(_REPO_ROOT / "scripts/ci/write-release-manifest.py", os.X_OK),
-    ).is_true()
+        publish["jobs"]["pypi-build"]["with"]["artifact-retention-days"],
+    ).is_equal_to(90)
+
+
+def test_prerelease_tags_run_the_gate_and_skip_every_channel_publish() -> None:
+    """A prerelease proves the build stage and the gate, publishing nothing new."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    stable_only = ("docker-promote", "homebrew-tap", "npm-publish")
+    for job_id in stable_only:
+        condition = _normalize_github_expr(str(publish["jobs"][job_id]["if"]))
+        assert_that(condition).described_as(job_id).contains(
+            "needs.classify-tag.outputs.is_prerelease == 'false'",
+        )
+    for job_id in (*_BUILD_STAGE_JOBS, "release-gate", "pypi-upload", "github-release"):
+        condition = _normalize_github_expr(str(publish["jobs"][job_id].get("if", "")))
+        assert_that(condition).described_as(job_id).does_not_contain("is_prerelease")
+
+
+def test_homebrew_dispatch_reads_the_arm64_digest_from_the_manifest() -> None:
+    """The tap gets the digest the gate verified, after the release exists."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    tap = publish["jobs"]["homebrew-tap"]
+    assert_that(set(tap["needs"])).is_equal_to(
+        {"classify-tag", "release-gate", "github-release"},
+    )
+    assert_that(tap["permissions"]).is_equal_to({"contents": "read"})
+    callee = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    dispatch = callee["jobs"]["homebrew-dispatch"]
+    by_name = {step.get("name"): step for step in dispatch["steps"]}
+    assert_that(by_name["Download release manifest"]["with"]["name"]).is_equal_to(
+        "release-manifest",
+    )
+    payload = by_name["Dispatch formula update"]["with"]
+    assert_that(payload["binary-arm64-sha"]).is_equal_to(
+        "${{ steps.checksums.outputs.arm64_sha256 }}",
+    )
+    assert_that(callee["jobs"]).does_not_contain_key("upload-binaries")
+    assert_that(callee["jobs"]).does_not_contain_key("upload-man-page")
+    # npm no longer waits on Homebrew: both hang off the release.
+    assert_that(_job_ancestors(publish, job_id="npm-publish")).does_not_contain(
+        "homebrew-tap",
+    )
+    assert_that(publish["jobs"]["npm-publish"]["needs"]).contains("github-release")
+
+
+def test_docker_promote_promotes_the_full_release_tag_set() -> None:
+    """Each image gets <version>, <major.minor>, <major> and latest (#2658 nit)."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    steps = _job_steps(publish, job="docker-promote")
+    metas = {
+        str(step["id"]): step["with"]
+        for step in steps
+        if "docker/metadata-action@" in str(step.get("uses", ""))
+    }
+    expected_images = {
+        "meta-base": "ghcr.io/lgtm-hq/py-lintro-base",
+        "meta-full": "ghcr.io/lgtm-hq/py-lintro",
+        "meta-ai": "ghcr.io/lgtm-hq/py-lintro-ai",
+    }
+    assert_that(set(metas)).is_equal_to(set(expected_images))
+    patterns = [
+        "type=semver,pattern={{version}},value=${{ github.ref_name }}",
+        "type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}",
+        "type=semver,pattern={{major}},value=${{ github.ref_name }}",
+    ]
+    for step_id, with_block in metas.items():
+        assert_that(with_block["images"]).described_as(step_id).is_equal_to(
+            expected_images[step_id],
+        )
+        assert_that(str(with_block["flavor"]).strip()).described_as(
+            step_id,
+        ).is_equal_to(
+            "latest=true",
+        )
+        tags = [line.strip() for line in str(with_block["tags"]).splitlines() if line]
+        assert_that(tags).described_as(step_id).is_equal_to(
+            patterns,
+        )
