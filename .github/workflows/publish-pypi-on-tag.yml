@@ -65,7 +65,7 @@ jobs:
     name: Generate and verify SBOM
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
     with:
       target: .
       target-type: dir
@@ -75,7 +75,7 @@ jobs:
       # Remediation landed in #1126; Dependabot shows no open high alerts.
       fail-on-severity: high
       create-attestation: true
-      tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
+      tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
       egress-policy: block
       egress-preset: sbom
     permissions:
@@ -98,7 +98,7 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
     permissions:
       # read: checkout and build sdist/wheel (reusable-build-python-dist)
       contents: read
@@ -113,7 +113,7 @@ jobs:
       # Policy recovery window (lgtm-hq/lgtm-ci#962): the reusable defaults
       # to 90 already; pinned so a default change upstream cannot shorten it.
       artifact-retention-days: 90
-      tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
+      tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
       egress-policy: block
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
@@ -290,11 +290,11 @@ jobs:
       - name: Prepare PyPI upload
         id: prepare
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
         with:
           artifact-name: python-dist
           python-version: '3.14'
-          tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
+          tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
           require-attestation: 'true'
           # The dist attestation was made inside lgtm-ci's build reusable,
           # which is the signer identity Fulcio recorded.
@@ -314,7 +314,7 @@ jobs:
     needs: [pypi-upload]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
     permissions:
       # write: create GitHub Release and upload the gated assets
       contents: write
@@ -328,7 +328,7 @@ jobs:
       checksums: true
       immutable-assets: true
       generate-release-notes: true
-      tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
+      tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
       egress-policy: block
       egress-preset: github-tooling
       # Full list (v0.50.0+ replace semantics): the reusable passes
