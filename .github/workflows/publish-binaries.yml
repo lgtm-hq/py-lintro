@@ -266,7 +266,7 @@ jobs:
 
       - name: Dispatch formula update
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@6c08ef91318466d03c615112820eae9b795a9a8b # v0.71.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@19531b4aa3e8de8404a7fb6f3b5692c810acef39 # v0.72.0
         with:
           formula: lintro
           version: ${{ steps.version.outputs.version }}
