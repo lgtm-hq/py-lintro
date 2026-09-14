@@ -104,20 +104,28 @@ hence the `actions: read` + `issues: write` job permissions.
 
 ## Publish
 
-- **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
-  `reusable-build-python-dist` → caller `pypi-upload` job (`prepare-pypi-upload` →
-  `pypa/gh-action-pypi-publish` → `attest-build-provenance`) →
-  `reusable-github-release`, then the binaries (`build-binaries.yml` builds and attests,
-  `publish-binaries.yml` uploads and pings the Homebrew tap). Docker runs in two stages
-  (#2562): `docker-build` calls `docker-build-publish.yml` in staging mode at tag push
-  (build, scan, attest, cosign; run-scoped `build-<run_id>` tags only, no version or
-  `latest`), `docker-manifest` records the three index digests in the `release-manifest`
-  artifact (90 days), and `docker-promote`, after the GitHub Release, runs
-  `gh attestation verify oci://…` on each staging digest first, then retags them to
-  `<version>`, `<major.minor>`, `<major>`, `latest` and signs them. Prereleases run the
-  staging build and skip the promote. Upload via `pypa/gh-action-pypi-publish` (OIDC
-  trusted publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on
-  `main` via `docker-ci` only (no duplicate quality on tag).
+- **publish-pypi-on-tag.yml** — Production tag publish, build-then-publish (#2562).
+  Build stage, all off `classify-tag`: `reusable-sbom` → `reusable-build-python-dist`
+  (attests `dist/*`, writes `SHA256SUMS`, 90-day artifact); `build-binaries.yml` (three
+  binaries, attested, plus `lintro.1`); `docker-build` calls `docker-build-publish.yml`
+  in staging mode (build, scan, attest, cosign; run-scoped `build-<run_id>` tags only,
+  no version or `latest`). **`release-gate`** needs every build job: downloads every
+  artifact, runs `gh attestation verify` on each dist file (signer
+  `lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml`) and binary (signer
+  `lgtm-hq/py-lintro/.github/workflows/build-binaries.yml`), checks the dist
+  `SHA256SUMS`, downloads the Sigstore bundles (`<asset>.intoto.jsonl`), assembles the
+  `release-assets` artifact with a `SHA256SUMS` over everything and writes
+  `release-manifest.json` (image digests plus per-file sha256/size/bundle; both 90
+  days). Publish stage: `pypi-upload` (`environment: pypi`, `prepare-pypi-upload` with
+  `require-attestation`, then `pypa/gh-action-pypi-publish` as the last step — the first
+  irreversible write of the run) → `reusable-github-release` (attaches `release-assets`
+  with `checksums` and `immutable-assets`) → `docker-promote` (verify and cosign the
+  staging digests, then retag to `<version>`, `<major.minor>`, `<major>`, `latest` as
+  the last steps), `homebrew-tap` (`publish-binaries.yml`: reads the arm64 sha256 from
+  the manifest and pings the tap), `npm-publish` (no longer behind Homebrew) and the
+  mirror lane. Prereleases run the build stage, the gate, PyPI and the GitHub Release as
+  before and skip the Docker promote, Homebrew and npm. Lint runs on `main` via
+  `docker-ci` only (no duplicate quality on tag).
 - **docker-build-publish.yml** — Multi-arch GHCR build via `reusable-docker.yml` (base +
   full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
   pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical
@@ -182,11 +190,12 @@ The binaries ship in two `workflow_call` stages, both called from
   (the reuse check below), `id-token: write` and `attestations: write`. Nothing in this
   workflow touches the release. It runs for prerelease tags too, so a prerelease can
   prove the build stage, but publishes nothing for them.
-- **publish-binaries.yml** (`homebrew-tap` job in the caller, stable tags only) —
-  `Upload <asset> to release` downloads each binary artifact and attaches it with
-  `scripts/build/upload_release_asset.sh`; `Upload Man Page` attaches `lintro.1`;
-  `Notify Homebrew Tap` waits for PyPI and dispatches the formula update with the arm64
-  checksum. Only the two upload jobs hold `contents: write`.
+- **publish-binaries.yml** (`homebrew-tap` job in the caller, stable tags only, after
+  `github-release`) — `Notify Homebrew Tap` reads the arm64 sha256 from the
+  `release-manifest` artifact the gate wrote, waits for PyPI and dispatches the formula
+  update. The binaries and `lintro.1` are attached to the release by
+  `reusable-github-release` from the gate's `release-assets` artifact (immutable
+  assets), so nothing in this workflow holds `contents: write` any more.
 
 Artifacts (`lintro-macos-arm64`, `lintro-linux-x64`, `lintro-linux-arm64`, `sha256-*`,
 `lintro-man-page`) are retained for 90 days, the policy recovery window

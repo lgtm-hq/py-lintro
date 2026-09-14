@@ -3,8 +3,9 @@ name: Build - Platform Binaries
 # Build stage of the binary release (#2562): compiles, verifies, smoke-tests
 # and attests the three platform binaries and generates the man page, then
 # uploads everything as run artifacts. Nothing here writes to a release; the
-# publish stage is publish-binaries.yml. workflow_call only: the manual
-# repair dispatch that resolved "latest release" (#2484) is gone, and
+# publish stage is release-gate and the GitHub Release (#2562). workflow_call
+# only: the manual repair dispatch that resolved "latest release" (#2484) is
+# gone, and
 # recovery is lgtm-hq/lgtm-ci#966.
 
 'on':
@@ -32,7 +33,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      # read: checkout only. The release upload lives in publish-binaries.yml.
+      # read: checkout only. The release upload lives in github-release.
       contents: read
 
     steps:
@@ -105,7 +106,7 @@ jobs:
     permissions:
       # read: checkout, and the reuse check downloads the published asset to
       # hash it. No contents: write anywhere in this workflow (#2562): the
-      # release is only touched by publish-binaries.yml.
+      # release is only touched by the github-release job of the caller.
       contents: read
       # #2435: the reuse check lists and downloads this run's own sha256
       # artifact (including earlier attempts) to decide whether the asset on

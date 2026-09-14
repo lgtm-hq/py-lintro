@@ -110,6 +110,9 @@ jobs:
     with:
       python-version: '3.14'
       artifact-name: python-dist
+      # Policy recovery window (lgtm-hq/lgtm-ci#962): the reusable defaults
+      # to 90 already; pinned so a default change upstream cannot shorten it.
+      artifact-retention-days: 90
       tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
       egress-policy: block
       egress-preset: pypi
@@ -131,9 +134,122 @@ jobs:
         releases.astral.sh:443
         github-releases.githubusercontent.com:443
 
+  release-gate:
+    name: Release gate
+    # #2562 PR (c): the last job before any irreversible write. Every build
+    # job feeds it; it downloads every artifact, verifies the GitHub
+    # attestation of each dist file and binary, checks the dist SHA256SUMS,
+    # downloads the Sigstore bundles, assembles the release-assets artifact
+    # the GitHub Release attaches, and writes release-manifest.json. Fails
+    # closed: nothing downstream runs unless every check passed.
+    needs: [classify-tag, sbom, pypi-build, build-binaries, docker-build]
+    if: >-
+      github.ref_type == 'tag' &&
+      !startsWith(github.ref_name, 'actions-v')
+    runs-on: ubuntu-24.04
+    permissions:
+      # read: sparse checkout of the gate scripts
+      contents: read
+      # read: gh attestation verify/download read the attestations API. With
+      # an explicit permissions block an omitted scope is `none`.
+      attestations: read
+    timeout-minutes: 15
+    steps:
+      - name: Harden runner
+        # Artifact service hops for download/upload-artifact, the GitHub API
+        # for the attestations, and the sigstore TUF root gh verifies with.
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            tuf-repo-cdn.sigstore.dev:443
+      - name: Checkout scripts
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci
+          persist-credentials: false
+      - name: Download Python distribution
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: python-dist
+          path: gate/dist
+      - name: Download macOS binaries
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: lintro-macos-*
+          merge-multiple: true
+          path: gate/binaries
+      - name: Download Linux binaries
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: lintro-linux-*
+          merge-multiple: true
+          path: gate/binaries
+      - name: Download man page
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: lintro-man-page
+          path: gate/man
+      - name: Verify artifacts and assemble release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GATE_DIR: gate
+          OUT_DIR: release-assets
+          ATTESTATION_REPO: lgtm-hq/py-lintro
+          # A reusable signs as the called file: lgtm-ci's build-dist
+          # reusable attests dist/*, and build-binaries.yml (a local
+          # reusable) attests the binaries. The entry workflow signs nothing.
+          DIST_SIGNER_WORKFLOW: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml
+          BINARY_SIGNER_WORKFLOW: lgtm-hq/py-lintro/.github/workflows/build-binaries.yml
+        run: scripts/ci/release-gate/verify_artifacts.sh
+      - name: Write release manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+          BASE_DIGEST: ${{ needs.docker-build.outputs.base-digest }}
+          FULL_DIGEST: ${{ needs.docker-build.outputs.full-digest }}
+          AI_DIGEST: ${{ needs.docker-build.outputs.ai-digest }}
+          ASSETS_DIR: release-assets
+          OUTPUT: release-manifest.json
+        run: python3 scripts/ci/release-gate/write_manifest.py
+      - name: Upload release assets
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-assets
+          path: release-assets/
+          if-no-files-found: error
+          # Policy recovery window (lgtm-hq/lgtm-ci#962): a publish rerun
+          # weeks later still finds the verified bytes.
+          retention-days: 90
+      - name: Upload release manifest
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-manifest
+          path: release-manifest.json
+          if-no-files-found: error
+          retention-days: 90
+
   pypi-upload:
     name: Upload to PyPI
-    needs: [pypi-build]
+    # The first irreversible write of the run, and the last step of this
+    # job (#2562): everything upstream was built, verified and attested by
+    # release-gate, and prepare-pypi-upload re-verifies dist/* here.
+    needs: [release-gate]
     if: >-
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
@@ -142,10 +258,10 @@ jobs:
     permissions:
       # read: download python-dist workflow artifact
       contents: read
+      # read: prepare-pypi-upload's require-attestation verifies dist/*
+      attestations: read
       # write: OIDC JWT for PyPI trusted publishing (this workflow file)
       id-token: write
-      # write: Sigstore provenance attestation after upload (best-effort)
-      attestations: write
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
@@ -179,18 +295,19 @@ jobs:
           artifact-name: python-dist
           python-version: '3.14'
           tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
+          require-attestation: 'true'
+          # The dist attestation was made inside lgtm-ci's build reusable,
+          # which is the signer identity Fulcio recorded.
+          signer-workflow: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml
+      # Last step on purpose: once this succeeds nothing can be re-run into
+      # a different state (#2562). The attest step that used to follow it
+      # moved to the build stage, where it is a hard failure.
       - name: Upload to PyPI
         # yamllint disable-line rule:line-length
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://upload.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}
-      - name: Attest build provenance
-        continue-on-error: true
-        # yamllint disable-line rule:line-length
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
   github-release:
     name: Create GitHub Release
@@ -199,10 +316,17 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
     permissions:
-      # write: create GitHub Release and upload dist assets
+      # write: create GitHub Release and upload the gated assets
       contents: write
     with:
-      artifact-name: python-dist
+      # The gate's assembled artifact: dist files, the three binaries,
+      # lintro.1, SHA256SUMS over all of them and the Sigstore bundles.
+      artifact-name: release-assets
+      artifact-path: release
+      # The gate's SHA256SUMS is attached as is; a rerun never overwrites a
+      # published asset whose bytes differ (release-security policy, s.4).
+      checksums: true
+      immutable-assets: true
       generate-release-notes: true
       tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
       egress-policy: block
@@ -274,12 +398,11 @@ jobs:
 
   build-binaries:
     name: Build platform binaries
-    # #2562 PR (a): the build half of the former build-binary.yml, called
-    # from the same position the whole workflow used to occupy. Prerelease
-    # tags build too (artifacts and attestations only; nothing is published
-    # for them), so a prerelease tag can prove the build stage. Moving this
-    # ahead of the PyPI gate is a later PR of #2562.
-    needs: [classify-tag, pypi-upload, github-release]
+    # #2562: the build half of the former build-binary.yml, now ahead of the
+    # pypi gate. Prerelease tags build too (artifacts and attestations only;
+    # nothing is published for them), so a prerelease tag can prove the
+    # build stage. release-gate verifies what this produced.
+    needs: [classify-tag]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     uses: ./.github/workflows/build-binaries.yml
     permissions:
@@ -302,24 +425,21 @@ jobs:
 
   homebrew-tap:
     name: Publish Homebrew Tap
-    # The publish half: attaches this run's built and attested binaries and
-    # man page to the release, then pings the tap. Stable releases only.
-    needs: [classify-tag, pypi-upload, github-release, build-binaries]
+    # Pings the tap once the release carries the gated assets. The binaries
+    # and man page are attached by github-release from the gate's artifact;
+    # the dispatch reads the arm64 checksum from the release manifest.
+    # Stable releases only.
+    needs: [classify-tag, release-gate, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
       needs.classify-tag.outputs.is_prerelease == 'false'
     uses: ./.github/workflows/publish-binaries.yml
     permissions:
-      # write: upload macOS/Linux binaries to the GitHub release. Formula
-      # updates are dispatched to the tap (repository_dispatch), not pushed
-      # from here — this token has no write access to lgtm-hq/homebrew-tap.
-      contents: write
-      # read: publish-binaries.yml's upload jobs list and download this run's
-      # own sha256 artifacts for the reuse check (#2440, #2435). A called
-      # workflow may not request more than its caller's job grants, so
-      # omitting this fails the whole run at startup (v0.152.1+ tags died as
-      # startup_failure).
-      actions: read
+      # read: sparse checkout of scripts and the release-manifest artifact.
+      # Formula updates are dispatched to the tap (repository_dispatch), not
+      # pushed from here — this token has no write access to the tap, and
+      # nothing in the callee writes to this repository or its release.
+      contents: read
     with:
       release_tag: ${{ github.ref_name }}
     # Named secret rather than `secrets: inherit`: the call needs exactly one.
@@ -328,11 +448,10 @@ jobs:
 
   npm-publish:
     name: Publish to npm
-    # Needs homebrew-tap: that job (publish-binaries.yml) uploads the three
-    # platform binaries to the GitHub release, which publish-npm.yml
-    # downloads. Gated to stable releases only, since the binaries are not
-    # published for prereleases.
-    needs: [classify-tag, homebrew-tap]
+    # Needs github-release: it attaches the three platform binaries the gate
+    # verified, which publish-npm.yml downloads. No longer behind Homebrew
+    # (#2562). Stable releases only.
+    needs: [classify-tag, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
       needs.classify-tag.outputs.is_prerelease == 'false'
@@ -378,67 +497,14 @@ jobs:
     with:
       staging: true
 
-  docker-manifest:
-    name: Record image digests
-    # The three index digests the staging build exported, written to the
-    # release-manifest artifact for the promote job, a publish rerun and the
-    # recovery window (#2562; PR (c)'s release gate extends this file).
-    needs: [docker-build]
-    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
-    runs-on: ubuntu-latest
-    permissions:
-      # read: sparse checkout of the manifest writer
-      contents: read
-    timeout-minutes: 5
-    steps:
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: block
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-            pipelines.actions.githubusercontent.com:443
-            results-receiver.actions.githubusercontent.com:443
-            *.blob.core.windows.net:443
-      - name: Checkout scripts
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts/ci/write-release-manifest.py
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-      - name: Write release manifest
-        env:
-          RELEASE_TAG: ${{ github.ref_name }}
-          RUN_ID: ${{ github.run_id }}
-          BASE_DIGEST: ${{ needs.docker-build.outputs.base-digest }}
-          FULL_DIGEST: ${{ needs.docker-build.outputs.full-digest }}
-          AI_DIGEST: ${{ needs.docker-build.outputs.ai-digest }}
-          OUTPUT: release-manifest.json
-        run: python3 scripts/ci/write-release-manifest.py
-      - name: Upload release manifest
-        # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
-        with:
-          name: release-manifest
-          path: release-manifest.json
-          if-no-files-found: error
-          # Policy recovery window (lgtm-hq/lgtm-ci#962): a publish rerun
-          # must still find the digests it has to promote.
-          retention-days: 90
-
   docker-promote:
     name: Promote Docker images to release tags
     # Promotion is a registry-side retag of the digests built and attested
     # before the gate; nothing is rebuilt after approval (#1358, #2562). The
     # GitHub attestation and the lgtm-ci cosign signature are digest-bound
     # and carry over; this job verifies the attestation on every staging
-    # digest first, retags, then adds its own signature.
-    needs: [classify-tag, docker-build, github-release]
+    # digest, adds its own signature to those digests, and retags last.
+    needs: [classify-tag, docker-build, release-gate, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
       needs.classify-tag.outputs.is_prerelease == 'false'
@@ -541,8 +607,24 @@ jobs:
             ghcr.io/lgtm-hq/py-lintro@${{ needs.docker-build.outputs.full-digest }}
             ghcr.io/lgtm-hq/py-lintro-ai@${{ needs.docker-build.outputs.ai-digest }}
         run: scripts/ci/verify-image-attestations.sh
-      # EXPECTED_DIGEST pins each promotion to the digest verified above:
-      # the version tags can only ever land on the attested bytes.
+      # Sign BEFORE any retag (Codex on #2659): a cosign signature is bound
+      # to the digest, so signing the staging digest signs every tag it will
+      # carry, and a signing failure leaves the version tags unmoved rather
+      # than a partially promoted, unsigned release.
+      - name: Install Cosign
+        # yamllint disable-line rule:line-length
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign staging digests (keyless)
+        env:
+          IMAGES: |
+            ghcr.io/lgtm-hq/py-lintro-base@${{ needs.docker-build.outputs.base-digest }}
+            ghcr.io/lgtm-hq/py-lintro@${{ needs.docker-build.outputs.full-digest }}
+            ghcr.io/lgtm-hq/py-lintro-ai@${{ needs.docker-build.outputs.ai-digest }}
+        run: scripts/ci/cosign-sign-images.sh
+      # The retags are the job's irreversible writes and its last steps:
+      # nothing may follow them. EXPECTED_DIGEST pins each promotion to the
+      # digest verified and signed above, so the version tags can only ever
+      # land on the attested bytes.
       - name: Promote base image (digest retag)
         id: promote-base
         env:
@@ -567,13 +649,3 @@ jobs:
           EXPECTED_DIGEST: ${{ needs.docker-build.outputs.ai-digest }}
           TAGS: ${{ steps.meta-ai.outputs.tags }}
         run: scripts/ci/promote-ci-docker-images.sh
-      - name: Install Cosign
-        # yamllint disable-line rule:line-length
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - name: Sign promoted digests (keyless)
-        env:
-          IMAGES: |
-            ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
-            ghcr.io/lgtm-hq/py-lintro@${{ steps.promote-full.outputs.digest }}
-            ghcr.io/lgtm-hq/py-lintro-ai@${{ steps.promote-ai.outputs.digest }}
-        run: scripts/ci/cosign-sign-images.sh
