@@ -96,7 +96,7 @@ jobs:
     # Base image (tools layer) publishes before full; a full-image failure must
     # not block repairing py-lintro-base tags during backfill dispatch.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@19531b4aa3e8de8404a7fb6f3b5692c810acef39 # v0.72.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
     permissions:
       contents: read
       packages: write
@@ -149,7 +149,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '19531b4aa3e8de8404a7fb6f3b5692c810acef39' # v0.72.0
+      tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
       egress-policy: block
       egress-preset: docker
       # Shared allowlist, maintained once in
@@ -170,7 +170,7 @@ jobs:
       needs.resolve-endpoints.result == 'success' &&
       needs.docker-base.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@19531b4aa3e8de8404a7fb6f3b5692c810acef39 # v0.72.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
     permissions:
       contents: read
       packages: write
@@ -223,7 +223,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '19531b4aa3e8de8404a7fb6f3b5692c810acef39' # v0.72.0
+      tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
       egress-policy: block
       egress-preset: docker
       # Shared allowlist, maintained once in
@@ -252,7 +252,7 @@ jobs:
       needs.resolve-endpoints.result == 'success' &&
       needs.docker-full.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@19531b4aa3e8de8404a7fb6f3b5692c810acef39 # v0.72.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
     permissions:
       contents: read
       packages: write
@@ -305,7 +305,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '19531b4aa3e8de8404a7fb6f3b5692c810acef39' # v0.72.0
+      tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
       egress-policy: block
       egress-preset: docker
       # Shared allowlist, maintained once in
