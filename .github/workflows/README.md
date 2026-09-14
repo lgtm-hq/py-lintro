@@ -108,12 +108,20 @@ hence the `actions: read` + `issues: write` job permissions.
   `reusable-build-python-dist` → caller `pypi-upload` job (`prepare-pypi-upload` →
   `pypa/gh-action-pypi-publish` → `attest-build-provenance`) →
   `reusable-github-release`, then the binaries (`build-binaries.yml` builds and attests,
-  `publish-binaries.yml` uploads and pings the Homebrew tap) and Docker
-  (`docker-build-publish.yml`). Upload via `pypa/gh-action-pypi-publish` (OIDC trusted
-  publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on `main`
-  via `docker-ci` only (no duplicate quality on tag).
-- **docker-build-publish.yml** — Multi-arch GHCR publish via `reusable-docker.yml`
-  (full + base images, registry cache at `:cache`, no-cache on version tags)
+  `publish-binaries.yml` uploads and pings the Homebrew tap). Docker runs in two stages
+  (#2562): `docker-build` calls `docker-build-publish.yml` in staging mode at tag push
+  (build, scan, attest, cosign; run-scoped `build-<run_id>` tags only, no version or
+  `latest`), `docker-manifest` records the three index digests in the `release-manifest`
+  artifact (90 days), and `docker-promote` retags those digests to `<version>`,
+  `<major.minor>`, `<major>`, `latest` after the GitHub Release, signs them and runs
+  `gh attestation verify oci://…` on each. Prereleases run the staging build and skip
+  the promote. Upload via `pypa/gh-action-pypi-publish` (OIDC trusted publishing) runs
+  in this workflow file, not in lgtm-ci reusables. Lint runs on `main` via `docker-ci`
+  only (no duplicate quality on tag).
+- **docker-build-publish.yml** — Multi-arch GHCR build via `reusable-docker.yml` (base +
+  full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
+  pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical
+  version directly until the recovery workflow (lgtm-hq/lgtm-ci#966) lands.
 - **docker-tools-candidate.yml** — On an in-repository `renovate/**` push that changes a
   tool-version manifest, builds a candidate `lintro-tools` image and commits its digest
   to both Dockerfile pin sites. The app-token push retriggers PR checks; its

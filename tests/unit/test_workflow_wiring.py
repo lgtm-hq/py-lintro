@@ -4014,6 +4014,13 @@ def test_build_binaries_have_no_path_to_pypi_upload() -> None:
     upstream_of_upload = _job_ancestors(publish, job_id="pypi-upload")
     assert_that(upstream_of_upload).does_not_contain("build-binaries")
     assert_that(upstream_of_upload).does_not_contain("homebrew-tap")
+    # PR (b): the Docker staging build and its digest manifest are build
+    # stage too, and the promote is a publish job.
+    assert_that(upstream_of_upload).does_not_contain(
+        "docker-build",
+        "docker-manifest",
+        "docker-promote",
+    )
 
     assert_that(_job_ancestors(publish, job_id="homebrew-tap")).contains(
         "build-binaries",
@@ -6214,7 +6221,11 @@ def test_reusable_workflow_permission_check_covers_the_release_pipeline(
         workflow=parsed_workflows["publish-pypi-on-tag.yml"],
     )
     callees = {callee for _, _, callee in calls}
-    assert_that(callees).contains(_BUILD_BINARY_WORKFLOW, _PUBLISH_BINARIES_WORKFLOW)
+    assert_that(callees).contains(
+        _BUILD_BINARY_WORKFLOW,
+        _PUBLISH_BINARIES_WORKFLOW,
+        "docker-build-publish.yml",
+    )
     for caller_job_id in ("build-binaries", "homebrew-tap"):
         caller_job = next(job for job_id, job, _ in calls if job_id == caller_job_id)
         grant = _effective_grant(
@@ -7015,11 +7026,10 @@ _EVIDENCE_CALLER_IF_ALLOWLIST: dict[str, str] = {
         "needs.docker-full.result == 'success'"
     ),
     "docker-tools-candidate.yml::candidate-build": (
-        "github.actor == 'renovate[bot]' && " "needs.resolve-pr.result == 'success'"
+        "github.actor == 'renovate[bot]' && needs.resolve-pr.result == 'success'"
     ),
     "docker-tools-promote.yml::publish-fallback": (
-        "needs.resolve.outputs.action == 'publish' && "
-        "github.ref == 'refs/heads/main'"
+        "needs.resolve.outputs.action == 'publish' && github.ref == 'refs/heads/main'"
     ),
     "docker-tools-publish.yml::tools-image": "",
 }
@@ -7194,3 +7204,189 @@ def test_main_promotion_attests_the_promoted_digests() -> None:
     )
     for step in attest_steps:
         assert_that(step["with"].get("push-to-registry")).is_true()
+
+
+# --- #2562 PR (b): Docker staging before the gate, promote after -------------
+
+_RELEASE_IMAGE_DIGEST_OUTPUTS = {
+    "base-digest": "${{ jobs.docker-base.outputs.digest }}",
+    "full-digest": "${{ jobs.docker-full.outputs.digest }}",
+    "ai-digest": "${{ jobs.docker-ai.outputs.digest }}",
+}
+
+#: Image -> the docker-build output the promote step must pin to.
+_PROMOTED_IMAGE_DIGESTS = {
+    "ghcr.io/lgtm-hq/py-lintro-base": "${{ needs.docker-build.outputs.base-digest }}",
+    "ghcr.io/lgtm-hq/py-lintro": "${{ needs.docker-build.outputs.full-digest }}",
+    "ghcr.io/lgtm-hq/py-lintro-ai": "${{ needs.docker-build.outputs.ai-digest }}",
+}
+
+
+def test_docker_build_runs_before_the_gate_in_staging_mode() -> None:
+    """Images are built and attested off classify-tag, never upstream of pypi-upload.
+
+    The staging call carries only ``staging: true``: no version, no latest, no
+    prerelease gate (prereleases prove the build stage), and a ``ref_type``
+    guard so a workflow_dispatch from a branch never pushes staging images.
+    The old rebuild-on-tag ``docker-publish`` call is gone (#2562).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    assert_that(publish["jobs"]).does_not_contain_key("docker-publish")
+    build = publish["jobs"]["docker-build"]
+    assert_that(build["needs"]).is_equal_to(["classify-tag"])
+    assert_that(build["uses"]).is_equal_to(
+        "./.github/workflows/docker-build-publish.yml",
+    )
+    assert_that(build["with"]).is_equal_to({"staging": True})
+    build_if = _normalize_github_expr(str(build["if"]))
+    assert_that(build_if).contains("github.ref_type == 'tag'")
+    assert_that(build_if).does_not_contain("is_prerelease")
+    assert_that(_job_ancestors(publish, job_id="docker-build")).is_equal_to(
+        {"classify-tag"},
+    )
+
+
+def test_docker_promote_depends_on_the_github_release() -> None:
+    """The version tags move only after the release exists, on this run's digests."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    promote = publish["jobs"]["docker-promote"]
+    assert_that(promote["needs"]).contains(
+        "classify-tag",
+        "docker-build",
+        "github-release",
+    )
+    assert_that(_job_ancestors(publish, job_id="docker-promote")).contains(
+        "pypi-upload",
+        "github-release",
+        "docker-build",
+    )
+    assert_that(_normalize_github_expr(str(promote["if"]))).contains(
+        "needs.classify-tag.outputs.is_prerelease == 'false'",
+    )
+    assert_that(promote).does_not_contain_key("uses")
+    # No attestations: write. Nothing new is attested; the attestation is
+    # digest-bound and the job only verifies it.
+    assert_that(promote["permissions"]).is_equal_to(
+        {"contents": "read", "packages": "write", "id-token": "write"},
+    )
+
+
+def test_docker_promote_retags_signs_and_verifies_the_exported_digests() -> None:
+    """Promote (x3) -> cosign -> gh attestation verify, in order, none bypassable."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    steps = _job_steps(publish, job="docker-promote")
+    index_by_run = {str(step.get("run", "")): i for i, step in enumerate(steps)}
+    promotes = [
+        step
+        for step in steps
+        if step.get("run") == "scripts/ci/promote-ci-docker-images.sh"
+    ]
+    assert_that(promotes).is_length(3)
+    for step in promotes:
+        env = step["env"]
+        assert_that(env["CI_TAG"]).is_equal_to("build-${{ github.run_id }}")
+        assert_that(env["EXPECTED_DIGEST"]).is_equal_to(
+            _PROMOTED_IMAGE_DIGESTS[env["SOURCE_IMAGE"]],
+        )
+    assert_that({step["env"]["SOURCE_IMAGE"] for step in promotes}).is_equal_to(
+        set(_PROMOTED_IMAGE_DIGESTS),
+    )
+    sign = index_by_run["scripts/ci/cosign-sign-images.sh"]
+    verify = index_by_run["scripts/ci/verify-image-attestations.sh"]
+    last_promote = max(index_by_run[step["run"]] for step in promotes)
+    assert_that(last_promote).is_less_than(sign)
+    assert_that(sign).is_less_than(verify)
+    verify_step = steps[verify]
+    assert_that(verify_step["env"]["ATTESTATION_REPO"]).is_equal_to("lgtm-hq/py-lintro")
+    assert_that(verify_step["env"]["SIGNER_REPO"]).is_equal_to("lgtm-hq/lgtm-ci")
+    assert_that(verify_step["env"]).contains_key("GH_TOKEN")
+    for image in _PROMOTED_IMAGE_DIGESTS:
+        for step in (steps[sign], verify_step):
+            assert_that(str(step["env"]["IMAGES"])).described_as(
+                step["name"],
+            ).contains(f"{image}@${{{{ steps.promote-")
+    for step in (*promotes, steps[sign], verify_step):
+        assert_that(step.get("continue-on-error")).described_as(step["name"]).is_none()
+        assert_that(step.get("if")).described_as(step["name"]).is_none()
+    for script in (
+        "scripts/ci/promote-ci-docker-images.sh",
+        "scripts/ci/cosign-sign-images.sh",
+        "scripts/ci/verify-image-attestations.sh",
+    ):
+        assert_that(os.access(_REPO_ROOT / script, os.X_OK)).described_as(
+            script,
+        ).is_true()
+
+
+def test_docker_staging_build_passes_no_version_or_latest_tag() -> None:
+    """Staging pushes run-scoped tags only; version and latest wait for promote.
+
+    The negated ``!inputs.staging && (...) || ''`` form is load-bearing: the
+    naive ``inputs.staging && '' || <expr>`` falls through to ``<expr>``
+    because the empty string is falsy in GitHub expressions. The ``release:``
+    trigger (a rebuild-on-tag path) is gone; the backfill dispatch stays.
+    """
+    publish = _load_workflow(name="docker-build-publish.yml")
+    triggers = publish["on"]
+    assert_that(triggers).does_not_contain_key("release")
+    call = triggers["workflow_call"]
+    assert_that(call["inputs"]["staging"]["type"]).is_equal_to("boolean")
+    assert_that(call["inputs"]["staging"]["default"]).is_false()
+    assert_that({k: v["value"] for k, v in call["outputs"].items()}).is_equal_to(
+        _RELEASE_IMAGE_DIGEST_OUTPUTS,
+    )
+    for job_id in _RELEASE_IMAGE_JOBS:
+        with_block = publish["jobs"][job_id]["with"]
+        version = _normalize_github_expr(str(with_block["version"]))
+        assert_that(version).described_as(job_id).starts_with(
+            "${{ !inputs.staging && (",
+        )
+        assert_that(version).described_as(job_id).ends_with(") || '' }}")
+        assert_that(version).does_not_contain("github.event.release")
+        assert_that(_normalize_github_expr(str(with_block["tag-latest"]))).described_as(
+            job_id,
+        ).starts_with("${{ !inputs.staging &&")
+        assert_that(with_block["tags"]).described_as(job_id).is_equal_to(
+            "${{ inputs.staging && format('build-{0}', github.run_id) || '' }}",
+        )
+        assert_that(with_block).does_not_contain_key("exact-tags")
+        assert_that(_normalize_github_expr(str(with_block["push"]))).does_not_contain(
+            "github.event_name == 'release'",
+        )
+    dispatch = triggers["workflow_dispatch"]["inputs"]
+    assert_that(dispatch).contains_key(
+        "backfill_version",
+        "backfill_ref",
+        "force_publish",
+    )
+
+
+def test_release_manifest_is_retained_for_the_recovery_window() -> None:
+    """The three digests land in a 90-day ``release-manifest`` artifact."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    manifest = publish["jobs"]["docker-manifest"]
+    assert_that(manifest["needs"]).is_equal_to(["docker-build"])
+    assert_that(manifest["permissions"]).is_equal_to({"contents": "read"})
+    steps = manifest["steps"]
+    uploads = [s for s in steps if "actions/upload-artifact@" in str(s.get("uses", ""))]
+    assert_that(uploads).is_length(1)
+    assert_that(uploads[0]["with"]["name"]).is_equal_to("release-manifest")
+    assert_that(uploads[0]["with"]["retention-days"]).is_equal_to(90)
+    assert_that(uploads[0]["with"]["if-no-files-found"]).is_equal_to("error")
+    write = next(
+        s
+        for s in steps
+        if s.get("run") == "python3 scripts/ci/write-release-manifest.py"
+    )
+    assert_that(write["env"]["OUTPUT"]).is_equal_to(uploads[0]["with"]["path"])
+    for var, output in (
+        ("BASE_DIGEST", "base-digest"),
+        ("FULL_DIGEST", "full-digest"),
+        ("AI_DIGEST", "ai-digest"),
+    ):
+        assert_that(write["env"][var]).is_equal_to(
+            f"${{{{ needs.docker-build.outputs.{output} }}}}",
+        )
+    assert_that(
+        os.access(_REPO_ROOT / "scripts/ci/write-release-manifest.py", os.X_OK),
+    ).is_true()

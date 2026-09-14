@@ -348,22 +348,225 @@ jobs:
     # reusable workflow's GITHUB_TOKEN for release-asset download is provided
     # automatically. Avoids exposing all org/repo secrets to the call.
 
-  docker-publish:
-    name: Publish Docker Images to GHCR
-    needs: [classify-tag, pypi-upload]
-    # yamllint disable-line rule:line-length
+  docker-build:
+    name: Build and attest Docker images (staging)
+    # #2562 PR (b): the three release images are built, scanned, attested
+    # and cosign-signed before the pypi gate, pushed only under run-scoped
+    # staging tags (build-<run_id>[-<slug>] and sha-<short>). Staging tags
+    # are not a release channel: no version or latest tag is written here.
+    # Prerelease tags build too; only docker-promote is stable-only. Gated
+    # on ref_type so a workflow_dispatch from a branch never builds or
+    # attests non-release bytes.
+    needs: [classify-tag]
     if: >-
-      !startsWith(github.ref_name, 'actions-v') &&
-      needs.classify-tag.outputs.is_prerelease == 'false'
+      github.ref_type == 'tag' &&
+      !startsWith(github.ref_name, 'actions-v')
     uses: ./.github/workflows/docker-build-publish.yml
     permissions:
+      # A called workflow may not request more than its caller's job grants
+      # (#2484): this is the superset of docker-build-publish.yml's jobs.
       # read: checkout for Docker build context
       contents: read
-      # write: push images to ghcr.io
+      # write: push staging images to ghcr.io
       packages: write
-      # write: OIDC for container image signing / provenance
+      # write: OIDC for cosign signing and the GitHub attestation
       id-token: write
       # write: publish image attestations
       attestations: write
       # write: upload container scan results to Security tab
       security-events: write
+    with:
+      staging: true
+
+  docker-manifest:
+    name: Record image digests
+    # The three index digests the staging build exported, written to the
+    # release-manifest artifact for the promote job, a publish rerun and the
+    # recovery window (#2562; PR (c)'s release gate extends this file).
+    needs: [docker-build]
+    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      # read: sparse checkout of the manifest writer
+      contents: read
+    timeout-minutes: 5
+    steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+      - name: Checkout scripts
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: scripts/ci/write-release-manifest.py
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+      - name: Write release manifest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RUN_ID: ${{ github.run_id }}
+          BASE_DIGEST: ${{ needs.docker-build.outputs.base-digest }}
+          FULL_DIGEST: ${{ needs.docker-build.outputs.full-digest }}
+          AI_DIGEST: ${{ needs.docker-build.outputs.ai-digest }}
+          OUTPUT: release-manifest.json
+        run: python3 scripts/ci/write-release-manifest.py
+      - name: Upload release manifest
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-manifest
+          path: release-manifest.json
+          if-no-files-found: error
+          # Policy recovery window (lgtm-hq/lgtm-ci#962): a publish rerun
+          # must still find the digests it has to promote.
+          retention-days: 90
+
+  docker-promote:
+    name: Promote Docker images to release tags
+    # Promotion is a registry-side retag of the digests built and attested
+    # before the gate; nothing is rebuilt after approval (#1358, #2562). The
+    # GitHub attestation and the lgtm-ci cosign signature are digest-bound
+    # and carry over; this job adds its own signature and verifies the
+    # attestation on every promoted digest before the job goes green.
+    needs: [classify-tag, docker-build, github-release]
+    if: >-
+      !startsWith(github.ref_name, 'actions-v') &&
+      needs.classify-tag.outputs.is_prerelease == 'false'
+    runs-on: ubuntu-24.04
+    permissions:
+      # read: checkout; gh attestation verify reads the attestations API
+      contents: read
+      # write: retag the promoted digests in GHCR
+      packages: write
+      # write: OIDC for cosign keyless signing of the promoted digests
+      id-token: write
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # No build here: the allowlist covers checkout, GHCR retagging, the
+        # cosign download, sigstore keyless signing and the attestation
+        # verification (TUF root + GitHub API).
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            token.actions.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+            oauth2.sigstore.dev:443
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Docker (Buildx + login)
+        # Default `docker` driver: imagetools talks to the registry from the
+        # CLI, no BuildKit container needed.
+        uses: ./.github/actions/setup-docker
+        with:
+          login: 'true'
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata (base)
+        id: meta-base
+        # yamllint disable-line rule:line-length
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/lgtm-hq/py-lintro-base
+          flavor: latest=true
+          tags: |
+            type=semver,pattern={{version}},value=${{ github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
+            type=semver,pattern={{major}},value=${{ github.ref_name }}
+      - name: Extract metadata (full)
+        id: meta-full
+        # yamllint disable-line rule:line-length
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/lgtm-hq/py-lintro
+          flavor: latest=true
+          tags: |
+            type=semver,pattern={{version}},value=${{ github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
+            type=semver,pattern={{major}},value=${{ github.ref_name }}
+      - name: Extract metadata (ai)
+        id: meta-ai
+        # yamllint disable-line rule:line-length
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        with:
+          images: ghcr.io/lgtm-hq/py-lintro-ai
+          flavor: latest=true
+          tags: |
+            type=semver,pattern={{version}},value=${{ github.ref_name }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
+            type=semver,pattern={{major}},value=${{ github.ref_name }}
+      # EXPECTED_DIGEST pins each promotion to the digest the staging build
+      # exported: the version tags can only ever land on the attested bytes.
+      - name: Promote base image (digest retag)
+        id: promote-base
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/py-lintro-base
+          CI_TAG: build-${{ github.run_id }}
+          EXPECTED_DIGEST: ${{ needs.docker-build.outputs.base-digest }}
+          TAGS: ${{ steps.meta-base.outputs.tags }}
+        run: scripts/ci/promote-ci-docker-images.sh
+      - name: Promote full image (digest retag)
+        id: promote-full
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/py-lintro
+          CI_TAG: build-${{ github.run_id }}
+          EXPECTED_DIGEST: ${{ needs.docker-build.outputs.full-digest }}
+          TAGS: ${{ steps.meta-full.outputs.tags }}
+        run: scripts/ci/promote-ci-docker-images.sh
+      - name: Promote ai image (digest retag)
+        id: promote-ai
+        env:
+          SOURCE_IMAGE: ghcr.io/lgtm-hq/py-lintro-ai
+          CI_TAG: build-${{ github.run_id }}
+          EXPECTED_DIGEST: ${{ needs.docker-build.outputs.ai-digest }}
+          TAGS: ${{ steps.meta-ai.outputs.tags }}
+        run: scripts/ci/promote-ci-docker-images.sh
+      - name: Install Cosign
+        # yamllint disable-line rule:line-length
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign promoted digests (keyless)
+        env:
+          IMAGES: |
+            ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
+            ghcr.io/lgtm-hq/py-lintro@${{ steps.promote-full.outputs.digest }}
+            ghcr.io/lgtm-hq/py-lintro-ai@${{ steps.promote-ai.outputs.digest }}
+        run: scripts/ci/cosign-sign-images.sh
+      - name: Verify attestations on the promoted digests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATTESTATION_REPO: lgtm-hq/py-lintro
+          # The nested lgtm-ci reusable made the attestation, so the signer
+          # is lgtm-ci as a whole (docs/docker.md).
+          SIGNER_REPO: lgtm-hq/lgtm-ci
+          IMAGES: |
+            ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
+            ghcr.io/lgtm-hq/py-lintro@${{ steps.promote-full.outputs.digest }}
+            ghcr.io/lgtm-hq/py-lintro-ai@${{ steps.promote-ai.outputs.digest }}
+        run: scripts/ci/verify-image-attestations.sh

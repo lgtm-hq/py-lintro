@@ -115,3 +115,23 @@ run_promote() {
 	run cat "${DOCKER_LOG}"
 	assert_output --partial "buildx imagetools create"
 }
+
+@test "EXPECTED_DIGEST matching the resolved digest promotes" {
+	run run_promote env EXPECTED_DIGEST=sha256:aaa111
+	assert_success
+
+	run cat "${DOCKER_LOG}"
+	assert_output --partial "buildx imagetools create"
+}
+
+@test "EXPECTED_DIGEST mismatch refuses before any retag (#2562)" {
+	run run_promote env EXPECTED_DIGEST=sha256:bbb222
+	assert_failure
+	assert_output --partial "Refusing to promote"
+	assert_output --partial "sha256:bbb222"
+
+	# The digest was resolved, but nothing was retagged or verified.
+	run cat "${DOCKER_LOG}"
+	assert_output --partial "imagetools inspect"
+	[[ "${output}" != *"imagetools create"* ]]
+}
