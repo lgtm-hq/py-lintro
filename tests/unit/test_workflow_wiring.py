@@ -2258,6 +2258,135 @@ def _workflow_paths() -> list[Path]:
     return sorted((*workflows_dir.glob("*.yml"), *workflows_dir.glob("*.yaml")))
 
 
+_SIGSTORE_HOSTS = frozenset(
+    {
+        "fulcio.sigstore.dev:443",
+        "rekor.sigstore.dev:443",
+        "tuf-repo-cdn.sigstore.dev:443",
+        "oauth2.sigstore.dev:443",
+    },
+)
+_OIDC_HOST = "token.actions.githubusercontent.com:443"
+
+
+def _endpoint_set(value: object) -> set[str] | None:
+    """Split a literal ``allowed-endpoints`` block into a host set.
+
+    Args:
+        value: The raw ``allowed-endpoints`` value from the workflow.
+
+    Returns:
+        The host set, or ``None`` when the value is an expression that a
+        resolver job fills in at run time (covered by its own test).
+    """
+    if not isinstance(value, str) or "${{" in value:
+        return None
+    return set(value.split())
+
+
+def _attesting_jobs() -> list[tuple[str, str, set[str] | None, bool]]:
+    """Collect every job that signs an attestation and its literal allowlist.
+
+    A job attests when it runs ``actions/attest-build-provenance`` or
+    ``sigstore/cosign-installer`` directly, calls lgtm-ci's
+    ``reusable-build-python-dist.yml`` (which attests dist/* since v0.70.0),
+    or calls a ``reusable-docker*`` workflow with ``cosign-sign: true``. For a
+    reusable call the caller's list only matters under ``replace`` semantics.
+
+    Returns:
+        Tuples of (workflow file, job name, allowlist or None, needs OIDC).
+    """
+    found: list[tuple[str, str, set[str] | None, bool]] = []
+    for path in _workflow_paths():
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_name, job in (workflow.get("jobs") or {}).items():
+            uses = str(job.get("uses", ""))
+            with_block = job.get("with") or {}
+            if "reusable-build-python-dist.yml" in uses:
+                if with_block.get("allowed-endpoints-mode") == "replace":
+                    found.append(
+                        (
+                            path.name,
+                            job_name,
+                            _endpoint_set(with_block.get("allowed-endpoints")),
+                            True,
+                        ),
+                    )
+                continue
+            if "reusable-docker" in uses and with_block.get("cosign-sign") is True:
+                if with_block.get("allowed-endpoints-mode") == "replace":
+                    found.append(
+                        (
+                            path.name,
+                            job_name,
+                            _endpoint_set(with_block.get("allowed-endpoints")),
+                            False,
+                        ),
+                    )
+                continue
+            steps = job.get("steps") or []
+            step_uses = [str(step.get("uses", "")) for step in steps]
+            attests = any(
+                u.startswith("actions/attest-build-provenance@") for u in step_uses
+            )
+            signs = any(u.startswith("sigstore/cosign-installer@") for u in step_uses)
+            if not (attests or signs):
+                continue
+            harden = [
+                step
+                for step in steps
+                if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+            ]
+            assert_that(harden).described_as(
+                f"{path.name}:{job_name} attests but has no harden-runner step",
+            ).is_length(1)
+            found.append(
+                (
+                    path.name,
+                    job_name,
+                    _endpoint_set(
+                        (harden[0].get("with") or {}).get("allowed-endpoints")
+                    ),
+                    attests,
+                ),
+            )
+    return found
+
+
+def test_every_attesting_job_allows_the_sigstore_hosts() -> None:
+    """Every job that signs an attestation must let Sigstore traffic out.
+
+    Under ``allowed-endpoints-mode: replace`` the caller's list is passed
+    verbatim to harden-runner, so a list copied from the pypi preset silently
+    drops the Sigstore hosts the reusable's own default carried. The
+    v0.160.3a3 checkpoint died that way: the dist attest step got
+    ``ECONNREFUSED`` from fulcio.sigstore.dev after a green build (#2562).
+    Jobs that mint an OIDC token for the attestation also need the token
+    endpoint.
+    """
+    jobs = _attesting_jobs()
+    names = {(workflow, job) for workflow, job, _, _ in jobs}
+    assert_that(names).contains(
+        ("publish-pypi-on-tag.yml", "pypi-build"),
+        ("publish-pypi-on-tag.yml", "docker-promote"),
+    )
+    assert_that([job for job in names if job[0] == "build-binaries.yml"]).is_not_empty()
+
+    offenders: list[str] = []
+    for workflow, job, endpoints, needs_oidc in jobs:
+        if endpoints is None:
+            continue
+        required = set(_SIGSTORE_HOSTS)
+        if needs_oidc:
+            required.add(_OIDC_HOST)
+        missing = sorted(required - endpoints)
+        if missing:
+            offenders.append(f"{workflow}:{job} missing {missing}")
+    assert_that(offenders).described_as(
+        "attesting jobs whose replace-mode allowlist blocks Sigstore",
+    ).is_empty()
+
+
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
     """Every lgtm-ci ref in workflows must match the single canonical pin.
 

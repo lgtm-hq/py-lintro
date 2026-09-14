@@ -118,7 +118,15 @@ jobs:
       egress-preset: pypi
       # Full list (v0.50.0+ replace semantics): the reusable passes
       # allowed-endpoints verbatim to step-security/harden-runner, so a
-      # non-empty value must include the pypi preset baseline.
+      # non-empty value must include the pypi preset baseline AND the hosts
+      # the reusable's own default list would have carried. Since lgtm-ci
+      # v0.70.0 the build job attests dist/*: the attest step fetches the
+      # OIDC token from token.actions.githubusercontent.com and signs through
+      # Sigstore (Fulcio certificate, Rekor entry, TUF root, timestamp). The
+      # pypi preset has none of those, so the replace list blocked them and
+      # the v0.160.3a3 checkpoint died with ECONNREFUSED to fulcio (#2562).
+      # Same hosts as build-binaries.yml's attest allowlist; a wiring test
+      # keeps every attesting job on them.
       allowed-endpoints-mode: replace
       allowed-endpoints: >
         github.com:443
@@ -133,6 +141,12 @@ jobs:
         astral.sh:443
         releases.astral.sh:443
         github-releases.githubusercontent.com:443
+        token.actions.githubusercontent.com:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443
 
   release-gate:
     name: Release gate
