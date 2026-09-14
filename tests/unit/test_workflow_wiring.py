@@ -2263,6 +2263,7 @@ _SIGSTORE_HOSTS = frozenset(
         "fulcio.sigstore.dev:443",
         "rekor.sigstore.dev:443",
         "tuf-repo-cdn.sigstore.dev:443",
+        "timestamp.sigstore.dev:443",
         "oauth2.sigstore.dev:443",
     },
 )
@@ -2276,11 +2277,15 @@ def _endpoint_set(value: object) -> set[str] | None:
         value: The raw ``allowed-endpoints`` value from the workflow.
 
     Returns:
-        The host set, or ``None`` when the value is an expression that a
-        resolver job fills in at run time (covered by its own test).
+        The host set (empty when the block is missing, which under ``replace``
+        semantics blocks all egress), or ``None`` when the value is an
+        expression that a resolver job fills in at run time (covered by its
+        own test).
     """
-    if not isinstance(value, str) or "${{" in value:
+    if isinstance(value, str) and "${{" in value:
         return None
+    if not isinstance(value, str):
+        return set()
     return set(value.split())
 
 
@@ -2362,7 +2367,7 @@ def test_every_attesting_job_allows_the_sigstore_hosts() -> None:
     v0.160.3a3 checkpoint died that way: the dist attest step got
     ``ECONNREFUSED`` from fulcio.sigstore.dev after a green build (#2562).
     Jobs that mint an OIDC token for the attestation also need the token
-    endpoint.
+    endpoint. A missing allowlist counts as empty, not as exempt.
     """
     jobs = _attesting_jobs()
     names = {(workflow, job) for workflow, job, _, _ in jobs}
