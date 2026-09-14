@@ -107,7 +107,8 @@ hence the `actions: read` + `issues: write` job permissions.
 - **publish-pypi-on-tag.yml** — Production tag publish: `reusable-sbom` →
   `reusable-build-python-dist` → caller `pypi-upload` job (`prepare-pypi-upload` →
   `pypa/gh-action-pypi-publish` → `attest-build-provenance`) →
-  `reusable-github-release`, then Homebrew (`build-binary.yml`) and Docker
+  `reusable-github-release`, then the binaries (`build-binaries.yml` builds and attests,
+  `publish-binaries.yml` uploads and pings the Homebrew tap) and Docker
   (`docker-build-publish.yml`). Upload via `pypa/gh-action-pypi-publish` (OIDC trusted
   publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on `main`
   via `docker-ci` only (no duplicate quality on tag).
@@ -157,71 +158,65 @@ hence the `actions: read` + `issues: write` job permissions.
   release gate. Unfiltered trigger, so the `🔐 Dependency Vulnerability Gate` context
   always reports and is safe to require
 - **lintro-report-scheduled.yml**, **pr-comment-cleanup.yml**,
-  **test-built-package.yml**, **build-binary.yml**
+  **test-built-package.yml**, **build-binaries.yml**, **publish-binaries.yml**
+
+## Binary release stages
+
+The binaries ship in two `workflow_call` stages, both called from
+`publish-pypi-on-tag.yml` (#2562):
+
+- **build-binaries.yml** (`build-binaries` job in the caller) — `Build macOS Binary` /
+  `Build Linux Binary` compile with Nuitka, run `verify_built_binary.sh` and
+  `smoke-test-binary.py`, finalize, then **attest the finalized binary** with
+  `actions/attest-build-provenance` (hard fail, no `continue-on-error`) and upload it
+  and its `sha256-*` checksum as run artifacts. `Generate Man Page` uploads `lintro.1`
+  the same way. Every job here is `contents: read`; the build jobs add `actions: read`
+  (the reuse check below), `id-token: write` and `attestations: write`. Nothing in this
+  workflow touches the release. It runs for prerelease tags too, so a prerelease can
+  prove the build stage, but publishes nothing for them.
+- **publish-binaries.yml** (`homebrew-tap` job in the caller, stable tags only) —
+  `Upload <asset> to release` downloads each binary artifact and attaches it with
+  `scripts/build/upload_release_asset.sh`; `Upload Man Page` attaches `lintro.1`;
+  `Notify Homebrew Tap` waits for PyPI and dispatches the formula update with the arm64
+  checksum. Only the two upload jobs hold `contents: write`.
+
+Artifacts (`lintro-macos-arm64`, `lintro-linux-x64`, `lintro-linux-arm64`, `sha256-*`,
+`lintro-man-page`) are retained for 90 days, the policy recovery window
+(lgtm-hq/lgtm-ci#962), so a publish rerun weeks later still finds what the run built.
+
+Neither workflow has a `workflow_dispatch` trigger. The former `build-binary.yml` repair
+dispatch resolved the _latest published_ release and republished the dispatched ref's
+binaries onto it, which is how #2484 overwrote four `v0.151.1` assets; it is gone with
+the split. Recovering a broken release is lgtm-hq/lgtm-ci#966.
 
 ## Binary release reruns
 
-`build-binary.yml`'s `Build macOS Binary` / `Build Linux Binary` jobs are idempotent
-(#2435). Before compiling, each checks whether the release already carries its platform
-asset and whether that asset's SHA256 matches the `sha256-*` artifact this same run
-produced on an earlier attempt. The check also looks at `<asset>.new` when the published
-name is missing or stale, so an interrupted swap does not cost a rebuild. On a match the
-job reuses the asset and skips `Build binary`, `Verify binary`,
-`Smoke-test tool registry`, `Finalize binary` and `Upload to release`; only the artifact
-uploads run again. The same-run artifact is written after verify and smoke-test passed
-on that earlier attempt, which is what makes skipping them safe — an asset uploaded by
-hand has no such artifact and is rebuilt.
+Both stages are idempotent (#2435), so **Re-run failed jobs** on a tag run is the
+supported recovery and npm backfill path (#2247). There is no separate dispatch path.
 
-Consequences for operators:
-
-- **Re-run failed jobs** on a tag run is the supported npm backfill path (#2247): the
-  binary jobs pass in ~2 minutes instead of a ~20-minute rebuild, and `npm-publish` runs
-  under the trusted workflow identity it needs. There is no separate dispatch path.
-- The two compile jobs upload with `scripts/build/upload_release_asset.sh`, which
-  uploads `<asset>.new`, verifies its checksum, and only then deletes and renames. A
-  kill between that delete and that rename leaves only `<asset>.new`, and both halves of
-  the next attempt recover from it: the reuse check promotes it when it matches the
-  run's checksum artifact (so the rerun still skips the rebuild), and the uploader
-  promotes it when it matches the binary it was about to upload. A killed runner can no
-  longer strip a good binary off a published release, which is what the
-  `softprops/action-gh-release` overwrite path did on `v0.147.3`. The
-  `Generate Man Page` job still uploads with `softprops/action-gh-release`; its asset is
-  regenerated cheaply, so the swap was not extended to it.
-
-### Dispatching `build-binary.yml` by hand
-
-`get-release-info` resolves the latest published release whenever no `release_tag` input
-is supplied, so before #2484 a bare `workflow_dispatch` republished main-HEAD binaries,
-the man page and the universal binary onto a shipped release — three such dispatches
-overwrote four `v0.151.1` assets and broke the Homebrew arm64 checksum. Every publishing
-step and the `homebrew-dispatch` job are now gated on
-`inputs.release_tag != '' || inputs.upload_to_release == true`.
-
-- **Plain dispatch** (leave `upload_to_release` off): builds, verifies and uploads run
-  artifacts only. Nothing on any release is touched. This is the safe way to test a
-  build from a branch.
-- **Repair dispatch** (`upload_to_release: true`, **run from the release tag**):
-  republishes the built binaries onto the release `get-release-info` resolves. Use it
-  only to restore assets a broken run left behind; download the artifacts from the tag
-  run first if you want to compare checksums.
-  - **Select the release tag as the dispatch ref** ("Use workflow from" in the UI, or
-    `gh workflow run build-binary.yml --ref <tag> ...`). The workflow checks out the ref
-    it was dispatched from, but `get-release-info` resolves the _latest published
-    release_ regardless — so a repair dispatched from `main` compiles main-HEAD and
-    publishes it onto a shipped release under that release's asset names, which is the
-    same corruption #2484 is about, just with the gate honoured. The full invariant:
-    only the _latest published_ release can be repaired this way, the dispatch ref has
-    to be that release's tag, and dispatching from any older tag publishes that ref's
-    binaries onto the current latest release's asset names. Repairing an older release
-    needs a different path (see the incident notes on #2484).
-  - **There is no `arch` input to get wrong.** Since #2579 the workflow builds exactly
-    the three release assets — `lintro-macos-arm64`, `lintro-linux-x64`,
-    `lintro-linux-arm64` — unconditionally, so a repair dispatch restores all of them
-    and, on a stable release, re-pings the tap with the arm64 checksum. Intel Macs are
-    served from PyPI by the Homebrew formula and have no asset to repair.
-- **The tag pipeline is unaffected.** `publish-pypi-on-tag.yml` calls this workflow with
-  `release_tag`, which satisfies the first disjunct; `upload_to_release` is a
-  dispatch-only input and never reaches the `workflow_call` path.
+- A failed build job rebuilds; a build job that already succeeded keeps its artifacts
+  from the earlier attempt, and the publish jobs download those. Before compiling, each
+  build job also checks whether the release already carries its platform asset with a
+  SHA256 matching the `sha256-*` artifact this same run produced on an earlier attempt
+  (`scripts/build/reuse_release_asset.sh`); on a match it skips `Build binary`,
+  `Verify binary`, `Smoke-test tool registry`, `Finalize binary` and
+  `Attest build provenance` and only re-uploads the artifacts. The same-run artifact is
+  written after verify, smoke-test and attest passed on that earlier attempt, which is
+  what makes skipping them safe — an asset uploaded by hand has no such artifact and is
+  rebuilt. The build jobs hold `contents: read`, so an interrupted swap's `<asset>.new`
+  is not promoted there; that case rebuilds and the publish stage finishes the swap.
+- The publish jobs run the same check with `contents: write`: a matching asset skips the
+  upload, a matching `<asset>.new` left by an interrupted swap is promoted, and anything
+  else is uploaded with `scripts/build/upload_release_asset.sh`, which uploads
+  `<asset>.new`, verifies its checksum, and only then deletes and renames. A kill
+  between that delete and that rename leaves only `<asset>.new`, and the next attempt
+  recovers from it in either place. A killed runner can no longer strip a good binary
+  off a published release, which is what the `softprops/action-gh-release` overwrite
+  path did on `v0.147.3`. The man page is still uploaded with
+  `softprops/action-gh-release`; it is regenerated cheaply, so the swap was not extended
+  to it.
+- `npm-publish` runs under the trusted workflow identity it needs on a rerun, because it
+  is still called from the tag pipeline.
 
 ## Token patterns
 
