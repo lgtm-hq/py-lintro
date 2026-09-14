@@ -132,12 +132,15 @@ DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
 # GitHub build-provenance attestation. The attestation is stored on this
 # repository, but the signer is the workflow that ran the attest step: a
 # release tag or backfill is attested inside lgtm-ci's reusable-docker.yml,
-# so gh must be told to accept that signer (its default expects a signer in
-# --repo); the main promotion is attested in-repo by docker-ci.yml.
+# the main promotion in-repo by docker-ci.yml. Pin the exact signer workflow
+# rather than only its repository, so no other workflow in either
+# repository can vouch for the image.
 gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
-  --repo lgtm-hq/py-lintro --signer-repo lgtm-hq/lgtm-ci   # release tags, backfills
+  --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml   # release tags, backfills
 gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
-  --repo lgtm-hq/py-lintro                                 # main promotion
+  --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/py-lintro/.github/workflows/docker-ci.yml       # main promotion
 
 # Cosign keyless signature, bound to the same signer identities: Fulcio
 # records the reusable workflow's path for tag and backfill images and

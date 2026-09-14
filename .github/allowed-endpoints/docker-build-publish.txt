@@ -55,3 +55,9 @@ rekor.sigstore.dev:443
 tuf-repo-cdn.sigstore.dev:443
 timestamp.sigstore.dev:443
 oauth2.sigstore.dev:443
+
+# Trivy image scan (scan: true on the three release jobs, #2630): the
+# installer download and the vulnerability-DB mirror, as in
+# docker-tools-publish.yml
+get.trivy.dev:443
+mirror.gcr.io:443
