@@ -3901,6 +3901,73 @@ def test_binary_artifacts_are_retained_for_the_recovery_window() -> None:
     )
 
 
+def test_publish_binaries_receives_one_named_secret() -> None:
+    """The publish call passes exactly the tap dispatch token, not ``inherit``.
+
+    ``secrets: inherit`` would hand the call every org/repo secret; the callee
+    needs one, declares it on its ``workflow_call`` interface, and uses no
+    other secret besides ``GITHUB_TOKEN`` (#2562 review).
+    """
+    caller = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = caller["jobs"]["homebrew-tap"]
+    assert_that(job["secrets"]).is_equal_to(
+        {"HOMEBREW_TAP_DISPATCH_TOKEN": "${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}"},
+    )
+    build_job = caller["jobs"]["build-binaries"]
+    assert_that(build_job).does_not_contain_key("secrets")
+
+    callee = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    declared = callee["on"]["workflow_call"]["secrets"]
+    assert_that(set(declared)).is_equal_to({"HOMEBREW_TAP_DISPATCH_TOKEN"})
+    assert_that(declared["HOMEBREW_TAP_DISPATCH_TOKEN"]["required"]).is_true()
+    for workflow_name in _BINARY_WORKFLOWS:
+        text = (_REPO_ROOT / ".github" / "workflows" / workflow_name).read_text(
+            encoding="utf-8",
+        )
+        used = set(re.findall(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)", text))
+        assert_that(used - {"GITHUB_TOKEN"}).described_as(workflow_name).is_subset_of(
+            set(declared),
+        )
+
+
+def test_binary_publish_jobs_allowlist_the_artifact_service() -> None:
+    """Every hardened publish job that moves an artifact can reach the service.
+
+    Block-mode harden-runner denies ``actions/download-artifact`` its hops to
+    ``pipelines.actions.githubusercontent.com`` and
+    ``results-receiver.actions.githubusercontent.com`` unless both are
+    allowlisted, and the failure only shows on a tag run (#2562 review).
+    """
+    for workflow_name in _BINARY_WORKFLOWS:
+        workflow = _load_workflow(name=workflow_name)
+        for job_id, job in workflow["jobs"].items():
+            steps = job.get("steps") or []
+            harden = next(
+                (
+                    step
+                    for step in steps
+                    if str(step.get("uses", "")).startswith("step-security/")
+                ),
+                None,
+            )
+            assert_that(harden).described_as(f"{workflow_name}:{job_id}").is_not_none()
+            assert harden is not None
+            assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+            moves_artifact = any(
+                str(step.get("uses", "")).startswith(
+                    ("actions/upload-artifact@", "actions/download-artifact@"),
+                )
+                for step in steps
+            )
+            if not moves_artifact:
+                continue
+            endpoints = str(harden["with"]["allowed-endpoints"]).split()
+            assert_that(endpoints).described_as(f"{workflow_name}:{job_id}").contains(
+                "pipelines.actions.githubusercontent.com:443",
+                "results-receiver.actions.githubusercontent.com:443",
+            )
+
+
 def _job_ancestors(workflow: dict[str, Any], *, job_id: str) -> set[str]:
     """Return every job ``job_id`` transitively depends on via ``needs``.
 

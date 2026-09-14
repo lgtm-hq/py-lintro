@@ -13,6 +13,12 @@ name: Publish - Homebrew Tap
         description: 'Release tag to publish'
         required: true
         type: string
+    secrets:
+      HOMEBREW_TAP_DISPATCH_TOKEN:
+        description: >-
+          Token that can fire repository_dispatch on lgtm-hq/homebrew-tap.
+          The only secret this workflow uses besides GITHUB_TOKEN.
+        required: true
 
 permissions: {}
 
@@ -28,6 +34,19 @@ jobs:
       is_prerelease: ${{ steps.get-tag.outputs.is_prerelease }}
 
     steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          # Sparse checkout plus the gh CLI's API endpoint (unreached on the
+          # workflow_call path, see below, but the script is given GH_TOKEN).
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+
       - name: Checkout scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -200,12 +219,16 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
+          # pipelines/results-receiver: actions/download-artifact reaches the
+          # artifact service through them under block mode.
           allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
             actions.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
             pypi.org:443
 
       - name: Checkout scripts
