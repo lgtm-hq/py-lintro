@@ -145,13 +145,18 @@ permissions:
 
 ## Permission Scopes by Workflow
 
-| Workflow                   | Permissions                        | Justification         |
-| -------------------------- | ---------------------------------- | --------------------- |
-| `docker-ci.yml`            | `contents: read` (+ per-job)       | CI pipeline + quality |
-| `test-ci.yml`              | `contents: read` (+ per-job)       | Unit tests            |
-| `publish-pypi-on-tag.yml`  | `contents: write, id-token: write` | Release + OIDC        |
-| `build-binary.yml`         | `contents: write`                  | Upload release assets |
-| `docker-build-publish.yml` | `contents: read` (+ per-job)       | Push to GHCR          |
+| Workflow                   | Permissions                  | Justification         |
+| -------------------------- | ---------------------------- | --------------------- |
+| `docker-ci.yml`            | `contents: read` (+ per-job) | CI pipeline + quality |
+| `test-ci.yml`              | `contents: read` (+ per-job) | Unit tests            |
+| `publish-pypi-on-tag.yml`  | `{}` (+ per-job)             | Release + OIDC        |
+| `build-binaries.yml`       | `{}` (+ per-job)             | Build + attest        |
+| `publish-binaries.yml`     | `{}` (+ per-job)             | Homebrew dispatch     |
+| `docker-build-publish.yml` | `contents: read` (+ per-job) | Push to GHCR          |
+
+In the tag pipeline `contents: write` is held by the `github-release` call alone; the
+build jobs hold `id-token: write` + `attestations: write` to attest what they built, and
+`release-gate` and `pypi-upload` hold `attestations: read` to verify it.
 
 ## Supply Chain Security
 
@@ -160,12 +165,23 @@ permissions:
 Software Bill of Materials (SBOM) is generated for each release using:
 
 - `cyclonedx-bom` for Python dependencies
-- Attestation artifacts for verification
+- A GitHub build-provenance attestation on every release asset — the sdist and wheel
+  (attested inside lgtm-ci's `reusable-build-python-dist.yml`) and the three platform
+  binaries (attested inside `build-binaries.yml`) — created **before** the first
+  publish. The `release-gate` job of `publish-pypi-on-tag.yml` runs
+  `gh attestation verify` on every one of them, checks `SHA256SUMS`, and only then does
+  PyPI, the GitHub Release or any other channel receive anything; nothing is rebuilt
+  after the `pypi` approval. The Sigstore bundles ship on the GitHub Release as
+  `<asset>.intoto.jsonl` next to `SHA256SUMS`, and the release's assets are immutable (a
+  rerun never overwrites a published asset whose bytes differ).
 - BuildKit SBOM and provenance attestations on every published container image
   (`py-lintro`, `py-lintro-base`, `py-lintro-ai` and the tools images), plus a GitHub
-  build-provenance attestation and a Cosign keyless signature on each image digest; the
-  tag publish, the manual backfill and the `main` promotion all produce the same
-  evidence. See "Verify an image" in `docs/docker.md`.
+  build-provenance attestation and a Cosign keyless signature on each image digest. The
+  release images are built, attested and signed under staging tags before the `pypi`
+  approval, verified and signed again by `publish-pypi-on-tag.yml` at promote time, and
+  promoted to their version tags by digest; the manual backfill and the `main` promotion
+  produce the same evidence. See "Verify an image" and "Verify a release asset" in
+  `docs/docker.md`.
 
 ### Dependency Updates
 
@@ -180,6 +196,19 @@ PyPI packages are published using OIDC trusted publishing, which provides:
 - Cryptographic proof of build provenance
 - No long-lived credentials to leak
 - Transparent build logs
+
+Release assets on GitHub can be verified offline from the attached bundles or online
+against the attestations API:
+
+```bash
+gh attestation verify lintro-linux-x64 --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/py-lintro/.github/workflows/build-binaries.yml
+gh attestation verify lintro-<version>-py3-none-any.whl --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml
+gh attestation verify lintro-linux-x64 --repo lgtm-hq/py-lintro \
+  --bundle lintro-linux-x64.intoto.jsonl
+sha256sum -c SHA256SUMS
+```
 
 ## Incident Response
 

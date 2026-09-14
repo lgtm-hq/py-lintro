@@ -124,6 +124,15 @@ for `py-lintro` and `py-lintro-base`, the two images with a rolling `main` tag
 (`py-lintro-ai` is published from tags only), so a `main` tag verifies the same way as a
 release.
 
+Since #2562 a release image is built, attested and cosign-signed under run-scoped
+staging tags **before** the `pypi` approval, and `docker-promote` retags the exact index
+digest to `<version>`, `<major.minor>`, `<major>` and `latest` after the GitHub Release.
+Before any retag that job runs the `gh attestation verify` command below on each staging
+digest and adds a second cosign signature from `publish-pypi-on-tag.yml`, so a release
+digest carries two signatures: the build-time one from lgtm-ci's nested multi-platform
+reusable and the promote-time one from this repository's tag workflow. Either satisfies
+the identity regexp below.
+
 ```bash
 # Resolve the digest of the tag you intend to run
 DIGEST=$(docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest \
@@ -151,7 +160,7 @@ gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
 # with cosign 2.6 or newer and pass --new-bundle-format; older cosign,
 # including 2.5, reports "no signatures found".
 cosign verify --new-bundle-format "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
-  --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/docker-ci\.yml|lgtm-ci/\.github/workflows/reusable-docker-(build|multiplatform)\.yml)@' \
+  --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/(docker-ci|publish-pypi-on-tag)\.yml|lgtm-ci/\.github/workflows/reusable-docker-(build|multiplatform)\.yml)@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # BuildKit provenance and SBOM attached to the index (non-empty for each platform)
@@ -162,6 +171,33 @@ docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
 ```
 
 Substitute `py-lintro-base` or `py-lintro-ai` for the other release images.
+
+### Verify a release asset
+
+The sdist, the wheel and the three platform binaries on a GitHub Release carry the same
+kind of GitHub build-provenance attestation, made before the first publish and checked
+by the tag pipeline's `release-gate` job. As with the images, the signer is the workflow
+whose job ran the attest step, which is a reusable, not the entry workflow: lgtm-ci's
+`reusable-build-python-dist.yml` for the dist files and this repository's
+`build-binaries.yml` for the binaries.
+
+```bash
+gh attestation verify lintro-macos-arm64 --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/py-lintro/.github/workflows/build-binaries.yml
+gh attestation verify lintro-<version>.tar.gz --repo lgtm-hq/py-lintro \
+  --signer-workflow lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml
+
+# Offline, from the bundle attached next to each asset
+gh attestation verify lintro-macos-arm64 --repo lgtm-hq/py-lintro \
+  --bundle lintro-macos-arm64.intoto.jsonl
+
+# Checksums over every asset, bundles included
+sha256sum -c SHA256SUMS
+```
+
+The bundle is the JSONL `gh attestation download` produces (a Sigstore bundle wrapping
+the in-toto provenance statement), attached as `<asset>.intoto.jsonl` so Scorecard's
+Signed-Releases check finds a signature file next to every asset.
 
 ### Using the Published Image
 
