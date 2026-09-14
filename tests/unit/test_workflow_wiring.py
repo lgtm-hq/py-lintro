@@ -7264,15 +7264,28 @@ def test_docker_promote_depends_on_the_github_release() -> None:
         "needs.classify-tag.outputs.is_prerelease == 'false'",
     )
     assert_that(promote).does_not_contain_key("uses")
-    # No attestations: write. Nothing new is attested; the attestation is
-    # digest-bound and the job only verifies it.
+    # attestations: read, not write. Nothing new is attested; the attestation
+    # is digest-bound and the job only verifies it, and with an explicit
+    # permissions block an omitted scope is `none`, which makes the
+    # attestations API call unauthorized (Codex on #2658).
     assert_that(promote["permissions"]).is_equal_to(
-        {"contents": "read", "packages": "write", "id-token": "write"},
+        {
+            "contents": "read",
+            "attestations": "read",
+            "packages": "write",
+            "id-token": "write",
+        },
     )
 
 
-def test_docker_promote_retags_signs_and_verifies_the_exported_digests() -> None:
-    """Promote (x3) -> cosign -> gh attestation verify, in order, none bypassable."""
+def test_docker_promote_verifies_then_retags_then_signs_the_exported_digests() -> None:
+    """Gh attestation verify -> promote (x3) -> cosign, in order, none bypassable.
+
+    Verification runs on the staging digests before any retag: attestations
+    are digest-bound, so it proves the same thing as verifying the promoted
+    refs, and a missing attestation fails the job while the version tags
+    are still unmoved (Codex on #2658).
+    """
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     steps = _job_steps(publish, job="docker-promote")
     index_by_run = {str(step.get("run", "")): i for i, step in enumerate(steps)}
@@ -7293,18 +7306,21 @@ def test_docker_promote_retags_signs_and_verifies_the_exported_digests() -> None
     )
     sign = index_by_run["scripts/ci/cosign-sign-images.sh"]
     verify = index_by_run["scripts/ci/verify-image-attestations.sh"]
+    first_promote = min(index_by_run[step["run"]] for step in promotes)
     last_promote = max(index_by_run[step["run"]] for step in promotes)
+    assert_that(verify).is_less_than(first_promote)
     assert_that(last_promote).is_less_than(sign)
-    assert_that(sign).is_less_than(verify)
     verify_step = steps[verify]
     assert_that(verify_step["env"]["ATTESTATION_REPO"]).is_equal_to("lgtm-hq/py-lintro")
     assert_that(verify_step["env"]["SIGNER_REPO"]).is_equal_to("lgtm-hq/lgtm-ci")
     assert_that(verify_step["env"]).contains_key("GH_TOKEN")
-    for image in _PROMOTED_IMAGE_DIGESTS:
-        for step in (steps[sign], verify_step):
-            assert_that(str(step["env"]["IMAGES"])).described_as(
-                step["name"],
-            ).contains(f"{image}@${{{{ steps.promote-")
+    for image, digest in _PROMOTED_IMAGE_DIGESTS.items():
+        # Verification targets the staging digests the build stage exported;
+        # signing targets the digests the retag confirmed.
+        assert_that(str(verify_step["env"]["IMAGES"])).contains(f"{image}@{digest}")
+        assert_that(str(steps[sign]["env"]["IMAGES"])).contains(
+            f"{image}@${{{{ steps.promote-",
+        )
     for step in (*promotes, steps[sign], verify_step):
         assert_that(step.get("continue-on-error")).described_as(step["name"]).is_none()
         assert_that(step.get("if")).described_as(step["name"]).is_none()

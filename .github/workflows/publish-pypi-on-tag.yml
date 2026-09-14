@@ -436,16 +436,20 @@ jobs:
     # Promotion is a registry-side retag of the digests built and attested
     # before the gate; nothing is rebuilt after approval (#1358, #2562). The
     # GitHub attestation and the lgtm-ci cosign signature are digest-bound
-    # and carry over; this job adds its own signature and verifies the
-    # attestation on every promoted digest before the job goes green.
+    # and carry over; this job verifies the attestation on every staging
+    # digest first, retags, then adds its own signature.
     needs: [classify-tag, docker-build, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
       needs.classify-tag.outputs.is_prerelease == 'false'
     runs-on: ubuntu-24.04
     permissions:
-      # read: checkout; gh attestation verify reads the attestations API
+      # read: checkout
       contents: read
+      # read: gh attestation verify reads the attestations API. With an
+      # explicit permissions block an omitted scope is `none`, so without
+      # this the verification is unauthorized.
+      attestations: read
       # write: retag the promoted digests in GHCR
       packages: write
       # write: OIDC for cosign keyless signing of the promoted digests
@@ -522,8 +526,23 @@ jobs:
             type=semver,pattern={{version}},value=${{ github.ref_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
             type=semver,pattern={{major}},value=${{ github.ref_name }}
-      # EXPECTED_DIGEST pins each promotion to the digest the staging build
-      # exported: the version tags can only ever land on the attested bytes.
+      # Verify BEFORE any retag: attestations are digest-bound, so proving
+      # the staging digests is proving the promoted ones, and a missing
+      # attestation fails the job while the version tags are still unmoved.
+      - name: Verify attestations on the staging digests
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ATTESTATION_REPO: lgtm-hq/py-lintro
+          # The nested lgtm-ci reusable made the attestation, so the signer
+          # is lgtm-ci as a whole (docs/docker.md).
+          SIGNER_REPO: lgtm-hq/lgtm-ci
+          IMAGES: |
+            ghcr.io/lgtm-hq/py-lintro-base@${{ needs.docker-build.outputs.base-digest }}
+            ghcr.io/lgtm-hq/py-lintro@${{ needs.docker-build.outputs.full-digest }}
+            ghcr.io/lgtm-hq/py-lintro-ai@${{ needs.docker-build.outputs.ai-digest }}
+        run: scripts/ci/verify-image-attestations.sh
+      # EXPECTED_DIGEST pins each promotion to the digest verified above:
+      # the version tags can only ever land on the attested bytes.
       - name: Promote base image (digest retag)
         id: promote-base
         env:
@@ -558,15 +577,3 @@ jobs:
             ghcr.io/lgtm-hq/py-lintro@${{ steps.promote-full.outputs.digest }}
             ghcr.io/lgtm-hq/py-lintro-ai@${{ steps.promote-ai.outputs.digest }}
         run: scripts/ci/cosign-sign-images.sh
-      - name: Verify attestations on the promoted digests
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ATTESTATION_REPO: lgtm-hq/py-lintro
-          # The nested lgtm-ci reusable made the attestation, so the signer
-          # is lgtm-ci as a whole (docs/docker.md).
-          SIGNER_REPO: lgtm-hq/lgtm-ci
-          IMAGES: |
-            ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
-            ghcr.io/lgtm-hq/py-lintro@${{ steps.promote-full.outputs.digest }}
-            ghcr.io/lgtm-hq/py-lintro-ai@${{ steps.promote-ai.outputs.digest }}
-        run: scripts/ci/verify-image-attestations.sh

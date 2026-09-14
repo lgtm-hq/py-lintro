@@ -112,12 +112,12 @@ hence the `actions: read` + `issues: write` job permissions.
   (#2562): `docker-build` calls `docker-build-publish.yml` in staging mode at tag push
   (build, scan, attest, cosign; run-scoped `build-<run_id>` tags only, no version or
   `latest`), `docker-manifest` records the three index digests in the `release-manifest`
-  artifact (90 days), and `docker-promote` retags those digests to `<version>`,
-  `<major.minor>`, `<major>`, `latest` after the GitHub Release, signs them and runs
-  `gh attestation verify oci://…` on each. Prereleases run the staging build and skip
-  the promote. Upload via `pypa/gh-action-pypi-publish` (OIDC trusted publishing) runs
-  in this workflow file, not in lgtm-ci reusables. Lint runs on `main` via `docker-ci`
-  only (no duplicate quality on tag).
+  artifact (90 days), and `docker-promote`, after the GitHub Release, runs
+  `gh attestation verify oci://…` on each staging digest first, then retags them to
+  `<version>`, `<major.minor>`, `<major>`, `latest` and signs them. Prereleases run the
+  staging build and skip the promote. Upload via `pypa/gh-action-pypi-publish` (OIDC
+  trusted publishing) runs in this workflow file, not in lgtm-ci reusables. Lint runs on
+  `main` via `docker-ci` only (no duplicate quality on tag).
 - **docker-build-publish.yml** — Multi-arch GHCR build via `reusable-docker.yml` (base +
   full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
   pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical
