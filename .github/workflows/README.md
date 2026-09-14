@@ -119,13 +119,13 @@ hence the `actions: read` + `issues: write` job permissions.
   days). Publish stage: `pypi-upload` (`environment: pypi`, `prepare-pypi-upload` with
   `require-attestation`, then `pypa/gh-action-pypi-publish` as the last step — the first
   irreversible write of the run) → `reusable-github-release` (attaches `release-assets`
-  with `checksums` and `immutable-assets`) → `docker-promote` (verify the staging
-  digests, retag to `<version>`, `<major.minor>`, `<major>`, `latest`, cosign),
-  `homebrew-tap` (`publish-binaries.yml`: reads the arm64 sha256 from the manifest and
-  pings the tap), `npm-publish` (no longer behind Homebrew) and the mirror lane.
-  Prereleases run the build stage, the gate, PyPI and the GitHub Release as before and
-  skip the Docker promote, Homebrew and npm. Lint runs on `main` via `docker-ci` only
-  (no duplicate quality on tag).
+  with `checksums` and `immutable-assets`) → `docker-promote` (verify and cosign the
+  staging digests, then retag to `<version>`, `<major.minor>`, `<major>`, `latest` as
+  the last steps), `homebrew-tap` (`publish-binaries.yml`: reads the arm64 sha256 from
+  the manifest and pings the tap), `npm-publish` (no longer behind Homebrew) and the
+  mirror lane. Prereleases run the build stage, the gate, PyPI and the GitHub Release as
+  before and skip the Docker promote, Homebrew and npm. Lint runs on `main` via
+  `docker-ci` only (no duplicate quality on tag).
 - **docker-build-publish.yml** — Multi-arch GHCR build via `reusable-docker.yml` (base +
   full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
   pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical

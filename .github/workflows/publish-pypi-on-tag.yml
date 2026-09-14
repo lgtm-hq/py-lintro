@@ -503,7 +503,7 @@ jobs:
     # before the gate; nothing is rebuilt after approval (#1358, #2562). The
     # GitHub attestation and the lgtm-ci cosign signature are digest-bound
     # and carry over; this job verifies the attestation on every staging
-    # digest first, retags, then adds its own signature.
+    # digest, adds its own signature to those digests, and retags last.
     needs: [classify-tag, docker-build, release-gate, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
@@ -607,8 +607,24 @@ jobs:
             ghcr.io/lgtm-hq/py-lintro@${{ needs.docker-build.outputs.full-digest }}
             ghcr.io/lgtm-hq/py-lintro-ai@${{ needs.docker-build.outputs.ai-digest }}
         run: scripts/ci/verify-image-attestations.sh
-      # EXPECTED_DIGEST pins each promotion to the digest verified above:
-      # the version tags can only ever land on the attested bytes.
+      # Sign BEFORE any retag (Codex on #2659): a cosign signature is bound
+      # to the digest, so signing the staging digest signs every tag it will
+      # carry, and a signing failure leaves the version tags unmoved rather
+      # than a partially promoted, unsigned release.
+      - name: Install Cosign
+        # yamllint disable-line rule:line-length
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign staging digests (keyless)
+        env:
+          IMAGES: |
+            ghcr.io/lgtm-hq/py-lintro-base@${{ needs.docker-build.outputs.base-digest }}
+            ghcr.io/lgtm-hq/py-lintro@${{ needs.docker-build.outputs.full-digest }}
+            ghcr.io/lgtm-hq/py-lintro-ai@${{ needs.docker-build.outputs.ai-digest }}
+        run: scripts/ci/cosign-sign-images.sh
+      # The retags are the job's irreversible writes and its last steps:
+      # nothing may follow them. EXPECTED_DIGEST pins each promotion to the
+      # digest verified and signed above, so the version tags can only ever
+      # land on the attested bytes.
       - name: Promote base image (digest retag)
         id: promote-base
         env:
@@ -633,13 +649,3 @@ jobs:
           EXPECTED_DIGEST: ${{ needs.docker-build.outputs.ai-digest }}
           TAGS: ${{ steps.meta-ai.outputs.tags }}
         run: scripts/ci/promote-ci-docker-images.sh
-      - name: Install Cosign
-        # yamllint disable-line rule:line-length
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-      - name: Sign promoted digests (keyless)
-        env:
-          IMAGES: |
-            ghcr.io/lgtm-hq/py-lintro-base@${{ steps.promote-base.outputs.digest }}
-            ghcr.io/lgtm-hq/py-lintro@${{ steps.promote-full.outputs.digest }}
-            ghcr.io/lgtm-hq/py-lintro-ai@${{ steps.promote-ai.outputs.digest }}
-        run: scripts/ci/cosign-sign-images.sh

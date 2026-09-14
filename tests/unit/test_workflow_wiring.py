@@ -7175,8 +7175,8 @@ def test_docker_promote_depends_on_the_github_release() -> None:
     )
 
 
-def test_docker_promote_verifies_then_retags_then_signs_the_exported_digests() -> None:
-    """Gh attestation verify -> promote (x3) -> cosign, in order, none bypassable.
+def test_docker_promote_verifies_signs_then_retags_last() -> None:
+    """Gh attestation verify -> cosign -> promote (x3) last, none bypassable.
 
     Verification runs on the staging digests before any retag: attestations
     are digest-bound, so it proves the same thing as verifying the promoted
@@ -7210,19 +7210,25 @@ def test_docker_promote_verifies_then_retags_then_signs_the_exported_digests() -
     # Indexed by step id: the three promote steps share one ``run`` string,
     # so a run-keyed index collapses them onto the last one (Codex on #2658).
     promote_indexes = [index_by_id[step["id"]] for step in promotes]
-    assert_that(verify).is_less_than(min(promote_indexes))
-    assert_that(max(promote_indexes)).is_less_than(sign)
+    # Signing precedes every retag (Codex on #2659): a signature is bound to
+    # the digest, so the staging digest's signature is the promoted tags'
+    # signature, and a failure leaves the version tags unmoved. The retags
+    # are the job's irreversible writes, so they are its last steps.
+    assert_that(verify).is_less_than(sign)
+    assert_that(sign).is_less_than(min(promote_indexes))
+    assert_that(sorted(promote_indexes)).is_equal_to(
+        list(range(len(steps) - 3, len(steps))),
+    )
+    assert_that(steps[-1]["run"]).is_equal_to("scripts/ci/promote-ci-docker-images.sh")
     verify_step = steps[verify]
     assert_that(verify_step["env"]["ATTESTATION_REPO"]).is_equal_to("lgtm-hq/py-lintro")
     assert_that(verify_step["env"]["SIGNER_REPO"]).is_equal_to("lgtm-hq/lgtm-ci")
     assert_that(verify_step["env"]).contains_key("GH_TOKEN")
     for image, digest in _PROMOTED_IMAGE_DIGESTS.items():
-        # Verification targets the staging digests the build stage exported;
-        # signing targets the digests the retag confirmed.
+        # Verification and signing both target the staging digests the build
+        # stage exported; the retags pin to the same digests.
         assert_that(str(verify_step["env"]["IMAGES"])).contains(f"{image}@{digest}")
-        assert_that(str(steps[sign]["env"]["IMAGES"])).contains(
-            f"{image}@${{{{ steps.promote-",
-        )
+        assert_that(str(steps[sign]["env"]["IMAGES"])).contains(f"{image}@{digest}")
     for step in (*promotes, steps[sign], verify_step):
         assert_that(step.get("continue-on-error")).described_as(step["name"]).is_none()
         assert_that(step.get("if")).described_as(step["name"]).is_none()
