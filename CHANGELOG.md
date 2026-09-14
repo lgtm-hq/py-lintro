@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.160.2] - 2026-09-14
+
+### Fixed
+
+- **docker**: enable provenance and SBOM on the three release images in every publish
+  path (#2640) (936732a)
+
 ## [0.160.1] - 2026-09-13
 
 ### Fixed
