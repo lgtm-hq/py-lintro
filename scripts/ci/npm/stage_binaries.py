@@ -26,7 +26,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NPM_DIR = PROJECT_ROOT / "npm"
 
 # Map: (artifact name, binary filename) -> npm platform package directory.
-# Artifact names mirror the upload steps in build-binary.yml; npm platform
+# Artifact names mirror the upload steps in build-binaries.yml; npm platform
 # keys follow Node's platform-arch convention (darwin/arm64, linux/x64, ...).
 # There is no darwin-x64 entry: Intel Macs are served from PyPI (#2579).
 BINARY_MAP: dict[str, str] = {

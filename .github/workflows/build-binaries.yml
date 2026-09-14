@@ -1,21 +1,19 @@
 ---
-name: Publish - Homebrew Tap
+name: Build - Platform Binaries
+# Build stage of the binary release (#2562): compiles, verifies, smoke-tests
+# and attests the three platform binaries and generates the man page, then
+# uploads everything as run artifacts. Nothing here writes to a release; the
+# publish stage is publish-binaries.yml. workflow_call only: the manual
+# repair dispatch that resolved "latest release" (#2484) is gone, and
+# recovery is lgtm-hq/lgtm-ci#966.
 
 'on':
   workflow_call:
     inputs:
       release_tag:
-        description: 'Release tag to publish'
+        description: 'Release tag the binaries are built for'
         required: true
         type: string
-  workflow_dispatch:
-    inputs:
-      upload_to_release:
-        # yamllint disable-line rule:line-length
-        description: 'Repair path: republish the built binaries onto the latest release. Dispatch from the release tag, or you publish this ref onto that release. Leave off - a plain dispatch only builds and uploads run artifacts.'
-        required: false
-        default: false
-        type: boolean
 
 permissions: {}
 
@@ -29,45 +27,13 @@ env:
   UV_VERSION: '0.12.11'
 
 jobs:
-  get-release-info:
-    name: Get Release Info
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    # Manual runs use latest release. Tag releases pass inputs.release_tag via
-    # workflow_call; the caller's push event is inherited (not workflow_call).
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      inputs.release_tag != ''
-    outputs:
-      release_tag: ${{ steps.get-tag.outputs.tag }}
-      is_prerelease: ${{ steps.get-tag.outputs.is_prerelease }}
-
-    steps:
-      - name: Checkout scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts
-
-      - name: Get release tag
-        id: get-tag
-        run: scripts/ci/homebrew/get-release-info.sh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_CALL_RELEASE_TAG: ${{ inputs.release_tag }}
-
   generate-man-page:
     name: Generate Man Page
-    needs: get-release-info
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
-      # Required by softprops/action-gh-release to upload dist/lintro.1.
-      contents: write
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      inputs.release_tag != ''
+      # read: checkout only. The release upload lives in publish-binaries.yml.
+      contents: read
 
     steps:
       - name: Harden Runner
@@ -84,7 +50,8 @@ jobs:
             files.pythonhosted.org:443
             astral.sh:443
             releases.astral.sh:443
-            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -123,27 +90,12 @@ jobs:
         with:
           name: lintro-man-page
           path: dist/lintro.1
-          retention-days: 7
-
-      - name: Upload to release
-        # Resolved tag is set for both workflow_call and workflow_dispatch, so
-        # a bare dispatch would otherwise republish onto the latest release
-        # (#2484). Publish on the workflow_call path, or on a dispatch that
-        # explicitly asked for a repair upload.
-        if: >-
-          needs.get-release-info.outputs.release_tag != '' &&
-          (inputs.release_tag != '' || inputs.upload_to_release == true)
-        # yamllint disable-line rule:line-length
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
-        with:
-          tag_name: ${{ needs.get-release-info.outputs.release_tag }}
-          files: dist/lintro.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 90 days: the policy recovery window (lgtm-hq/lgtm-ci#962), so a
+          # publish rerun weeks later still finds what this run built.
+          retention-days: 90
 
   build-macos:
     name: Build macOS Binary
-    needs: get-release-info
     runs-on: macos-latest
     # 25 min compile + 20 min smoke + 15 min setup/diagnostic headroom.
     # The smoke step's 20-minute budget used to sit inside a 35-minute job
@@ -151,11 +103,19 @@ jobs:
     # valid smoke test.
     timeout-minutes: 60
     permissions:
-      contents: write
+      # read: checkout, and the reuse check downloads the published asset to
+      # hash it. No contents: write anywhere in this workflow (#2562): the
+      # release is only touched by publish-binaries.yml.
+      contents: read
       # #2435: the reuse check lists and downloads this run's own sha256
       # artifact (including earlier attempts) to decide whether the asset on
       # the release is one this job already verified.
       actions: read
+      # write: OIDC for the Sigstore signing of the build-provenance
+      # attestation.
+      id-token: write
+      # write: upload the attestation to the GitHub attestations API.
+      attestations: write
     strategy:
       fail-fast: false
       # #2579: Apple silicon only. The x86_64 leg and the lipo'd universal
@@ -175,6 +135,8 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: 'block'
+          # The sigstore hosts and token.actions.githubusercontent.com serve
+          # the attest step (OIDC token, Fulcio certificate, Rekor entry).
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -186,10 +148,15 @@ jobs:
             release-assets.githubusercontent.com:443
             astral.sh:443
             releases.astral.sh:443
-            uploads.github.com:443
             nuitka.net:443
+            token.actions.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
             results-receiver.actions.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+            oauth2.sigstore.dev:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -228,18 +195,18 @@ jobs:
         run: |
           uv sync --group build --extra mcp --no-default-groups
 
-      # #2435: a rerun of this job (the supported npm backfill path, see
-      # docs/npm-distribution.md) used to rebuild from scratch even when the
+      # #2435: a rerun of this job used to rebuild from scratch even when the
       # release already carried this job's own verified binary. The step below
       # reuses that asset when its SHA256 matches the sha256 artifact this run
-      # produced, and every step it makes redundant is gated on its output. It
-      # also promotes an `<asset>.new` left behind by a swap that was killed
-      # between its delete and its rename, so that window costs no rebuild.
+      # produced, and every step it makes redundant is gated on its output.
+      # With contents: read the script cannot promote an `<asset>.new` left by
+      # an interrupted swap; that case degrades to a rebuild here and the
+      # publish stage's own reuse check (contents: write) finishes the swap.
       - name: Check for reusable release asset
         id: reuse
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
           BUILD_ARCH: ${{ matrix.arch }}
         run: >-
           scripts/build/reuse_release_asset.sh
@@ -323,6 +290,18 @@ jobs:
           "dist/nuitka/lintro-macos-$BUILD_ARCH"
           "$BUILD_ARCH"
 
+      # #2562: provenance for the finalized binary, before it leaves this job.
+      # Not continue-on-error: an unattested binary must fail the build, not
+      # ship. Skipped on reuse because the same-run checksum that authorised
+      # the reuse was written only after this step succeeded on the earlier
+      # attempt, so the bytes are already attested.
+      - name: Attest build provenance
+        if: steps.reuse.outputs.reuse != 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/nuitka/lintro-macos-${{ matrix.arch }}
+
       # Ungated on reuse (#2435) so a later attempt still finds the binary and
       # its checksum among the run artifacts. No `overwrite:` needed: artifacts
       # are per-attempt, so re-uploading a name an earlier attempt already used
@@ -333,7 +312,8 @@ jobs:
         with:
           name: lintro-macos-${{ matrix.arch }}
           path: dist/nuitka/lintro-macos-${{ matrix.arch }}
-          retention-days: 7
+          # 90 days: the policy recovery window (lgtm-hq/lgtm-ci#962).
+          retention-days: 90
 
       - name: Save SHA256 to file
         env:
@@ -350,32 +330,10 @@ jobs:
         with:
           name: sha256-${{ matrix.arch }}
           path: sha256-${{ matrix.arch }}.txt
-          retention-days: 7
-
-      - name: Upload to release
-        # Resolved tag is set for both workflow_call and workflow_dispatch.
-        # #2435: upload-then-swap instead of the action's overwrite_files,
-        # which deletes the published asset before uploading its replacement.
-        # Skipped entirely when the asset being uploaded is the one already
-        # on the release.
-        # #2484: a bare dispatch (a build check) must not republish onto the
-        # latest release; only workflow_call or an explicit repair dispatch.
-        if: >-
-          needs.get-release-info.outputs.release_tag != '' &&
-          steps.reuse.outputs.reuse != 'true' &&
-          (inputs.release_tag != '' || inputs.upload_to_release == true)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
-          BUILD_ARCH: ${{ matrix.arch }}
-        run: >-
-          scripts/build/upload_release_asset.sh
-          "$RELEASE_TAG"
-          "dist/nuitka/lintro-macos-$BUILD_ARCH"
+          retention-days: 90
 
   build-linux:
     name: Build Linux Binary
-    needs: get-release-info
     runs-on: ${{ matrix.runner }}
     # 25 min compile + 20 min smoke + 15 min setup/diagnostic headroom.
     # The smoke step's 20-minute budget used to sit inside a 35-minute job
@@ -383,11 +341,17 @@ jobs:
     # valid smoke test.
     timeout-minutes: 60
     permissions:
-      contents: write
+      # See the macOS job: read-only on the repository and the release.
+      contents: read
       # #2435: the reuse check lists and downloads this run's own sha256
       # artifact (including earlier attempts) to decide whether the asset on
       # the release is one this job already verified.
       actions: read
+      # write: OIDC for the Sigstore signing of the build-provenance
+      # attestation.
+      id-token: write
+      # write: upload the attestation to the GitHub attestations API.
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -417,6 +381,8 @@ jobs:
         # (#2488 tracks narrowing the others). macOS legs are out of scope:
         # never observed reclaimed, and harden-runner enforces differently
         # there.
+        # The sigstore hosts and token.actions.githubusercontent.com serve
+        # the attest step (OIDC token, Fulcio certificate, Rekor entry).
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -432,10 +398,15 @@ jobs:
             release-assets.githubusercontent.com:443
             astral.sh:443
             releases.astral.sh:443
-            uploads.github.com:443
             nuitka.net:443
+            token.actions.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
             results-receiver.actions.githubusercontent.com:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+            oauth2.sigstore.dev:443
             hosted-compute-watchdog-prod-iad-01.githubapp.com:443
             hosted-compute-watchdog-prod-iad-02.githubapp.com:443
             hosted-compute-watchdog-prod-eus-01.githubapp.com:443
@@ -484,7 +455,7 @@ jobs:
         id: reuse
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
           BUILD_ARCH: ${{ matrix.arch }}
         run: >-
           scripts/build/reuse_release_asset.sh
@@ -562,6 +533,14 @@ jobs:
           "dist/nuitka/lintro-linux-$BUILD_ARCH"
           "linux-$BUILD_ARCH"
 
+      # #2562: see the macOS job — hard-fails, skipped on reuse.
+      - name: Attest build provenance
+        if: steps.reuse.outputs.reuse != 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/nuitka/lintro-linux-${{ matrix.arch }}
+
       # Ungated on reuse and `overwrite:`-free for the same reason as the macOS
       # job above (#2435).
       - name: Upload artifact
@@ -569,7 +548,8 @@ jobs:
         with:
           name: lintro-linux-${{ matrix.arch }}
           path: dist/nuitka/lintro-linux-${{ matrix.arch }}
-          retention-days: 7
+          # 90 days: the policy recovery window (lgtm-hq/lgtm-ci#962).
+          retention-days: 90
 
       - name: Save SHA256 to file
         env:
@@ -584,99 +564,4 @@ jobs:
         with:
           name: sha256-linux-${{ matrix.arch }}
           path: sha256-linux-${{ matrix.arch }}.txt
-          retention-days: 7
-
-      - name: Upload to release
-        # Resolved tag is set for both workflow_call and workflow_dispatch.
-        # #2435: see the macOS job — upload-then-swap, skipped on reuse.
-        # #2484: a bare dispatch (a build check) must not republish onto the
-        # latest release; only workflow_call or an explicit repair dispatch.
-        if: >-
-          needs.get-release-info.outputs.release_tag != '' &&
-          steps.reuse.outputs.reuse != 'true' &&
-          (inputs.release_tag != '' || inputs.upload_to_release == true)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ needs.get-release-info.outputs.release_tag }}
-          BUILD_ARCH: ${{ matrix.arch }}
-        run: >-
-          scripts/build/upload_release_asset.sh
-          "$RELEASE_TAG"
-          "dist/nuitka/lintro-linux-$BUILD_ARCH"
-
-  homebrew-dispatch:
-    name: Notify Homebrew Tap
-    needs: [get-release-info, build-macos, generate-man-page]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    # Stable tag releases only. The tap's formulas/lintro.yml declares a
-    # binary formula for Apple silicon, so the dispatch must carry the arm64
-    # checksum: a failed binary build blocks the formula update (re-run this
-    # workflow to recover) instead of shipping a partial bump. Intel Macs are
-    # served from PyPI by the formula's own `on_intel` branch (#2579), so no
-    # second checksum travels with the dispatch.
-    # Use resolved tag: workflow_dispatch has no release_tag input.
-    # #2484: a bare dispatch builds only and publishes nothing.
-    if: >-
-      needs.get-release-info.outputs.release_tag != '' &&
-      needs.get-release-info.outputs.is_prerelease == 'false' &&
-      (inputs.release_tag != '' || inputs.upload_to_release == true)
-
-    steps:
-      - name: Harden Runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-            actions.githubusercontent.com:443
-            pypi.org:443
-
-      - name: Checkout scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          sparse-checkout: scripts
-          persist-credentials: false
-
-      - name: Download SHA256 artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: sha256-arm64
-          path: checksums/
-
-      - name: Read checksum
-        id: checksums
-        run: |
-          ARM64_SHA=$(cat checksums/sha256-arm64.txt)
-          echo "arm64_sha256=$ARM64_SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Extract version from tag
-        id: version
-        env:
-          TAG: ${{ needs.get-release-info.outputs.release_tag }}
-        run: |
-          VERSION="${TAG#v}"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for PyPI availability
-        # The tap generates lintro-full from live PyPI metadata as soon as
-        # the dispatch lands, so the sdist must be visible first.
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: scripts/ci/homebrew/wait-for-pypi.sh lintro "$VERSION"
-
-      - name: Dispatch formula update
-        # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@6c08ef91318466d03c615112820eae9b795a9a8b # v0.71.0
-        with:
-          formula: lintro
-          version: ${{ steps.version.outputs.version }}
-          pypi-package: lintro
-          binary-arm64-sha: ${{ steps.checksums.outputs.arm64_sha256 }}
-          token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+          retention-days: 90

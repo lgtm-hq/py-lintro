@@ -13,7 +13,7 @@ name: Audit - Release Version Skew
 # deduplicated main-failure issue when they disagree.
 #
 # It is an alarm, never a gate: it does not block, retry or reorder the release
-# pipeline, and the deliberate `needs:` coupling in build-binary/publish-npm
+# pipeline, and the deliberate `needs:` coupling in publish-binaries/publish-npm
 # stays untouched. Expected lag is suppressed by the script's settle window and
 # by the in-flight release check (the manual PyPI approval gate surfaces as a
 # `waiting` run, which is intentional and must not alarm).

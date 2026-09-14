@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # download_release_binaries.sh
-# Download the three platform binaries that build-binary.yml attaches to a
+# Download the three platform binaries that publish-binaries.yml attaches to a
 # GitHub release, laying them out for stage_binaries.py.
 
 set -euo pipefail
