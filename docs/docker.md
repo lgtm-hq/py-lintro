@@ -119,10 +119,10 @@ Every published image, the release images `py-lintro`, `py-lintro-base` and
 `py-lintro-ai` as well as the tools images, carries three kinds of evidence: a Sigstore
 Cosign keyless signature, BuildKit provenance and SBOM attestations attached to the
 image index, and a GitHub build-provenance attestation. The tag publish and the manual
-backfill produce that set for all three release images; the `main` promotion produces
-it for `py-lintro` and `py-lintro-base`, the two images with a rolling `main` tag
-(`py-lintro-ai` is published from tags only), so a `main` tag verifies the same way as
-a release.
+backfill produce that set for all three release images; the `main` promotion produces it
+for `py-lintro` and `py-lintro-base`, the two images with a rolling `main` tag
+(`py-lintro-ai` is published from tags only), so a `main` tag verifies the same way as a
+release.
 
 ```bash
 # Resolve the digest of the tag you intend to run
