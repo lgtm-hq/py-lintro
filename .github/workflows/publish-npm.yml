@@ -9,7 +9,7 @@ name: Publish - npm
 # Set the `dry_run` input to skip the real publish (still requires the
 # environment approval). The platform binaries are downloaded from the
 # GitHub release created earlier in the tag pipeline, so this workflow must
-# run after build-binary.yml has uploaded them.
+# run after publish-binaries.yml has uploaded them.
 #
 # A LIVE direct `workflow_dispatch` of this workflow is refused by the `guard`
 # job: trusted publishing only matches the tag-pipeline entry path

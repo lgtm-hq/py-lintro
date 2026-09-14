@@ -209,7 +209,7 @@
       "description": "Exact uv pins for setup-uv in the binary build and semgrep-lock workflows (avoids the astral-sh/versions manifest fetch); must track the Dockerfile ARG UV_VERSION",
       "customType": "regex",
       "managerFilePatterns": [
-        ".github/workflows/build-binary.yml",
+        ".github/workflows/build-binaries.yml",
         ".github/workflows/docker-ci.yml"
       ],
       "matchStrings": [

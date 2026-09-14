@@ -33,6 +33,11 @@ _LINTRO_REPORT_SCRIPT = (
 # of the ``pass`` substring. Build the event kind from parts for token matching.
 _GITHUB_PULL_REQUEST_EVENT = "pull_" + "request"
 
+# #2562: build-binary.yml split into a build stage (compile, verify, attest,
+# upload artifacts) and a publish stage (release upload, Homebrew dispatch).
+_BUILD_BINARY_WORKFLOW = "build-binaries.yml"
+_PUBLISH_BINARIES_WORKFLOW = "publish-binaries.yml"
+
 
 def _github_event_name_is_pull_request_token() -> str:
     """Return the workflow token for ``github.event_name == 'pull_request'``."""
@@ -1780,11 +1785,11 @@ def test_build_binary_pins_setup_uv_version() -> None:
     The pin must also equal the tools image's ``ARG UV_VERSION`` so the two
     Renovate-managed uv pins cannot silently drift apart.
     """
-    workflow = _load_workflow(name="build-binary.yml")
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     pinned = workflow["env"]["UV_VERSION"]
     assert_that(pinned).matches(r"^\d+\.\d+\.\d+$")
     assert_that(pinned).described_as(
-        "build-binary UV_VERSION must match docker/tools.Dockerfile ARG UV_VERSION",
+        "build-binaries UV_VERSION must match docker/tools.Dockerfile ARG UV_VERSION",
     ).is_equal_to(_tools_dockerfile_uv_version())
 
     setup_uv_steps: list[dict[str, Any]] = []
@@ -1801,291 +1806,70 @@ def test_build_binary_pins_setup_uv_version() -> None:
         assert_that(version).contains("env.UV_VERSION")
 
 
-# Every publishing step and job carries the same opt-in disjunction. Asserting
-# it by substring lets an inverted or conjunctive rewrite through, so the tests
-# below pin the literal disjunct *and* evaluate the whole condition against the
-# three payloads that matter. These tests read the working tree, so a gate
-# regression reddens the PR that introduces it - which is the point, because
-# the gate's runtime behaviour is only exercised on a tag run or a manual
-# dispatch. Neither happens on a PR, so this file is the only place a broken
-# gate can be caught before it reaches a published release.
+# #2562: the binary workflows are workflow_call only. The former
+# build-binary.yml carried a workflow_dispatch repair path whose get-release-info
+# resolved the *latest published* release and republished the dispatched ref's
+# binaries onto it (#2484). Every publishing step was gated on
+# ``inputs.release_tag != '' || inputs.upload_to_release == true`` to keep a
+# bare dispatch side-effect free; with the trigger gone the gate and its
+# evaluator are gone too. Recovery is lgtm-hq/lgtm-ci#966.
 
-_UPLOAD_OPT_IN_DISJUNCTION = (
-    "(inputs.release_tag != '' || inputs.upload_to_release == true)"
-)
-
-# The exact publishing surface. A rename or a new upload step must be added
-# here deliberately, so the sweep cannot silently shrink.
-_UPLOAD_STEPS = (
-    ("generate-man-page", "Upload to release"),
-    ("build-macos", "Upload to release"),
-    ("build-linux", "Upload to release"),
-)
-
-# Operands that are true on every payload under test: the tag resolved by
-# get-release-info (its latest-release fallback covers the dispatch path), the
-# #2435 reuse guard and the stable-release guard.
-_UPLOAD_GATE_TRUE_OPERANDS = (
-    "needs.get-release-info.outputs.release_tag != ''",
-    "steps.reuse.outputs.reuse != 'true'",
-    "needs.get-release-info.outputs.is_prerelease == 'false'",
-)
+_BINARY_WORKFLOWS = (_BUILD_BINARY_WORKFLOW, _PUBLISH_BINARIES_WORKFLOW)
 
 
-def _evaluate_upload_gate(
-    condition: str,
-    *,
-    release_tag: str,
-    upload_to_release: str,
-) -> bool:
-    """Evaluate an upload-gate condition against one dispatch/call payload.
+@pytest.mark.parametrize("workflow_name", _BINARY_WORKFLOWS)
+def test_binary_workflows_are_workflow_call_only(workflow_name: str) -> None:
+    """Neither binary stage can be dispatched by hand (#2562, #2484).
 
-    The condition is reduced to boolean literals and ``and``/``or`` and then
-    handed to the same restricted-AST evaluator every other ``if:`` assertion
-    in this module uses, so there is one boolean grammar here rather than two.
-    Only the operand forms this workflow actually uses are understood; anything
-    else survives reduction and fails the completeness pre-pass, so a rewrite
-    into an unrecognised shape cannot pass silently.
+    A dispatch of the old workflow resolved the latest published release and
+    could republish main-HEAD binaries onto it. Both halves of the split take
+    the tag from their caller and nowhere else: ``workflow_call`` is the only
+    trigger, ``release_tag`` is required, and the ``upload_to_release`` repair
+    input no longer exists anywhere.
 
     Args:
-        condition: The raw ``if:`` expression.
-        release_tag: Value of ``inputs.release_tag`` (``''`` on a dispatch).
-        upload_to_release: Value of ``inputs.upload_to_release`` (``''`` when
-            the input is undeclared, as on the ``workflow_call`` path).
-
-    Returns:
-        Whether the step or job would run.
+        workflow_name: The binary workflow under test.
     """
-    expr = _normalize_github_expr(condition)
-    for operand in _UPLOAD_GATE_TRUE_OPERANDS:
-        expr = expr.replace(operand, "True")
-    upload_requested = upload_to_release == "true"
-    # ``!input`` and the ``== false`` form are recognised so that an inverted
-    # rewrite reduces cleanly and fails on semantics, not on tokenisation.
-    for token, value in (
-        ("!inputs.upload_to_release", not upload_requested),
-        ("inputs.release_tag != ''", release_tag != ""),
-        ("inputs.release_tag == ''", release_tag == ""),
-        ("inputs.upload_to_release == true", upload_requested),
-        ("inputs.upload_to_release == false", not upload_requested),
-    ):
-        expr = expr.replace(token, repr(value))
-    expr = expr.replace("&&", " and ").replace("||", " or ")
-    # A parenthesised inversion is the other shape an inverted rewrite takes,
-    # and the token table above cannot reach it. Map it onto Python's ``not``,
-    # which the restricted AST evaluator already understands, so such a rewrite
-    # also fails on semantics rather than on tokenisation.
-    expr = re.sub(r"!\s*\(", "not (", expr)
-
-    residue = re.sub(
-        r"\bTrue\b|\bFalse\b|\bnot\b|\band\b|\bor\b|[()\s]",
-        "",
-        expr,
+    workflow = _load_workflow(name=workflow_name)
+    triggers = workflow["on"]
+    assert_that(set(triggers)).described_as(workflow_name).is_equal_to(
+        {"workflow_call"},
     )
-    assert_that(residue).described_as(
-        f"unrecognised operand in {condition!r} (reduced to {expr!r})",
-    ).is_empty()
-    return _eval_restricted_bool_expr(expr)
-
-
-def _assert_upload_gate_behaviour(condition: str, *, described_as: str) -> None:
-    """Assert one condition publishes on exactly the three intended payloads.
-
-    Args:
-        condition: The raw ``if:`` expression.
-        described_as: Label for assertion failures.
-    """
-    # workflow_call from the tag pipeline: release_tag is passed, and the
-    # undeclared upload_to_release evaluates to the empty string.
-    assert_that(
-        _evaluate_upload_gate(condition, release_tag="v1", upload_to_release=""),
-    ).described_as(f"{described_as}: workflow_call must publish").is_true()
-    # Plain dispatch (a build check): publishes nothing.
-    assert_that(
-        _evaluate_upload_gate(condition, release_tag="", upload_to_release="false"),
-    ).described_as(f"{described_as}: plain dispatch must not publish").is_false()
-    # Repair dispatch: upload_to_release alone is enough.
-    assert_that(
-        _evaluate_upload_gate(condition, release_tag="", upload_to_release="true"),
-    ).described_as(f"{described_as}: repair dispatch must publish").is_true()
-
-
-def test_upload_gate_evaluator_rejects_a_conjunctive_gate() -> None:
-    """The gate assertions are not vacuous: a conjunctive rewrite must fail.
-
-    ``inputs.release_tag != '' && inputs.upload_to_release == true`` is the
-    plausible regression - it looks equivalent and silently disables publishing
-    on the tag path, where ``upload_to_release`` is undeclared and empty.
-    """
-    conjunctive = (
-        "needs.get-release-info.outputs.release_tag != '' && "
-        "(inputs.release_tag != '' && inputs.upload_to_release == true)"
+    release_tag = triggers["workflow_call"]["inputs"]["release_tag"]
+    assert_that(release_tag["required"]).described_as(workflow_name).is_true()
+    assert_that(release_tag["type"]).described_as(workflow_name).is_equal_to("string")
+    assert_that(triggers["workflow_call"]["inputs"]).does_not_contain_key(
+        "upload_to_release",
     )
-    assert_that(
-        _evaluate_upload_gate(conjunctive, release_tag="v1", upload_to_release=""),
-    ).is_false()
-    with pytest.raises(AssertionError):
-        _assert_upload_gate_behaviour(conjunctive, described_as="conjunctive")
-
-    # An inverted arm publishes on the plain dispatch this issue exists to stop.
-    # The evaluator understands ``== false``, so this sub-case must fail on the
-    # semantic assertion rather than on operand tokenisation.
-    inverted = (
-        "needs.get-release-info.outputs.release_tag != '' && "
-        "(inputs.release_tag != '' || inputs.upload_to_release == false)"
+    text = (_REPO_ROOT / ".github" / "workflows" / workflow_name).read_text(
+        encoding="utf-8",
     )
-    assert_that(
-        _evaluate_upload_gate(inverted, release_tag="", upload_to_release="false"),
-    ).is_true()
-    with pytest.raises(AssertionError) as inverted_failure:
-        _assert_upload_gate_behaviour(inverted, described_as="inverted")
-    assert_that(str(inverted_failure.value)).contains(
-        "inverted: plain dispatch must not publish",
-    )
+    assert_that(text).described_as(workflow_name).does_not_contain("upload_to_release")
+    assert_that(text).described_as(workflow_name).does_not_contain("workflow_dispatch")
 
 
-def test_upload_gate_evaluator_rejects_a_negated_disjunction() -> None:
-    """``!(a || b)`` reduces to ``not (...)`` and fails on semantics.
+def test_readme_no_longer_documents_the_binary_repair_dispatch() -> None:
+    """The workflows README describes the two-stage split, not a dispatch.
 
-    An author "fixing" the gate by wrapping the disjunction in a negation
-    produces exactly the inverted publishing surface #2484 is about, so the
-    evaluator must understand the shape rather than choke on it.
-    """
-    negated = (
-        "needs.get-release-info.outputs.release_tag != '' && "
-        "!(inputs.release_tag != '' || inputs.upload_to_release == true)"
-    )
-    assert_that(
-        _evaluate_upload_gate(negated, release_tag="", upload_to_release="false"),
-    ).is_true()
-    assert_that(
-        _evaluate_upload_gate(negated, release_tag="v1", upload_to_release=""),
-    ).is_false()
-    with pytest.raises(AssertionError):
-        _assert_upload_gate_behaviour(negated, described_as="negated")
-
-
-def test_build_binary_dispatch_uploads_are_opt_in() -> None:
-    """A plain ``workflow_dispatch`` must not republish release assets.
-
-    ``get-release-info`` resolves the latest published release when no
-    ``release_tag`` input is supplied, so before #2484 a bare dispatch
-    overwrote that release's binaries and man page. Every publishing step and
-    job must therefore also require the workflow_call path or the explicit
-    ``upload_to_release`` repair input.
-    """
-    workflow = _load_workflow(name="build-binary.yml")
-    dispatch_inputs = workflow["on"]["workflow_dispatch"]["inputs"]
-    upload_input = dispatch_inputs["upload_to_release"]
-    assert_that(upload_input["type"]).is_equal_to("boolean")
-    assert_that(upload_input["default"]).is_false()
-    assert_that(str(upload_input["description"]).lower()).described_as(
-        "the dispatch form must say this is the repair path",
-    ).contains("repair")
-
-    # ``upload_to_release`` is dispatch-only by design, and that asymmetry is
-    # what makes the gate's workflow_call payload correct: the tag pipeline
-    # cannot pass the input, so it evaluates to the empty string there and the
-    # gate has to publish on ``release_tag`` alone. Pin both halves, because a
-    # later ``upload_to_release`` added under workflow_call would silently
-    # invalidate the payload the evaluator below asserts against.
-    call_inputs = workflow["on"]["workflow_call"]["inputs"]
-    assert_that(call_inputs).described_as(
-        "upload_to_release is a dispatch-only repair input",
-    ).does_not_contain_key("upload_to_release")
-    assert_that(call_inputs["release_tag"]["required"]).described_as(
-        "the workflow_call path must always carry a release tag",
-    ).is_true()
-    # The other half of the asymmetry: the gate's ``inputs.release_tag != ''``
-    # disjunct is inert on dispatch only because dispatch declares no such
-    # input. A later dispatch-level ``release_tag`` would let a repair run
-    # republish its ref onto whichever release get-release-info resolves.
-    assert_that(dispatch_inputs).described_as(
-        "a dispatch must not be able to name a release_tag",
-    ).does_not_contain_key("release_tag")
-
-    upload_steps = tuple(
-        (job_id, str(step.get("name")))
-        for job_id, job in workflow["jobs"].items()
-        for step in job.get("steps") or []
-        if str(step.get("name", "")).startswith("Upload to release")
-    )
-    assert_that(upload_steps).described_as(
-        "the publishing surface must not grow or shrink unnoticed",
-    ).is_equal_to(_UPLOAD_STEPS)
-
-    for job_id, step_name in _UPLOAD_STEPS:
-        step = next(
-            candidate
-            for candidate in workflow["jobs"][job_id]["steps"]
-            if candidate.get("name") == step_name
-        )
-        condition = _normalize_github_expr(str(step.get("if", "")))
-        label = f"{job_id}/{step_name}"
-        assert_that(condition).described_as(label).contains(
-            _UPLOAD_OPT_IN_DISJUNCTION,
-        )
-        _assert_upload_gate_behaviour(str(step["if"]), described_as=label)
-
-    homebrew = str(workflow["jobs"]["homebrew-dispatch"].get("if", ""))
-    assert_that(_normalize_github_expr(homebrew)).described_as(
-        "homebrew-dispatch publishes downstream and must honour the gate",
-    ).contains(_UPLOAD_OPT_IN_DISJUNCTION)
-    _assert_upload_gate_behaviour(homebrew, described_as="homebrew-dispatch")
-
-
-def test_build_binary_documents_the_side_effect_free_dispatch() -> None:
-    """The workflows README documents the plain dispatch and the repair path.
-
-    The input description alone is only visible once the dispatch form is
-    open; an operator reaching for a manual build reads the README first, and
-    the repair path is the part that has to be written down (#2484).
-
-    Since #2579 the workflow has no ``arch`` input: every dispatch builds the
-    macOS arm64 binary and both Linux binaries, so ``upload_to_release`` is the
-    only input a repair needs. The dispatch ref still matters and is not an
-    input at all: the workflow builds the ref it was dispatched from while
-    ``get-release-info`` resolves the latest published release either way, so
-    a repair run from ``main`` publishes main-HEAD onto a shipped release. The
-    README has to name the input and the ref, and must not send an operator
-    looking for an ``arch`` selector that no longer exists.
+    The "Dispatching build-binary.yml by hand" runbook told an operator how
+    to republish onto the latest release; with the trigger gone that text
+    would send them to a form that no longer exists (#2562). The README has
+    to name both stages, the recovery pointer, and the rerun path instead.
     """
     readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
         encoding="utf-8",
     )
-    assert_that(readme).contains("upload_to_release")
-    assert_that(readme).contains("build-binary.yml")
-
-    section = readme.partition("### Dispatching `build-binary.yml` by hand")[2]
-    assert_that(section).described_as(
-        "the dispatch runbook section must exist to document the repair path",
-    ).is_not_empty()
-    repair = section.partition("- **Repair dispatch**")[2].partition("\n- **The tag")[0]
-    assert_that(repair).described_as(
-        "the repair bullet must name the input and the ref a full repair needs",
-    ).is_not_empty()
-    # "ref" and "tag" carry the dispatch-ref prerequisite, which is not an
-    # input and so has no workflow-side assertion to anchor it.
-    for token in ("upload_to_release", "ref", "tag", "#2579"):
-        assert_that(repair).described_as(
-            f"the repair path must mention {token}",
-        ).contains(token)
-    for stale in ("arch: universal", "inputs.arch", "create-universal-binary"):
-        assert_that(repair).described_as(
-            f"the repair path must not describe the removed {stale!r}",
-        ).does_not_contain(stale)
-
-    # The README's claim is only true while the workflow declares no arch
-    # input and nothing is gated on one.
-    workflow = _load_workflow(name="build-binary.yml")
-    for trigger in ("workflow_dispatch", "workflow_call"):
-        assert_that(workflow["on"][trigger]["inputs"]).described_as(
-            f"{trigger} must not declare an arch input (#2579)",
-        ).does_not_contain_key("arch")
-    for job_id, job in workflow["jobs"].items():
-        assert_that(str(job.get("if", ""))).described_as(
-            f"{job_id} must not gate on the removed arch input",
-        ).does_not_contain("inputs.arch")
+    for stale in ("upload_to_release", "### Dispatching", "Repair dispatch"):
+        assert_that(readme).described_as(stale).does_not_contain(stale)
+    for expected in (
+        _BUILD_BINARY_WORKFLOW,
+        _PUBLISH_BINARIES_WORKFLOW,
+        "lgtm-hq/lgtm-ci#966",
+        "Re-run failed jobs",
+        "attest-build-provenance",
+        "90 days",
+    ):
+        assert_that(readme).described_as(expected).contains(expected)
 
 
 def test_renovate_manages_build_binary_uv_pin() -> None:
@@ -2097,19 +1881,19 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
     """
     config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
     workflow_text = (
-        _REPO_ROOT / ".github" / "workflows" / "build-binary.yml"
+        _REPO_ROOT / ".github" / "workflows" / _BUILD_BINARY_WORKFLOW
     ).read_text(encoding="utf-8")
 
     matching = [
         manager
         for manager in config["customManagers"]
         if any(
-            "build-binary.yml" in pattern
+            _BUILD_BINARY_WORKFLOW in pattern
             for pattern in manager.get("managerFilePatterns", [])
         )
     ]
     assert_that(matching).described_as(
-        "no Renovate customManager targets build-binary.yml",
+        "no Renovate customManager targets build-binaries.yml",
     ).is_not_empty()
 
     # The docker-ci semgrep-lock job carries the same pin (#2436); the same
@@ -2136,7 +1920,7 @@ def test_renovate_manages_build_binary_uv_pin() -> None:
             pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
             found = re.search(pattern, workflow_text)
             assert_that(found).described_as(
-                f"matchString {match_string!r} does not match build-binary.yml",
+                f"matchString {match_string!r} does not match build-binaries.yml",
             ).is_not_none()
 
 
@@ -2170,7 +1954,7 @@ def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
 
 def test_build_binary_retries_setup_uv_on_failure() -> None:
     """Each setup-uv job keeps a continue-on-error + retry pair (#1513)."""
-    workflow = _load_workflow(name="build-binary.yml")
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     jobs_with_setup_uv = [
         job_id
         for job_id, job in workflow["jobs"].items()
@@ -2227,7 +2011,7 @@ def test_binary_jobs_never_install_the_dev_group() -> None:
     the binary jobs therefore has to carry ``--no-default-groups`` -- including
     ``uv run``, which otherwise re-syncs the default groups back in.
     """
-    workflow = _load_workflow(name="build-binary.yml")
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     binary_jobs = ("build-macos", "build-linux")
 
     for job_id in binary_jobs:
@@ -2264,7 +2048,7 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
     same source on the same runner class and has never been observed dying that
     way, which leaves the enforced egress allowlist as the lead.
     """
-    workflow = _load_workflow(name="build-binary.yml")
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     job = workflow["jobs"]["build-linux"]
     harden = next(
         step
@@ -2287,7 +2071,7 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
     assert_that(endpoints).contains(
         "actions-results-receiver-production.githubapp.com:443",
     )
-    # The job must still carry its baseline: build-binary.yml is read from
+    # The job must still carry its baseline: build-binaries.yml is read from
     # the tag, so a shrunk list passes every PR and fails at the release.
     assert_that(endpoints).contains(
         "pypi.org:443",
@@ -3095,14 +2879,18 @@ def test_publish_pypi_top_level_permissions_are_empty() -> None:
 
     Every job in ``publish-pypi-on-tag.yml`` declares its own ``permissions``
     block, so a top-level grant is dead configuration that only widens the
-    default token. The ``actions: read`` that the reusable ``build-binary``
-    chain needs belongs on the ``homebrew-tap`` caller job (#2440).
+    default token. The ``actions: read`` that the reusable binary stages need
+    belongs on the ``build-binaries`` and ``homebrew-tap`` caller jobs (#2440,
+    #2562).
     """
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     assert_that(publish["permissions"]).is_equal_to({})
     homebrew = publish["jobs"]["homebrew-tap"]["permissions"]
     assert_that(homebrew).contains_entry({"actions": "read"})
     assert_that(homebrew).contains_entry({"contents": "write"})
+    build = publish["jobs"]["build-binaries"]["permissions"]
+    assert_that(build).contains_entry({"actions": "read"})
+    assert_that(build).contains_entry({"contents": "read"})
 
 
 def test_no_testpypi_workflow_or_endpoints_remain() -> None:
@@ -3416,17 +3204,22 @@ def test_mirror_release_scripts_are_executable() -> None:
 
 # --- Binary build job timeouts (#1702) ---------------------------------------
 #
-# No job in build-binary.yml set timeout-minutes, so every binary build
-# inherited GitHub's 6-hour default. The Linux x64 Nuitka compile twice hung
-# until runner loss at ~57 min (v0.80.4, v0.91.24), silently desyncing the
-# npm publish and Homebrew chain via `needs:`.
-
-_BUILD_BINARY_WORKFLOW = "build-binary.yml"
+# No job in the former build-binary.yml set timeout-minutes, so every binary
+# build inherited GitHub's 6-hour default. The Linux x64 Nuitka compile twice
+# hung until runner loss at ~57 min (v0.80.4, v0.91.24), silently desyncing
+# the npm publish and Homebrew chain via `needs:`.
 
 
-def test_build_binary_every_job_declares_timeout_minutes() -> None:
-    """Every build-binary job is bounded instead of inheriting the 6h default."""
-    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+@pytest.mark.parametrize("workflow_name", _BINARY_WORKFLOWS)
+def test_binary_workflows_every_job_declares_timeout_minutes(
+    workflow_name: str,
+) -> None:
+    """Every binary-stage job is bounded instead of inheriting the 6h default.
+
+    Args:
+        workflow_name: The binary workflow under test.
+    """
+    workflow = _load_workflow(name=workflow_name)
     for job_id, job in workflow["jobs"].items():
         assert_that(job).described_as(job_id).contains_key("timeout-minutes")
         assert_that(job["timeout-minutes"]).described_as(job_id).is_instance_of(int)
@@ -3507,22 +3300,31 @@ _NPM_PLATFORM_KEYS = ("darwin-arm64", "linux-arm64", "linux-x64")
 
 
 def test_build_binary_ships_exactly_three_platform_binaries() -> None:
-    """build-binary.yml builds macOS arm64 plus both Linux arches, nothing else.
+    """The binary stages build macOS arm64 plus both Linux arches, nothing else.
 
     No x86_64 macOS leg, no universal job, no ``arch`` input to select either:
-    the job list, the macOS matrix and the caller's ``with:`` block are all
-    pinned so a partial revert of #2579 is caught here rather than on a tag.
+    the job lists of both stages, the macOS matrix, the publish matrix and the
+    caller's ``with:`` blocks are all pinned so a partial revert of #2579 is
+    caught here rather than on a tag.
     """
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     assert_that(set(workflow["jobs"])).is_equal_to(
+        {"generate-man-page", "build-macos", "build-linux"},
+    )
+    publish = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    assert_that(set(publish["jobs"])).is_equal_to(
         {
             "get-release-info",
-            "generate-man-page",
-            "build-macos",
-            "build-linux",
+            "upload-binaries",
+            "upload-man-page",
             "homebrew-dispatch",
         },
     )
+    published_assets = sorted(
+        entry["asset"]
+        for entry in publish["jobs"]["upload-binaries"]["strategy"]["matrix"]["include"]
+    )
+    assert_that(published_assets).is_equal_to(sorted(_RELEASE_BINARY_ARTIFACTS))
 
     macos = workflow["jobs"]["build-macos"]
     assert_that(macos["strategy"]["matrix"]).is_equal_to({"arch": ["arm64"]})
@@ -3535,34 +3337,39 @@ def test_build_binary_ships_exactly_three_platform_binaries() -> None:
     )
     assert_that(linux_arches).is_equal_to(["arm64", "x64"])
 
-    text = (_REPO_ROOT / ".github" / "workflows" / _BUILD_BINARY_WORKFLOW).read_text(
-        encoding="utf-8",
-    )
-    for stale in (
-        "lintro-macos-x86_64",
-        "sha256-x86_64",
-        "universal",
-        "lipo",
-        "macos-15-intel",
-    ):
-        # Only the #2579 rationale comment may mention the dropped leg.
-        occurrences = [
-            line
-            for line in text.splitlines()
-            if stale in line and not line.lstrip().startswith("#")
-        ]
-        assert_that(occurrences).described_as(
-            f"{stale!r} must not appear outside comments in build-binary.yml",
-        ).is_empty()
+    for workflow_name in _BINARY_WORKFLOWS:
+        text = (_REPO_ROOT / ".github" / "workflows" / workflow_name).read_text(
+            encoding="utf-8",
+        )
+        for stale in (
+            "lintro-macos-x86_64",
+            "sha256-x86_64",
+            "universal",
+            "lipo",
+            "macos-15-intel",
+        ):
+            # Only the #2579 rationale comment may mention the dropped leg.
+            occurrences = [
+                line
+                for line in text.splitlines()
+                if stale in line and not line.lstrip().startswith("#")
+            ]
+            assert_that(occurrences).described_as(
+                f"{stale!r} must not appear outside comments in {workflow_name}",
+            ).is_empty()
 
     caller = _load_workflow(name="publish-pypi-on-tag.yml")
-    homebrew_tap = caller["jobs"]["homebrew-tap"]
-    assert_that(homebrew_tap["uses"]).is_equal_to(
-        "./.github/workflows/build-binary.yml",
-    )
-    assert_that(homebrew_tap["with"]).is_equal_to(
-        {"release_tag": "${{ github.ref_name }}"},
-    )
+    for job_id, callee in (
+        ("build-binaries", _BUILD_BINARY_WORKFLOW),
+        ("homebrew-tap", _PUBLISH_BINARIES_WORKFLOW),
+    ):
+        job = caller["jobs"][job_id]
+        assert_that(job["uses"]).described_as(job_id).is_equal_to(
+            f"./.github/workflows/{callee}",
+        )
+        assert_that(job["with"]).described_as(job_id).is_equal_to(
+            {"release_tag": "${{ github.ref_name }}"},
+        )
 
 
 def test_homebrew_dispatch_carries_one_macos_checksum() -> None:
@@ -3572,9 +3379,11 @@ def test_homebrew_dispatch_carries_one_macos_checksum() -> None:
     so a second value here would either be fabricated or read from an artifact
     no job produces any more.
     """
-    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    workflow = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
     job = workflow["jobs"]["homebrew-dispatch"]
-    assert_that(job["needs"]).contains("build-macos")
+    # Every binary and the man page must be on the release before the tap is
+    # told about the version (#2562: the uploads moved to the publish stage).
+    assert_that(job["needs"]).contains("upload-binaries", "upload-man-page")
     by_name = {step.get("name"): step for step in job["steps"]}
 
     download = by_name["Download SHA256 artifact"]
@@ -3601,7 +3410,8 @@ def test_homebrew_dispatch_carries_one_macos_checksum() -> None:
     )
 
     # The build-macos matrix is what makes ``sha256-arm64`` exist at all.
-    macos_arches = workflow["jobs"]["build-macos"]["strategy"]["matrix"]["arch"]
+    build = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    macos_arches = build["jobs"]["build-macos"]["strategy"]["matrix"]["arch"]
     assert_that(macos_arches).is_equal_to(["arm64"])
 
 
@@ -3763,11 +3573,15 @@ def test_build_binary_compile_is_wrapped_by_memory_sampler() -> None:
 # and swap uploads instead of overwriting them.
 
 _REUSE_GUARD = "steps.reuse.outputs.reuse != 'true'"
+# #2562: the attest step joins the skipped set. The same-run checksum that
+# authorises a reuse is written only after the attestation succeeded on the
+# earlier attempt, so the reused bytes are already attested.
 _REUSE_SKIPPED_STEPS = (
     "Build binary",
     "Verify binary",
     "Smoke-test tool registry",
     "Finalize binary",
+    "Attest build provenance",
 )
 # These must keep running on reuse so a later attempt still finds the binary
 # and its checksum among the run artifacts.
@@ -3855,59 +3669,371 @@ def test_build_binary_save_sha256_falls_back_to_the_reused_checksum() -> None:
         )
 
 
+def test_publish_binaries_reuse_the_same_run_checksums() -> None:
+    """The publish stage keeps the ``steps.reuse`` semantics (#2435, #2562).
+
+    Each upload leg downloads the artifact the build stage produced, then runs
+    the same reuse check the build jobs run: when the release already carries
+    the asset with the SHA256 this run's own ``sha256-*`` artifact recorded,
+    the upload is skipped. The matrix must pair every published asset with the
+    checksum artifact the build stage writes for it, so the check can never
+    consult a checksum from another platform.
+    """
+    build = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    checksum_artifacts = {
+        str(step["with"]["name"]).replace("${{ matrix.arch }}", arch)
+        for job_id in ("build-macos", "build-linux")
+        for step in build["jobs"][job_id]["steps"]
+        if step.get("name") == "Upload SHA256 file"
+        for arch in ("arm64", "x64")
+    }
+
+    publish = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    job = publish["jobs"]["upload-binaries"]
+    assert_that(job["strategy"]["fail-fast"]).is_false()
+    matrix = job["strategy"]["matrix"]["include"]
+    assert_that(matrix).is_equal_to(
+        [
+            {"asset": "lintro-macos-arm64", "checksum": "sha256-arm64"},
+            {"asset": "lintro-linux-x64", "checksum": "sha256-linux-x64"},
+            {"asset": "lintro-linux-arm64", "checksum": "sha256-linux-arm64"},
+        ],
+    )
+    for entry in matrix:
+        assert_that(checksum_artifacts).described_as(entry["asset"]).contains(
+            entry["checksum"],
+        )
+
+    names = [step.get("name") for step in job["steps"]]
+    by_name = {step.get("name"): step for step in job["steps"]}
+    download = by_name["Download binary artifact"]
+    assert_that(download["uses"]).contains("actions/download-artifact@")
+    assert_that(download["with"]).is_equal_to(
+        {"name": "${{ matrix.asset }}", "path": "dist/nuitka/"},
+    )
+
+    check = by_name["Check for reusable release asset"]
+    assert_that(check["id"]).is_equal_to("reuse")
+    assert_that(check["run"]).contains("scripts/build/reuse_release_asset.sh")
+    assert_that(check["env"]).contains_key(
+        "GH_TOKEN",
+        "RELEASE_TAG",
+        "ASSET_NAME",
+        "CHECKSUM_ARTIFACT",
+    )
+    assert_that(check["env"]["CHECKSUM_ARTIFACT"]).is_equal_to("${{ matrix.checksum }}")
+    # The reused copy must not clobber the downloaded artifact.
+    assert_that(check["run"]).contains('"reused/$ASSET_NAME"')
+    assert_that(names.index("Download binary artifact")).is_less_than(
+        names.index("Check for reusable release asset"),
+    )
+    assert_that(names.index("Check for reusable release asset")).is_less_than(
+        names.index("Upload to release"),
+    )
+
+
 def test_build_binary_release_upload_swaps_instead_of_overwriting() -> None:
     """The release upload never deletes the live asset before the new one lands.
 
     ``softprops/action-gh-release`` (and ``gh release upload --clobber``)
     delete first, which loses the binary when the runner dies mid-upload.
+    Since #2562 the only binary upload lives in the publish stage.
     """
-    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
-    for job_id, binary in (
-        ("build-macos", "dist/nuitka/lintro-macos-$BUILD_ARCH"),
-        ("build-linux", "dist/nuitka/lintro-linux-$BUILD_ARCH"),
-    ):
-        steps = workflow["jobs"][job_id]["steps"]
-        by_name = {step.get("name"): step for step in steps}
-        upload = by_name["Upload to release"]
+    workflow = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    job = workflow["jobs"]["upload-binaries"]
+    steps = job["steps"]
+    by_name = {step.get("name"): step for step in steps}
+    upload = by_name["Upload to release"]
 
-        assert_that(upload.get("uses")).described_as(job_id).is_none()
-        assert_that(upload["run"]).described_as(job_id).contains(
-            "scripts/build/upload_release_asset.sh",
-        )
-        assert_that(upload["run"]).described_as(job_id).contains(binary)
-        assert_that(upload["env"]).described_as(job_id).contains_key("GH_TOKEN")
+    assert_that(upload.get("uses")).is_none()
+    assert_that(upload["run"]).contains("scripts/build/upload_release_asset.sh")
+    assert_that(upload["run"]).contains('"dist/nuitka/$ASSET_NAME"')
+    assert_that(upload["env"]).contains_key("GH_TOKEN")
 
-        guard = _normalize_github_expr(upload["if"])
-        assert_that(guard).described_as(job_id).contains(
-            "needs.get-release-info.outputs.release_tag != ''",
-        )
-        assert_that(guard).described_as(job_id).contains(_REUSE_GUARD)
+    guard = _normalize_github_expr(upload["if"])
+    assert_that(guard).contains("needs.get-release-info.outputs.release_tag != ''")
+    assert_that(guard).contains(_REUSE_GUARD)
 
-        # No step in these jobs may reintroduce a delete-then-upload overwrite.
-        for step in steps:
-            assert_that(step.get("with", {}) or {}).described_as(
-                f"{job_id}:{step.get('name')}",
-            ).does_not_contain_key("overwrite_files")
-            assert_that(step.get("run", "")).described_as(
-                f"{job_id}:{step.get('name')}",
-            ).does_not_contain("--clobber")
+    # No step in this job may reintroduce a delete-then-upload overwrite.
+    for step in steps:
+        assert_that(step.get("with", {}) or {}).described_as(
+            str(step.get("name")),
+        ).does_not_contain_key("overwrite_files")
+        assert_that(step.get("run", "")).described_as(
+            str(step.get("name")),
+        ).does_not_contain("--clobber")
+
+    # And the build stage has no release upload at all.
+    build = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id, build_job in build["jobs"].items():
+        for step in build_job.get("steps") or []:
+            label = f"{job_id}:{step.get('name')}"
+            assert_that(str(step.get("name", ""))).described_as(label).does_not_contain(
+                "Upload to release",
+            )
+            assert_that(str(step.get("run", ""))).described_as(label).does_not_contain(
+                "upload_release_asset.sh",
+            )
+            assert_that(str(step.get("uses", ""))).described_as(label).does_not_contain(
+                "action-gh-release",
+            )
 
 
 def test_build_binary_jobs_may_read_their_own_run_artifacts() -> None:
-    """The reuse check needs the release (contents) and the run's artifacts."""
+    """The reuse check needs the release (contents) and the run's artifacts.
+
+    Since #2562 the build jobs are read-only on contents and hold the two
+    attestation scopes instead; the publish upload legs hold ``contents:
+    write`` and the same ``actions: read``.
+    """
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     for job_id in ("build-macos", "build-linux"):
         permissions = workflow["jobs"][job_id]["permissions"]
-        assert_that(permissions).described_as(job_id).contains_entry(
-            {"contents": "write"},
+        assert_that(permissions).described_as(job_id).is_equal_to(
+            {
+                "contents": "read",
+                "actions": "read",
+                "id-token": "write",
+                "attestations": "write",
+            },
         )
-        assert_that(permissions).described_as(job_id).contains_entry(
-            {"actions": "read"},
+
+    publish = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    permissions = publish["jobs"]["upload-binaries"]["permissions"]
+    assert_that(permissions).is_equal_to({"contents": "write", "actions": "read"})
+
+
+def test_build_stage_never_holds_contents_write() -> None:
+    """No job in the build stage can write to the repository or a release.
+
+    The point of the split (#2562) is that a binary is built, verified and
+    attested by jobs that cannot publish it; ``contents: write`` belongs to
+    the publish stage alone, and only its two upload jobs hold it.
+    """
+    build = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    assert_that(build["permissions"]).is_equal_to({})
+    for job_id, job in build["jobs"].items():
+        grant = _effective_grant(job=job, workflow=build)
+        assert_that(_granted_level(grant, scope="contents")).described_as(
+            job_id,
+        ).is_less_than(_PERMISSION_LEVELS["write"])
+
+    publish = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    assert_that(publish["permissions"]).is_equal_to({})
+    writers = {
+        job_id
+        for job_id, job in publish["jobs"].items()
+        if _granted_level(_effective_grant(job=job, workflow=publish), scope="contents")
+        >= _PERMISSION_LEVELS["write"]
+    }
+    assert_that(writers).is_equal_to({"upload-binaries", "upload-man-page"})
+
+
+def test_build_binaries_attest_the_finalized_binary() -> None:
+    """Each build job attests the finalized binary and hard-fails on error.
+
+    The attestation must cover the exact file the artifact upload ships, sit
+    after ``Finalize binary`` (so the subject is the renamed, final binary)
+    and before ``Upload artifact``, and carry no ``continue-on-error``: an
+    unattested binary must fail the build rather than ship (#2562).
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    for job_id in ("build-macos", "build-linux"):
+        steps = workflow["jobs"][job_id]["steps"]
+        names = [step.get("name") for step in steps]
+        by_name = {step.get("name"): step for step in steps}
+
+        attest = by_name["Attest build provenance"]
+        assert_that(str(attest["uses"])).described_as(job_id).starts_with(
+            "actions/attest-build-provenance@",
         )
+        assert_that(_SHA_PIN_RE.search(str(attest["uses"]))).described_as(
+            job_id,
+        ).is_not_none()
+        assert_that(attest).described_as(job_id).does_not_contain_key(
+            "continue-on-error",
+        )
+        assert_that(attest["with"]["subject-path"]).described_as(job_id).is_equal_to(
+            by_name["Upload artifact"]["with"]["path"],
+        )
+        assert_that(names.index("Finalize binary")).described_as(job_id).is_less_than(
+            names.index("Attest build provenance"),
+        )
+        assert_that(names.index("Attest build provenance")).described_as(
+            job_id,
+        ).is_less_than(names.index("Upload artifact"))
+        # The reuse invariant behind _REUSE_SKIPPED_STEPS: the same-run
+        # checksum is written and uploaded only after the attestation, so a
+        # checksum match on a later attempt proves the bytes are attested.
+        for checksum_step in ("Save SHA256 to file", "Upload SHA256 file"):
+            assert_that(names.index("Attest build provenance")).described_as(
+                f"{job_id}: attest must precede {checksum_step}",
+            ).is_less_than(names.index(checksum_step))
+
+    # Whole-workflow sweep: no attest step anywhere in the build stage may be
+    # best-effort, whatever it is called.
+    for job_id, job in workflow["jobs"].items():
+        for step in job.get("steps") or []:
+            if "attest-build-provenance" in str(step.get("uses", "")):
+                assert_that(step.get("continue-on-error")).described_as(
+                    f"{job_id}:{step.get('name')}",
+                ).is_none()
+
+
+def test_binary_artifacts_are_retained_for_the_recovery_window() -> None:
+    """Every release artifact of the build stage is retained for 90 days.
+
+    Seven days was shorter than the time a broken release can sit before a
+    publish rerun needs the built and attested bytes (#2562, policy window
+    lgtm-hq/lgtm-ci#962). Failure diagnostics keep the short retention.
+    """
+    workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
+    retained: dict[str, int] = {}
+    for job in workflow["jobs"].values():
+        for step in job.get("steps") or []:
+            if not str(step.get("uses", "")).startswith("actions/upload-artifact@"):
+                continue
+            retained[str(step["with"]["name"])] = int(step["with"]["retention-days"])
+
+    assert_that(retained).is_equal_to(
+        {
+            "lintro-man-page": 90,
+            "lintro-macos-${{ matrix.arch }}": 90,
+            "sha256-${{ matrix.arch }}": 90,
+            "memory-diagnostics-macos-${{ matrix.arch }}": 7,
+            "lintro-linux-${{ matrix.arch }}": 90,
+            "sha256-linux-${{ matrix.arch }}": 90,
+            "memory-diagnostics-linux-${{ matrix.arch }}": 7,
+        },
+    )
+
+
+def test_publish_binaries_receives_one_named_secret() -> None:
+    """The publish call passes exactly the tap dispatch token, not ``inherit``.
+
+    ``secrets: inherit`` would hand the call every org/repo secret; the callee
+    needs one, declares it on its ``workflow_call`` interface, and uses no
+    other secret besides ``GITHUB_TOKEN`` (#2562 review).
+    """
+    caller = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = caller["jobs"]["homebrew-tap"]
+    # Built from parts: the value is a GitHub expression, not a credential,
+    # and assembling it keeps the mapping literal out of bandit's B105 net.
+    tap_dispatch_key = "HOMEBREW_TAP_DISPATCH_TOKEN"
+    expected_expression = "${{ secrets." + tap_dispatch_key + " }}"
+    assert_that(job["secrets"]).is_equal_to({tap_dispatch_key: expected_expression})
+    build_job = caller["jobs"]["build-binaries"]
+    assert_that(build_job).does_not_contain_key("secrets")
+
+    callee = _load_workflow(name=_PUBLISH_BINARIES_WORKFLOW)
+    declared = callee["on"]["workflow_call"]["secrets"]
+    assert_that(set(declared)).is_equal_to({tap_dispatch_key})
+    assert_that(declared[tap_dispatch_key]["required"]).is_true()
+    for workflow_name in _BINARY_WORKFLOWS:
+        text = (_REPO_ROOT / ".github" / "workflows" / workflow_name).read_text(
+            encoding="utf-8",
+        )
+        used = set(re.findall(r"secrets\.([A-Za-z_][A-Za-z0-9_]*)", text))
+        assert_that(used - {"GITHUB_TOKEN"}).described_as(workflow_name).is_subset_of(
+            set(declared),
+        )
+
+
+def test_binary_publish_jobs_allowlist_the_artifact_service() -> None:
+    """Every hardened publish job that moves an artifact can reach the service.
+
+    Block-mode harden-runner denies ``actions/download-artifact`` its hops to
+    ``pipelines.actions.githubusercontent.com`` and
+    ``results-receiver.actions.githubusercontent.com`` unless both are
+    allowlisted, and the failure only shows on a tag run (#2562 review).
+    """
+    for workflow_name in _BINARY_WORKFLOWS:
+        workflow = _load_workflow(name=workflow_name)
+        for job_id, job in workflow["jobs"].items():
+            steps = job.get("steps") or []
+            harden = next(
+                (
+                    step
+                    for step in steps
+                    if str(step.get("uses", "")).startswith("step-security/")
+                ),
+                None,
+            )
+            assert_that(harden).described_as(f"{workflow_name}:{job_id}").is_not_none()
+            assert harden is not None
+            assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
+            moves_artifact = any(
+                str(step.get("uses", "")).startswith(
+                    ("actions/upload-artifact@", "actions/download-artifact@"),
+                )
+                for step in steps
+            )
+            if not moves_artifact:
+                continue
+            endpoints = str(harden["with"]["allowed-endpoints"]).split()
+            assert_that(endpoints).described_as(f"{workflow_name}:{job_id}").contains(
+                "pipelines.actions.githubusercontent.com:443",
+                "results-receiver.actions.githubusercontent.com:443",
+            )
+
+
+def _job_ancestors(workflow: dict[str, Any], *, job_id: str) -> set[str]:
+    """Return every job ``job_id`` transitively depends on via ``needs``.
+
+    Args:
+        workflow: Parsed workflow document.
+        job_id: The job whose upstream closure is wanted.
+
+    Returns:
+        The transitive ``needs`` closure, excluding ``job_id`` itself.
+    """
+    ancestors: set[str] = set()
+    pending = [job_id]
+    while pending:
+        current = pending.pop()
+        needs = workflow["jobs"][current].get("needs") or []
+        if isinstance(needs, str):
+            needs = [needs]
+        for upstream in needs:
+            if upstream not in ancestors:
+                ancestors.add(str(upstream))
+                pending.append(str(upstream))
+    return ancestors
+
+
+def test_build_binaries_have_no_path_to_pypi_upload() -> None:
+    """No binary build job is upstream of the PyPI upload (#2562).
+
+    The build stage must be able to move ahead of the ``pypi`` approval gate
+    without ever becoming something the upload waits on in reverse: the
+    upload's transitive ``needs`` closure excludes the build call, while the
+    publish call depends on it, so a binary is on the release only after it
+    was built and attested in this run.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    upstream_of_upload = _job_ancestors(publish, job_id="pypi-upload")
+    assert_that(upstream_of_upload).does_not_contain("build-binaries")
+    assert_that(upstream_of_upload).does_not_contain("homebrew-tap")
+
+    assert_that(_job_ancestors(publish, job_id="homebrew-tap")).contains(
+        "build-binaries",
+    )
+    assert_that(_job_ancestors(publish, job_id="npm-publish")).contains(
+        "homebrew-tap",
+        "build-binaries",
+    )
+    # The build call runs for prereleases too (artifacts only); the publish
+    # call stays stable-only.
+    build_if = _normalize_github_expr(str(publish["jobs"]["build-binaries"]["if"]))
+    assert_that(build_if).does_not_contain("is_prerelease")
+    publish_if = _normalize_github_expr(str(publish["jobs"]["homebrew-tap"]["if"]))
+    assert_that(publish_if).contains(
+        "needs.classify-tag.outputs.is_prerelease == 'false'",
+    )
 
 
 def test_binary_release_scripts_are_executable() -> None:
-    """The #2435 scripts referenced by build-binary.yml exist and are executable."""
+    """The #2435 scripts the binary stages reference exist and are executable."""
     scripts = (
         _REPO_ROOT / "scripts" / "build" / "reuse_release_asset.sh",
         _REPO_ROOT / "scripts" / "build" / "upload_release_asset.sh",
@@ -6088,15 +6214,16 @@ def test_reusable_workflow_permission_check_covers_the_release_pipeline(
         workflow=parsed_workflows["publish-pypi-on-tag.yml"],
     )
     callees = {callee for _, _, callee in calls}
-    assert_that(callees).contains("build-binary.yml")
-    caller_job = next(job for job_id, job, _ in calls if job_id == "homebrew-tap")
-    grant = _effective_grant(
-        job=caller_job,
-        workflow=parsed_workflows["publish-pypi-on-tag.yml"],
-    )
-    assert_that(_granted_level(grant, scope="actions")).is_greater_than_or_equal_to(
-        _PERMISSION_LEVELS["read"],
-    )
+    assert_that(callees).contains(_BUILD_BINARY_WORKFLOW, _PUBLISH_BINARIES_WORKFLOW)
+    for caller_job_id in ("build-binaries", "homebrew-tap"):
+        caller_job = next(job for job_id, job, _ in calls if job_id == caller_job_id)
+        grant = _effective_grant(
+            job=caller_job,
+            workflow=parsed_workflows["publish-pypi-on-tag.yml"],
+        )
+        assert_that(_granted_level(grant, scope="actions")).described_as(
+            caller_job_id,
+        ).is_greater_than_or_equal_to(_PERMISSION_LEVELS["read"])
 
 
 def test_permission_shortfalls_detects_a_withheld_scope(
@@ -6175,8 +6302,10 @@ def test_reusable_workflow_walk_fails_on_the_pre_2518_publish_workflow(
 
     #2440 gave build-binary.yml's compile jobs ``actions: read`` while the
     ``homebrew-tap`` caller still granted only ``contents: write``; #2518 added
-    the grant. Replaying that state against the real callee proves the walk
-    catches it rather than passing because nothing on disk is broken today.
+    the grant. Since #2562 that caller runs publish-binaries.yml, whose upload
+    legs carry the same ``actions: read`` for the reuse check. Replaying the
+    withheld grant against the real callee proves the walk catches it rather
+    than passing because nothing on disk is broken today.
 
     Args:
         parsed_workflows: Every workflow in the repository, parsed.
@@ -6204,7 +6333,9 @@ def test_reusable_workflow_walk_fails_on_the_pre_2518_publish_workflow(
     assert_that(shortfalls).is_not_empty()
     for message in shortfalls:
         assert_that(message).contains("requests actions=read")
-    assert_that(" ".join(shortfalls)).contains("build-binary.yml::build-linux")
+    assert_that(" ".join(shortfalls)).contains(
+        f"{_PUBLISH_BINARIES_WORKFLOW}::upload-binaries",
+    )
 
 
 def test_permission_shortfalls_is_silent_when_the_grant_covers_the_callee(

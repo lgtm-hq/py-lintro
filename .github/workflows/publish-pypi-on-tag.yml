@@ -272,33 +272,66 @@ jobs:
     secrets:
       MIRROR_REPO_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
 
+  build-binaries:
+    name: Build platform binaries
+    # #2562 PR (a): the build half of the former build-binary.yml, called
+    # from the same position the whole workflow used to occupy. Prerelease
+    # tags build too (artifacts and attestations only; nothing is published
+    # for them), so a prerelease tag can prove the build stage. Moving this
+    # ahead of the PyPI gate is a later PR of #2562.
+    needs: [classify-tag, pypi-upload, github-release]
+    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    uses: ./.github/workflows/build-binaries.yml
+    permissions:
+      # read: checkout, and the reuse check hashes the published asset. The
+      # build half never writes to the release (#2562).
+      contents: read
+      # read: build-binaries.yml's build jobs list and download this run's
+      # own sha256 artifacts (#2440, #2435). A called workflow may not
+      # request more than its caller's job grants, so omitting this fails
+      # the whole run at startup (v0.152.1+ tags died as startup_failure).
+      actions: read
+      # write: OIDC signing of the binary build-provenance attestations.
+      id-token: write
+      # write: upload the binary attestations.
+      attestations: write
+    with:
+      release_tag: ${{ github.ref_name }}
+    # No secrets: inherit — the callee only needs GITHUB_TOKEN, which every
+    # reusable call receives.
+
   homebrew-tap:
     name: Publish Homebrew Tap
-    needs: [classify-tag, pypi-upload, github-release]
+    # The publish half: attaches this run's built and attested binaries and
+    # man page to the release, then pings the tap. Stable releases only.
+    needs: [classify-tag, pypi-upload, github-release, build-binaries]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
       needs.classify-tag.outputs.is_prerelease == 'false'
-    uses: ./.github/workflows/build-binary.yml
+    uses: ./.github/workflows/publish-binaries.yml
     permissions:
       # write: upload macOS/Linux binaries to the GitHub release. Formula
       # updates are dispatched to the tap (repository_dispatch), not pushed
       # from here — this token has no write access to lgtm-hq/homebrew-tap.
       contents: write
-      # read: build-binary.yml's build jobs list and download this run's own
-      # sha256 artifacts (#2440, #2435). A called workflow may not request
-      # more than its caller's job grants, so omitting this fails the whole
-      # run at startup (v0.152.1+ tags died as startup_failure).
+      # read: publish-binaries.yml's upload jobs list and download this run's
+      # own sha256 artifacts for the reuse check (#2440, #2435). A called
+      # workflow may not request more than its caller's job grants, so
+      # omitting this fails the whole run at startup (v0.152.1+ tags died as
+      # startup_failure).
       actions: read
     with:
       release_tag: ${{ github.ref_name }}
-    secrets: inherit
+    # Named secret rather than `secrets: inherit`: the call needs exactly one.
+    secrets:
+      HOMEBREW_TAP_DISPATCH_TOKEN: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
 
   npm-publish:
     name: Publish to npm
-    # Needs homebrew-tap: that job (build-binary.yml) uploads the three
+    # Needs homebrew-tap: that job (publish-binaries.yml) uploads the three
     # platform binaries to the GitHub release, which publish-npm.yml
-    # downloads. Gated to stable releases only, since build-binary does not
-    # run for prereleases.
+    # downloads. Gated to stable releases only, since the binaries are not
+    # published for prereleases.
     needs: [classify-tag, homebrew-tap]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
