@@ -148,8 +148,8 @@ gh attestation verify "oci://ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
 # lgtm-ci build workflow for tag and backfill images, docker-ci.yml for the
 # main promotion, so the regexp accepts exactly those. lgtm-ci signs with
 # cosign's new bundle format (an OCI referrer, not a `.sig` tag), so verify
-# with cosign 2.5 or newer and pass --new-bundle-format; older cosign reports
-# "no signatures found".
+# with cosign 2.6 or newer and pass --new-bundle-format; older cosign,
+# including 2.5, reports "no signatures found".
 cosign verify --new-bundle-format "ghcr.io/lgtm-hq/py-lintro@${DIGEST}" \
   --certificate-identity-regexp '^https://github\.com/lgtm-hq/(py-lintro/\.github/workflows/docker-ci\.yml|lgtm-ci/\.github/workflows/reusable-docker-(build|multiplatform)\.yml)@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
