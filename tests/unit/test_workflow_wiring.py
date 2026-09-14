@@ -2345,7 +2345,7 @@ def _attesting_jobs() -> list[tuple[str, str, set[str] | None, bool]]:
                     path.name,
                     job_name,
                     _endpoint_set(
-                        (harden[0].get("with") or {}).get("allowed-endpoints")
+                        (harden[0].get("with") or {}).get("allowed-endpoints"),
                     ),
                     attests,
                 ),
