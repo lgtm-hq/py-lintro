@@ -26,7 +26,7 @@ STUB
 	chmod +x "${STUB_BIN}/docker"
 
 	UPSTREAM="${BATS_TEST_TMPDIR}/upstream.git"
-	git init --quiet --bare "$UPSTREAM"
+	git init --quiet --bare --initial-branch=main "$UPSTREAM"
 	SEED="${BATS_TEST_TMPDIR}/seed"
 	mkdir -p "${SEED}/lintro"
 	cd "${SEED}" || return 1

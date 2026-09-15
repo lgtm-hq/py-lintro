@@ -16,7 +16,7 @@ setup() {
 	# refs/pull/<n>/head, exactly like GitHub keeps a merged Renovate PR head
 	# after the branch is deleted.
 	UPSTREAM="${BATS_TEST_TMPDIR}/upstream.git"
-	git init --quiet --bare "$UPSTREAM"
+	git init --quiet --bare --initial-branch=main "$UPSTREAM"
 
 	SEED="${BATS_TEST_TMPDIR}/seed"
 	mkdir -p "${SEED}/lintro/tools" "${SEED}/docker" \
