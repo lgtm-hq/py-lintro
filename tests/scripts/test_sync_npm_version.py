@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from assertpy import assert_that
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,6 +94,30 @@ def test_normalise_version_strips_leading_v() -> None:
     mod = _load_module()
     assert_that(mod._normalise_version("v1.2.3")).is_equal_to("1.2.3")
     assert_that(mod._normalise_version("1.2.3")).is_equal_to("1.2.3")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # The checkpoint forms the validation channels can publish (#2633):
+        # npm rejects the bare PEP 440 suffix, SemVer wants a dotted one.
+        ("v0.160.3rc1", "0.160.3-rc.1"),
+        ("0.160.3rc4", "0.160.3-rc.4"),
+        ("v1.2.3a1", "1.2.3-alpha.1"),
+        ("v1.2.3b12", "1.2.3-beta.12"),
+        # Stable and already-SemVer forms pass through untouched.
+        ("v1.2.3", "1.2.3"),
+        ("1.2.3-rc.1", "1.2.3-rc.1"),
+        ("1.2.3+build.1", "1.2.3+build.1"),
+    ],
+)
+def test_normalise_version_maps_pep440_prereleases_to_semver(
+    raw: str,
+    expected: str,
+) -> None:
+    """A PEP 440 rcN/aN/bN tag becomes the SemVer prerelease npm accepts."""
+    mod = _load_module()
+    assert_that(mod._normalise_version(raw)).is_equal_to(expected)
 
 
 # ---------------------------------------------------------------------------

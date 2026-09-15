@@ -38,6 +38,9 @@ configuring, and contributing to Lintro.
   integrating a new linting or formatting tool
 - **[Testing Guide](testing.md)** - Test layout, source mapping, markers, fixtures, and
   coverage
+- **[Release Validation Runbook](release-validation.md)** - The S1-S4 scenarios that
+  prove the tag pipeline's failure and recovery paths on `rc` tags, and the two
+  validation-only switches they use
 
 **Architecture & Vision:**
 

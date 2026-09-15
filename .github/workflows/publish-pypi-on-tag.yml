@@ -5,6 +5,22 @@ name: Publish - PyPI Production
 # Publishes package to PyPI when version tags are pushed.
 # Lint gate: docker-ci on main/PR (no duplicate quality on tag).
 # Layout: lgtm-ci docs/python-release-publish.md (requires lgtm-ci v0.45.1+)
+#
+# Validation-only switches (#2633, docs/release-validation.md). Both are
+# repository VARIABLES (visible in the run, never secrets), both are read
+# exactly once, by classify-tag, and passed down as job outputs; no other
+# job in this file reads vars.*. Both default off: with the variables unset
+# every gate below behaves exactly as it did without them.
+#
+#   RELEASE_VALIDATION_CHANNELS=true   For an rcN tag ONLY (classify-tag's
+#       is_rc): npm-publish runs under dist-tag `next` and docker-promote
+#       retags `<version>` alone (no latest, major.minor or major).
+#       homebrew-tap stays skipped (the tap has no prerelease lane). A
+#       stable tag ignores the variable entirely.
+#   RELEASE_FAULT=fail-build | fail-publish-npm   The named fault step
+#       (release-gate's `fail-build`, publish-npm.yml stage's
+#       `fail-publish-npm`) exits 1 with a clear message; every other step
+#       is untouched. Used to prove the failure and recovery paths on an rc.
 
 'on':
   push:
@@ -38,6 +54,15 @@ jobs:
       # non-``X.Y.Z`` suffix); false for stable releases including +build
       # metadata. Consumed by Homebrew/npm/Docker gating below.
       is_prerelease: ${{ steps.classify.outputs.is_prerelease }}
+      # true only for a PEP 440 release candidate (X.Y.ZrcN): the one tag
+      # form the validation channels can open for (#2633).
+      is_rc: ${{ steps.classify.outputs.is_rc }}
+      # true iff is_rc and RELEASE_VALIDATION_CHANNELS == 'true'. Extends
+      # the npm-publish and docker-promote gates below; never Homebrew.
+      validation_channels: ${{ steps.classify.outputs.validation_channels }}
+      # RELEASE_FAULT, trimmed; empty when unset. Compared by the fault
+      # steps, which fire only on an exact match with their own name.
+      release_fault: ${{ steps.classify.outputs.release_fault }}
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
@@ -59,6 +84,10 @@ jobs:
         id: classify
         env:
           TAG_NAME: ${{ github.ref_name }}
+          # The only vars.* reads in this file (#2633): both switches enter
+          # the run here and travel as job outputs from this point on.
+          RELEASE_VALIDATION_CHANNELS: ${{ vars.RELEASE_VALIDATION_CHANNELS }}
+          RELEASE_FAULT: ${{ vars.RELEASE_FAULT }}
         run: python3 scripts/ci/classify-release-tag.py "$TAG_NAME"
 
   sbom:
@@ -191,6 +220,21 @@ jobs:
         with:
           sparse-checkout: scripts/ci
           persist-credentials: false
+      - name: Inject fault (fail-build)
+        # #2633 S2. The build calls (pypi-build, build-binaries, docker-build)
+        # are reusable workflows with no caller-side steps, so the gate, the
+        # last job before any irreversible write and the only build-side job
+        # in this file with steps, hosts the build-stage fault. Placed before
+        # the downloads: a fired fault leaves the gate red with nothing
+        # verified, so pypi-upload and every publisher stay skipped.
+        # Unconditional like every other gate step (no `if:` in this job,
+        # pinned by a wiring test): the script is the condition, exiting 1
+        # only when classify-tag's release_fault equals this step's name
+        # and logging "nothing injected" otherwise.
+        id: fail-build
+        env:
+          RELEASE_FAULT: ${{ needs.classify-tag.outputs.release_fault }}
+        run: scripts/ci/release-fault.sh fail-build
       - name: Download Python distribution
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -476,11 +520,14 @@ jobs:
     name: Publish to npm
     # Needs github-release: it attaches the three platform binaries and the
     # SHA256SUMS the gate verified, which publish-npm.yml downloads and
-    # re-verifies. No longer behind Homebrew (#2562). Stable releases only.
+    # re-verifies. No longer behind Homebrew (#2562). Stable releases only,
+    # plus an rc with the validation channels open (#2633), which publishes
+    # under dist-tag `next` so `latest` never moves to a candidate.
     needs: [classify-tag, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      needs.classify-tag.outputs.is_prerelease == 'false'
+      (needs.classify-tag.outputs.is_prerelease == 'false' ||
+      needs.classify-tag.outputs.validation_channels == 'true')
     uses: ./.github/workflows/publish-npm.yml
     permissions:
       # read: checkout and download release assets
@@ -494,6 +541,14 @@ jobs:
       attestations: write
     with:
       release_tag: ${{ github.ref_name }}
+      # `next` only under the validation switch; a stable release keeps the
+      # default `latest` (backfills use the workflow_dispatch of the callee).
+      dist_tag: >-
+        ${{ needs.classify-tag.outputs.validation_channels == 'true'
+        && 'next' || 'latest' }}
+      # The callee cannot read vars.* (reusable call): the fault travels as
+      # an input to its `fail-publish-npm` step (#2633 S3).
+      release_fault: ${{ needs.classify-tag.outputs.release_fault }}
     # No secrets: inherit — publishing is OIDC-only (id-token), and the
     # reusable workflow's GITHUB_TOKEN for release-asset download is provided
     # automatically. Avoids exposing all org/repo secrets to the call.
@@ -535,10 +590,14 @@ jobs:
     # GitHub attestation and the lgtm-ci cosign signature are digest-bound
     # and carry over; this job verifies the attestation on every staging
     # digest, adds its own signature to those digests, and retags last.
+    # Stable releases only, plus an rc with the validation channels open
+    # (#2633): that run retags `<version>` alone, so latest, major.minor and
+    # major never point at a candidate.
     needs: [classify-tag, docker-build, release-gate, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
-      needs.classify-tag.outputs.is_prerelease == 'false'
+      (needs.classify-tag.outputs.is_prerelease == 'false' ||
+      needs.classify-tag.outputs.validation_channels == 'true')
     runs-on: ubuntu-24.04
     permissions:
       # read: checkout
@@ -552,6 +611,14 @@ jobs:
       # write: OIDC for cosign keyless signing of the promoted digests
       id-token: write
     timeout-minutes: 15
+    env:
+      # The tag set the metadata steps below emit (#2633): latest and the
+      # floating tags are stable-only; an rc under the validation switch gets
+      # `<version>` alone. An rcN tag is PEP 440, not SemVer, so the
+      # candidate's version tag comes from the pep440 type; a stable X.Y.Z
+      # parses the same under both.
+      STABLE_TAGS: ${{ needs.classify-tag.outputs.validation_channels != 'true' }}
+      RC_TAGS: ${{ needs.classify-tag.outputs.validation_channels == 'true' }}
     steps:
       - name: Harden Runner
         # No build here: the allowlist covers checkout, GHCR retagging, the
@@ -590,39 +657,46 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # The tag entries carry two expressions each and cannot be folded
+      # inside a literal block.
+      # yamllint disable rule:line-length
       - name: Extract metadata (base)
         id: meta-base
         # yamllint disable-line rule:line-length
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro-base
-          flavor: latest=true
+          flavor: latest=${{ env.STABLE_TAGS }}
           tags: |
-            type=semver,pattern={{version}},value=${{ github.ref_name }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
-            type=semver,pattern={{major}},value=${{ github.ref_name }}
+            type=semver,pattern={{version}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=semver,pattern={{major}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=pep440,pattern={{version}},value=${{ github.ref_name }},enable=${{ env.RC_TAGS }}
       - name: Extract metadata (full)
         id: meta-full
         # yamllint disable-line rule:line-length
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro
-          flavor: latest=true
+          flavor: latest=${{ env.STABLE_TAGS }}
           tags: |
-            type=semver,pattern={{version}},value=${{ github.ref_name }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
-            type=semver,pattern={{major}},value=${{ github.ref_name }}
+            type=semver,pattern={{version}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=semver,pattern={{major}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=pep440,pattern={{version}},value=${{ github.ref_name }},enable=${{ env.RC_TAGS }}
       - name: Extract metadata (ai)
         id: meta-ai
         # yamllint disable-line rule:line-length
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ghcr.io/lgtm-hq/py-lintro-ai
-          flavor: latest=true
+          flavor: latest=${{ env.STABLE_TAGS }}
           tags: |
-            type=semver,pattern={{version}},value=${{ github.ref_name }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}
-            type=semver,pattern={{major}},value=${{ github.ref_name }}
+            type=semver,pattern={{version}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=semver,pattern={{major}},value=${{ github.ref_name }},enable=${{ env.STABLE_TAGS }}
+            type=pep440,pattern={{version}},value=${{ github.ref_name }},enable=${{ env.RC_TAGS }}
+      # yamllint enable rule:line-length
       # Verify BEFORE any retag: attestations are digest-bound, so proving
       # the staging digests is proving the promoted ones, and a missing
       # attestation fails the job while the version tags are still unmoved.

@@ -129,7 +129,9 @@ pipeline without a release: open a version-bump PR to `main` titled
 reacting. After the squash merge, push a signed `vX.Y.ZaN` tag on the merge commit by
 hand. The tag run then builds, gates, publishes to PyPI and creates a prerelease GitHub
 Release, and skips Docker promote, Homebrew and npm; the next bot version PR bumps past
-the checkpoint version as usual.
+the checkpoint version as usual. An `rcN` checkpoint can additionally open the
+validation channels (see "Validation-only switches" below and
+`docs/release-validation.md`).
 
 ## Publish
 
@@ -155,8 +157,9 @@ the checkpoint version as usual.
   mirror lane; `notify-failure` runs last under `!cancelled()` and reports the
   per-channel result (see Release above). Prereleases run the build stage, the gate,
   PyPI and the GitHub Release (marked prerelease, derived from `classify-tag`) and skip
-  the Docker promote, Homebrew, npm and the pre-commit mirror bump. Lint runs on `main`
-  via `docker-ci` only (no duplicate quality on tag).
+  the Docker promote, Homebrew, npm and the pre-commit mirror bump, unless an `rcN` tag
+  runs with the validation channels open (below). Lint runs on `main` via `docker-ci`
+  only (no duplicate quality on tag).
 - **docker-build-publish.yml** — Multi-arch GHCR build via `reusable-docker.yml` (base +
   full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
   pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical
@@ -273,6 +276,31 @@ the recovery workflow (lgtm-hq/lgtm-ci#966).
   rerun retags the same digests again (registry no-op).
 - `npm-publish` runs under the trusted workflow identity it needs on a rerun, because it
   is still called from the tag pipeline.
+
+## Validation-only switches
+
+Two repository **variables** (never secrets, so their state is visible in the run) exist
+for the release validation runbook (`docs/release-validation.md`, #2633) and for nothing
+else. Both are read exactly once, by `classify-tag` in `publish-pypi-on-tag.yml`, and
+passed to the other jobs as outputs; no other job in the tag pipeline or any workflow it
+calls reads `vars.*`. Both default off, and a wiring test runs the classifier with them
+scrubbed to prove every gate then behaves as it always did.
+
+- **`vars.RELEASE_VALIDATION_CHANNELS`** — `true` opens the validation channels for a
+  PEP 440 `X.Y.ZrcN` tag only (output `validation_channels`; an alpha, a beta or a
+  stable tag ignores it): `npm-publish` runs under dist-tag `next` (the PEP 440 version
+  is mapped to its SemVer form, `0.160.3-rc.1`, for `package.json`), `docker-promote`
+  runs but retags `<version>` alone (no `latest`, `major.minor` or `major`; the metadata
+  steps switch between the SemVer and pep440 tag types on the same output),
+  `homebrew-tap` and the mirror lane stay skipped.
+- **`vars.RELEASE_FAULT`** — `fail-build` or `fail-publish-npm` (output
+  `release_fault`). `release-gate`'s `Inject fault (fail-build)` step and
+  `publish-npm.yml`'s `Inject fault (fail-publish-npm)` stage step (the fault reaches
+  the called workflow as the `release_fault` input) each run
+  `scripts/ci/release-fault.sh <name>`, which exits 1 with an `::error` annotation only
+  when the output equals its name. Unset, or any other value, injects nothing.
+
+Delete both variables once a validation round is recorded.
 
 ## Token patterns
 

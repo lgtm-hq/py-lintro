@@ -51,6 +51,16 @@ name: Publish - npm
         required: false
         default: latest
         type: string
+      release_fault:
+        description: >-
+          Fault to inject (#2633, docs/release-validation.md): the stage job's
+          `fail-publish-npm` step exits 1 iff this equals its name. A called
+          workflow cannot read vars.*, so the tag pipeline passes
+          classify-tag's release_fault output through. Empty (the default)
+          injects nothing.
+        required: false
+        default: ''
+        type: string
   workflow_dispatch:
     inputs:
       release_tag:
@@ -122,6 +132,20 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Inject fault (fail-publish-npm)
+        # #2633 S3: the publish-stage fault. First step after the checkout
+        # that provides the script, before any binary is downloaded, so a
+        # fired fault leaves npm untouched while PyPI, the GitHub Release and
+        # the Docker promote (all upstream or parallel) complete, which is
+        # exactly the partial release the notifier and the recovery workflow
+        # exist for. Unconditional: the script is the condition, exiting 1
+        # only when the input equals this step's name and logging "nothing
+        # injected" otherwise.
+        id: fail-publish-npm
+        env:
+          RELEASE_FAULT: ${{ inputs.release_fault }}
+        run: scripts/ci/release-fault.sh fail-publish-npm
 
       - name: Set up Node.js
         # Node 24 ships npm ≥ 11.5.1. Do not run `npm install -g npm` here:

@@ -199,16 +199,35 @@ def sync_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[Path]:
     return changed
 
 
+# PEP 440 bare prerelease suffix -> the SemVer prerelease npm accepts. The
+# project versions in PEP 440 (``0.160.3rc1``), but ``package.json`` requires
+# SemVer, where a prerelease needs a hyphen and a dotted identifier
+# (``0.160.3-rc.1``); npm rejects the bare form outright. Only the checkpoint
+# forms the pipeline can publish (#2633 validation channels) are mapped.
+_PEP440_PRERELEASE = re.compile(r"^(\d+\.\d+\.\d+)(a|b|rc)(\d+)$")
+_PEP440_TO_SEMVER = {"a": "alpha", "b": "beta", "rc": "rc"}
+
+
 def _normalise_version(raw: str) -> str:
-    """Strip a leading ``v`` from a tag-style version string.
+    """Turn a tag-style version into the version npm manifests carry.
+
+    Strips a leading ``v`` and rewrites a PEP 440 bare prerelease
+    (``X.Y.ZrcN``, ``X.Y.ZaN``, ``X.Y.ZbN``) to its SemVer form
+    (``X.Y.Z-rc.N``, ``-alpha.N``, ``-beta.N``). A stable ``X.Y.Z`` is
+    returned unchanged, as is anything the mapping does not recognise.
 
     Args:
-        raw: A version or tag (e.g. ``"v1.2.3"``).
+        raw: A version or tag (e.g. ``"v1.2.3"``, ``"v0.160.3rc1"``).
 
     Returns:
-        The version without a leading ``v``.
+        The version to write into every npm manifest.
     """
-    return raw[1:] if raw.startswith("v") else raw
+    version = raw[1:] if raw.startswith("v") else raw
+    match = _PEP440_PRERELEASE.match(version)
+    if match is None:
+        return version
+    core, kind, number = match.groups()
+    return f"{core}-{_PEP440_TO_SEMVER[kind]}.{number}"
 
 
 def main(argv: list[str] | None = None) -> int:
