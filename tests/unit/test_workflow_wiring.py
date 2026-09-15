@@ -1747,9 +1747,9 @@ def test_publish_npm_stage_verifies_release_binaries_before_staging() -> None:
     download = index_of("scripts/ci/npm/download_release_binaries.sh", runs)
     verify = index_of("scripts/ci/npm/verify_release_binaries.sh", runs)
     stage = index_of("scripts/ci/npm/stage_binaries.py", runs)
-    checksums = index_of("scripts/ci/npm/write_package_checksums.py", runs)
+    checksums = index_of("--output npm/SHA256SUMS", runs)
     smoke = index_of("scripts/ci/npm/smoke_test.sh", runs)
-    recheck = index_of("sha256sum --check --strict SHA256SUMS", runs)
+    recheck = index_of("SHA256SUMS.after", runs)
     attest = index_of("actions/attest-build-provenance@", uses)
     upload = index_of("actions/upload-artifact@", uses)
     # The manifest is written before the smoke test executes a release
@@ -1758,7 +1758,12 @@ def test_publish_npm_stage_verifies_release_binaries_before_staging() -> None:
     assert_that(
         [download, verify, stage, checksums, smoke, recheck, attest, upload],
     ).is_sorted()
-    assert_that(runs[recheck]).starts_with("(cd npm && sha256sum")
+    # Regenerate-and-diff, not `sha256sum --check`: a file ADDED under a
+    # package by the smoke-tested binary must fail here too.
+    assert_that(runs[recheck]).contains(
+        "scripts/ci/npm/write_package_checksums.py",
+        "diff -u npm/SHA256SUMS",
+    )
 
     verify_step = steps[verify]
     assert_that(verify_step["run"].strip()).is_equal_to(

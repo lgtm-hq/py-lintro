@@ -154,28 +154,44 @@ function ensureExecutable(binaryPath, fsModule) {
   } catch {
     // Not executable (or not accessible): fall through to the repair.
   }
-  // Only a regular file that is not a symlink may be repaired: chmod
-  // follows links, and a tampered platform package must not be able to
-  // point the repair at some other file.
-  let stat;
+  // Repair through a descriptor opened without following symlinks, so the
+  // mode change lands on the file that was inspected: a tampered platform
+  // package or a race cannot redirect it to another path.
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  let fd;
   try {
-    stat = fs.lstatSync(binaryPath);
+    fd = fs.openSync(binaryPath, flags);
   } catch (err) {
-    throw new Error(`lintro: the platform binary at "${binaryPath}" is missing: ${err.message}`);
-  }
-  if (stat.isSymbolicLink() || !stat.isFile()) {
+    if (err.code === 'ENOENT') {
+      throw new Error(`lintro: the platform binary at "${binaryPath}" is missing`);
+    }
+    if (err.code === 'ELOOP') {
+      throw new Error(
+        `lintro: the platform binary at "${binaryPath}" is a symlink; ` +
+          'refusing to change its mode'
+      );
+    }
     throw new Error(
-      `lintro: the platform binary at "${binaryPath}" is not a regular file; ` +
-        'refusing to change its mode'
+      `lintro: the platform binary at "${binaryPath}" could not be opened: ${err.message}`
     );
   }
   try {
-    fs.chmodSync(binaryPath, 0o755);
-  } catch (err) {
-    throw new Error(
-      `lintro: the platform binary at "${binaryPath}" is not executable ` +
-        `and could not be made executable: ${err.message}`
-    );
+    if (!fs.fstatSync(fd).isFile()) {
+      throw new Error(
+        `lintro: the platform binary at "${binaryPath}" is not a regular file; ` +
+          'refusing to change its mode'
+      );
+    }
+    try {
+      fs.fchmodSync(fd, 0o755);
+    } catch (err) {
+      throw new Error(
+        `lintro: the platform binary at "${binaryPath}" is not executable ` +
+          `and could not be made executable: ${err.message}`
+      );
+    }
+  } finally {
+    fs.closeSync(fd);
   }
   return true;
 }

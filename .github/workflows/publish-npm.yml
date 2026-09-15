@@ -192,10 +192,16 @@ jobs:
         run: scripts/ci/npm/smoke_test.sh
 
       - name: Re-verify package set after the smoke test
-        # The smoke test ran a release binary; every packed file must still
-        # match the manifest written before it, or the attestation below
-        # would sign bytes the release attestations never covered.
-        run: (cd npm && sha256sum --check --strict SHA256SUMS)
+        # The smoke test ran a release binary; the set of packable files and
+        # every byte in them must be exactly what the manifest recorded
+        # before it, or the attestation below would sign bytes the release
+        # attestations never covered. Regenerating and diffing (not
+        # `sha256sum --check`) also catches files ADDED under a package.
+        run: >-
+          python scripts/ci/npm/write_package_checksums.py
+          --packages-dir npm
+          --output "${RUNNER_TEMP}/SHA256SUMS.after"
+          && diff -u npm/SHA256SUMS "${RUNNER_TEMP}/SHA256SUMS.after"
 
       - name: Attest staged package set
         # Signs as this file (publish-npm.yml); the reusable's verify step

@@ -154,11 +154,12 @@ describe('resolveBinary', () => {
 describe('ensureExecutable', () => {
   const X_OK = 1;
 
-  const fakeFs = ({ executable, chmodError, symlink, missing, directory }) => {
+  const FD = 7;
+  const fakeFs = ({ executable, chmodError, openError, directory }) => {
     const calls = [];
     return {
       calls,
-      constants: { X_OK },
+      constants: { X_OK, O_RDONLY: 0, O_NOFOLLOW: 0x100 },
       accessSync(path, mode) {
         calls.push(['accessSync', path, mode]);
         if (!executable) {
@@ -167,43 +168,56 @@ describe('ensureExecutable', () => {
           throw err;
         }
       },
-      lstatSync(path) {
-        calls.push(['lstatSync', path]);
-        if (missing) {
-          const err = new Error('ENOENT: no such file or directory');
-          err.code = 'ENOENT';
+      openSync(path, flags) {
+        calls.push(['openSync', path, flags]);
+        if (openError) {
+          const err = new Error(`${openError}: open failed`);
+          err.code = openError;
           throw err;
         }
-        return {
-          isSymbolicLink: () => Boolean(symlink),
-          isFile: () => !symlink && !directory,
-        };
+        return FD;
       },
-      chmodSync(path, mode) {
-        calls.push(['chmodSync', path, mode]);
+      fstatSync(fd) {
+        calls.push(['fstatSync', fd]);
+        return { isFile: () => !directory };
+      },
+      fchmodSync(fd, mode) {
+        calls.push(['fchmodSync', fd, mode]);
         if (chmodError) {
           throw chmodError;
         }
       },
+      closeSync(fd) {
+        calls.push(['closeSync', fd]);
+      },
     };
   };
 
-  it('refuses to chmod a symlink', () => {
-    const fs = fakeFs({ executable: false, symlink: true });
-    expect(() => ensureExecutable('/bin/x', fs)).toThrow(/not a regular file/);
-    expect(fs.calls.some(([name]) => name === 'chmodSync')).toBe(false);
+  const chmodCalls = (fs) => fs.calls.filter(([name]) => name === 'fchmodSync');
+
+  it('refuses to chmod a symlink (open without following links fails with ELOOP)', () => {
+    const fs = fakeFs({ executable: false, openError: 'ELOOP' });
+    expect(() => ensureExecutable('/bin/x', fs)).toThrow(/is a symlink/);
+    expect(chmodCalls(fs)).toEqual([]);
   });
 
-  it('refuses to chmod something that is not a regular file', () => {
+  it('refuses to chmod something that is not a regular file, and closes the descriptor', () => {
     const fs = fakeFs({ executable: false, directory: true });
     expect(() => ensureExecutable('/bin/x', fs)).toThrow(/not a regular file/);
-    expect(fs.calls.some(([name]) => name === 'chmodSync')).toBe(false);
+    expect(chmodCalls(fs)).toEqual([]);
+    expect(fs.calls.at(-1)).toEqual(['closeSync', FD]);
   });
 
-  it('reports a missing binary instead of trying to repair it', () => {
-    const fs = fakeFs({ executable: false, missing: true });
+  it('reports a missing binary distinctly', () => {
+    const fs = fakeFs({ executable: false, openError: 'ENOENT' });
     expect(() => ensureExecutable('/bin/x', fs)).toThrow(/is missing/);
-    expect(fs.calls.some(([name]) => name === 'chmodSync')).toBe(false);
+    expect(chmodCalls(fs)).toEqual([]);
+  });
+
+  it('reports other open failures as such, not as a missing binary', () => {
+    const fs = fakeFs({ executable: false, openError: 'EACCES' });
+    expect(() => ensureExecutable('/bin/x', fs)).toThrow(/could not be opened: EACCES/);
+    expect(chmodCalls(fs)).toEqual([]);
   });
 
   it('leaves an executable binary untouched', () => {
@@ -218,8 +232,10 @@ describe('ensureExecutable', () => {
     expect(ensureExecutable('/bin/x', fs)).toBe(true);
     expect(fs.calls).toEqual([
       ['accessSync', '/bin/x', X_OK],
-      ['lstatSync', '/bin/x'],
-      ['chmodSync', '/bin/x', 0o755],
+      ['openSync', '/bin/x', 0x100],
+      ['fstatSync', FD],
+      ['fchmodSync', FD, 0o755],
+      ['closeSync', FD],
     ]);
   });
 
