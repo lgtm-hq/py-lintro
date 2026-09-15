@@ -134,6 +134,38 @@ def latest_coverage_by_path(
     return latest
 
 
+def truncated_patch_hashes(coverage: Sequence[CoverageRecord]) -> frozenset[str]:
+    """Return the patch hashes whose most recent review was truncated.
+
+    Every prior record counts, not only each path's latest one: coverage is
+    keyed ``(path, hash)``, so a file that moved on to a new hash keeps its
+    old truncated record, and a sibling that still carries that old hash
+    inherited a prefix review, not a complete one (lintro-ops #37). A hash is
+    truncated when the highest-round record at that hash, from any path, is
+    marked; a later complete review at the same hash clears it for every
+    sibling. On a round tie a marked record wins, so a gap is never hidden
+    by a same-round sibling.
+
+    Args:
+        coverage: All prior coverage records.
+
+    Returns:
+        The hashes still known to carry only a prefix review.
+    """
+    latest: dict[str, CoverageRecord] = {}
+    for record in coverage:
+        current = latest.get(record.patch_hash)
+        if (
+            current is None
+            or record.round > current.round
+            or (record.round == current.round and record.truncated)
+        ):
+            latest[record.patch_hash] = record
+    return frozenset(
+        patch_hash for patch_hash, record in latest.items() if record.truncated
+    )
+
+
 def hashes_for_diffs(*, diffs: Mapping[str, str]) -> dict[str, str]:
     """Hash each per-file unified diff.
 

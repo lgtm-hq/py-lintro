@@ -34,7 +34,11 @@ from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.classifier import classify_changed_files
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.coverage_degradation import describe_coverage_degradations
-from lintro.ai.review.coverage_rounds import hashes_for_diffs, latest_coverage_by_path
+from lintro.ai.review.coverage_rounds import (
+    hashes_for_diffs,
+    latest_coverage_by_path,
+    truncated_patch_hashes,
+)
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
@@ -631,6 +635,94 @@ def test_same_hash_siblings_inherit_the_truncation_marker() -> None:
         "pkg/api.py",
         "pkg/api_copy.py",
     )
+
+
+def _twin_context() -> ReviewContext:
+    """Return the PR context with an identical-diff sibling of ``pkg/api.py``."""
+    context = _pr_context()
+    diff = context.unified_diff.replace("pkg/api.py", "pkg/api_copy.py")
+    return make_review_context(
+        unified_diff=context.unified_diff + diff,
+        changed_files=[
+            *context.changed_files,
+            ChangedFile(
+                path="pkg/api_copy.py",
+                status="modified",
+                additions=1,
+                deletions=1,
+            ),
+        ],
+    )
+
+
+def test_an_old_truncated_hash_still_marks_a_later_sibling() -> None:
+    """A path moving on to a new hash does not forget its old truncated one."""
+    twin = _twin_context()
+    plan = plan_resume(context=twin, prior=None)
+    shared_hash = plan.hashes["pkg/api.py"]
+    prior = ReviewState(
+        coverage=(
+            # Round 1: pkg/api.py reviewed only in part at the shared hash.
+            CoverageRecord(
+                path="pkg/api.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r1",
+                round=1,
+                truncated=True,
+            ),
+            # Round 2: the same path re-reviewed whole at a different hash, so
+            # its latest record no longer carries the shared hash.
+            CoverageRecord(
+                path="pkg/api.py",
+                patch_hash="other-hash",
+                reviewed_sha="r2",
+                round=2,
+            ),
+        ),
+    )
+    # Round 3: the sibling appears at the shared hash and inherits coverage
+    # from the round-1 prefix review, which must still count as truncated.
+    later = plan_resume(context=twin, prior=prior)
+    assert_that(carried_truncated_paths(plan=later, prior=prior)).contains(
+        "pkg/api_copy.py",
+    )
+
+
+def test_a_complete_review_at_the_hash_clears_every_sibling() -> None:
+    """A later complete review at a truncated hash clears the marker for all."""
+    twin = _twin_context()
+    plan = plan_resume(context=twin, prior=None)
+    shared_hash = plan.hashes["pkg/api.py"]
+    prior = ReviewState(
+        coverage=(
+            CoverageRecord(
+                path="pkg/api.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r1",
+                round=1,
+                truncated=True,
+            ),
+            CoverageRecord(
+                path="pkg/api_copy.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r3",
+                round=3,
+            ),
+        ),
+    )
+    later = plan_resume(context=twin, prior=prior)
+    assert_that(carried_truncated_paths(plan=later, prior=prior)).is_empty()
+
+
+def test_truncated_patch_hashes_prefers_the_marked_record_on_a_round_tie() -> None:
+    """Same-round records at one hash never hide a gap behind an unmarked twin."""
+    records = (
+        CoverageRecord(path="a.py", patch_hash="h", round=2),
+        CoverageRecord(path="b.py", patch_hash="h", round=2, truncated=True),
+        CoverageRecord(path="c.py", patch_hash="k", round=1, truncated=True),
+        CoverageRecord(path="d.py", patch_hash="k", round=2),
+    )
+    assert_that(truncated_patch_hashes(records)).is_equal_to(frozenset({"h"}))
 
 
 def test_coverage_record_truncation_round_trips_and_defaults_off() -> None:

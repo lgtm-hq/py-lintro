@@ -13,9 +13,9 @@ from lintro.ai.review.coverage import (
     classify_files,
     coverage_counts,
     hashes_for_diffs,
-    latest_coverage_by_path,
     queue_paths,
     review_eligible_paths,
+    truncated_patch_hashes,
 )
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.import_graph import importers_of
@@ -219,17 +219,14 @@ def carried_truncated_paths(
 
     Returns:
         Sorted paths classified ``COVERED`` this round whose current hash is
-        one a latest prior record marks ``truncated`` — the file's own record
-        or, for a sampled sibling that inherited coverage, the identical
-        diff's record.
+        one the prior records still mark ``truncated`` — the file's own
+        record or, for a sampled sibling that inherited coverage, the
+        identical diff's record, however many rounds ago it was written (see
+        :func:`~lintro.ai.review.coverage_rounds.truncated_patch_hashes`).
     """
     if prior is None:
         return ()
-    truncated_hashes = {
-        record.patch_hash
-        for record in latest_coverage_by_path(prior.coverage).values()
-        if record.truncated
-    }
+    truncated_hashes = truncated_patch_hashes(prior.coverage)
     return tuple(
         sorted(
             item.path
