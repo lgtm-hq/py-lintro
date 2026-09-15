@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import io
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 import sys
 import tempfile
+import tokenize
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -2207,6 +2209,37 @@ def test_auto_rerun_covers_tag_publish_workflows() -> None:
     )
 
 
+def test_auto_rerun_never_reruns_publish_workflows() -> None:
+    """Publish runs are protected from automatic reruns (#2633, lgtm-ci#1003).
+
+    The rc1 publish run (34967569536) was re-run by the auto-rerun net after
+    an egress refusal matched a signature, and the rerun reached the npm
+    approval gate. The reusable's ``protected-workflows`` input names the
+    publish workflow files whose runs are never re-run; both the tag
+    pipeline and the standalone npm workflow must be listed. The
+    runner-acquisition signature is read from check-run annotations, so the
+    caller must grant ``checks: read``.
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    job = workflow["jobs"]["rerun"]
+    protected = {
+        entry.strip()
+        for entry in str(job["with"]["protected-workflows"])
+        .replace("\n", ",")
+        .split(",")
+        if entry.strip()
+    }
+    assert_that(protected).contains("publish-pypi-on-tag.yml", "publish-npm.yml")
+    for name in protected:
+        assert_that(
+            (_REPO_ROOT / ".github" / "workflows" / name).is_file(),
+        ).described_as(
+            f"protected workflow {name} must exist",
+        ).is_true()
+    assert_that(job["permissions"]).contains_entry({"checks": "read"})
+    assert_that(job["permissions"]).contains_entry({"actions": "write"})
+
+
 def test_auto_rerun_allows_three_reruns() -> None:
     """Persistent runner-loss failures may receive up to three reruns (#2237)."""
     workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
@@ -2490,6 +2523,262 @@ def test_every_attesting_job_allows_the_sigstore_hosts() -> None:
             offenders.append(f"{workflow}:{job} missing {missing}")
     assert_that(offenders).described_as(
         "attesting jobs whose replace-mode allowlist blocks Sigstore",
+    ).is_empty()
+
+
+_ATTESTATION_STORE_HOST = "*.blob.core.windows.net:443"
+_ATTESTATION_VERIFY_HOSTS = frozenset(
+    {
+        "api.github.com:443",
+        "tuf-repo-cdn.sigstore.dev:443",
+        _ATTESTATION_STORE_HOST,
+    },
+)
+
+
+def _python_code(text: str) -> str:
+    """Return a Python module's source without comments and docstrings.
+
+    Other string literals stay, so a verifier call spelled as an argv list
+    (``subprocess.run(["gh", "attestation", "verify", ...])``) still counts.
+
+    Args:
+        text: Python source.
+
+    Returns:
+        The source with comment tokens and docstring statements dropped, or
+        an empty string when it does not parse.
+    """
+    try:
+        module = ast.parse(text)
+    except SyntaxError:
+        return ""
+    docstring_lines: set[int] = set()
+    for node in ast.walk(module):
+        if not isinstance(
+            node,
+            ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+        ):
+            continue
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            first = body[0]
+            docstring_lines.update(
+                range(first.lineno, (first.end_lineno or first.lineno) + 1),
+            )
+    lines = text.splitlines()
+    try:
+        comment_starts = {
+            token.start[0]: token.start[1]
+            for token in tokenize.generate_tokens(io.StringIO(text).readline)
+            if token.type == tokenize.COMMENT
+        }
+    except tokenize.TokenError:
+        comment_starts = {}
+    return "\n".join(
+        line[: comment_starts.get(number, len(line))]
+        for number, line in enumerate(lines, start=1)
+        if number not in docstring_lines
+    )
+
+
+def _code_lines(text: str, *, python: bool = False) -> str:
+    """Return the executable part of a script or ``run:`` block.
+
+    Args:
+        text: Shell or YAML ``run:`` source, or a Python module.
+        python: Treat ``text`` as Python (see :func:`_python_code`).
+
+    Returns:
+        The source without comment lines, heredoc bodies (shell) or
+        docstrings (Python).
+    """
+    if python:
+        return _python_code(text)
+    kept: list[str] = []
+    heredoc_end: str | None = None
+    for line in text.splitlines():
+        if heredoc_end is not None:
+            # Inside a heredoc (usage text, templates): data, not code.
+            if line.strip() == heredoc_end:
+                heredoc_end = None
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        kept.append(line)
+        opener = _HEREDOC_OPENER.search(line)
+        if opener is not None:
+            heredoc_end = opener.group("q") or opener.group("d") or opener.group("tag")
+    return "\n".join(kept)
+
+
+# ``<<`` or ``<<-`` with a quoted or bare delimiter. ``<<<`` is a here-string
+# and ``$((1 << 2))`` a shift: a bare delimiter starts with a letter or
+# underscore and stops at a shell operator, so ``<<EOF;`` yields ``EOF``.
+_HEREDOC_OPENER = re.compile(
+    r"""(?<!<)<<(?!<)-?\s*(?:'(?P<q>[^']+)'|"(?P<d>[^"]+)"|(?P<tag>[A-Za-z_][^\s'"<;&|)]*))""",
+)
+
+
+# ``gh attestation verify`` as a command: the ``gh`` binary or a variable
+# holding it (``"$gh_cmd" attestation verify``), not prose quoting it.
+_VERIFIER_CALL = re.compile(
+    r"""(?:\bgh\b|gh_cmd"?\}?)["',\s]+attestation["',\s]+verify\b""",
+)
+
+
+def _attestation_verifying_scripts() -> set[str]:
+    """Return the repo-relative paths of every script running the verifier.
+
+    Any shell or Python script under ``scripts/`` whose code (comments and,
+    for Python, string literals stripped) runs ``gh attestation verify``
+    counts, and so does any script that invokes one of those scripts,
+    transitively, so a wrapper cannot hide the call. Documentation files are
+    not consulted.
+
+    Returns:
+        Repo-relative paths (``scripts/...``).
+    """
+    scripts_dir = _REPO_ROOT / "scripts"
+    sources = {
+        str(path.relative_to(_REPO_ROOT)): _code_lines(
+            path.read_text(encoding="utf-8"),
+            python=path.suffix == ".py",
+        )
+        for path in scripts_dir.rglob("*")
+        if path.is_file() and path.suffix in {".sh", ".bash", ".py"}
+    }
+    verifying = {name for name, code in sources.items() if _VERIFIER_CALL.search(code)}
+    while True:
+        wrappers = {
+            name
+            for name, code in sources.items()
+            if name not in verifying
+            and any(_invokes(code=code, script=script) for script in verifying)
+        }
+        if not wrappers:
+            return verifying
+        verifying |= wrappers
+
+
+def _invokes(*, code: str, script: str) -> bool:
+    """Return whether ``code`` invokes ``script`` as a command or argument.
+
+    Matches the script by its repo-relative path or by its basename as a
+    whole path token (``bash verify_artifacts.sh``, ``./x/verify_artifacts.sh``,
+    ``"$ROOT/scripts/ci/x.sh"``), but not a same-named file in another
+    directory tree and not a bare mention inside a longer word.
+
+    Args:
+        code: Script or ``run:`` source with comments stripped.
+        script: Repo-relative script path.
+
+    Returns:
+        ``True`` when the script is invoked.
+    """
+    name = Path(script).name
+    parent = Path(script).parent.name
+    pattern = re.compile(
+        r"""(?:^|[\s"'=(])(?P<path>/?(?:[A-Za-z0-9_.${}-]+/)*"""
+        + re.escape(name)
+        + r""")(?=$|[\s"');&|])""",
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(code):
+        path = match.group("path")
+        if path == script or path.endswith(f"/{script}"):
+            return True
+        parts = path.split("/")
+        if len(parts) == 1:
+            return True
+        if parts[-2] == parent and all(part in {".", ".."} for part in parts[:-2]):
+            return True
+    return False
+
+
+def _attestation_verifying_jobs() -> list[tuple[str, str, set[str] | None]]:
+    """Collect every job that runs ``gh attestation verify`` and its allowlist.
+
+    A job verifies when the code of one of its ``run:`` steps (comments
+    stripped) invokes the verifier directly or runs a repo script that does.
+    Only jobs with their own harden-runner step are collected; reusable
+    callers are covered by the reusable's own default allowlist unless they
+    pass a replace-mode list.
+
+    Returns:
+        Tuples of (workflow file, job name, literal allowlist or None).
+    """
+    scripts = _attestation_verifying_scripts()
+    found: list[tuple[str, str, set[str] | None]] = []
+    for path in _workflow_paths():
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_name, job in (workflow.get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            runs = [_code_lines(str(step.get("run", ""))) for step in steps]
+            verifies = any(
+                "attestation verify" in run
+                or any(_invokes(code=run, script=script) for script in scripts)
+                for run in runs
+            )
+            if not verifies:
+                continue
+            harden = [
+                step
+                for step in steps
+                if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+            ]
+            assert_that(harden).described_as(
+                f"{path.name}:{job_name} verifies attestations but has no "
+                "harden-runner step",
+            ).is_length(1)
+            found.append(
+                (
+                    path.name,
+                    job_name,
+                    _endpoint_set(
+                        (harden[0].get("with") or {}).get("allowed-endpoints"),
+                    ),
+                ),
+            )
+    return found
+
+
+def test_every_attestation_verifying_job_allows_the_attestation_store() -> None:
+    """Every job running ``gh attestation verify`` must reach the bundle store.
+
+    ``gh attestation verify`` reads the attestations API, then downloads the
+    Sigstore bundle from GitHub's attestation store on Azure blob storage and
+    checks it against the TUF root. The S1 checkpoint v0.160.3rc1 died in
+    docker-promote's "Verify attestations on the staging digests" step
+    because that job's allowlist had no ``*.blob.core.windows.net:443``
+    while release-gate's did (#2633). A missing allowlist counts as empty,
+    and an expression-valued allowlist fails closed: none of these jobs uses
+    one today, and a future resolver job must extend this test to check the
+    resolved list rather than be skipped.
+    """
+    jobs = _attestation_verifying_jobs()
+    names = {(workflow, job) for workflow, job, _ in jobs}
+    assert_that(names).contains(
+        ("publish-pypi-on-tag.yml", "release-gate"),
+        ("publish-pypi-on-tag.yml", "docker-promote"),
+        ("publish-npm.yml", "stage"),
+    )
+
+    offenders: list[str] = []
+    for workflow, job, endpoints in jobs:
+        if endpoints is None:
+            offenders.append(f"{workflow}:{job} uses an expression allowlist")
+            continue
+        missing = sorted(_ATTESTATION_VERIFY_HOSTS - endpoints)
+        if missing:
+            offenders.append(f"{workflow}:{job} missing {missing}")
+    assert_that(offenders).described_as(
+        "attestation-verifying jobs whose allowlist blocks the verifier",
     ).is_empty()
 
 
