@@ -7801,6 +7801,73 @@ def test_mirror_lane_runs_for_stable_releases_only(job_name: str) -> None:
         )
 
 
+def test_release_recovery_entry_calls_the_reusable_with_the_tag_path_values() -> None:
+    """The recovery entry workflow resumes with the ORIGINAL run's artifacts.
+
+    lgtm-ci#966's reusable never rebuilds: it reads the source run's
+    artifacts and resumes the missing channels. The caller must name the
+    same artifacts, package set and signer the tag path produces, register
+    itself as the npm entry workflow, and default to a dry run (#2633).
+    """
+    recover = _load_workflow(name="release-recover.yml")
+    publish_npm = _load_workflow(name="publish-npm.yml")["jobs"]["publish"]["with"]
+    stage_steps = _load_workflow(name="publish-npm.yml")["jobs"]["stage"]["steps"]
+    # PyYAML parses a bare `on:` key as boolean True; the file quotes it.
+    on = next(value for key, value in recover.items() if key in ("on", True))
+
+    assert_that(list(on)).is_equal_to(["workflow_dispatch"])
+    inputs = on["workflow_dispatch"]["inputs"]
+    assert_that(inputs["dry-run"]["default"]).is_true()
+    assert_that(inputs["tag"]["required"]).is_true()
+    assert_that(inputs["source-run-id"]["required"]).is_true()
+    assert_that(recover["permissions"]).is_equal_to({})
+
+    job = recover["jobs"]["recover"]
+    assert_that(str(job["uses"])).is_equal_to(
+        "lgtm-hq/lgtm-ci/.github/workflows/reusable-release-recover.yml@"
+        + _canonical_lgtm_ci_pin(),
+    )
+    assert_that(job["permissions"]).is_equal_to(
+        {
+            "actions": "read",
+            "contents": "write",
+            "issues": "write",
+            "id-token": "write",
+            "attestations": "write",
+        },
+    )
+    with_block = job["with"]
+    assert_that(with_block["tooling-ref"]).is_equal_to(_canonical_lgtm_ci_pin())
+    assert_that(with_block["source-workflow"]).is_equal_to(
+        ".github/workflows/publish-pypi-on-tag.yml",
+    )
+    assert_that(with_block["dry-run"]).is_equal_to("${{ inputs.dry-run }}")
+    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    # The npm resume must see exactly the package set the tag path staged.
+    assert_that(with_block["npm-artifact-name"]).is_equal_to(
+        publish_npm["artifact-name"],
+    )
+    assert_that(with_block["npm-order"]).is_equal_to(publish_npm["order"])
+    assert_that(with_block["npm-packages-dir"]).is_equal_to(".")
+    assert_that(with_block["npm-checksums-file"]).is_equal_to("SHA256SUMS")
+    assert_that(with_block["signer-workflow"]).is_equal_to(
+        publish_npm["signer-workflow"],
+    )
+    assert_that(with_block["signer-repo"]).is_equal_to(publish_npm["signer-repo"])
+    assert_that(with_block["npm-entry-workflows"]).is_equal_to(
+        ".github/workflows/release-recover.yml",
+    )
+    # The GitHub Release resume reads the gate's assembled artifact.
+    assert_that(with_block["release-artifact-name"]).is_equal_to("release-assets")
+    uploads = [
+        s
+        for s in stage_steps
+        if str(s.get("uses", "")).startswith("actions/upload-artifact@")
+    ]
+    assert_that(uploads[0]["with"]["name"]).is_equal_to(with_block["npm-artifact-name"])
+    assert_that(job).does_not_contain_key("secrets")
+
+
 def test_release_failure_notifier_runs_after_every_publish_job() -> None:
     """A failed tag run ends in one deduplicated issue, a green one closes it.
 
