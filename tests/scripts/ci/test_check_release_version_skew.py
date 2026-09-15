@@ -242,6 +242,24 @@ def test_formula_release_url_wins_over_version_stanza(module: Any) -> None:
     assert_that(module.formula_version(body=body)).is_equal_to("1.2.3")
 
 
+def test_formula_ignores_release_urls_of_other_repositories(module: Any) -> None:
+    """A pinned resource from another project's releases never wins."""
+    body = "\n".join(
+        [
+            "class Lintro < Formula",
+            '  version "1.2.3"',
+            '  resource "dep" do',
+            '    url "https://github.com/other/dep/releases/download/v9.0.0/dep.tgz"',
+            "  end",
+            "end",
+        ],
+    )
+    assert_that(module.formula_version(body=body)).is_equal_to("1.2.3")
+    assert_that(
+        module.formula_version(body=body, source_repo="other/dep"),
+    ).is_equal_to("9.0.0")
+
+
 def test_formula_pypi_sdist_url_is_not_a_release_url(module: Any) -> None:
     """A formula with only a PyPI sdist url has no readable version."""
     body = "\n".join(

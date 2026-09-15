@@ -76,13 +76,30 @@ _PENDING_RUN_STATES = frozenset(
 _NPM_JOB_PREFIX = "publish to npm"
 
 _FORMULA_VERSION = re.compile(r'^\s*version\s+"([^"]+)"', re.MULTILINE)
-# The GitHub release-asset download url carries the release tag as its path
-# segment; that tag is the formula's version once the explicit stanza is gone.
-_FORMULA_RELEASE_URL = re.compile(
-    r'^\s*url\s+"https://github\.com/[^/"]+/[^/"]+/releases/download/'
-    r'v?([^/"]+)/[^"]+"',
-    re.MULTILINE,
-)
+
+
+def _formula_release_url_pattern(*, source_repo: str) -> re.Pattern[str]:
+    """Build the regex matching a release-asset url of ``source_repo``.
+
+    The GitHub release-asset download url carries the release tag as its path
+    segment; that tag is the formula's version once the explicit stanza is
+    gone. The pattern is scoped to the audited source repository so a pinned
+    resource from some other project's releases cannot be mistaken for it.
+
+    Args:
+        source_repo: Repository whose releases the formula installs, in
+            ``owner/name`` form.
+
+    Returns:
+        A compiled multiline pattern whose first group is the release tag.
+    """
+    return re.compile(
+        rf'^\s*url\s+"https://github\.com/{re.escape(source_repo)}/'
+        r'releases/download/v?([^/"]+)/[^"]+"',
+        re.MULTILINE,
+    )
+
+
 _VERSION_CORE = re.compile(r"^(\d+(?:\.\d+)*)(.*)$")
 
 
@@ -258,6 +275,7 @@ def resolve_homebrew(
     formula: str,
     branch: str,
     fetch: TextFetcher,
+    source_repo: str = DEFAULT_REPO,
 ) -> ChannelStatus:
     """Resolve the version pinned by the Homebrew tap formula.
 
@@ -266,6 +284,7 @@ def resolve_homebrew(
         formula: Path to the formula inside the tap.
         branch: Tap branch to read.
         fetch: Text fetcher used for the raw file request.
+        source_repo: Repository whose release assets the formula installs.
 
     Returns:
         The resolved channel status.
@@ -275,7 +294,7 @@ def resolve_homebrew(
         body = fetch(url=url)
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return ChannelStatus(name="Homebrew", error=f"{type(exc).__name__}: {exc}")
-    version = formula_version(body=body)
+    version = formula_version(body=body, source_repo=source_repo)
     if version is None:
         return ChannelStatus(
             name="Homebrew",
@@ -284,22 +303,25 @@ def resolve_homebrew(
     return ChannelStatus(name="Homebrew", version=version)
 
 
-def formula_version(*, body: str) -> str | None:
+def formula_version(*, body: str, source_repo: str = DEFAULT_REPO) -> str | None:
     """Extract the pinned version from a Homebrew formula body.
 
     The tap formula no longer carries an explicit ``version`` stanza (Homebrew
     scans it from the stable url; ``brew audit --strict`` flags the redundant
-    line), so the release tag in the first GitHub release-asset ``url`` stanza
-    is authoritative. An explicit ``version`` stanza is honoured only when no
-    such url exists, which keeps older formula shapes readable.
+    line), so the release tag in the first release-asset ``url`` stanza of
+    ``source_repo`` is authoritative. An explicit ``version`` stanza is
+    honoured only when no such url exists, which keeps older formula shapes
+    readable. Release urls of other repositories (pinned resources) never
+    count.
 
     Args:
         body: The formula source.
+        source_repo: Repository whose release assets the formula installs.
 
     Returns:
         The version string, or ``None`` when neither shape is present.
     """
-    url_match = _FORMULA_RELEASE_URL.search(body)
+    url_match = _formula_release_url_pattern(source_repo=source_repo).search(body)
     if url_match is not None:
         return url_match.group(1).strip()
     stanza_match = _FORMULA_VERSION.search(body)
@@ -582,6 +604,7 @@ def audit(
             formula=args.tap_formula,
             branch=args.tap_branch,
             fetch=fetch,
+            source_repo=args.repo,
         ),
     ]
 
