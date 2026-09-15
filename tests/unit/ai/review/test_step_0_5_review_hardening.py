@@ -1,0 +1,556 @@
+"""Hardening of the step 0.5 review shape (lintro-ops #37, Codex review round).
+
+Pins seven behaviours the first Codex pass over the findings-only chunk shape
+found missing: an output-exhaustion error is never retried generically, a
+failed half of a split chunk does not discard the other half, env and CLI
+overlays keep the user's explicit-field set (so the CLI parallelism clamp
+still applies under ``LINTRO_AI_TRANSPORT=cli``), overlapping duplicate groups
+resolve against live survivors, a synthesis answer without its narrative is
+flagged, a single over-target file is reviewed whole up to the context window
+and recorded when cut, and a sticky nit row carries enough to act on.
+"""
+
+from __future__ import annotations
+
+from dataclasses import replace
+from pathlib import Path
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from assertpy import assert_that
+
+from lintro.ai.cli_schemas import SYNTHESIS_CLI_SCHEMA
+from lintro.ai.config import AIConfig
+from lintro.ai.config_overrides import apply_env_overrides
+from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
+from lintro.ai.providers.response import AIResponse
+from lintro.ai.registry import AIProvider
+from lintro.ai.retry import with_retry
+from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
+from lintro.ai.review.chunker import chunk_review_context
+from lintro.ai.review.classifier import classify_changed_files
+from lintro.ai.review.coverage_degradation import describe_coverage_degradations
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
+from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
+from lintro.ai.review.models.review_chunk import ReviewChunk
+from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
+from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
+from lintro.ai.review.response_pipeline import ChunkReviewRequest
+from lintro.ai.review.run_planning import (
+    resolve_max_parallel_calls,
+    resolve_review_chunks,
+)
+from lintro.ai.review.sticky import build_sticky_comment
+from lintro.ai.review.synthesis_narrative import (
+    DuplicateGroup,
+    apply_duplicate_groups,
+)
+from lintro.config.review_config import ReviewSynthesisConfig
+from tests.unit.ai.review.review_fixtures import make_review_context
+from tests.unit.ai.review.test_cross_chunk_synthesis_2269 import (
+    _outcome,
+    _run,
+    _synthesis_payload,
+)
+
+_EXHAUSTED = "Claude CLI reported error: maximum output tokens reached"
+
+
+# --- 1. output exhaustion is not a transient failure ---------------------------
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_output_exhaustion_is_raised_on_the_first_attempt(
+    mock_sleep: MagicMock,
+) -> None:
+    """The generic retry loop does not repeat an oversized request.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    calls = 0
+
+    @with_retry(max_retries=3, base_delay=0.0)
+    async def fn() -> str:
+        nonlocal calls
+        calls += 1
+        raise AIProviderError(_EXHAUSTED)
+
+    with pytest.raises(AIProviderError):
+        await fn()
+
+    assert_that(calls).is_equal_to(1)
+    assert_that(mock_sleep.call_count).is_equal_to(0)
+
+
+@patch("lintro.ai.retry.asyncio.sleep")
+async def test_other_provider_errors_still_retry(mock_sleep: MagicMock) -> None:
+    """A transient provider error keeps its retry budget.
+
+    Args:
+        mock_sleep: Patched ``asyncio.sleep``.
+    """
+    calls = 0
+
+    @with_retry(max_retries=2, base_delay=0.0)
+    async def fn() -> str:
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise AIProviderError("server error")
+        return "ok"
+
+    assert_that(await fn()).is_equal_to("ok")
+    assert_that(calls).is_equal_to(3)
+
+
+# --- 2. a failed half keeps the other half -------------------------------------
+
+
+def _two_file_chunk(*, repo_root: str) -> tuple[ReviewChunk, ReviewContext]:
+    diff = (
+        "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n"
+        "@@ -1 +1 @@\n+x = 1\n"
+        "diff --git a/src/b.py b/src/b.py\n--- a/src/b.py\n+++ b/src/b.py\n"
+        "@@ -1 +1 @@\n+y = 2\n"
+    )
+    chunk = ReviewChunk(
+        id=1,
+        files=["src/a.py", "src/b.py"],
+        diff=diff,
+        relationship="directory-prefix",
+    )
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(path="src/a.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="src/b.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff=diff,
+        pr_metadata=None,
+        repo_root=repo_root,
+    )
+    return chunk, context
+
+
+def _ok_response(*, file: str) -> AIResponse:
+    return AIResponse(
+        content=(
+            '{"findings": [{"severity": "P2", "category": "logic-bug", '
+            f'"file": "{file}", "line": 1, "title": "t", "description": "d", '
+            '"cause": "c", "fix": "f", "confidence": "high", '
+            '"checklist_ids": []}], "flagged_files": []}'
+        ),
+        model="claude-sonnet-4-6",
+        provider=AIProvider.ANTHROPIC,
+        input_tokens=10,
+        output_tokens=20,
+        cost_estimate=0.0,
+    )
+
+
+async def _split_with(
+    *,
+    tmp_path: Path,
+    failures: dict[int, Exception],
+) -> Any:
+    """Drive the main pass with the given per-call failures (1-based)."""
+    chunk, context = _two_file_chunk(repo_root=str(tmp_path))
+    provider = MagicMock()
+    provider.aclose = AsyncMock()
+    provider.model_name = "claude-sonnet-4-6"
+    provider.name = "anthropic"
+    provider.capabilities.supports_sessions = False
+    budget = MagicMock()
+    budget.check = MagicMock()
+    prompts: list[str] = []
+
+    async def _fake_call_ai(**kwargs: object) -> AIResponse:
+        prompt = str(kwargs.get("user_prompt", ""))
+        prompts.append(prompt)
+        error = failures.get(len(prompts))
+        if error is not None:
+            raise error
+        file = (
+            "src/b.py" if "+y = 2" in prompt and "+x = 1" not in prompt else "src/a.py"
+        )
+        return _ok_response(file=file)
+
+    with patch(
+        "lintro.ai.review.provider_call.call_ai",
+        new=AsyncMock(side_effect=_fake_call_ai),
+    ):
+        return await review_chunk_main_pass(
+            request=ChunkReviewRequest(
+                chunk=chunk,
+                context=context,
+                provider=provider,
+                ai_config=AIConfig(
+                    enabled=True,
+                    review=True,
+                    transport=AITransport.CLI,
+                ),
+                checklist_text="",
+                checklist_count=0,
+                interaction_paths="",
+                lint_results=None,
+                extra_checklist="",
+                strictness_section="",
+                budget=budget,
+                repo_root=str(tmp_path),
+                use_one_shot=True,
+                diff_budget=10_000,
+                chunk_index=3,
+            ),
+        )
+
+
+async def test_a_failed_second_half_keeps_the_first_half(tmp_path: Path) -> None:
+    """The first half's findings survive; the failed half's files are unreviewed.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    partial = await _split_with(
+        tmp_path=tmp_path,
+        failures={1: AIProviderError(_EXHAUSTED), 3: AIProviderError("timeout")},
+    )
+
+    assert_that([finding.file for finding in partial.findings]).is_equal_to(
+        ["src/a.py"],
+    )
+    assert_that(partial.files).is_equal_to(("src/a.py",))
+    assert_that([item.reason for item in partial.coverage_degradations]).is_equal_to(
+        [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
+    )
+    assert_that(partial.input_tokens).is_equal_to(10)
+
+
+async def test_both_halves_failing_raises(tmp_path: Path) -> None:
+    """With nothing to keep, the provider error propagates.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    with pytest.raises(AIProviderError, match="timeout"):
+        await _split_with(
+            tmp_path=tmp_path,
+            failures={
+                1: AIProviderError(_EXHAUSTED),
+                2: AIProviderError("timeout"),
+                3: AIProviderError("timeout"),
+            },
+        )
+
+
+async def test_a_cost_cap_stop_on_a_half_propagates(tmp_path: Path) -> None:
+    """A budget stop is never swallowed into a degraded half.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    with pytest.raises(AICostBudgetExceededError):
+        await _split_with(
+            tmp_path=tmp_path,
+            failures={
+                1: AIProviderError(_EXHAUSTED),
+                3: AICostBudgetExceededError("cap"),
+            },
+        )
+
+
+# --- 3. overlays keep the explicit-field set -----------------------------------
+
+
+def test_env_overlay_keeps_the_cli_parallelism_clamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LINTRO_AI_TRANSPORT=cli`` alone must not mark every field as set.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    for name in (
+        "LINTRO_AI_ENABLED",
+        "LINTRO_AI_REVIEW",
+        "LINTRO_AI_PROVIDER",
+        "LINTRO_AI_MODEL",
+        "LINTRO_AI_MAX_COST_USD",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("LINTRO_AI_TRANSPORT", "cli")
+
+    overlaid, _sources = apply_env_overrides(AIConfig(enabled=True, review=True), {})
+
+    assert_that(overlaid.transport).is_equal_to(AITransport.CLI)
+    assert_that(overlaid.model_fields_set).contains("transport", "enabled", "review")
+    assert_that(overlaid.model_fields_set).does_not_contain("max_parallel_calls")
+    assert_that(
+        resolve_max_parallel_calls(ai_config=overlaid, enforce_cost_cap=False),
+    ).is_equal_to(3)
+
+
+def test_env_overlay_keeps_an_explicit_parallelism(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A user-set ``max_parallel_calls`` survives the overlay as explicit.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("LINTRO_AI_TRANSPORT", "cli")
+
+    overlaid, _sources = apply_env_overrides(
+        AIConfig(enabled=True, review=True, max_parallel_calls=5),
+        {},
+    )
+
+    assert_that(overlaid.model_fields_set).contains("max_parallel_calls")
+    assert_that(
+        resolve_max_parallel_calls(ai_config=overlaid, enforce_cost_cap=False),
+    ).is_equal_to(5)
+
+
+# --- 4. overlapping duplicate groups -------------------------------------------
+
+
+def _finding(*, file: str, line: int, severity: Severity, title: str) -> ReviewFinding:
+    return ReviewFinding(
+        severity=severity,
+        category="logic-bug",
+        file=file,
+        line=line,
+        title=title,
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+    )
+
+
+def test_overlapping_groups_redirect_to_the_live_survivor() -> None:
+    """A group naming an already-dropped finding folds into its survivor."""
+    findings = (
+        _finding(file="a.py", line=1, severity=Severity.P2, title="A"),
+        _finding(file="b.py", line=2, severity=Severity.P1, title="B"),
+        _finding(file="c.py", line=3, severity=Severity.P3, title="C"),
+    )
+
+    kept, merged = apply_duplicate_groups(
+        findings=findings,
+        groups=(
+            DuplicateGroup(keep="a.py:1", drop=("b.py:2",)),  # B (P1) survives
+            DuplicateGroup(keep="a.py:1", drop=("c.py:3",)),  # A is gone; C → B
+        ),
+    )
+
+    assert_that(merged).is_equal_to(2)
+    assert_that([finding.title for finding in kept]).is_equal_to(["B"])
+    assert_that([o.label for o in kept[0].all_occurrences]).is_equal_to(
+        ["b.py:2", "a.py:1", "c.py:3"],
+    )
+
+
+def test_chained_groups_carry_absorbed_sites_forward() -> None:
+    """Dropping a survivor into a later group moves what it absorbed too."""
+    findings = (
+        _finding(file="a.py", line=1, severity=Severity.P3, title="A"),
+        _finding(file="b.py", line=2, severity=Severity.P3, title="B"),
+        _finding(file="c.py", line=3, severity=Severity.P1, title="C"),
+    )
+
+    kept, merged = apply_duplicate_groups(
+        findings=findings,
+        groups=(
+            DuplicateGroup(keep="a.py:1", drop=("b.py:2",)),  # B → A
+            DuplicateGroup(keep="c.py:3", drop=("a.py:1",)),  # A → C, with B
+        ),
+    )
+
+    assert_that(merged).is_equal_to(2)
+    assert_that([finding.title for finding in kept]).is_equal_to(["C"])
+    assert_that([o.label for o in kept[0].all_occurrences]).is_equal_to(
+        ["c.py:3", "a.py:1", "b.py:2"],
+    )
+
+
+# --- 5. the synthesis narrative is required ------------------------------------
+
+
+def test_synthesis_cli_schema_requires_the_narrative() -> None:
+    """A structured CLI reply cannot omit the summary or the reasoning."""
+    assert_that(SYNTHESIS_CLI_SCHEMA["required"]).contains(
+        "summary",
+        "verdict_reasoning",
+        "findings",
+    )
+    assert_that(SYNTHESIS_CLI_SCHEMA["required"]).does_not_contain("duplicates")
+
+
+def test_synthesis_outcome_serializes_narrative_missing() -> None:
+    """The JSON block says when the pass wrote no summary."""
+    assert_that(SynthesisOutcome().to_dict()["narrative_missing"]).is_false()
+    assert_that(
+        SynthesisOutcome(narrative_missing=True).to_dict()["narrative_missing"],
+    ).is_true()
+
+
+def test_a_summary_less_synthesis_answer_is_flagged_not_silent() -> None:
+    """A findings-only synthesis reply completes but is marked narrative-missing."""
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content=_synthesis_payload(),
+    )
+
+    outcome = _outcome(result=result)
+    assert_that(outcome.failed).is_false()
+    assert_that(outcome.narrative_missing).is_true()
+    assert_that(result.pr_summary).is_none()
+
+
+# --- 6. a single over-target file --------------------------------------------
+
+
+def _big_single_file_context(*, lines: int) -> ReviewContext:
+    body = "".join(
+        f"+line {index:05d} of a very long change here\n" for index in range(lines)
+    )
+    diff = (
+        "diff --git a/big.py b/big.py\n--- a/big.py\n+++ b/big.py\n"
+        f"@@ -1 +1,{lines} @@\n{body}"
+    )
+    return make_review_context(
+        unified_diff=diff,
+        changed_files=[
+            ChangedFile(path="big.py", status="modified", additions=lines, deletions=0),
+        ],
+    )
+
+
+def test_a_single_file_over_the_target_is_reviewed_whole_under_the_ceiling() -> None:
+    """A 9k-token file is one whole chunk when the context window allows it."""
+    context = _big_single_file_context(lines=900)  # ~9k tokens
+    classifications = classify_changed_files(files=context.changed_files)
+
+    result = chunk_review_context(
+        context=context,
+        max_tokens=7_000,
+        classifications=classifications,
+        hard_max_tokens=100_000,
+    )
+
+    assert_that(result.chunks).is_length(1)
+    assert_that(result.truncated).is_false()
+    assert_that(result.chunks[0].truncated).is_false()
+    assert_that(result.chunks[0].diff).contains("line 00899")
+
+
+def test_a_single_file_over_the_ceiling_is_cut_and_marked() -> None:
+    """Above the hard ceiling the file is truncated and the chunk says so."""
+    context = _big_single_file_context(lines=900)
+    classifications = classify_changed_files(files=context.changed_files)
+
+    result = chunk_review_context(
+        context=context,
+        max_tokens=7_000,
+        classifications=classifications,
+        hard_max_tokens=8_000,
+    )
+
+    assert_that(result.chunks).is_length(1)
+    assert_that(result.truncated).is_true()
+    assert_that(result.chunks[0].truncated).is_true()
+    assert_that(result.chunks[0].diff).does_not_contain("line 00899")
+
+
+def test_resolve_review_chunks_threads_the_hard_ceiling() -> None:
+    """The planner passes the context-window remainder to the chunker."""
+    context = _big_single_file_context(lines=900)
+    classifications = classify_changed_files(files=context.changed_files)
+
+    chunks = resolve_review_chunks(
+        context=context,
+        diff_budget=7_000,
+        classifications=classifications,
+        hard_diff_ceiling=100_000,
+    )
+
+    assert_that(chunks).is_length(1)
+    assert_that(chunks[0].truncated).is_false()
+    assert_that(chunks[0].diff).contains("line 00899")
+
+
+def test_a_cut_diff_is_described_as_a_coverage_limit(
+    sample_review_result: ReviewResult,
+) -> None:
+    """``diff_truncated`` reads as a real coverage degradation.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    metadata = replace(
+        sample_review_result.metadata,
+        coverage_degradations=(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.DIFF_TRUNCATED,
+                chunk_index=0,
+            ),
+        ),
+    )
+
+    text = describe_coverage_degradations(metadata=metadata)
+
+    assert_that(text).contains("diff cut to the context window")
+    assert_that(text).does_not_contain("other limit")
+
+
+# --- 7. sticky nit rows carry description and fix ------------------------------
+
+
+def test_sticky_nit_row_carries_description_and_fix(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A P3 row is actionable without an inline thread.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    nit = apply_posting_policy(
+        findings=(
+            ReviewFinding(
+                severity=Severity.P3,
+                category="code-smell",
+                file="src/app.py",
+                line=9,
+                title="Nit title",
+                description="The branch is never taken.",
+                cause="Off by one.",
+                fix="Compare with >=.",
+                confidence="high",
+            ),
+        ),
+        policy=PostingPolicy(),
+    )
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=nit),
+            head_sha="abc123def456",
+            repo="lgtm-hq/py-lintro",
+            pr_number=7,
+        ),
+    )
+
+    assert_that(body).contains(
+        "| **new** | **Nit title**<br>The branch is never taken.<br>"
+        "Fix: Compare with >=. | `src/app.py:9` |",
+    )

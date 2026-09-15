@@ -28,12 +28,17 @@ class SynthesisOutcome:
             complete for them.
         duplicates_merged: Number of chunk findings the pass collapsed into
             another finding with the same root cause (lintro-ops milestone 0).
+        narrative_missing: True when the pass answered but wrote no usable
+            ``summary``, so the round renders the TL;DR-only fallback. The
+            findings half of the answer still counts; this flag keeps a
+            summary-less round from reading as a fully successful pass.
     """
 
     findings_added: int = 0
     truncated: bool = False
     failed: bool = False
     duplicates_merged: int = 0
+    narrative_missing: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the outcome for the review JSON payload.
@@ -53,4 +58,5 @@ class SynthesisOutcome:
             "truncated": self.truncated,
             "failed": self.failed,
             "duplicates_merged": self.duplicates_merged,
+            "narrative_missing": self.narrative_missing,
         }

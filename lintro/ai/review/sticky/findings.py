@@ -158,9 +158,9 @@ def _nits_block(
     """Render the collapsed index of open P3 nits (lintro-ops #37).
 
     A nit is a tracked record like any other, but it opens no inline thread:
-    the sticky is its only surface, so it is listed here, title and location
-    only, under a disclosure that keeps the Δ table to the findings a reader
-    must act on.
+    the sticky is its only surface, so each row carries the title, a
+    compressed description and the fix when there is one, under a disclosure
+    that keeps the Δ table to the findings a reader must act on.
 
     Args:
         records: Open sticky-only records, already ordered and limited.
@@ -183,11 +183,34 @@ def _nits_block(
     for record in records:
         lines.append(
             f"| {_delta_cell(record=record, match=match)} "
-            f"| {_cell(text=record.title, limit=_TITLE_LIMIT)} "
+            f"| {_nit_cell(record=record)} "
             f"| `{_location(record=record)}` |",
         )
     lines.extend(["", "</details>"])
     return lines
+
+
+#: Longest a nit's description and fix may run in the sticky table.
+_NIT_DESCRIPTION_LIMIT = 160
+_NIT_FIX_LIMIT = 120
+
+
+def _nit_cell(*, record: FindingRecord) -> str:
+    """Render a nit's title, description and fix as one table cell.
+
+    Args:
+        record: The open P3 record.
+
+    Returns:
+        ``**title**`` followed, on ``<br>``-separated lines, by the compressed
+        description and a ``Fix:`` line when the record carries one.
+    """
+    parts = [f"**{_cell(text=record.title, limit=_TITLE_LIMIT)}**"]
+    if record.description.strip():
+        parts.append(_cell(text=record.description, limit=_NIT_DESCRIPTION_LIMIT))
+    if record.fix.strip():
+        parts.append(f"Fix: {_cell(text=record.fix, limit=_NIT_FIX_LIMIT)}")
+    return "<br>".join(parts)
 
 
 def _pruning_markers(*, dropped_open: int, dropped_fixed: int) -> list[str]:

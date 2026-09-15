@@ -1025,6 +1025,7 @@ def test_new_value_objects_construct_and_serialize_from_the_package() -> None:
             "truncated": True,
             "failed": False,
             "duplicates_merged": 0,
+            "narrative_missing": False,
         },
     )
     assert_that(str(enums.FindingOrigin.SYNTHESIS)).is_equal_to("synthesis")

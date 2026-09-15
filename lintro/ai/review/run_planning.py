@@ -107,6 +107,7 @@ def resolve_review_chunks(
     classifications: list[FileClassification],
     force_semantic_chunking: bool = False,
     skipped_sink: list[SkippedFile] | None = None,
+    hard_diff_ceiling: int | None = None,
 ) -> list[ReviewChunk]:
     """Resolve review chunks using a budget-gated fast path.
 
@@ -115,12 +116,15 @@ def resolve_review_chunks(
 
     Args:
         context: Collected review diff context.
-        diff_budget: Maximum estimated tokens available for diff content.
+        diff_budget: Per-chunk token target for diff content.
         classifications: Domain classifications for changed files.
         force_semantic_chunking: When True, skip the single-chunk fast path.
         skipped_sink: Optional list the chunker's per-file skips are appended
             to, so the caller can report *why* a changed file went unreviewed
             instead of only how many did (#1910).
+        hard_diff_ceiling: Absolute per-chunk ceiling (the context-window
+            remainder) a single over-target file may fill whole before it is
+            truncated; ``None`` makes the target the ceiling.
 
     Returns:
         Ordered list of review chunks to process.
@@ -135,6 +139,7 @@ def resolve_review_chunks(
         context=context,
         max_tokens=max(diff_budget, 1),
         classifications=classifications,
+        hard_max_tokens=hard_diff_ceiling,
     )
     if not chunking.chunks:
         # The whole-context fallback reviews every file, so the chunker's
@@ -163,7 +168,7 @@ def _resolve_diff_budget(
     options: ReviewSessionOptions,
     context_window: int,
 ) -> int:
-    """Resolve how many tokens of diff one provider call may carry.
+    """Resolve the per-chunk diff token target for one provider call.
 
     Args:
         context: Collected review diff context.
@@ -171,7 +176,33 @@ def _resolve_diff_budget(
         context_window: Context window resolved for the provider model.
 
     Returns:
-        The token budget available for embedded diffs.
+        The per-chunk token target (the smaller of the chunk budget and the
+        context-window remainder).
+    """
+    return _resolve_diff_budgets(
+        context=context,
+        options=options,
+        context_window=context_window,
+    )[0]
+
+
+def _resolve_diff_budgets(
+    *,
+    context: ReviewContext,
+    options: ReviewSessionOptions,
+    context_window: int,
+) -> tuple[int, int]:
+    """Resolve the per-chunk target and the hard per-chunk ceiling.
+
+    Args:
+        context: Collected review diff context.
+        options: Session options for the run.
+        context_window: Context window resolved for the provider model.
+
+    Returns:
+        ``(target, ceiling)``: the per-chunk token target the chunker splits
+        groups against, and the context-window remainder a single file may
+        fill before it has to be truncated.
     """
     diff_budget = calculate_available_diff_tokens(
         context_window=context_window,
@@ -194,10 +225,11 @@ def _resolve_diff_budget(
     # slow chunk. The per-chunk budget applies on every transport so the
     # chunker produces small file-group chunks that review at depth and run
     # in parallel (lintro-ops milestone 0, decision A).
-    return resolve_chunk_diff_budget(
+    target = resolve_chunk_diff_budget(
         context_window_budget=diff_budget,
         review_chunk_diff_tokens=options.ai_config.review_chunk_diff_tokens,
     )
+    return target, max(diff_budget, target)
 
 
 #: Concurrency ceiling on the CLI transport when ``ai.max_parallel_calls`` is
@@ -264,7 +296,7 @@ def plan_run(
         model=options.provider.model_name,
         override=options.context_window_override,
     )
-    diff_budget = _resolve_diff_budget(
+    diff_budget, hard_diff_ceiling = _resolve_diff_budgets(
         context=context,
         options=options,
         context_window=context_window,
@@ -278,6 +310,7 @@ def plan_run(
                 classifications=options.classifications,
                 force_semantic_chunking=options.force_semantic_chunking,
                 skipped_sink=chunk_skips,
+                hard_diff_ceiling=hard_diff_ceiling,
             )
             if options.run_builtin_checklist
             else []

@@ -157,8 +157,13 @@ async def _parse_call(
         elapsed=call.elapsed,
     )
     partial = payload_to_partial(response=response, payload=payload)
-    # The main call's own wall time, for the per-chunk timings (section 5).
-    return replace(partial, provider_seconds=call.elapsed)
+    # The files this answer actually covered (a half carries only its own),
+    # and the call's own wall time for the per-chunk timings.
+    return replace(
+        partial,
+        files=tuple(request.chunk.files),
+        provider_seconds=call.elapsed,
+    )
 
 
 async def _retry_after_exhaustion(
@@ -170,8 +175,10 @@ async def _retry_after_exhaustion(
     Args:
         request: The request whose first call exhausted the ceiling.
 
-    A half (or the single-file retry) that exhausts the ceiling again, or
-    fails for any other reason, raises the provider error it hit.
+    A single-file retry that fails again raises the provider error it hit.
+    When one half fails for any reason but a cost-cap stop, the other half's
+    partial is kept and the failed half's files are left out of ``files`` so
+    they count as unreviewed; only when both halves fail is the error raised.
 
     Returns:
         The chunk partial, carrying one output-exhaustion degradation.
@@ -201,10 +208,30 @@ async def _retry_after_exhaustion(
         "reviewing each once.",
     )
     partials: list[ChunkReviewPartial] = []
+    failure: AIError | None = None
     for half in halves:
         half_request = replace(request, chunk=half)
-        call = await invoke_chunk_review(request=half_request)
-        partials.append(await _parse_call(request=half_request, call=call))
+        try:
+            call = await invoke_chunk_review(request=half_request)
+            partials.append(await _parse_call(request=half_request, call=call))
+        except AICostBudgetExceededError:
+            raise
+        except AIError as exc:
+            # The other half's findings are paid for and complete; losing
+            # them to this half's failure would discard real coverage. The
+            # failed half's files stay out of ``files`` so coverage crediting
+            # reports them unreviewed rather than reviewed.
+            logger.warning(
+                "One half of a split chunk failed ({files}); keeping the "
+                "other half's findings and leaving those files unreviewed: "
+                "{error}",
+                files=", ".join(half.files),
+                error=exc,
+            )
+            failure = exc
+    if not partials:
+        assert failure is not None
+        raise failure
     merged = merge_half_partials(partials=partials)
     return replace(
         merged,

@@ -374,13 +374,14 @@ independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
 On top of the confidence gate, findings are tiered by severity for posting. Only **P1
 and P2** findings that clear the policy open inline threads. **P3** findings never open
 a thread: they are listed in the sticky comment under a collapsed **🟡 N P3 nits (not
-posted inline)** block, title and location only, directly below the round's Δ table. The
-tier is rendering only: a P3 is still a tracked record, still counts toward the derived
-verdict (`nits only`), still appears in the fix prompts, and still shows as **✔ fixed**
-in the Δ table when a later round stops reporting it. The review body's _N findings
-posted_ header counts threads, so it excludes P3s as it excludes notes. There is no
-setting for the boundary; it is the constant `INLINE_SEVERITIES` in
-`lintro/ai/review/posting_tiers.py`.
+posted inline)** block directly below the round's Δ table, each row carrying the title,
+a compressed description, the fix when there is one, and the location, so the sticky is
+a complete surface for a nit. The tier is rendering only: a P3 is still a tracked
+record, still counts toward the derived verdict (`nits only`), still appears in the fix
+prompts, and still shows as **✔ fixed** in the Δ table when a later round stops
+reporting it. The review body's _N findings posted_ header counts threads, so it
+excludes P3s as it excludes notes. There is no setting for the boundary; it is the
+constant `INLINE_SEVERITIES` in `lintro/ai/review/posting_tiers.py`.
 
 ### When inline comments cannot be posted
 
@@ -455,7 +456,8 @@ every file is still reviewed, but the model never saw that chunk in one view, so
 findings that need the whole chunk in view may go unreported.
 
 - `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
-  event, each with a `reason` (`output_exhaustion_retried`, a failed depth pass, or —
+  event, each with a `reason` (`output_exhaustion_retried`, `diff_truncated` when a
+  single file's diff exceeded the context window and was cut, a failed depth pass, or —
   when the synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
   `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
   chunk that was split and whose depth-3 sweep also failed contributes two entries with
@@ -620,12 +622,16 @@ What it adds to the surfaces:
       "findings_added": 1,
       "truncated": false,
       "failed": false,
-      "duplicates_merged": 2
+      "duplicates_merged": 2,
+      "narrative_missing": false
     }
   }
   ```
 
   `findings_added` is what survived the cap and the dedupe, not what the model returned.
+  `narrative_missing` is `true` when the pass answered without a usable `summary`: the
+  findings half still counts, the round renders without a headline and walkthrough, and
+  the flag keeps a summary-less answer from reading as a fully successful pass.
   `duplicates_merged` is the number of chunk findings collapsed into another finding
   with the same root cause. `truncated` means the pass saw less than its whole prompt
   input. `failed` distinguishes a pass that could not answer from one that found

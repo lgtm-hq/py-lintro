@@ -19,6 +19,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   P1/P2 only, with P3 nits listed in the sticky comment; per-call wall time and
   transport-reported turns are recorded in the chunk timings (#2680, lintro-ops
   milestone 0 step 0.5)
+- `lintro review` reviews a single file that exceeds the per-chunk target whole, up to
+  the context-window remainder, and records a `diff_truncated` coverage degradation when
+  the file had to be cut; the synthesis JSON block carries `narrative_missing`.
 
 ### Changed
 

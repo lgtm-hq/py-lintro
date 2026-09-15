@@ -717,8 +717,37 @@ async def test_exhausted_single_file_chunk_is_retried_once(
     assert_that(partial.findings).is_length(1)
 
 
-async def test_exhaustion_on_a_half_propagates(tmp_path: Path) -> None:
-    """A half that exhausts the ceiling again raises the provider error.
+async def test_exhaustion_on_a_half_keeps_the_other_half(tmp_path: Path) -> None:
+    """A half that exhausts the ceiling again is dropped, not the whole chunk.
+
+    The surviving half's findings are kept and only its files count as
+    reviewed; the failed half's files are left unreviewed for the coverage
+    surfaces to report.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    prompts: list[str] = []
+    partial = await _main_pass_for(
+        tmp_path=tmp_path,
+        two_files=True,
+        exhaust_calls=frozenset({1, 2}),
+        prompts=prompts,
+    )
+
+    assert_that(prompts).is_length(3)
+    assert_that(partial.files).is_equal_to(("src/b.py",))
+    assert_that([finding.file for finding in partial.findings]).is_equal_to(
+        ["src/b.py"],
+    )
+    reasons = [item.reason for item in partial.coverage_degradations]
+    assert_that(reasons).is_equal_to(
+        [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
+    )
+
+
+async def test_exhaustion_on_both_halves_propagates(tmp_path: Path) -> None:
+    """With neither half answering, the provider error is raised.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -728,11 +757,11 @@ async def test_exhaustion_on_a_half_propagates(tmp_path: Path) -> None:
         await _main_pass_for(
             tmp_path=tmp_path,
             two_files=True,
-            exhaust_calls=frozenset({1, 2}),
+            exhaust_calls=frozenset({1, 2, 3}),
             prompts=prompts,
         )
 
-    assert_that(prompts).is_length(2)
+    assert_that(prompts).is_length(3)
 
 
 #: Findings count large enough that the old default cap (12) would have bitten.

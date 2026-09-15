@@ -228,9 +228,10 @@ SYNTHESIS_CLI_SCHEMA: dict[str, object] = {
     "type": "object",
     # The round's synthesis envelope (lintro-ops milestone 0): the narrative
     # the chunks no longer write, the duplicate merges, and the cross-file
-    # findings. Only ``findings`` is required so a pass that wrote nothing
-    # else still parses; every narrative parser degrades to None.
-    "required": ["findings"],
+    # findings. The narrative is the pass's primary output now that chunks
+    # write none, so ``summary`` and ``verdict_reasoning`` are required;
+    # ``duplicates`` stays optional (an empty list is the common answer).
+    "required": ["summary", "verdict_reasoning", "findings"],
     "additionalProperties": False,
     "properties": {
         "summary": {

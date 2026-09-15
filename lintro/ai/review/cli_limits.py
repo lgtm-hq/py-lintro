@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.config import AIConfig
 from lintro.ai.exceptions import AIProviderError
+from lintro.ai.output_exhaustion import is_output_exhaustion_error
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.token_budget import estimate_tokens
@@ -128,38 +129,6 @@ def resolve_chunk_diff_budget(
         Positive per-chunk token budget.
     """
     return max(min(context_window_budget, review_chunk_diff_tokens), 1)
-
-
-def is_output_exhaustion_error(message: str) -> bool:
-    """Return True when *message* looks like a mid-JSON 32k output failure.
-
-    Args:
-        message: Exception message from a CLI provider call.
-
-    Returns:
-        True when the message matches known output-cap exhaustion signatures.
-    """
-    # Normalize JSON spacing so needle matching is layout-independent.
-    text = message.lower().replace('": "', '":"')
-    # Restrictive on purpose: every Claude CLI failure envelope contains
-    # generic tokens like ``is_error``, ``output_tokens`` (usage block), and
-    # ``finish_reason`` — matching those would classify *any* provider error
-    # (auth, timeout, 4xx) as output exhaustion and trigger the tighter-cap
-    # retry on errors that a smaller response cannot fix.
-    # Output-specific phrasings only: "exceeded the maximum number of
-    # tokens" also matches INPUT context-window violations, and "response
-    # truncated" matches generic proxy/stream errors — both would trigger a
-    # tighter-cap retry that cannot help (#1967 review).
-    needles = (
-        'stop_reason":"max_tokens',
-        'stop_reason":"length',
-        'finish_reason":"length',
-        "max output tokens",
-        "maximum output tokens",
-        "output token limit",
-        "maximum number of output tokens",
-    )
-    return any(needle in text for needle in needles)
 
 
 def is_cli_output_exhaustion(error: BaseException) -> bool:

@@ -130,11 +130,25 @@ async def review_chunk(
             chunk_index=chunk_index,
         ),
     )
+    truncation_degradations: tuple[CoverageDegradation, ...] = (
+        (
+            CoverageDegradation(
+                reason=CoverageDegradationReason.DIFF_TRUNCATED,
+                chunk_index=chunk_index,
+            ),
+        )
+        if chunk.truncated
+        else ()
+    )
     partial = replace(
         main_pass,
-        files=tuple(chunk.files),
+        # A split chunk whose one half failed reports only the files the
+        # surviving half covered, so coverage crediting leaves the rest
+        # unreviewed instead of claiming them.
+        files=main_pass.files or tuple(chunk.files),
         coverage_degradations=(
             *depth_degradations,
+            *truncation_degradations,
             *main_pass.coverage_degradations,
         ),
     )

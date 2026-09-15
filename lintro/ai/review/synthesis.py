@@ -386,6 +386,11 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             cost_estimate=response.cost_estimate,
         )
     narrative = parse_synthesis_envelope(content=response.content)
+    if narrative.summary is None:
+        logger.warning(
+            "The synthesis pass answered without a usable summary; the round "
+            "renders without a headline and walkthrough.",
+        )
     merged_findings, duplicates_merged = apply_duplicate_groups(
         findings=existing_findings,
         groups=narrative.duplicates,
@@ -436,6 +441,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             truncated=truncated,
             failed=False,
             duplicates_merged=duplicates_merged,
+            narrative_missing=narrative.summary is None,
         ),
         degradations=degradations,
         input_tokens=response.input_tokens,

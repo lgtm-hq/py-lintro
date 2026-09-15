@@ -144,7 +144,10 @@ def test_sticky_lists_p3_under_a_disclosure_and_p2_in_the_table(
     assert_that(body).contains("Real defect")
     assert_that(body).contains(f"<details><summary>{NIT_SUMMARY}</summary>")
     assert_that(body).contains("| Δ | Finding | Where |")
-    assert_that(body).contains("| **new** | Nit title | `src/app.py:9` |")
+    assert_that(body).contains(
+        "| **new** | **Nit title**<br>The branch is never taken.<br>"
+        "Fix: Compare with >=. | `src/app.py:9` |",
+    )
     # Both are open and tracked: the heading counts two.
     assert_that(body).contains("· 2 open · ")
     # The nit row is not in the severity-bearing table.

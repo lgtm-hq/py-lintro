@@ -46,6 +46,10 @@ class CoverageDegradationReason(StrEnum):
         ADVERSARIAL_SWEEP_FAILED: The depth-3 adversarial sweep for one chunk
             failed, so the chunk keeps its main-pass findings and whatever the
             sweep would have added is missing (#2395).
+        DIFF_TRUNCATED: One file's diff exceeded the hard per-chunk ceiling
+            (the context-window remainder) and was cut to fit, so the model
+            reviewed only a prefix of that file's change and findings past
+            the cut may go unreported.
     """
 
     OUTPUT_EXHAUSTION_RETRIED = auto()
@@ -53,3 +57,4 @@ class CoverageDegradationReason(StrEnum):
     SYNTHESIS_FAILED = auto()
     GENERATED_QUESTIONS_FAILED = auto()
     ADVERSARIAL_SWEEP_FAILED = auto()
+    DIFF_TRUNCATED = auto()

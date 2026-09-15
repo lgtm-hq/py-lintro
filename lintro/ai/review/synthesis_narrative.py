@@ -197,6 +197,12 @@ def _plan_duplicate_drops(
 ) -> tuple[dict[int, ReviewFinding], dict[int, list[FindingOccurrence]]]:
     """Decide which findings each duplicate group drops and who absorbs them.
 
+    Groups may overlap or chain (``B`` dropped into ``A`` by one group, then
+    ``A`` named as a drop of ``C`` by the next). Every reference is resolved
+    to its *current* survivor before a group is applied, so a finding that an
+    earlier group already dropped can neither survive a later group nor take
+    its members down with it: what it absorbed moves to the new survivor.
+
     Args:
         findings: The merged chunk findings, in reported order.
         groups: Duplicate groups the pass proposed.
@@ -212,6 +218,13 @@ def _plan_duplicate_drops(
             by_ref.setdefault(occurrence.label, finding)
     dropped: dict[int, ReviewFinding] = {}
     absorbed: dict[int, list[FindingOccurrence]] = {}
+    survivor_of: dict[int, ReviewFinding] = {}
+
+    def live(finding: ReviewFinding) -> ReviewFinding:
+        while id(finding) in survivor_of:
+            finding = survivor_of[id(finding)]
+        return finding
+
     for group in groups:
         refs = (group.keep, *group.drop)
         members = [by_ref.get(ref) for ref in refs]
@@ -221,7 +234,10 @@ def _plan_duplicate_drops(
                 refs=refs,
             )
             continue
-        resolved = {id(member): member for member in members if member is not None}
+        resolved = {
+            id(current): current
+            for current in (live(member) for member in members if member is not None)
+        }
         if len(resolved) < 2:
             continue
         survivor = min(
@@ -229,8 +245,10 @@ def _plan_duplicate_drops(
             key=lambda item: (-_SEVERITY_RANK[item.severity], order[id(item)]),
         )
         for member in resolved.values():
-            if member is survivor or id(member) in dropped:
+            if member is survivor:
                 continue
             dropped[id(member)] = member
+            survivor_of[id(member)] = survivor
             absorbed.setdefault(id(survivor), []).extend(member.all_occurrences)
+            absorbed[id(survivor)].extend(absorbed.pop(id(member), []))
     return dropped, absorbed

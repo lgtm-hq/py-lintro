@@ -115,6 +115,18 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
                 f"only the main pass after {wording}",
             )
 
+    cut = {
+        item.chunk_index
+        for item in degradations
+        if item.reason is CoverageDegradationReason.DIFF_TRUNCATED
+    }
+    if cut:
+        clauses.append(
+            f"{len(cut)} of {total} {_plural(count=total, noun='chunk')} had "
+            f"{'its' if len(cut) == 1 else 'their'} diff cut to the context "
+            "window, so only a prefix of that file's change was reviewed",
+        )
+
     reasons = {item.reason for item in degradations}
     if CoverageDegradationReason.SYNTHESIS_TRUNCATED in reasons:
         clauses.append(
@@ -126,6 +138,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
 
     known = {
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+        CoverageDegradationReason.DIFF_TRUNCATED,
         CoverageDegradationReason.SYNTHESIS_TRUNCATED,
         CoverageDegradationReason.SYNTHESIS_FAILED,
         *_DEPTH_PASS_CLAUSES,
