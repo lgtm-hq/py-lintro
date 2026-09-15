@@ -2586,9 +2586,11 @@ def _code_lines(text: str, *, python: bool = False) -> str:
     return "\n".join(kept)
 
 
-# ``<<`` or ``<<-`` with a quoted or bare delimiter; ``<<<`` is a here-string.
+# ``<<`` or ``<<-`` with a quoted or bare delimiter. ``<<<`` is a here-string
+# and ``$((1 << 2))`` a shift: a bare delimiter starts with a letter or
+# underscore and stops at a shell operator, so ``<<EOF;`` yields ``EOF``.
 _HEREDOC_OPENER = re.compile(
-    r"""(?<!<)<<(?!<)-?\s*(?:'(?P<q>[^']+)'|"(?P<d>[^"]+)"|(?P<tag>[^\s'"<]+))""",
+    r"""(?<!<)<<(?!<)-?\s*(?:'(?P<q>[^']+)'|"(?P<d>[^"]+)"|(?P<tag>[A-Za-z_][^\s'"<;&|)]*))""",
 )
 
 
