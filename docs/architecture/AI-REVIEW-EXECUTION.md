@@ -109,7 +109,9 @@ the git-native diff-delivery flags stay as separate keywords, since they are the
 thing the two builders do not share. `redact_prompt_text` and `make_boundary_marker` now
 fire inside this module, which makes it the redaction choke point for prompt bytes: the
 git-native builder still embeds the redacted diff unless the caller explicitly opts out.
-The emitted bytes are unchanged and the #2298 prompt goldens pass without regeneration.
+That slice left the emitted bytes unchanged and the #2298 prompt goldens passed without
+regeneration; the milestone 0.5 findings-only prompts have since changed those bytes, so
+the prompt goldens are regenerated here.
 
 ### Cross-chunk merge (`lintro/ai/review/merge.py`, #2301)
 

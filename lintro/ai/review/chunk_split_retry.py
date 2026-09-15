@@ -13,8 +13,10 @@ two partials under the original chunk index. A single-file chunk cannot be
 split, so it is retried once unchanged. Either way the run records one
 :attr:`~lintro.ai.review.enums.coverage_degradation_reason.CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED`
 degradation for the chunk, because the model never saw the whole chunk in one
-view. A second exhaustion on a half (or on the single-file retry) propagates
-as the provider error it is.
+view. A second exhaustion propagates as the provider error it is only when
+nothing survives it — both halves failing, or the single-file retry. When one
+half fails and the other completed, the surviving findings are kept and the
+chunk records ``SPLIT_HALF_FAILED`` for the files left unreviewed.
 """
 
 from __future__ import annotations

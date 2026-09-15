@@ -256,7 +256,6 @@ def test_synthesis_envelope_degrades_on_unreadable_content() -> None:
         assert_that(narrative.summary).is_none()
         assert_that(narrative.verdict_reasoning).is_none()
         assert_that(narrative.duplicates).is_empty()
-        assert_that(narrative.payload).is_none()
     assert_that(parse_duplicate_groups(raw_duplicates={"keep": "a"})).is_empty()
 
 

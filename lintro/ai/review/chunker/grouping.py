@@ -673,7 +673,12 @@ def _build_group_chunks(
             included_diff = solo
             continue
 
-        ceiling = max(hard_max_tokens or max_tokens, max_tokens)
+        # An explicit ``None`` is the documented "no ceiling" sentinel; a
+        # caller-computed 0 is a real (if unusable) ceiling, so it is clamped
+        # by ``max`` rather than silently read as unset.
+        ceiling = (
+            max_tokens if hard_max_tokens is None else max(hard_max_tokens, max_tokens)
+        )
         if estimate_tokens(solo) <= ceiling:
             # Over the target but under the hard ceiling: one whole-file
             # chunk beats a truncated one, at the cost of a slower call.

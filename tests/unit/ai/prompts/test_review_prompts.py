@@ -419,17 +419,7 @@ def test_chunk_summaries_render_severity_location_and_title() -> None:
 
 def test_chunk_summary_digest_prints_the_finding_id_when_given() -> None:
     """A finding with a digest id is listed as ``F<n>`` so duplicates can name it."""
-    finding = ReviewFinding(
-        severity=Severity.P2,
-        category="logic-bug",
-        file="pkg/api.py",
-        line=12,
-        title="Signature drift",
-        description="d",
-        cause="c",
-        fix="f",
-        confidence="high",
-    )
+    finding = _digest_finding()
     rendered = format_chunk_summaries_for_prompt(
         summaries=[
             ChunkSummary(chunk_id=1, files=("pkg/api.py",), findings=(finding,)),

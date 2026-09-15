@@ -208,6 +208,25 @@ def _inline_safe(*, text: str, limit: int) -> str:
     return _DETAILS_TAG_RE.sub(r"&lt;\1\2", safe)
 
 
+def _inline_cell(*, text: str, limit: int) -> str:
+    """Sanitize model text for a table cell that sits inside a collapsible.
+
+    The nit rows are both at once: a Markdown table cell, so a pipe or a
+    newline must not break the table, and a body inside ``<details>``, so a
+    model-written closing tag must not end the disclosure early. ``_cell``
+    covers only the first and ``_inline_safe`` only the second, so neither is
+    sufficient alone.
+
+    Args:
+        text: Raw model-derived text.
+        limit: Maximum length before truncation.
+
+    Returns:
+        Text safe to embed in a table cell within a ``<details>`` block.
+    """
+    return _DETAILS_TAG_RE.sub(r"&lt;\1\2", _cell(text=text, limit=limit))
+
+
 def _short_sha(*, sha: str) -> str:
     """Return the display-length prefix of a commit sha, or an empty string."""
     cleaned = sanitize_comment_text(sha, limit=64).strip()[:SHORT_SHA_LENGTH]

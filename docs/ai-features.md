@@ -352,10 +352,13 @@ confidence recovers matches the record it already had rather than reappearing as
 
 Nothing is dropped. JSON and MCP output keep every finding and add `posted_inline`
 (`true` / `false`) per finding so a consumer can tell a thread from a note. The terminal
-verdict, the JSON `readiness_verdict`, and the exit code all use the inline subset: a P1
-routed to notes does not fail the process. With the default floor that means a `low`
-confidence P1; with `review_inline_min_confidence: low` no confidence is below the
-floor, so every P1 finding blocks again.
+verdict, the JSON `readiness_verdict`, and the exit code are derived from tracked
+records rather than from what posted inline: a P3 opens a record and moves the verdict
+to `nits only` even though it renders in the sticky, while a finding routed to notes
+opens no record and never moves it — so a P1 routed to notes does not fail the process.
+With the default floor that means a `low` confidence P1; with
+`review_inline_min_confidence: low` no confidence is below the floor, so every P1
+finding blocks again.
 
 ```yaml
 # .lintro-config.yaml
@@ -762,8 +765,10 @@ only; else ready. The review prompt calibrates the P2 vs P3 boundary that would
 otherwise flip that verdict run-to-run: borderline findings must be P3, and every
 finding `description` must name the rubric boundary it used.
 
-Only findings the posting policy routes inline count (see "Confidence gate on inline
-posting"): a `low` confidence finding or an open question never moves the verdict.
+Only findings that open a tracked record count (see "Confidence gate on inline
+posting"): a `low` confidence finding routed to notes, or an open question, never moves
+the verdict. A P3 opens a record even though the posting tier renders it in the sticky
+instead of inline, so it still moves the verdict to `nits only`.
 
 A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.

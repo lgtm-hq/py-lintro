@@ -29,6 +29,7 @@ from lintro.ai.review.sticky.cells import (
     _cell,
     _delta_cell,
     _finding_cell,
+    _inline_cell,
     _inline_safe,
     _location,
     _plural,
@@ -203,13 +204,18 @@ def _nit_cell(*, record: FindingRecord) -> str:
 
     Returns:
         ``**title**`` followed, on ``<br>``-separated lines, by the compressed
-        description and a ``Fix:`` line when the record carries one.
+        description and a ``Fix:`` line when the record carries one. The cell
+        renders inside ``_nits_block``'s disclosure, so it is sanitized with
+        ``_inline_cell``: a model-written ``</details>`` in any of the three
+        fields would otherwise close the disclosure early.
     """
-    parts = [f"**{_cell(text=record.title, limit=_TITLE_LIMIT)}**"]
+    parts = [f"**{_inline_cell(text=record.title, limit=_TITLE_LIMIT)}**"]
     if record.description.strip():
-        parts.append(_cell(text=record.description, limit=_NIT_DESCRIPTION_LIMIT))
+        parts.append(
+            _inline_cell(text=record.description, limit=_NIT_DESCRIPTION_LIMIT),
+        )
     if record.fix.strip():
-        parts.append(f"Fix: {_cell(text=record.fix, limit=_NIT_FIX_LIMIT)}")
+        parts.append(f"Fix: {_inline_cell(text=record.fix, limit=_NIT_FIX_LIMIT)}")
     return "<br>".join(parts)
 
 

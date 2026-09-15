@@ -169,6 +169,39 @@ def test_sticky_omits_the_nits_block_when_no_p3_is_open(
     assert_that(body).does_not_contain("(not posted inline)</summary>")
 
 
+def test_a_nit_cannot_close_the_disclosure_with_model_written_html(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A ``</details>`` in a nit's own text is defanged, not rendered.
+
+    The nit rows sit inside ``_nits_block``'s disclosure, so untrusted model
+    text there must not be able to end it early and re-nest the rest of the
+    comment. The table-cell sanitizer alone does not defang these tags.
+    """
+    escaping = replace(
+        _p3(),
+        description="Ends the block: </details><summary>injected</summary>",
+        fix="And again </details>",
+    )
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=replace(sample_review_result, findings=_tiered(escaping)),
+        ),
+    )
+
+    # Scoped to the disclosure: the fix-all prompt panel renders the same
+    # text inside a ``` fence, where the tags are literal by construction and
+    # the raw sequence is expected to appear.
+    nits = body.split("(not posted inline)</summary>", 1)[1]
+    nits = nits.split("</details>", 1)[0]
+
+    assert_that(nits).contains("&lt;/details")
+    assert_that(nits).contains("&lt;summary")
+    # The model's own sequence never reaches the cell as real tags, which is
+    # what closing the disclosure early would have taken.
+    assert_that(nits).does_not_contain("</details><summary>injected")
+
+
 def test_sticky_pluralizes_the_nits_summary(
     sample_review_result: ReviewResult,
 ) -> None:

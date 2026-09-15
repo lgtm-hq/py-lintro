@@ -18,7 +18,6 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
 
 from loguru import logger
 
@@ -77,15 +76,11 @@ class SynthesisNarrative:
         summary: The round's headline and walkthrough, or ``None``.
         verdict_reasoning: The round's verdict explanation, or ``None``.
         duplicates: Duplicate merges the pass proposed, in reported order.
-        payload: The parsed envelope, or ``None`` when the response was not a
-            JSON object. The findings half is read from the same payload by
-            the findings parser so the response is decoded once.
     """
 
     summary: ReviewSummary | None = None
     verdict_reasoning: VerdictReasoning | None = None
     duplicates: tuple[DuplicateGroup, ...] = field(default_factory=tuple)
-    payload: dict[str, Any] | None = None
 
 
 def parse_synthesis_envelope(*, content: str) -> SynthesisNarrative:
@@ -111,7 +106,6 @@ def parse_synthesis_envelope(*, content: str) -> SynthesisNarrative:
         summary=summary,
         verdict_reasoning=verdict_reasoning,
         duplicates=parse_duplicate_groups(raw_duplicates=payload.get("duplicates")),
-        payload=payload,
     )
 
 

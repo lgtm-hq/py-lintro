@@ -65,9 +65,11 @@ class ChunkReviewPartial:
         turns: Agent turns the transport reported for that call, or ``None``.
         truncated: True when the chunk's diff was cut to the context ceiling,
             so the model saw only a prefix of its file. The file stays in
-            ``files`` for the synthesis digest but is never credited as
-            covered, and the truncation is stamped on the
-            coverage record (see :func:`truncated_paths`).
+            ``files`` for the synthesis digest and is credited as covered at
+            its current hash, so the round converges; the truncation is
+            stamped on its coverage record (see :func:`truncated_paths`) and
+            ``findings_coverage_complete`` stays false until the file's diff
+            changes.
     """
 
     findings: tuple[ReviewFinding, ...]
