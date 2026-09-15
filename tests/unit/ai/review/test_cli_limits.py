@@ -8,16 +8,12 @@ from assertpy import assert_that
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.review.cli_limits import (
     CLI_DIFF_HARD_CEILING_BYTES,
-    CLI_FINDINGS_RETRY_CAP,
-    CLI_MAX_FINDINGS_PER_CALL,
     CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
     assert_cli_diff_within_ceiling,
     is_cli_output_exhaustion,
     is_output_exhaustion_error,
     measure_diff_size,
     resolve_cli_diff_budget,
-    resolve_cli_findings_cap,
-    tighter_findings_cap,
 )
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -75,27 +71,23 @@ def test_assert_cli_diff_within_ceiling_rejects_oversized_diffs() -> None:
     assert_that(str(exc_info.value)).contains("--transport api")
 
 
-def test_resolve_cli_findings_cap_only_for_cli() -> None:
-    """Findings cap applies only on the CLI transport."""
-    assert_that(
-        resolve_cli_findings_cap(
-            transport_is_cli=True,
-            cli_max_findings_per_call=CLI_MAX_FINDINGS_PER_CALL,
-        ),
-    ).is_equal_to(CLI_MAX_FINDINGS_PER_CALL)
-    assert_that(
-        resolve_cli_findings_cap(
-            transport_is_cli=False,
-            cli_max_findings_per_call=CLI_MAX_FINDINGS_PER_CALL,
-        ),
-    ).is_none()
+def test_cli_limits_expose_no_findings_cap() -> None:
+    """The per-call findings cap is gone from the CLI limits for good.
 
+    lintro-ops milestone 0 (decision A) retired the cap: a chunk reports every
+    finding it has, and an oversized answer splits the chunk instead. Pinning
+    the absence keeps a future "just a small ceiling" from creeping back.
+    """
+    import lintro.ai.review.cli_limits as cli_limits
 
-def test_tighter_findings_cap_steps_down() -> None:
-    """Retry caps step down toward one finding."""
-    assert_that(tighter_findings_cap(current=12)).is_equal_to(CLI_FINDINGS_RETRY_CAP)
-    assert_that(tighter_findings_cap(current=CLI_FINDINGS_RETRY_CAP)).is_equal_to(3)
-    assert_that(tighter_findings_cap(current=1)).is_equal_to(1)
+    for name in (
+        "CLI_MAX_FINDINGS_PER_CALL",
+        "CLI_FINDINGS_RETRY_CAP",
+        "resolve_cli_findings_cap",
+        "tighter_findings_cap",
+        "findings_cap_was_hit",
+    ):
+        assert_that(hasattr(cli_limits, name)).described_as(name).is_false()
 
 
 def test_is_output_exhaustion_error_matches_known_signatures() -> None:

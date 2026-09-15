@@ -65,4 +65,8 @@
   described `fix`. Omitting `before` means only the line range's existence can be
   verified, so a misnumbered hunk survives; include it whenever you include
   `suggested_change`.
-{findings_cap_rule}
+- There is no cap on findings: report every real problem you find, most serious
+  first, and **do not report the same problem twice**. When one problem repeats across
+  locations, report it once and list every location in `occurrences` as `file`/`line`
+  pairs — including the primary one. It renders as a single collapsed thread, and its
+  fix prompt enumerates every location.

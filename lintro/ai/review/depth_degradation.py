@@ -10,8 +10,8 @@ chunk and discarded findings the run had already bought.
 :func:`run_degradable_depth_pass` runs one such call and, on ``AIError``,
 returns no value plus the
 :class:`~lintro.ai.review.models.coverage_degradation.CoverageDegradation` the
-chunk records. That is the same #2003 channel the findings cap and the #2269
-synthesis failure use, so the degraded pass reaches the terminal warning, both
+chunk records. That is the same #2003 channel the output-exhaustion split and
+the #2269 synthesis failure use, so the degraded pass reaches the terminal warning, both
 GitHub surfaces and the JSON/MCP payloads without a parallel mechanism.
 
 :class:`~lintro.ai.exceptions.AICostBudgetExceededError` is deliberately not
@@ -35,13 +35,7 @@ if TYPE_CHECKING:
         CoverageDegradationReason,
     )
 
-__all__ = ["DEPTH_PASS_NO_CAP", "run_degradable_depth_pass"]
-
-#: ``findings_cap`` stamped on a failed depth pass. The extra passes carry no
-#: per-call findings ceiling, so this is a placeholder rather than a real cap;
-#: :data:`~lintro.ai.review.models.review_metadata._CAP_REASONS` excludes these
-#: reasons so it can never win the ``findings_cap_applied`` minimum.
-DEPTH_PASS_NO_CAP: int = 0
+__all__ = ["run_degradable_depth_pass"]
 
 _PassResult = TypeVar("_PassResult")
 
@@ -78,10 +72,4 @@ async def run_degradable_depth_pass(
             f"The {label} failed for chunk {chunk_index} ({exc}); keeping "
             "the main pass's result and recording degraded coverage.",
         )
-        return None, (
-            CoverageDegradation(
-                reason=reason,
-                chunk_index=chunk_index,
-                findings_cap=DEPTH_PASS_NO_CAP,
-            ),
-        )
+        return None, (CoverageDegradation(reason=reason, chunk_index=chunk_index),)

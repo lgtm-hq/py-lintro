@@ -28,15 +28,10 @@ class CoverageDegradation:
     Attributes:
         reason: Which limit applied to the chunk.
         chunk_index: Zero-based index of the affected chunk in the run.
-        findings_cap: The per-call findings ceiling in force after the
-            degradation was applied. For a cap hit this is the ceiling the
-            answer reached; for an output-exhaustion retry it is the
-            *tightened* cap the retry ran under, not the original.
     """
 
     reason: CoverageDegradationReason
     chunk_index: int
-    findings_cap: int
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the degradation for JSON and MCP payloads.
@@ -47,5 +42,4 @@ class CoverageDegradation:
         return {
             "reason": str(self.reason),
             "chunk_index": self.chunk_index,
-            "findings_cap": self.findings_cap,
         }

@@ -1,12 +1,15 @@
 """The depth-controlled review of a single chunk (issue #2301).
 
 One chunk, up to three provider calls: the optional depth-2 question
-generator, the main review call, and the optional depth-3 adversarial sweep.
+generator, the main review call (which
+:mod:`lintro.ai.review.chunk_split_retry` splits in two when its answer
+exhausts the provider's output ceiling), and the optional depth-3 adversarial
+sweep.
 :func:`review_chunk_with_progress` wraps that in the run's progress events and
 the #1101 error taxonomy, so the fan-out above only has to schedule.
 :func:`review_chunk` is the seam between the fan-out in
 :mod:`lintro.ai.review.chunk_runner`, which decides *when* a chunk runs, and
-the passes in :mod:`lintro.ai.review.response_pipeline`,
+the passes in :mod:`lintro.ai.review.chunk_split_retry`,
 :mod:`lintro.ai.review.checklist_pass` and
 :mod:`lintro.ai.review.adversarial_pass`, which decide what each call asks.
 
@@ -25,13 +28,9 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from lintro.ai.enums import AITransport
 from lintro.ai.review.adversarial_pass import run_adversarial_pass
 from lintro.ai.review.checklist_pass import generate_extra_checklist
-from lintro.ai.review.cli_limits import (
-    findings_cap_was_hit,
-    resolve_cli_findings_cap,
-)
+from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
 from lintro.ai.review.depth_degradation import run_degradable_depth_pass
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -40,12 +39,7 @@ from lintro.ai.review.merge import ChunkReviewPartial, merge_findings
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.progress import NullReviewProgress, StepTrackingProgress
-from lintro.ai.review.response_pipeline import (
-    ChunkReviewRequest,
-    invoke_chunk_review,
-    parse_review_payload_with_recovery,
-    payload_to_partial,
-)
+from lintro.ai.review.response_pipeline import ChunkReviewRequest
 from lintro.ai.review.session import aborted_before_completion, is_cost_cap_stop
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 
@@ -117,7 +111,7 @@ async def review_chunk(
     # Gate before the main provider call so intra-chunk (depth-2/3) work
     # cannot overshoot the budget between the per-chunk checks.
     plan.budget.check()
-    call = await invoke_chunk_review(
+    main_pass = await review_chunk_main_pass(
         request=ChunkReviewRequest(
             chunk=chunk,
             context=plan.context,
@@ -133,49 +127,15 @@ async def review_chunk(
             repo_root=plan.repo_root,
             use_one_shot=plan.use_one_shot,
             diff_budget=plan.diff_budget,
-            max_findings=resolve_cli_findings_cap(
-                transport_is_cli=ai_config.transport == AITransport.CLI,
-                cli_max_findings_per_call=ai_config.cli_max_findings_per_call,
-            ),
             chunk_index=chunk_index,
         ),
     )
-    response, payload = await parse_review_payload_with_recovery(
-        response=call.response,
-        chunk=chunk,
-        provider=plan.provider,
-        ai_config=ai_config,
-        budget=plan.budget,
-        repo_root=plan.repo_root,
-        use_one_shot=plan.use_one_shot,
-        elapsed=call.elapsed,
-    )
-    main_pass = payload_to_partial(response=response, payload=payload)
-    # The cap is recorded only once the parsed answer reached it: a ceiling
-    # nobody bumped into cost the run no findings, so recording it would make
-    # every capped-transport review read as degraded (#2283). Counted on the
-    # main pass alone, before the depth-3 sweep merges its own findings in.
-    cap_degradations: tuple[CoverageDegradation, ...] = ()
-    if findings_cap_was_hit(
-        findings_count=len(main_pass.findings),
-        findings_cap=call.findings_cap,
-    ):
-        cap_degradations = (
-            CoverageDegradation(
-                reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-                chunk_index=chunk_index,
-                # ``call.findings_cap`` is never None here: the helper only
-                # reports a hit when a real ceiling was in force.
-                findings_cap=call.findings_cap or 0,
-            ),
-        )
     partial = replace(
         main_pass,
         files=tuple(chunk.files),
         coverage_degradations=(
             *depth_degradations,
-            *call.degradations,
-            *cap_degradations,
+            *main_pass.coverage_degradations,
         ),
     )
 

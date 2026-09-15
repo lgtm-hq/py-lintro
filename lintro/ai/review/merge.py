@@ -70,7 +70,8 @@ class ChunkReviewPartial:
             crediting and the synthesis digest key off this set.
         flagged_files: Reviewer re-read requests the chunk reported.
         coverage_degradations: Chunk-level limits that may have suppressed
-            findings, such as a findings cap or an output-exhaustion retry.
+            findings, such as an output-exhaustion split or a failed depth
+            pass.
     """
 
     summary: str

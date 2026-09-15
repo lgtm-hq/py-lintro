@@ -19,13 +19,9 @@ from loguru import logger
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.providers.response import AIResponse
-from lintro.ai.review.cli_limits import findings_cap_was_hit
 from lintro.ai.review.confirmation_filter import (
     drop_confirmation_findings,
     is_confirmation_finding,
-)
-from lintro.ai.review.enums.coverage_degradation_reason import (
-    CoverageDegradationReason,
 )
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.merge import parse_review_response
@@ -137,12 +133,11 @@ def test_homebrew_tap_411_fixture_carries_the_posted_finding_verbatim() -> None:
     assert_that(finding["category"]).is_equal_to("logic-bug")
 
 
-def test_dropped_confirmation_does_not_count_toward_findings_cap() -> None:
-    """A dropped confirmation is gone before the cap is checked.
+def test_dropped_confirmation_leaves_the_partial_empty() -> None:
+    """A dropped confirmation is gone from the partial ``chunk_pass`` receives.
 
-    ``chunk_pass`` counts ``len(partial.findings)`` after
-    ``payload_to_partial``, so a cap of one is not hit by a chunk whose only
-    finding was a confirmation.
+    The chunk's finding count is what every downstream surface sees, so a
+    chunk whose only finding was a confirmation carries no findings at all.
     """
     raw = HOMEBREW_TAP_411_FIXTURE.read_text(encoding="utf-8")
     payload = parse_review_response(content=raw)
@@ -150,9 +145,7 @@ def test_dropped_confirmation_does_not_count_toward_findings_cap() -> None:
 
     partial = payload_to_partial(response=_response(content=raw), payload=payload)
 
-    assert_that(
-        findings_cap_was_hit(findings_count=len(partial.findings), findings_cap=1),
-    ).is_false()
+    assert_that(partial.findings).is_empty()
 
 
 @pytest.mark.parametrize(
@@ -352,16 +345,15 @@ def test_severity_is_untouched_for_kept_findings() -> None:
     assert_that(partial.findings[0].severity).is_equal_to(Severity.P1)
 
 
-async def test_dropped_confirmation_records_no_cap_degradation_through_chunk_pass(
+async def test_dropped_confirmation_records_no_degradation_through_chunk_pass(
     tmp_path: Path,
 ) -> None:
-    """A one-chunk CLI run whose only finding is the fixture confirmation is uncapped.
+    """A one-chunk CLI run whose only finding is the fixture confirmation is clean.
 
-    Runs the real orchestrator with a per-call cap of 1 and the recorded
-    homebrew-tap#411 answer replayed as the provider response. The answer
-    carries exactly one finding, which would hit the cap if it were counted
-    before the drop; the run must record no ``FINDINGS_CAP_APPLIED``
-    degradation and post no findings.
+    Runs the real orchestrator with the recorded homebrew-tap#411 answer
+    replayed as the provider response. The answer carries exactly one
+    finding, which is dropped as a confirmation; the run must record no
+    coverage degradation and post no findings.
 
     Args:
         tmp_path: Pytest temporary directory fixture, used as the repo root.
@@ -400,7 +392,6 @@ async def test_dropped_confirmation_records_no_cap_degradation_through_chunk_pas
                     enabled=True,
                     review=True,
                     transport=AITransport.CLI,
-                    cli_max_findings_per_call=1,
                 ),
                 depth=1,
                 checklist_items=[],
@@ -410,11 +401,7 @@ async def test_dropped_confirmation_records_no_cap_degradation_through_chunk_pas
         )
 
     assert_that(result.findings).is_empty()
-    reasons = [item.reason for item in result.metadata.coverage_degradations]
-    assert_that(reasons).does_not_contain(
-        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-    )
-    assert_that(result.metadata.findings_cap_applied).is_none()
+    assert_that(result.metadata.coverage_degradations).is_empty()
     assert_that(result.metadata.findings_coverage_complete).is_true()
 
 

@@ -478,14 +478,13 @@ def _run_metadata(*, metadata: ReviewMetadata) -> dict[str, Any]:
         "timestamp": metadata.timestamp,
         "partial": metadata.partial,
         "stopped_reason": metadata.stopped_reason,
-        # #2003: "we capped the model at N" is reported separately from
+        # #2003: "reviewed at reduced depth" is reported separately from
         # "chunks went unreviewed" (``partial``), so a classifier never reads
-        # a findings-capped round as a full one.
+        # a degraded round as a full one.
         "findings_coverage_complete": metadata.findings_coverage_complete,
         "coverage_degradations": [
             item.to_dict() for item in metadata.coverage_degradations
         ],
-        "findings_cap_applied": metadata.findings_cap_applied,
         "output_exhaustion_retried": metadata.output_exhaustion_retried,
     }
 

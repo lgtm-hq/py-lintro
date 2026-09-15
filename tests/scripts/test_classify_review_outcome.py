@@ -1367,7 +1367,7 @@ def _degraded_envelope(
             "findings": findings or [],
             "findings_coverage_complete": complete,
             "coverage_degradations": [
-                {"reason": reason, "chunk_index": index, "findings_cap": 0}
+                {"reason": reason, "chunk_index": index}
                 for index, reason in enumerate(reasons)
             ],
         },
@@ -1427,11 +1427,11 @@ def test_degraded_envelope_names_every_recorded_reason(
     report = classifier.classify(
         status=0,
         output=_degraded_envelope(
-            reasons=("findings_cap_applied", "generated_questions_failed"),
+            reasons=("output_exhaustion_retried", "generated_questions_failed"),
         ),
     )
 
-    assert_that(report.detail).contains("findings_cap_applied")
+    assert_that(report.detail).contains("output_exhaustion_retried")
     assert_that(report.detail).contains("generated_questions_failed")
 
 
@@ -1446,7 +1446,7 @@ def test_incomplete_coverage_wins_over_degraded_depth(
     payload = json.loads(_incomplete_envelope())
     payload["findings_coverage_complete"] = False
     payload["coverage_degradations"] = [
-        {"reason": "adversarial_sweep_failed", "chunk_index": 0, "findings_cap": 0},
+        {"reason": "adversarial_sweep_failed", "chunk_index": 0},
     ]
 
     report = classifier.classify(status=0, output=json.dumps(payload))

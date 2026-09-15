@@ -4,7 +4,10 @@ Context-window token budgets alone are transport-blind: a 1.5k-line PR still
 fits a 200k-token window as one chunk, but the CLI path then hits wall-clock
 timeouts and the 32k output-token cap. These helpers apply a tighter,
 transport-aware ceiling keyed off measured diff size so the existing chunker
-actually splits large CLI reviews.
+actually splits large CLI reviews, and recognise the output-exhaustion error
+that :mod:`lintro.ai.review.chunk_split_retry` answers by splitting the chunk.
+No per-call findings ceiling exists any more (lintro-ops milestone 0,
+decision A).
 """
 
 from __future__ import annotations
@@ -23,36 +26,24 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CLI_DIFF_HARD_CEILING_BYTES",
-    "CLI_FINDINGS_RETRY_CAP",
-    "CLI_MAX_FINDINGS_PER_CALL",
     "CLI_TRANSPORT_DIFF_TOKEN_BUDGET",
     "DiffSize",
     "assert_cli_diff_within_ceiling",
-    "findings_cap_was_hit",
     "is_cli_output_exhaustion",
     "is_output_exhaustion_error",
     "measure_diff_size",
     "resolve_cli_diff_budget",
-    "resolve_cli_findings_cap",
-    "tighter_findings_cap",
 ]
 
 # Single source of truth for the CLI limit defaults is the AIConfig model
-# (cli_max_diff_tokens / cli_max_diff_bytes / cli_max_findings_per_call);
-# these module aliases exist for callers and tests that want the defaults
-# without building a config instance.
+# (cli_max_diff_tokens / cli_max_diff_bytes); these module aliases exist for
+# callers and tests that want the defaults without building a config instance.
 CLI_TRANSPORT_DIFF_TOKEN_BUDGET = int(
     AIConfig.model_fields["cli_max_diff_tokens"].default,
 )
 CLI_DIFF_HARD_CEILING_BYTES = int(
     AIConfig.model_fields["cli_max_diff_bytes"].default,
 )
-CLI_MAX_FINDINGS_PER_CALL = int(
-    AIConfig.model_fields["cli_max_findings_per_call"].default,
-)
-
-#: Tighter findings cap used when retrying a chunk after output exhaustion.
-CLI_FINDINGS_RETRY_CAP = 6
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,40 +128,6 @@ def resolve_cli_diff_budget(
     return max(min(context_window_budget, cli_max_diff_tokens), 1)
 
 
-def resolve_cli_findings_cap(
-    *,
-    transport_is_cli: bool,
-    cli_max_findings_per_call: int,
-) -> int | None:
-    """Return the per-call findings ceiling for CLI transport, else None.
-
-    Args:
-        transport_is_cli: Whether the active transport is CLI.
-        cli_max_findings_per_call: Configured findings ceiling.
-
-    Returns:
-        Findings cap for CLI, or ``None`` for other transports.
-    """
-    if not transport_is_cli:
-        return None
-    return max(cli_max_findings_per_call, 1)
-
-
-def tighter_findings_cap(*, current: int) -> int:
-    """Halve a findings cap for retry after output-token exhaustion.
-
-    Args:
-        current: Current per-call findings ceiling.
-
-    Returns:
-        A strictly smaller positive ceiling (at least 1), preferring the
-        dedicated retry constant when the current cap is still above it.
-    """
-    if current > CLI_FINDINGS_RETRY_CAP:
-        return CLI_FINDINGS_RETRY_CAP
-    return max(current // 2, 1)
-
-
 def is_output_exhaustion_error(message: str) -> bool:
     """Return True when *message* looks like a mid-JSON 32k output failure.
 
@@ -215,22 +172,3 @@ def is_cli_output_exhaustion(error: BaseException) -> bool:
     if not isinstance(error, AIProviderError):
         return False
     return is_output_exhaustion_error(str(error))
-
-
-def findings_cap_was_hit(*, findings_count: int, findings_cap: int | None) -> bool:
-    """Return whether a chunk's parsed answer reached its per-call ceiling.
-
-    A configured cap is not itself a coverage limit: the model only had to
-    leave findings out when it emitted as many as it was allowed to. A chunk
-    that returned exactly ``findings_cap`` findings counts as a hit, because
-    the prompt told it to stop there and summarize any overflow (#2283).
-
-    Args:
-        findings_count: Number of findings parsed from the chunk answer.
-        findings_cap: The ceiling in force for that answer, or ``None`` when
-            the call was uncapped.
-
-    Returns:
-        True when a real ceiling was in force and the answer reached it.
-    """
-    return findings_cap is not None and findings_count >= findings_cap

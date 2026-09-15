@@ -89,7 +89,6 @@ def test_budget_config_construction_and_frozen() -> None:
         fix_search_radius=5,
         cli_max_diff_tokens=config_defaults.cli_max_diff_tokens,
         cli_max_diff_bytes=config_defaults.cli_max_diff_bytes,
-        cli_max_findings_per_call=config_defaults.cli_max_findings_per_call,
     )
 
     assert_that(view.max_fix_attempts).is_equal_to(3)

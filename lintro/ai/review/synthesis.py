@@ -84,12 +84,6 @@ class _SynthesisInterruptedError(Exception):
     """
 
 
-#: ``findings_cap`` stamped on a synthesis coverage degradation. The synthesis
-#: reasons are excluded from ``ReviewMetadata.findings_cap_applied``, so this
-#: is a placeholder and never read as a per-call ceiling.
-_SYNTHESIS_NO_CAP = 0
-
-
 @dataclass(frozen=True, slots=True)
 class SynthesisPass:
     """Everything one synthesis pass contributed to a run.
@@ -166,7 +160,6 @@ def _failed_pass(
         CoverageDegradation(
             reason=CoverageDegradationReason.SYNTHESIS_FAILED,
             chunk_index=SYNTHESIS_CHUNK_INDEX,
-            findings_cap=_SYNTHESIS_NO_CAP,
         ),
     ]
     if truncated:
@@ -175,7 +168,6 @@ def _failed_pass(
             CoverageDegradation(
                 reason=CoverageDegradationReason.SYNTHESIS_TRUNCATED,
                 chunk_index=SYNTHESIS_CHUNK_INDEX,
-                findings_cap=_SYNTHESIS_NO_CAP,
             ),
         )
     return SynthesisPass(
@@ -414,7 +406,6 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             CoverageDegradation(
                 reason=CoverageDegradationReason.SYNTHESIS_TRUNCATED,
                 chunk_index=SYNTHESIS_CHUNK_INDEX,
-                findings_cap=_SYNTHESIS_NO_CAP,
             ),
         )
         if truncated

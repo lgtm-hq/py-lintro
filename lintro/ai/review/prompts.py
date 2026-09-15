@@ -69,7 +69,6 @@ class PromptInputs:
         lint_results: Optional lint digest for prompt injection.
         extra_checklist: Additional generated checklist rows for depth 2.
         strictness_section: Sensitivity instructions for the review pass.
-        max_findings: Optional per-call findings ceiling for CLI transport.
     """
 
     chunk: ReviewChunk
@@ -80,7 +79,6 @@ class PromptInputs:
     lint_results: str | None = None
     extra_checklist: str = ""
     strictness_section: str = ""
-    max_findings: int | None = None
 
 
 def _combined_checklist(*, inputs: PromptInputs) -> tuple[str, int]:
@@ -114,7 +112,6 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
     """
     chunk = inputs.chunk
     context = inputs.context
-    max_findings = inputs.max_findings
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
     pr_title = redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
@@ -153,10 +150,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
         ),
         strictness_section=inputs.strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(
-            checklist_count=checklist_count,
-            max_findings=max_findings,
-        ),
+        output_rules=format_output_rules(checklist_count=checklist_count),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -193,7 +187,6 @@ def build_git_native_review_prompt(
         embed_diff = True
     chunk = inputs.chunk
     context = inputs.context
-    max_findings = inputs.max_findings
     pr_title = context.pr_metadata.title if context.pr_metadata else "Local changes"
     pr_title = redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
@@ -249,10 +242,7 @@ def build_git_native_review_prompt(
         ),
         strictness_section=inputs.strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(
-            checklist_count=checklist_count,
-            max_findings=max_findings,
-        ),
+        output_rules=format_output_rules(checklist_count=checklist_count),
     )
     return REVIEW_SYSTEM, user_prompt
 

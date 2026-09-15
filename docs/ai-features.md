@@ -433,49 +433,40 @@ exclusive.
 
 ### Review coverage completeness
 
-A capped CLI review is **not a guaranteed full finding set**. Under `--transport cli`,
-every chunk prompt carries the `ai.cli_max_findings_per_call` ceiling, and a chunk that
-still exhausts the provider's output-token cap is retried once at a tighter ceiling. In
-both cases every chunk is still reviewed — but the model was told to stop at N findings,
-so lower-severity issues beyond the cap may exist and go unreported. A configured
-ceiling is only recorded as a coverage degradation once a chunk's answer actually
-reaches it, so a CLI run whose chunks all came back under the cap is coverage-complete
-and renders exactly like an uncapped one.
-
-That is recorded and surfaced rather than left silent:
+There is **no per-call findings cap** (lintro-ops milestone 0, decision A): a chunk
+reports every finding it has, on every transport. What can still reduce a run's finding
+depth is recorded and surfaced rather than left silent. Under `--transport cli`, a chunk
+whose answer exhausts the provider's output-token ceiling is **split by file into two
+halves** that are each reviewed once (a single-file chunk is retried once unchanged);
+every file is still reviewed, but the model never saw that chunk in one view, so
+findings that need the whole chunk in view may go unreported.
 
 - `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
-  event, each with a `reason` (`findings_cap_applied`, `output_exhaustion_retried`, or —
-  when the opt-in pass below ran — `synthesis_truncated` / `synthesis_failed`), the
-  `chunk_index`, and the `findings_cap` that was in force. The synthesis reasons carry a
-  placeholder `chunk_index` of `-1` and a placeholder `findings_cap` of `0`, and are
-  excluded from `findings_cap_applied`, which only ever reports a real per-call ceiling.
-  A chunk that ran under the cap and then retried after output exhaustion contributes
-  two entries with the same `chunk_index`. `findings_coverage_complete` is the derived
-  "no coverage degradation of any kind" boolean: **any** entry in
-  `coverage_degradations` makes it false, including a synthesis pass that was truncated
-  or did not complete. `findings_cap_applied` is the narrower signal and stays `null`
-  for a run degraded only by the synthesis pass, because no per-call ceiling was in
-  force.
+  event, each with a `reason` (`output_exhaustion_retried`, a failed depth pass, or —
+  when the synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
+  `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
+  chunk that was split and whose depth-3 sweep also failed contributes two entries with
+  the same `chunk_index`. `findings_coverage_complete` is the derived "no coverage
+  degradation of any kind" boolean: **any** entry in `coverage_degradations` makes it
+  false, including a synthesis pass that was truncated or did not complete.
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
-- `--output json` exposes `findings_coverage_complete`, `coverage_degradations`,
-  `findings_cap_applied`, and `output_exhaustion_retried` at the payload root (and
-  `coverage_degradations` inside `metadata`). The MCP `lintro_review` payload carries
-  all four on its `run` block and hoists only `findings_coverage_complete` to the
-  tool-result root, next to `coverage`.
+- `--output json` exposes `findings_coverage_complete`, `coverage_degradations` and
+  `output_exhaustion_retried` at the payload root (and `coverage_degradations` inside
+  `metadata`). The MCP `lintro_review` payload carries all three on its `run` block and
+  hoists only `findings_coverage_complete` to the tool-result root, next to `coverage`.
 
 **Coverage limitation is a separate axis from `partial`.** `partial` / `stopped_reason`
 mean the run _stopped early_ and planned review work was left undone (built-in chunks or
-custom-agent passes, on a cost cap or an interrupt). A findings-cap run finished its
-planned work, just not at full depth, so it is reported as its own signal with equal
-prominence instead of being folded into `partial`. A run can be both. It is also
-distinct from `coverage.complete` in the JSON payload, which says whether every eligible
-file was covered at HEAD.
+custom-agent passes, on a cost cap or an interrupt). A degraded run finished its planned
+work, just not at full depth, so it is reported as its own signal with equal prominence
+instead of being folded into `partial`. A run can be both. It is also distinct from
+`coverage.complete` in the JSON payload, which says whether every eligible file was
+covered at HEAD.
 
-An uncapped, complete run renders exactly as it always has — no banner, no warning row,
-`findings_coverage_complete: true`.
+A complete run renders exactly as it always has — no banner, no warning row,
+`findings_coverage_complete: true` — however many findings its chunks returned.
 
 This is distinct from the hard `cli_max_diff_bytes` ceiling: a diff over that limit is
 refused outright with `DIFF_TOO_LARGE` and is a hard failure, not a degraded success.
@@ -1010,14 +1001,6 @@ ai:
   # larger diffs fail fast with a --paths / --transport api advisory.
   # (int >= 10000, default: 1500000)
   cli_max_diff_bytes: 1500000
-
-  # Max findings one CLI review call may emit. The cap is a prompt contract
-  # (the model is instructed to stop at the cap and summarize overflow), not
-  # a post-parse truncation; a chunk that still exhausts the 32k output cap
-  # retries once with a tighter cap, and truncated responses fall back to
-  # the schema-retry / unstructured-recovery ladder.
-  # (int 1–50, default: 12)
-  cli_max_findings_per_call: 12
 
   # Re-prompt to refine a fix that failed verification. (int 0–3, default: 1)
   max_refinement_attempts: 1

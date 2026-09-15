@@ -104,13 +104,12 @@ The second slice moves the two chunk prompt builders — `build_review_prompt` f
 transport and `build_git_native_review_prompt` for CLI-backed providers — and the
 non-diff token estimate `estimate_prompt_overhead` out of the orchestrator. The shared
 render inputs (chunk, context, checklist text and count, interaction paths, lint digest,
-generated checklist rows, strictness section, findings cap) travel as one frozen
-`PromptInputs`; only the git-native diff-delivery flags stay as separate keywords, since
-they are the one thing the two builders do not share. `redact_prompt_text` and
-`make_boundary_marker` now fire inside this module, which makes it the redaction choke
-point for prompt bytes: the git-native builder still embeds the redacted diff unless the
-caller explicitly opts out. The emitted bytes are unchanged and the #2298 prompt goldens
-pass without regeneration.
+generated checklist rows, strictness section) travel as one frozen `PromptInputs`; only
+the git-native diff-delivery flags stay as separate keywords, since they are the one
+thing the two builders do not share. `redact_prompt_text` and `make_boundary_marker` now
+fire inside this module, which makes it the redaction choke point for prompt bytes: the
+git-native builder still embeds the redacted diff unless the caller explicitly opts out.
+The emitted bytes are unchanged and the #2298 prompt goldens pass without regeneration.
 
 ### Cross-chunk merge (`lintro/ai/review/merge.py`, #2301)
 
@@ -130,11 +129,13 @@ The fourth slice moves everything that happens _inside_ one chunk out of the
 orchestrator, leaving it the chunk scheduler it is meant to be.
 
 `lintro/ai/review/response_pipeline.py` owns the main round-trip: `invoke_chunk_review`
-builds the prompt through `PromptInputs`, calls the provider, and — when CLI transport
-hits its output-token ceiling mid-JSON — retries once with a tighter findings cap
-(#1967). Both the cap and the retry are recorded as `CoverageDegradation` entries, so a
-capped chunk can never present as an unlimited one (#2003). Its sixteen inputs travel as
-one frozen `ChunkReviewRequest` rather than a keyword wall.
+builds the prompt through `PromptInputs` and calls the provider once. When CLI transport
+hits its output-token ceiling mid-JSON, `lintro/ai/review/chunk_split_retry.py` splits
+the chunk by file into two halves and reviews each once (a single-file chunk is retried
+once unchanged); the split is recorded as a `CoverageDegradation` entry, so a
+re-reviewed chunk can never present as an untouched one (#2003). There is no per-call
+findings cap (lintro-ops milestone 0, decision A). Its sixteen inputs travel as one
+frozen `ChunkReviewRequest` rather than a keyword wall.
 `parse_review_payload_with_recovery` runs the parse ladder — parse, then at most one
 schema-reminder retry when the timeout budget allows one, then recovery of the prose as
 unstructured findings — so a paid-for answer is never discarded (#1853); it folds the

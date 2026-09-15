@@ -59,7 +59,6 @@ class AIBudgetConfig:
     fix_search_radius: int
     cli_max_diff_tokens: int
     cli_max_diff_bytes: int
-    cli_max_findings_per_call: int
 
 
 @dataclass(frozen=True)

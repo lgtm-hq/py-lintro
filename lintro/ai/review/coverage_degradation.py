@@ -1,13 +1,12 @@
-"""Shared wording for findings-cap / output-exhaustion coverage limits (#2003).
+"""Shared wording for coverage limits a review run recorded (#2003).
 
 Every surface (terminal, GitHub review body, sticky comment) describes a
-degraded run with the same sentence built here, so a capped review can never
+degraded run with the same sentence built here, so a degraded review can never
 read as complete on one surface and limited on another.
 
-The wording says a chunk *hit* the cap, not that it ran under one: the
-degradation is recorded only when a chunk's parsed answer actually reached the
-ceiling, so a configured cap nobody bumped into produces no sentence at all
-(#2283).
+There is no per-call findings cap to describe (lintro-ops milestone 0,
+decision A): the per-chunk limits are an output-exhaustion split and a failed
+optional depth pass, and the whole-run limits are the synthesis pass's.
 """
 
 from __future__ import annotations
@@ -70,29 +69,22 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         metadata: Review run metadata carrying ``coverage_degradations``.
 
     Returns:
-        A plain-text sentence naming how many chunks *hit* a per-call cap, the
-        caps in force, and any incomplete optional pass, or an empty string
-        when the run recorded no degradation. A configured ceiling no chunk
-        reached is not a degradation and produces no sentence (#2283). The
-        text carries no markup so the terminal and the GitHub surfaces can
-        share it verbatim.
+        A plain-text sentence naming how many chunks were split after output
+        exhaustion and any incomplete optional pass, or an empty string when
+        the run recorded no degradation. The text carries no markup so the
+        terminal and the GitHub surfaces can share it verbatim.
     """
     degradations = metadata.coverage_degradations
     if not degradations:
         return ""
 
-    capped = [
-        item
-        for item in degradations
-        if item.reason is CoverageDegradationReason.FINDINGS_CAP_APPLIED
-    ]
     retried = [
         item
         for item in degradations
         if item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
     ]
-    # Rows are per limit event, not per chunk: a capped chunk that also
-    # retried contributes two rows with one chunk_index. Count chunks by
+    # Rows are per limit event, not per chunk: a chunk whose depth pass also
+    # failed contributes two rows with one chunk_index. Count chunks by
     # distinct index and never let the row count inflate the denominator.
     # A whole-run degradation carries the synthesis sentinel rather than a
     # real chunk index, so it must not be counted as a chunk either: without
@@ -106,22 +98,13 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     total = max(metadata.chunks_total, len(affected))
 
     clauses: list[str] = []
-    if capped:
-        capped_chunks = len({item.chunk_index for item in capped})
-        caps = sorted({item.findings_cap for item in capped})
-        cap_text = "/".join(str(cap) for cap in caps)
-        clauses.append(
-            f"{capped_chunks} of {total} {_plural(count=total, noun='chunk')} "
-            f"hit the {cap_text}-finding per-call cap",
-        )
     if retried:
         retried_chunks = len({item.chunk_index for item in retried})
-        caps = sorted({item.findings_cap for item in retried})
-        cap_text = "/".join(str(cap) for cap in caps)
         clauses.append(
-            f"{retried_chunks} {_plural(count=retried_chunks, noun='chunk')} "
-            f"retried at a tighter {cap_text}-finding cap after exhausting the "
-            "provider output limit",
+            f"{retried_chunks} of {total} {_plural(count=total, noun='chunk')} "
+            "exhausted the provider output limit and "
+            f"{'was' if retried_chunks == 1 else 'were'} split and re-reviewed "
+            "in halves",
         )
 
     for reason, wording in _DEPTH_PASS_CLAUSES.items():
@@ -142,7 +125,6 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         clauses.append("the cross-chunk synthesis pass did not complete")
 
     known = {
-        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
         CoverageDegradationReason.SYNTHESIS_TRUNCATED,
         CoverageDegradationReason.SYNTHESIS_FAILED,
@@ -162,11 +144,11 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # A run can be capped *and* stopped early; only claim full chunk
     # coverage when ``partial`` says the run reached every chunk.
     coverage = "" if metadata.partial else "Every chunk was reviewed, but "
-    # Only a real per-call ceiling can be blamed for lost low-severity depth;
-    # a run degraded solely by an incomplete optional pass says so instead.
+    # A split chunk lost its whole-chunk view; a run degraded solely by an
+    # incomplete optional pass says so instead.
     tail = (
-        "lower-severity findings in those chunks may go unreported."
-        if (capped or retried)
+        "findings that need the whole chunk in view may go unreported."
+        if retried
         else "some issues may go unreported."
     )
     if not coverage:

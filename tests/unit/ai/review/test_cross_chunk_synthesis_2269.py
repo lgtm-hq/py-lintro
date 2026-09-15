@@ -896,16 +896,6 @@ def test_unparseable_response_degrades_the_run_instead_of_ending_it() -> None:
     assert_that(note).contains("did not complete")
 
 
-def test_a_findings_cap_is_never_reported_for_a_synthesis_degradation() -> None:
-    """Synthesis reasons carry a placeholder cap and stay out of the ceiling."""
-    result = _run(
-        synthesis=ReviewSynthesisConfig(enabled=True),
-        synthesis_error=AIError("provider exploded"),
-    )
-
-    assert_that(result.metadata.findings_cap_applied).is_none()
-
-
 def test_select_synthesis_diff_sends_the_whole_pr_when_it_fits() -> None:
     """An in-budget PR reaches the pass whole and unmarked."""
     context = _pr_context()
