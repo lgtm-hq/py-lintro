@@ -165,6 +165,8 @@ def test_normalise_version_rejects_post_and_dev_releases(raw: str) -> None:
         ("1.2", "three-part"),
         ("1.2.3.4", "three-part"),
         ("garbage", "non-PEP 440"),
+        ("1.2.3prev\u0131ew1", "non-PEP 440"),
+        ("1.2.3rc\u0661", "non-PEP 440"),
         ("1.2.3-beta.2+x", "local version or epoch"),
     ],
 )

@@ -244,7 +244,9 @@ _PEP440_VERSION = re.compile(
     (?:\+(?P<local>[a-z0-9]+(?:[-_\.][a-z0-9]+)*))?       # local version
     \s*$
     """,
-    re.VERBOSE | re.IGNORECASE,
+    # ASCII: PEP 440 is ASCII-only, and Unicode case folding would let a
+    # confusable such as a dotless i slip past the spelling table.
+    re.VERBOSE | re.IGNORECASE | re.ASCII,
 )
 _PRE_SPELLINGS = {
     "a": "a",
