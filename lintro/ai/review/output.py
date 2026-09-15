@@ -206,10 +206,6 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
             if result.verdict_reasoning is not None
             else None
         ),
-        "file_assessments": [
-            asdict(assessment) for assessment in result.file_assessments
-        ],
-        "checklist": [asdict(answer) for answer in result.checklist],
         "findings": [finding_to_dict(finding=finding) for finding in result.findings],
         # #2101: dropped suggestions are never silent. Each finding carries its
         # own ``suggestion_dropped`` tag; these keys give consumers the run

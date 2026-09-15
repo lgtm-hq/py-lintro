@@ -50,21 +50,7 @@
     "synthesis": null,
     "lint_facts_note": ""
   },
-  "summary": "Session gate now fails closed, but a hardcoded key landed with it.\n\nToken decoding gained an unverified fast path.",
-  "checklist": [
-    {
-      "id": 1,
-      "answer": "yes",
-      "evidence": "src/auth/tokens.py:1 defaults to no verification",
-      "question": ""
-    },
-    {
-      "id": 2,
-      "answer": "no",
-      "evidence": "signature widened compatibly",
-      "question": ""
-    }
-  ],
+  "summary": "",
   "findings": [
     {
       "severity": "P1",
@@ -145,45 +131,8 @@
       "posted_inline": true
     }
   ],
-  "pr_summary": {
-    "headline": "Session gate now fails closed, but a hardcoded key landed with it. Token decoding gained an unverified fast path.",
-    "walkthrough": [
-      {
-        "text": "is_active rejects the expired status explicitly.",
-        "finding_ref": "src/auth/session.py:6"
-      },
-      {
-        "text": "A module-level API key constant was added.",
-        "finding_ref": "src/auth/session.py:3"
-      },
-      {
-        "text": "decode accepts a verify flag that defaults to skipping verification.",
-        "finding_ref": "src/auth/tokens.py:1"
-      }
-    ]
-  },
-  "verdict_reasoning": {
-    "deciding_factor": "A credential is committed in the session module.",
-    "failure_mechanism": "The constant ships in the wheel and is readable by anyone who installs it.",
-    "files_needing_attention": [
-      "src/auth/session.py",
-      "src/auth/tokens.py"
-    ]
-  },
-  "file_assessments": [
-    {
-      "file": "src/auth/session.py",
-      "overview": "Adds an explicit expired branch and a module-level constant."
-    },
-    {
-      "file": "assets/logo.png",
-      "overview": "Binary asset replaced; not reviewable as text."
-    },
-    {
-      "file": "src/auth/tokens.py",
-      "overview": "Renamed module gains a verify keyword defaulting to False."
-    }
-  ],
+  "pr_summary": null,
+  "verdict_reasoning": null,
   "coverage": {
     "reviewed": 3,
     "carried": 0,

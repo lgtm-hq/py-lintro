@@ -1,9 +1,8 @@
 """Goldens for the chunk merge stage (issue #2298).
 
-`merge_review_results` and its helpers decide finding order, dedup, checklist
-precedence, summary joining and per-file assessment ownership. Only
-`merge_findings` and `merge_checklist_answers` had unit coverage before this
-suite; `merge_verdict_reasoning` and `merge_file_assessments` had none.
+`merge_review_results` and `merge_findings` decide finding order and dedup.
+Chunks report findings only (lintro-ops milestone 0), so the merge no longer
+carries checklist answers or narrative fields; those goldens were retired.
 """
 
 from __future__ import annotations
@@ -13,12 +12,8 @@ from assertpy import assert_that
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.merge import (
     ChunkReviewPartial,
-    merge_checklist_answers,
-    merge_file_assessments,
     merge_findings,
-    merge_pr_summaries,
     merge_review_results,
-    merge_verdict_reasoning,
 )
 from lintro.ai.review.response_pipeline import payload_to_partial
 from tests.unit.ai.review.golden.golden_fixtures import GOLDEN_RESPONSES
@@ -75,24 +70,6 @@ def test_merge_helper_outputs_match_goldens() -> None:
         value=merge_findings(
             findings_groups=[partial.findings for partial in partials],
         ),
-    )
-    assert_golden_json(
-        name="merge_checklist_answers.golden",
-        value=merge_checklist_answers(
-            checklist_groups=[partial.checklist for partial in partials],
-        ),
-    )
-    assert_golden_json(
-        name="merge_pr_summaries.golden",
-        value=merge_pr_summaries(partials=partials),
-    )
-    assert_golden_json(
-        name="merge_verdict_reasoning.golden",
-        value=merge_verdict_reasoning(partials=partials),
-    )
-    assert_golden_json(
-        name="merge_file_assessments.golden",
-        value=merge_file_assessments(partials=partials),
     )
 
 

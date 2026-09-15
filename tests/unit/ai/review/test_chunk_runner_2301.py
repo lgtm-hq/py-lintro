@@ -71,8 +71,6 @@ def _partial() -> ChunkReviewPartial:
         A partial that reviewed the fixture file and reported nothing.
     """
     return ChunkReviewPartial(
-        summary="",
-        checklist=(),
         findings=(),
         input_tokens=0,
         output_tokens=0,

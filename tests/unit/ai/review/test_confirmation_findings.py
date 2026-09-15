@@ -101,8 +101,8 @@ def test_homebrew_tap_411_fixture_yields_no_findings_and_one_checklist_yes() -> 
 
     The finding in the fixture is the one lintro posted as an inline thread on
     lgtm-hq/homebrew-tap#411: its body says "positive verification, not a
-    defect" and its fix is "No code change". The checklist entry that
-    produced it stays, so the answer is still visible as a cleared item.
+    defect" and its fix is "No code change". Chunks report findings only, so
+    the checklist answer the fixture also carries is ignored.
     """
     raw = HOMEBREW_TAP_411_FIXTURE.read_text(encoding="utf-8")
 
@@ -110,10 +110,7 @@ def test_homebrew_tap_411_fixture_yields_no_findings_and_one_checklist_yes() -> 
     partial = payload_to_partial(response=_response(content=raw), payload=payload)
 
     assert_that(partial.findings).is_empty()
-    yes_answers = [item for item in partial.checklist if item.answer == "yes"]
-    assert_that(yes_answers).is_length(1)
-    assert_that(yes_answers[0].id).is_equal_to(8)
-    assert_that(partial.checklist).is_length(3)
+    assert_that(hasattr(partial, "checklist")).is_false()
 
 
 def test_homebrew_tap_411_fixture_carries_the_posted_finding_verbatim() -> None:

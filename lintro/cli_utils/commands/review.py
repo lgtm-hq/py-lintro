@@ -50,7 +50,6 @@ from lintro.ai.provider_enum import (
 from lintro.ai.providers import get_provider
 from lintro.ai.review.checklist_display import (
     build_prompt_question_map,
-    enrich_review_result,
     resolve_checklist_display,
 )
 from lintro.ai.review.convergence import (
@@ -1302,7 +1301,6 @@ def _render_post_and_exit(
         ),
     )
     question_map = build_prompt_question_map(items=prepared.checklist_items)
-    result = enrich_review_result(result=result, question_map=question_map)
     render = _ReviewRender(
         checklist_display=resolve_checklist_display(
             cli_value=options.show_checklist,

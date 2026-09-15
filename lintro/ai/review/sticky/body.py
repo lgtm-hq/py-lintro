@@ -12,14 +12,12 @@ from __future__ import annotations
 
 from lintro.ai.review.agent_prompts import render_agent_prompt_panel
 from lintro.ai.review.enums.agent_prompt_scope_kind import AgentPromptScopeKind
-from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_constants import STICKY_FOOTER, STICKY_MARKER
 from lintro.ai.review.github_contract import RenderLimits
 from lintro.ai.review.github_notes import format_partial_review_label
 from lintro.ai.review.github_render import (
     Section,
-    _format_checklist_appendix_markdown,
 )
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.sticky_plan import StickyPlan
@@ -150,11 +148,6 @@ def round_sections(
     if result is None:
         msg = "round_sections needs a result; use state_sections instead"
         raise ValueError(msg)
-    appendix = (
-        "\n".join(_format_checklist_appendix_markdown(result=result))
-        if plan.checklist_display is ChecklistDisplay.ALL
-        else ""
-    )
     return [
         Section(name="marker", text=STICKY_MARKER),
         Section(
@@ -228,7 +221,6 @@ def round_sections(
                 auth_mode=plan.auth_mode,
             ),
         ),
-        Section(name="checklist_appendix", text=appendix),
         *_history_sections(plan=plan, limits=limits, archive_only=archive_history),
         Section(name="footer", text=STICKY_FOOTER),
     ]

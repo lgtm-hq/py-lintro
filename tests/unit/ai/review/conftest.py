@@ -12,7 +12,6 @@ import pytest
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.models.changed_file import ChangedFile
-from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -224,26 +223,6 @@ def sample_review_result() -> ReviewResult:
             timestamp="2026-06-24T10:00:00+00:00",
         ),
         summary="Merge with fixes.",
-        checklist=(
-            ChecklistAnswer(
-                id=1,
-                answer="yes",
-                evidence="src/main.py:10",
-                question="Does unknown status fail closed?",
-            ),
-            ChecklistAnswer(
-                id=2,
-                answer="no",
-                evidence="none",
-                question="Are access paths covered by tests?",
-            ),
-            ChecklistAnswer(
-                id=3,
-                answer="yes",
-                evidence="docs/README.md:1",
-                question="Is migration documented?",
-            ),
-        ),
         findings=(
             ReviewFinding(
                 severity=Severity.P1,

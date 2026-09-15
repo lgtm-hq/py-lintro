@@ -32,11 +32,7 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
 )
 from lintro.ai.review.merge import (
     ChunkReviewPartial,
-    merge_checklist_answers,
-    merge_file_assessments,
     merge_findings,
-    merge_pr_summaries,
-    merge_verdict_reasoning,
 )
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -107,9 +103,8 @@ def merge_half_partials(
 ) -> ChunkReviewPartial:
     """Fold the partials of a split chunk back into one chunk partial.
 
-    Findings are deduplicated by location, checklist answers merge with
-    ``yes`` winning, the narrative fields merge the way whole chunks merge,
-    and token and cost usage are summed.
+    Findings are deduplicated by location; re-read flags, token, cost and
+    timing usage are combined.
 
     Args:
         partials: The halves' partials, in file order.
@@ -118,12 +113,7 @@ def merge_half_partials(
         One partial standing for the whole chunk.
     """
     ordered = list(partials)
-    summaries = [partial.summary for partial in ordered if partial.summary.strip()]
     return ChunkReviewPartial(
-        summary="\n\n".join(summaries),
-        checklist=merge_checklist_answers(
-            checklist_groups=[partial.checklist for partial in ordered],
-        ),
         findings=merge_findings(
             findings_groups=[partial.findings for partial in ordered],
         ),
@@ -132,9 +122,6 @@ def merge_half_partials(
         cost_estimate=sum(partial.cost_estimate for partial in ordered),
         provider_seconds=sum(partial.provider_seconds for partial in ordered),
         turns=_sum_turns(partials=ordered),
-        pr_summary=merge_pr_summaries(partials=ordered),
-        verdict_reasoning=merge_verdict_reasoning(partials=ordered),
-        file_assessments=merge_file_assessments(partials=ordered),
         files=tuple(path for partial in ordered for path in partial.files),
         flagged_files=tuple(
             flag for partial in ordered for flag in partial.flagged_files

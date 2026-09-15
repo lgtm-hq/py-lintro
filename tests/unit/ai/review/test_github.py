@@ -699,7 +699,6 @@ def _result_with_findings(
     return ReviewResult(
         metadata=base.metadata,
         summary=base.summary,
-        checklist=base.checklist,
         findings=findings,
     )
 

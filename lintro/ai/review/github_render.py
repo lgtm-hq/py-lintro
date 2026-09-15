@@ -32,9 +32,7 @@ from dataclasses import dataclass
 
 from lintro.ai.review.agent_prompts import render_finding_prompt_panel
 from lintro.ai.review.checklist_display import (
-    cleared_answers,
     format_review_questions_markdown,
-    orphan_concerns,
     questions_for_finding,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
@@ -46,7 +44,6 @@ from lintro.ai.review.github_contract import (
 )
 from lintro.ai.review.inline_fix import InlineFixPlan, normalize_diff_path
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
-from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sanitize import sanitize_comment_text
 
 __all__ = [
@@ -308,43 +305,6 @@ def _location_label(*, finding: ReviewFinding) -> str:
     if finding.line > 0:
         return f"`{safe}:{finding.line}`"
     return f"`{safe}`"
-
-
-def _format_checklist_appendix_markdown(*, result: ReviewResult) -> list[str]:
-    """Build cleared/orphan checklist appendix lines for markdown."""
-    cleared = cleared_answers(answers=result.checklist)
-    orphans = orphan_concerns(
-        answers=result.checklist,
-        findings=result.findings,
-    )
-    lines = ["", f"### Cleared checks ({len(cleared)})"]
-    if cleared:
-        for answer in cleared:
-            question = sanitize_comment_text(
-                answer.question or f"(checklist item {answer.id})",
-                limit=300,
-            )
-            lines.append(f"- ✓ {question}")
-    else:
-        lines.append("- (none)")
-
-    lines.extend(["", f"### Checklist concerns without findings ({len(orphans)})"])
-    if orphans:
-        for answer in orphans:
-            question = sanitize_comment_text(
-                answer.question or f"(checklist item {answer.id})",
-                limit=300,
-            )
-            evidence = sanitize_comment_text(answer.evidence, limit=200).replace(
-                "|",
-                "\\|",
-            )
-            lines.append(f"- {question}")
-            if evidence.strip():
-                lines.append(f"  - {evidence}")
-    else:
-        lines.append("- (none — good)")
-    return lines
 
 
 def _partition_findings(

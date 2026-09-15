@@ -5,10 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.coverage_record import CoverageRecord
-from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -23,15 +21,13 @@ class ReviewResult:
     Attributes:
         metadata: Run metadata (model, tokens, cost, etc.).
         summary: High-level review summary text. Equal to
-            ``pr_summary.headline`` when a structured summary was returned.
-        checklist: Checklist yes/no answers with evidence.
+            ``pr_summary.headline`` when the synthesis pass wrote one.
         findings: Actionable findings from the review.
-        pr_summary: Structured PR summary (headline plus walkthrough bullets).
-            ``None`` when the model returned only plain summary text.
-        verdict_reasoning: Model-written explanation of the readiness verdict.
-            ``None`` when the model omitted it.
-        file_assessments: One-sentence overview per reviewed file. Empty when
-            the model omitted them.
+        pr_summary: Structured PR summary (headline plus walkthrough bullets)
+            written by the round's synthesis pass. ``None`` when that pass did
+            not run or failed.
+        verdict_reasoning: Explanation of the readiness verdict written by the
+            synthesis pass. ``None`` when that pass did not run or failed.
         coverage: Per-round coverage counters, or ``None`` before resume
             bookkeeping runs.
         coverage_records: File-level coverage map after this round.
@@ -45,11 +41,9 @@ class ReviewResult:
 
     metadata: ReviewMetadata
     summary: str
-    checklist: tuple[ChecklistAnswer, ...] = field(default_factory=tuple)
     findings: tuple[ReviewFinding, ...] = field(default_factory=tuple)
     pr_summary: ReviewSummary | None = None
     verdict_reasoning: VerdictReasoning | None = None
-    file_assessments: tuple[FileAssessment, ...] = field(default_factory=tuple)
     coverage: CoverageCounts | None = None
     coverage_records: tuple[CoverageRecord, ...] = field(default_factory=tuple)
     flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)

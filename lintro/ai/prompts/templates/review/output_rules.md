@@ -1,28 +1,17 @@
 **Rules:**
 
-- Include all **{checklist_count}** checklist entries in `checklist` (even if answer is
-  "no").
+- You write **findings only**. Do not score or state a verdict, and do not write a
+  summary, a walkthrough, or per-file overviews: lintro derives the merge-readiness
+  verdict from the severities of the open findings (any P1 → {label_blocked}; else any
+  P2 → {label_changes_requested}; else any P3 → {label_nits_only}; else
+  {label_ready}), and a later pass writes the summary from every chunk's findings.
+- There is no ceiling on the number of findings: report every defect you can
+  evidence, serious ones first. Collapse repeated occurrences of one root cause into a
+  single finding with an `occurrences` list rather than one finding per site.
 - Finding nothing is a normal result; an empty findings array is valid.
 - Do not duplicate findings — merge related checklist items when they share a root
-  cause.
+  cause; the checklist is guidance for what to look for, not a list to answer.
 - Prioritize cross-file integration bugs over isolated nits.
-- `summary.headline` is exactly one sentence stating what the change does — not an
-  assessment of whether it should merge.
-- `summary.walkthrough` holds 3–6 bullets, each one sentence, covering the change in
-  the order a reviewer would read it. When a bullet describes code you also reported a
-  finding for, set that bullet's `finding_ref` to the finding's `file:line`; otherwise
-  use an empty string.
-- **Do not score or state a verdict.** The merge-readiness verdict is computed by
-  lintro from the severities of the open findings (any P1 → {label_blocked}; else any
-  P2 → {label_changes_requested}; else any P3 → {label_nits_only}; else
-  {label_ready}). Write only the reasoning:
-  `verdict_reasoning.deciding_factor` names the single issue that decides it (or says
-  plainly that nothing blocks the merge) and `verdict_reasoning.failure_mechanism`
-  traces how that issue fails in production. Two short paragraphs at most, total.
-- `verdict_reasoning.files_needing_attention` lists the paths a reviewer should open
-  first; leave it empty when nothing needs attention.
-- `file_assessments` holds one entry per reviewed file with a single-sentence
-  `overview`. Do not include severity counts — lintro derives those from `findings`.
 - Every finding `title` must be a single line with no line breaks.
 - **P1 requires a concrete `failure_scenario`** — the inputs, the path taken, and the
   observable result. "Could be a problem" is not a failure mechanism. A P1 without one

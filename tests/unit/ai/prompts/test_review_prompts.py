@@ -490,7 +490,7 @@ def test_synthesis_user_template_interpolates_every_field() -> None:
     assert_that(rendered).contains("Piece 2 reviewed")
     assert_that(rendered).contains("only part of this PR")
     assert_that(rendered).contains("diff body")
-    assert_that(rendered).contains("Report at most 17 findings")
+    assert_that(rendered).contains("Report at most 17 cross-file findings")
 
 
 def test_synthesis_user_template_fences_the_pr_title() -> None:
@@ -569,8 +569,8 @@ def test_synthesis_prompt_pair_never_demands_a_checklist() -> None:
     user_prompt = _render_synthesis_user_prompt()
     pair = f"{REVIEW_SYNTHESIS_SYSTEM_PROMPT}\n{user_prompt}"
 
-    assert_that(REVIEW_SYSTEM).contains("Complete every checklist item")
-    assert_that(pair).does_not_contain("Complete every checklist item")
+    assert_that(REVIEW_SYSTEM).contains("Check every checklist item")
+    assert_that(pair).does_not_contain("Check every checklist item")
     assert_that(pair.lower()).does_not_contain("checklist item")
     assert_that(REVIEW_SYNTHESIS_SYSTEM_PROMPT).contains("empty `findings` array")
 

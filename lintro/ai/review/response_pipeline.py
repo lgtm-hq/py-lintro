@@ -37,11 +37,8 @@ from lintro.ai.review.confirmation_filter import drop_confirmation_findings
 from lintro.ai.review.finding_parser import parse_findings, parse_flagged_files
 from lintro.ai.review.merge import (
     ChunkReviewPartial,
-    normalize_checklist_answer_value,
     parse_review_response,
 )
-from lintro.ai.review.models.checklist_answer import ChecklistAnswer
-from lintro.ai.review.narrative_parser import parse_narrative, parse_summary_text
 from lintro.ai.review.prompts import (
     PromptInputs,
     build_git_native_review_prompt,
@@ -66,7 +63,6 @@ __all__ = [
     "ChunkReviewRequest",
     "invoke_chunk_review",
     "merge_response_usage",
-    "parse_checklist",
     "parse_review_payload_with_recovery",
     "payload_to_partial",
 ]
@@ -331,13 +327,13 @@ def payload_to_partial(
     response: AIResponse,
     payload: dict[str, Any],
 ) -> ChunkReviewPartial:
-    """Convert parsed JSON payload to a chunk partial result.
+    """Convert a parsed chunk payload to a chunk partial result.
 
-    Accepts both the extended ``summary`` object (#1907) and the plain summary
-    string; narrative fields degrade to ``None``/empty rather than failing the
-    chunk. The string shape reaches here from transports that do not enforce
-    :data:`~lintro.ai.cli_schemas.REVIEW_CLI_SCHEMA` and from the prose
-    recovery payload, not from a schema-constrained CLI-transport reply.
+    The chunk contract is findings only (lintro-ops milestone 0, decision
+    A): ``findings`` and the ``flagged_files`` re-read requests are read and
+    every other key is ignored, so an older model that still emits a
+    summary, checklist or per-file overview degrades to nothing rather than
+    failing the chunk.
 
     Findings whose body says they are not a defect are dropped here (#2430).
 
@@ -348,64 +344,15 @@ def payload_to_partial(
     Returns:
         The chunk partial result.
     """
-    raw_summary = payload.get("summary", "")
-    summary = parse_summary_text(raw_summary=raw_summary)
-    pr_summary, verdict_reasoning, file_assessments = parse_narrative(payload=payload)
-
-    checklist = parse_checklist(raw_checklist=payload.get("checklist", []))
     findings = drop_confirmation_findings(
         findings=parse_findings(raw_findings=payload.get("findings", [])),
     )
     flagged_files = parse_flagged_files(raw_flags=payload.get("flagged_files"))
-
     return ChunkReviewPartial(
-        summary=summary,
-        checklist=checklist,
         findings=findings,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
-        pr_summary=pr_summary,
-        verdict_reasoning=verdict_reasoning,
-        file_assessments=file_assessments,
         turns=response.turns,
         flagged_files=flagged_files,
     )
-
-
-def parse_checklist(*, raw_checklist: object) -> tuple[ChecklistAnswer, ...]:
-    """Parse checklist answers from AI JSON.
-
-    Args:
-        raw_checklist: The ``checklist`` value from a parsed model payload.
-
-    Returns:
-        The well-formed checklist answers, in payload order.
-    """
-    if not isinstance(raw_checklist, list):
-        return ()
-    answers: list[ChecklistAnswer] = []
-    for item in raw_checklist:
-        if not isinstance(item, dict):
-            continue
-        answer_id = item.get("id")
-        answer = item.get("answer", "no")
-        evidence_raw = item.get("evidence", "")
-        if not isinstance(answer_id, int):
-            continue
-        if not isinstance(answer, str):
-            answer = str(answer)
-        if evidence_raw is None:
-            evidence = ""
-        elif isinstance(evidence_raw, str):
-            evidence = evidence_raw
-        else:
-            evidence = str(evidence_raw)
-        answers.append(
-            ChecklistAnswer(
-                id=answer_id,
-                answer=normalize_checklist_answer_value(answer=answer),
-                evidence=evidence.strip(),
-            ),
-        )
-    return tuple(answers)

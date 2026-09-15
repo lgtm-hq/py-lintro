@@ -27,7 +27,6 @@ def test_render_review_terminal_with_empty_findings() -> None:
             checklist_items=0,
         ),
         summary="Safe to merge.",
-        checklist=(),
         findings=(),
     )
     console = Console(record=True)
@@ -84,10 +83,10 @@ def test_render_review_terminal_linked_shows_questions_under_findings(
     assert_that(text).does_not_contain("Cleared checks")
 
 
-def test_render_review_terminal_all_shows_appendix(
+def test_render_review_terminal_all_has_no_checklist_appendix(
     sample_review_result: ReviewResult,
 ) -> None:
-    """All mode includes cleared and orphan checklist appendices."""
+    """All mode no longer renders a checklist appendix (findings-only chunks)."""
     console = Console(record=True)
     question_map = {
         1: "Does unknown status fail closed?",
@@ -102,11 +101,9 @@ def test_render_review_terminal_all_shows_appendix(
     )
     text = console.export_text()
 
-    assert_that(text).contains("Cleared checks (1)")
-    assert_that(text).contains("Are access paths covered by tests?")
-    assert_that(text).contains("Checklist concerns without findings (1)")
-    assert_that(text).contains("Is migration documented?")
-    assert_that(text).does_not_contain("(none — good)")
+    assert_that(text).does_not_contain("Cleared checks")
+    assert_that(text).does_not_contain("Checklist concerns without findings")
+    assert_that(text).contains("Fail-open default")
 
 
 def test_render_review_terminal_attributes_custom_agent_findings() -> None:
@@ -124,7 +121,6 @@ def test_render_review_terminal_attributes_custom_agent_findings() -> None:
             checklist_items=0,
         ),
         summary="Merge with fixes.",
-        checklist=(),
         findings=(
             ReviewFinding(
                 severity=Severity.P1,

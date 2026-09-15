@@ -14,8 +14,9 @@ class SynthesisOutcome:
 
     The outcome exists only when the pass actually ran, so every surface can
     treat ``ReviewMetadata.synthesis is None`` as "this run had no synthesis
-    pass" and render nothing at all. That keeps a default (disabled) run's
-    output byte-identical to one from before the pass existed.
+    pass" and render nothing at all. The pass is on by default (lintro-ops
+    milestone 0, decision A): it writes the round's summary and verdict
+    reasoning, merges duplicate findings and adds cross-file findings.
 
     Attributes:
         findings_added: Number of synthesized findings that survived the cap,
@@ -25,11 +26,14 @@ class SynthesisOutcome:
         failed: True when the pass was attempted but produced no usable
             answer. Never fatal: the chunk findings stand and the run stays
             complete for them.
+        duplicates_merged: Number of chunk findings the pass collapsed into
+            another finding with the same root cause (lintro-ops milestone 0).
     """
 
     findings_added: int = 0
     truncated: bool = False
     failed: bool = False
+    duplicates_merged: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the outcome for the review JSON payload.
@@ -48,4 +52,5 @@ class SynthesisOutcome:
             "findings_added": self.findings_added,
             "truncated": self.truncated,
             "failed": self.failed,
+            "duplicates_merged": self.duplicates_merged,
         }

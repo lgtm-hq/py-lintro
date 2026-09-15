@@ -136,8 +136,6 @@ def test_recorder_clamps_negative_provider_seconds() -> None:
 def test_chunk_partial_defaults_to_no_call_detail() -> None:
     """A partial built without call detail reports zero seconds, no turns."""
     partial = ChunkReviewPartial(
-        summary="",
-        checklist=(),
         findings=(),
         input_tokens=0,
         output_tokens=0,

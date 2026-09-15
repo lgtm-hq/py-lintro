@@ -14,8 +14,6 @@ from lintro.ai.resolved_ai_config import (
     format_sourced_value,
 )
 from lintro.ai.review.checklist_display import (
-    cleared_answers,
-    orphan_concerns,
     questions_for_finding,
 )
 from lintro.ai.review.coverage_degradation import (
@@ -136,9 +134,6 @@ def render_review_terminal(
         question_map=prompt_questions,
     )
 
-    if checklist_display == ChecklistDisplay.ALL:
-        _render_checklist_appendix(result=result, console=output)
-
 
 def _render_findings(
     *,
@@ -240,37 +235,3 @@ def _render_finding_panel(
             padding=(0, 1),
         ),
     )
-
-
-def _render_checklist_appendix(*, result: ReviewResult, console: Console) -> None:
-    """Render cleared and orphan checklist sections for audit mode."""
-    cleared = cleared_answers(answers=result.checklist)
-    orphans = orphan_concerns(
-        answers=result.checklist,
-        findings=result.findings,
-    )
-
-    console.print()
-    console.print(f"[bold cyan]Cleared checks ({len(cleared)})[/bold cyan]")
-    if cleared:
-        for answer in cleared:
-            question = answer.question or f"(checklist item {answer.id})"
-            console.print(f"  [green]✓[/green] {question}")
-    else:
-        console.print("[dim]  (none)[/dim]")
-
-    console.print()
-    console.print(
-        f"[bold cyan]Checklist concerns without findings ({len(orphans)})[/bold cyan]",
-    )
-    if orphans:
-        for answer in orphans:
-            question = answer.question or f"(checklist item {answer.id})"
-            console.print(f"  [yellow]•[/yellow] {question}")
-            if answer.evidence.strip():
-                evidence = answer.evidence
-                if len(evidence) > 120:
-                    evidence = f"{evidence[:117]}..."
-                console.print(f"    [dim]{evidence}[/dim]")
-    else:
-        console.print("[dim]  (none — good)[/dim]")

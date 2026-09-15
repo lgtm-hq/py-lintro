@@ -139,14 +139,14 @@ frozen `ChunkReviewRequest` rather than a keyword wall.
 `parse_review_payload_with_recovery` runs the parse ladder — parse, then at most one
 schema-reminder retry when the timeout budget allows one, then recovery of the prose as
 unstructured findings — so a paid-for answer is never discarded (#1853); it folds the
-retry's usage in through `merge_response_usage`. `payload_to_partial` and
-`parse_checklist` turn the parsed payload into the `ChunkReviewPartial` the merge layer
-consumes.
+retry's usage in through `merge_response_usage`. `payload_to_partial` turns the parsed
+payload (findings and `flagged_files` only, lintro-ops milestone 0) into the
+`ChunkReviewPartial` the merge layer consumes.
 
 `lintro/ai/review/checklist_pass.py` owns the depth-2 generated checklist:
 `generate_extra_checklist` asks the model for domain-specific questions and truncates
 the answer at `GENERATED_CHECKLIST_ID_STRIDE`, which is what keeps parallel chunks on
-disjoint generated-id ranges so `merge_checklist_answers` cannot collide.
+disjoint generated-id ranges so a finding's `checklist_ids` cannot collide.
 `lintro/ai/review/adversarial_pass.py` owns the depth-3 sweep: `run_adversarial_pass`
 returns findings and usage only, and degrades to usage alone when the answer is
 malformed.
