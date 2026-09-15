@@ -8,6 +8,7 @@ const {
   unsupportedPlatformHint,
   supportedPlatforms,
   resolveBinary,
+  ensureExecutable,
 } = require('../lib/resolve.js');
 
 describe('packageForPlatform', () => {
@@ -146,6 +147,55 @@ describe('resolveBinary', () => {
     const badRequire = () => ({});
     expect(() => resolveBinary(badRequire, 'darwin', 'arm64')).toThrow(
       /did not export a binary path/
+    );
+  });
+});
+
+describe('ensureExecutable', () => {
+  const X_OK = 1;
+
+  const fakeFs = ({ executable, chmodError }) => {
+    const calls = [];
+    return {
+      calls,
+      constants: { X_OK },
+      accessSync(path, mode) {
+        calls.push(['accessSync', path, mode]);
+        if (!executable) {
+          const err = new Error('EACCES: permission denied');
+          err.code = 'EACCES';
+          throw err;
+        }
+      },
+      chmodSync(path, mode) {
+        calls.push(['chmodSync', path, mode]);
+        if (chmodError) {
+          throw chmodError;
+        }
+      },
+    };
+  };
+
+  it('leaves an executable binary untouched', () => {
+    const fs = fakeFs({ executable: true });
+    expect(ensureExecutable('/bin/x', fs)).toBe(false);
+    expect(fs.calls).toEqual([['accessSync', '/bin/x', X_OK]]);
+  });
+
+  it('restores 0755 when the binary lost its exec bit', () => {
+    // The artifact handoff between publish jobs lands every file as 0644.
+    const fs = fakeFs({ executable: false });
+    expect(ensureExecutable('/bin/x', fs)).toBe(true);
+    expect(fs.calls).toEqual([
+      ['accessSync', '/bin/x', X_OK],
+      ['chmodSync', '/bin/x', 0o755],
+    ]);
+  });
+
+  it('throws a helpful error when the mode cannot be repaired', () => {
+    const fs = fakeFs({ executable: false, chmodError: new Error('EROFS: read-only file system') });
+    expect(() => ensureExecutable('/ro/bin/x', fs)).toThrow(
+      /platform binary at "\/ro\/bin\/x" is not executable and could not be made executable: EROFS/
     );
   });
 });

@@ -131,6 +131,40 @@ function resolveBinary(requireFn, platform, arch) {
   return mod.path;
 }
 
+/**
+ * Make sure the platform binary carries its executable bit.
+ *
+ * The publish pipeline hands the staged package set between jobs as a
+ * workflow artifact, and that zip drops file modes: every file lands as
+ * 0644, so the tarball npm publishes can ship the binary without `+x`.
+ * npm only restores modes for a package's own `bin` entries, and the
+ * platform packages declare none, so the launcher repairs it here. A
+ * binary that is already executable is left untouched.
+ *
+ * @param {string} binaryPath - Absolute path to the platform binary.
+ * @param {typeof import('fs')} [fsModule] - Injectable `fs` (testing).
+ * @returns {boolean} `true` when the mode had to be repaired.
+ * @throws {Error} When the binary is not executable and cannot be made so.
+ */
+function ensureExecutable(binaryPath, fsModule) {
+  const fs = fsModule || require('fs');
+  try {
+    fs.accessSync(binaryPath, fs.constants.X_OK);
+    return false;
+  } catch {
+    // Not executable (or not accessible): fall through to the repair.
+  }
+  try {
+    fs.chmodSync(binaryPath, 0o755);
+  } catch (err) {
+    throw new Error(
+      `lintro: the platform binary at "${binaryPath}" is not executable ` +
+        `and could not be made executable: ${err.message}`
+    );
+  }
+  return true;
+}
+
 module.exports = {
   PLATFORM_PACKAGES,
   UNSUPPORTED_PLATFORM_HINTS,
@@ -138,4 +172,5 @@ module.exports = {
   unsupportedPlatformHint,
   supportedPlatforms,
   resolveBinary,
+  ensureExecutable,
 };

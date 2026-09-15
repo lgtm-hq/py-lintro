@@ -3,18 +3,30 @@ name: Publish - npm
 
 # Distributes lintro as an npm package via platform-specific Nuitka binaries
 # (the esbuild/biome model). Publishing uses npm trusted publishing (OIDC):
-# no NODE_AUTH_TOKEN secret is required. The `npm` environment gates every
-# live publish behind maintainer approval, mirroring the `pypi` environment.
+# no NODE_AUTH_TOKEN secret is required.
 #
-# Set the `dry_run` input to skip the real publish (still requires the
-# environment approval). The platform binaries are downloaded from the
-# GitHub release created earlier in the tag pipeline, so this workflow must
-# run after publish-binaries.yml has uploaded them.
+# Two jobs (#2632):
 #
-# A LIVE direct `workflow_dispatch` of this workflow is refused by the `guard`
-# job: trusted publishing only matches the tag-pipeline entry path
-# (publish-pypi-on-tag.yml @ refs/tags/v*). Publish or backfill a tag by
-# approving / re-running that run instead. See #2247 and
+#   stage    Downloads the three release binaries plus the release's
+#            SHA256SUMS, verifies each binary's digest and its
+#            build-binaries.yml attestation, stages them into the npm tree,
+#            injects the version, smoke-tests the launcher, writes a
+#            SHA256SUMS over every file npm would pack, attests that set and
+#            uploads it as the `npm-dist` artifact. Carries the `npm`
+#            environment: every live publish waits for maintainer approval
+#            here, mirroring the `pypi` environment.
+#   publish  lgtm-ci's reusable-publish-npm-set.yml: re-verifies every packed
+#            file against the manifest and the stage job's attestation
+#            BEFORE npm pack, publishes platform packages first and the meta
+#            package last (idempotent re-runs, bounded transient retry), then
+#            verifies the registry (dist.attestations per package, npm audit
+#            signatures, launcher smoke). A `uses:` job cannot declare
+#            `environment`, so the approval lives on `stage`.
+#
+# npm trusted publishing matches the ENTRY workflow of the run — the tag
+# pipeline (publish-pypi-on-tag.yml), not this file. The reusable's entry
+# guard enforces that binding on live runs; a `workflow_dispatch` of this
+# workflow is a dry-run by default and cannot publish. See #2247 and
 # docs/npm-distribution.md.
 
 'on':
@@ -62,59 +74,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Runs BEFORE the environment-gated publish job and carries no
-  # `environment:`, so a run that cannot authenticate fails without consuming
-  # an `npm` approval. npm trusted publishing matches exactly one entry
-  # workflow (publish-pypi-on-tag.yml); any other entry path — a direct
-  # dispatch of this workflow, say — presents a different OIDC identity and the
-  # registry masks the rejection as E404 (see #2247).
-  guard:
-    name: Check entry path
+  stage:
+    name: Verify and stage npm package set
     runs-on: ubuntu-24.04
-    permissions:
-      # read: checkout, to run the guard script from the repository
-      contents: read
-    steps:
-      - name: Harden Runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: 'block'
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Refuse runs that cannot authenticate to npm
-        # workflow_ref is the run's *entry* workflow — the OIDC subject npm
-        # matches on. The script allowlists the one workflow npm trusts;
-        # event_name cannot substitute for it, because a workflow_call run
-        # reports the caller's event and so cannot distinguish a dispatch of
-        # this workflow from a dispatch of the tag pipeline that calls it.
-        env:
-          WORKFLOW_REF: ${{ github.workflow_ref }}
-          DRY_RUN: ${{ inputs.dry_run }}
-        run: scripts/ci/npm/assert_dispatch_allowed.sh
-
-  publish:
-    name: Package and publish
-    needs: guard
-    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     environment: npm
     permissions:
       # read: checkout and download release assets
       contents: read
-      # write: OIDC for npm trusted publishing + provenance attestation
+      # write: OIDC signing of the staged package-set attestation
       id-token: write
+      # write: upload that attestation; read half covers gh attestation
+      # verify of the release binaries
+      attestations: write
 
     steps:
       - name: Harden Runner
+        # gh release download (api + release-assets), gh attestation verify
+        # (api + Sigstore TUF root), setup-node, the pre-publish smoke's npm
+        # install, attest-build-provenance (OIDC token + Sigstore) and the
+        # artifact upload service.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -125,13 +104,16 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             release-assets.githubusercontent.com:443
-            uploads.github.com:443
             token.actions.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+            results-receiver.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
             nodejs.org:443
             registry.npmjs.org:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
             oauth2.sigstore.dev:443
 
       - name: Checkout code
@@ -140,10 +122,8 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js
-        # Node 24 ships npm ≥ 11.5.1 (required for OIDC trusted publishing).
-        # Do not run `npm install -g npm` here: in-place self-upgrade corrupts
-        # the toolcache tree and breaks `npm publish --provenance` (missing
-        # sigstore). See #1203.
+        # Node 24 ships npm ≥ 11.5.1. Do not run `npm install -g npm` here:
+        # in-place self-upgrade corrupts the toolcache tree (#1203).
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
@@ -154,7 +134,7 @@ jobs:
         with:
           python-version: '3.14'
 
-      - name: Download release binaries
+      - name: Download release binaries and SHA256SUMS
         run: >-
           scripts/ci/npm/download_release_binaries.sh
           "$RELEASE_TAG"
@@ -162,6 +142,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ inputs.release_tag }}
+
+      - name: Verify release binaries (digest + attestation)
+        # The first consumer of the #2562 evidence: each binary must match
+        # the release's SHA256SUMS and carry a build-binaries.yml attestation
+        # (a reusable signs as the called file, never as the entry workflow).
+        # A replaced release asset (#2484 class) fails here, before staging.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BINARIES_DIR: ${{ runner.temp }}/npm-binaries
+          ATTESTATION_REPO: lgtm-hq/py-lintro
+          BINARY_SIGNER_WORKFLOW: lgtm-hq/py-lintro/.github/workflows/build-binaries.yml
+        run: scripts/ci/npm/verify_release_binaries.sh
 
       - name: Stage binaries into npm packages
         run: >-
@@ -185,14 +177,106 @@ jobs:
       - name: Smoke test launcher (Linux x64)
         run: scripts/ci/npm/smoke_test.sh
 
-      - name: Publish to npm
-        # LIVE drives publish_packages.sh: 1 for a real publish, 0 for
-        # --dry-run. Trusted publishing generates provenance automatically;
-        # disable the explicit flag on dry-runs where nothing is published.
-        # dist_tag must be non-latest when backfilling versions below current
-        # latest (npm refuses to move latest backwards without --tag).
-        env:
-          LIVE: ${{ inputs.dry_run && '0' || '1' }}
-          NPM_PROVENANCE: ${{ inputs.dry_run && '0' || '1' }}
-          NPM_DIST_TAG: ${{ inputs.dist_tag || 'latest' }}
-        run: scripts/ci/npm/publish_packages.sh
+      - name: Write package-set checksums
+        # One `<sha256>  <package>/<file>` line per file npm would pack, for
+        # all four packages: the manifest the reusable verifies against and
+        # the subject list of the attestation below.
+        run: >-
+          python scripts/ci/npm/write_package_checksums.py
+          --packages-dir npm
+          --output npm/SHA256SUMS
+
+      - name: Attest staged package set
+        # Signs as this file (publish-npm.yml); the reusable's verify step
+        # requires exactly that signer for every packed file.
+        # yamllint disable-line rule:line-length
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: npm/SHA256SUMS
+
+      - name: Upload staged package set
+        # Jobs have isolated filesystems: the reusable downloads this artifact
+        # into its packages-dir. The zip drops file modes (every file lands
+        # as 644), so the launcher restores the binary's exec bit at run time
+        # and smoke_test.sh above proves that path before anything ships.
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: npm-dist
+          path: npm/
+          if-no-files-found: error
+          # Policy recovery window (lgtm-hq/lgtm-ci#962): a resume weeks
+          # later still finds the verified, attested set.
+          retention-days: 90
+
+  publish:
+    name: Publish npm package set
+    needs: stage
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
+    permissions:
+      # read: checkout of this repository inside the reusable
+      contents: read
+      # write: OIDC for npm trusted publishing + provenance
+      id-token: write
+      # write: the reusable's job requests it statically for the tarball
+      # provenance upload; the call startup-fails without it (#2484 class)
+      attestations: write
+    with:
+      packages-dir: npm
+      artifact-name: npm-dist
+      # Platform packages first, meta package last: the meta package's
+      # optionalDependencies must exist on the registry before it does.
+      order: '["darwin-arm64", "linux-arm64", "linux-x64", "lintro"]'
+      # dist_tag must be non-latest when backfilling versions below current
+      # latest (npm refuses to move latest backwards without --tag).
+      dist-tag: ${{ inputs.dist_tag || 'latest' }}
+      dry-run: ${{ inputs.dry_run }}
+      provenance: true
+      access: public
+      max-attempts: 3
+      # The one entry workflow npm trusts (#2247): a live run entering
+      # through any other file fails here, before anything is packed. A
+      # dry-run leaves the allowlist empty so a `workflow_dispatch` of this
+      # workflow (dry-run by default) can still rehearse the pipeline.
+      entry-workflows: >-
+        ${{ !inputs.dry_run && '.github/workflows/publish-pypi-on-tag.yml' || '' }}
+      # Workspace-relative path to the manifest that shipped inside the
+      # artifact; its entries are relative to packages-dir. The default
+      # files-to-verify ("[]") verifies every file the manifest lists, on
+      # top of every file npm would pack.
+      checksums-file: npm/SHA256SUMS
+      signer-repo: lgtm-hq/py-lintro
+      # The stage job's attestation over npm/SHA256SUMS (a called workflow
+      # signs as its own file). The binaries' build-binaries.yml attestation
+      # was checked in stage, before they were staged.
+      signer-workflow: .github/workflows/publish-npm.yml
+      post-publish-verify: true
+      # Runs inside the scratch install of the published meta package.
+      smoke-command: ./node_modules/.bin/lintro --version
+      node-version: '24'
+      tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
+      egress-policy: block
+      egress-preset: npm-publish
+      # Full list (replace semantics): the reusable passes allowed-endpoints
+      # verbatim to harden-runner, so this must carry everything its own
+      # default carried plus the hosts this consumer adds (nodejs.org for
+      # setup-node, the artifact download service, the Sigstore timestamp).
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        actions.githubusercontent.com:443
+        token.actions.githubusercontent.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        results-receiver.actions.githubusercontent.com:443
+        *.blob.core.windows.net:443
+        nodejs.org:443
+        registry.npmjs.org:443
+        fulcio.sigstore.dev:443
+        rekor.sigstore.dev:443
+        tuf-repo-cdn.sigstore.dev:443
+        timestamp.sigstore.dev:443
+        oauth2.sigstore.dev:443
