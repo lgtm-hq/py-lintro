@@ -8,12 +8,12 @@ from assertpy import assert_that
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.review.cli_limits import (
     CLI_DIFF_HARD_CEILING_BYTES,
-    CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+    REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     assert_cli_diff_within_ceiling,
     is_cli_output_exhaustion,
     is_output_exhaustion_error,
     measure_diff_size,
-    resolve_cli_diff_budget,
+    resolve_chunk_diff_budget,
 )
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -41,13 +41,13 @@ def test_measure_diff_size_counts_lines_bytes_and_tokens() -> None:
     assert_that(size.tokens).is_greater_than(0)
 
 
-def test_resolve_cli_diff_budget_takes_minimum() -> None:
+def test_resolve_chunk_diff_budget_takes_minimum() -> None:
     """CLI soft ceiling wins when the context-window budget is larger."""
-    budget = resolve_cli_diff_budget(
+    budget = resolve_chunk_diff_budget(
         context_window_budget=200_000,
-        cli_max_diff_tokens=CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+        review_chunk_diff_tokens=REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     )
-    assert_that(budget).is_equal_to(CLI_TRANSPORT_DIFF_TOKEN_BUDGET)
+    assert_that(budget).is_equal_to(REVIEW_CHUNK_DIFF_TOKEN_BUDGET)
 
 
 def test_assert_cli_diff_within_ceiling_accepts_small_diffs() -> None:

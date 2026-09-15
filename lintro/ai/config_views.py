@@ -57,7 +57,7 @@ class AIBudgetConfig:
     cache_max_entries: int
     context_lines: int
     fix_search_radius: int
-    cli_max_diff_tokens: int
+    review_chunk_diff_tokens: int
     cli_max_diff_bytes: int
 
 

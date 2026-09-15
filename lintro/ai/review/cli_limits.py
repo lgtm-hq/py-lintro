@@ -26,20 +26,20 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CLI_DIFF_HARD_CEILING_BYTES",
-    "CLI_TRANSPORT_DIFF_TOKEN_BUDGET",
+    "REVIEW_CHUNK_DIFF_TOKEN_BUDGET",
     "DiffSize",
     "assert_cli_diff_within_ceiling",
     "is_cli_output_exhaustion",
     "is_output_exhaustion_error",
     "measure_diff_size",
-    "resolve_cli_diff_budget",
+    "resolve_chunk_diff_budget",
 ]
 
 # Single source of truth for the CLI limit defaults is the AIConfig model
-# (cli_max_diff_tokens / cli_max_diff_bytes); these module aliases exist for
+# (review_chunk_diff_tokens / cli_max_diff_bytes); these module aliases exist for
 # callers and tests that want the defaults without building a config instance.
-CLI_TRANSPORT_DIFF_TOKEN_BUDGET = int(
-    AIConfig.model_fields["cli_max_diff_tokens"].default,
+REVIEW_CHUNK_DIFF_TOKEN_BUDGET = int(
+    AIConfig.model_fields["review_chunk_diff_tokens"].default,
 )
 CLI_DIFF_HARD_CEILING_BYTES = int(
     AIConfig.model_fields["cli_max_diff_bytes"].default,
@@ -108,24 +108,26 @@ def assert_cli_diff_within_ceiling(
     )
 
 
-def resolve_cli_diff_budget(
+def resolve_chunk_diff_budget(
     *,
     context_window_budget: int,
-    cli_max_diff_tokens: int,
+    review_chunk_diff_tokens: int,
 ) -> int:
-    """Return the per-chunk token budget for CLI transport.
+    """Return the per-chunk diff token budget for any transport.
 
-    Takes the minimum of the model context-window remainder and the CLI soft
-    ceiling so large PRs route through the semantic chunker instead of one shot.
+    Takes the minimum of the model context-window remainder and the
+    configured chunk budget (``ai.review_chunk_diff_tokens``) so every PR
+    above the budget routes through the semantic chunker into small
+    file-group chunks instead of one shot (lintro-ops milestone 0).
 
     Args:
         context_window_budget: Tokens left for diff content after prompt overhead.
-        cli_max_diff_tokens: Configurable CLI soft ceiling.
+        review_chunk_diff_tokens: Configured per-chunk budget.
 
     Returns:
         Positive per-chunk token budget.
     """
-    return max(min(context_window_budget, cli_max_diff_tokens), 1)
+    return max(min(context_window_budget, review_chunk_diff_tokens), 1)
 
 
 def is_output_exhaustion_error(message: str) -> bool:

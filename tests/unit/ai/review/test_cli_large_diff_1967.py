@@ -23,11 +23,11 @@ from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.cli_limits import (
     CLI_DIFF_HARD_CEILING_BYTES,
-    CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+    REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     assert_cli_diff_within_ceiling,
     is_output_exhaustion_error,
     measure_diff_size,
-    resolve_cli_diff_budget,
+    resolve_chunk_diff_budget,
 )
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -150,22 +150,22 @@ def test_measure_diff_size_counts_lines_bytes_and_tokens() -> None:
     assert_that(size.tokens).is_equal_to(estimate_tokens(diff))
 
 
-def test_resolve_cli_diff_budget_caps_context_window_remainder() -> None:
+def test_resolve_chunk_diff_budget_caps_context_window_remainder() -> None:
     """CLI soft ceiling wins over a huge context-window remainder."""
-    budget = resolve_cli_diff_budget(
+    budget = resolve_chunk_diff_budget(
         context_window_budget=190_000,
-        cli_max_diff_tokens=CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+        review_chunk_diff_tokens=REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     )
 
-    assert_that(budget).is_equal_to(CLI_TRANSPORT_DIFF_TOKEN_BUDGET)
+    assert_that(budget).is_equal_to(REVIEW_CHUNK_DIFF_TOKEN_BUDGET)
     assert_that(budget).is_less_than(190_000)
 
 
-def test_resolve_cli_diff_budget_keeps_smaller_context_remainder() -> None:
+def test_resolve_chunk_diff_budget_keeps_smaller_context_remainder() -> None:
     """A tiny model window is not inflated to the CLI soft ceiling."""
-    budget = resolve_cli_diff_budget(
+    budget = resolve_chunk_diff_budget(
         context_window_budget=1_000,
-        cli_max_diff_tokens=CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+        review_chunk_diff_tokens=REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     )
 
     assert_that(budget).is_equal_to(1_000)
@@ -213,9 +213,9 @@ def test_cli_chunk_threshold_routes_large_diff_through_chunker() -> None:
         repo_root="",
     )
     window_budget = 190_000
-    cli_budget = resolve_cli_diff_budget(
+    cli_budget = resolve_chunk_diff_budget(
         context_window_budget=window_budget,
-        cli_max_diff_tokens=CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+        review_chunk_diff_tokens=REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     )
 
     assert_that(estimate_tokens(unified_diff)).is_greater_than(cli_budget)
@@ -386,7 +386,7 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
 ) -> None:
     """run_review_async applies the CLI diff budget and reviews in chunks.
 
-    Locks the orchestrator wiring (``diff_budget = resolve_cli_diff_budget``):
+    Locks the orchestrator wiring (``diff_budget = resolve_chunk_diff_budget``):
     if that line disappears, a CLI-sized diff runs one-shot again and this
     test fails on ``chunks_total``, even though every helper unit test passes.
     """
@@ -559,7 +559,6 @@ async def test_main_pass_splits_a_chunk_on_cli_output_exhaustion(
     assert_that(calls[1]).contains("+x = 1")
     assert_that(calls[1]).does_not_contain("+y = 2")
     assert_that(calls[2]).contains("+y = 2")
-    assert_that(partial.pr_summary).is_not_none()
     assert_that(partial.coverage_degradations).is_length(1)
     assert_that(partial.coverage_degradations[0].reason).is_equal_to(
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,

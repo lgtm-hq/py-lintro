@@ -26,7 +26,7 @@ from lintro.ai.model_pricing import (
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.cli_limits import (
     assert_cli_diff_within_ceiling,
-    resolve_cli_diff_budget,
+    resolve_chunk_diff_budget,
 )
 from lintro.ai.review.custom_agents import select_custom_agents
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -182,18 +182,21 @@ def _resolve_diff_budget(
             lint_results=options.lint_results,
         ),
     )
-    if options.ai_config.transport != AITransport.CLI:
-        return diff_budget
-    # Context-window budgets are transport-blind and leave ~1.5k-line PRs
-    # as a single CLI chunk (#1967). Tighten before the chunker runs, and
-    # refuse outright when the full diff exceeds the hard ceiling.
-    assert_cli_diff_within_ceiling(
-        context=context,
-        cli_max_diff_bytes=options.ai_config.cli_max_diff_bytes,
-    )
-    return resolve_cli_diff_budget(
+    if options.ai_config.transport == AITransport.CLI:
+        # The CLI transport spawns one process per chunk, so a diff above the
+        # hard byte ceiling is refused outright rather than fanned out into
+        # an unbounded number of chunks (#1967).
+        assert_cli_diff_within_ceiling(
+            context=context,
+            cli_max_diff_bytes=options.ai_config.cli_max_diff_bytes,
+        )
+    # Context-window budgets are transport-blind and leave most PRs as one
+    # slow chunk. The per-chunk budget applies on every transport so the
+    # chunker produces small file-group chunks that review at depth and run
+    # in parallel (lintro-ops milestone 0, decision A).
+    return resolve_chunk_diff_budget(
         context_window_budget=diff_budget,
-        cli_max_diff_tokens=options.ai_config.cli_max_diff_tokens,
+        review_chunk_diff_tokens=options.ai_config.review_chunk_diff_tokens,
     )
 
 
