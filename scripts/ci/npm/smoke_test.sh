@@ -20,6 +20,11 @@ Detects the host platform, packs the meta-package and the matching
 @lgtm-hq/lintro-<platform> package, installs them into a scratch project, and runs
 `lintro --version`, asserting a zero exit code. Requires the platform binary
 to already be staged into npm/<platform>/bin/lintro.
+
+The run is repeated with the installed platform binary stripped of its
+executable bit (mode 0644): that is how the binary reaches the publish job,
+because the artifact handoff between jobs drops file modes, so the launcher
+must restore it before anything is published.
 EOF
 	exit 0
 fi
@@ -53,4 +58,21 @@ npm install --no-save "$workdir/$platform_tarball" "$workdir/$meta_tarball"
 
 echo "==> lintro --version"
 ./node_modules/.bin/lintro --version
-echo "Smoke test passed: launcher resolved and executed the platform binary."
+
+# The publish job receives the staged set as a workflow artifact, whose zip
+# lands every file as 0644, so the published binary may lack +x. Prove the
+# launcher repairs that (npm/lintro/lib/resolve.js ensureExecutable) here,
+# before the set is attested and handed over.
+installed_binary="./node_modules/@lgtm-hq/lintro-${platform_key}/bin/lintro"
+if [[ ! -f "$installed_binary" ]]; then
+	echo "Installed platform binary not found: $installed_binary" >&2
+	exit 1
+fi
+chmod 0644 "$installed_binary"
+echo "==> lintro --version (platform binary stripped of its exec bit)"
+./node_modules/.bin/lintro --version
+if [[ ! -x "$installed_binary" ]]; then
+	echo "Launcher ran but did not restore the exec bit on $installed_binary" >&2
+	exit 1
+fi
+echo "Smoke test passed: launcher resolved and executed the platform binary, with and without its exec bit."

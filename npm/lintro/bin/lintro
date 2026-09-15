@@ -10,12 +10,15 @@
  */
 
 const { execFileSync } = require("child_process");
-const { resolveBinary } = require("../lib/resolve.js");
+const { ensureExecutable, resolveBinary } = require("../lib/resolve.js");
 
 function main() {
   let binaryPath;
   try {
     binaryPath = resolveBinary();
+    // The published tarball may carry the binary without its exec bit (the
+    // publish pipeline's artifact handoff drops file modes); repair it.
+    ensureExecutable(binaryPath);
   } catch (err) {
     process.stderr.write(`${err.message}\n`);
     process.exit(1);

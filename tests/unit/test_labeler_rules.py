@@ -92,7 +92,7 @@ def _labels_for(*, path: str) -> set[str]:
         (".github/labeler.yml", {"maintenance"}),
         ("scripts/ci/resolve-pipeline-relevance.sh", {"ci"}),
         ("scripts/ci/test-verify-imports.sh", {"ci"}),
-        ("scripts/ci/npm/publish_packages.sh", {"ci", "release"}),
+        ("scripts/ci/npm/download_release_binaries.sh", {"ci", "release"}),
         ("npm/lintro/package.json", {"release"}),
         ("package.json", set()),
         ("apps/site/package.json", set()),

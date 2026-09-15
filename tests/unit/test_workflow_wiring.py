@@ -1574,8 +1574,113 @@ def test_lintro_report_scheduled_workflow_shares_single_run_output() -> None:
     assert_that(notify_needs).contains("lintro-report")
 
 
+def _publish_npm_jobs() -> dict[str, Any]:
+    """Return the jobs of publish-npm.yml.
+
+    Returns:
+        The parsed ``jobs`` mapping.
+    """
+    return cast(dict[str, Any], _load_workflow(name="publish-npm.yml")["jobs"])
+
+
+def _publish_npm_step(*, job: str, name: str) -> dict[str, Any]:
+    """Return one named step of a publish-npm.yml job.
+
+    Args:
+        job: Job id.
+        name: Step name.
+
+    Returns:
+        The step mapping.
+    """
+    steps = _publish_npm_jobs()[job]["steps"]
+    step = next((s for s in steps if s.get("name") == name), None)
+    assert_that(step).described_as(f"{job}: step {name!r} not found").is_not_none()
+    assert step is not None  # narrow type for mypy
+    return cast(dict[str, Any], step)
+
+
+_NPM_SET_REUSABLE = "lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml"
+_NPM_PACKAGE_ORDER = ["darwin-arm64", "linux-arm64", "linux-x64", "lintro"]
+
+
+def test_publish_npm_calls_the_lgtm_ci_package_set_reusable() -> None:
+    """The publish job is lgtm-ci's package-set reusable at the canonical pin.
+
+    Everything from "directory of packages" onward moved upstream (#2632):
+    the ordered, idempotent publish loop, pre-publish artifact verification
+    and post-publish registry verification. The caller must grant the
+    callee's static permissions or the run startup-fails (#2484 class), and
+    both the ``uses:`` ref and ``tooling-ref`` must be the repo-wide pin.
+    """
+    jobs = _publish_npm_jobs()
+    publish = jobs["publish"]
+    canonical = _canonical_lgtm_ci_pin()
+    assert_that(publish["uses"]).is_equal_to(f"{_NPM_SET_REUSABLE}@{canonical}")
+    assert_that(publish["with"]["tooling-ref"]).is_equal_to(canonical)
+    assert_that(publish["permissions"]).is_equal_to(
+        {"contents": "read", "id-token": "write", "attestations": "write"},
+    )
+    needs = publish["needs"]
+    assert_that([needs] if isinstance(needs, str) else needs).is_equal_to(["stage"])
+
+    # The tag pipeline's caller job must in turn grant what the nested
+    # reusable and the attesting stage job request.
+    tag_pipeline = _load_workflow(name="publish-pypi-on-tag.yml")
+    caller = tag_pipeline["jobs"]["npm-publish"]
+    assert_that(caller["uses"]).is_equal_to("./.github/workflows/publish-npm.yml")
+    assert_that(caller["permissions"]).is_equal_to(
+        {"contents": "read", "id-token": "write", "attestations": "write"},
+    )
+
+
+def test_publish_npm_binds_the_environment_approval_to_the_publish_job() -> None:
+    """The npm approval gate sits on the job that publishes, via the reusable.
+
+    A ``uses:`` job cannot declare ``environment``; lgtm-ci 0.74.0's
+    package-set reusable takes it as an input and binds its publish job, so
+    the approval and the OIDC environment claim stay where the token is
+    minted and the npmjs trusted-publisher registration keeps its ``npm``
+    environment binding (#2632, lgtm-hq/lgtm-ci#990). ``stage`` carries no
+    environment: nothing there is irreversible.
+    """
+    jobs = _load_workflow(name="publish-npm.yml")["jobs"]
+
+    assert_that(jobs["stage"]).does_not_contain_key("environment")
+    assert_that(jobs["publish"]).does_not_contain_key("environment")
+    assert_that(jobs["publish"]["with"]["environment"]).is_equal_to("npm")
+    assert_that(jobs["publish"]["needs"]).is_equal_to("stage")
+
+
+def test_publish_npm_reusable_verifies_artifacts_before_packing() -> None:
+    """verify-artifacts is wired: manifest, signer, order, handoff, smoke.
+
+    The reusable fails a live publish closed without ``checksums-file``,
+    ``signer-repo`` and ``signer-workflow``; a tampered or unattested file
+    then fails before ``npm pack`` (covered by the reusable's own tests).
+    The signer is this workflow file: the stage job attests the staged set,
+    and a called workflow signs as its own file, not as the entry workflow.
+    """
+    with_block = _publish_npm_jobs()["publish"]["with"]
+    assert_that(with_block["packages-dir"]).is_equal_to("npm")
+    assert_that(with_block["artifact-name"]).is_equal_to("npm-dist")
+    assert_that(json.loads(with_block["order"])).is_equal_to(_NPM_PACKAGE_ORDER)
+    assert_that(with_block["checksums-file"]).is_equal_to("npm/SHA256SUMS")
+    assert_that(with_block["signer-repo"]).is_equal_to("lgtm-hq/py-lintro")
+    assert_that(with_block["signer-workflow"]).is_equal_to(
+        ".github/workflows/publish-npm.yml",
+    )
+    assert_that(with_block["post-publish-verify"]).is_true()
+    assert_that(with_block["smoke-command"]).is_equal_to(
+        "./node_modules/.bin/lintro --version",
+    )
+    assert_that(with_block["provenance"]).is_true()
+    assert_that(with_block["access"]).is_equal_to("public")
+    assert_that(str(with_block["dry-run"])).contains("inputs.dry_run")
+
+
 def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
-    """publish-npm accepts dist_tag and forwards it as NPM_DIST_TAG."""
+    """publish-npm accepts dist_tag and forwards it to the reusable."""
     workflow = _load_workflow(name="publish-npm.yml")
     on = workflow["on"]
     assert_that(on["workflow_call"]["inputs"]["dist_tag"]["default"]).is_equal_to(
@@ -1584,96 +1689,32 @@ def test_publish_npm_exposes_dist_tag_for_backfills() -> None:
     assert_that(on["workflow_dispatch"]["inputs"]["dist_tag"]["default"]).is_equal_to(
         "latest",
     )
-
-    publish_step = next(
-        (
-            step
-            for step in workflow["jobs"]["publish"]["steps"]
-            if step.get("name") == "Publish to npm"
-        ),
-        None,
-    )
-    assert_that(publish_step).described_as(
-        "'Publish to npm' step not found",
-    ).is_not_none()
-    assert publish_step is not None  # narrow type for mypy
-    assert_that(publish_step["env"]["NPM_DIST_TAG"]).contains("inputs.dist_tag")
+    # A dispatch is a dry-run unless someone opts in; a call is live.
+    assert_that(on["workflow_dispatch"]["inputs"]["dry_run"]["default"]).is_true()
+    assert_that(on["workflow_call"]["inputs"]["dry_run"]["default"]).is_false()
+    dist_tag = str(workflow["jobs"]["publish"]["with"]["dist-tag"])
+    assert_that(dist_tag).contains("inputs.dist_tag")
 
 
-def test_publish_npm_refuses_untrusted_entry_before_the_npm_environment() -> None:
-    """A run that cannot authenticate fails before the npm approval is spent.
+def test_publish_npm_entry_guard_names_the_workflow_that_calls_it() -> None:
+    """Live runs are bound to the one entry workflow npm trusts (#2247).
 
-    npm trusted publishing only authenticates the tag-pipeline entry path
-    (issue #2247), so a live direct dispatch can never publish. The guard must
-    run in its own job that carries no ``environment:`` and that the
-    environment-gated publish job ``needs``, otherwise the doomed run burns an
-    ``npm`` deployment approval before failing.
+    npm trusted publishing matches the run's *entry* workflow file, so the
+    reusable's guard must allowlist exactly the tag pipeline for live runs,
+    and that file must exist and really call publish-npm.yml. A dry-run
+    dispatch of publish-npm.yml leaves the allowlist empty so the packaging
+    steps can still be rehearsed without publishing.
     """
-    workflow = _load_workflow(name="publish-npm.yml")
-    jobs = workflow["jobs"]
-
-    guard = jobs["guard"]
-    assert_that(guard).does_not_contain_key("environment")
-
-    publish_needs = jobs["publish"]["needs"]
-    if isinstance(publish_needs, str):
-        publish_needs = [publish_needs]
-    assert_that(publish_needs).contains("guard")
-    assert_that(jobs["publish"]["environment"]).is_equal_to("npm")
-
-    guard_step = next(
-        (
-            step
-            for step in guard["steps"]
-            if step.get("run", "").strip().endswith("assert_dispatch_allowed.sh")
-        ),
-        None,
-    )
-    assert_that(guard_step).described_as("guard step not found").is_not_none()
-    assert guard_step is not None  # narrow type for mypy
-    # The decision logic lives in the script, not inline in the workflow.
-    assert_that(guard_step["run"].strip()).is_equal_to(
-        "scripts/ci/npm/assert_dispatch_allowed.sh",
-    )
-    # Both inputs the guard decides on must reach the script: the entry
-    # workflow (the OIDC subject) and dry_run.
-    assert_that(guard_step["env"]["WORKFLOW_REF"]).contains("github.workflow_ref")
-    assert_that(guard_step["env"]["DRY_RUN"]).contains("inputs.dry_run")
-
-
-def _guard_allowlisted_workflow() -> str:
-    """Return the workflow filename the npm guard allowlists.
-
-    Returns:
-        The basename of the entry workflow named in
-        ``TRUSTED_ENTRY_WORKFLOW`` inside ``assert_dispatch_allowed.sh``.
-    """
-    script = (
-        _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
-    ).read_text(encoding="utf-8")
-    match = re.search(
-        r"^readonly TRUSTED_ENTRY_WORKFLOW='/\.github/workflows/([^']+)@'",
-        script,
-        flags=re.MULTILINE,
-    )
-    assert_that(match).described_as("TRUSTED_ENTRY_WORKFLOW not found").is_not_none()
+    entry = str(_publish_npm_jobs()["publish"]["with"]["entry-workflows"])
+    match = re.search(r"'(\.github/workflows/[^']+\.yml)'", entry)
+    assert_that(match).described_as(entry).is_not_none()
     assert match is not None  # narrow type for mypy
-    return match.group(1)
+    allowlisted = match.group(1)
+    assert_that(allowlisted).is_equal_to(".github/workflows/publish-pypi-on-tag.yml")
+    assert_that(entry).contains("!inputs.dry_run")
+    assert_that(entry.strip()).ends_with("|| '' }}")
 
-
-def test_publish_npm_guard_allowlists_a_workflow_that_calls_it() -> None:
-    """The allowlisted entry workflow exists and really calls publish-npm.yml.
-
-    The guard is an allowlist keyed on a workflow *filename*, so a rename on
-    either side would silently lock out every publish (or, with a denylist,
-    let an unauthenticable one through). Pin both halves: the named workflow
-    is on disk, and it is the one that invokes publish-npm.yml.
-    """
-    allowlisted = _guard_allowlisted_workflow()
-    entry_path = _REPO_ROOT / ".github" / "workflows" / allowlisted
-    assert_that(entry_path.is_file()).described_as(str(entry_path)).is_true()
-
-    entry_workflow = _load_workflow(name=allowlisted)
+    entry_workflow = _load_workflow(name=Path(allowlisted).name)
     callers = [
         job
         for job in entry_workflow["jobs"].values()
@@ -1685,121 +1726,114 @@ def test_publish_npm_guard_allowlists_a_workflow_that_calls_it() -> None:
     ).is_not_empty()
 
 
-def test_publish_npm_guard_script_allowlists_the_trusted_entry_workflow() -> None:
-    """Only the tag pipeline may run a live publish; everything else fails.
+def test_publish_npm_stage_verifies_release_binaries_before_staging() -> None:
+    """The stage job checks digests and attestations, then attests the set.
 
-    ``github.event_name`` cannot substitute for the entry workflow: a
-    ``workflow_call`` run reports the *caller's* event, so a dispatched
-    tag-pipeline run and a dispatched publish-npm.yml run look identical. And
-    the check is an allowlist, so an unknown or renamed caller is refused
-    rather than waved through. The runner's own ``GITHUB_WORKFLOW_REF`` is the
-    fallback, so a dropped ``env:`` mapping still gates the publish.
+    Order matters: download (binaries + SHA256SUMS) → verify each binary
+    against the manifest and its build-binaries.yml attestation → stage →
+    version → smoke → write the package-set manifest → attest it → upload.
+    The attestation's subjects are exactly the manifest the reusable reads,
+    so the bytes it packs are the bytes this job verified and signed.
     """
-    script = _REPO_ROOT / "scripts" / "ci" / "npm" / "assert_dispatch_allowed.sh"
-    workflows = "lgtm-hq/py-lintro/.github/workflows"
-    trusted = _guard_allowlisted_workflow()
-    tag_pipeline_ref = f"{workflows}/{trusted}@refs/tags/v1.2.3"
-    dispatch_ref = f"{workflows}/publish-npm.yml@refs/heads/main"
-    unset = "<unset>"
-    cases: list[tuple[dict[str, str], int]] = [
-        # The trusted entry workflow, on any ref: allowed.
-        ({"WORKFLOW_REF": tag_pipeline_ref}, 0),
-        # An absent or empty DRY_RUN is a live publish, not a dry run: a
-        # dispatch must still be refused, or a dropped input would open the gate.
-        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": unset}, 1),
-        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": ""}, 1),
-        ({"WORKFLOW_REF": f"{workflows}/{trusted}@refs/heads/main"}, 0),
-        # Direct dispatch of this workflow: refused unless it is a dry run.
-        ({"WORKFLOW_REF": dispatch_ref}, 1),
-        ({"WORKFLOW_REF": dispatch_ref, "DRY_RUN": "true"}, 0),
-        # An unknown caller is not on the allowlist.
-        ({"WORKFLOW_REF": f"{workflows}/some-other-pipeline.yml@refs/tags/v1"}, 1),
-        # With no WORKFLOW_REF mapping, the runner's own GITHUB_WORKFLOW_REF
-        # still gates: a dropped `env:` in the workflow must not open the gate.
-        ({"GITHUB_WORKFLOW_REF": tag_pipeline_ref}, 0),
-        ({"GITHUB_WORKFLOW_REF": dispatch_ref}, 1),
-        # No entry path at all proves nothing: fail closed.
-        ({}, 1),
-    ]
-    for env, expected_code in cases:
-        merged = {"PATH": "/usr/bin:/bin", "DRY_RUN": "false", **env}
-        merged = {key: value for key, value in merged.items() if value != unset}
-        result = subprocess.run(  # nosec B603 - fixed in-repo script
-            [str(script)],
-            env=merged,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert_that(result.returncode).described_as(str(env)).is_equal_to(
-            expected_code,
-        )
+    steps = _publish_npm_jobs()["stage"]["steps"]
+    runs = [str(step.get("run", "")).strip() for step in steps]
+    uses = [str(step.get("uses", "")) for step in steps]
+
+    def index_of(needle: str, haystack: list[str]) -> int:
+        hits = [i for i, entry in enumerate(haystack) if needle in entry]
+        assert_that(hits).described_as(needle).is_length(1)
+        return hits[0]
+
+    download = index_of("scripts/ci/npm/download_release_binaries.sh", runs)
+    verify = index_of("scripts/ci/npm/verify_release_binaries.sh", runs)
+    stage = index_of("scripts/ci/npm/stage_binaries.py", runs)
+    checksums = index_of("scripts/ci/npm/write_package_checksums.py", runs)
+    attest = index_of("actions/attest-build-provenance@", uses)
+    upload = index_of("actions/upload-artifact@", uses)
+    smoke = index_of("scripts/ci/npm/smoke_test.sh", runs)
+    # The smoke test executes a release binary, so it runs LAST: after the
+    # manifest is attested and the artifact uploaded, nothing it could
+    # rewrite in the workspace is what gets published (Codex review on
+    # #2667). It must still be a step of this job so a failure blocks the
+    # publish job.
+    assert_that(
+        [download, verify, stage, checksums, attest, upload, smoke],
+    ).is_sorted()
+    assert_that(smoke).is_equal_to(len(steps) - 1)
+
+    verify_step = steps[verify]
+    assert_that(verify_step["run"].strip()).is_equal_to(
+        "scripts/ci/npm/verify_release_binaries.sh",
+    )
+    assert_that(verify_step["env"]["ATTESTATION_REPO"]).is_equal_to("lgtm-hq/py-lintro")
+    assert_that(verify_step["env"]["BINARY_SIGNER_WORKFLOW"]).is_equal_to(
+        _BINARY_SIGNER_WORKFLOW,
+    )
+    assert_that(runs[checksums]).contains("--output npm/SHA256SUMS")
+    assert_that(steps[attest]["with"]).is_equal_to(
+        {"subject-checksums": "npm/SHA256SUMS"},
+    )
+    assert_that(steps[upload]["with"]["name"]).is_equal_to("npm-dist")
+    assert_that(steps[upload]["with"]["path"]).is_equal_to("npm/")
+    assert_that(steps[upload]["with"]["retention-days"]).is_equal_to(90)
 
 
-def test_publish_npm_classifies_e404_as_non_retryable() -> None:
-    """publish_packages.sh classifies npm's masked-auth E404 as fatal.
+def test_publish_npm_has_no_local_publish_script() -> None:
+    """publish_packages.sh and assert_dispatch_allowed.sh are gone (#2632).
 
-    npm reports an unauthorized publish as ``E404 Not Found`` (issue #2247).
-    Retrying it burns three attempts per package on a permanent condition, so
-    E404 belongs in the non-retryable class, not the transient one. This is a
-    wiring assertion on the two classification patterns; the behaviour (one
-    attempt, no retry) is covered by
-    ``tests/bats/unit/npm/test_publish_packages_e404.bats``.
+    The publish loop and the entry guard live in lgtm-ci now; a local copy
+    creeping back would fork the audited loop. No step in publish-npm.yml
+    may run ``npm publish`` itself either.
     """
-    script = (_REPO_ROOT / "scripts" / "ci" / "npm" / "publish_packages.sh").read_text(
-        encoding="utf-8",
+    npm_scripts = _REPO_ROOT / "scripts" / "ci" / "npm"
+    on_disk = sorted(child.name for child in npm_scripts.iterdir())
+    assert_that(on_disk).does_not_contain(
+        "publish_packages.sh",
+        "assert_dispatch_allowed.sh",
     )
-    non_retryable = re.search(
-        r"^NON_RETRYABLE_ERROR_RE='([^']*)'",
-        script,
-        flags=re.MULTILINE,
+    assert_that(on_disk).contains(
+        "download_release_binaries.sh",
+        "verify_release_binaries.sh",
+        "stage_binaries.py",
+        "sync_npm_version.py",
+        "smoke_test.sh",
+        "write_package_checksums.py",
     )
-    transient = re.search(
-        r"^TRANSIENT_ERROR_RE='([^']*)'",
-        script,
-        flags=re.MULTILINE,
-    )
-    assert_that(non_retryable).is_not_none()
-    assert_that(transient).is_not_none()
-    assert non_retryable is not None and transient is not None  # narrow for mypy
-    assert_that(non_retryable.group(1).split("|")).contains("E404")
-    assert_that(transient.group(1)).does_not_contain("E404")
+    for job_id, job in _publish_npm_jobs().items():
+        for step in job.get("steps") or []:
+            run = str(step.get("run", ""))
+            assert_that(run).described_as(
+                f"{job_id}: {step.get('name')}",
+            ).does_not_contain(
+                "npm publish",
+                "publish_packages.sh",
+                "assert_dispatch_allowed.sh",
+            )
 
 
-def test_publish_npm_delegates_publish_to_hardened_script() -> None:
-    """The publish step runs publish_packages.sh (retry/idempotency live there).
+def test_publish_npm_reusable_allowlist_carries_the_publish_hosts() -> None:
+    """Replace-mode egress for the reusable names every host it needs.
 
-    The retry + existence-check logic (issue #1682) must live in a testable
-    script under scripts/ci/npm/, not inline in the workflow, so the publish
-    step's ``run`` invokes that script rather than a raw ``npm publish`` loop.
+    Under ``allowed-endpoints-mode: replace`` the list is passed verbatim to
+    harden-runner, so it must carry the registry, the OIDC token endpoint,
+    the Sigstore hosts (npm provenance), the GitHub API and TUF root (gh
+    attestation verify) and the artifact download service.
     """
-    workflow = _load_workflow(name="publish-npm.yml")
-    publish_step = next(
-        (
-            step
-            for step in workflow["jobs"]["publish"]["steps"]
-            if step.get("name") == "Publish to npm"
-        ),
-        None,
-    )
-    assert_that(publish_step).is_not_none()
-    assert publish_step is not None  # narrow type for mypy
-    # The step must delegate to the script as its command, not merely mention
-    # it — an inline ``npm publish`` loop that referenced the path in a comment
-    # would slip past a substring check.
-    assert_that(publish_step["run"].strip()).is_equal_to(
-        "scripts/ci/npm/publish_packages.sh",
-    )
-    # Provenance must not be dropped on a live publish.
-    assert_that(publish_step["env"]["NPM_PROVENANCE"]).contains("'0'")
-    assert_that(publish_step["env"]["NPM_PROVENANCE"]).contains("'1'")
-
-
-# The retry/idempotency behaviour of publish_packages.sh itself is covered by
-# executable stub-based tests in tests/scripts/test_npm_publish_packages.py
-# (transient-retry-success, attempt-exhaustion, auth-not-retried, skip and
-# conflict idempotency). That is a stronger guard than asserting on script
-# substrings here, so this module only asserts the workflow-to-script wiring.
+    with_block = _publish_npm_jobs()["publish"]["with"]
+    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    assert_that(with_block["allowed-endpoints-mode"]).is_equal_to("replace")
+    endpoints = _endpoint_set(with_block["allowed-endpoints"])
+    assert endpoints is not None  # literal list, narrow for mypy
+    required = {
+        "registry.npmjs.org:443",
+        "api.github.com:443",
+        "github.com:443",
+        "pipelines.actions.githubusercontent.com:443",
+        "*.blob.core.windows.net:443",
+        _OIDC_HOST,
+        *_SIGSTORE_HOSTS,
+    }
+    assert_that(sorted(required - endpoints)).is_empty()
 
 
 _UV_ARG_PATTERN = re.compile(r"^ARG UV_VERSION=(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$")
@@ -3663,8 +3697,11 @@ def test_npm_platform_map_has_no_intel_macos_package() -> None:
         sorted(_quoted_strings_in_block(sync, start="PLATFORM_PACKAGES = (", end=")")),
     ).is_equal_to(sorted(_NPM_PLATFORM_KEYS))
 
-    publish = (npm_scripts / "publish_packages.sh").read_text(encoding="utf-8")
-    publish_order = _quoted_strings_in_block(publish, start="PACKAGES=(", end=")")
+    # The publish order now lives in the reusable call (#2632): platform
+    # packages first, meta package last.
+    publish_order = json.loads(
+        _load_workflow(name="publish-npm.yml")["jobs"]["publish"]["with"]["order"],
+    )
     assert_that(publish_order).is_equal_to([*sorted(_NPM_PLATFORM_KEYS), "lintro"])
 
     npm_dir = _REPO_ROOT / "npm"

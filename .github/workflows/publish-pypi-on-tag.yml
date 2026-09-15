@@ -474,9 +474,9 @@ jobs:
 
   npm-publish:
     name: Publish to npm
-    # Needs github-release: it attaches the three platform binaries the gate
-    # verified, which publish-npm.yml downloads. No longer behind Homebrew
-    # (#2562). Stable releases only.
+    # Needs github-release: it attaches the three platform binaries and the
+    # SHA256SUMS the gate verified, which publish-npm.yml downloads and
+    # re-verifies. No longer behind Homebrew (#2562). Stable releases only.
     needs: [classify-tag, github-release]
     if: >-
       !startsWith(github.ref_name, 'actions-v') &&
@@ -485,8 +485,13 @@ jobs:
     permissions:
       # read: checkout and download release assets
       contents: read
-      # write: OIDC for npm trusted publishing + provenance
+      # write: OIDC for npm trusted publishing + provenance, and for the
+      # stage job's attestation of the package set (#2632)
       id-token: write
+      # write: the stage job attests the staged package set and lgtm-ci's
+      # package-set reusable requests it statically; a called workflow may
+      # not request more than its caller grants (#2484 class)
+      attestations: write
     with:
       release_tag: ${{ github.ref_name }}
     # No secrets: inherit — publishing is OIDC-only (id-token), and the

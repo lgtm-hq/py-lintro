@@ -70,18 +70,19 @@ Scripts for building standalone binaries and distribution packages.
 
 ### 📦 npm Distribution Scripts (`ci/npm/`)
 
-Scripts that package the platform binaries into the npm meta-package + per-platform
-packages and (dry-run) publish them. See the
+Scripts that verify and stage the release binaries into the npm meta-package +
+per-platform packages. The publish itself (ordered, idempotent, verified before and
+after) is lgtm-ci's `reusable-publish-npm-set.yml` (#2632). See the
 [npm distribution design](../docs/npm-distribution.md).
 
-| Script                         | Purpose                                                    | Usage                                                           |
-| ------------------------------ | ---------------------------------------------------------- | --------------------------------------------------------------- |
-| `sync_npm_version.py`          | Sync/check versions across all `npm/*/package.json`        | `python scripts/ci/npm/sync_npm_version.py --version 1.2.3`     |
-| `stage_binaries.py`            | Copy downloaded platform binaries into the npm tree        | `python scripts/ci/npm/stage_binaries.py --artifacts-dir <dir>` |
-| `download_release_binaries.sh` | Download release binaries for staging                      | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`    |
-| `smoke_test.sh`                | Pack + install the meta-package and run `lintro --version` | `./scripts/ci/npm/smoke_test.sh`                                |
-| `publish_packages.sh`          | Publish npm packages (dry-run unless `LIVE=1`)             | `./scripts/ci/npm/publish_packages.sh`                          |
-| `assert_dispatch_allowed.sh`   | Allow a live publish only from the tag pipeline (#2247)    | `./scripts/ci/npm/assert_dispatch_allowed.sh`                   |
+| Script                         | Purpose                                                              | Usage                                                                                 |
+| ------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `sync_npm_version.py`          | Sync/check versions across all `npm/*/package.json`                  | `python scripts/ci/npm/sync_npm_version.py --version 1.2.3`                           |
+| `stage_binaries.py`            | Copy downloaded platform binaries into the npm tree                  | `python scripts/ci/npm/stage_binaries.py --artifacts-dir <dir>`                       |
+| `download_release_binaries.sh` | Download release binaries plus `SHA256SUMS` for staging              | `./scripts/ci/npm/download_release_binaries.sh v1.2.3 <dir>`                          |
+| `verify_release_binaries.sh`   | Check each downloaded binary's digest and attestation before staging | `BINARIES_DIR=<dir> ATTESTATION_REPO=... ./scripts/ci/npm/verify_release_binaries.sh` |
+| `smoke_test.sh`                | Pack + install the meta-package and run `lintro --version`           | `./scripts/ci/npm/smoke_test.sh`                                                      |
+| `write_package_checksums.py`   | Write `SHA256SUMS` over every file npm would pack (reusable input)   | `python scripts/ci/npm/write_package_checksums.py --packages-dir npm --output <file>` |
 
 ### 🍺 Homebrew Formulas (`ci/homebrew/`)
 
