@@ -623,7 +623,10 @@ jobs:
       - name: Harden Runner
         # No build here: the allowlist covers checkout, GHCR retagging, the
         # cosign download, sigstore keyless signing and the attestation
-        # verification (TUF root + GitHub API).
+        # verification (GitHub API, the attestation store on Azure blob the
+        # bundle is downloaded from, and the TUF root). The blob host is the
+        # same entry release-gate carries; S1 of #2633 (v0.160.3rc1) died in
+        # "Verify attestations on the staging digests" without it.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -638,6 +641,7 @@ jobs:
             pkg-containers.githubusercontent.com:443
             token.actions.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
