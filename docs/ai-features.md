@@ -641,13 +641,14 @@ What it adds to the surfaces:
   ```
 
   `findings_added` is what survived the cap and the dedupe, not what the model returned.
-  `narrative_missing` is `true` when the pass answered without a usable `summary`: the
-  findings half still counts, the round renders without a headline and walkthrough, and
-  the flag keeps a summary-less answer from reading as a fully successful pass.
-  `duplicates_merged` is the number of chunk findings collapsed into another finding
-  with the same root cause. `truncated` means the pass saw less than its whole prompt
-  input. `failed` distinguishes a pass that could not answer from one that found
-  nothing. The same block is on the MCP `lintro_review` payload root.
+  `narrative_missing` is `true` when the pass answered but wrote no usable `summary` or
+  no usable `verdict_reasoning`: the findings half still counts, the round renders the
+  TL;DR-only fallback for whichever half is missing, and the flag keeps a narrative-less
+  answer from reading as a fully successful pass. `duplicates_merged` is the number of
+  chunk findings collapsed into another finding with the same root cause. `truncated`
+  means the pass saw less than its whole prompt input. `failed` distinguishes a pass
+  that could not answer from one that found nothing. The same block is on the MCP
+  `lintro_review` payload root.
 
 - `"origin": "synthesis"` on each cross-file finding the pass contributed.
 - A `synthesis_truncated` or `synthesis_failed` entry in `coverage_degradations` (see
