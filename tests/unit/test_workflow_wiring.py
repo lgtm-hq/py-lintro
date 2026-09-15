@@ -428,6 +428,21 @@ def test_release_workflows_grant_failure_reporting_permissions() -> None:
         assert_that(permissions).contains_entry({"issues": "write"})
 
 
+def test_semantic_pr_title_enforces_a_merge_safe_length_limit() -> None:
+    """The title check must cap titles so the squash commit passes commitlint.
+
+    commitlint on main enforces a 100-character header and the squash merge
+    appends `` (#NNNN)`` to the PR title, so the reusable's ``max-length``
+    input must be set and leave at least that suffix's room (#2553).
+    """
+    workflow = _load_workflow(name="semantic-pr-title.yml")
+    with_block = workflow["jobs"]["semantic-title"]["with"]
+    assert_that(with_block).contains_key("max-length")
+    limit = int(str(with_block["max-length"]))
+    assert_that(limit).is_greater_than(0)
+    assert_that(limit).is_less_than_or_equal_to(92)
+
+
 def test_semantic_pr_title_can_write_failure_comments() -> None:
     """Semantic PR title workflow can upsert failure comments on PRs."""
     workflow = _load_workflow(name="semantic-pr-title.yml")
