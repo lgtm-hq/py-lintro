@@ -172,6 +172,7 @@ async def review_chunk(
     partial = replace(
         main_pass,
         files=tuple(chunk.files),
+        provider_seconds=call.elapsed,
         coverage_degradations=(
             *depth_degradations,
             *call.degradations,

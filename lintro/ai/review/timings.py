@@ -167,8 +167,10 @@ class ReviewTimingRecorder:
         queued_seconds: float,
         in_flight_seconds: float,
         failed: bool = False,
+        provider_seconds: float = 0.0,
+        turns: int | None = None,
     ) -> None:
-        """Record one chunk's queued/in-flight split.
+        """Record one chunk's queued/in-flight split and its call detail.
 
         Args:
             chunk_index: Position of the chunk in the run.
@@ -176,6 +178,8 @@ class ReviewTimingRecorder:
             queued_seconds: Seconds spent waiting on the concurrency semaphore.
             in_flight_seconds: Seconds spent reviewing once admitted.
             failed: True when the chunk ended in an error or a stop.
+            provider_seconds: Wall-clock seconds of the main provider call.
+            turns: Transport-reported agent turns for that call, if any.
         """
         self._chunks.append(
             ChunkTiming(
@@ -184,6 +188,8 @@ class ReviewTimingRecorder:
                 queued_seconds=max(queued_seconds, 0.0),
                 in_flight_seconds=max(in_flight_seconds, 0.0),
                 failed=failed,
+                provider_seconds=max(provider_seconds, 0.0),
+                turns=turns,
             ),
         )
 

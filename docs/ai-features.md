@@ -826,7 +826,9 @@ error stickies). `--output-format json` carries the full breakdown in a top-leve
         "queued_seconds": 0.0,
         "in_flight_seconds": 61.2,
         "total_seconds": 61.2,
-        "failed": false
+        "failed": false,
+        "provider_seconds": 58.9,
+        "turns": 4
       }
     ]
   }
@@ -860,7 +862,14 @@ Reading the block:
   semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
   capped by the effective concurrency ceiling, not by provider latency. That ceiling is
   `min(chunk count, ai.max_parallel_calls)`, or 1 when a cost cap serializes chunk calls
-  (#2154); it is reported as `max_parallel`.
+  (#2154); on the CLI transport it is `min(chunk count, 3)` unless `ai.max_parallel_calls`
+  is set explicitly, because each CLI call is a whole agent process. It is reported as
+  `max_parallel`.
+- Each chunk also carries `provider_seconds`, the main review call's own wall time
+  inside the in-flight span (the difference is prompt building, parsing and any depth-2/3
+  pass), and `turns`, the agent turn count the transport reported for that call. The
+  Claude CLI envelope reports `num_turns`; other transports report none, and the key is
+  then `null` rather than absent.
 - GitHub posting happens after the result is rendered, so it is outside the measured
   window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
   existing consumers.
@@ -998,7 +1007,7 @@ ai:
 
   # Concurrent AI provider calls (fixes and review chunk fan-out).
   # Honored even when max_cost_usd is set. (int 1–20, default: 5)
-  max_parallel_calls: 5
+  max_parallel_calls: 5 # CLI transport: effective 3 unless set explicitly
 
   # Spend ceiling per AI session, in USD; the run stops
   # scheduling new calls once spent+reserved reaches the cap. null disables

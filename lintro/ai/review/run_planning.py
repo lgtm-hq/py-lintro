@@ -197,6 +197,44 @@ def _resolve_diff_budget(
     )
 
 
+#: Concurrency ceiling on the CLI transport when ``ai.max_parallel_calls`` is
+#: left at its default. A CLI call spawns a whole agent process, so five in
+#: flight thrash a laptop and trip provider rate limits where five API
+#: calls do not (lintro-ops #37).
+CLI_DEFAULT_MAX_PARALLEL_CALLS: int = 3
+
+
+def resolve_max_parallel_calls(
+    *,
+    ai_config: AIConfig,
+    enforce_cost_cap: bool,
+) -> int:
+    """Return the concurrency ceiling for this run's chunk fan-out.
+
+    A cost cap serializes chunk calls so the resume queue cannot invert
+    (#2154). Otherwise the CLI transport is clamped to
+    :data:`CLI_DEFAULT_MAX_PARALLEL_CALLS` unless ``ai.max_parallel_calls``
+    was set explicitly, in which case the user's number wins on every
+    transport. The effective ceiling is reported alongside the timings so a
+    slow run's concurrency is never guessed at.
+
+    Args:
+        ai_config: Resolved AI configuration for the run.
+        enforce_cost_cap: Whether the run enforces ``ai.max_cost_usd``.
+
+    Returns:
+        Positive concurrency ceiling.
+    """
+    if enforce_cost_cap and ai_config.max_cost_usd is not None:
+        return 1
+    if (
+        ai_config.transport == AITransport.CLI
+        and "max_parallel_calls" not in ai_config.model_fields_set
+    ):
+        return min(ai_config.max_parallel_calls, CLI_DEFAULT_MAX_PARALLEL_CALLS)
+    return ai_config.max_parallel_calls
+
+
 def plan_run(
     *,
     context: ReviewContext,
@@ -266,13 +304,9 @@ def plan_run(
             agent=skipped_agent.agent.name,
             reason=skipped_agent.reason.value,
         )
-    # A cost cap serializes chunk calls so the resume queue cannot invert
-    # (#2154); the effective ceiling is reported alongside the timings so a
-    # slow run's concurrency is never guessed at.
-    max_parallel_calls = (
-        1
-        if options.enforce_cost_cap and options.ai_config.max_cost_usd is not None
-        else options.ai_config.max_parallel_calls
+    max_parallel_calls = resolve_max_parallel_calls(
+        ai_config=options.ai_config,
+        enforce_cost_cap=options.enforce_cost_cap,
     )
     return ReviewRunPlan(
         policy=policy,

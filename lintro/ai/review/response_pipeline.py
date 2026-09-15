@@ -443,6 +443,7 @@ def payload_to_partial(
         pr_summary=pr_summary,
         verdict_reasoning=verdict_reasoning,
         file_assessments=file_assessments,
+        turns=response.turns,
         flagged_files=flagged_files,
     )
 
