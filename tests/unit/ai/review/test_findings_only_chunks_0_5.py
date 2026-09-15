@@ -330,6 +330,30 @@ def test_duplicates_resolve_by_digest_id() -> None:
     ).is_equal_to(["a.py:3", "b.py:9"])
 
 
+def test_finding_ids_keep_the_earliest_finding_for_a_shared_key() -> None:
+    """A later finding with the same merge key never steals an earlier id."""
+    first = _finding(file="a.py", line=3, severity=Severity.P2, title="Same")
+    twin = _finding(file="a.py", line=3, severity=Severity.P3, title="Same")
+    other = _finding(file="b.py", line=9, severity=Severity.P3, title="Other")
+
+    ids = finding_ids(findings=(first, twin, other))
+
+    assert_that(ids).is_equal_to(
+        {("a.py", 3, "Same"): "F1", ("b.py", 9, "Other"): "F3"},
+    )
+    kept, merged = apply_duplicate_groups(
+        findings=(first, twin, other),
+        groups=(DuplicateGroup(keep="F1", drop=("F3",)),),
+    )
+    assert_that(merged).is_equal_to(1)
+    # The P2 ``first`` survived (not the P3 twin) and absorbed the other site.
+    assert_that(kept[0].severity).is_equal_to(Severity.P2)
+    assert_that(
+        [occurrence.label for occurrence in kept[0].all_occurrences],
+    ).is_equal_to(["a.py:3", "b.py:9"])
+    assert_that(kept[1]).is_same_as(twin)
+
+
 def test_duplicates_ignore_an_ambiguous_location_and_an_unknown_id() -> None:
     """A ``file:line`` shared by two findings, or an id past the list, resolves to nothing."""
     findings = (

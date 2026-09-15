@@ -167,12 +167,15 @@ def finding_ids(*, findings: Sequence[ReviewFinding]) -> dict[FindingKey, str]:
     Returns:
         Mapping from each finding's merge key ``(file, line, title)`` to its
         id. Questions are keyed too, so a digest that omits them still
-        numbers the findings around them consistently.
+        numbers the findings around them consistently. When two findings
+        share a key (a custom-agent finding restating a chunk finding), the
+        earliest keeps the id: the digest then prints one id for that key,
+        and a reference to it resolves to the same, earliest, finding.
     """
-    return {
-        (finding.file, finding.line, finding.title): f"F{index}"
-        for index, finding in enumerate(findings, start=1)
-    }
+    ids: dict[FindingKey, str] = {}
+    for index, finding in enumerate(findings, start=1):
+        ids.setdefault((finding.file, finding.line, finding.title), f"F{index}")
+    return ids
 
 
 def _resolve_reference(
