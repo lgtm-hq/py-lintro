@@ -199,16 +199,116 @@ def sync_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[Path]:
     return changed
 
 
+# PEP 440 prerelease kind -> the SemVer prerelease identifier npm accepts. The
+# project versions in PEP 440 (``0.160.3rc1``), but ``package.json`` requires
+# SemVer, where a prerelease needs a hyphen and a dotted identifier
+# (``0.160.3-rc.1``); npm rejects the bare form outright. The version is
+# parsed with ``packaging`` so every valid PEP 440 spelling (``1.2.3RC1``,
+# ``1.2.3-rc1``, ``1.2.3.RC1``, ...) maps like its canonical form instead of
+# leaking into a manifest as an npm-invalid string.
+_PEP440_TO_SEMVER = {"a": "alpha", "b": "beta", "rc": "rc"}
+
+# The PEP 440 grammar (appendix B of the spec, as vendored by ``packaging``),
+# inlined so this script stays stdlib-only: the publish-npm stage job runs it
+# on a bare ``setup-python`` interpreter with no dependency installation.
+_PEP440_VERSION = re.compile(
+    r"""
+    ^\s*
+    v?
+    (?:
+        (?:(?P<epoch>[0-9]+)!)?                           # epoch
+        (?P<release>[0-9]+(?:\.[0-9]+)*)                  # release segment
+        (?P<pre>                                          # pre-release
+            [-_\.]?
+            (?P<pre_l>alpha|a|beta|b|preview|pre|c|rc)
+            [-_\.]?
+            (?P<pre_n>[0-9]+)?
+        )?
+        (?P<post>                                         # post release
+            (?:-(?P<post_n1>[0-9]+))
+            |
+            (?:
+                [-_\.]?
+                (?P<post_l>post|rev|r)
+                [-_\.]?
+                (?P<post_n2>[0-9]+)?
+            )
+        )?
+        (?P<dev>                                          # dev release
+            [-_\.]?
+            (?P<dev_l>dev)
+            [-_\.]?
+            (?P<dev_n>[0-9]+)?
+        )?
+    )
+    (?:\+(?P<local>[a-z0-9]+(?:[-_\.][a-z0-9]+)*))?       # local version
+    \s*$
+    """,
+    # ASCII: PEP 440 is ASCII-only, and Unicode case folding would let a
+    # confusable such as a dotless i slip past the spelling table.
+    re.VERBOSE | re.IGNORECASE | re.ASCII,
+)
+_PRE_SPELLINGS = {
+    "a": "a",
+    "alpha": "a",
+    "b": "b",
+    "beta": "b",
+    "c": "rc",
+    "rc": "rc",
+    "pre": "rc",
+    "preview": "rc",
+}
+
+
 def _normalise_version(raw: str) -> str:
-    """Strip a leading ``v`` from a tag-style version string.
+    """Turn a tag-style version into the version npm manifests carry.
+
+    Strips a leading ``v``, parses the rest as PEP 440 and rewrites a
+    prerelease (``aN``/``bN``/``rcN`` in any valid spelling) to its SemVer
+    form (``X.Y.Z-alpha.N`` / ``-beta.N`` / ``-rc.N``). A stable ``X.Y.Z``
+    comes back canonical and unchanged.
 
     Args:
-        raw: A version or tag (e.g. ``"v1.2.3"``).
+        raw: A version or tag (e.g. ``"v1.2.3"``, ``"v0.160.3rc1"``).
 
     Returns:
-        The version without a leading ``v``.
+        The version to write into every npm manifest.
+
+    Raises:
+        ValueError: When ``raw`` is not a PEP 440 version, when its release
+            segment is not exactly three parts, or when it carries a
+            post-release, dev-release, local segment or epoch, none of which
+            has an npm-valid form.
     """
-    return raw[1:] if raw.startswith("v") else raw
+    text = raw[1:] if raw.startswith("v") else raw
+    match = _PEP440_VERSION.match(text)
+    if match is None:
+        msg = f"npm cannot carry a non-PEP 440 version: {raw!r}"
+        raise ValueError(msg)
+    if match.group("post") is not None or match.group("dev") is not None:
+        msg = (
+            f"npm cannot carry a PEP 440 post- or dev-release version: {raw!r}. "
+            "Only stable X.Y.Z and aN/bN/rcN prereleases are publishable."
+        )
+        raise ValueError(msg)
+    epoch = int(match.group("epoch") or 0)
+    if match.group("local") is not None or epoch != 0:
+        msg = (
+            f"npm cannot carry a PEP 440 local version or epoch: {raw!r}. "
+            "Only stable X.Y.Z and aN/bN/rcN prereleases are publishable."
+        )
+        raise ValueError(msg)
+    release = tuple(int(part) for part in match.group("release").split("."))
+    if len(release) != 3:
+        msg = f"npm needs a three-part X.Y.Z release segment: {raw!r}"
+        raise ValueError(msg)
+    core = ".".join(str(part) for part in release)
+    if match.group("pre") is None:
+        return core
+    kind = _PRE_SPELLINGS[match.group("pre_l").lower()]
+    # PEP 440: an implicit pre-release number (``1.2.3rc``) means 0.
+    number = int(match.group("pre_n") or 0)
+    return f"{core}-{_PEP440_TO_SEMVER[kind]}.{number}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -241,6 +341,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    try:
+        return _run(args)
+    except ValueError as exc:
+        print(f"sync_npm_version.py: {exc}", file=sys.stderr)
+        return 1
+
+
+def _run(args: argparse.Namespace) -> int:
+    """Execute the parsed command.
+
+    Args:
+        args: Parsed CLI arguments.
+
+    Returns:
+        Process exit code (0 on success, 1 on drift).
+    """
     if args.check:
         # In-repo manifests carry a placeholder version, so default checks use
         # the meta-package as the source of truth rather than pyproject.

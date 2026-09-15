@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 import sys
+import tempfile
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -7720,7 +7721,13 @@ def test_homebrew_dispatch_reads_the_arm64_digest_from_the_manifest() -> None:
 
 
 def test_docker_promote_promotes_the_full_release_tag_set() -> None:
-    """Each image gets <version>, <major.minor>, <major> and latest (#2658 nit)."""
+    """Each image gets <version>, <major.minor>, <major> and latest (#2658 nit).
+
+    Since #2633 every floating tag is enabled by ``env.STABLE_TAGS`` and the
+    candidate's version tag by ``env.RC_TAGS``; both derive from
+    ``validation_channels`` (see the #2633 section), so with the switch off
+    the set is exactly the four tags a stable release always had.
+    """
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     steps = _job_steps(publish, job="docker-promote")
     metas = {
@@ -7734,10 +7741,13 @@ def test_docker_promote_promotes_the_full_release_tag_set() -> None:
         "meta-ai": "ghcr.io/lgtm-hq/py-lintro-ai",
     }
     assert_that(set(metas)).is_equal_to(set(expected_images))
+    stable = ",enable=${{ env.STABLE_TAGS }}"
     patterns = [
-        "type=semver,pattern={{version}},value=${{ github.ref_name }}",
-        "type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}",
-        "type=semver,pattern={{major}},value=${{ github.ref_name }}",
+        "type=semver,pattern={{version}},value=${{ github.ref_name }}" + stable,
+        "type=semver,pattern={{major}}.{{minor}},value=${{ github.ref_name }}" + stable,
+        "type=semver,pattern={{major}},value=${{ github.ref_name }}" + stable,
+        "type=pep440,pattern={{version}},value=${{ github.ref_name }}"
+        ",enable=${{ env.RC_TAGS }}",
     ]
     for step_id, with_block in metas.items():
         assert_that(with_block["images"]).described_as(step_id).is_equal_to(
@@ -7746,7 +7756,7 @@ def test_docker_promote_promotes_the_full_release_tag_set() -> None:
         assert_that(str(with_block["flavor"]).strip()).described_as(
             step_id,
         ).is_equal_to(
-            "latest=true",
+            "latest=${{ env.STABLE_TAGS }}",
         )
         tags = [line.strip() for line in str(with_block["tags"]).splitlines() if line]
         assert_that(tags).described_as(step_id).is_equal_to(
@@ -7812,6 +7822,7 @@ def test_release_recovery_entry_calls_the_reusable_with_the_tag_path_values() ->
     recover = _load_workflow(name="release-recover.yml")
     publish_npm = _load_workflow(name="publish-npm.yml")["jobs"]["publish"]["with"]
     stage_steps = _load_workflow(name="publish-npm.yml")["jobs"]["stage"]["steps"]
+    tag_pipeline = _load_workflow(name="publish-pypi-on-tag.yml")
     # PyYAML parses a bare `on:` key as boolean True; the file quotes it.
     on = next(value for key, value in recover.items() if key in ("on", True))
 
@@ -7857,8 +7868,27 @@ def test_release_recovery_entry_calls_the_reusable_with_the_tag_path_values() ->
     assert_that(with_block["npm-entry-workflows"]).is_equal_to(
         ".github/workflows/release-recover.yml",
     )
-    # The GitHub Release resume reads the gate's assembled artifact.
-    assert_that(with_block["release-artifact-name"]).is_equal_to("release-assets")
+    # The GitHub Release resume reads the gate's assembled artifact, under
+    # the name the gate uploads it as and github-release attaches; the
+    # recovery record lands on the issue the tag path's notifier keys
+    # (#2670 follow-up, #2633).
+    gate_uploads = [
+        s
+        for s in _job_steps(tag_pipeline, job="release-gate")
+        if str(s.get("uses", "")).startswith("actions/upload-artifact@")
+    ]
+    assert_that(gate_uploads[0]["with"]["name"]).is_equal_to(
+        with_block["release-artifact-name"],
+    )
+    assert_that(with_block["release-artifact-name"]).is_equal_to(
+        tag_pipeline["jobs"]["github-release"]["with"]["artifact-name"],
+    )
+    assert_that(with_block["recovery-issue-workflow-key"]).is_equal_to(
+        tag_pipeline["jobs"]["notify-failure"]["with"]["workflow-key"],
+    )
+    assert_that(with_block["source-workflow"]).is_equal_to(
+        ".github/workflows/publish-pypi-on-tag.yml",
+    )
     uploads = [
         s
         for s in stage_steps
@@ -7974,3 +8004,457 @@ def test_security_md_describes_the_gated_release() -> None:
     ):
         assert_that(text).described_as(expected).contains(expected)
     assert_that(text).does_not_contain("build-binary.yml")
+
+
+# --- #2633: validation channel switch and fault injection --------------------
+
+#: The two repository variables the validation runbook flips
+#: (docs/release-validation.md). Read once, by classify-tag, never elsewhere.
+_VALIDATION_CHANNELS_VAR = "RELEASE_VALIDATION_CHANNELS"
+_RELEASE_FAULT_VAR = "RELEASE_FAULT"
+_RELEASE_FAULT_SCRIPT = "scripts/ci/release-fault.sh"
+#: A ``vars.X`` read in a workflow expression (secrets are a separate concern).
+_VARS_REFERENCE_RE = re.compile(r"\bvars\.[A-Za-z_][A-Za-z0-9_]*")
+_ACTIONS_V_GUARD = "!startsWith(github.ref_name, 'actions-v')"
+#: Every workflow the tag pipeline calls locally; none may read vars.*.
+_TAG_PIPELINE_CALLEES = (
+    "publish-npm.yml",
+    "build-binaries.yml",
+    "publish-binaries.yml",
+    "docker-build-publish.yml",
+    "mirror-release.yml",
+)
+
+
+def _evaluate_tag_gate(
+    condition: str,
+    *,
+    is_prerelease: str,
+    validation_channels: str,
+) -> bool:
+    """Evaluate a tag-pipeline job gate for a classify-tag output pair.
+
+    The ``actions-v`` recursion guard is true for every release tag; the
+    mirror token probe is treated as present so only the classifier outputs
+    decide.
+
+    Args:
+        condition: The job's raw ``if:`` expression.
+        is_prerelease: Simulated ``classify-tag.outputs.is_prerelease``.
+        validation_channels: Simulated ``classify-tag.outputs.validation_channels``.
+
+    Returns:
+        Whether the job would run.
+    """
+    expr = _normalize_github_expr(condition)
+    expr = expr.replace("${{", "").replace("}}", "")
+    expr = _replace_github_token(expr, token=_ACTIONS_V_GUARD, replacement="True")
+    return _evaluate_github_if(
+        expr,
+        cancelled=False,
+        results={},
+        outputs={
+            "classify-tag": {
+                "is_prerelease": is_prerelease,
+                "validation_channels": validation_channels,
+            },
+            # A job output, not a credential.
+            "mirror-token": {"has_token": "true"},  # nosec B105
+        },
+    )
+
+
+def _run_classifier(*, tag: str, env: dict[str, str]) -> dict[str, str]:
+    """Run classify-release-tag.py as the job does and parse its outputs.
+
+    Args:
+        tag: The tag to classify.
+        env: The switch variables to set (everything else is scrubbed).
+
+    Returns:
+        Output name to value.
+    """
+    scrubbed = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in (_VALIDATION_CHANNELS_VAR, _RELEASE_FAULT_VAR, "GITHUB_OUTPUT")
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        github_output = Path(tmp) / "gh_output"
+        result = subprocess.run(  # nosec B603 - fixed argv against a repo script
+            [
+                sys.executable,
+                str(_REPO_ROOT / "scripts" / "ci" / "classify-release-tag.py"),
+                tag,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**scrubbed, **env, "GITHUB_OUTPUT": str(github_output)},
+        )
+        # stdout stays the one-line contract the mirror resolver captures;
+        # the job reads everything from GITHUB_OUTPUT (delimiter form).
+        assert_that(result.stdout.strip()).matches(r"^is_prerelease=(true|false)$")
+        lines = github_output.read_text(encoding="utf-8").splitlines()
+    outputs: dict[str, str] = {}
+    for index in range(0, len(lines), 3):
+        name, delimiter = lines[index].split("<<", 1)
+        assert_that(lines[index + 2]).is_equal_to(delimiter)
+        outputs[name] = lines[index + 1]
+    return outputs
+
+
+def test_only_classify_tag_reads_repository_variables() -> None:
+    """Both switches enter the run through classify-tag's env and nowhere else.
+
+    The issue's wiring rule (#2633): read each variable once, pass it down as
+    a job output, so no other job in the tag pipeline or any workflow it
+    calls reads ``vars.*``; the variables' state is then visible in one
+    place of the run.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    readers = {
+        job_id
+        for job_id, job in publish["jobs"].items()
+        if _VARS_REFERENCE_RE.findall(json.dumps(job))
+    }
+    assert_that(readers).is_equal_to({"classify-tag"})
+    classify = next(
+        step
+        for step in _job_steps(publish, job="classify-tag")
+        if step.get("id") == "classify"
+    )
+    assert_that(classify["run"]).contains("scripts/ci/classify-release-tag.py")
+    assert_that(classify["env"][_VALIDATION_CHANNELS_VAR]).is_equal_to(
+        f"${{{{ vars.{_VALIDATION_CHANNELS_VAR} }}}}",
+    )
+    assert_that(classify["env"][_RELEASE_FAULT_VAR]).is_equal_to(
+        f"${{{{ vars.{_RELEASE_FAULT_VAR} }}}}",
+    )
+    var_reads = sorted(
+        set(_VARS_REFERENCE_RE.findall(json.dumps(publish["jobs"]["classify-tag"]))),
+    )
+    assert_that(var_reads).is_equal_to(
+        [f"vars.{_RELEASE_FAULT_VAR}", f"vars.{_VALIDATION_CHANNELS_VAR}"],
+    )
+    for callee in _TAG_PIPELINE_CALLEES:
+        # Parsed, not raw: a comment or an input description may mention the
+        # rule; only an expression can read a variable.
+        assert_that(
+            _VARS_REFERENCE_RE.findall(json.dumps(_load_workflow(name=callee)["jobs"])),
+        ).described_as(callee).is_empty()
+    outputs = publish["jobs"]["classify-tag"]["outputs"]
+    for name in ("is_prerelease", "is_rc", "validation_channels", "release_fault"):
+        assert_that(outputs[name]).described_as(name).is_equal_to(
+            f"${{{{ steps.classify.outputs.{name} }}}}",
+        )
+
+
+def test_validation_switches_are_no_ops_by_default() -> None:
+    """With both variables unset every gate behaves exactly as before #2633.
+
+    The classifier is run as the job runs it, with the variables scrubbed,
+    and the resulting outputs drive the same ``if:`` expressions the jobs
+    carry: an rc skips npm, Docker and Homebrew, a stable tag runs them, and
+    neither fault step has a condition that is true for an empty fault.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    for tag in ("v0.160.3rc1", "v0.160.3a1", "v1.2.3"):
+        outputs = _run_classifier(tag=tag, env={})
+        assert_that(outputs["validation_channels"]).described_as(tag).is_equal_to(
+            "false",
+        )
+        assert_that(outputs["release_fault"]).described_as(tag).is_equal_to("")
+        # Stable isolation (Codex P1 on #2672): a leftover RELEASE_FAULT
+        # reaches the fault steps for an rc only; every other tag gets the
+        # empty output, so both steps stay no-ops.
+        leftover = _run_classifier(tag=tag, env={_RELEASE_FAULT_VAR: "fail-build"})
+        assert_that(leftover["release_fault"]).described_as(tag).is_equal_to(
+            "fail-build" if outputs["is_rc"] == "true" else "",
+        )
+        expected = outputs["is_prerelease"] == "false"
+        for job_id in ("npm-publish", "docker-promote", "homebrew-tap", "mirror-token"):
+            runs = _evaluate_tag_gate(
+                str(publish["jobs"][job_id]["if"]),
+                is_prerelease=outputs["is_prerelease"],
+                validation_channels=outputs["validation_channels"],
+            )
+            assert_that(runs).described_as(f"{tag} {job_id}").is_equal_to(expected)
+    # The fault steps themselves, run as the jobs run them with the empty
+    # output the classifier just produced, and with the other fault's name.
+    for step_run, other in (
+        ("fail-build", "fail-publish-npm"),
+        ("fail-publish-npm", "fail-build"),
+    ):
+        for value in ("", other):
+            result = _run_fault_step(fault=step_run, release_fault=value)
+            assert_that(result.returncode).described_as(
+                f"{step_run} with RELEASE_FAULT={value!r}",
+            ).is_equal_to(0)
+            assert_that(result.stdout).contains("nothing injected")
+
+
+def _run_fault_step(
+    *,
+    fault: str,
+    release_fault: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run release-fault.sh the way the fault step does.
+
+    Args:
+        fault: The step's own fault name (the script argument).
+        release_fault: The value of classify-tag's ``release_fault`` output.
+
+    Returns:
+        The completed process.
+    """
+    return subprocess.run(  # nosec B603 - fixed argv against a repo script
+        [str(_REPO_ROOT / _RELEASE_FAULT_SCRIPT), fault],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **{k: v for k, v in os.environ.items() if k != "GITHUB_STEP_SUMMARY"},
+            "RELEASE_FAULT": release_fault,
+        },
+    )
+
+
+def test_validation_channels_open_npm_and_docker_for_rc_tags_only() -> None:
+    """The switch extends exactly the npm and Docker gates, for an rc only.
+
+    ``validation_channels`` is derived by the classifier as rc AND the
+    variable equals ``true``: an alpha, a beta or a stable tag with the
+    variable set yields ``false``. With it true, npm-publish and
+    docker-promote run while homebrew-tap and the mirror lane stay skipped
+    (the tap has no prerelease lane; the mirror pins the wheel pre-commit
+    installs).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    switch = {_VALIDATION_CHANNELS_VAR: "true"}
+    for tag, expected in (
+        ("v0.160.3rc1", "true"),
+        ("v0.160.3a1", "false"),
+        ("v0.160.3b1", "false"),
+        ("v1.2.3", "false"),
+    ):
+        outputs = _run_classifier(tag=tag, env=switch)
+        assert_that(outputs["validation_channels"]).described_as(tag).is_equal_to(
+            expected,
+        )
+        assert_that(outputs["is_rc"]).described_as(tag).is_equal_to(expected)
+    opened = {"npm-publish": True, "docker-promote": True}
+    closed = {"homebrew-tap": False, "mirror-token": False, "mirror-release": False}
+    for job_id, expected_run in {**opened, **closed}.items():
+        runs = _evaluate_tag_gate(
+            str(publish["jobs"][job_id]["if"]),
+            is_prerelease="true",
+            validation_channels="true",
+        )
+        assert_that(runs).described_as(job_id).is_equal_to(expected_run)
+    # The gates still carry the prerelease clause the stable path relies on
+    # and the extension is the one output, in the one shape.
+    extension = "needs.classify-tag.outputs.validation_channels == 'true'"
+    for job_id in opened:
+        condition = _normalize_github_expr(str(publish["jobs"][job_id]["if"]))
+        assert_that(condition).described_as(job_id).contains(
+            f"(needs.classify-tag.outputs.is_prerelease == 'false' || {extension})",
+        )
+    for job_id in closed:
+        condition = _normalize_github_expr(str(publish["jobs"][job_id]["if"]))
+        assert_that(condition).described_as(job_id).does_not_contain(
+            "validation_channels",
+        )
+    # github-release still marks the rc as a prerelease under the switch.
+    assert_that(publish["jobs"]["github-release"]["with"]["prerelease"]).contains(
+        "is_prerelease == 'true'",
+    )
+
+
+def test_validation_channels_pass_the_next_dist_tag_to_npm() -> None:
+    """Under the switch npm publishes as ``next``; a stable release keeps latest."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    npm = _load_workflow(name="publish-npm.yml")
+    with_block = publish["jobs"]["npm-publish"]["with"]
+    assert_that(_normalize_github_expr(str(with_block["dist_tag"]))).is_equal_to(
+        "${{ needs.classify-tag.outputs.validation_channels == 'true'"
+        " && 'next' || 'latest' }}",
+    )
+    assert_that(with_block["release_fault"]).is_equal_to(
+        "${{ needs.classify-tag.outputs.release_fault }}",
+    )
+    on = next(value for key, value in npm.items() if key in ("on", True))
+    call_inputs = on["workflow_call"]["inputs"]
+    assert_that(call_inputs["dist_tag"]["default"]).is_equal_to("latest")
+    assert_that(call_inputs["release_fault"]["type"]).is_equal_to("string")
+    assert_that(call_inputs["release_fault"]["default"]).is_equal_to("")
+    assert_that(call_inputs["release_fault"]["required"]).is_false()
+    assert_that(npm["jobs"]["publish"]["with"]["dist-tag"]).is_equal_to(
+        "${{ inputs.dist_tag || 'latest' }}",
+    )
+    # The manual dispatch surface gained no fault input: faults enter the
+    # pipeline through the tag path only.
+    assert_that(on["workflow_dispatch"]["inputs"]).does_not_contain_key(
+        "release_fault",
+    )
+
+
+def test_validation_channels_promote_the_version_tag_only() -> None:
+    """Under the switch docker-promote retags ``<version>`` alone.
+
+    ``env.STABLE_TAGS`` (latest, the three semver tags) is the switch
+    negated, ``env.RC_TAGS`` (the pep440 version tag) the switch itself, so
+    the two sets are disjoint and together cover every entry the metadata
+    steps declare (the entries themselves are pinned by
+    ``test_docker_promote_promotes_the_full_release_tag_set``).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    promote = publish["jobs"]["docker-promote"]
+    assert_that(promote["env"]["STABLE_TAGS"]).is_equal_to(
+        "${{ needs.classify-tag.outputs.validation_channels != 'true' }}",
+    )
+    assert_that(promote["env"]["RC_TAGS"]).is_equal_to(
+        "${{ needs.classify-tag.outputs.validation_channels == 'true' }}",
+    )
+    for step in _job_steps(publish, job="docker-promote"):
+        if "docker/metadata-action@" not in str(step.get("uses", "")):
+            continue
+        assert_that(str(step["with"]["flavor"]).strip()).described_as(
+            step["id"],
+        ).is_equal_to("latest=${{ env.STABLE_TAGS }}")
+        entries = [
+            line.strip()
+            for line in str(step["with"]["tags"]).splitlines()
+            if line.strip()
+        ]
+        rc_entries = [e for e in entries if e.endswith("enable=${{ env.RC_TAGS }}")]
+        stable_entries = [
+            e for e in entries if e.endswith("enable=${{ env.STABLE_TAGS }}")
+        ]
+        assert_that(len(rc_entries) + len(stable_entries)).described_as(
+            step["id"],
+        ).is_equal_to(len(entries))
+        assert_that(rc_entries).described_as(step["id"]).is_length(1)
+        assert_that(rc_entries[0]).contains("type=pep440,pattern={{version}}")
+        assert_that(stable_entries).described_as(step["id"]).is_length(3)
+        for entry in stable_entries:
+            assert_that(entry).does_not_contain("pep440")
+
+
+def test_fault_steps_exist_with_their_exact_conditions() -> None:
+    """Each fault step fails through the one script, on its own name only.
+
+    ``fail-build`` sits in release-gate (the build calls are reusables with
+    no caller-side steps; the gate is the last job before any irreversible
+    write and the only build-side job here with steps), before every
+    download and the verification. ``fail-publish-npm`` is the first step
+    of publish-npm.yml's stage job after the runner hardening and the
+    checkout that provides the script, before any binary is downloaded.
+    Neither carries an ``if:``: the gate's no-conditional-step invariant
+    holds, and the condition is the script's exact comparison of
+    ``RELEASE_FAULT`` (the classify-tag output, or the pass-through input)
+    with the step's name, exercised here both ways.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    npm = _load_workflow(name="publish-npm.yml")
+    script = _REPO_ROOT / _RELEASE_FAULT_SCRIPT
+    assert_that(script.exists()).is_true()
+    assert_that(os.access(script, os.X_OK)).is_true()
+
+    gate_steps = _job_steps(publish, job="release-gate")
+    gate_ids = [str(s.get("id", "")) for s in gate_steps]
+    build_fault = gate_steps[gate_ids.index("fail-build")]
+    assert_that(build_fault).does_not_contain_key("if")
+    assert_that(build_fault).does_not_contain_key("continue-on-error")
+    assert_that(build_fault["run"]).is_equal_to(f"{_RELEASE_FAULT_SCRIPT} fail-build")
+    assert_that(build_fault["env"]["RELEASE_FAULT"]).is_equal_to(
+        "${{ needs.classify-tag.outputs.release_fault }}",
+    )
+    first_download = next(
+        i
+        for i, s in enumerate(gate_steps)
+        if str(s.get("uses", "")).startswith("actions/download-artifact@")
+    )
+    verify = next(
+        i
+        for i, s in enumerate(gate_steps)
+        if s.get("run") == "scripts/ci/release-gate/verify_artifacts.sh"
+    )
+    assert_that(gate_ids.index("fail-build")).is_less_than(first_download)
+    assert_that(gate_ids.index("fail-build")).is_less_than(verify)
+    preamble = {
+        str(s.get("uses", "")).split("@")[0]
+        for s in gate_steps[: gate_ids.index("fail-build")]
+    }
+    assert_that(preamble).is_equal_to(
+        {"step-security/harden-runner", "actions/checkout"},
+    )
+
+    stage_steps = _job_steps(npm, job="stage")
+    stage_ids = [str(s.get("id", "")) for s in stage_steps]
+    npm_fault = stage_steps[stage_ids.index("fail-publish-npm")]
+    assert_that(npm_fault).does_not_contain_key("if")
+    assert_that(npm_fault).does_not_contain_key("continue-on-error")
+    assert_that(npm_fault["run"]).is_equal_to(
+        f"{_RELEASE_FAULT_SCRIPT} fail-publish-npm",
+    )
+    assert_that(npm_fault["env"]["RELEASE_FAULT"]).is_equal_to(
+        "${{ inputs.release_fault }}",
+    )
+    preamble = {
+        str(s.get("uses", "")).split("@")[0]
+        for s in stage_steps[: stage_ids.index("fail-publish-npm")]
+    }
+    assert_that(preamble).is_equal_to(
+        {"step-security/harden-runner", "actions/checkout"},
+    )
+    # No third fault step anywhere: the runbook names exactly these two.
+    fault_steps = [
+        (name, s.get("id"))
+        for name in ("publish-pypi-on-tag.yml", "publish-npm.yml")
+        for job in _load_workflow(name=name)["jobs"].values()
+        for s in (job.get("steps") or [])
+        if _RELEASE_FAULT_SCRIPT in str(s.get("run", ""))
+    ]
+    assert_that(fault_steps).is_equal_to(
+        [
+            ("publish-pypi-on-tag.yml", "fail-build"),
+            ("publish-npm.yml", "fail-publish-npm"),
+        ],
+    )
+    # The exact condition, run as the steps run it: each fires on its own
+    # name alone, with the annotation the runbook looks for.
+    for own, other in (
+        ("fail-build", "fail-publish-npm"),
+        ("fail-publish-npm", "fail-build"),
+    ):
+        fired = _run_fault_step(fault=own, release_fault=own)
+        assert_that(fired.returncode).described_as(own).is_equal_to(1)
+        assert_that(fired.stdout).contains(
+            f"::error title=Injected release fault::RELEASE_FAULT={own}",
+        )
+        for value in (other, ""):
+            quiet = _run_fault_step(fault=own, release_fault=value)
+            assert_that(quiet.returncode).described_as(f"{own}/{value!r}").is_equal_to(
+                0,
+            )
+
+
+def test_validation_switches_are_documented_as_validation_only() -> None:
+    """The workflow header, the workflows README and the runbook name both switches."""
+    header = (
+        _REPO_ROOT / ".github" / "workflows" / "publish-pypi-on-tag.yml"
+    ).read_text(encoding="utf-8")
+    readme = (_REPO_ROOT / ".github" / "workflows" / "README.md").read_text(
+        encoding="utf-8",
+    )
+    runbook = (_REPO_ROOT / "docs" / "release-validation.md").read_text(
+        encoding="utf-8",
+    )
+    for text, label in ((header, "header"), (readme, "README"), (runbook, "runbook")):
+        for needle in (_VALIDATION_CHANNELS_VAR, _RELEASE_FAULT_VAR, "validation"):
+            assert_that(text).described_as(f"{label}: {needle}").contains(needle)
+    for scenario in ("S1", "S2", "S3", "S4"):
+        assert_that(runbook).described_as(scenario).contains(f"## {scenario}")
+    assert_that(runbook).contains("npm deprecate")
+    assert_that(runbook).contains("exempt")
