@@ -86,6 +86,21 @@ def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None
     return left, right
 
 
+def _sum_turns(*, partials: list[ChunkReviewPartial]) -> int | None:
+    """Sum the halves' transport-reported turns, or ``None`` if any is unknown.
+
+    Args:
+        partials: The halves' partials.
+
+    Returns:
+        The total turn count, or ``None`` when a half reported none.
+    """
+    turns = [partial.turns for partial in partials]
+    if any(value is None for value in turns):
+        return None
+    return sum(value for value in turns if value is not None)
+
+
 def merge_half_partials(
     *,
     partials: Sequence[ChunkReviewPartial],
@@ -115,6 +130,8 @@ def merge_half_partials(
         input_tokens=sum(partial.input_tokens for partial in ordered),
         output_tokens=sum(partial.output_tokens for partial in ordered),
         cost_estimate=sum(partial.cost_estimate for partial in ordered),
+        provider_seconds=sum(partial.provider_seconds for partial in ordered),
+        turns=_sum_turns(partials=ordered),
         pr_summary=merge_pr_summaries(partials=ordered),
         verdict_reasoning=merge_verdict_reasoning(partials=ordered),
         file_assessments=merge_file_assessments(partials=ordered),
@@ -152,7 +169,9 @@ async def _parse_call(
         use_one_shot=request.use_one_shot,
         elapsed=call.elapsed,
     )
-    return payload_to_partial(response=response, payload=payload)
+    partial = payload_to_partial(response=response, payload=payload)
+    # The main call's own wall time, for the per-chunk timings (section 5).
+    return replace(partial, provider_seconds=call.elapsed)
 
 
 async def _retry_after_exhaustion(
