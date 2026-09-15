@@ -176,17 +176,26 @@ jobs:
           python scripts/ci/npm/sync_npm_version.py
           --check --version "$RELEASE_TAG"
 
-      - name: Smoke test launcher (Linux x64)
-        run: scripts/ci/npm/smoke_test.sh
-
       - name: Write package-set checksums
         # One `<sha256>  <package>/<file>` line per file npm would pack, for
         # all four packages: the manifest the reusable verifies against and
-        # the subject list of the attestation below.
+        # the subject list of the attestation below. Written BEFORE the smoke
+        # test executes a staged binary, and re-checked after it, so nothing
+        # that runs in this job can alter the bytes the attestation vouches
+        # for without failing the job (Codex review on #2667).
         run: >-
           python scripts/ci/npm/write_package_checksums.py
           --packages-dir npm
           --output npm/SHA256SUMS
+
+      - name: Smoke test launcher (Linux x64)
+        run: scripts/ci/npm/smoke_test.sh
+
+      - name: Re-verify package set after the smoke test
+        # The smoke test ran a release binary; every packed file must still
+        # match the manifest written before it, or the attestation below
+        # would sign bytes the release attestations never covered.
+        run: (cd npm && sha256sum --check --strict SHA256SUMS)
 
       - name: Attest staged package set
         # Signs as this file (publish-npm.yml); the reusable's verify step

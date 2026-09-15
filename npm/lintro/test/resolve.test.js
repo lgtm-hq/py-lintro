@@ -154,7 +154,7 @@ describe('resolveBinary', () => {
 describe('ensureExecutable', () => {
   const X_OK = 1;
 
-  const fakeFs = ({ executable, chmodError }) => {
+  const fakeFs = ({ executable, chmodError, symlink, missing, directory }) => {
     const calls = [];
     return {
       calls,
@@ -167,6 +167,18 @@ describe('ensureExecutable', () => {
           throw err;
         }
       },
+      lstatSync(path) {
+        calls.push(['lstatSync', path]);
+        if (missing) {
+          const err = new Error('ENOENT: no such file or directory');
+          err.code = 'ENOENT';
+          throw err;
+        }
+        return {
+          isSymbolicLink: () => Boolean(symlink),
+          isFile: () => !symlink && !directory,
+        };
+      },
       chmodSync(path, mode) {
         calls.push(['chmodSync', path, mode]);
         if (chmodError) {
@@ -175,6 +187,24 @@ describe('ensureExecutable', () => {
       },
     };
   };
+
+  it('refuses to chmod a symlink', () => {
+    const fs = fakeFs({ executable: false, symlink: true });
+    expect(() => ensureExecutable('/bin/x', fs)).toThrow(/not a regular file/);
+    expect(fs.calls.some(([name]) => name === 'chmodSync')).toBe(false);
+  });
+
+  it('refuses to chmod something that is not a regular file', () => {
+    const fs = fakeFs({ executable: false, directory: true });
+    expect(() => ensureExecutable('/bin/x', fs)).toThrow(/not a regular file/);
+    expect(fs.calls.some(([name]) => name === 'chmodSync')).toBe(false);
+  });
+
+  it('reports a missing binary instead of trying to repair it', () => {
+    const fs = fakeFs({ executable: false, missing: true });
+    expect(() => ensureExecutable('/bin/x', fs)).toThrow(/is missing/);
+    expect(fs.calls.some(([name]) => name === 'chmodSync')).toBe(false);
+  });
 
   it('leaves an executable binary untouched', () => {
     const fs = fakeFs({ executable: true });
@@ -188,6 +218,7 @@ describe('ensureExecutable', () => {
     expect(ensureExecutable('/bin/x', fs)).toBe(true);
     expect(fs.calls).toEqual([
       ['accessSync', '/bin/x', X_OK],
+      ['lstatSync', '/bin/x'],
       ['chmodSync', '/bin/x', 0o755],
     ]);
   });

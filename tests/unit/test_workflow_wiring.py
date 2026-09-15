@@ -1747,11 +1747,18 @@ def test_publish_npm_stage_verifies_release_binaries_before_staging() -> None:
     download = index_of("scripts/ci/npm/download_release_binaries.sh", runs)
     verify = index_of("scripts/ci/npm/verify_release_binaries.sh", runs)
     stage = index_of("scripts/ci/npm/stage_binaries.py", runs)
-    smoke = index_of("scripts/ci/npm/smoke_test.sh", runs)
     checksums = index_of("scripts/ci/npm/write_package_checksums.py", runs)
+    smoke = index_of("scripts/ci/npm/smoke_test.sh", runs)
+    recheck = index_of("sha256sum --check --strict SHA256SUMS", runs)
     attest = index_of("actions/attest-build-provenance@", uses)
     upload = index_of("actions/upload-artifact@", uses)
-    assert_that([download, verify, stage, smoke, checksums, attest, upload]).is_sorted()
+    # The manifest is written before the smoke test executes a release
+    # binary and re-checked after it, so the attestation can only ever sign
+    # the bytes that were verified (Codex review on #2667).
+    assert_that(
+        [download, verify, stage, checksums, smoke, recheck, attest, upload],
+    ).is_sorted()
+    assert_that(runs[recheck]).starts_with("(cd npm && sha256sum")
 
     verify_step = steps[verify]
     assert_that(verify_step["run"].strip()).is_equal_to(

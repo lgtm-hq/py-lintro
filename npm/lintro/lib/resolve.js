@@ -154,6 +154,21 @@ function ensureExecutable(binaryPath, fsModule) {
   } catch {
     // Not executable (or not accessible): fall through to the repair.
   }
+  // Only a regular file that is not a symlink may be repaired: chmod
+  // follows links, and a tampered platform package must not be able to
+  // point the repair at some other file.
+  let stat;
+  try {
+    stat = fs.lstatSync(binaryPath);
+  } catch (err) {
+    throw new Error(`lintro: the platform binary at "${binaryPath}" is missing: ${err.message}`);
+  }
+  if (stat.isSymbolicLink() || !stat.isFile()) {
+    throw new Error(
+      `lintro: the platform binary at "${binaryPath}" is not a regular file; ` +
+        'refusing to change its mode'
+    );
+  }
   try {
     fs.chmodSync(binaryPath, 0o755);
   } catch (err) {
