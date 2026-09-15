@@ -2209,6 +2209,37 @@ def test_auto_rerun_covers_tag_publish_workflows() -> None:
     )
 
 
+def test_auto_rerun_never_reruns_publish_workflows() -> None:
+    """Publish runs are protected from automatic reruns (#2633, lgtm-ci#1003).
+
+    The rc1 publish run (34967569536) was re-run by the auto-rerun net after
+    an egress refusal matched a signature, and the rerun reached the npm
+    approval gate. The reusable's ``protected-workflows`` input names the
+    publish workflow files whose runs are never re-run; both the tag
+    pipeline and the standalone npm workflow must be listed. The
+    runner-acquisition signature is read from check-run annotations, so the
+    caller must grant ``checks: read``.
+    """
+    workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    job = workflow["jobs"]["rerun"]
+    protected = {
+        entry.strip()
+        for entry in str(job["with"]["protected-workflows"])
+        .replace("\n", ",")
+        .split(",")
+        if entry.strip()
+    }
+    assert_that(protected).contains("publish-pypi-on-tag.yml", "publish-npm.yml")
+    for name in protected:
+        assert_that(
+            (_REPO_ROOT / ".github" / "workflows" / name).is_file(),
+        ).described_as(
+            f"protected workflow {name} must exist",
+        ).is_true()
+    assert_that(job["permissions"]).contains_entry({"checks": "read"})
+    assert_that(job["permissions"]).contains_entry({"actions": "write"})
+
+
 def test_auto_rerun_allows_three_reruns() -> None:
     """Persistent runner-loss failures may receive up to three reruns (#2237)."""
     workflow = _load_workflow(name="auto-rerun-on-infra-failure.yml")
