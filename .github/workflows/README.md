@@ -298,7 +298,10 @@ scrubbed to prove every gate then behaves as it always did.
   `publish-npm.yml`'s `Inject fault (fail-publish-npm)` stage step (the fault reaches
   the called workflow as the `release_fault` input) each run
   `scripts/ci/release-fault.sh <name>`, which exits 1 with an `::error` annotation only
-  when the output equals its name. Unset, or any other value, injects nothing.
+  when the output equals its name. The output is empty for every tag but an `rcN`, so a
+  leftover variable cannot touch a stable release. Unset injects nothing; a value
+  outside the allowlist (empty, `fail-build`, `fail-publish-npm`; for the channel switch
+  empty, `true`, `false`) fails `classify-tag` before anything is written.
 
 Delete both variables once a validation round is recorded.
 

@@ -206,6 +206,12 @@ def sync_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[Path]:
 # forms the pipeline can publish (#2633 validation channels) are mapped.
 _PEP440_PRERELEASE = re.compile(r"^(\d+\.\d+\.\d+)(a|b|rc)(\d+)$")
 _PEP440_TO_SEMVER = {"a": "alpha", "b": "beta", "rc": "rc"}
+# PEP 440 post-releases and dev-releases have no SemVer equivalent npm would
+# accept, and nothing in the pipeline publishes them; they are rejected
+# explicitly rather than written into a manifest npm then refuses.
+_PEP440_UNSUPPORTED = re.compile(
+    r"^\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?(?:\.?post\d+|\.?dev\d+)+$",
+)
 
 
 def _normalise_version(raw: str) -> str:
@@ -221,8 +227,18 @@ def _normalise_version(raw: str) -> str:
 
     Returns:
         The version to write into every npm manifest.
+
+    Raises:
+        ValueError: For a PEP 440 post-release or dev-release (``.postN``,
+            ``.devN``), which has no npm-valid form.
     """
     version = raw[1:] if raw.startswith("v") else raw
+    if _PEP440_UNSUPPORTED.match(version):
+        msg = (
+            f"npm cannot carry a PEP 440 post- or dev-release version: {raw!r}. "
+            "Only stable X.Y.Z and aN/bN/rcN prereleases are publishable."
+        )
+        raise ValueError(msg)
     match = _PEP440_PRERELEASE.match(version)
     if match is None:
         return version
@@ -260,6 +276,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    try:
+        return _run(args)
+    except ValueError as exc:
+        print(f"sync_npm_version.py: {exc}", file=sys.stderr)
+        return 1
+
+
+def _run(args: argparse.Namespace) -> int:
+    """Execute the parsed command.
+
+    Args:
+        args: Parsed CLI arguments.
+
+    Returns:
+        Process exit code (0 on success, 1 on drift).
+    """
     if args.check:
         # In-repo manifests carry a placeholder version, so default checks use
         # the meta-package as the source of truth rather than pyproject.

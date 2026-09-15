@@ -10,6 +10,7 @@ import re
 import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 import sys
+import tempfile
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -8078,18 +8079,29 @@ def _run_classifier(*, tag: str, env: dict[str, str]) -> dict[str, str]:
         for key, value in os.environ.items()
         if key not in (_VALIDATION_CHANNELS_VAR, _RELEASE_FAULT_VAR, "GITHUB_OUTPUT")
     }
-    result = subprocess.run(  # nosec B603 - fixed argv against a repo script
-        [
-            sys.executable,
-            str(_REPO_ROOT / "scripts" / "ci" / "classify-release-tag.py"),
-            tag,
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-        env={**scrubbed, **env},
-    )
-    return dict(line.split("=", 1) for line in result.stdout.splitlines())
+    with tempfile.TemporaryDirectory() as tmp:
+        github_output = Path(tmp) / "gh_output"
+        result = subprocess.run(  # nosec B603 - fixed argv against a repo script
+            [
+                sys.executable,
+                str(_REPO_ROOT / "scripts" / "ci" / "classify-release-tag.py"),
+                tag,
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**scrubbed, **env, "GITHUB_OUTPUT": str(github_output)},
+        )
+        # stdout stays the one-line contract the mirror resolver captures;
+        # the job reads everything from GITHUB_OUTPUT (delimiter form).
+        assert_that(result.stdout.strip()).matches(r"^is_prerelease=(true|false)$")
+        lines = github_output.read_text(encoding="utf-8").splitlines()
+    outputs: dict[str, str] = {}
+    for index in range(0, len(lines), 3):
+        name, delimiter = lines[index].split("<<", 1)
+        assert_that(lines[index + 2]).is_equal_to(delimiter)
+        outputs[name] = lines[index + 1]
+    return outputs
 
 
 def test_only_classify_tag_reads_repository_variables() -> None:
@@ -8153,6 +8165,13 @@ def test_validation_switches_are_no_ops_by_default() -> None:
             "false",
         )
         assert_that(outputs["release_fault"]).described_as(tag).is_equal_to("")
+        # Stable isolation (Codex P1 on #2672): a leftover RELEASE_FAULT
+        # reaches the fault steps for an rc only; every other tag gets the
+        # empty output, so both steps stay no-ops.
+        leftover = _run_classifier(tag=tag, env={_RELEASE_FAULT_VAR: "fail-build"})
+        assert_that(leftover["release_fault"]).described_as(tag).is_equal_to(
+            "fail-build" if outputs["is_rc"] == "true" else "",
+        )
         expected = outputs["is_prerelease"] == "false"
         for job_id in ("npm-publish", "docker-promote", "homebrew-tap", "mirror-token"):
             runs = _evaluate_tag_gate(

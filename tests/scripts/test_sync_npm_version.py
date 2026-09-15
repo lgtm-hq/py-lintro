@@ -120,6 +120,34 @@ def test_normalise_version_maps_pep440_prereleases_to_semver(
     assert_that(mod._normalise_version(raw)).is_equal_to(expected)
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "v1.2.3.post1",
+        "1.2.3post1",
+        "v1.2.3.dev1",
+        "1.2.3dev2",
+        "v1.2.3rc1.post1",
+        "v1.2.3rc1.dev3",
+    ],
+)
+def test_normalise_version_rejects_post_and_dev_releases(raw: str) -> None:
+    """post/dev releases have no npm form and are refused, not passed through."""
+    mod = _load_module()
+    with pytest.raises(ValueError, match="post- or dev-release") as excinfo:
+        mod._normalise_version(raw)
+    assert_that(str(excinfo.value)).contains(raw)
+
+
+def test_main_fails_cleanly_on_a_post_release(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI exits 1 with the error on stderr instead of writing manifests."""
+    mod = _load_module()
+    assert_that(mod.main(["--check", "--version", "v1.2.3.post1"])).is_equal_to(1)
+    assert_that(capsys.readouterr().err).contains("post- or dev-release")
+
+
 # ---------------------------------------------------------------------------
 # In-repo manifests
 # ---------------------------------------------------------------------------

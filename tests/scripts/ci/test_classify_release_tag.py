@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,35 @@ from assertpy import assert_that
 
 ROOT = Path(__file__).resolve().parents[3]
 CLASSIFY_SCRIPT = ROOT / "scripts" / "ci" / "classify-release-tag.py"
+_DELIMITER_RE = re.compile(r"^EOF_[0-9a-f]{32}$")
+
+
+def _parse_github_output(text: str) -> dict[str, str]:
+    """Parse a GITHUB_OUTPUT file written in the delimiter form only.
+
+    Every entry must be ``name<<EOF_<32 hex>`` / value / delimiter; a bare
+    ``name=value`` line is a test failure, since that is the form a value
+    could inject.
+
+    Args:
+        text: The file content.
+
+    Returns:
+        Output name to value, in file order.
+    """
+    outputs: dict[str, str] = {}
+    lines = text.splitlines()
+    index = 0
+    while index < len(lines):
+        header = lines[index]
+        assert_that(header).contains("<<")
+        name, delimiter = header.split("<<", 1)
+        assert_that(delimiter).matches(_DELIMITER_RE.pattern)
+        assert_that(lines[index + 2]).is_equal_to(delimiter)
+        assert_that(outputs).does_not_contain_key(name)
+        outputs[name] = lines[index + 1]
+        index += 3
+    return outputs
 
 
 def _load_module() -> Any:
@@ -93,16 +123,19 @@ def test_main_writes_github_output(
 
     exit_code = module.main()
 
-    expected = [
-        "is_prerelease=false",
-        "is_rc=false",
-        "validation_channels=false",
-        "release_fault=",
-    ]
     assert_that(exit_code).is_equal_to(0)
-    assert_that(capsys.readouterr().out.strip().splitlines()).is_equal_to(expected)
-    assert_that(output_file.read_text(encoding="utf-8")).is_equal_to(
-        "".join(f"{line}\n" for line in expected),
+    # stdout is the one-line contract scripts/ci/mirror/resolve-version.sh
+    # captures; the other outputs reach GITHUB_OUTPUT only.
+    assert_that(capsys.readouterr().out.strip()).is_equal_to("is_prerelease=false")
+    assert_that(
+        _parse_github_output(output_file.read_text(encoding="utf-8")),
+    ).is_equal_to(
+        {
+            "is_prerelease": "false",
+            "is_rc": "false",
+            "validation_channels": "false",
+            "release_fault": "",
+        },
     )
 
 
@@ -118,9 +151,7 @@ def test_main_prerelease_output(
     exit_code = module.main()
 
     assert_that(exit_code).is_equal_to(0)
-    assert_that(capsys.readouterr().out.splitlines()[0]).is_equal_to(
-        "is_prerelease=true",
-    )
+    assert_that(capsys.readouterr().out.strip()).is_equal_to("is_prerelease=true")
 
 
 def test_main_rejects_wrong_arg_count(
@@ -173,8 +204,6 @@ def test_is_rc_tag(tag: str, expected: bool) -> None:
         ("v0.160.3rc1", None, False),
         ("v0.160.3rc1", "", False),
         ("v0.160.3rc1", "false", False),
-        ("v0.160.3rc1", "TRUE", False),
-        ("v0.160.3rc1", "1", False),
         # A stable tag, an alpha, a beta or a SemVer rc never opens them,
         # whatever the variable holds: the switch cannot touch a release.
         ("v1.2.3", "true", False),
@@ -204,19 +233,121 @@ def test_validation_channels_open_for_rc_tags_only(
         ("fail-build", "fail-build"),
         ("fail-publish-npm", "fail-publish-npm"),
         (" fail-build\n", "fail-build"),
-        # Unknown names pass through: no step matches them, and the run log
-        # shows what the variable held instead of silently dropping it.
-        ("fail-everything", "fail-everything"),
     ],
 )
-def test_release_fault_is_trimmed_and_passed_through(
+def test_release_fault_is_trimmed_and_passed_through_for_rc_tags(
     fault: str | None,
     expected: str,
 ) -> None:
-    """The fault output is the trimmed variable; unset is the empty no-op."""
+    """For an rc the fault output is the trimmed variable; unset is the no-op."""
     module = _load_module()
-    assert_that(module.release_fault(fault=fault)).is_equal_to(expected)
+    assert_that(module.release_fault(tag="v0.160.3rc2", fault=fault)).is_equal_to(
+        expected,
+    )
     assert_that(module.KNOWN_FAULTS).contains("fail-build", "fail-publish-npm")
+
+
+@pytest.mark.parametrize(
+    "tag",
+    ["v1.2.3", "v1.2.3+build.1", "v0.160.3a1", "v0.160.3b1"],
+)
+@pytest.mark.parametrize("fault", ["fail-build", "fail-publish-npm"])
+def test_release_fault_is_empty_for_every_tag_but_an_rc(tag: str, fault: str) -> None:
+    """A leftover RELEASE_FAULT can never break a stable (or alpha/beta) release."""
+    module = _load_module()
+    assert_that(module.release_fault(tag=tag, fault=fault)).is_equal_to("")
+    outputs = module.classify(tag=tag, environ={module.RELEASE_FAULT_ENV: fault})
+    assert_that(outputs["release_fault"]).is_equal_to("")
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("RELEASE_FAULT", "fail-everything"),
+        ("RELEASE_FAULT", "FAIL-BUILD"),
+        ("RELEASE_FAULT", "fail-build\nis_prerelease=false"),
+        ("RELEASE_FAULT", "fail-build\x00"),
+        ("RELEASE_VALIDATION_CHANNELS", "TRUE"),
+        ("RELEASE_VALIDATION_CHANNELS", "1"),
+        ("RELEASE_VALIDATION_CHANNELS", "yes"),
+        ("RELEASE_VALIDATION_CHANNELS", "true\nrelease_fault=fail-build"),
+    ],
+)
+def test_values_outside_the_allowlist_fail_closed(name: str, value: str) -> None:
+    """Anything but the exact allowlisted values raises, whatever the tag."""
+    module = _load_module()
+    for tag in ("v0.160.3rc1", "v1.2.3"):
+        with pytest.raises(module.InvalidVariableError) as excinfo:
+            module.classify(tag=tag, environ={name: value})
+        assert_that(str(excinfo.value)).contains(name)
+
+
+def test_main_rejects_an_unknown_value_and_writes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An unknown value exits 2 with an error annotation and leaves GITHUB_OUTPUT untouched."""
+    module = _load_module()
+    output_file = tmp_path / "gh_output"
+    output_file.write_text("earlier=kept\n", encoding="utf-8")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+    monkeypatch.setenv(module.RELEASE_FAULT_ENV, "fail-everything")
+    monkeypatch.delenv(module.VALIDATION_CHANNELS_ENV, raising=False)
+    monkeypatch.setattr("sys.argv", ["classify-release-tag.py", "v0.160.3rc1"])
+
+    assert_that(module.main()).is_equal_to(2)
+    captured = capsys.readouterr()
+    assert_that(captured.out).contains(
+        "::error title=Invalid release validation variable::",
+    )
+    assert_that(captured.out).does_not_contain("is_prerelease=")
+    assert_that(captured.err).contains("RELEASE_FAULT")
+    assert_that(output_file.read_text(encoding="utf-8")).is_equal_to("earlier=kept\n")
+
+
+def test_main_rejects_an_embedded_newline_and_writes_nothing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A value that could inject a second output line is refused outright."""
+    module = _load_module()
+    output_file = tmp_path / "gh_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+    monkeypatch.setenv(module.VALIDATION_CHANNELS_ENV, "true\nis_prerelease=false")
+    monkeypatch.delenv(module.RELEASE_FAULT_ENV, raising=False)
+    monkeypatch.setattr("sys.argv", ["classify-release-tag.py", "v0.160.3rc1"])
+
+    assert_that(module.main()).is_equal_to(2)
+    assert_that(output_file.exists()).is_false()
+
+
+def test_main_writes_each_output_once_in_delimiter_form(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valid values produce exactly one delimiter block per output, random delimiters."""
+    module = _load_module()
+    output_file = tmp_path / "gh_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
+    monkeypatch.setenv(module.VALIDATION_CHANNELS_ENV, "true")
+    monkeypatch.setenv(module.RELEASE_FAULT_ENV, "fail-publish-npm")
+    monkeypatch.setattr("sys.argv", ["classify-release-tag.py", "v0.160.3rc3"])
+
+    assert_that(module.main()).is_equal_to(0)
+    text = output_file.read_text(encoding="utf-8")
+    assert_that(_parse_github_output(text)).is_equal_to(
+        {
+            "is_prerelease": "true",
+            "is_rc": "true",
+            "validation_channels": "true",
+            "release_fault": "fail-publish-npm",
+        },
+    )
+    delimiters = re.findall(r"<<(EOF_[0-9a-f]{32})$", text, flags=re.MULTILINE)
+    assert_that(delimiters).is_length(4)
+    assert_that(set(delimiters)).is_length(4)
+    assert_that(re.findall(r"^[a-z_]+=", text, flags=re.MULTILINE)).is_empty()
 
 
 def test_classify_emits_every_output_in_order() -> None:
@@ -252,22 +383,29 @@ def test_classify_defaults_are_off_without_the_variables() -> None:
 
 
 def test_main_reads_the_switches_from_the_environment(
+    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """main() reads RELEASE_VALIDATION_CHANNELS and RELEASE_FAULT from env."""
     module = _load_module()
-    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    output_file = tmp_path / "gh_output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_file))
     monkeypatch.setenv(module.VALIDATION_CHANNELS_ENV, "true")
     monkeypatch.setenv(module.RELEASE_FAULT_ENV, "fail-build")
     monkeypatch.setattr("sys.argv", ["classify-release-tag.py", "v0.160.3rc3"])
 
     assert_that(module.main()).is_equal_to(0)
-    assert_that(capsys.readouterr().out.splitlines()).is_equal_to(
-        [
-            "is_prerelease=true",
-            "is_rc=true",
-            "validation_channels=true",
-            "release_fault=fail-build",
-        ],
+    captured = capsys.readouterr()
+    assert_that(captured.out.strip()).is_equal_to("is_prerelease=true")
+    assert_that(captured.err).contains("release_fault='fail-build'")
+    assert_that(
+        _parse_github_output(output_file.read_text(encoding="utf-8")),
+    ).is_equal_to(
+        {
+            "is_prerelease": "true",
+            "is_rc": "true",
+            "validation_channels": "true",
+            "release_fault": "fail-build",
+        },
     )

@@ -20,12 +20,14 @@ exactly once, by the `classify-tag` job of `publish-pypi-on-tag.yml`, and travel
 outputs; no other job reads `vars.*` (`tests/unit/test_workflow_wiring.py` pins this).
 Both are **validation-only**: with the variables unset every gate behaves exactly as it
 did before they existed, and a wiring test runs the classifier with them scrubbed to
-prove it.
+prove it. Both are validated against an exact allowlist (`RELEASE_VALIDATION_CHANNELS`:
+empty, `true`, `false`; `RELEASE_FAULT`: empty, `fail-build`, `fail-publish-npm`); any
+other value fails `classify-tag` with a clear error and nothing is written.
 
-| Variable                      | Effect                                                                                                                                                                                                                                                                                                                                                    |
-| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RELEASE_VALIDATION_CHANNELS` | `true` opens the validation channels for a PEP 440 `X.Y.ZrcN` tag only (`classify-tag` output `validation_channels`): `npm-publish` runs under dist-tag `next`, `docker-promote` runs but retags `<version>` alone (no `latest`, `major.minor` or `major`), `homebrew-tap` stays skipped. An alpha, a beta or a stable tag ignores the variable entirely. |
-| `RELEASE_FAULT`               | `fail-build` or `fail-publish-npm` (`classify-tag` output `release_fault`). The named step exits 1 with an `::error` annotation; the other is untouched. Any other value injects nothing.                                                                                                                                                                 |
+| Variable                      | Effect                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RELEASE_VALIDATION_CHANNELS` | `true` opens the validation channels for a PEP 440 `X.Y.ZrcN` tag only (`classify-tag` output `validation_channels`): `npm-publish` runs under dist-tag `next`, `docker-promote` runs but retags `<version>` alone (no `latest`, `major.minor` or `major`), `homebrew-tap` stays skipped. An alpha, a beta or a stable tag ignores the variable entirely.  |
+| `RELEASE_FAULT`               | `fail-build` or `fail-publish-npm` (`classify-tag` output `release_fault`), for an `rcN` tag only: any other tag gets an empty output by construction, so a leftover variable cannot touch a stable release. The named step exits 1 with an `::error` annotation; the other is untouched. Any other value fails `classify-tag` before anything is written. |
 
 Where the faults live, and why:
 

@@ -29,28 +29,45 @@ other job in the tag pipeline reads ``vars.*``:
   under ``<version>`` only; Homebrew stays skipped. Any other tag, or any
   other value, yields ``false`` and every existing prerelease gate is
   unchanged.
-* ``RELEASE_FAULT`` — passed through (trimmed) as ``release_fault``. The
+* ``RELEASE_FAULT`` — passed through (trimmed) as ``release_fault`` for a
+  release candidate only; for any other tag the output is the empty string,
+  so a leftover variable can never break a stable release. The
   ``fail-build`` and ``fail-publish-npm`` steps compare against it and exit 1
   only on an exact match; unset is the no-op default.
+
+Both variables are validated against an exact allowlist after trimming
+(``RELEASE_VALIDATION_CHANNELS``: empty, ``true``, ``false``;
+``RELEASE_FAULT``: empty, ``fail-build``, ``fail-publish-npm``). Any other
+value, including one carrying a newline or another control character, fails
+the job before anything is written: the outputs are derived from repository
+variables and land in ``GITHUB_OUTPUT``, so an unvalidated value could inject
+or override another output. As defence in depth every output is written in
+the delimiter form with a random delimiter.
 
 Usage:
     python3 scripts/ci/classify-release-tag.py <tag>
 
 Behavior:
-    - Prints ``is_prerelease=…``, ``is_rc=…``, ``validation_channels=…`` and
-      ``release_fault=…`` to stdout, one per line.
-    - When ``GITHUB_OUTPUT`` is set, appends the same lines so GitHub Actions
-      jobs can gate on ``steps.<id>.outputs.<name>``.
+    - Prints exactly one line, ``is_prerelease=true`` or
+      ``is_prerelease=false``, to stdout: the contract
+      ``scripts/ci/mirror/resolve-version.sh`` captures. The other outputs
+      are summarised on stderr for the run log.
+    - When ``GITHUB_OUTPUT`` is set, appends ``is_prerelease``, ``is_rc``,
+      ``validation_channels`` and ``release_fault`` (delimiter form) so
+      GitHub Actions jobs can gate on ``steps.<id>.outputs.<name>``.
 
 Exit codes:
     0 — Classification printed.
     1 — Invalid arguments (wrong number of positional arguments).
+    2 — A validation variable holds a value outside its allowlist; nothing
+        is written.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import secrets
 import sys
 from pathlib import Path
 
@@ -72,6 +89,36 @@ VALIDATION_CHANNELS_ENV = "RELEASE_VALIDATION_CHANNELS"
 RELEASE_FAULT_ENV = "RELEASE_FAULT"
 #: The fault names the pipeline's fault steps recognise.
 KNOWN_FAULTS = ("fail-build", "fail-publish-npm")
+#: Exact allowlists (after trimming) for the two variables. Anything else
+#: fails closed: the values end up in GITHUB_OUTPUT.
+ALLOWED_FAULTS = frozenset({"", *KNOWN_FAULTS})
+ALLOWED_SWITCH_VALUES = frozenset({"", "true", "false"})
+
+
+class InvalidVariableError(ValueError):
+    """A validation variable holds a value outside its allowlist."""
+
+
+def _validated(*, name: str, value: str | None, allowed: frozenset[str]) -> str:
+    """Return ``value`` trimmed, or raise when it is not allowlisted.
+
+    Args:
+        name: The variable name, for the error message.
+        value: The raw variable value (``None`` when unset).
+        allowed: The exact, case-sensitive allowlist.
+
+    Returns:
+        The trimmed value.
+
+    Raises:
+        InvalidVariableError: When the trimmed value is not in ``allowed``.
+    """
+    trimmed = (value or "").strip()
+    if trimmed not in allowed:
+        choices = ", ".join(repr(item) for item in sorted(allowed))
+        msg = f"{name} must be one of {choices}; got {trimmed!r}"
+        raise InvalidVariableError(msg)
+    return trimmed
 
 
 def is_prerelease_tag(*, tag: str) -> bool:
@@ -112,23 +159,34 @@ def validation_channels_enabled(*, tag: str, switch: str | None) -> bool:
     Returns:
         ``True`` iff ``tag`` is a release candidate and ``switch`` is exactly
         ``true`` after trimming. A stable tag never opens them, whatever the
-        variable says, so the switch cannot change a real release.
+        variable says, so the switch cannot change a real release. A value
+        outside the allowlist (empty, ``true``, ``false``) is rejected by
+        ``_validated`` with ``InvalidVariableError``.
     """
-    return is_rc_tag(tag=tag) and (switch or "").strip() == "true"
+    value = _validated(
+        name=VALIDATION_CHANNELS_ENV,
+        value=switch,
+        allowed=ALLOWED_SWITCH_VALUES,
+    )
+    return is_rc_tag(tag=tag) and value == "true"
 
 
-def release_fault(*, fault: str | None) -> str:
-    """Return the trimmed fault name to inject, or the empty string.
+def release_fault(*, tag: str, fault: str | None) -> str:
+    """Return the fault name to inject for ``tag``, or the empty string.
 
     Args:
+        tag: The git tag name.
         fault: The raw ``RELEASE_FAULT`` value (``None`` when unset).
 
     Returns:
-        The trimmed value. Unknown names pass through unchanged: no fault
-        step matches them, so they inject nothing, and the run log shows
-        exactly what the variable held.
+        The trimmed fault name for a release candidate; the empty string for
+        every other tag, so a leftover variable cannot touch a stable
+        release (same rule as the validation channels). A value outside the
+        allowlist (empty, ``fail-build``, ``fail-publish-npm``) is rejected
+        by ``_validated`` with ``InvalidVariableError``.
     """
-    return (fault or "").strip()
+    value = _validated(name=RELEASE_FAULT_ENV, value=fault, allowed=ALLOWED_FAULTS)
+    return value if is_rc_tag(tag=tag) else ""
 
 
 def classify(*, tag: str, environ: dict[str, str] | os._Environ[str]) -> dict[str, str]:
@@ -149,19 +207,33 @@ def classify(*, tag: str, environ: dict[str, str] | os._Environ[str]) -> dict[st
         "is_prerelease": "true" if is_prerelease_tag(tag=tag) else "false",
         "is_rc": "true" if is_rc_tag(tag=tag) else "false",
         "validation_channels": "true" if enabled else "false",
-        "release_fault": release_fault(fault=environ.get(RELEASE_FAULT_ENV)),
+        "release_fault": release_fault(
+            tag=tag,
+            fault=environ.get(RELEASE_FAULT_ENV),
+        ),
     }
 
 
 def _write_output(*, outputs: dict[str, str]) -> None:
-    """Emit the classification to stdout and to ``GITHUB_OUTPUT`` when set."""
-    lines = [f"{name}={value}" for name, value in outputs.items()]
-    for line in lines:
-        print(line)
+    """Emit the classification to stdout and to ``GITHUB_OUTPUT`` when set.
+
+    ``GITHUB_OUTPUT`` receives the delimiter form (``name<<EOF_<random>``)
+    with a fresh random delimiter per value, so a value can never be read
+    as a second ``name=value`` line.
+    """
+    print(f"is_prerelease={outputs['is_prerelease']}")
+    extras = " ".join(
+        f"{name}={value!r}"
+        for name, value in outputs.items()
+        if name != "is_prerelease"
+    )
+    print(f"classify-release-tag.py: {extras}", file=sys.stderr)
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:
         with Path(github_output).open("a", encoding="utf-8") as handle:
-            handle.write("".join(f"{line}\n" for line in lines))
+            for name, value in outputs.items():
+                delimiter = f"EOF_{secrets.token_hex(16)}"
+                handle.write(f"{name}<<{delimiter}\n{value}\n{delimiter}\n")
 
 
 def main() -> int:
@@ -173,7 +245,13 @@ def main() -> int:
         )
         return 1
 
-    _write_output(outputs=classify(tag=sys.argv[1], environ=os.environ))
+    try:
+        outputs = classify(tag=sys.argv[1], environ=os.environ)
+    except InvalidVariableError as exc:
+        print(f"::error title=Invalid release validation variable::{exc}")
+        print(f"classify-release-tag.py: {exc}", file=sys.stderr)
+        return 2
+    _write_output(outputs=outputs)
     return 0
 
 
