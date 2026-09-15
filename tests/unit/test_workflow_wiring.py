@@ -5721,9 +5721,11 @@ def test_docker_allowlist_file_keeps_the_baseline_and_signing_hosts() -> None:
         "auth.docker.io:443",
         "pypi.org:443",
         "files.pythonhosted.org:443",
-        "fulcio.sigstore.dev:443",
-        "rekor.sigstore.dev:443",
-        "token.actions.githubusercontent.com:443",
+        # The full signing set, shared with the attesting-jobs test so the
+        # resolver-fed image jobs are held to the same hosts as every
+        # literal replace-mode list (#2562).
+        *sorted(_SIGSTORE_HOSTS),
+        _OIDC_HOST,
     ):
         assert_that(endpoints).contains(endpoint)
 
