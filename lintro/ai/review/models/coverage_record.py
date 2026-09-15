@@ -24,6 +24,12 @@ class CoverageRecord:
         round: Round number that produced the entry.
         stopped_reason: Empty when the file finished; otherwise the
             mid-round stop that checkpointed this entry.
+        truncated: True when the file's diff exceeded the per-chunk ceiling
+            and only a prefix was reviewed. The file is still credited at
+            this hash so the round converges, and every later round that
+            carries the record re-reports the truncation until the file's
+            diff changes (lintro-ops #37). Serialized only when True, so a
+            record written before the field existed round-trips unchanged.
     """
 
     path: str
@@ -31,6 +37,7 @@ class CoverageRecord:
     reviewed_sha: str = ""
     round: int = 1
     stopped_reason: str = ""
+    truncated: bool = False
 
     @property
     def identity(self) -> tuple[str, str]:
@@ -51,6 +58,8 @@ class CoverageRecord:
         }
         if self.stopped_reason:
             payload["stopped_reason"] = self.stopped_reason
+        if self.truncated:
+            payload["truncated"] = True
         return payload
 
     @classmethod
@@ -74,4 +83,5 @@ class CoverageRecord:
             reviewed_sha=str(payload.get("reviewed_sha", "")),
             round=coerce_int(payload.get("round"), default=1) or 1,
             stopped_reason=str(payload.get("stopped_reason", "")),
+            truncated=payload.get("truncated") is True,
         )

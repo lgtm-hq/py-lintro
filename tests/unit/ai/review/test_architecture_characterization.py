@@ -94,7 +94,6 @@ _MCP_RUN_METADATA_KEYS: frozenset[str] = frozenset(
         # the "stopped early" one so a capped run is never read as complete.
         "findings_coverage_complete",
         "coverage_degradations",
-        "findings_cap_applied",
         "output_exhaustion_retried",
     },
 )

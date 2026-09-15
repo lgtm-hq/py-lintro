@@ -25,6 +25,9 @@ from lintro.ai.review.coverage import (
     inherit_same_round_paths,
     pending_invalidations_for,
 )
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.file_selection import (
@@ -32,12 +35,16 @@ from lintro.ai.review.file_selection import (
     resolve_file_selection,
 )
 from lintro.ai.review.finding_parser import reject_context_findings
-from lintro.ai.review.merge import merge_review_results
+from lintro.ai.review.merge import merge_review_results, truncated_paths
 from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.coverage_counts import CoverageCounts
+from lintro.ai.review.models.coverage_degradation import (
+    CARRIED_CHUNK_INDEX,
+    CoverageDegradation,
+)
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
-from lintro.ai.review.resume import records_for_reviewed
+from lintro.ai.review.resume import carried_truncated_paths, records_for_reviewed
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
@@ -150,14 +157,17 @@ def assemble_review_result(
         + (synthesis.cost_estimate if synthesis is not None else 0.0)
     )
     chunks_reviewed = len(outcome.partials)
-    summary = (
-        custom_agents_only_summary(
-            run_builtin_checklist=options.run_builtin_checklist,
-            agents_run=len(outcome.custom_results),
-            findings=len(outcome.custom_findings),
-        )
-        or outcome.merged.summary
-    )
+    # The round's narrative comes from the synthesis pass (lintro-ops
+    # milestone 0, decision A); chunks report findings only. A failed or
+    # disabled pass leaves both ``None`` and the surfaces render their
+    # TL;DR-only fallback.
+    pr_summary = synthesis.summary if synthesis is not None else None
+    verdict_reasoning = synthesis.verdict_reasoning if synthesis is not None else None
+    summary = custom_agents_only_summary(
+        run_builtin_checklist=options.run_builtin_checklist,
+        agents_run=len(outcome.custom_results),
+        findings=len(outcome.custom_findings),
+    ) or (pr_summary.headline if pr_summary is not None else "")
 
     selection = resolve_file_selection(
         context=context,
@@ -212,6 +222,16 @@ def assemble_review_result(
                 for degradation in item.coverage_degradations
             ),
             *(synthesis.degradations if synthesis is not None else ()),
+            *(
+                CoverageDegradation(
+                    reason=CoverageDegradationReason.DIFF_TRUNCATED,
+                    chunk_index=CARRIED_CHUNK_INDEX,
+                )
+                for _path in carried_truncated_paths(
+                    plan=plan.resume,
+                    prior=None if options.force_full else options.prior_state,
+                )
+            ),
         ),
         synthesis=synthesis.outcome if synthesis is not None else None,
         lint_facts_note=options.lint_note,
@@ -239,6 +259,7 @@ def assemble_review_result(
         ),
         prior=None if options.force_full else options.prior_state,
         stopped_reason=outcome.stopped_reason,
+        truncated_paths=truncated_paths(partials=outcome.partials),
     )
     payload_flags = tuple(
         flag for item in outcome.partials for flag in item.flagged_files
@@ -328,11 +349,9 @@ def assemble_review_result(
     return ReviewResult(
         metadata=metadata,
         summary=summary,
-        checklist=outcome.merged.checklist,
         findings=filtered_findings,
-        pr_summary=outcome.merged.pr_summary,
-        verdict_reasoning=outcome.merged.verdict_reasoning,
-        file_assessments=outcome.merged.file_assessments,
+        pr_summary=pr_summary,
+        verdict_reasoning=verdict_reasoning,
         coverage=coverage,
         coverage_records=coverage_records,
         flagged_files=flagged_files,
@@ -461,7 +480,6 @@ def empty_review_result(
     return ReviewResult(
         metadata=metadata,
         summary="No changes found to review.",
-        checklist=(),
         findings=(),
         coverage=CoverageCounts(),
     )

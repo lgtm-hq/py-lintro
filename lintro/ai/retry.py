@@ -23,6 +23,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
     AIRateLimitError,
 )
+from lintro.ai.output_exhaustion import is_output_exhaustion_error
 
 # Defaults
 DEFAULT_MAX_RETRIES = 3
@@ -105,6 +106,25 @@ async def _sleep_before_retry(
         f"AI retry {attempt + 1}/{budget}: {error}, waiting {delay:.1f}s",
     )
     await asyncio.sleep(delay)
+
+
+def _is_output_exhausted(*, error: BaseException) -> bool:
+    """Return whether ``error`` is an output-ceiling overrun.
+
+    The same request produces the same overrun, and each repeat is a billable
+    call the budget cannot see, so the retry loop re-raises it and the review
+    layer splits the work instead (#1967).
+
+    Args:
+        error: The provider error the retry loop caught.
+
+    Returns:
+        True when the error is a provider error carrying an output-exhaustion
+        signature.
+    """
+    return isinstance(error, AIProviderError) and is_output_exhaustion_error(
+        str(error),
+    )
 
 
 def with_retry(
@@ -221,7 +241,9 @@ def with_retry(
                     )
                     rate_limit_retries += 1
                 except AIProviderError as e:
-                    if transient_retries >= max_retries:
+                    if transient_retries >= max_retries or _is_output_exhausted(
+                        error=e,
+                    ):
                         raise
                     await _sleep_before_retry(
                         error=e,

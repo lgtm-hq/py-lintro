@@ -734,7 +734,6 @@ def _review_result_with_sources() -> ReviewResult:
             max_cost_usd_source="env",
         ),
         summary="Safe to merge.",
-        checklist=(),
         findings=(),
     )
 

@@ -41,10 +41,11 @@ treat it as evidence that such a file was not updated, not touched, or missing a
 
 ---
 
-### Mandatory checklist (complete all {checklist_count} before finalizing)
+### Review checklist ({checklist_count} items to check the diff against)
 
-Answer every item and record it in `checklist` with brief evidence (file:line). A
-**yes** is NOT a finding unless it also identifies a defect.
+Check the diff against every item. Do not answer the items: report a finding, with
+file:line evidence, for each item where the diff has a defect, and nothing for items
+that hold. A concern is NOT a finding unless it also identifies a defect.
 
 {checklist}
 

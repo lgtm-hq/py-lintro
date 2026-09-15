@@ -1,4 +1,4 @@
-"""Tests for narrative review outputs end to end through the pipeline (#1907)."""
+"""Tests for the findings-only chunk contract and the narrative surfaces (#1907, lintro-ops #37)."""
 
 from __future__ import annotations
 
@@ -12,12 +12,7 @@ from lintro.ai.cli_schemas import REVIEW_CLI_SCHEMA
 from lintro.ai.prompts.review import REVIEW_OUTPUT_SCHEMA, format_output_rules
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.merge import (
-    ChunkReviewPartial,
-    merge_pr_summaries,
-    merge_review_results,
-)
-from lintro.ai.review.models.file_assessment import FileAssessment
+from lintro.ai.review.merge import ChunkReviewPartial, merge_review_results
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -60,34 +55,20 @@ def _response() -> AIResponse:
     )
 
 
-def _partial(
-    *,
-    summary: str = "",
-    pr_summary: ReviewSummary | None = None,
-    verdict_reasoning: VerdictReasoning | None = None,
-    file_assessments: tuple[FileAssessment, ...] = (),
-) -> ChunkReviewPartial:
-    """Build a chunk partial carrying only the narrative fields under test.
+def _partial(*, findings: tuple[ReviewFinding, ...] = ()) -> ChunkReviewPartial:
+    """Build a findings-only chunk partial.
 
     Args:
-        summary: Flat summary text.
-        pr_summary: Structured summary, if any.
-        verdict_reasoning: Verdict reasoning, if any.
-        file_assessments: Per-file assessments.
+        findings: Findings the chunk reported.
 
     Returns:
         The constructed partial.
     """
     return ChunkReviewPartial(
-        summary=summary,
-        checklist=(),
-        findings=(),
+        findings=findings,
         input_tokens=0,
         output_tokens=0,
         cost_estimate=0.0,
-        pr_summary=pr_summary,
-        verdict_reasoning=verdict_reasoning,
-        file_assessments=file_assessments,
     )
 
 
@@ -113,122 +94,52 @@ def _payload() -> dict[str, Any]:
     }
 
 
-def test_payload_to_partial_carries_narrative_fields() -> None:
-    """A chunk partial keeps the structured narrative alongside the flat text."""
+def test_payload_to_partial_ignores_narrative_keys() -> None:
+    """A chunk answer is findings only; narrative keys are ignored, not parsed."""
     partial = payload_to_partial(response=_response(), payload=_payload())
 
-    assert_that(partial.summary).is_equal_to("Adds narrative outputs.")
-    assert_that(_require(partial.pr_summary).walkthrough[0].text).is_equal_to(
-        "Extends the schema.",
-    )
-    assert_that(_require(partial.verdict_reasoning).deciding_factor).is_equal_to(
-        "Nothing blocks the merge.",
-    )
-    assert_that(partial.file_assessments[0].file).is_equal_to("a.py")
+    assert_that(partial.findings).is_empty()
+    assert_that(partial.flagged_files).is_empty()
+    for name in ("summary", "pr_summary", "file_assessments", "checklist"):
+        assert_that(hasattr(partial, name)).described_as(name).is_false()
 
 
-def test_payload_to_partial_degrades_on_legacy_payload() -> None:
-    """A findings-only legacy payload still produces a usable partial."""
+def test_payload_to_partial_reads_a_findings_only_payload() -> None:
+    """The findings-only contract parses findings and re-read flags."""
     partial = payload_to_partial(
         response=_response(),
-        payload={"summary": "Merge with fixes.", "checklist": [], "findings": []},
+        payload={
+            "findings": [
+                {
+                    "severity": "P2",
+                    "category": "logic-bug",
+                    "file": "a.py",
+                    "line": 3,
+                    "title": "Off by one",
+                    "description": "d",
+                    "cause": "c",
+                    "fix": "f",
+                    "confidence": "high",
+                },
+            ],
+            "flagged_files": [{"path": "b.py", "reason": "re-read"}],
+        },
     )
 
-    assert_that(partial.summary).is_equal_to("Merge with fixes.")
-    assert_that(partial.pr_summary).is_none()
-    assert_that(partial.verdict_reasoning).is_none()
-    assert_that(partial.file_assessments).is_empty()
+    assert_that(partial.findings).is_length(1)
+    assert_that(partial.findings[0].title).is_equal_to("Off by one")
+    assert_that(partial.flagged_files).is_length(1)
 
 
-def test_merge_pr_summaries_drops_an_all_blank_headline_result() -> None:
-    """A merge with no usable headline text returns None, not a blank one.
+def test_merge_review_results_carries_findings_only() -> None:
+    """The merged shell has no narrative of its own; synthesis writes it."""
+    merged = merge_review_results(partials=[_partial(), _partial()])
 
-    parse_review_summary treats a summary with bullets but no headline as
-    non-None (is_empty requires both fields absent), so every chunk can
-    contribute a headline-less summary. Joining empty headlines would then
-    leave a structurally invalid ReviewSummary(headline="", ...) that
-    renderers would print as a blank heading line.
-    """
-    merged = merge_pr_summaries(
-        partials=[
-            _partial(
-                pr_summary=ReviewSummary(
-                    headline="",
-                    walkthrough=(SummaryBullet(text="Parses the payload."),),
-                ),
-            ),
-            _partial(
-                pr_summary=ReviewSummary(
-                    headline="",
-                    walkthrough=(SummaryBullet(text="Threads it through."),),
-                ),
-            ),
-        ],
-    )
-
-    assert_that(merged).is_none()
-
-
-def test_merge_review_results_merges_narrative_across_chunks() -> None:
-    """Headlines join, bullets deduplicate, and file assessments key by path."""
-    merged = merge_review_results(
-        partials=[
-            _partial(
-                summary="First chunk.",
-                pr_summary=ReviewSummary(
-                    headline="Adds a parser.",
-                    walkthrough=(SummaryBullet(text="Parses the payload."),),
-                ),
-                verdict_reasoning=VerdictReasoning(
-                    deciding_factor="Nothing blocks the merge.",
-                    files_needing_attention=("a.py",),
-                ),
-                file_assessments=(FileAssessment(file="a.py", overview="Parser."),),
-            ),
-            _partial(
-                summary="Second chunk.",
-                pr_summary=ReviewSummary(
-                    headline="Wires it in.",
-                    walkthrough=(
-                        SummaryBullet(text="Parses the payload."),
-                        SummaryBullet(text="Threads it through."),
-                    ),
-                ),
-                verdict_reasoning=VerdictReasoning(
-                    deciding_factor="Ignored — the first chunk's prose wins.",
-                    files_needing_attention=("b.py",),
-                ),
-                file_assessments=(FileAssessment(file="b.py", overview="Wiring."),),
-            ),
-        ],
-    )
-
-    assert_that(_require(merged.pr_summary).headline).is_equal_to(
-        "Adds a parser. Wires it in.",
-    )
-    assert_that(
-        [bullet.text for bullet in _require(merged.pr_summary).walkthrough],
-    ).is_equal_to(
-        ["Parses the payload.", "Threads it through."],
-    )
-    assert_that(_require(merged.verdict_reasoning).deciding_factor).is_equal_to(
-        "Nothing blocks the merge.",
-    )
-    assert_that(_require(merged.verdict_reasoning).files_needing_attention).is_equal_to(
-        ("a.py", "b.py"),
-    )
-    assert_that([item.file for item in merged.file_assessments]).is_equal_to(
-        ["a.py", "b.py"],
-    )
-
-
-def test_merge_review_results_without_narrative_yields_none() -> None:
-    """Chunks that produced no narrative merge to the degraded shape."""
-    merged = merge_review_results(partials=[_partial(summary="Only text.")])
-
+    assert_that(merged.summary).is_equal_to("")
     assert_that(merged.pr_summary).is_none()
     assert_that(merged.verdict_reasoning).is_none()
-    assert_that(merged.file_assessments).is_empty()
+    assert_that(hasattr(merged, "file_assessments")).is_false()
+    assert_that(hasattr(merged, "checklist")).is_false()
 
 
 def test_review_result_to_dict_includes_narrative_and_verdict() -> None:
@@ -264,7 +175,6 @@ def test_review_result_to_dict_includes_narrative_and_verdict() -> None:
             walkthrough=(SummaryBullet(text="Parses.", finding_ref="a.py:1"),),
         ),
         verdict_reasoning=VerdictReasoning(deciding_factor="A crash on merge."),
-        file_assessments=(FileAssessment(file="a.py", overview="Parser."),),
     )
 
     payload = review_result_to_dict(result=result)
@@ -276,7 +186,8 @@ def test_review_result_to_dict_includes_narrative_and_verdict() -> None:
     assert_that(payload["verdict_reasoning"]["deciding_factor"]).is_equal_to(
         "A crash on merge.",
     )
-    assert_that(payload["file_assessments"]).is_length(1)
+    assert_that(payload).does_not_contain_key("file_assessments")
+    assert_that(payload).does_not_contain_key("checklist")
 
 
 def test_review_result_to_dict_degrades_without_narrative() -> None:
@@ -300,21 +211,15 @@ def test_review_result_to_dict_degrades_without_narrative() -> None:
 
     assert_that(payload["pr_summary"]).is_none()
     assert_that(payload["verdict_reasoning"]).is_none()
-    assert_that(payload["file_assessments"]).is_empty()
+    assert_that(payload).does_not_contain_key("file_assessments")
     assert_that(payload["readiness_verdict"]).is_equal_to(ReviewVerdict.READY.value)
 
 
-def test_prompt_output_schema_declares_narrative_fields() -> None:
-    """The prompt schema is valid JSON declaring every narrative field."""
+def test_prompt_output_schema_is_findings_only() -> None:
+    """The chunk prompt schema declares findings and re-read flags, nothing else."""
     schema = json.loads(REVIEW_OUTPUT_SCHEMA)
 
-    assert_that(schema["summary"]).contains_key("headline", "walkthrough")
-    assert_that(schema["verdict_reasoning"]).contains_key(
-        "deciding_factor",
-        "failure_mechanism",
-        "files_needing_attention",
-    )
-    assert_that(schema["file_assessments"][0]).contains_key("file", "overview")
+    assert_that(set(schema)).is_equal_to({"findings", "flagged_files"})
     assert_that(schema["findings"][0]["title"]).contains("single-line")
 
 
@@ -324,18 +229,10 @@ def test_cli_schema_matches_prompt_schema_fields() -> None:
     prompt_schema = json.loads(REVIEW_OUTPUT_SCHEMA)
 
     assert_that(set(properties)).is_equal_to(set(prompt_schema))
-    assert_that(set(properties["summary"]["properties"])).is_equal_to(
-        set(prompt_schema["summary"]),
-    )
+    assert_that(REVIEW_CLI_SCHEMA["required"]).is_equal_to(["findings"])
     assert_that(set(properties["findings"]["items"]["properties"])).is_equal_to(
         set(prompt_schema["findings"][0]),
     )
-    assert_that(set(properties["verdict_reasoning"]["properties"])).is_equal_to(
-        set(prompt_schema["verdict_reasoning"]),
-    )
-    assert_that(
-        set(properties["file_assessments"]["items"]["properties"]),
-    ).is_equal_to(set(prompt_schema["file_assessments"][0]))
 
 
 def test_output_rules_forbid_a_model_supplied_verdict() -> None:
@@ -343,9 +240,10 @@ def test_output_rules_forbid_a_model_supplied_verdict() -> None:
     rules = format_output_rules(checklist_count=3)
 
     assert_that(rules).contains("Do not score or state a verdict")
-    assert_that(rules).contains("computed by")
+    assert_that(rules).contains("findings only")
+    assert_that(rules).contains("a later pass writes the summary")
     assert_that(rules).contains("single line with no line breaks")
-    assert_that(rules).contains("**3**")
+    assert_that(rules).does_not_contain("checklist entries")
 
 
 def test_prompt_rubric_names_the_same_verdicts_as_the_code_rubric() -> None:

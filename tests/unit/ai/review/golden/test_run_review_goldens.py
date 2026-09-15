@@ -251,4 +251,3 @@ def test_run_review_findings_match_the_merge_golden() -> None:
     )
 
     assert_that(to_jsonable(result.findings)).is_equal_to(merged["findings"])
-    assert_that(to_jsonable(result.checklist)).is_equal_to(merged["checklist"])

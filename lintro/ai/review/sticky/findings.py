@@ -24,10 +24,12 @@ from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.sticky_plan import StickyPlan
+from lintro.ai.review.posting_tiers import split_records_by_tier
 from lintro.ai.review.sticky.cells import (
     _cell,
     _delta_cell,
     _finding_cell,
+    _inline_cell,
     _inline_safe,
     _location,
     _plural,
@@ -116,14 +118,19 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
     lines = [heading]
     if note:
         lines.extend(["", note])
-    lines.extend(
-        [
-            "",
-            "| Δ | Sev | Finding | Where | Since |",
-            "|:-:|:-:|---|---|---|",
-        ],
-    )
-    for record in open_records:
+    # Only the inline tier sits in the Δ table; P3 nits open no thread and
+    # are indexed under their own disclosure below it (lintro-ops #37). Fixed
+    # rows keep every severity so a fixed nit still reads as fixed.
+    inline_records, nit_records = split_records_by_tier(records=open_records)
+    if inline_records or fixed_now:
+        lines.extend(
+            [
+                "",
+                "| Δ | Sev | Finding | Where | Since |",
+                "|:-:|:-:|---|---|---|",
+            ],
+        )
+    for record in inline_records:
         lines.append(
             f"| {_delta_cell(record=record, match=match)} "
             f"| {_severity_cell(record=record)} "
@@ -139,8 +146,77 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
             f"| `{_location(record=record)}` "
             f"| round {record.since_round} |",
         )
+    lines.extend(_nits_block(records=nit_records, match=match))
     lines.extend(markers)
     return "\n".join(lines)
+
+
+def _nits_block(
+    *,
+    records: list[FindingRecord],
+    match: FindingMatchResult,
+) -> list[str]:
+    """Render the collapsed index of open P3 nits (lintro-ops #37).
+
+    A nit is a tracked record like any other, but it opens no inline thread:
+    the sticky is its only surface, so each row carries the title, a
+    compressed description and the fix when there is one, under a disclosure
+    that keeps the Δ table to the findings a reader must act on.
+
+    Args:
+        records: Open sticky-only records, already ordered and limited.
+        match: Cross-round matching outcome, for the ``Δ`` column.
+
+    Returns:
+        The block's lines, or an empty list when there are no nits.
+    """
+    if not records:
+        return []
+    count = len(records)
+    lines = [
+        "",
+        f"<details><summary>🟡 {count} P3 "
+        f"{_plural(count=count, noun='nit')} (not posted inline)</summary>",
+        "",
+        "| Δ | Finding | Where |",
+        "|:-:|---|---|",
+    ]
+    for record in records:
+        lines.append(
+            f"| {_delta_cell(record=record, match=match)} "
+            f"| {_nit_cell(record=record)} "
+            f"| `{_location(record=record)}` |",
+        )
+    lines.extend(["", "</details>"])
+    return lines
+
+
+#: Longest a nit's description and fix may run in the sticky table.
+_NIT_DESCRIPTION_LIMIT = 160
+_NIT_FIX_LIMIT = 120
+
+
+def _nit_cell(*, record: FindingRecord) -> str:
+    """Render a nit's title, description and fix as one table cell.
+
+    Args:
+        record: The open P3 record.
+
+    Returns:
+        ``**title**`` followed, on ``<br>``-separated lines, by the compressed
+        description and a ``Fix:`` line when the record carries one. The cell
+        renders inside ``_nits_block``'s disclosure, so it is sanitized with
+        ``_inline_cell``: a model-written ``</details>`` in any of the three
+        fields would otherwise close the disclosure early.
+    """
+    parts = [f"**{_inline_cell(text=record.title, limit=_TITLE_LIMIT)}**"]
+    if record.description.strip():
+        parts.append(
+            _inline_cell(text=record.description, limit=_NIT_DESCRIPTION_LIMIT),
+        )
+    if record.fix.strip():
+        parts.append(f"Fix: {_inline_cell(text=record.fix, limit=_NIT_FIX_LIMIT)}")
+    return "<br>".join(parts)
 
 
 def _pruning_markers(*, dropped_open: int, dropped_fixed: int) -> list[str]:
@@ -216,13 +292,17 @@ def _open_findings_section(
     if total == 0:
         return "### Open findings (0)\n\n✅ Nothing open."
 
-    lines = [
-        f"### Open findings ({total})",
-        "",
-        "| Δ | Sev | Finding | Where | Since |",
-        "|:-:|:-:|---|---|---|",
-    ]
-    for record in records:
+    inline_records, nit_records = split_records_by_tier(records=records)
+    lines = [f"### Open findings ({total})"]
+    if inline_records:
+        lines.extend(
+            [
+                "",
+                "| Δ | Sev | Finding | Where | Since |",
+                "|:-:|:-:|---|---|---|",
+            ],
+        )
+    for record in inline_records:
         lines.append(
             f"| {_delta_cell(record=record, match=match)} "
             f"| {_severity_cell(record=record)} "
@@ -230,6 +310,7 @@ def _open_findings_section(
             f"| `{_location(record=record)}` "
             f"| round {record.since_round} |",
         )
+    lines.extend(_nits_block(records=nit_records, match=match))
     dropped = total - len(records)
     if dropped > 0:
         lines.extend(["", _open_pruning_marker(dropped=dropped)])

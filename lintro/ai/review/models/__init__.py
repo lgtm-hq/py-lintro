@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from lintro.ai.review.models.agent_prompt_scope import AgentPromptScope
 from lintro.ai.review.models.changed_file import ChangedFile
-from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.checklist_item import ChecklistItem
 from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.chunk_timing import ChunkTiming
 from lintro.ai.review.models.chunking_result import ChunkingResult
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
-from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
@@ -41,14 +39,12 @@ from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 __all__ = [
     "AgentPromptScope",
     "ChangedFile",
-    "ChecklistAnswer",
     "ChecklistItem",
     "ChunkSummary",
     "ChunkTiming",
     "ChunkingResult",
     "ConvergenceDecision",
     "CoverageDegradation",
-    "FileAssessment",
     "FileClassification",
     "FindingMatchResult",
     "FindingOccurrence",

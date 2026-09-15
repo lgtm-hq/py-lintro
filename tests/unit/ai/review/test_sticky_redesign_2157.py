@@ -58,7 +58,11 @@ def test_complete_round_matches_variant_a(sample_review_result: ReviewResult) ->
     assert_that(body).contains("## 🔎 Lintro Review — 🟡 Nits only")
     assert_that(body).contains("### Findings · Round 1 · `abc1234`")
     assert_that(body).contains("✅ 3/3 at HEAD")
-    assert_that(body).contains("| Δ | Sev | Finding | Where | Since |")
+    # The round's only finding is a P3: it is indexed under the nits
+    # disclosure, not in the Δ table (lintro-ops #37 posting tiers).
+    assert_that(body).does_not_contain("| Δ | Sev | Finding | Where | Since |")
+    assert_that(body).contains("🟡 1 P3 nit (not posted inline)")
+    assert_that(body).contains("| Δ | Finding | Where |")
     assert_that(body).contains("**new**")
     assert_that(body).contains("**This run**")
     assert_that(body).contains("| model | transport | est. cost | tokens in / out |")

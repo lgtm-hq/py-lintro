@@ -93,8 +93,6 @@ async def run_adversarial_pass(
     except (json.JSONDecodeError, ValueError):
         logger.warning("Failed to parse adversarial sweep response")
         return ChunkReviewPartial(
-            summary="",
-            checklist=(),
             findings=(),
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
@@ -104,8 +102,6 @@ async def run_adversarial_pass(
     if not isinstance(payload, dict):
         logger.warning("Adversarial sweep payload was not an object")
         return ChunkReviewPartial(
-            summary="",
-            checklist=(),
             findings=(),
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
@@ -115,8 +111,6 @@ async def run_adversarial_pass(
     findings_raw = payload.get("findings", [])
     findings = parse_findings(raw_findings=findings_raw)
     return ChunkReviewPartial(
-        summary="",
-        checklist=(),
         findings=findings,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,

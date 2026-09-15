@@ -89,11 +89,6 @@ def emitted(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     )
     monkeypatch.setattr(
         review_command,
-        "enrich_review_result",
-        lambda *, result, question_map: result,
-    )
-    monkeypatch.setattr(
-        review_command,
         "_execute_advisory",
         lambda **kwargs: [],
     )

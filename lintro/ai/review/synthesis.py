@@ -1,25 +1,18 @@
-"""Final cross-chunk synthesis pass for ``lintro review`` (issue #2269).
+"""The round's synthesis pass for ``lintro review`` (#2269, lintro-ops #37).
 
-Every review chunk is reviewed in isolation: its prompt carries only its own
-files' diff. A bug that exists solely in the *combination* of two files split
-across chunks is therefore invisible to every chunk — a signature changed in
-one file with a caller updated to the wrong shape in another, a config key
-renamed in one file with a consumer left reading the old name. Symmetrically,
-a chunk that cannot see the other half invents phantoms about it.
+Every review chunk reports findings only and sees only its own files' diff.
+This module is the one extra provider call per round that closes both gaps:
+after the chunk findings are merged, it shows the model the whole
+changed-file list, a digest of every reported finding, and as much of the
+whole-PR diff as its token budget allows, and asks for the round's summary
+and verdict reasoning, for duplicate findings that share a root cause, and
+for inconsistencies *between* files reviewed in different chunks.
 
-This module is the one extra provider call that closes that gap: after the
-chunk findings are merged, it shows the model the whole changed-file list, a
-compact per-chunk digest, and as much of the whole-PR diff as its token budget
-allows, and asks only for inconsistencies *between* files reviewed in
-different chunks.
-
-Off by default (``review.synthesis.enabled``) so the cost and wall-clock delta
-can be measured on the #2148 timing surfaces before it is switched on.
-
-The pass is deliberately a single seam: :func:`run_synthesis_pass` is called
-from exactly one place in the orchestrator's finalize step, and it owns all of
-its own prompt building, budgeting, parsing, and filtering. #1972 Phase 4 can
-move that call without touching anything in here.
+On by default (``review.synthesis.enabled``). The pass is deliberately a
+single seam: :func:`run_synthesis_pass` is called from exactly one place in
+the orchestrator's finalize step, and it owns all of its own prompt building,
+budgeting, parsing, and filtering. A failure never ends the run: the chunk
+findings stand, the narrative is absent, and ``synthesis_failed`` is recorded.
 """
 
 from __future__ import annotations
@@ -32,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from lintro.ai.cli_schemas import cli_schema_for_synthesis
 from lintro.ai.invoke import call_ai
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -42,9 +36,16 @@ from lintro.ai.review.models.coverage_degradation import (
     CoverageDegradation,
 )
 from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
+from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 from lintro.ai.review.sensitivity import filter_findings_by_policy
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
+from lintro.ai.review.synthesis_narrative import (
+    apply_duplicate_groups,
+    finding_ids,
+    parse_synthesis_envelope,
+)
 from lintro.ai.review.synthesis_prompt import (
     build_synthesis_prompt,
     guarded_changed_paths,
@@ -84,12 +85,6 @@ class _SynthesisInterruptedError(Exception):
     """
 
 
-#: ``findings_cap`` stamped on a synthesis coverage degradation. The synthesis
-#: reasons are excluded from ``ReviewMetadata.findings_cap_applied``, so this
-#: is a placeholder and never read as a per-call ceiling.
-_SYNTHESIS_NO_CAP = 0
-
-
 @dataclass(frozen=True, slots=True)
 class SynthesisPass:
     """Everything one synthesis pass contributed to a run.
@@ -107,6 +102,12 @@ class SynthesisPass:
         input_tokens: Prompt tokens the extra call consumed.
         output_tokens: Completion tokens the extra call produced.
         cost_estimate: Estimated USD cost of the extra call.
+        summary: The round's headline and walkthrough, or ``None`` when the
+            pass failed or wrote none.
+        verdict_reasoning: The round's verdict explanation, or ``None``.
+        merged_findings: The chunk findings after the pass's duplicate merges
+            were applied, or ``None`` when the pass failed (the caller keeps
+            the unmerged set).
     """
 
     findings: tuple[ReviewFinding, ...] = field(default_factory=tuple)
@@ -115,6 +116,9 @@ class SynthesisPass:
     input_tokens: int = 0
     output_tokens: int = 0
     cost_estimate: float = 0.0
+    summary: ReviewSummary | None = None
+    verdict_reasoning: VerdictReasoning | None = None
+    merged_findings: tuple[ReviewFinding, ...] | None = None
 
 
 def should_run_synthesis(
@@ -122,11 +126,11 @@ def should_run_synthesis(
     config: ReviewSynthesisConfig | None,
     chunks_reviewed: int,
 ) -> bool:
-    """Decide whether the cross-chunk synthesis pass applies to this run.
+    """Decide whether the synthesis pass applies to this run.
 
-    The pass exists to reason across a chunk boundary, so a run that had no
-    boundary to cross gets nothing from it and must not be charged for an
-    extra call.
+    The pass writes the round's summary and verdict reasoning, so it applies
+    to every run that reviewed at least one chunk — a single-chunk PR needs
+    its narrative as much as a ten-chunk one (lintro-ops milestone 0).
 
     Args:
         config: Resolved synthesis configuration, or ``None`` when the caller
@@ -134,12 +138,11 @@ def should_run_synthesis(
         chunks_reviewed: Number of chunks that actually completed.
 
     Returns:
-        True when the pass is enabled and the run reviewed more than one
-        chunk.
+        True when the pass is enabled and at least one chunk was reviewed.
     """
     if config is None or not config.enabled:
         return False
-    return chunks_reviewed > 1
+    return chunks_reviewed >= 1
 
 
 def _failed_pass(
@@ -166,7 +169,6 @@ def _failed_pass(
         CoverageDegradation(
             reason=CoverageDegradationReason.SYNTHESIS_FAILED,
             chunk_index=SYNTHESIS_CHUNK_INDEX,
-            findings_cap=_SYNTHESIS_NO_CAP,
         ),
     ]
     if truncated:
@@ -175,7 +177,6 @@ def _failed_pass(
             CoverageDegradation(
                 reason=CoverageDegradationReason.SYNTHESIS_TRUNCATED,
                 chunk_index=SYNTHESIS_CHUNK_INDEX,
-                findings_cap=_SYNTHESIS_NO_CAP,
             ),
         )
     return SynthesisPass(
@@ -329,6 +330,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
         context=context,
         summaries=summaries,
         diff_budget=diff_budget,
+        finding_ids=finding_ids(findings=existing_findings),
     )
     truncated = plan.truncated
     system_prompt, user_prompt = build_synthesis_prompt(
@@ -347,6 +349,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
                 budget=budget,
                 repo_root=repo_root or None,
                 use_one_shot=use_one_shot,
+                cli_schema=cli_schema_for_synthesis(transport=ai_config.transport),
             ),
             stop=stop,
         )
@@ -384,6 +387,16 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             output_tokens=response.output_tokens,
             cost_estimate=response.cost_estimate,
         )
+    narrative = parse_synthesis_envelope(content=response.content)
+    if narrative.summary is None:
+        logger.warning(
+            "The synthesis pass answered without a usable summary; the round "
+            "renders without a headline and walkthrough.",
+        )
+    merged_findings, duplicates_merged = apply_duplicate_groups(
+        findings=existing_findings,
+        groups=narrative.duplicates,
+    )
 
     tagged = tuple(
         replace(finding, origin=FindingOrigin.SYNTHESIS) for finding in parsed
@@ -405,7 +418,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
     # exists to surface.
     deduplicated = deduplicate_synthesis_findings(
         candidates=guarded,
-        existing=existing_findings,
+        existing=merged_findings,
     )
     kept = deduplicated[: max(config.max_findings, 1)]
 
@@ -414,7 +427,6 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             CoverageDegradation(
                 reason=CoverageDegradationReason.SYNTHESIS_TRUNCATED,
                 chunk_index=SYNTHESIS_CHUNK_INDEX,
-                findings_cap=_SYNTHESIS_NO_CAP,
             ),
         )
         if truncated
@@ -430,9 +442,18 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             findings_added=len(kept),
             truncated=truncated,
             failed=False,
+            duplicates_merged=duplicates_merged,
+            # The narrative is the pass's primary output: a reply missing
+            # either half of it is degraded, not a quieter success.
+            narrative_missing=(
+                narrative.summary is None or narrative.verdict_reasoning is None
+            ),
         ),
         degradations=degradations,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
+        summary=narrative.summary,
+        verdict_reasoning=narrative.verdict_reasoning,
+        merged_findings=merged_findings,
     )

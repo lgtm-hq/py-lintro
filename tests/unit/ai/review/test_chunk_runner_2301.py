@@ -8,8 +8,9 @@ review it protects), and the built-in review passes share exactly one
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
 
 from assertpy import assert_that
@@ -71,8 +72,6 @@ def _partial() -> ChunkReviewPartial:
         A partial that reviewed the fixture file and reported nothing.
     """
     return ChunkReviewPartial(
-        summary="",
-        checklist=(),
         findings=(),
         input_tokens=0,
         output_tokens=0,
@@ -143,6 +142,32 @@ def test_checkpoint_writer_numbers_parts_monotonically(tmp_path: Path) -> None:
         checkpoint([_partial()])
 
     assert_that(written).is_equal_to([1, 2])
+
+
+def test_checkpoint_writer_marks_a_truncated_chunk_on_its_record(
+    tmp_path: Path,
+) -> None:
+    """An in-flight checkpoint credits a cut file but stamps the truncation.
+
+    Args:
+        tmp_path: Pytest temporary directory used as the state directory.
+    """
+    context = _context()
+    checkpoint = _writer(context)
+    states: list[Any] = []
+
+    with (
+        patch.dict("os.environ", {"LINTRO_REVIEW_STATE_DIR": str(tmp_path)}),
+        patch(
+            "lintro.ai.review.incremental_coverage.write_state_part",
+            side_effect=lambda **kwargs: states.append(kwargs["state"]),
+        ),
+    ):
+        checkpoint([replace(_partial(), truncated=True)])
+
+    records = {record.path: record for record in states[-1].coverage}
+    assert_that(records).contains_key("src/app.py")
+    assert_that(records["src/app.py"].truncated).is_true()
 
 
 def test_checkpoint_writer_survives_a_failed_part(tmp_path: Path) -> None:

@@ -402,14 +402,24 @@ class AIConfig(BaseModel):
             "a zero-unresolved-threads rule."
         ),
     )
-    cli_max_diff_tokens: int = Field(
-        default=24_000,
+    review_chunk_diff_tokens: int = Field(
+        default=7_000,
         ge=1_000,
         description=(
-            "Per-chunk diff token budget under --transport cli. The "
-            "context-window budget alone is far too large for a single CLI "
-            "call (timeout / 32k output-token exhaustion on ~1.5k-line PRs); "
-            "this ceiling forces the semantic chunker to split large diffs."
+            "Per-chunk diff token budget on every transport (lintro-ops "
+            "milestone 0, decision A). The semantic chunker splits any diff "
+            "above it into file groups that are small enough to review at "
+            "depth and that run in parallel; the context window alone would "
+            "leave most PRs as one slow chunk."
+        ),
+    )
+    cli_max_diff_tokens: int | None = Field(
+        default=None,
+        ge=1_000,
+        description=(
+            "Deprecated alias for review_chunk_diff_tokens. When set and the "
+            "new key is not, it fills review_chunk_diff_tokens and warns; the "
+            "old key is removed not before 2026-10-15."
         ),
     )
     cli_max_diff_bytes: int = Field(
@@ -422,14 +432,14 @@ class AIConfig(BaseModel):
             "spawning an unbounded number of CLI chunks."
         ),
     )
-    cli_max_findings_per_call: int = Field(
-        default=12,
-        ge=1,
-        le=50,
+    cli_max_findings_per_call: int | None = Field(
+        default=None,
         description=(
-            "Maximum findings a single CLI review call may emit. Bounds the "
-            "JSON response so the model cannot hit the ~32k output-token cap "
-            "mid-object; overflow is summarized rather than truncated."
+            "Deprecated and ignored: the per-call findings cap was retired "
+            "(lintro-ops milestone 0, decision A). A chunk reports every "
+            "finding it has; an oversized answer splits the chunk instead of "
+            "tightening a ceiling. The key is accepted for one release so "
+            "existing configs keep loading, and it warns when set."
         ),
     )
     transcript_logging: bool = Field(
@@ -567,6 +577,62 @@ class AIConfig(BaseModel):
             # filters; also log so installed-CLI users see the migration hint.
             warnings.warn(message, DeprecationWarning, stacklevel=2)
             logger.warning(message)
+        return self
+
+    @model_validator(mode="after")
+    def _apply_deprecated_chunk_budget_alias(self) -> AIConfig:
+        """Map the deprecated ``cli_max_diff_tokens`` onto the new key.
+
+        ``ai.review_chunk_diff_tokens`` is the per-chunk budget on every
+        transport. The CLI-only spelling is accepted for one release so an
+        existing config keeps loading: when it is set and the new key is not,
+        its value becomes the budget and a deprecation warning names the
+        replacement; when both are set the new key wins.
+
+        Returns:
+            The validated configuration instance.
+        """
+        fields_set = self.model_fields_set
+        if "cli_max_diff_tokens" not in fields_set or self.cli_max_diff_tokens is None:
+            return self
+        if "review_chunk_diff_tokens" not in fields_set:
+            self.review_chunk_diff_tokens = self.cli_max_diff_tokens
+        if _SUPPRESS_DIAGNOSTICS.get():
+            return self
+        message = (
+            "ai.cli_max_diff_tokens is deprecated, use "
+            "ai.review_chunk_diff_tokens; the old key is removed not before "
+            "2026-10-15."
+        )
+        warnings.warn(message, DeprecationWarning, stacklevel=2)
+        logger.warning(message)
+        return self
+
+    @model_validator(mode="after")
+    def _warn_on_retired_findings_cap(self) -> AIConfig:
+        """Warn when the retired ``cli_max_findings_per_call`` key is set.
+
+        The per-call findings cap no longer exists (lintro-ops milestone 0,
+        decision A): a chunk reports every finding it has, and an oversized
+        answer splits the chunk instead of tightening a ceiling. The key is
+        still declared so a config that sets it keeps loading under
+        ``extra="forbid"``; the value is ignored.
+
+        Returns:
+            The validated configuration instance.
+        """
+        if "cli_max_findings_per_call" not in self.model_fields_set:
+            return self
+        if _SUPPRESS_DIAGNOSTICS.get():
+            return self
+        message = (
+            "ai.cli_max_findings_per_call is deprecated and ignored: the "
+            "per-call findings cap was retired. Remove the key; every chunk "
+            "now reports all of its findings. The key is removed not before "
+            "2026-10-15."
+        )
+        warnings.warn(message, DeprecationWarning, stacklevel=2)
+        logger.warning(message)
         return self
 
     @model_validator(mode="after")
@@ -771,9 +837,8 @@ class AIConfig(BaseModel):
             cache_max_entries=self.cache_max_entries,
             context_lines=self.context_lines,
             fix_search_radius=self.fix_search_radius,
-            cli_max_diff_tokens=self.cli_max_diff_tokens,
+            review_chunk_diff_tokens=self.review_chunk_diff_tokens,
             cli_max_diff_bytes=self.cli_max_diff_bytes,
-            cli_max_findings_per_call=self.cli_max_findings_per_call,
         )
 
     @property

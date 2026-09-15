@@ -58,12 +58,18 @@ provider seam that makes decision A's transport neutrality expressible.
   only the tiers that clear the posting policy open threads; the rest are reported
   without blocking.
 
-Delivered by: [#2269](https://github.com/lgtm-hq/py-lintro/issues/2269) (cross-chunk
-synthesis, shipped opt-in and off by default — "Cross-chunk synthesis" in
-[`docs/ai-features.md`](../ai-features.md)),
-[#2283](https://github.com/lgtm-hq/py-lintro/issues/2283) (the per-call cap surface and
-its retirement), [#2572](https://github.com/lgtm-hq/py-lintro/issues/2572) (posting
-tiers: the confidence gate and the notes block, `ai.review_inline_min_confidence` and
+Delivered by: [#2680](https://github.com/lgtm-hq/py-lintro/issues/2680) (milestone 0
+step 0.5, lintro-ops #37: small parallel file-group chunks on every transport via
+`ai.review_chunk_diff_tokens`, the findings-only chunk contract, the synthesis pass as
+the round's one narrative call — on by default and the source of the summary, the
+verdict reasoning and the duplicate merges — no per-call findings cap, and the P1/P2
+inline posting tier with P3 listed in the sticky; "The synthesis pass" and "Posting
+tiers" in [`docs/ai-features.md`](../ai-features.md)),
+[#2269](https://github.com/lgtm-hq/py-lintro/issues/2269) (the cross-chunk synthesis
+pass #2680 promoted), [#2283](https://github.com/lgtm-hq/py-lintro/issues/2283) (the
+per-call cap surface #2680 retired),
+[#2572](https://github.com/lgtm-hq/py-lintro/issues/2572) (posting tiers: the confidence
+gate and the notes block, `ai.review_inline_min_confidence` and
 `ai.review_post_questions_inline`), and
 [#2554](https://github.com/lgtm-hq/py-lintro/issues/2554) with
 [#2515](https://github.com/lgtm-hq/py-lintro/issues/2515) for transport neutrality.

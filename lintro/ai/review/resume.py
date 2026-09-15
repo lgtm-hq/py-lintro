@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
@@ -13,9 +13,12 @@ from lintro.ai.review.coverage import (
     classify_files,
     coverage_counts,
     hashes_for_diffs,
+    newest_records_by_hash,
+    own_records_at_hash,
     queue_paths,
     review_eligible_paths,
 )
+from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.import_graph import importers_of
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.coverage_record import CoverageRecord
@@ -24,7 +27,13 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
 
-__all__ = ["ResumePlan", "filter_chunks", "plan_resume", "records_for_reviewed"]
+__all__ = [
+    "ResumePlan",
+    "carried_truncated_paths",
+    "filter_chunks",
+    "plan_resume",
+    "records_for_reviewed",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,6 +157,7 @@ def records_for_reviewed(
     round_number: int,
     prior: ReviewState | None,
     stopped_reason: str = "",
+    truncated_paths: Collection[str] = (),
 ) -> tuple[CoverageRecord, ...]:
     """Merge new coverage entries onto the prior map.
 
@@ -158,10 +168,17 @@ def records_for_reviewed(
         round_number: Current round.
         prior: Previous state.
         stopped_reason: Mid-round stop, if any.
+        truncated_paths: Reviewed paths whose chunk was cut to the
+            context-window ceiling. Their records carry ``truncated``, and
+            so does every same-hash sibling credited through them: an
+            identical diff that inherited coverage inherited the cut too.
 
     Returns:
         Unioned coverage records.
     """
+    truncated_hashes = {
+        plan.hashes[path] for path in truncated_paths if plan.hashes.get(path)
+    }
     merged: dict[tuple[str, str], CoverageRecord] = {}
     if prior is not None:
         for record in prior.coverage:
@@ -176,6 +193,56 @@ def records_for_reviewed(
             reviewed_sha=head_sha,
             round=round_number,
             stopped_reason=stopped_reason,
+            truncated=(
+                item.path in truncated_paths or item.patch_hash in truncated_hashes
+            ),
         )
         merged[record.identity] = record
     return tuple(merged.values())
+
+
+def carried_truncated_paths(
+    *,
+    plan: ResumePlan,
+    prior: ReviewState | None,
+) -> tuple[str, ...]:
+    """Return covered files whose carried coverage record is truncated.
+
+    A file reviewed only up to the context-window ceiling is credited at its
+    hash so the round converges, but the gap is real until the diff changes:
+    every round that skips the file as covered re-reports it (lintro-ops
+    #37). A new hash re-reviews the file and writes a fresh record, which
+    clears the marker or sets it again.
+
+    Args:
+        plan: This round's plan.
+        prior: Previous state, or ``None`` on a first run.
+
+    Returns:
+        Sorted paths classified ``COVERED`` this round that still carry only
+        a prefix review. A file's own latest record at its current hash is
+        authoritative over any sibling's record of the same or an earlier
+        round: a complete re-review at that hash clears the file even while
+        a stale sibling record at the same hash stays marked. Only a strictly
+        newer record at the same hash from another path overrides it, because
+        a later complete review of identical content is a complete review of
+        this file too. A file with no record of its own at that hash — a
+        sampled sibling that inherited coverage — takes the newest record at
+        the hash, however many rounds ago it was written (see
+        :func:`~lintro.ai.review.coverage_rounds.truncated_patch_hashes`).
+    """
+    if prior is None:
+        return ()
+    own = own_records_at_hash(prior.coverage)
+    newest = newest_records_by_hash(prior.coverage)
+    carried: list[str] = []
+    for item in plan.classified:
+        if item.need is not FileReviewNeed.COVERED:
+            continue
+        record = own.get((item.path, item.patch_hash))
+        latest = newest.get(item.patch_hash)
+        if record is not None and (latest is None or latest.round <= record.round):
+            latest = record
+        if latest is not None and latest.truncated:
+            carried.append(item.path)
+    return tuple(sorted(carried))

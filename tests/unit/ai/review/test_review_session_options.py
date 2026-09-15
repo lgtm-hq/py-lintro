@@ -174,7 +174,6 @@ def _capturing_run_review_async(
                 checklist_items=0,
             ),
             summary="",
-            checklist=(),
             findings=(),
         )
 

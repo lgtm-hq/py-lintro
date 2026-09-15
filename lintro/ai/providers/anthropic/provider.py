@@ -184,6 +184,18 @@ class _AnthropicCliTransport(CliTransport):
         else:
             session_id = None
 
+        # The CLI envelope reports how many agent turns the call took; it is
+        # carried onto the per-chunk timings (lintro-ops #37). A bool is an
+        # int in Python and never a turn count, so it is rejected explicitly.
+        raw_turns = data.get("num_turns")
+        turns = (
+            raw_turns
+            if isinstance(raw_turns, int)
+            and not isinstance(raw_turns, bool)
+            and raw_turns >= 0
+            else None
+        )
+
         return (
             AIResponse(
                 content=self.substitute_parsed_json(content),
@@ -192,6 +204,7 @@ class _AnthropicCliTransport(CliTransport):
                 output_tokens=output_tokens,
                 cost_estimate=cost,
                 provider=AIProvider.ANTHROPIC,
+                turns=turns,
             ),
             session_id,
         )

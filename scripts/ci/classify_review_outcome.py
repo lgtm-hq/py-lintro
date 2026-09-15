@@ -10,12 +10,14 @@ nothing (#1826). This module is the decision point that fixes that — it maps a
 * **reviewed** -- a review was produced (with or without P1 findings). Green.
 * **degraded** -- a review was produced and posted, and every eligible file was
   reviewed, but not at full depth: the envelope's
-  ``findings_coverage_complete`` is false, so a chunk that hit its per-call
-  findings cap, an output-exhaustion retry, an incomplete cross-chunk synthesis
-  pass, or a failed depth-2/3 pass may have suppressed findings (#2395). A cap
-  no chunk reached is not a degradation and stays green (#2283). The findings are
-  kept; the check goes red and the annotation names every recorded reason,
-  because a partial finding set must never read as a clean pass.
+  ``findings_coverage_complete`` is false, so a chunk that was split and
+  re-reviewed after exhausting the provider output limit, an incomplete
+  cross-chunk synthesis pass, or a failed depth-2/3 pass may have suppressed
+  findings (#2395). There is no per-call findings cap (lintro-ops milestone 0,
+  decision A), so however many findings a chunk returns it stays green. The
+  findings are kept; the check goes red and the annotation names every
+  recorded reason, because a partial finding set must never read as a clean
+  pass.
 * **converged** -- the deterministic convergence stop rule (#2099) skipped the
   round before any provider call, because the last N rounds all scored below
   the configured threshold. Nothing was reviewed, but nothing needed to be, and
@@ -120,11 +122,10 @@ CONVERGED_OUTCOME: Final[str] = "converged"
 # #2395). Mirror lintro.ai.review.output.review_result_to_dict; a contract
 # test in tests/scripts/test_classify_review_outcome.py pins the names.
 # ``findings_coverage_complete`` is false whenever the run recorded any
-# coverage degradation -- a chunk that hit its per-call findings cap, an
-# output-exhaustion retry, an incomplete cross-chunk synthesis pass, or a
-# depth-2/3 pass that failed and left the chunk on its main-pass result. A
-# configured cap no chunk reached records nothing, so a normal CLI round
-# classifies ``reviewed`` (#2283).
+# coverage degradation -- a chunk split and re-reviewed after exhausting the
+# provider output limit, an incomplete cross-chunk synthesis pass, or a
+# depth-2/3 pass that failed and left the chunk on its main-pass result. No
+# per-call findings cap exists, so a normal CLI round classifies ``reviewed``.
 DEPTH_COMPLETE_KEY: Final[str] = "findings_coverage_complete"
 DEPTH_DEGRADATIONS_KEY: Final[str] = "coverage_degradations"
 

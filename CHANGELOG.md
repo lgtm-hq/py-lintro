@@ -11,11 +11,40 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai/review**: review every transport in small parallel file-group chunks
+  (`ai.review_chunk_diff_tokens`, default 7000) with a findings-only chunk contract; the
+  synthesis pass now runs by default on every round and writes the summary, walkthrough
+  and verdict reasoning, merges duplicate findings (`duplicates_merged` in the
+  `synthesis` JSON block) and reports cross-file findings; inline threads are posted for
+  P1/P2 only, with P3 nits listed in the sticky comment; per-call wall time and
+  transport-reported turns are recorded in the chunk timings (#2680, lintro-ops
+  milestone 0 step 0.5)
+- `lintro review` reviews a single file that exceeds the per-chunk target whole, up to
+  the context-window remainder, and records a `diff_truncated` coverage degradation when
+  the file had to be cut; the synthesis JSON block carries `narrative_missing`.
+
 ### Changed
+
+- **ai/review**: the chunk answer is `findings` and `flagged_files` only; the
+  `file_assessments` and `checklist` keys are gone from the review JSON and the MCP
+  payload, and `summary` / `pr_summary` / `verdict_reasoning` come from the synthesis
+  pass (null when it did not run or failed); `review.synthesis.enabled` defaults to
+  `true`; `ai.max_parallel_calls` is clamped to 3 on the CLI transport unless set
+  explicitly (#2680)
 
 ### Deprecated
 
+- **ai/review**: `ai.cli_max_diff_tokens` (use `ai.review_chunk_diff_tokens`) and
+  `ai.cli_max_findings_per_call` (no-op) are still accepted with a warning; both are
+  removed not before 2026-10-15 (#2680)
+
 ### Removed
+
+- **ai/review**: the enforced per-call findings cap (`findings_cap_applied`, the
+  `findings_cap` degradation field, the tighter-cap retry); the
+  `ai.cli_max_findings_per_call` key itself stays a deprecated no-op (see Deprecated).
+  An oversized chunk answer splits the chunk by file and reviews each half instead
+  (#2680)
 
 ### Fixed
 

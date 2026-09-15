@@ -42,7 +42,7 @@ __all__ = [
 ]
 
 # Depth ≥ 2 generates 5–10 checklist questions per chunk. Parallel chunks get
-# disjoint id ranges so merge_checklist_answers does not collide across chunks.
+# disjoint id ranges so a finding's checklist_ids stay unambiguous across chunks.
 GENERATED_CHECKLIST_ID_STRIDE = 32
 
 
@@ -96,8 +96,6 @@ async def generate_extra_checklist(
         use_one_shot=use_one_shot,
     )
     usage = ChunkReviewPartial(
-        summary="",
-        checklist=(),
         findings=(),
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
@@ -123,7 +121,7 @@ async def generate_extra_checklist(
         # The prompt asks for 5-10 questions, but the count is model-controlled.
         # Parallel chunks get disjoint id ranges of GENERATED_CHECKLIST_ID_STRIDE,
         # so accepting more than the stride would collide with the next chunk's
-        # range and corrupt merge_checklist_answers.
+        # range and make a finding's checklist_ids ambiguous.
         if next_id - next_generated_checklist_id >= GENERATED_CHECKLIST_ID_STRIDE:
             logger.warning(
                 "Generated checklist overflow: keeping the first "

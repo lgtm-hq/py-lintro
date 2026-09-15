@@ -331,7 +331,6 @@ def test_a_p1_question_does_not_fail_the_process() -> None:
     result = ReviewResult(
         metadata=_placeholder_metadata(),
         summary="s",
-        checklist=(),
         findings=(question,),
     )
 
@@ -355,7 +354,6 @@ def test_has_p1_findings_after_lowercase_normalization() -> None:
     result = ReviewResult(
         metadata=_placeholder_metadata(),
         summary="s",
-        checklist=(),
         findings=findings,
     )
 
@@ -378,7 +376,6 @@ def test_has_p1_findings_true_for_blocking_synonym() -> None:
     result = ReviewResult(
         metadata=_placeholder_metadata(),
         summary="s",
-        checklist=(),
         findings=findings,
     )
 
@@ -395,7 +392,6 @@ def test_has_p1_findings_true_for_gibberish_severity() -> None:
     result = ReviewResult(
         metadata=_placeholder_metadata(),
         summary="s",
-        checklist=(),
         findings=findings,
     )
 

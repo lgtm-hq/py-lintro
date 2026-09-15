@@ -33,6 +33,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.review.checklist_pass import GENERATED_CHECKLIST_ID_STRIDE
+from lintro.ai.review.chunk_call_detail import _call_detail, _finished_partial
 from lintro.ai.review.chunk_pass import review_chunk_with_progress
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.interrupt import (
@@ -88,19 +89,24 @@ async def _review_one_chunk_until_stop(
     )
 
     def _record(*, failed: bool) -> None:
-        """Record the lone chunk's in-flight span.
+        """Record the lone chunk's in-flight span and its call detail.
 
         Args:
             failed: True when the chunk ended in an error or a stop.
         """
         if timings is None:
             return
+        provider_seconds, turns = _call_detail(
+            partial=None if failed else _finished_partial(task=review_task),
+        )
         timings.add_chunk(
             chunk_index=0,
             files=len(chunk.files),
             queued_seconds=0.0,
             in_flight_seconds=time.monotonic() - started,
             failed=failed,
+            provider_seconds=provider_seconds,
+            turns=turns,
         )
 
     async def _await_recorded() -> ChunkReviewPartial:
@@ -252,18 +258,17 @@ async def _run_chunk(
     queued_at = time.monotonic()
     admitted_at: float | None = None
     failed = True
+    partial: ChunkReviewPartial | None = None
     try:
         async with semaphore:
             admitted_at = time.monotonic()
-            outcome = (
-                chunk_index,
-                await review_chunk_with_progress(
-                    chunk_index=chunk_index,
-                    chunk=chunk,
-                    total_chunks=total_chunks,
-                    plan=chunk_plan,
-                ),
+            partial = await review_chunk_with_progress(
+                chunk_index=chunk_index,
+                chunk=chunk,
+                total_chunks=total_chunks,
+                plan=chunk_plan,
             )
+            outcome = (chunk_index, partial)
     except Exception as exc:
         return chunk_index, exc
     else:
@@ -275,6 +280,7 @@ async def _run_chunk(
         # time rather than vanishing from the breakdown.
         if plan.timings is not None:
             now = time.monotonic()
+            provider_seconds, turns = _call_detail(partial=partial)
             plan.timings.add_chunk(
                 chunk_index=chunk_index,
                 files=len(chunk.files),
@@ -285,6 +291,8 @@ async def _run_chunk(
                     now - admitted_at if admitted_at is not None else 0.0
                 ),
                 failed=failed,
+                provider_seconds=provider_seconds,
+                turns=turns,
             )
 
 

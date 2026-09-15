@@ -9,7 +9,7 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 
-__all__ = ["SYNTHESIS_CHUNK_INDEX", "CoverageDegradation"]
+__all__ = ["CARRIED_CHUNK_INDEX", "SYNTHESIS_CHUNK_INDEX", "CoverageDegradation"]
 
 #: ``chunk_index`` stamped on a degradation that belongs to the whole run
 #: rather than to one chunk — today only the cross-chunk synthesis pass
@@ -20,6 +20,12 @@ __all__ = ["SYNTHESIS_CHUNK_INDEX", "CoverageDegradation"]
 #: importing the pass.
 SYNTHESIS_CHUNK_INDEX = -1
 
+#: ``chunk_index`` stamped on a degradation carried over from an earlier
+#: round: a file skipped as covered this round whose coverage record says
+#: only a prefix of its diff was ever reviewed (lintro-ops #37). No chunk of
+#: this run read it, so it takes its own sentinel.
+CARRIED_CHUNK_INDEX = -2
+
 
 @dataclass(frozen=True, slots=True)
 class CoverageDegradation:
@@ -28,15 +34,10 @@ class CoverageDegradation:
     Attributes:
         reason: Which limit applied to the chunk.
         chunk_index: Zero-based index of the affected chunk in the run.
-        findings_cap: The per-call findings ceiling in force after the
-            degradation was applied. For a cap hit this is the ceiling the
-            answer reached; for an output-exhaustion retry it is the
-            *tightened* cap the retry ran under, not the original.
     """
 
     reason: CoverageDegradationReason
     chunk_index: int
-    findings_cap: int
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the degradation for JSON and MCP payloads.
@@ -47,5 +48,4 @@ class CoverageDegradation:
         return {
             "reason": str(self.reason),
             "chunk_index": self.chunk_index,
-            "findings_cap": self.findings_cap,
         }

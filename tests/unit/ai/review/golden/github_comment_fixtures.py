@@ -16,7 +16,6 @@ from __future__ import annotations
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import fingerprint_for, match_findings
-from lintro.ai.review.models.checklist_answer import ChecklistAnswer
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -94,20 +93,6 @@ def golden_review_result() -> ReviewResult:
             duration_seconds=42.5,
         ),
         summary="Two blocking issues remain; the session fix landed.",
-        checklist=(
-            ChecklistAnswer(
-                id=1,
-                answer="no",
-                evidence="src/auth/session.py:31",
-                question="Does an unknown status fail closed?",
-            ),
-            ChecklistAnswer(
-                id=2,
-                answer="yes",
-                evidence="tests/test_session.py:12",
-                question="Are the access paths covered by tests?",
-            ),
-        ),
         findings=(
             ReviewFinding(
                 severity=Severity.P1,
