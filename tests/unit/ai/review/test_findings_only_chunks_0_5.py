@@ -23,9 +23,12 @@ from lintro.ai.review.cli_limits import (
     resolve_chunk_diff_budget,
 )
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.run_planning import _resolve_diff_budget, resolve_review_chunks
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.synthesis import should_run_synthesis
@@ -394,6 +397,54 @@ def test_duplicates_never_merge_a_question_with_a_finding() -> None:
     )
     assert_that(merged).is_equal_to(1)
     assert_that(kept[0].title).is_equal_to("Is this reachable?")
+
+
+def test_a_merged_duplicate_keeps_its_prior_record_open() -> None:
+    """A finding merged into a root cause is not reported as fixed.
+
+    The merge re-attributes a defect; it does not repair one. The losing side
+    leaves the round's finding list, so the matcher — which pairs by
+    fingerprint and never looks a record up by an absorbed occurrence — finds
+    no current sighting of the prior record and, on a path that *was*
+    re-reviewed, falls through to ``RESOLVED``. That stamps a live defect
+    "Addressed", which is the one direction the matcher's ambiguity bias
+    exists to rule out.
+    """
+    root = _finding(file="a.py", line=3, severity=Severity.P1, title="Guard bypass")
+    duplicate = _finding(
+        file="b.py",
+        line=9,
+        severity=Severity.P2,
+        title="Missing guard",
+    )
+    reviewed = frozenset({"a.py", "b.py"})
+
+    first = match_findings(
+        previous=None,
+        findings=[root, duplicate],
+        round_number=1,
+        reviewed_paths=reviewed,
+    )
+    assert_that(first.records).is_length(2)
+
+    kept, merged = apply_duplicate_groups(
+        findings=(root, duplicate),
+        groups=(DuplicateGroup(keep="a.py:3", drop=("b.py:9",)),),
+    )
+    assert_that(merged).is_equal_to(1)
+
+    second = match_findings(
+        previous=ReviewState(findings=first.records),
+        findings=kept,
+        round_number=2,
+        head_sha="sha2",
+        reviewed_paths=reviewed,
+    )
+
+    assert_that([record.title for record in second.resolved]).is_empty()
+    held = [record for record in second.records if record.title == "Missing guard"]
+    assert_that(held).is_length(1)
+    assert_that(held[0].status).is_equal_to(FindingStatus.OPEN)
 
 
 def test_duplicates_with_an_unresolved_reference_are_ignored() -> None:

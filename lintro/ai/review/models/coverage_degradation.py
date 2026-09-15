@@ -34,18 +34,32 @@ class CoverageDegradation:
     Attributes:
         reason: Which limit applied to the chunk.
         chunk_index: Zero-based index of the affected chunk in the run.
+        split: Whether an output-exhaustion retry actually split the chunk.
+            A single-file chunk cannot be split, so it is retried once
+            unchanged and keeps its whole-chunk view; both paths record
+            ``OUTPUT_EXHAUSTION_RETRIED``, and this is what tells them apart.
+            Meaningful only for that reason, and ``True`` by default so a
+            degradation recorded without it reads as the ordinary split.
     """
 
     reason: CoverageDegradationReason
     chunk_index: int
+    split: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the degradation for JSON and MCP payloads.
 
+        ``split`` is emitted only for the reason it describes, so the payload
+        of every other degradation is unchanged and no consumer is handed a
+        flag that means nothing for the limit it sits on.
+
         Returns:
             JSON-serializable mapping with the reason as a plain string.
         """
-        return {
+        payload: dict[str, Any] = {
             "reason": str(self.reason),
             "chunk_index": self.chunk_index,
         }
+        if self.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED:
+            payload["split"] = self.split
+        return payload

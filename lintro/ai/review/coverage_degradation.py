@@ -94,13 +94,25 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     total = max(metadata.chunks_total, len(affected))
 
     clauses: list[str] = []
-    if retried:
-        retried_chunks = len({item.chunk_index for item in retried})
+    # A single-file chunk cannot be split, so it is retried once unchanged and
+    # keeps the whole-chunk view a split gives up. Reporting both as splits
+    # would claim a loss of context the unchanged retry never took.
+    split_chunks = len({item.chunk_index for item in retried if item.split})
+    unsplit_chunks = len({item.chunk_index for item in retried if not item.split})
+    if split_chunks:
         clauses.append(
-            f"{retried_chunks} of {total} {_plural(count=total, noun='chunk')} "
+            f"{split_chunks} of {total} {_plural(count=total, noun='chunk')} "
             "exhausted the provider output limit and "
-            f"{'was' if retried_chunks == 1 else 'were'} split and re-reviewed "
+            f"{'was' if split_chunks == 1 else 'were'} split and re-reviewed "
             "in halves",
+        )
+    if unsplit_chunks:
+        clauses.append(
+            f"{unsplit_chunks} of {total} single-file "
+            f"{_plural(count=unsplit_chunks, noun='chunk')} exhausted the "
+            "provider output limit and "
+            f"{'was' if unsplit_chunks == 1 else 'were'} retried once "
+            "unchanged",
         )
 
     for reason, wording in _DEPTH_PASS_CLAUSES.items():
@@ -121,7 +133,8 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         clauses.append(
             f"{len(cut)} of {total} {_plural(count=total, noun='chunk')} had "
             f"{'its' if len(cut) == 1 else 'their'} diff cut to the context "
-            "window, so only a prefix of that file's change was reviewed",
+            "window, so only a prefix of each affected file's change was "
+            "reviewed",
         )
     carried = sum(1 for item in truncated if item.chunk_index == CARRIED_CHUNK_INDEX)
     if carried:
@@ -181,7 +194,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # incomplete optional pass says so instead.
     tail = (
         "findings that need the whole chunk in view may go unreported."
-        if retried
+        if split_chunks
         else "some issues may go unreported."
     )
     if not coverage:

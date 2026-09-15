@@ -25,7 +25,8 @@
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
         "origin": null,
-        "posted_inline": true
+        "posted_inline": true,
+        "merged_duplicates": []
       },
       {
         "severity": "P2",
@@ -51,7 +52,8 @@
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
         "origin": null,
-        "posted_inline": true
+        "posted_inline": true,
+        "merged_duplicates": []
       }
     ],
     "input_tokens": 1200,
@@ -90,7 +92,8 @@
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
         "origin": null,
-        "posted_inline": true
+        "posted_inline": true,
+        "merged_duplicates": []
       },
       {
         "severity": "P1",
@@ -116,7 +119,8 @@
         "suggestion_dropped": null,
         "cross_chunk_contradiction": null,
         "origin": null,
-        "posted_inline": true
+        "posted_inline": true,
+        "merged_duplicates": []
       }
     ],
     "input_tokens": 900,

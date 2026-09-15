@@ -23,6 +23,7 @@ from loguru import logger
 
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
+from lintro.ai.review.models.merged_duplicate import MergedDuplicate
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
@@ -216,6 +217,11 @@ def apply_duplicate_groups(
     equals the earliest reported; the dropped sites are folded into the
     survivor's ``occurrences`` so no location disappears from the report.
 
+    The survivor also records each merged-away finding's identity in
+    ``merged_duplicates``. A merge re-attributes a defect to its root cause
+    rather than fixing it, so without that the matcher would see no current
+    sighting of the dropped side and stamp its still-open record resolved.
+
     Args:
         findings: The merged chunk findings, in reported order.
         groups: Duplicate groups the pass proposed.
@@ -223,7 +229,7 @@ def apply_duplicate_groups(
     Returns:
         Tuple of ``(surviving findings, number of findings dropped)``.
     """
-    dropped, absorbed = _plan_duplicate_drops(findings=findings, groups=groups)
+    dropped, absorbed, merged = _plan_duplicate_drops(findings=findings, groups=groups)
     if not dropped:
         return tuple(findings), 0
     kept: list[ReviewFinding] = []
@@ -242,7 +248,22 @@ def apply_duplicate_groups(
             known.add(occurrence.label)
             added.append(occurrence)
         kept.append(
-            replace(finding, occurrences=(*finding.all_occurrences, *added)),
+            replace(
+                finding,
+                occurrences=(*finding.all_occurrences, *added),
+                merged_duplicates=(
+                    *finding.merged_duplicates,
+                    *(
+                        MergedDuplicate(
+                            file=item.file,
+                            category=item.category,
+                            title=item.title,
+                            line=item.line,
+                        )
+                        for item in merged.get(id(finding), ())
+                    ),
+                ),
+            ),
         )
     logger.info(
         "Synthesis merged {n} duplicate finding(s) into their root causes.",
@@ -255,7 +276,11 @@ def _plan_duplicate_drops(
     *,
     findings: Sequence[ReviewFinding],
     groups: Sequence[DuplicateGroup],
-) -> tuple[dict[int, ReviewFinding], dict[int, list[FindingOccurrence]]]:
+) -> tuple[
+    dict[int, ReviewFinding],
+    dict[int, list[FindingOccurrence]],
+    dict[int, list[ReviewFinding]],
+]:
     """Decide which findings each duplicate group drops and who absorbs them.
 
     Groups may overlap or chain (``B`` dropped into ``A`` by one group, then
@@ -269,8 +294,9 @@ def _plan_duplicate_drops(
         groups: Duplicate groups the pass proposed.
 
     Returns:
-        Tuple of ``(dropped, absorbed)``: findings to drop keyed by identity,
-        and the occurrences each surviving finding absorbs, keyed the same way.
+        Tuple of ``(dropped, absorbed, merged)``: findings to drop keyed by
+        identity, the occurrences each surviving finding absorbs, and the
+        findings it absorbed them from, both keyed the same way.
     """
     order = {id(finding): index for index, finding in enumerate(findings)}
     labelled: dict[str, list[ReviewFinding]] = {}
@@ -282,6 +308,7 @@ def _plan_duplicate_drops(
     by_label = {label: tuple(holders) for label, holders in labelled.items()}
     dropped: dict[int, ReviewFinding] = {}
     absorbed: dict[int, list[FindingOccurrence]] = {}
+    merged: dict[int, list[ReviewFinding]] = {}
     survivor_of: dict[int, ReviewFinding] = {}
 
     def live(finding: ReviewFinding) -> ReviewFinding:
@@ -326,4 +353,9 @@ def _plan_duplicate_drops(
             survivor_of[id(member)] = survivor
             absorbed.setdefault(id(survivor), []).extend(member.all_occurrences)
             absorbed[id(survivor)].extend(absorbed.pop(id(member), []))
-    return dropped, absorbed
+            # Chained the same way as the occurrences: a finding dropped into
+            # ``A`` moves to ``C`` when ``A`` is later dropped into ``C``, so
+            # the record it holds open follows the surviving finding.
+            merged.setdefault(id(survivor), []).append(member)
+            merged[id(survivor)].extend(merged.pop(id(member), []))
+    return dropped, absorbed, merged

@@ -68,6 +68,13 @@ _RETRY_OTHER = CoverageDegradation(
     reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
     chunk_index=1,
 )
+#: The same limit on a chunk that could not be split: one file, retried once
+#: unchanged, so it never gave up the whole-chunk view a split costs.
+_RETRY_UNSPLIT = CoverageDegradation(
+    reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+    chunk_index=2,
+    split=False,
+)
 
 
 def _with_degradations(
@@ -252,6 +259,54 @@ def test_description_names_the_split(
     assert_that(described).contains("may go unreported")
 
 
+def test_description_never_calls_an_unchanged_retry_a_split(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A single-file retry is described as the retry it was.
+
+    The chunk kept its whole-file view and was simply asked again, so the
+    sentence must claim neither the split nor the whole-chunk tail that only
+    a real split earns.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = _with_degradations(
+        result=sample_review_result,
+        degradations=(_RETRY_UNSPLIT,),
+    )
+
+    described = describe_coverage_degradations(metadata=result.metadata)
+
+    assert_that(described).contains("retried once unchanged")
+    assert_that(described).does_not_contain("split and re-reviewed in halves")
+    assert_that(described).contains("some issues may go unreported")
+    assert_that(described).does_not_contain("whole chunk in view")
+
+
+def test_description_separates_a_split_from_an_unchanged_retry(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A run with both limits gets a clause for each.
+
+    One chunk did lose its whole-chunk view, so the stronger tail still
+    stands for the run as a whole.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = _with_degradations(
+        result=sample_review_result,
+        degradations=(_RETRY, _RETRY_UNSPLIT),
+    )
+
+    described = describe_coverage_degradations(metadata=result.metadata)
+
+    assert_that(described).contains("split and re-reviewed in halves")
+    assert_that(described).contains("retried once unchanged")
+    assert_that(described).contains("whole chunk in view")
+
+
 # --- surfaces ----------------------------------------------------------------
 
 
@@ -384,16 +439,53 @@ def test_json_payload_exposes_the_coverage_fields(
 
     assert_that(payload["findings_coverage_complete"]).is_false()
     assert_that(payload["output_exhaustion_retried"]).is_true()
+    # ``split`` rides along on this reason only, so a consumer can tell a
+    # chunk that gave up its whole-chunk view from a single-file chunk that
+    # was simply asked again.
     assert_that(payload["coverage_degradations"]).is_equal_to(
         [
-            {"reason": "output_exhaustion_retried", "chunk_index": 0},
-            {"reason": "output_exhaustion_retried", "chunk_index": 1},
+            {
+                "reason": "output_exhaustion_retried",
+                "chunk_index": 0,
+                "split": True,
+            },
+            {
+                "reason": "output_exhaustion_retried",
+                "chunk_index": 1,
+                "split": True,
+            },
         ],
     )
     # The retired cap never comes back as a payload key.
     # The reason must survive JSON encoding as a plain string, not an enum repr.
     assert_that(json.loads(json.dumps(payload))["coverage_degradations"]).is_equal_to(
         payload["coverage_degradations"],
+    )
+
+
+def test_json_payload_marks_an_unchanged_retry_unsplit(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A consumer can tell a real split from a single-file retry.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = _with_degradations(
+        result=sample_review_result,
+        degradations=(_RETRY_UNSPLIT,),
+    )
+
+    payload = review_result_to_dict(result=result)
+
+    assert_that(payload["coverage_degradations"]).is_equal_to(
+        [
+            {
+                "reason": "output_exhaustion_retried",
+                "chunk_index": 2,
+                "split": False,
+            },
+        ],
     )
 
 
@@ -683,6 +775,8 @@ async def test_exhausted_multi_file_chunk_is_split_and_merged(
         [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
     )
     assert_that(partial.coverage_degradations[0].chunk_index).is_equal_to(3)
+    # The chunk really was split, so it gave up its whole-chunk view.
+    assert_that(partial.coverage_degradations[0].split).is_true()
     # Usage is the sum of both halves.
     assert_that(partial.input_tokens).is_equal_to(20)
     assert_that(partial.output_tokens).is_equal_to(40)
@@ -714,6 +808,9 @@ async def test_exhausted_single_file_chunk_is_retried_once(
     assert_that(reasons).is_equal_to(
         [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
     )
+    # Nothing was split: the chunk kept its whole-file view and was simply
+    # asked again, so the run must not report it as a chunk that lost it.
+    assert_that(partial.coverage_degradations[0].split).is_false()
     assert_that(partial.findings).is_length(1)
 
 

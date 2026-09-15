@@ -206,7 +206,13 @@ async def _retry_after_exhaustion(
         partial = await _parse_call(request=request, call=call)
         return replace(
             partial,
-            coverage_degradations=(*partial.coverage_degradations, degradation),
+            coverage_degradations=(
+                *partial.coverage_degradations,
+                # Nothing was split: the chunk kept its whole-file view and
+                # was simply asked again, so the run must not report it as a
+                # chunk that lost that view.
+                replace(degradation, split=False),
+            ),
         )
 
     logger.warning(

@@ -1028,6 +1028,11 @@ ai:
   # (int >= 10000, default: 1500000)
   cli_max_diff_bytes: 1500000
 
+  # Deprecated and ignored: the per-call findings cap was retired, so every
+  # chunk now reports all of its findings. Still warned about when present;
+  # removed not before 2026-10-15.
+  # cli_max_findings_per_call: 20
+
   # Re-prompt to refine a fix that failed verification. (int 0–3, default: 1)
   max_refinement_attempts: 1
 

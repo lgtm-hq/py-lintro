@@ -5,7 +5,9 @@ Findings are identified by a stable fingerprint over ``file path``,
 which drifts as the PR evolves. Two findings can legitimately share a
 fingerprint within a single round (two hardcoded credentials in one file), so
 identity is the pair ``(fingerprint, ordinal)`` where the ordinal is assigned
-by first-seen line order.
+by first-seen line order. Identity itself, and the records a round builds from
+it, live in :mod:`lintro.ai.review.finding_identity`; this module pairs them
+across rounds and re-exports those names for callers.
 
 On later rounds ambiguous candidates are paired by nearest-line distance. When
 the pairing is still ambiguous the matcher biases toward *carrying over* an
@@ -15,9 +17,6 @@ lesser failure than a false "Addressed" banner.
 
 from __future__ import annotations
 
-import hashlib
-import re
-import unicodedata
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import replace
@@ -25,14 +24,22 @@ from dataclasses import replace
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.finding_identity import (
+    FINGERPRINT_LENGTH,
+    current_records,
+    duplicate_records,
+    fingerprint_for,
+    normalize_file_path,
+    normalize_title,
+)
 from lintro.ai.review.finding_pairing import (
+    duplicates_holding_prior_records,
     merge_pair,
     next_free_ordinal,
     notes_holding_prior_records,
     pair_group,
 )
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
-from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
@@ -48,66 +55,6 @@ __all__ = [
     "normalize_title",
     "review_findings_from_unposted",
 ]
-
-# Truncated sha256 hex digest length. 16 hex chars (64 bits) keeps the state
-# blob small while making a collision within one PR effectively impossible.
-FINGERPRINT_LENGTH = 16
-
-_PUNCTUATION_RE = re.compile(r"[^\w\s]+", flags=re.UNICODE)
-_WHITESPACE_RE = re.compile(r"\s+")
-
-
-def normalize_title(title: str) -> str:
-    """Normalize a finding title for fingerprinting.
-
-    Lowercases, strips backticks and all other punctuation, and collapses
-    whitespace runs so cosmetic rewordings of the same finding keep a stable
-    identity across rounds.
-
-    Args:
-        title: Raw finding title as reported by the model.
-
-    Returns:
-        The normalized title.
-    """
-    folded = unicodedata.normalize("NFKC", title).casefold()
-    stripped = _PUNCTUATION_RE.sub(" ", folded)
-    return _WHITESPACE_RE.sub(" ", stripped).strip()
-
-
-def normalize_file_path(path: str) -> str:
-    """Normalize a repository-relative file path for fingerprinting.
-
-    Args:
-        path: File path as reported by the model.
-
-    Returns:
-        Path with Windows separators converted and any leading ``./`` removed.
-    """
-    return path.strip().replace("\\", "/").removeprefix("./")
-
-
-def fingerprint_for(*, file: str, category: str, title: str) -> str:
-    """Compute the stable fingerprint for a finding.
-
-    Args:
-        file: Repository-relative file path.
-        category: Finding category label.
-        title: Raw finding title.
-
-    Returns:
-        Truncated sha256 hex digest identifying the finding independently of
-        its line number.
-    """
-    payload = "\x00".join(
-        (
-            normalize_file_path(file),
-            normalize_title(category),
-            normalize_title(title),
-        ),
-    )
-    digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-    return digest[:FINGERPRINT_LENGTH]
 
 
 def derive_verdict(*, findings: Iterable[FindingRecord]) -> ReviewVerdict:
@@ -159,94 +106,6 @@ def count_blocking_findings(*, findings: Iterable[FindingRecord]) -> int:
         and not record.is_question
         and record.severity is Severity.P1
     )
-
-
-def _normalized_occurrences(
-    *,
-    finding: ReviewFinding,
-) -> tuple[FindingOccurrence, ...]:
-    """Return a finding's occurrences with their paths normalized.
-
-    Args:
-        finding: Finding whose occurrence locations are being tracked.
-
-    Returns:
-        The *explicitly reported* occurrences with file paths normalized the
-        same way the fingerprint normalizes them, so a path that changes only
-        in separator style does not read as a new location. Empty when the
-        model reported none — the distinction matters, because a later round
-        that omits the list must inherit the prior locations rather than
-        appear to have fixed all but one of them.
-    """
-    return tuple(
-        FindingOccurrence(
-            file=normalize_file_path(occurrence.file),
-            line=occurrence.line,
-        )
-        for occurrence in finding.occurrences
-    )
-
-
-def _current_records(
-    *,
-    findings: Sequence[ReviewFinding],
-    round_number: int,
-) -> list[FindingRecord]:
-    """Build fresh records for this round's findings with ordinals assigned.
-
-    Ordinals are 1-based and assigned by first-seen line order within each
-    fingerprint group, matching the ambiguity policy.
-
-    Args:
-        findings: Findings reported in the current round.
-        round_number: Round number being recorded.
-
-    Returns:
-        Records in reported order, each carrying its fingerprint and ordinal.
-    """
-    grouped: dict[str, list[int]] = defaultdict(list)
-    fingerprints: list[str] = []
-    for index, finding in enumerate(findings):
-        fingerprint = fingerprint_for(
-            file=finding.file,
-            category=finding.category,
-            title=finding.title,
-        )
-        fingerprints.append(fingerprint)
-        grouped[fingerprint].append(index)
-
-    ordinals: dict[int, int] = {}
-    for indices in grouped.values():
-        ordered = sorted(indices, key=lambda index: (findings[index].line, index))
-        for ordinal, index in enumerate(ordered, start=1):
-            ordinals[index] = ordinal
-
-    return [
-        FindingRecord(
-            fingerprint=fingerprints[index],
-            ordinal=ordinals[index],
-            severity=finding.severity,
-            category=finding.category,
-            title=finding.title,
-            file=normalize_file_path(finding.file),
-            line=finding.line,
-            status=FindingStatus.OPEN,
-            since_round=round_number,
-            checklist_ids=finding.checklist_ids,
-            kind=finding.kind,
-            occurrences=_normalized_occurrences(finding=finding),
-            occurrences_total=len(finding.occurrences),
-            severity_downgraded=finding.severity_downgraded,
-            cross_chunk_contradiction=finding.cross_chunk_contradiction,
-            description=finding.description,
-            cause=finding.cause,
-            fix=finding.fix,
-            confidence=finding.confidence,
-            origin=finding.origin,
-            evidence_style=finding.evidence_style,
-        )
-        for index, finding in enumerate(findings)
-    ]
 
 
 def review_findings_from_unposted(
@@ -372,6 +231,13 @@ def match_findings(
     (:func:`~lintro.ai.review.finding_pairing.notes_holding_prior_records`), so
     a sibling sharing the fingerprint that stopped being reported still
     resolves.
+
+    A finding a duplicate merge folded into another (lintro-ops #37) is the
+    same case seen from the other side: the merge re-attributes the defect to
+    its root cause rather than repairing it, so the merged-away finding's
+    prior record is carried forward open too, paired one by one by
+    (:func:`~lintro.ai.review.finding_pairing.duplicates_holding_prior_records`).
+
     The filter lives here rather than at each caller so the sticky, the
     review body, the inline comments, and the coverage bookkeeping cannot
     disagree about which findings exist.
@@ -395,11 +261,11 @@ def match_findings(
         The per-round transitions plus the merged record set to persist.
     """
     prior_records = list(previous.findings) if previous is not None else []
-    current_records = _current_records(
+    inline_records = current_records(
         findings=[finding for finding in findings if finding.posted_inline],
         round_number=round_number,
     )
-    note_records = _current_records(
+    note_records = current_records(
         findings=[finding for finding in findings if not finding.posted_inline],
         round_number=round_number,
     )
@@ -408,7 +274,7 @@ def match_findings(
     for index, record in enumerate(prior_records):
         prior_by_fingerprint[record.fingerprint].append(index)
     current_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
-    for record in current_records:
+    for record in inline_records:
         current_by_fingerprint[record.fingerprint].append(record)
 
     merged: list[FindingRecord] = []
@@ -462,6 +328,14 @@ def match_findings(
         notes=note_records,
         matched_prior=matched_prior,
     )
+    # A record a note already holds is not available to a merged duplicate:
+    # one held record needs one reason, not two.
+    duplicate_held = duplicates_holding_prior_records(
+        prior_records=prior_records,
+        prior_by_fingerprint=prior_by_fingerprint,
+        duplicates=duplicate_records(findings=findings, round_number=round_number),
+        matched_prior=matched_prior | note_held,
+    )
 
     for index, record in enumerate(prior_records):
         if index in matched_prior:
@@ -472,7 +346,8 @@ def match_findings(
         path = record.file
         left_diff = departed_paths is not None and path in departed_paths
         unread = reviewed_paths is not None and path not in reviewed_paths
-        if (unread and not left_diff) or index in note_held:
+        held = index in note_held or index in duplicate_held
+        if (unread and not left_diff) or held:
             merged.append(record)
             carried.append(record)
             outcomes[record.key] = FindingMatchOutcome.CARRIED

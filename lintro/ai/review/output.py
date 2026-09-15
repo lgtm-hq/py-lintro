@@ -134,6 +134,8 @@ def finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
     origin = payload.pop("origin", None)
     if origin is not None:
         payload["origin"] = str(origin)
+    if not payload.get("merged_duplicates"):
+        payload.pop("merged_duplicates", None)
     return payload
 
 

@@ -18,6 +18,7 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models.finding_record import FindingRecord
 
 __all__ = [
+    "duplicates_holding_prior_records",
     "merge_pair",
     "next_free_ordinal",
     "notes_holding_prior_records",
@@ -183,13 +184,92 @@ def notes_holding_prior_records(
         each note that holds one whose thread was actually posted — what the
         sticky tags.
     """
-    notes_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
-    for note in notes:
-        notes_by_fingerprint[note.fingerprint].append(note)
+    held_by = _held_prior_records(
+        prior_records=prior_records,
+        prior_by_fingerprint=prior_by_fingerprint,
+        current=notes,
+        matched_prior=matched_prior,
+    )
+    # Only a record whose thread was posted can be the reason a thread is
+    # still open, which is what the sticky's tag tells the reader.
+    carries = {
+        (prior_records[index].fingerprint, note.line)
+        for index, note in held_by.items()
+        if prior_records[index].inline_comment_id is not None
+    }
+    return set(held_by), frozenset(carries)
 
-    held: set[int] = set()
-    carries: set[tuple[str, int]] = set()
-    for fingerprint, group in notes_by_fingerprint.items():
+
+def duplicates_holding_prior_records(
+    *,
+    prior_records: Sequence[FindingRecord],
+    prior_by_fingerprint: Mapping[str, list[int]],
+    duplicates: Sequence[FindingRecord],
+    matched_prior: AbstractSet[int],
+) -> set[int]:
+    """Pair merged-away duplicates with the prior records they keep open.
+
+    A duplicate merge (lintro-ops #37) drops the losing side from the round's
+    finding list and folds its sites into the survivor. The defect it named is
+    still live — the synthesis pass re-attributed it, it did not fix it — so
+    the record it opened is carried rather than resolved.
+
+    The pairing is per record for the same reason it is in
+    :func:`notes_holding_prior_records`: two prior records can share a
+    fingerprint at different lines, and carrying every sibling because one of
+    them was merged away would leave the absent sibling open forever.
+
+    Args:
+        prior_records: Records decoded from the prior state, in state order.
+        prior_by_fingerprint: Index of ``prior_records`` positions per
+            fingerprint.
+        duplicates: Transient records built from this round's merged-away
+            duplicates.
+        matched_prior: Positions already claimed by a current finding or held
+            by a note.
+
+    Returns:
+        The prior positions merged-away duplicates hold open.
+    """
+    return set(
+        _held_prior_records(
+            prior_records=prior_records,
+            prior_by_fingerprint=prior_by_fingerprint,
+            current=duplicates,
+            matched_prior=matched_prior,
+        ),
+    )
+
+
+def _held_prior_records(
+    *,
+    prior_records: Sequence[FindingRecord],
+    prior_by_fingerprint: Mapping[str, list[int]],
+    current: Sequence[FindingRecord],
+    matched_prior: AbstractSet[int],
+) -> dict[int, FindingRecord]:
+    """Pair transient records against the open prior records they re-assert.
+
+    Shared by the notes and duplicate-merge paths: both are the model still
+    asserting a finding without opening a record of its own, so both hold a
+    prior record open by the same :func:`pair_group` rules.
+
+    Args:
+        prior_records: Records decoded from the prior state, in state order.
+        prior_by_fingerprint: Index of ``prior_records`` positions per
+            fingerprint.
+        current: Transient records to pair, in reported order.
+        matched_prior: Positions already claimed and therefore unavailable.
+
+    Returns:
+        Mapping of held prior position to the transient record holding it.
+    """
+    by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
+    for record in current:
+        by_fingerprint[record.fingerprint].append(record)
+
+    held: dict[int, FindingRecord] = {}
+    for fingerprint, group in by_fingerprint.items():
         available = [
             index
             for index in prior_by_fingerprint.get(fingerprint, [])
@@ -197,14 +277,9 @@ def notes_holding_prior_records(
             and prior_records[index].status is FindingStatus.OPEN
         ]
         prior_group = [prior_records[index] for index in available]
-        for note_index, group_index in pair_group(
+        for current_index, group_index in pair_group(
             prior=prior_group,
             current=group,
         ).items():
-            prior_index = available[group_index]
-            held.add(prior_index)
-            # Only a record whose thread was posted can be the reason a thread
-            # is still open, which is what the sticky's tag tells the reader.
-            if prior_records[prior_index].inline_comment_id is not None:
-                carries.add((fingerprint, group[note_index].line))
-    return held, frozenset(carries)
+            held[available[group_index]] = group[current_index]
+    return held

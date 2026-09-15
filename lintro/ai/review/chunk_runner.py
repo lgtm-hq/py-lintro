@@ -33,7 +33,7 @@ from lintro.ai.exceptions import (
     AIProviderError,
 )
 from lintro.ai.review.checklist_pass import GENERATED_CHECKLIST_ID_STRIDE
-from lintro.ai.review.chunk_call_detail import _call_detail, _finished_partial
+from lintro.ai.review.chunk_call_detail import call_detail, finished_partial
 from lintro.ai.review.chunk_pass import review_chunk_with_progress
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.interrupt import (
@@ -96,8 +96,8 @@ async def _review_one_chunk_until_stop(
         """
         if timings is None:
             return
-        provider_seconds, turns = _call_detail(
-            partial=None if failed else _finished_partial(task=review_task),
+        provider_seconds, turns = call_detail(
+            partial=None if failed else finished_partial(task=review_task),
         )
         timings.add_chunk(
             chunk_index=0,
@@ -280,7 +280,7 @@ async def _run_chunk(
         # time rather than vanishing from the breakdown.
         if plan.timings is not None:
             now = time.monotonic()
-            provider_seconds, turns = _call_detail(partial=partial)
+            provider_seconds, turns = call_detail(partial=partial)
             plan.timings.add_chunk(
                 chunk_index=chunk_index,
                 files=len(chunk.files),

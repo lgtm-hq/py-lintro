@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from lintro.ai.review.merge import ChunkReviewPartial
 
-__all__ = ["_call_detail", "_finished_partial"]
+__all__ = ["call_detail", "finished_partial"]
 
 
-def _finished_partial(
+def finished_partial(
     *,
     task: asyncio.Future[ChunkReviewPartial],
 ) -> ChunkReviewPartial | None:
@@ -35,7 +35,7 @@ def _finished_partial(
     return task.result()
 
 
-def _call_detail(
+def call_detail(
     *,
     partial: ChunkReviewPartial | None,
 ) -> tuple[float, int | None]:

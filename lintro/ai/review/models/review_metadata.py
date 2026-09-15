@@ -162,7 +162,9 @@ class ReviewMetadata:
 
         Returns:
             True when at least one chunk hit the provider output-token
-            ceiling and was split and re-reviewed in halves.
+            ceiling and had its answer re-obtained — split and re-reviewed in
+            halves, or, for a single-file chunk that cannot be split, retried
+            once unchanged.
         """
         return any(
             item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED

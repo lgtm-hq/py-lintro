@@ -13,6 +13,7 @@ from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
+from lintro.ai.review.models.merged_duplicate import MergedDuplicate
 from lintro.ai.review.models.suggested_change import SuggestedChange
 
 __all__ = ["ReviewFinding", "Severity"]
@@ -109,6 +110,12 @@ class ReviewFinding:
             policy renders exactly as it did before the gate existed; the
             default policy clears it for low-confidence findings and for
             questions.
+        merged_duplicates: Findings a synthesis duplicate merge folded into
+            this one (lintro-ops #37). The merge re-attributes a defect
+            rather than fixing it, so the matcher carries each merged-away
+            finding's prior record forward open instead of resolving it on
+            absence. Empty for a finding no merge touched, which is every
+            finding on a run without the pass.
     """
 
     severity: Severity
@@ -133,6 +140,7 @@ class ReviewFinding:
     cross_chunk_contradiction: CrossChunkContradiction | None = None
     origin: FindingOrigin | None = None
     posted_inline: bool = True
+    merged_duplicates: tuple[MergedDuplicate, ...] = field(default_factory=tuple)
 
     @property
     def all_occurrences(self) -> tuple[FindingOccurrence, ...]:
