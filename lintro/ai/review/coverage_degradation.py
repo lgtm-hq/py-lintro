@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
-from lintro.ai.review.models.coverage_degradation import SYNTHESIS_CHUNK_INDEX
+from lintro.ai.review.models.coverage_degradation import CARRIED_CHUNK_INDEX
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -90,11 +90,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # real chunk index, so it must not be counted as a chunk either: without
     # this, a single-chunk run whose synthesis pass was truncated would read
     # as "1 of 2 chunks".
-    affected = {
-        item.chunk_index
-        for item in degradations
-        if item.chunk_index != SYNTHESIS_CHUNK_INDEX
-    }
+    affected = {item.chunk_index for item in degradations if item.chunk_index >= 0}
     total = max(metadata.chunks_total, len(affected))
 
     clauses: list[str] = []
@@ -115,16 +111,25 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
                 f"only the main pass after {wording}",
             )
 
-    cut = {
-        item.chunk_index
+    truncated = [
+        item
         for item in degradations
         if item.reason is CoverageDegradationReason.DIFF_TRUNCATED
-    }
+    ]
+    cut = {item.chunk_index for item in truncated if item.chunk_index >= 0}
     if cut:
         clauses.append(
             f"{len(cut)} of {total} {_plural(count=total, noun='chunk')} had "
             f"{'its' if len(cut) == 1 else 'their'} diff cut to the context "
             "window, so only a prefix of that file's change was reviewed",
+        )
+    carried = sum(1 for item in truncated if item.chunk_index == CARRIED_CHUNK_INDEX)
+    if carried:
+        clauses.append(
+            f"{carried} {_plural(count=carried, noun='file')} carried from an "
+            "earlier round had only a prefix of "
+            f"{'its' if carried == 1 else 'their'} diff reviewed; a change to "
+            "the file re-reviews it",
         )
 
     lost_half = {
@@ -135,9 +140,9 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     if lost_half:
         clauses.append(
             f"{len(lost_half)} split {_plural(count=len(lost_half), noun='chunk')} "
-            f"lost one half to a failed call, so "
-            f"{'its' if len(lost_half) == 1 else 'their'} files were not "
-            "reviewed",
+            "lost one half to a failed call, so the files in "
+            f"{'that half' if len(lost_half) == 1 else 'those halves'} were "
+            "not reviewed",
         )
 
     reasons = {item.reason for item in degradations}

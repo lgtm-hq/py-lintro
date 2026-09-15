@@ -32,20 +32,32 @@ from lintro.ai.retry import with_retry
 from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
 from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.classifier import classify_changed_files
+from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.coverage_degradation import describe_coverage_degradations
+from lintro.ai.review.coverage_rounds import hashes_for_diffs, latest_coverage_by_path
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 from lintro.ai.review.models.changed_file import ChangedFile
-from lintro.ai.review.models.coverage_degradation import CoverageDegradation
+from lintro.ai.review.models.coverage_degradation import (
+    CARRIED_CHUNK_INDEX,
+    CoverageDegradation,
+)
+from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
 from lintro.ai.review.response_pipeline import ChunkReviewRequest
+from lintro.ai.review.resume import (
+    carried_truncated_paths,
+    plan_resume,
+    records_for_reviewed,
+)
 from lintro.ai.review.run_planning import (
     resolve_max_parallel_calls,
     resolve_review_chunks,
@@ -59,6 +71,7 @@ from lintro.config.review_config import ReviewSynthesisConfig
 from tests.unit.ai.review.review_fixtures import make_review_context
 from tests.unit.ai.review.test_cross_chunk_synthesis_2269 import (
     _outcome,
+    _pr_context,
     _run,
     _synthesis_payload,
     _two_chunks,
@@ -266,7 +279,7 @@ def test_a_lost_half_is_described_as_unreviewed_files(
     text = describe_coverage_degradations(metadata=metadata)
 
     assert_that(text).contains("lost one half to a failed call")
-    assert_that(text).contains("its files were not reviewed")
+    assert_that(text).contains("the files in that half were not reviewed")
     assert_that(text).does_not_contain("Every chunk was reviewed")
     assert_that(text).does_not_contain("other limit")
     assert_that(metadata.findings_coverage_complete).is_false()
@@ -469,19 +482,128 @@ def test_a_verdict_less_synthesis_answer_is_flagged_not_silent() -> None:
     assert_that(outcome.narrative_missing).is_true()
 
 
-def test_a_truncated_chunk_credits_no_coverage() -> None:
-    """A cut file is not persisted as covered, so the next round re-reviews it."""
+def test_a_truncated_chunk_is_credited_with_a_truncated_record() -> None:
+    """Round 1: the cut file counts as reviewed, but its record says cut.
+
+    Crediting the file is what lets the round converge; the record's marker
+    is what keeps the gap honest on every later round.
+    """
     chunks = _two_chunks()
     chunks[0] = replace(chunks[0], truncated=True)
     result = _run(synthesis=ReviewSynthesisConfig(enabled=False), chunks=chunks)
 
     cut_file = chunks[0].files[0]
-    assert_that(result.metadata.reviewed_paths).does_not_contain(cut_file)
-    assert_that(result.metadata.reviewed_paths).contains(chunks[1].files[0])
+    assert_that(result.metadata.reviewed_paths).contains(cut_file, chunks[1].files[0])
     assert_that(result.metadata.findings_coverage_complete).is_false()
     assert_that(
         [item.reason for item in result.metadata.coverage_degradations],
     ).contains(CoverageDegradationReason.DIFF_TRUNCATED)
+    by_path = {record.path: record for record in result.coverage_records}
+    assert_that(by_path[cut_file].truncated).is_true()
+    assert_that(by_path[chunks[1].files[0]].truncated).is_false()
+
+
+def _prior_state_with_truncated_record(*, path: str) -> ReviewState:
+    """Build a prior state whose record for ``path`` at HEAD is truncated.
+
+    Args:
+        path: The changed file the earlier round reviewed only in part.
+
+    Returns:
+        A state carrying one truncated coverage record at the current hash.
+    """
+    context = _pr_context()
+    hashes = hashes_for_diffs(
+        diffs=split_unified_diff_by_file(unified_diff=context.unified_diff),
+    )
+    return ReviewState(
+        coverage=(
+            CoverageRecord(
+                path=path,
+                patch_hash=hashes[path],
+                reviewed_sha="head",
+                round=1,
+                truncated=True,
+            ),
+        ),
+    )
+
+
+def test_a_carried_truncated_file_re_reports_the_gap() -> None:
+    """Round 2, same head: the cut file is skipped as covered, gap re-recorded."""
+    chunks = _two_chunks()
+    cut_file = chunks[0].files[0]
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=False),
+        chunks=[chunks[1]],
+        prior_state=_prior_state_with_truncated_record(path=cut_file),
+    )
+
+    assert_that(result.metadata.reviewed_paths).does_not_contain(cut_file)
+    assert_that(result.metadata.findings_coverage_complete).is_false()
+    carried = [
+        item
+        for item in result.metadata.coverage_degradations
+        if item.reason is CoverageDegradationReason.DIFF_TRUNCATED
+    ]
+    assert_that(carried).is_length(1)
+    assert_that(carried[0].chunk_index).is_equal_to(CARRIED_CHUNK_INDEX)
+    by_path = {record.path: record for record in result.coverage_records}
+    assert_that(by_path[cut_file].truncated).is_true()
+    text = describe_coverage_degradations(metadata=result.metadata)
+    assert_that(text).contains("carried from an earlier round")
+    assert_that(text).contains("a change to the file re-reviews it")
+
+
+def test_a_changed_truncated_file_is_re_reviewed_and_cleared() -> None:
+    """Round 3, new diff: the file is queued again and its marker clears."""
+    context = _pr_context()
+    cut_file = "pkg/api.py"
+    prior = _prior_state_with_truncated_record(path=cut_file)
+    # The same file with a different (smaller) change: a new hash.
+    changed = replace(
+        context,
+        unified_diff=context.unified_diff.replace(
+            "+def send(payload, *, retries):",
+            "+def send(payload, retries=3):",
+        ),
+    )
+
+    plan = plan_resume(context=changed, prior=prior)
+
+    assert_that(plan.queue).contains(cut_file)
+    assert_that(carried_truncated_paths(plan=plan, prior=prior)).is_empty()
+    records = records_for_reviewed(
+        plan=plan,
+        reviewed_paths=plan.queue,
+        head_sha="head2",
+        round_number=2,
+        prior=prior,
+    )
+    latest = latest_coverage_by_path(records)
+    assert_that(latest[cut_file].truncated).is_false()
+    assert_that(latest[cut_file].round).is_equal_to(2)
+    # And once that record is carried, nothing is re-reported.
+    later = plan_resume(context=changed, prior=replace(prior, coverage=records))
+    assert_that(later.queue).does_not_contain(cut_file)
+    assert_that(
+        carried_truncated_paths(plan=later, prior=replace(prior, coverage=records)),
+    ).is_empty()
+
+
+def test_coverage_record_truncation_round_trips_and_defaults_off() -> None:
+    """The marker is written only when set and an old record loads as unset."""
+    record = CoverageRecord(path="a.py", patch_hash="h", truncated=True)
+    assert_that(record.to_dict()["truncated"]).is_true()
+    loaded = CoverageRecord.from_dict(record.to_dict())
+    assert loaded is not None
+    assert_that(loaded.truncated).is_true()
+
+    plain = CoverageRecord(path="a.py", patch_hash="h")
+    assert_that(plain.to_dict()).does_not_contain_key("truncated")
+    old_format = CoverageRecord.from_dict({"path": "a.py", "hash": "h", "round": 1})
+    assert old_format is not None
+    assert_that(old_format.truncated).is_false()
 
 
 # --- 6. a single over-target file --------------------------------------------

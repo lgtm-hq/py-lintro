@@ -146,21 +146,24 @@
       "patch_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "reviewed_sha": "feature/session-gate",
       "round": 1,
-      "stopped_reason": ""
+      "stopped_reason": "",
+      "truncated": false
     },
     {
       "path": "src/auth/session.py",
       "patch_hash": "034a4a7f8ae64528866571130fc18c8450d6cef86249b2d46f9e0013a1da9e18",
       "reviewed_sha": "feature/session-gate",
       "round": 1,
-      "stopped_reason": ""
+      "stopped_reason": "",
+      "truncated": false
     },
     {
       "path": "src/auth/tokens.py",
       "patch_hash": "da74300485ec268bc02153f58f741a3c1988f70599ffc8b2c35390b9f114b5e8",
       "reviewed_sha": "feature/session-gate",
       "round": 1,
-      "stopped_reason": ""
+      "stopped_reason": "",
+      "truncated": false
     }
   ],
   "flagged_files": [],

@@ -144,10 +144,10 @@ def test_checkpoint_writer_numbers_parts_monotonically(tmp_path: Path) -> None:
     assert_that(written).is_equal_to([1, 2])
 
 
-def test_checkpoint_writer_credits_no_coverage_for_a_truncated_chunk(
+def test_checkpoint_writer_marks_a_truncated_chunk_on_its_record(
     tmp_path: Path,
 ) -> None:
-    """An in-flight checkpoint never persists a cut file as covered.
+    """An in-flight checkpoint credits a cut file but stamps the truncation.
 
     Args:
         tmp_path: Pytest temporary directory used as the state directory.
@@ -165,8 +165,9 @@ def test_checkpoint_writer_credits_no_coverage_for_a_truncated_chunk(
     ):
         checkpoint([replace(_partial(), truncated=True)])
 
-    covered = {record.path for record in states[-1].coverage}
-    assert_that(covered).does_not_contain("src/app.py")
+    records = {record.path: record for record in states[-1].coverage}
+    assert_that(records).contains_key("src/app.py")
+    assert_that(records["src/app.py"].truncated).is_true()
 
 
 def test_checkpoint_writer_survives_a_failed_part(tmp_path: Path) -> None:

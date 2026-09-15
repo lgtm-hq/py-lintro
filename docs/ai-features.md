@@ -457,10 +457,13 @@ findings that need the whole chunk in view may go unreported.
 
 - `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
   event, each with a `reason` (`output_exhaustion_retried`, `split_half_failed` when one
-  half of a split chunk failed and its files were left unreviewed, `diff_truncated` when
-  a single file's diff exceeded the context window and was cut (that file is not
-  credited as covered, so the next round reviews it again), a failed depth pass, or —
-  when the synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
+  half of a split chunk failed and the files in that half were left unreviewed,
+  `diff_truncated` when a single file's diff exceeded the context window and was cut
+  (the file is still credited as covered at its current hash so the review converges;
+  its coverage record carries a `truncated` marker, and every later round that skips the
+  file as covered re-records the degradation with a `chunk_index` of `-2` until the
+  file's diff changes and it is reviewed again), a failed depth pass, or — when the
+  synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
   `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
   chunk that was split and whose depth-3 sweep also failed contributes two entries with
   the same `chunk_index`. `findings_coverage_complete` is the derived "no coverage

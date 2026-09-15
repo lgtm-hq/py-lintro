@@ -145,8 +145,8 @@ async def review_chunk(
         # A split chunk whose one half failed reports only the files the
         # surviving half covered, so coverage crediting leaves the rest
         # unreviewed instead of claiming them. A truncated chunk keeps its
-        # file here (the synthesis digest needs the identity) and says so,
-        # and ``credited_paths`` leaves that file uncredited everywhere.
+        # file here and says so: the file is credited at its hash so the
+        # round converges, and its coverage record carries the truncation.
         files=main_pass.files or tuple(chunk.files),
         truncated=chunk.truncated,
         coverage_degradations=(

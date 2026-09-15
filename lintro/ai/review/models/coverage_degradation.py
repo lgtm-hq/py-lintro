@@ -9,7 +9,7 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 
-__all__ = ["SYNTHESIS_CHUNK_INDEX", "CoverageDegradation"]
+__all__ = ["CARRIED_CHUNK_INDEX", "SYNTHESIS_CHUNK_INDEX", "CoverageDegradation"]
 
 #: ``chunk_index`` stamped on a degradation that belongs to the whole run
 #: rather than to one chunk — today only the cross-chunk synthesis pass
@@ -19,6 +19,12 @@ __all__ = ["SYNTHESIS_CHUNK_INDEX", "CoverageDegradation"]
 #: module, so the surfaces that must exclude it can recognize it without
 #: importing the pass.
 SYNTHESIS_CHUNK_INDEX = -1
+
+#: ``chunk_index`` stamped on a degradation carried over from an earlier
+#: round: a file skipped as covered this round whose coverage record says
+#: only a prefix of its diff was ever reviewed (lintro-ops #37). No chunk of
+#: this run read it, so it takes its own sentinel.
+CARRIED_CHUNK_INDEX = -2
 
 
 @dataclass(frozen=True, slots=True)

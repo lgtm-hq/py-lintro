@@ -66,7 +66,8 @@ class ChunkReviewPartial:
         truncated: True when the chunk's diff was cut to the context ceiling,
             so the model saw only a prefix of its file. The file stays in
             ``files`` for the synthesis digest but is never credited as
-            covered (see :func:`credited_paths`).
+            covered, and the truncation is stamped on the
+            coverage record (see :func:`truncated_paths`).
     """
 
     findings: tuple[ReviewFinding, ...]
@@ -83,24 +84,22 @@ class ChunkReviewPartial:
     truncated: bool = False
 
 
-def credited_paths(*, partials: Iterable[ChunkReviewPartial]) -> set[str]:
-    """Return the changed paths the completed chunks may be credited for.
+def truncated_paths(*, partials: Iterable[ChunkReviewPartial]) -> set[str]:
+    """Return the changed paths whose chunk reviewed only a diff prefix.
 
-    A truncated chunk reviewed only a prefix of its file, so its files are
-    left out: the file stays awaiting and the next round reviews it again
-    instead of skipping the unseen suffix. Both the final assembly and the
-    in-flight checkpoints credit through here, so an interrupted run can
-    never persist coverage the final result would have refused.
+    A truncated chunk's file is still credited as covered at its current
+    hash, so an unchanged file is not re-read every round; the truncation
+    travels with the coverage record instead and is re-reported until the
+    file's diff changes. Both the final assembly and the in-flight
+    checkpoints stamp the record through here.
 
     Args:
         partials: Chunk partials finished so far.
 
     Returns:
-        The set of paths credited as reviewed.
+        The set of paths reviewed only up to the context-window ceiling.
     """
-    return {
-        path for partial in partials if not partial.truncated for path in partial.files
-    }
+    return {path for partial in partials if partial.truncated for path in partial.files}
 
 
 def parse_review_response(*, content: str) -> dict[str, Any]:

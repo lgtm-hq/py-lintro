@@ -19,7 +19,7 @@ from loguru import logger
 
 from lintro.ai.review.coverage import inherit_same_round_paths
 from lintro.ai.review.finding_matcher import match_findings
-from lintro.ai.review.merge import credited_paths
+from lintro.ai.review.merge import truncated_paths
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.resume import records_for_reviewed
 from lintro.ai.review.sensitivity import filter_findings_by_policy
@@ -68,7 +68,7 @@ def write_incremental_coverage_part(
     directory_override = os.environ.get("LINTRO_REVIEW_STATE_DIR", "").strip()
     if not directory_override:
         return
-    completed_files = credited_paths(partials=collected)
+    completed_files = {path for partial in collected for path in partial.files}
     covered_now = inherit_same_round_paths(
         reviewed_now=tuple(path for path in resume.queue if path in completed_files),
         eligible_paths=resume.eligible,
@@ -81,6 +81,7 @@ def write_incremental_coverage_part(
         round_number=prior_state.next_round if prior_state is not None else 1,
         prior=None if force_full else prior_state,
         stopped_reason=stopped_reason,
+        truncated_paths=truncated_paths(partials=collected),
     )
     pr_raw = os.environ.get("PR_NUMBER", "").strip()
     seed = ReviewState() if force_full or prior_state is None else prior_state

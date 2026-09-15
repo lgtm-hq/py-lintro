@@ -25,6 +25,9 @@ from lintro.ai.review.coverage import (
     inherit_same_round_paths,
     pending_invalidations_for,
 )
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.file_selection import (
@@ -32,12 +35,16 @@ from lintro.ai.review.file_selection import (
     resolve_file_selection,
 )
 from lintro.ai.review.finding_parser import reject_context_findings
-from lintro.ai.review.merge import credited_paths, merge_review_results
+from lintro.ai.review.merge import merge_review_results, truncated_paths
 from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.coverage_counts import CoverageCounts
+from lintro.ai.review.models.coverage_degradation import (
+    CARRIED_CHUNK_INDEX,
+    CoverageDegradation,
+)
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
-from lintro.ai.review.resume import records_for_reviewed
+from lintro.ai.review.resume import carried_truncated_paths, records_for_reviewed
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
@@ -215,12 +222,22 @@ def assemble_review_result(
                 for degradation in item.coverage_degradations
             ),
             *(synthesis.degradations if synthesis is not None else ()),
+            *(
+                CoverageDegradation(
+                    reason=CoverageDegradationReason.DIFF_TRUNCATED,
+                    chunk_index=CARRIED_CHUNK_INDEX,
+                )
+                for _path in carried_truncated_paths(
+                    plan=plan.resume,
+                    prior=None if options.force_full else options.prior_state,
+                )
+            ),
         ),
         synthesis=synthesis.outcome if synthesis is not None else None,
         lint_facts_note=options.lint_note,
     )
 
-    completed_files = credited_paths(partials=outcome.partials)
+    completed_files = {path for item in outcome.partials for path in item.files}
     agent_files = {path for item in outcome.custom_results for path in item.files}
     actually_reviewed = tuple(
         path
@@ -242,6 +259,7 @@ def assemble_review_result(
         ),
         prior=None if options.force_full else options.prior_state,
         stopped_reason=outcome.stopped_reason,
+        truncated_paths=truncated_paths(partials=outcome.partials),
     )
     payload_flags = tuple(
         flag for item in outcome.partials for flag in item.flagged_files

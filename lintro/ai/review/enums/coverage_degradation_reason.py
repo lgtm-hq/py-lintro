@@ -49,12 +49,15 @@ class CoverageDegradationReason(StrEnum):
         DIFF_TRUNCATED: One file's diff exceeded the hard per-chunk ceiling
             (the context-window remainder) and was cut to fit, so the model
             reviewed only a prefix of that file's change and findings past
-            the cut may go unreported.
+            the cut may go unreported. The file is credited as covered so
+            the review converges; its coverage record carries the truncation
+            and the reason is re-recorded (with a carried sentinel index) on
+            every later round that skips the file, until its diff changes.
         SPLIT_HALF_FAILED: After an output-exhaustion split, one half's call
             failed while the other completed. The surviving half's findings
-            are kept and the failed half's files are left unreviewed (they
-            are not credited as covered), so this run did not review every
-            file it started.
+            are kept and the files in the failed half are left unreviewed
+            (they are not credited as covered), so this run did not review
+            every file it started.
     """
 
     OUTPUT_EXHAUSTION_RETRIED = auto()

@@ -237,6 +237,7 @@ def _run(
     strictness: ReviewStrictness | None = None,
     synthesis_diff_budget: int | None = None,
     synthesis_system_prompts: list[str] | None = None,
+    prior_state: ReviewState | None = None,
 ) -> Any:
     """Run a review with the chunk and synthesis provider calls mocked apart.
 
@@ -257,6 +258,8 @@ def _run(
             budget can still exercise the truncation path end to end.
         synthesis_system_prompts: Optional sink recording the system prompt
             each synthesis call was made with.
+        prior_state: Optional prior artifact state, so a test can run a
+            later round against carried coverage.
 
     Returns:
         The review result.
@@ -333,6 +336,7 @@ def _run(
                     else resolve_sensitivity_policy(strictness=strictness)
                 ),
                 synthesis=synthesis,
+                prior_state=prior_state,
             ),
         )
 
