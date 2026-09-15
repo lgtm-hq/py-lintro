@@ -14,7 +14,11 @@ each published channel and fails loudly when they disagree:
 
     - PyPI: ``https://pypi.org/pypi/<package>/json`` -> ``info.version``
     - npm: ``https://registry.npmjs.org/<package>`` -> ``dist-tags.latest``
-    - Homebrew: the tap's ``Formula/lintro.rb`` -> ``version "..."``
+    - Homebrew: the tap's ``Formula/lintro.rb`` -> the release tag in the
+      GitHub release-asset ``url "https://github.com/<owner>/<repo>/releases/
+      download/v<X.Y.Z>/..."`` stanza, falling back to an explicit
+      ``version "..."`` stanza (the formula dropped the redundant ``version``
+      line for ``brew audit --strict``; lgtm-hq/homebrew-tap#480)
 
 It is an alarm, never a gate: it does not block, retry, or reorder the release
 pipeline. Two suppression rules keep expected propagation lag quiet:
@@ -72,6 +76,13 @@ _PENDING_RUN_STATES = frozenset(
 _NPM_JOB_PREFIX = "publish to npm"
 
 _FORMULA_VERSION = re.compile(r'^\s*version\s+"([^"]+)"', re.MULTILINE)
+# The GitHub release-asset download url carries the release tag as its path
+# segment; that tag is the formula's version once the explicit stanza is gone.
+_FORMULA_RELEASE_URL = re.compile(
+    r'^\s*url\s+"https://github\.com/[^/"]+/[^/"]+/releases/download/'
+    r'v?([^/"]+)/[^"]+"',
+    re.MULTILINE,
+)
 _VERSION_CORE = re.compile(r"^(\d+(?:\.\d+)*)(.*)$")
 
 
@@ -264,13 +275,37 @@ def resolve_homebrew(
         body = fetch(url=url)
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return ChannelStatus(name="Homebrew", error=f"{type(exc).__name__}: {exc}")
-    match = _FORMULA_VERSION.search(body)
-    if match is None:
+    version = formula_version(body=body)
+    if version is None:
         return ChannelStatus(
             name="Homebrew",
-            error=f"no version stanza found in {formula}",
+            error=f"no release url or version stanza found in {formula}",
         )
-    return ChannelStatus(name="Homebrew", version=match.group(1).strip())
+    return ChannelStatus(name="Homebrew", version=version)
+
+
+def formula_version(*, body: str) -> str | None:
+    """Extract the pinned version from a Homebrew formula body.
+
+    The tap formula no longer carries an explicit ``version`` stanza (Homebrew
+    scans it from the stable url; ``brew audit --strict`` flags the redundant
+    line), so the release tag in the first GitHub release-asset ``url`` stanza
+    is authoritative. An explicit ``version`` stanza is honoured only when no
+    such url exists, which keeps older formula shapes readable.
+
+    Args:
+        body: The formula source.
+
+    Returns:
+        The version string, or ``None`` when neither shape is present.
+    """
+    url_match = _FORMULA_RELEASE_URL.search(body)
+    if url_match is not None:
+        return url_match.group(1).strip()
+    stanza_match = _FORMULA_VERSION.search(body)
+    if stanza_match is not None:
+        return stanza_match.group(1).strip()
+    return None
 
 
 def release_pipeline_pending(
