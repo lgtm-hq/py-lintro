@@ -6924,6 +6924,7 @@ _LGTM_CI_NUMBER_INPUTS: dict[str, frozenset[str]] = {
         },
     ),
     "reusable-build-python-dist.yml": frozenset({"artifact-retention-days"}),
+    "reusable-release-failure-notifier.yml": frozenset({"max-reruns"}),
     "reusable-test-python.yml": frozenset({"coverage-threshold"}),
 }
 _LGTM_CI_NUMBER_INPUTS_COMMON: frozenset[str] = frozenset({"timeout-minutes"})
@@ -7574,7 +7575,7 @@ def test_github_release_attaches_the_gated_assets_immutably() -> None:
     """The release carries exactly what the gate assembled, never overwritten."""
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     release = publish["jobs"]["github-release"]
-    assert_that(release["needs"]).is_equal_to(["pypi-upload"])
+    assert_that(release["needs"]).is_equal_to(["classify-tag", "pypi-upload"])
     with_block = release["with"]
     assert_that(with_block["artifact-name"]).is_equal_to("release-assets")
     assert_that(with_block["artifact-path"]).is_equal_to("release")
@@ -7669,3 +7670,158 @@ def test_docker_promote_promotes_the_full_release_tag_set() -> None:
         assert_that(tags).described_as(step_id).is_equal_to(
             patterns,
         )
+
+
+# --- #2562 PR (d): the release failure notifier ------------------------------
+
+_NOTIFIER_REUSABLE = "reusable-release-failure-notifier.yml"
+
+
+def test_github_release_derives_prerelease_from_the_tag_classifier() -> None:
+    """A checkpoint tag must be published as a GitHub prerelease.
+
+    The call used to pass a hard-coded ``prerelease: false``, so the
+    v0.160.3a4 checkpoint became GitHub's "latest" release until it was
+    edited by hand. The flag now comes from the same ``classify-tag`` output
+    that gates Homebrew, npm, Docker and the mirror (#2562).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = publish["jobs"]["github-release"]
+
+    assert_that(job["needs"]).contains("classify-tag", "pypi-upload")
+    assert_that(_normalize_github_expr(str(job["with"]["prerelease"]))).is_equal_to(
+        "${{ needs.classify-tag.outputs.is_prerelease == 'true' }}",
+    )
+
+
+@pytest.mark.parametrize("job_name", ["mirror-token", "mirror-release"])
+def test_mirror_lane_runs_for_stable_releases_only(job_name: str) -> None:
+    """The pre-commit mirror bump must skip prerelease tags explicitly.
+
+    The mirror pins the wheel that pre-commit consumers install, so a
+    checkpoint prerelease must never bump it. The v0.160.3a4 checkpoint ran
+    the lane (harmlessly, the script pushed nothing); both jobs now gate on
+    the classifier like Homebrew and npm, keeping the ``actions-v`` recursion
+    guard and, for the bump itself, the token guard (#2562).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = publish["jobs"][job_name]
+    condition = _normalize_github_expr(str(job["if"]))
+
+    assert_that(job["needs"]).contains("classify-tag")
+    assert_that(condition).contains(
+        "needs.classify-tag.outputs.is_prerelease == 'false'",
+    )
+    assert_that(condition).contains("!startsWith(github.ref_name, 'actions-v')")
+    if job_name == "mirror-release":
+        assert_that(condition).contains(
+            "needs.mirror-token.outputs.has_token == 'true'",
+        )
+
+
+def test_release_failure_notifier_runs_after_every_publish_job() -> None:
+    """A failed tag run ends in one deduplicated issue, a green one closes it.
+
+    The notifier needs every channel job and runs under ``!cancelled()`` so a
+    partial release is reported whatever failed; ``ref_type`` keeps a branch
+    dispatch from filing an issue keyed to a branch name. It is the last job
+    in the file: nothing may run after the report.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = publish["jobs"]["notify-failure"]
+    assert_that(str(job["uses"])).starts_with(
+        f"lgtm-hq/lgtm-ci/.github/workflows/{_NOTIFIER_REUSABLE}@",
+    )
+    condition = _normalize_github_expr(str(job["if"]))
+    assert_that(condition).starts_with("!cancelled() &&")
+    assert_that(condition).contains("github.ref_type == 'tag'")
+    assert_that(set(_PUBLISH_JOBS)).is_subset_of(set(job["needs"]))
+    assert_that(job["permissions"]).is_equal_to(
+        {"actions": "read", "contents": "read", "issues": "write"},
+    )
+    with_block = job["with"]
+    assert_that(with_block["workflow-key"]).is_equal_to("publish-pypi-on-tag")
+    assert_that(with_block["tag"]).is_equal_to("${{ github.ref_name }}")
+    assert_that(with_block["channels"]).is_equal_to("${{ toJson(needs) }}")
+    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    assert_that(with_block["tooling-ref"]).is_equal_to(_canonical_lgtm_ci_pin())
+    assert_that(job).does_not_contain_key("secrets")
+    assert_that(list(publish["jobs"])[-1]).is_equal_to("notify-failure")
+
+
+def test_release_failure_notifier_sees_every_channel_result() -> None:
+    """Every job downstream of the gate is a row in the notifier's table."""
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    needs = set(publish["jobs"]["notify-failure"]["needs"])
+    every_other_job = {
+        job_id for job_id in publish["jobs"] if job_id != "notify-failure"
+    }
+    channel_jobs = {
+        job_id
+        for job_id in every_other_job
+        if "release-gate" in _job_ancestors(publish, job_id=job_id)
+    }
+    assert_that(channel_jobs).is_not_empty()
+    assert_that(channel_jobs).is_subset_of(needs)
+    # Build-stage jobs too: a failed build skips the gate and every
+    # publisher, and a table of skipped rows alone reads as a green run.
+    assert_that(needs).is_equal_to(every_other_job)
+
+
+def test_release_failure_notifier_matches_the_auto_rerun_budget() -> None:
+    """Suppression is opt-in and must mirror the auto-rerun call exactly.
+
+    The reusable stays quiet on an attempt within ``max-reruns`` whose failed
+    job matches an infra signature, so the budget and the extra signatures
+    must equal what auto-rerun-on-infra-failure.yml applies to this workflow;
+    otherwise one classifier files while the other retries.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    rerun = _load_workflow(name="auto-rerun-on-infra-failure.yml")
+    assert_that(set(rerun["on"]["workflow_run"]["workflows"])).contains(publish["name"])
+    rerun_inputs = rerun["jobs"]["rerun"]["with"]
+    notifier = publish["jobs"]["notify-failure"]["with"]
+    assert_that(notifier["max-reruns"]).is_instance_of(int)
+    assert_that(int(rerun_inputs["max-reruns"])).is_equal_to(notifier["max-reruns"])
+    assert_that(str(notifier["signatures"]).splitlines()).is_equal_to(
+        str(rerun_inputs["signatures"]).splitlines(),
+    )
+
+
+def test_release_gate_owns_the_manifest_and_no_docker_manifest_job_remains() -> None:
+    """The (b) ``docker-manifest`` job folded into the gate (#2659 review).
+
+    Two uploads under one artifact name in a run collide, so the manifest is
+    written exactly once, by release-gate, after every artifact verified.
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    assert_that(publish["jobs"]).does_not_contain_key("docker-manifest")
+    writers = [
+        (job_id, step)
+        for job_id, job in publish["jobs"].items()
+        for step in (job.get("steps") or [])
+        if "write_manifest.py" in str(step.get("run", ""))
+        or "write-release-manifest.py" in str(step.get("run", ""))
+    ]
+    assert_that([job_id for job_id, _ in writers]).is_equal_to(["release-gate"])
+    uploads = [
+        job_id
+        for job_id, job in publish["jobs"].items()
+        for step in (job.get("steps") or [])
+        if (step.get("with") or {}).get("name") == "release-manifest"
+    ]
+    assert_that(uploads).is_equal_to(["release-gate"])
+
+
+def test_security_md_describes_the_gated_release() -> None:
+    """SECURITY.md's supply-chain claim matches the pipeline (#2562)."""
+    text = (_REPO_ROOT / ".github" / "SECURITY.md").read_text(encoding="utf-8")
+    for expected in (
+        "release-gate",
+        "gh attestation verify",
+        ".intoto.jsonl",
+        "build-binaries.yml",
+        "immutable",
+    ):
+        assert_that(text).described_as(expected).contains(expected)
+    assert_that(text).does_not_contain("build-binary.yml")

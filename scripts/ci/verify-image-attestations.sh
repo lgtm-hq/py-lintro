@@ -22,7 +22,8 @@ Usage:
     scripts/ci/verify-image-attestations.sh
 
 Environment:
-  IMAGES            Whitespace/newline-separated image refs pinned by digest,
+  IMAGES            Newline-separated image refs pinned by digest (one per
+                    line; a space-joined value is read as one ref),
                     e.g. ghcr.io/lgtm-hq/py-lintro@sha256:... (required)
   ATTESTATION_REPO  Repository whose attestations are consulted, passed as
                     `--repo` (required)

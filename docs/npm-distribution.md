@@ -113,8 +113,10 @@ pointer is left alone.
 ### Approval and backfills
 
 The `npm` environment approval gate is intentionally preserved. Normal releases follow
-the dependency order PyPI → platform binaries/Homebrew tap → npm: approve the npm
-deployment only after the preceding jobs have uploaded the release binaries.
+the dependency order release gate (everything built, attested and verified) → PyPI →
+GitHub Release (dist, the three binaries, man page, `SHA256SUMS`, Sigstore bundles) →
+npm; npm no longer waits on the Homebrew dispatch (#2562). Approve the npm deployment
+only after the GitHub Release job has attached the binaries.
 
 **The only supported way to publish or backfill a tag** is through that tag's
 `Publish - PyPI Production` (`publish-pypi-on-tag.yml`) run — it is the entry path npm
@@ -122,17 +124,18 @@ trusts:
 
 1. Open the run for the tag under Actions → `Publish - PyPI Production`.
 2. If it already finished or failed, choose **Re-run failed jobs**; the rerun keeps the
-   PyPI → binaries/Homebrew → npm order and the entry-path identity.
+   gate → PyPI → GitHub Release → npm order and the entry-path identity. A failed run
+   also has a `release-failure:publish-pypi-on-tag:<tag>` issue with the per-channel
+   table; check it before approving the rerun.
 3. Approve the `npm` environment when that run reaches its waiting npm job.
 
-Re-running a tag run is designed to be cheap (#2435): the Linux and macOS binary jobs
-detect the verified binary already attached to the release (SHA256-matched against the
-`sha256-*` artifact the same run produced) and skip the ~20-minute Nuitka rebuild, the
-verify/smoke steps it feeds, and the release upload. Uploads also stage `<asset>.new`
-and verify it before anything is removed, so the only moment the release lacks its
-binary is the single delete-plus-rename API pair at the end; a kill there leaves
-`<asset>.new` in place and the next attempt promotes it from the reuse check. So
-**Re-run failed jobs** mostly re-drives the publish steps rather than repeating a build.
+Re-running a tag run is designed to be cheap (#2435): once the release exists, the Linux
+and macOS binary jobs detect the verified binary already attached to it (SHA256-matched
+against the `sha256-*` artifact the same run produced) and skip the ~20-minute Nuitka
+rebuild and the verify/smoke steps it feeds. The GitHub Release job never overwrites a
+published asset whose bytes differ (`immutable-assets`), so a rerun cannot strip or
+replace a binary npm is about to download. **Re-run failed jobs** mostly re-drives the
+publish steps rather than repeating a build.
 
 For the npm leg itself, a re-run over already-published packages is read-first (#2631):
 each package already on the registry is checked with `npm dist-tag ls`, and when the

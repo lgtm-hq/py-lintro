@@ -100,7 +100,26 @@ workflow (`mirror-release.yml`) uses a fixed run name because it is called from 
 pipeline rather than triggered by a branch push. Failure visibility itself lives
 upstream: the reusables run a `report-release-failure` job that writes trigger context
 to the step summary and opens/updates a deduplicated GitHub issue on `main` failures —
-hence the `actions: read` + `issues: write` job permissions.
+hence the `actions: read` + `issues: write` job permissions. The tag pipeline has its
+own report: `notify-failure` in `publish-pypi-on-tag.yml` (`if: !cancelled()`, needs
+every publish job) calls `reusable-release-failure-notifier.yml` with `toJson(needs)` as
+the per-channel table and files or updates one issue keyed
+`release-failure:publish-pypi-on-tag:<tag>`; a green rerun closes it. An attempt within
+the auto-rerun budget (3, the same `max-reruns` and infra signatures as
+`auto-rerun-on-infra-failure.yml`, pinned by a wiring test) whose failed job matches an
+infra signature stays quiet so the automatic rerun gets its chance (#2562).
+
+**Checkpoint prereleases.** The build-dist preflight (`reusable-build-python-dist.yml`)
+requires the tag to equal the `pyproject.toml` version and to be reachable from `main`,
+so a bare `aN` tag on `main` or on a side branch cannot publish. To exercise the gated
+pipeline without a release: open a version-bump PR to `main` titled
+`ci(release): checkpoint prerelease X.Y.ZaN (#issue)` that changes only
+`pyproject.toml`, `lintro/__init__.py` and `uv.lock` (`uv version X.Y.ZaN`, no
+`CHANGELOG.md`); the `ci` type keeps `release-auto-tag.yml` and the version-PR bot from
+reacting. After the squash merge, push a signed `vX.Y.ZaN` tag on the merge commit by
+hand. The tag run then builds, gates, publishes to PyPI and creates a prerelease GitHub
+Release, and skips Docker promote, Homebrew and npm; the next bot version PR bumps past
+the checkpoint version as usual.
 
 ## Publish
 
@@ -123,9 +142,11 @@ hence the `actions: read` + `issues: write` job permissions.
   staging digests, then retag to `<version>`, `<major.minor>`, `<major>`, `latest` as
   the last steps), `homebrew-tap` (`publish-binaries.yml`: reads the arm64 sha256 from
   the manifest and pings the tap), `npm-publish` (no longer behind Homebrew) and the
-  mirror lane. Prereleases run the build stage, the gate, PyPI and the GitHub Release as
-  before and skip the Docker promote, Homebrew and npm. Lint runs on `main` via
-  `docker-ci` only (no duplicate quality on tag).
+  mirror lane; `notify-failure` runs last under `!cancelled()` and reports the
+  per-channel result (see Release above). Prereleases run the build stage, the gate,
+  PyPI and the GitHub Release (marked prerelease, derived from `classify-tag`) and skip
+  the Docker promote, Homebrew, npm and the pre-commit mirror bump. Lint runs on `main`
+  via `docker-ci` only (no duplicate quality on tag).
 - **docker-build-publish.yml** — Multi-arch GHCR build via `reusable-docker.yml` (base +
   full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
   pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical
@@ -194,8 +215,9 @@ The binaries ship in two `workflow_call` stages, both called from
   `github-release`) — `Notify Homebrew Tap` reads the arm64 sha256 from the
   `release-manifest` artifact the gate wrote, waits for PyPI and dispatches the formula
   update. The binaries and `lintro.1` are attached to the release by
-  `reusable-github-release` from the gate's `release-assets` artifact (immutable
-  assets), so nothing in this workflow holds `contents: write` any more.
+  `reusable-github-release` from the gate's `release-assets` artifact (under the
+  `immutable-assets` rerun guard), so nothing in this workflow holds `contents: write`
+  any more.
 
 Artifacts (`lintro-macos-arm64`, `lintro-linux-x64`, `lintro-linux-arm64`, `sha256-*`,
 `lintro-man-page`) are retained for 90 days, the policy recovery window
@@ -208,30 +230,37 @@ the split. Recovering a broken release is lgtm-hq/lgtm-ci#966.
 
 ## Binary release reruns
 
-Both stages are idempotent (#2435), so **Re-run failed jobs** on a tag run is the
-supported recovery and npm backfill path (#2247). There is no separate dispatch path.
+Every stage is idempotent, so **Re-run failed jobs** on a tag run is the supported
+recovery and npm backfill path (#2247). There is no separate dispatch path. Start from
+the `release-failure:publish-pypi-on-tag:<tag>` issue the notifier filed: its channel
+table says what published and what did not, which is what decides between a rerun and
+the recovery workflow (lgtm-hq/lgtm-ci#966).
 
 - A failed build job rebuilds; a build job that already succeeded keeps its artifacts
-  from the earlier attempt, and the publish jobs download those. Before compiling, each
-  build job also checks whether the release already carries its platform asset with a
+  from the earlier attempt, and `release-gate` downloads those. Before compiling, each
+  binary build job checks whether the release already carries its platform asset with a
   SHA256 matching the `sha256-*` artifact this same run produced on an earlier attempt
-  (`scripts/build/reuse_release_asset.sh`); on a match it skips `Build binary`,
-  `Verify binary`, `Smoke-test tool registry`, `Finalize binary` and
-  `Attest build provenance` and only re-uploads the artifacts. The same-run artifact is
-  written after verify, smoke-test and attest passed on that earlier attempt, which is
-  what makes skipping them safe — an asset uploaded by hand has no such artifact and is
-  rebuilt. The build jobs hold `contents: read`, so an interrupted swap's `<asset>.new`
-  is not promoted there; that case rebuilds and the publish stage finishes the swap.
-- The publish jobs run the same check with `contents: write`: a matching asset skips the
-  upload, a matching `<asset>.new` left by an interrupted swap is promoted, and anything
-  else is uploaded with `scripts/build/upload_release_asset.sh`, which uploads
-  `<asset>.new`, verifies its checksum, and only then deletes and renames. A kill
-  between that delete and that rename leaves only `<asset>.new`, and the next attempt
-  recovers from it in either place. A killed runner can no longer strip a good binary
-  off a published release, which is what the `softprops/action-gh-release` overwrite
-  path did on `v0.147.3`. The man page is still uploaded with
-  `softprops/action-gh-release`; it is regenerated cheaply, so the swap was not extended
-  to it.
+  (`scripts/build/reuse_release_asset.sh`); on the first attempt no release exists yet,
+  so that check degrades to a rebuild, while a rerun after the release was created
+  reuses the published asset and skips `Build binary`, `Verify binary`,
+  `Smoke-test tool registry`, `Finalize binary` and `Attest build provenance` (the
+  same-run artifact was written only after those passed, and the earlier attempt's
+  attestation covers the same bytes).
+- `release-gate` re-verifies every artifact on every attempt and re-assembles
+  `release-assets` and `release-manifest` (both kept 90 days). A rerun of only the
+  publish stage reuses the gate's artifacts from the earlier attempt.
+- `github-release` attaches `release-assets` with `immutable-assets`: an asset already
+  on the release with the same digest is a no-op, a different or unverifiable digest
+  fails the job with the recovery rule instead of overwriting. No job in the tag
+  pipeline deletes or renames a published asset any more; the former upload-then-swap
+  path and its `<asset>.new` recovery are gone with the upload jobs. This is the
+  reusable's own guard, not GitHub's immutable releases: that is a repository setting
+  (Settings → General → Releases → "Immutable releases") which, once the owner enables
+  it, locks every published release's assets and tag at the API level; releases show
+  `immutable: false` until then.
+- `docker-promote` verifies and cosign-signs the staging digests before its retags,
+  which are the job's last steps and pin to the digests the build stage exported; a
+  rerun retags the same digests again (registry no-op).
 - `npm-publish` runs under the trusted workflow identity it needs on a rerun, because it
   is still called from the tag pipeline.
 
