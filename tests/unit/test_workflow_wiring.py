@@ -1133,7 +1133,8 @@ def test_test_ci_has_no_path_classification_surface() -> None:
     expected_needs: dict[str, list[str]] = {
         "test-compat": [],
         "test-coverage": [],
-        "test-gate": ["test-compat", "test-coverage"],
+        "test-shell": [],
+        "test-gate": ["test-compat", "test-coverage", "test-shell"],
         "test-suite-coverage": ["test-gate"],
         "stage-coverage-html": ["test-coverage"],
     }
@@ -1253,6 +1254,50 @@ def test_test_ci_matrix_collects_the_integration_suite() -> None:
         assert_that(job["with"]["extra-args"]).described_as(
             job_name,
         ).does_not_contain("--ignore", "tests/integration")
+
+
+def test_test_ci_runs_the_bats_suites_and_gates_on_them() -> None:
+    """CI must run the shell tests and the gate must count their result.
+
+    Fifteen bats files under ``tests/bats`` (build, release-gate, CI and npm
+    scripts) ran only through the local pre-push gate: no workflow invoked
+    bats, so a broken release script could reach ``main`` with green CI
+    (#2659 review). The job uses lgtm-ci's ``reusable-test-shell.yml`` at the
+    canonical pin under the runner contract, and ``test-gate`` needs it and
+    passes its result to ``evaluate-test-gate.sh``, which requires it.
+    """
+    test_ci = _load_workflow(name="test-ci.yml")
+    job = test_ci["jobs"]["test-shell"]
+
+    assert_that(str(job["uses"])).is_equal_to(
+        "lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@"
+        + _canonical_lgtm_ci_pin(),
+    )
+    with_block = job["with"]
+    assert_that(with_block["test-path"]).is_equal_to("tests/bats")
+    assert_that(with_block["tooling-ref"]).is_equal_to(_canonical_lgtm_ci_pin())
+    assert_that(with_block["egress-policy"]).is_equal_to("block")
+    assert_that(with_block["allowed-endpoints-mode"]).is_equal_to("replace")
+    assert_that(set(str(with_block["allowed-endpoints"]).split())).contains(
+        "github.com:443",
+        "api.github.com:443",
+    )
+    assert_that(job["permissions"]).is_equal_to(
+        {"contents": "read", "pull-requests": "write"},
+    )
+    assert_that((_REPO_ROOT / "tests" / "bats").is_dir()).is_true()
+
+    gate = test_ci["jobs"]["test-gate"]
+    assert_that(gate["needs"]).contains("test-compat", "test-coverage", "test-shell")
+    evaluate = [step for step in gate["steps"] if step.get("id") == "gate"]
+    assert_that(evaluate).is_length(1)
+    assert_that(evaluate[0]["env"]["SHELL_RESULT"]).is_equal_to(
+        "${{ needs.test-shell.result }}",
+    )
+    script = (_REPO_ROOT / "scripts" / "ci" / "evaluate-test-gate.sh").read_text(
+        encoding="utf-8",
+    )
+    assert_that(script).contains(': "${SHELL_RESULT:?}"', "test-shell:${SHELL_RESULT}")
 
 
 def test_test_ci_suite_coverage_gate_mirrors_test_gate() -> None:
