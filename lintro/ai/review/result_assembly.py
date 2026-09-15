@@ -150,14 +150,17 @@ def assemble_review_result(
         + (synthesis.cost_estimate if synthesis is not None else 0.0)
     )
     chunks_reviewed = len(outcome.partials)
-    summary = (
-        custom_agents_only_summary(
-            run_builtin_checklist=options.run_builtin_checklist,
-            agents_run=len(outcome.custom_results),
-            findings=len(outcome.custom_findings),
-        )
-        or outcome.merged.summary
-    )
+    # The round's narrative comes from the synthesis pass (lintro-ops
+    # milestone 0, decision A); chunks report findings only. A failed or
+    # disabled pass leaves both ``None`` and the surfaces render their
+    # TL;DR-only fallback.
+    pr_summary = synthesis.summary if synthesis is not None else None
+    verdict_reasoning = synthesis.verdict_reasoning if synthesis is not None else None
+    summary = custom_agents_only_summary(
+        run_builtin_checklist=options.run_builtin_checklist,
+        agents_run=len(outcome.custom_results),
+        findings=len(outcome.custom_findings),
+    ) or (pr_summary.headline if pr_summary is not None else "")
 
     selection = resolve_file_selection(
         context=context,
@@ -328,11 +331,9 @@ def assemble_review_result(
     return ReviewResult(
         metadata=metadata,
         summary=summary,
-        checklist=outcome.merged.checklist,
         findings=filtered_findings,
-        pr_summary=outcome.merged.pr_summary,
-        verdict_reasoning=outcome.merged.verdict_reasoning,
-        file_assessments=outcome.merged.file_assessments,
+        pr_summary=pr_summary,
+        verdict_reasoning=verdict_reasoning,
         coverage=coverage,
         coverage_records=coverage_records,
         flagged_files=flagged_files,
@@ -461,7 +462,6 @@ def empty_review_result(
     return ReviewResult(
         metadata=metadata,
         summary="No changes found to review.",
-        checklist=(),
         findings=(),
         coverage=CoverageCounts(),
     )

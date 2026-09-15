@@ -456,8 +456,8 @@ def test_disabled_config_makes_no_extra_call() -> None:
 # --- (b) enabled but only one chunk ------------------------------------------
 
 
-def test_enabled_with_one_chunk_makes_no_extra_call() -> None:
-    """A single-chunk run has no chunk boundary to reason across."""
+def test_enabled_with_one_chunk_still_runs_the_pass() -> None:
+    """A single-chunk run still needs its summary, so the pass runs (lintro-ops #37)."""
     synthesis_calls: list[str] = []
     one_chunk = [
         ReviewChunk(
@@ -474,8 +474,8 @@ def test_enabled_with_one_chunk_makes_no_extra_call() -> None:
         synthesis_calls=synthesis_calls,
     )
 
-    assert_that(synthesis_calls).is_empty()
-    assert_that(result.metadata.synthesis).is_none()
+    assert_that(synthesis_calls).is_length(1)
+    assert_that(result.metadata.synthesis).is_not_none()
 
 
 # --- (c) the fixture PR the issue names --------------------------------------
@@ -974,9 +974,9 @@ def test_a_cut_input_is_declared_to_the_model_in_the_prompt() -> None:
 # --- (g) config validation ----------------------------------------------------
 
 
-def test_synthesis_is_disabled_by_default() -> None:
-    """The pass ships off pending the #2147 cost measurement."""
-    assert_that(ReviewConfig().synthesis.enabled).is_false()
+def test_synthesis_is_enabled_by_default() -> None:
+    """The pass writes the round's narrative, so it ships on (lintro-ops #37)."""
+    assert_that(ReviewConfig().synthesis.enabled).is_true()
     assert_that(ReviewConfig().synthesis.max_findings).is_equal_to(5)
 
 
@@ -1024,6 +1024,7 @@ def test_new_value_objects_construct_and_serialize_from_the_package() -> None:
             "findings_added": 2,
             "truncated": True,
             "failed": False,
+            "duplicates_merged": 0,
         },
     )
     assert_that(str(enums.FindingOrigin.SYNTHESIS)).is_equal_to("synthesis")

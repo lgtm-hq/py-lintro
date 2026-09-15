@@ -372,15 +372,15 @@ independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
 ### Posting tiers: P1/P2 inline, P3 in the sticky
 
 On top of the confidence gate, findings are tiered by severity for posting. Only **P1
-and P2** findings that clear the policy open inline threads. **P3** findings never open a
-thread: they are listed in the sticky comment under a collapsed
-**🟡 N P3 nits (not posted inline)** block, title and location only, directly below the
-round's Δ table. The tier is rendering only: a P3 is still a tracked record, still
-counts toward the derived verdict (`nits only`), still appears in the fix prompts, and
-still shows as **✔ fixed** in the Δ table when a later round stops reporting it. The
-review body's _N findings posted_ header counts threads, so it excludes P3s as it
-excludes notes. There is no setting for the boundary; it is the constant
-`INLINE_SEVERITIES` in `lintro/ai/review/posting_tiers.py`.
+and P2** findings that clear the policy open inline threads. **P3** findings never open
+a thread: they are listed in the sticky comment under a collapsed **🟡 N P3 nits (not
+posted inline)** block, title and location only, directly below the round's Δ table. The
+tier is rendering only: a P3 is still a tracked record, still counts toward the derived
+verdict (`nits only`), still appears in the fix prompts, and still shows as **✔ fixed**
+in the Δ table when a later round stops reporting it. The review body's _N findings
+posted_ header counts threads, so it excludes P3s as it excludes notes. There is no
+setting for the boundary; it is the constant `INLINE_SEVERITIES` in
+`lintro/ai/review/posting_tiers.py`.
 
 ### When inline comments cannot be posted
 
@@ -541,92 +541,76 @@ never updated; with the full list in the prompt, the contradiction that the guar
 downgrades mostly stops being written in the first place, for a few hundred extra tokens
 per chunk.
 
-### Cross-chunk synthesis (opt-in, off by default)
+### The synthesis pass (summary, verdict reasoning, duplicates, cross-file findings)
 
-A large diff is reviewed in chunks, and every chunk prompt carries only its own files'
-diff. A bug that exists solely in the _combination_ of two files split across chunks is
-therefore invisible to every chunk: a signature changed in `a.py` with a caller updated
-to the wrong shape in `b.py`, a config key renamed in one file with a consumer left
-reading the old name.
+Every review chunk reports **findings only** and sees only its own files' diff
+(lintro-ops milestone 0, decision A): the chunk answer is the `findings` list plus its
+`flagged_files` re-read requests, and no chunk writes a summary, answers the checklist,
+or describes files. The round's narrative comes from one extra provider call made after
+the chunk findings are merged, `review.synthesis`, which sees the whole changed-file
+list, a digest of every reported finding (severity, `file:line`, title), and as much of
+the whole-PR diff as its token budget allows. It is asked for four things:
 
-`review.synthesis` adds one extra provider call per round, made after the chunk findings
-are merged, that sees the whole changed-file list, a compact per-chunk digest (which
-files each chunk reviewed, and one line per finding it already reported), and as much of
-the whole-PR diff as its token budget allows. It is asked for cross-file inconsistencies
-only, and is told never to restate a chunk finding.
+1. `summary` — one headline sentence on what the change does and a 3–6 bullet
+   walkthrough, each bullet optionally pointing at a finding by `file:line`.
+2. `verdict_reasoning` — the single issue that decides mergeability and how it fails in
+   production. The verdict itself is still derived in code from the open severities.
+3. `duplicates` — chunk findings that report the same root cause at different sites.
+   lintro applies them deterministically: a group is used only when every `file:line` it
+   names resolves to a reported finding, the highest severity in the group survives (the
+   earliest reported among equals), and the dropped sites are folded into the survivor's
+   `occurrences` so no location leaves the report.
+4. `findings` — inconsistencies between files reviewed in different chunks, exactly as
+   the cross-chunk pass always reported them (same evidence gate, sensitivity policy,
+   cross-chunk contradiction guard, dedupe and `max_findings` cap).
 
 ```yaml
 review:
   synthesis:
-    enabled: false # default — see below
-    max_findings: 5 # ceiling on what the pass may add (int >= 1)
+    enabled: true # default — disable to get findings only, no summary
+    max_findings: 5 # ceiling on the cross-file findings the pass may ADD (int >= 1)
 ```
 
-**It is off by default on purpose.** It costs one additional call per round, and the
-cost and wall-clock delta is measured through the phase timings above and the #2147
-cross-provider agreement matrix before it is switched on (#2269).
+How it behaves:
 
-How it behaves when enabled:
-
-- It runs only when the round actually used more than one chunk. A single-chunk run has
-  no boundary to reason across and is never charged for the extra call.
+- It runs on every completed round that reviewed at least one chunk, single-chunk PRs
+  included: a round without it has findings but no summary and no verdict reasoning.
 - It runs only on the completed path. A round that already stopped on a cost cap, a
-  timeout, or an interrupt (`partial`) skips the pass entirely and spends no extra call,
-  so an enabled multi-chunk partial carries no `synthesis` block at all — the same shape
-  a disabled run has.
-- Its input is bounded by the same per-call diff-token budget the chunk calls were
+  timeout, or an interrupt (`partial`) skips the pass and spends no extra call, so a
+  partial round carries no `synthesis` block at all.
+- Its input is bounded by the same per-chunk diff-token budget the chunk calls were
   planned against, and the budget covers the **whole prompt**: the changed-file list and
-  the per-chunk digest are rendered and charged first, and the diff takes only what they
-  leave over. A digest too large for the budget sheds its already-reported finding
-  lines, largest chunk first, before the per-chunk file lines are touched. If the whole
-  PR does not fit, the files that more than one chunk referenced go in first — those are
-  the seams the pass exists to inspect — and the rest follow in path order until the
-  budget is spent. The first file that does not fit ends the selection: a cross-chunk
-  file is cut into the remaining budget and kept, a non-priority one is dropped, and
-  nothing follows either way, so the diff never jumps out of one file mid-hunk into
-  another. Anything cut or dropped anywhere in the prompt — a shed digest line as much
-  as a dropped file — sets `truncated`. A large digest can therefore set it on a round
-  whose remaining budget still held the whole diff.
-- **Its findings pass every filter a chunk finding passes**, in this order: the **P1
-  evidence gate** (applied by the same finding parser as every chunk, so a phantom P1
-  with no failure mechanism comes back as a marked, non-blocking P2 rather than failing
-  the review); the run's **sensitivity policy**; and the **cross-chunk contradiction
-  guard** described above. The guard matters here for the phantom the evidence gate
-  cannot catch — the one that _does_ name a failure mechanism while claiming a file the
-  PR changed was never updated. The pass sees the whole PR, so a claim like that is
-  wrong here for the same reason it is wrong in a chunk: it comes back tagged
-  `cross_chunk_contradiction` and one band lower, so it cannot block on its own. What
-  survives is then deduplicated against the chunk findings by the same fingerprint the
-  state ledger uses and only then capped at `max_findings` — both on the guarded
-  severity, so a tagged finding cannot slip through a dedupe drop under a different
-  fingerprint, and a restatement can never consume a slot in the cap window that a novel
-  cross-file finding needed. A guarded synthesized finding is counted in the root
-  `cross_chunk_contradictions` like any other and keeps its `"origin": "synthesis"`. On
-  a resumed run they also go through the validation tail's **context-finding rejection**
-  alongside the chunk findings, so a synthesized finding on a path this round was not
-  asked to re-review is discarded; `findings_added` is recomputed from what survived
-  that tail, so the JSON block, the shared note, and the rendered finding list can never
-  disagree.
+  the finding digest are rendered and charged first, and the diff takes only what they
+  leave over. A digest too large for the budget sheds its finding lines, largest chunk
+  first, before the per-chunk file lines are touched. If the whole PR does not fit, the
+  files that more than one chunk referenced go in first and the rest follow in path
+  order until the budget is spent. Anything cut or dropped anywhere in the prompt sets
+  `truncated`.
+- **Its cross-file findings pass every filter a chunk finding passes**: the P1 evidence
+  gate, the run's sensitivity policy, the cross-chunk contradiction guard, deduplication
+  against the (duplicate-merged) chunk findings by the state ledger's fingerprint, and
+  only then the `max_findings` cap. A guarded synthesized finding keeps its
+  `"origin": "synthesis"`. On a resumed run they also go through the validation tail's
+  context-finding rejection, and `findings_added` is recomputed from what survived.
 - **A synthesis failure is never fatal.** A provider error, a timeout, a budget stop, an
-  interrupt that lands while the extra call is in flight, or an unreadable answer (not
-  JSON, not an object, or a `findings` value that is not a list) leaves the chunk
-  findings intact and marks the run's coverage degraded instead. A budget stop _during_
-  this call is recorded as `synthesis_failed` and does not make the run `partial`: every
-  chunk was already reviewed, so the only thing the cap cost was the optional sweep.
+  interrupt that lands while the call is in flight, or an unreadable answer leaves the
+  chunk findings intact, applies no duplicate merges, renders the surfaces without a
+  summary or verdict reasoning (the TL;DR-only fallback), and marks the run's coverage
+  degraded with `synthesis_failed`. A budget stop _during_ this call does not make the
+  run `partial`: every chunk was already reviewed.
+- On the CLI transport the envelope is constrained by a native JSON schema
+  (`lintro_synthesis`), as the chunk call is by `lintro_review`.
 
 What it adds to the surfaces:
 
-- A `synthesis` phase span in the timings block (see _Review phase timings_ below), so
-  its cost and wall-clock delta per round reads off the existing surfaces. The phase is
-  absent entirely from a round where the pass did not run.
+- The `Summary` and verdict-reasoning sections of the terminal output, the GitHub review
+  body and the sticky comment, and the `summary`, `pr_summary` and `verdict_reasoning`
+  keys of `--output json` (null when the pass did not run or failed).
+- A `synthesis` phase span in the timings block (see _Review phase timings_ below).
 - One shared note on the terminal, the GitHub review body's run-stats block, and the
-  sticky's `This run` table, rendered only when the pass ran. Its wording follows the
-  outcome: `Cross-chunk synthesis added 1 cross-file finding.` is the one-finding form,
-  and the sentence also has plural (`added 3 cross-file findings`), empty
-  (`found no cross-file inconsistencies`), and failed
-  (`did not complete; the chunk findings below are unaffected`) forms, plus a trailing
-  sentence about the truncated input when the pass saw less than its whole input — the
-  per-chunk digest or the diff was cut, matching the `truncated` flag below.
+  sticky's `This run` table, rendered only when the pass ran:
+  `Cross-chunk synthesis added 1 cross-file finding.` (plural, empty and failed forms as
+  before, plus a trailing sentence when the input was truncated).
 - A `synthesis` block at the root of `--output json`, present only when the pass ran:
 
   ```json
@@ -635,27 +619,22 @@ What it adds to the surfaces:
       "enabled": true,
       "findings_added": 1,
       "truncated": false,
-      "failed": false
+      "failed": false,
+      "duplicates_merged": 2
     }
   }
   ```
 
   `findings_added` is what survived the cap and the dedupe, not what the model returned.
-  `truncated` means the pass saw less than its whole prompt input: the per-chunk digest
-  or the diff was cut. Its whole prompt (the changed-file list, the per-chunk digest,
-  and the diff together) is fitted to one token budget, so a large digest shrinks the
-  diff rather than overrunning the context window — and a digest large enough to shed
-  its own finding lines sets `truncated` even when the whole diff still fit. `failed`
-  distinguishes a pass that could not answer from one that found nothing, which
-  `findings_added: 0` alone cannot. The same block is on the MCP `lintro_review` payload
-  root, and MCP findings carry `"origin": "synthesis"` too.
+  `duplicates_merged` is the number of chunk findings collapsed into another finding
+  with the same root cause. `truncated` means the pass saw less than its whole prompt
+  input. `failed` distinguishes a pass that could not answer from one that found
+  nothing. The same block is on the MCP `lintro_review` payload root.
 
-- `"origin": "synthesis"` on each finding the pass contributed, in the JSON `findings`
-  list and in the persisted state blob. The key is absent on every ordinary chunk
-  finding, so a run without the pass is byte-identical to one from before it existed.
+- `"origin": "synthesis"` on each cross-file finding the pass contributed.
 - A `synthesis_truncated` or `synthesis_failed` entry in `coverage_degradations` (see
   _Review coverage completeness_ above) when the input was cut or the pass did not
-  complete. The run stays complete for the chunk findings either way.
+  complete.
 
 ### Review convergence (deterministic re-review stop)
 
@@ -838,9 +817,9 @@ Reading the block:
   answers "how long did the user wait". The summary line lists nested phases inside the
   provider parenthetical for the same reason, e.g.
   `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
-- `synthesis` is the optional cross-chunk pass (see _Cross-chunk synthesis_ above). It
-  is off by default and only runs on a multi-chunk round, so the phase is absent from
-  most runs; when it is absent the round made no extra call.
+- `synthesis` is the optional cross-chunk pass (see _The synthesis pass_ above). It is
+  off by default and only runs on a multi-chunk round, so the phase is absent from most
+  runs; when it is absent the round made no extra call.
 - `validation` is the post-merge tail of the run: provider session teardown and progress
   callbacks, then the pass that decides what survives (context-finding rejection,
   coverage and resume bookkeeping, flag reconciliation). A slow session close therefore
@@ -853,14 +832,14 @@ Reading the block:
   semaphore) and `in_flight_seconds` (reviewing). A run where queued time dominates is
   capped by the effective concurrency ceiling, not by provider latency. That ceiling is
   `min(chunk count, ai.max_parallel_calls)`, or 1 when a cost cap serializes chunk calls
-  (#2154); on the CLI transport it is `min(chunk count, 3)` unless `ai.max_parallel_calls`
-  is set explicitly, because each CLI call is a whole agent process. It is reported as
-  `max_parallel`.
+  (#2154); on the CLI transport it is `min(chunk count, 3)` unless
+  `ai.max_parallel_calls` is set explicitly, because each CLI call is a whole agent
+  process. It is reported as `max_parallel`.
 - Each chunk also carries `provider_seconds`, the main review call's own wall time
-  inside the in-flight span (the difference is prompt building, parsing and any depth-2/3
-  pass), and `turns`, the agent turn count the transport reported for that call. The
-  Claude CLI envelope reports `num_turns`; other transports report none, and the key is
-  then `null` rather than absent.
+  inside the in-flight span (the difference is prompt building, parsing and any
+  depth-2/3 pass), and `turns`, the agent turn count the transport reported for that
+  call. The Claude CLI envelope reports `num_turns`; other transports report none, and
+  the key is then `null` rather than absent.
 - GitHub posting happens after the result is rendered, so it is outside the measured
   window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
   existing consumers.
@@ -1013,12 +992,17 @@ ai:
   # see "Data & Privacy". (int >= 1000, default: 12000)
   max_prompt_tokens: 12000
 
-  # ── CLI-transport review limits (#1967) ───────────────────────
-  # Per-chunk diff token budget under --transport cli; forces the semantic
-  # chunker to split diffs a single CLI turn cannot finish.
-  # (int >= 1000, default: 24000)
-  cli_max_diff_tokens: 24000
+  # ── Review chunking (lintro-ops milestone 0) ──────────────────
+  # Per-chunk diff token budget on every transport. The semantic chunker
+  # splits any diff above it into small file-group chunks that are reviewed
+  # at depth and run in parallel. (int >= 1000, default: 7000)
+  review_chunk_diff_tokens: 7000
 
+  # Deprecated alias for review_chunk_diff_tokens: still read (and warned
+  # about) when the new key is absent; removed not before 2026-10-15.
+  # cli_max_diff_tokens: 7000
+
+  # ── CLI-transport review limits (#1967) ───────────────────────
   # Hard ceiling on the full unified-diff byte size under --transport cli;
   # larger diffs fail fast with a --paths / --transport api advisory.
   # (int >= 10000, default: 1500000)

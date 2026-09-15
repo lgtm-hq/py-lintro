@@ -1,0 +1,236 @@
+"""The narrative half of the synthesis envelope (lintro-ops milestone 0).
+
+Chunks report findings only, so the round's ``summary``, its
+``verdict_reasoning`` and the ``duplicates`` it merges are written once by the
+synthesis pass. This module reads that envelope and applies the duplicate
+merges deterministically; the cross-file findings half of the same envelope is
+read by :mod:`lintro.ai.review.synthesis_response`, exactly as before.
+
+Every parser degrades rather than raises: a missing or malformed narrative
+field leaves that field ``None``/empty and never turns a completed review into
+a failed one. Duplicate merges are applied only when every reference resolves
+to a merged finding, and a merge never drops the more severe side.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
+from typing import Any
+
+from loguru import logger
+
+from lintro.ai.json_response import strip_json_fences
+from lintro.ai.review.models.finding_occurrence import FindingOccurrence
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_summary import ReviewSummary
+from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
+from lintro.ai.review.narrative_parser import parse_narrative
+
+__all__ = [
+    "DuplicateGroup",
+    "SynthesisNarrative",
+    "apply_duplicate_groups",
+    "parse_synthesis_envelope",
+    "parse_duplicate_groups",
+]
+
+#: Severity rank used to decide which side of a duplicate survives.
+_SEVERITY_RANK: dict[Severity, int] = {
+    Severity.P1: 3,
+    Severity.P2: 2,
+    Severity.P3: 1,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateGroup:
+    """One duplicate merge the synthesis pass proposed.
+
+    Attributes:
+        keep: ``file:line`` reference of the finding to keep.
+        drop: ``file:line`` references of the findings that restate it.
+    """
+
+    keep: str
+    drop: tuple[str, ...] = field(default_factory=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class SynthesisNarrative:
+    """What the synthesis envelope carried besides its cross-file findings.
+
+    Attributes:
+        summary: The round's headline and walkthrough, or ``None``.
+        verdict_reasoning: The round's verdict explanation, or ``None``.
+        duplicates: Duplicate merges the pass proposed, in reported order.
+        payload: The parsed envelope, or ``None`` when the response was not a
+            JSON object. The findings half is read from the same payload by
+            the findings parser so the response is decoded once.
+    """
+
+    summary: ReviewSummary | None = None
+    verdict_reasoning: VerdictReasoning | None = None
+    duplicates: tuple[DuplicateGroup, ...] = field(default_factory=tuple)
+    payload: dict[str, Any] | None = None
+
+
+def parse_synthesis_envelope(*, content: str) -> SynthesisNarrative:
+    """Read the narrative fields of a synthesis response.
+
+    Args:
+        content: Raw model response text.
+
+    Returns:
+        The narrative. Every field is ``None``/empty when the response could
+        not be decoded; the caller still decides pass failure from the
+        findings half, so an unreadable envelope fails the pass exactly as it
+        did before the narrative existed.
+    """
+    try:
+        payload = json.loads(strip_json_fences(content=content))
+    except (json.JSONDecodeError, ValueError):
+        return SynthesisNarrative()
+    if not isinstance(payload, dict):
+        return SynthesisNarrative()
+    summary, verdict_reasoning = parse_narrative(payload=payload)
+    return SynthesisNarrative(
+        summary=summary,
+        verdict_reasoning=verdict_reasoning,
+        duplicates=parse_duplicate_groups(raw_duplicates=payload.get("duplicates")),
+        payload=payload,
+    )
+
+
+def parse_duplicate_groups(*, raw_duplicates: object) -> tuple[DuplicateGroup, ...]:
+    """Parse the ``duplicates`` list of a synthesis payload.
+
+    Args:
+        raw_duplicates: Raw ``duplicates`` value from the parsed payload.
+
+    Returns:
+        Well-formed groups in payload order; a group with no ``keep`` or no
+        usable ``drop`` entry is skipped.
+    """
+    if not isinstance(raw_duplicates, list):
+        return ()
+    groups: list[DuplicateGroup] = []
+    for item in raw_duplicates:
+        if not isinstance(item, dict):
+            continue
+        keep = _as_ref(item.get("keep"))
+        raw_drop = item.get("drop")
+        drop = (
+            tuple(
+                ref
+                for ref in (_as_ref(value) for value in raw_drop)
+                if ref and ref != keep
+            )
+            if isinstance(raw_drop, list)
+            else ()
+        )
+        if not keep or not drop:
+            continue
+        groups.append(DuplicateGroup(keep=keep, drop=drop))
+    return tuple(groups)
+
+
+def _as_ref(value: object) -> str:
+    """Return a stripped ``file:line`` reference, or an empty string."""
+    return value.strip() if isinstance(value, str) else ""
+
+
+def apply_duplicate_groups(
+    *,
+    findings: Sequence[ReviewFinding],
+    groups: Sequence[DuplicateGroup],
+) -> tuple[tuple[ReviewFinding, ...], int]:
+    """Collapse duplicate findings the synthesis pass pointed out.
+
+    A group is applied only when its ``keep`` and every ``drop`` reference
+    resolve to a merged finding by ``file:line`` (any of a finding's
+    occurrences counts). The model's choice of which side to keep is
+    advisory: the highest severity in the group survives, and among equals
+    the earliest reported; the dropped sites are folded into the survivor's
+    ``occurrences`` so no location disappears from the report.
+
+    Args:
+        findings: The merged chunk findings, in reported order.
+        groups: Duplicate groups the pass proposed.
+
+    Returns:
+        Tuple of ``(surviving findings, number of findings dropped)``.
+    """
+    dropped, absorbed = _plan_duplicate_drops(findings=findings, groups=groups)
+    if not dropped:
+        return tuple(findings), 0
+    kept: list[ReviewFinding] = []
+    for finding in findings:
+        if id(finding) in dropped:
+            continue
+        extra = absorbed.get(id(finding))
+        if not extra:
+            kept.append(finding)
+            continue
+        known = {occurrence.label for occurrence in finding.all_occurrences}
+        added: list[FindingOccurrence] = []
+        for occurrence in extra:
+            if occurrence.label in known:
+                continue
+            known.add(occurrence.label)
+            added.append(occurrence)
+        kept.append(
+            replace(finding, occurrences=(*finding.all_occurrences, *added)),
+        )
+    logger.info(
+        "Synthesis merged {n} duplicate finding(s) into their root causes.",
+        n=len(dropped),
+    )
+    return tuple(kept), len(dropped)
+
+
+def _plan_duplicate_drops(
+    *,
+    findings: Sequence[ReviewFinding],
+    groups: Sequence[DuplicateGroup],
+) -> tuple[dict[int, ReviewFinding], dict[int, list[FindingOccurrence]]]:
+    """Decide which findings each duplicate group drops and who absorbs them.
+
+    Args:
+        findings: The merged chunk findings, in reported order.
+        groups: Duplicate groups the pass proposed.
+
+    Returns:
+        Tuple of ``(dropped, absorbed)``: findings to drop keyed by identity,
+        and the occurrences each surviving finding absorbs, keyed the same way.
+    """
+    order = {id(finding): index for index, finding in enumerate(findings)}
+    by_ref: dict[str, ReviewFinding] = {}
+    for finding in findings:
+        for occurrence in finding.all_occurrences:
+            by_ref.setdefault(occurrence.label, finding)
+    dropped: dict[int, ReviewFinding] = {}
+    absorbed: dict[int, list[FindingOccurrence]] = {}
+    for group in groups:
+        refs = (group.keep, *group.drop)
+        members = [by_ref.get(ref) for ref in refs]
+        if any(member is None for member in members):
+            logger.debug(
+                "Ignoring synthesis duplicate group {refs}: unresolved reference.",
+                refs=refs,
+            )
+            continue
+        resolved = {id(member): member for member in members if member is not None}
+        if len(resolved) < 2:
+            continue
+        survivor = min(
+            resolved.values(),
+            key=lambda item: (-_SEVERITY_RANK[item.severity], order[id(item)]),
+        )
+        for member in resolved.values():
+            if member is survivor or id(member) in dropped:
+                continue
+            dropped[id(member)] = member
+            absorbed.setdefault(id(survivor), []).extend(member.all_occurrences)
+    return dropped, absorbed
