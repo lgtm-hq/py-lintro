@@ -72,6 +72,9 @@ class ChunkReviewPartial:
         coverage_degradations: Chunk-level limits that may have suppressed
             findings, such as an output-exhaustion split or a failed depth
             pass.
+        provider_seconds: Wall-clock seconds of the chunk's main provider
+            call, for the per-chunk timings (lintro-ops #37).
+        turns: Agent turns the transport reported for that call, or ``None``.
     """
 
     summary: str
@@ -88,6 +91,8 @@ class ChunkReviewPartial:
     coverage_degradations: tuple[CoverageDegradation, ...] = field(
         default_factory=tuple,
     )
+    provider_seconds: float = 0.0
+    turns: int | None = None
 
 
 def parse_review_response(*, content: str) -> dict[str, Any]:

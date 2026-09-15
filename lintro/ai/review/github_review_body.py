@@ -51,7 +51,7 @@ from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.skipped_file import SkippedFile
-from lintro.ai.review.posting_policy import inline_findings
+from lintro.ai.review.posting_tiers import inline_tier_findings
 
 __all__ = ["REVIEW_BODY_FOOTER", "build_review_body"]
 
@@ -196,7 +196,8 @@ def _header(
 
     The findings count is the number posted inline. A finding the posting
     policy routed to the sticky's notes block (#2572) is not announced here:
-    the header promises threads below, and a note has none.
+    the header promises threads below, and a note has none. Nor is a P3 nit,
+    which the severity tier lists in the sticky rather than in a thread.
 
     Args:
         result: This round's review result.
@@ -213,8 +214,9 @@ def _header(
     partial = format_partial_review_label(metadata=result.metadata)
     lead = f"⚠️ **{partial}" if partial else "🔎 **Lintro review"
     # "posted" means posted inline: a note the posting policy routed to the
-    # sticky (#2572) is neither a thread below this body nor a count here.
-    posted = len(inline_findings(findings=result.findings))
+    # sticky (#2572) is neither a thread below this body nor a count here,
+    # and neither is a P3 nit, which the severity tier keeps in the sticky.
+    posted = len(inline_tier_findings(findings=result.findings))
     parts = [
         f"{lead} — {_plural(count=posted, noun='finding')} posted**",
     ]
@@ -260,7 +262,7 @@ def _prompt_section(
         actionable to fix. Notes (#2572) are left out: a low-confidence claim
         is not an instruction to change the code.
     """
-    posted = inline_findings(findings=result.findings)
+    posted = inline_tier_findings(findings=result.findings)
     if not prompt_findings(findings=posted):
         return ""
     return render_agent_prompt_panel(

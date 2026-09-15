@@ -104,7 +104,9 @@
     ],
     "files": [],
     "flagged_files": [],
-    "coverage_degradations": []
+    "coverage_degradations": [],
+    "provider_seconds": 0.0,
+    "turns": null
   },
   {
     "summary": "Token decoding gained an unverified fast path.",
@@ -212,6 +214,8 @@
     ],
     "files": [],
     "flagged_files": [],
-    "coverage_degradations": []
+    "coverage_degradations": [],
+    "provider_seconds": 0.0,
+    "turns": null
   }
 ]
