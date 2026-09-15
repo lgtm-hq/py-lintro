@@ -298,10 +298,12 @@ def test_main_rejects_an_unknown_value_and_writes_nothing(
 
     assert_that(module.main()).is_equal_to(2)
     captured = capsys.readouterr()
-    assert_that(captured.out).contains(
+    # stdout is the one-line contract the mirror resolver captures: nothing
+    # may land there on the failure path. The annotation goes to stderr.
+    assert_that(captured.out).is_empty()
+    assert_that(captured.err).contains(
         "::error title=Invalid release validation variable::",
     )
-    assert_that(captured.out).does_not_contain("is_prerelease=")
     assert_that(captured.err).contains("RELEASE_FAULT")
     assert_that(output_file.read_text(encoding="utf-8")).is_equal_to("earlier=kept\n")
 
@@ -309,6 +311,7 @@ def test_main_rejects_an_unknown_value_and_writes_nothing(
 def test_main_rejects_an_embedded_newline_and_writes_nothing(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     """A value that could inject a second output line is refused outright."""
     module = _load_module()
@@ -320,6 +323,7 @@ def test_main_rejects_an_embedded_newline_and_writes_nothing(
 
     assert_that(module.main()).is_equal_to(2)
     assert_that(output_file.exists()).is_false()
+    assert_that(capsys.readouterr().out).is_empty()
 
 
 def test_main_writes_each_output_once_in_delimiter_form(

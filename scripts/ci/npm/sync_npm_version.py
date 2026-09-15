@@ -29,6 +29,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
+
 # Repo root: this file lives at scripts/ci/npm/sync_npm_version.py.
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NPM_DIR = PROJECT_ROOT / "npm"
@@ -199,28 +201,23 @@ def sync_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[Path]:
     return changed
 
 
-# PEP 440 bare prerelease suffix -> the SemVer prerelease npm accepts. The
+# PEP 440 prerelease kind -> the SemVer prerelease identifier npm accepts. The
 # project versions in PEP 440 (``0.160.3rc1``), but ``package.json`` requires
 # SemVer, where a prerelease needs a hyphen and a dotted identifier
-# (``0.160.3-rc.1``); npm rejects the bare form outright. Only the checkpoint
-# forms the pipeline can publish (#2633 validation channels) are mapped.
-_PEP440_PRERELEASE = re.compile(r"^(\d+\.\d+\.\d+)(a|b|rc)(\d+)$")
+# (``0.160.3-rc.1``); npm rejects the bare form outright. The version is
+# parsed with ``packaging`` so every valid PEP 440 spelling (``1.2.3RC1``,
+# ``1.2.3-rc1``, ``1.2.3.RC1``, ...) maps like its canonical form instead of
+# leaking into a manifest as an npm-invalid string.
 _PEP440_TO_SEMVER = {"a": "alpha", "b": "beta", "rc": "rc"}
-# PEP 440 post-releases and dev-releases have no SemVer equivalent npm would
-# accept, and nothing in the pipeline publishes them; they are rejected
-# explicitly rather than written into a manifest npm then refuses.
-_PEP440_UNSUPPORTED = re.compile(
-    r"^\d+\.\d+\.\d+(?:(?:a|b|rc)\d+)?(?:\.?post\d+|\.?dev\d+)+$",
-)
 
 
 def _normalise_version(raw: str) -> str:
     """Turn a tag-style version into the version npm manifests carry.
 
-    Strips a leading ``v`` and rewrites a PEP 440 bare prerelease
-    (``X.Y.ZrcN``, ``X.Y.ZaN``, ``X.Y.ZbN``) to its SemVer form
-    (``X.Y.Z-rc.N``, ``-alpha.N``, ``-beta.N``). A stable ``X.Y.Z`` is
-    returned unchanged, as is anything the mapping does not recognise.
+    Strips a leading ``v``, parses the rest as PEP 440 and rewrites a
+    prerelease (``aN``/``bN``/``rcN`` in any valid spelling) to its SemVer
+    form (``X.Y.Z-alpha.N`` / ``-beta.N`` / ``-rc.N``). A stable ``X.Y.Z``
+    comes back canonical and unchanged.
 
     Args:
         raw: A version or tag (e.g. ``"v1.2.3"``, ``"v0.160.3rc1"``).
@@ -229,20 +226,36 @@ def _normalise_version(raw: str) -> str:
         The version to write into every npm manifest.
 
     Raises:
-        ValueError: For a PEP 440 post-release or dev-release (``.postN``,
-            ``.devN``), which has no npm-valid form.
+        ValueError: When ``raw`` is not a PEP 440 version, when its release
+            segment is not exactly three parts, or when it carries a
+            post-release, dev-release, local segment or epoch, none of which
+            has an npm-valid form.
     """
-    version = raw[1:] if raw.startswith("v") else raw
-    if _PEP440_UNSUPPORTED.match(version):
+    text = raw[1:] if raw.startswith("v") else raw
+    try:
+        parsed = Version(text)
+    except InvalidVersion as exc:
+        msg = f"npm cannot carry a non-PEP 440 version: {raw!r}"
+        raise ValueError(msg) from exc
+    if parsed.post is not None or parsed.dev is not None:
         msg = (
             f"npm cannot carry a PEP 440 post- or dev-release version: {raw!r}. "
             "Only stable X.Y.Z and aN/bN/rcN prereleases are publishable."
         )
         raise ValueError(msg)
-    match = _PEP440_PRERELEASE.match(version)
-    if match is None:
-        return version
-    core, kind, number = match.groups()
+    if parsed.local is not None or parsed.epoch != 0:
+        msg = (
+            f"npm cannot carry a PEP 440 local version or epoch: {raw!r}. "
+            "Only stable X.Y.Z and aN/bN/rcN prereleases are publishable."
+        )
+        raise ValueError(msg)
+    if len(parsed.release) != 3:
+        msg = f"npm needs a three-part X.Y.Z release segment: {raw!r}"
+        raise ValueError(msg)
+    core = ".".join(str(part) for part in parsed.release)
+    if parsed.pre is None:
+        return core
+    kind, number = parsed.pre
     return f"{core}-{_PEP440_TO_SEMVER[kind]}.{number}"
 
 

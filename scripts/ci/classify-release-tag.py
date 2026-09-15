@@ -248,7 +248,13 @@ def main() -> int:
     try:
         outputs = classify(tag=sys.argv[1], environ=os.environ)
     except InvalidVariableError as exc:
-        print(f"::error title=Invalid release validation variable::{exc}")
+        # stderr only: stdout is the one-line ``is_prerelease=`` contract and
+        # must stay empty on this path. GitHub reads annotations from either
+        # stream.
+        print(
+            f"::error title=Invalid release validation variable::{exc}",
+            file=sys.stderr,
+        )
         print(f"classify-release-tag.py: {exc}", file=sys.stderr)
         return 2
     _write_output(outputs=outputs)
