@@ -179,29 +179,11 @@ jobs:
       - name: Write package-set checksums
         # One `<sha256>  <package>/<file>` line per file npm would pack, for
         # all four packages: the manifest the reusable verifies against and
-        # the subject list of the attestation below. Written BEFORE the smoke
-        # test executes a staged binary, and re-checked after it, so nothing
-        # that runs in this job can alter the bytes the attestation vouches
-        # for without failing the job (Codex review on #2667).
+        # the subject list of the attestation below.
         run: >-
           python scripts/ci/npm/write_package_checksums.py
           --packages-dir npm
           --output npm/SHA256SUMS
-
-      - name: Smoke test launcher (Linux x64)
-        run: scripts/ci/npm/smoke_test.sh
-
-      - name: Re-verify package set after the smoke test
-        # The smoke test ran a release binary; the set of packable files and
-        # every byte in them must be exactly what the manifest recorded
-        # before it, or the attestation below would sign bytes the release
-        # attestations never covered. Regenerating and diffing (not
-        # `sha256sum --check`) also catches files ADDED under a package.
-        run: >-
-          python scripts/ci/npm/write_package_checksums.py
-          --packages-dir npm
-          --output "${RUNNER_TEMP}/SHA256SUMS.after"
-          && diff -u npm/SHA256SUMS "${RUNNER_TEMP}/SHA256SUMS.after"
 
       - name: Attest staged package set
         # Signs as this file (publish-npm.yml); the reusable's verify step
@@ -224,6 +206,15 @@ jobs:
           # Policy recovery window (lgtm-hq/lgtm-ci#962): a resume weeks
           # later still finds the verified, attested set.
           retention-days: 90
+
+      - name: Smoke test launcher (Linux x64)
+        # Deliberately LAST, after the manifest is attested and the artifact
+        # uploaded: this step executes a release binary, and anything that
+        # runs as the runner user could rewrite files in this workspace, so
+        # nothing it could touch is what gets published (the reusable
+        # downloads the immutable artifact). A failed smoke test still fails
+        # this job and the publish job never starts (Codex review on #2667).
+        run: scripts/ci/npm/smoke_test.sh
 
   publish:
     name: Publish npm package set
