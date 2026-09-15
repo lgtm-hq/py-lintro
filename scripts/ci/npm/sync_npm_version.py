@@ -29,8 +29,6 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from packaging.version import InvalidVersion, Version
-
 # Repo root: this file lives at scripts/ci/npm/sync_npm_version.py.
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 NPM_DIR = PROJECT_ROOT / "npm"
@@ -210,6 +208,55 @@ def sync_versions(version: str, *, npm_dir: Path = NPM_DIR) -> list[Path]:
 # leaking into a manifest as an npm-invalid string.
 _PEP440_TO_SEMVER = {"a": "alpha", "b": "beta", "rc": "rc"}
 
+# The PEP 440 grammar (appendix B of the spec, as vendored by ``packaging``),
+# inlined so this script stays stdlib-only: the publish-npm stage job runs it
+# on a bare ``setup-python`` interpreter with no dependency installation.
+_PEP440_VERSION = re.compile(
+    r"""
+    ^\s*
+    v?
+    (?:
+        (?:(?P<epoch>[0-9]+)!)?                           # epoch
+        (?P<release>[0-9]+(?:\.[0-9]+)*)                  # release segment
+        (?P<pre>                                          # pre-release
+            [-_\.]?
+            (?P<pre_l>alpha|a|beta|b|preview|pre|c|rc)
+            [-_\.]?
+            (?P<pre_n>[0-9]+)?
+        )?
+        (?P<post>                                         # post release
+            (?:-(?P<post_n1>[0-9]+))
+            |
+            (?:
+                [-_\.]?
+                (?P<post_l>post|rev|r)
+                [-_\.]?
+                (?P<post_n2>[0-9]+)?
+            )
+        )?
+        (?P<dev>                                          # dev release
+            [-_\.]?
+            (?P<dev_l>dev)
+            [-_\.]?
+            (?P<dev_n>[0-9]+)?
+        )?
+    )
+    (?:\+(?P<local>[a-z0-9]+(?:[-_\.][a-z0-9]+)*))?       # local version
+    \s*$
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+_PRE_SPELLINGS = {
+    "a": "a",
+    "alpha": "a",
+    "b": "b",
+    "beta": "b",
+    "c": "rc",
+    "rc": "rc",
+    "pre": "rc",
+    "preview": "rc",
+}
+
 
 def _normalise_version(raw: str) -> str:
     """Turn a tag-style version into the version npm manifests carry.
@@ -232,30 +279,33 @@ def _normalise_version(raw: str) -> str:
             has an npm-valid form.
     """
     text = raw[1:] if raw.startswith("v") else raw
-    try:
-        parsed = Version(text)
-    except InvalidVersion as exc:
+    match = _PEP440_VERSION.match(text)
+    if match is None:
         msg = f"npm cannot carry a non-PEP 440 version: {raw!r}"
-        raise ValueError(msg) from exc
-    if parsed.post is not None or parsed.dev is not None:
+        raise ValueError(msg)
+    if match.group("post") is not None or match.group("dev") is not None:
         msg = (
             f"npm cannot carry a PEP 440 post- or dev-release version: {raw!r}. "
             "Only stable X.Y.Z and aN/bN/rcN prereleases are publishable."
         )
         raise ValueError(msg)
-    if parsed.local is not None or parsed.epoch != 0:
+    epoch = int(match.group("epoch") or 0)
+    if match.group("local") is not None or epoch != 0:
         msg = (
             f"npm cannot carry a PEP 440 local version or epoch: {raw!r}. "
             "Only stable X.Y.Z and aN/bN/rcN prereleases are publishable."
         )
         raise ValueError(msg)
-    if len(parsed.release) != 3:
+    release = tuple(int(part) for part in match.group("release").split("."))
+    if len(release) != 3:
         msg = f"npm needs a three-part X.Y.Z release segment: {raw!r}"
         raise ValueError(msg)
-    core = ".".join(str(part) for part in parsed.release)
-    if parsed.pre is None:
+    core = ".".join(str(part) for part in release)
+    if match.group("pre") is None:
         return core
-    kind, number = parsed.pre
+    kind = _PRE_SPELLINGS[match.group("pre_l").lower()]
+    # PEP 440: an implicit pre-release number (``1.2.3rc``) means 0.
+    number = int(match.group("pre_n") or 0)
     return f"{core}-{_PEP440_TO_SEMVER[kind]}.{number}"
 
 

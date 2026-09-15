@@ -117,6 +117,10 @@ def test_normalise_version_strips_leading_v() -> None:
         ("v1.2.3.Alpha.2", "1.2.3-alpha.2"),
         ("1.2.3B3", "1.2.3-beta.3"),
         ("1.2.3c1", "1.2.3-rc.1"),
+        ("1.2.3pre2", "1.2.3-rc.2"),
+        ("1.2.3preview3", "1.2.3-rc.3"),
+        ("1.2.3rc", "1.2.3-rc.0"),
+        (" v1.2.3rc1 ", "1.2.3-rc.1"),
     ],
 )
 def test_normalise_version_maps_pep440_prereleases_to_semver(
@@ -172,6 +176,17 @@ def test_normalise_version_rejects_epochs_locals_and_unparseable(
     mod = _load_module()
     with pytest.raises(ValueError, match=reason):
         mod._normalise_version(raw)
+
+
+def test_script_stays_stdlib_only() -> None:
+    """The publish-npm stage job runs this script on a bare interpreter."""
+    stdlib = set(sys.stdlib_module_names)
+    imported = {
+        line.split()[1].split(".")[0]
+        for line in _SCRIPT.read_text(encoding="utf-8").splitlines()
+        if line.startswith(("import ", "from "))
+    }
+    assert_that(imported - stdlib - {"__future__"}).is_empty()
 
 
 def test_main_fails_cleanly_on_a_post_release(
