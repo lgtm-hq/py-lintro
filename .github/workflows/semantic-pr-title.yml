@@ -23,6 +23,11 @@ jobs:
       # Org ruleset (checks-py-lintro): semantic-title / 📝 Validate PR Title
       job-name: '📝 Validate PR Title'
       tooling-ref: '2145a9aa0b1c82939be0506763442df6ea36884d' # v0.74.2
+      # commitlint on main enforces a 100-character header, and the squash
+      # merge appends " (#NNNN)" to the PR title. 90 leaves room for that
+      # suffix, so a title that passes here cannot fail post-merge (#2553:
+      # 9 of the last 269 main commits did).
+      max-length: '90'
       egress-policy: block
       egress-preset: github-tooling
     permissions:
