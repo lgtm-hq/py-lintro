@@ -2505,27 +2505,70 @@ _ATTESTATION_VERIFY_HOSTS = frozenset(
 )
 
 
+def _python_code(text: str) -> str:
+    """Return a Python module's source without comments and docstrings.
+
+    Other string literals stay, so a verifier call spelled as an argv list
+    (``subprocess.run(["gh", "attestation", "verify", ...])``) still counts.
+
+    Args:
+        text: Python source.
+
+    Returns:
+        The source with comment tokens and docstring statements dropped, or
+        an empty string when it does not parse.
+    """
+    try:
+        module = ast.parse(text)
+    except SyntaxError:
+        return ""
+    docstring_lines: set[int] = set()
+    for node in ast.walk(module):
+        if not isinstance(
+            node,
+            ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef,
+        ):
+            continue
+        body = node.body
+        if (
+            body
+            and isinstance(body[0], ast.Expr)
+            and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)
+        ):
+            first = body[0]
+            docstring_lines.update(
+                range(first.lineno, (first.end_lineno or first.lineno) + 1),
+            )
+    lines = text.splitlines()
+    try:
+        comment_starts = {
+            token.start[0]: token.start[1]
+            for token in tokenize.generate_tokens(io.StringIO(text).readline)
+            if token.type == tokenize.COMMENT
+        }
+    except tokenize.TokenError:
+        comment_starts = {}
+    return "\n".join(
+        line[: comment_starts.get(number, len(line))]
+        for number, line in enumerate(lines, start=1)
+        if number not in docstring_lines
+    )
+
+
 def _code_lines(text: str, *, python: bool = False) -> str:
-    """Return ``text`` with comments and, for Python, string literals removed.
+    """Return the executable part of a script or ``run:`` block.
 
     Args:
         text: Shell or YAML ``run:`` source, or a Python module.
-        python: Tokenize as Python and drop string and comment tokens, so a
-            docstring or help text quoting the verifier does not count.
+        python: Treat ``text`` as Python (see :func:`_python_code`).
 
     Returns:
-        The executable part of the source.
+        The source without comment lines, heredoc bodies (shell) or
+        docstrings (Python).
     """
     if python:
-        try:
-            tokens = tokenize.generate_tokens(io.StringIO(text).readline)
-            return " ".join(
-                token.string
-                for token in tokens
-                if token.type not in {tokenize.STRING, tokenize.COMMENT}
-            )
-        except (tokenize.TokenError, SyntaxError):
-            return ""
+        return _python_code(text)
     kept: list[str] = []
     heredoc_end: str | None = None
     for line in text.splitlines():
@@ -2539,16 +2582,21 @@ def _code_lines(text: str, *, python: bool = False) -> str:
         kept.append(line)
         opener = _HEREDOC_OPENER.search(line)
         if opener is not None:
-            heredoc_end = opener.group("tag")
+            heredoc_end = opener.group("q") or opener.group("d") or opener.group("tag")
     return "\n".join(kept)
 
 
-_HEREDOC_OPENER = re.compile(r"""<<-?\s*['"]?(?P<tag>[A-Za-z_][A-Za-z0-9_]*)['"]?""")
+# ``<<`` or ``<<-`` with a quoted or bare delimiter; ``<<<`` is a here-string.
+_HEREDOC_OPENER = re.compile(
+    r"""(?<!<)<<(?!<)-?\s*(?:'(?P<q>[^']+)'|"(?P<d>[^"]+)"|(?P<tag>[^\s'"<]+))""",
+)
 
 
 # ``gh attestation verify`` as a command: the ``gh`` binary or a variable
 # holding it (``"$gh_cmd" attestation verify``), not prose quoting it.
-_VERIFIER_CALL = re.compile(r'(?:\bgh|gh_cmd"?\}?)\s+attestation\s+verify\b')
+_VERIFIER_CALL = re.compile(
+    r"""(?:\bgh\b|gh_cmd"?\}?)["',\s]+attestation["',\s]+verify\b""",
+)
 
 
 def _attestation_verifying_scripts() -> set[str]:
@@ -2603,9 +2651,9 @@ def _invokes(*, code: str, script: str) -> bool:
     name = Path(script).name
     parent = Path(script).parent.name
     pattern = re.compile(
-        r"""(?:^|[\s"'=(])(?P<path>(?:[A-Za-z0-9_.${}-]+/)*"""
+        r"""(?:^|[\s"'=(])(?P<path>/?(?:[A-Za-z0-9_.${}-]+/)*"""
         + re.escape(name)
-        + r""")(?=$|[\s"')])""",
+        + r""")(?=$|[\s"');&|])""",
         re.MULTILINE,
     )
     for match in pattern.finditer(code):
