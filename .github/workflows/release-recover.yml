@@ -1,0 +1,101 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Release Recovery
+
+# Recovery entry workflow for a partially published release (lgtm-ci#966,
+# release-security policy tiers). It never rebuilds: the resolve stage reads
+# the ORIGINAL publish run's artifacts (the gate's `release-assets` and the
+# npm stage's `npm-dist`) and resumes only the channels that are missing,
+# then records the outcome on the release-failure issue. Always dispatch
+# with dry-run: true first (the default) and read the summary.
+#
+# Dispatch it from the DEFAULT branch: the recovery runs this file plus the
+# lgtm-ci tooling pinned by tooling-ref, never the tag's workflow code, so a
+# fix merged on main applies to a release cut before it.
+#
+# npm trusted publishing validates THIS file: it must be registered as an
+# npm trusted publisher for the four packages (environment: npm, the same
+# gate as the tag path) and stay listed in npm-entry-workflows below.
+
+'on':
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to recover (e.g. v0.161.0)
+        required: true
+        type: string
+      source-run-id:
+        description: Run ID of the original publish-pypi-on-tag.yml run
+        required: true
+        type: string
+      dry-run:
+        description: Detect and summarize only (always run this first)
+        required: false
+        type: boolean
+        default: true
+      channels:
+        description: Restrict to channels (JSON array, e.g. '["npm"]'); default auto
+        required: false
+        type: string
+        default: 'auto'
+
+permissions: {}
+
+concurrency:
+  group: release-recover-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover release
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-recover.yml@7c82f643fd70415c58d55c182c9d994cbd45075e # v0.74.0
+    # Union of the reusable's per-job permissions: contents write for the
+    # GitHub Release resume, id-token + attestations for the npm resume,
+    # actions read for the source-run lookup, issues write for the record.
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      id-token: write
+      attestations: write
+    with:
+      tag: ${{ inputs.tag }}
+      source-run-id: ${{ inputs.source-run-id }}
+      # The publish workflow the source run must belong to; its head SHA must
+      # be the tag's commit (both re-read from the API by the resolve stage).
+      source-workflow: .github/workflows/publish-pypi-on-tag.yml
+      dry-run: ${{ inputs.dry-run }}
+      channels: ${{ inputs.channels }}
+      pypi-package: lintro
+      npm-package: '@lgtm-hq/lintro'
+      # publish-npm.yml's stage job uploads its packages dir as `npm-dist`,
+      # so the package subdirectories and SHA256SUMS sit at the artifact
+      # root; same order as the tag path (platform packages, meta last).
+      npm-artifact-name: npm-dist
+      npm-packages-dir: '.'
+      npm-order: '["darwin-arm64", "linux-arm64", "linux-x64", "lintro"]'
+      npm-checksums-file: SHA256SUMS
+      # This file: the npm trusted publisher must be registered for it.
+      npm-entry-workflows: .github/workflows/release-recover.yml
+      npm-access: public
+      npm-provenance: true
+      # The gate's artifact: dist files, binaries, lintro.1, SHA256SUMS and
+      # the .intoto.jsonl bundles, exactly what github-release attached.
+      release-artifact-name: release-assets
+      release-checksums-file: SHA256SUMS
+      # Registry probe only: images are promoted by digest from staging in
+      # the tag path and are not resumed here.
+      docker-image: ghcr.io/lgtm-hq/py-lintro
+      # The npm package set is attested by publish-npm.yml's stage job.
+      signer-repo: lgtm-hq/py-lintro
+      signer-workflow: .github/workflows/publish-npm.yml
+      recovery-issue-workflow-key: publish-pypi-on-tag
+      tooling-ref: '7c82f643fd70415c58d55c182c9d994cbd45075e' # v0.74.0
+      # Block mode with the reusable's own default allowlist (probes for
+      # PyPI, npm and GHCR, the GitHub API and artifact service, and the
+      # Sigstore hosts for the npm resume).
+      egress-policy: block
+    # No Homebrew dispatch: the tap has no recovery lane; a missing formula
+    # update is re-driven by the tap's update-formula dispatch instead.

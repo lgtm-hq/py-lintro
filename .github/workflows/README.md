@@ -84,6 +84,14 @@ comments so Renovate can track digest updates. Policy is enforced by
 - **release-auto-tag.yml** — Creates tags on release commits via
   `reusable-release-auto-tag.yml` (`create-release: false`; GitHub Release is created by
   publish workflow)
+- **release-recover.yml** — `workflow_dispatch` entry for a partially published release
+  (lgtm-ci#966): calls `reusable-release-recover.yml` with the original publish run's
+  id, which re-reads that run's `release-assets` and `npm-dist` artifacts, resumes only
+  the missing channels (GitHub Release assets, npm package set; Homebrew has no lane
+  here, Docker is probed only) and records the outcome on the release-failure issue. Dry
+  run by default; always run it first. Dispatch from `main`. Registered as an npm
+  trusted publisher for the four packages, same `npm` environment as the tag path.
+  Runbook: lgtm-ci `docs/release-recovery.md`.
 - **mirror-release.yml** — Reusable (`workflow_call`), invoked by
   `publish-pypi-on-tag.yml` after the GitHub Release job; bumps the `lintro` pin in the
   `lgtm-hq/lintro-pre-commit` mirror, merges the version-bump PR, and tags the mirror
