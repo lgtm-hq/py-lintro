@@ -591,6 +591,48 @@ def test_a_changed_truncated_file_is_re_reviewed_and_cleared() -> None:
     ).is_empty()
 
 
+def test_same_hash_siblings_inherit_the_truncation_marker() -> None:
+    """A sibling credited through a truncated representative is cut too."""
+    context = _pr_context()
+    diff = context.unified_diff.replace("pkg/api.py", "pkg/api_copy.py")
+    twin = make_review_context(
+        unified_diff=context.unified_diff + diff,
+        changed_files=[
+            *context.changed_files,
+            ChangedFile(
+                path="pkg/api_copy.py",
+                status="modified",
+                additions=1,
+                deletions=1,
+            ),
+        ],
+    )
+    plan = plan_resume(context=twin, prior=None)
+    assert_that(plan.hashes["pkg/api.py"]).is_equal_to(plan.hashes["pkg/api_copy.py"])
+
+    records = records_for_reviewed(
+        plan=plan,
+        reviewed_paths=("pkg/api.py", "pkg/api_copy.py", "pkg/caller.py"),
+        head_sha="head",
+        round_number=1,
+        prior=None,
+        truncated_paths={"pkg/api.py"},
+    )
+    by_path = {record.path: record for record in records}
+    assert_that(by_path["pkg/api.py"].truncated).is_true()
+    assert_that(by_path["pkg/api_copy.py"].truncated).is_true()
+    assert_that(by_path["pkg/caller.py"].truncated).is_false()
+
+    # A later round that carries only the representative's record still
+    # reports the sibling, which inherited coverage by hash.
+    prior = ReviewState(coverage=(by_path["pkg/api.py"],))
+    later = plan_resume(context=twin, prior=prior)
+    assert_that(carried_truncated_paths(plan=later, prior=prior)).contains(
+        "pkg/api.py",
+        "pkg/api_copy.py",
+    )
+
+
 def test_coverage_record_truncation_round_trips_and_defaults_off() -> None:
     """The marker is written only when set and an old record loads as unset."""
     record = CoverageRecord(path="a.py", patch_hash="h", truncated=True)

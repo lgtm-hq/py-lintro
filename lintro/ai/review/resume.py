@@ -168,11 +168,16 @@ def records_for_reviewed(
         prior: Previous state.
         stopped_reason: Mid-round stop, if any.
         truncated_paths: Reviewed paths whose chunk was cut to the
-            context-window ceiling; their records carry ``truncated``.
+            context-window ceiling. Their records carry ``truncated``, and
+            so does every same-hash sibling credited through them: an
+            identical diff that inherited coverage inherited the cut too.
 
     Returns:
         Unioned coverage records.
     """
+    truncated_hashes = {
+        plan.hashes[path] for path in truncated_paths if plan.hashes.get(path)
+    }
     merged: dict[tuple[str, str], CoverageRecord] = {}
     if prior is not None:
         for record in prior.coverage:
@@ -187,7 +192,9 @@ def records_for_reviewed(
             reviewed_sha=head_sha,
             round=round_number,
             stopped_reason=stopped_reason,
-            truncated=item.path in truncated_paths,
+            truncated=(
+                item.path in truncated_paths or item.patch_hash in truncated_hashes
+            ),
         )
         merged[record.identity] = record
     return tuple(merged.values())
@@ -211,19 +218,23 @@ def carried_truncated_paths(
         prior: Previous state, or ``None`` on a first run.
 
     Returns:
-        Sorted paths classified ``COVERED`` this round whose latest prior
-        record at the current hash carries ``truncated``.
+        Sorted paths classified ``COVERED`` this round whose current hash is
+        one a latest prior record marks ``truncated`` — the file's own record
+        or, for a sampled sibling that inherited coverage, the identical
+        diff's record.
     """
     if prior is None:
         return ()
-    latest = latest_coverage_by_path(prior.coverage)
+    truncated_hashes = {
+        record.patch_hash
+        for record in latest_coverage_by_path(prior.coverage).values()
+        if record.truncated
+    }
     return tuple(
         sorted(
             item.path
             for item in plan.classified
             if item.need is FileReviewNeed.COVERED
-            and (record := latest.get(item.path)) is not None
-            and record.truncated
-            and record.patch_hash == item.patch_hash
+            and item.patch_hash in truncated_hashes
         ),
     )
