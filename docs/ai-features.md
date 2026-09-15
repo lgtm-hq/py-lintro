@@ -456,8 +456,10 @@ every file is still reviewed, but the model never saw that chunk in one view, so
 findings that need the whole chunk in view may go unreported.
 
 - `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
-  event, each with a `reason` (`output_exhaustion_retried`, `diff_truncated` when a
-  single file's diff exceeded the context window and was cut, a failed depth pass, or —
+  event, each with a `reason` (`output_exhaustion_retried`, `split_half_failed` when one
+  half of a split chunk failed and its files were left unreviewed, `diff_truncated` when
+  a single file's diff exceeded the context window and was cut (that file is not
+  credited as covered, so the next round reviews it again), a failed depth pass, or —
   when the synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
   `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
   chunk that was split and whose depth-3 sweep also failed contributes two entries with

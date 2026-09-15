@@ -12,6 +12,7 @@ and recorded when cut, and a sticky nit row carries enough to act on.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,7 @@ from tests.unit.ai.review.test_cross_chunk_synthesis_2269 import (
     _outcome,
     _run,
     _synthesis_payload,
+    _two_chunks,
 )
 
 _EXHAUSTED = "Claude CLI reported error: maximum output tokens reached"
@@ -231,9 +233,43 @@ async def test_a_failed_second_half_keeps_the_first_half(tmp_path: Path) -> None
     )
     assert_that(partial.files).is_equal_to(("src/a.py",))
     assert_that([item.reason for item in partial.coverage_degradations]).is_equal_to(
-        [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
+        [
+            CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+            CoverageDegradationReason.SPLIT_HALF_FAILED,
+        ],
     )
     assert_that(partial.input_tokens).is_equal_to(10)
+
+
+def test_a_lost_half_is_described_as_unreviewed_files(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The describer names the lost half and never claims every chunk.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    metadata = replace(
+        sample_review_result.metadata,
+        coverage_degradations=(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+                chunk_index=0,
+            ),
+            CoverageDegradation(
+                reason=CoverageDegradationReason.SPLIT_HALF_FAILED,
+                chunk_index=0,
+            ),
+        ),
+    )
+
+    text = describe_coverage_degradations(metadata=metadata)
+
+    assert_that(text).contains("lost one half to a failed call")
+    assert_that(text).contains("its files were not reviewed")
+    assert_that(text).does_not_contain("Every chunk was reviewed")
+    assert_that(text).does_not_contain("other limit")
+    assert_that(metadata.findings_coverage_complete).is_false()
 
 
 async def test_both_halves_failing_raises(tmp_path: Path) -> None:
@@ -416,6 +452,36 @@ def test_a_summary_less_synthesis_answer_is_flagged_not_silent() -> None:
     assert_that(outcome.failed).is_false()
     assert_that(outcome.narrative_missing).is_true()
     assert_that(result.pr_summary).is_none()
+
+
+def test_a_verdict_less_synthesis_answer_is_flagged_not_silent() -> None:
+    """A summary without verdict reasoning is still a missing narrative."""
+    payload = json.loads(_synthesis_payload())
+    payload["summary"] = {"headline": "Adds a thing.", "walkthrough": []}
+    payload.pop("verdict_reasoning", None)
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_content=json.dumps(payload),
+    )
+
+    outcome = _outcome(result=result)
+    assert_that(outcome.failed).is_false()
+    assert_that(outcome.narrative_missing).is_true()
+
+
+def test_a_truncated_chunk_credits_no_coverage() -> None:
+    """A cut file is not persisted as covered, so the next round re-reviews it."""
+    chunks = _two_chunks()
+    chunks[0] = replace(chunks[0], truncated=True)
+    result = _run(synthesis=ReviewSynthesisConfig(enabled=False), chunks=chunks)
+
+    cut_file = chunks[0].files[0]
+    assert_that(result.metadata.reviewed_paths).does_not_contain(cut_file)
+    assert_that(result.metadata.reviewed_paths).contains(chunks[1].files[0])
+    assert_that(result.metadata.findings_coverage_complete).is_false()
+    assert_that(
+        [item.reason for item in result.metadata.coverage_degradations],
+    ).contains(CoverageDegradationReason.DIFF_TRUNCATED)
 
 
 # --- 6. a single over-target file --------------------------------------------

@@ -181,7 +181,13 @@ async def _retry_after_exhaustion(
     they count as unreviewed; only when both halves fail is the error raised.
 
     Returns:
-        The chunk partial, carrying one output-exhaustion degradation.
+        The chunk partial, carrying one output-exhaustion degradation (and a
+        split-half-failed degradation when one half was lost).
+
+    Raises:
+        AICostBudgetExceededError: When any call hits the session cost cap.
+        AIError: When every half failed, or the single-file retry failed
+            again.
     """
     degradation = CoverageDegradation(
         reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
@@ -208,8 +214,8 @@ async def _retry_after_exhaustion(
         "reviewing each once.",
     )
     partials: list[ChunkReviewPartial] = []
-    failure: AIError | None = None
-    for half in halves:
+    lost_half = False
+    for position, half in enumerate(halves):
         half_request = replace(request, chunk=half)
         try:
             call = await invoke_chunk_review(request=half_request)
@@ -217,6 +223,9 @@ async def _retry_after_exhaustion(
         except AICostBudgetExceededError:
             raise
         except AIError as exc:
+            if position == len(halves) - 1 and not partials:
+                # Nothing survived: there is no coverage to keep.
+                raise
             # The other half's findings are paid for and complete; losing
             # them to this half's failure would discard real coverage. The
             # failed half's files stay out of ``files`` so coverage crediting
@@ -228,14 +237,26 @@ async def _retry_after_exhaustion(
                 files=", ".join(half.files),
                 error=exc,
             )
-            failure = exc
-    if not partials:
-        assert failure is not None
-        raise failure
+            lost_half = True
     merged = merge_half_partials(partials=partials)
+    half_failed: tuple[CoverageDegradation, ...] = ()
+    if lost_half:
+        # Named separately from the split itself so the run can say that
+        # one half's files were not reviewed rather than "re-reviewed in
+        # halves", and so the coverage sentence never claims every chunk.
+        half_failed = (
+            CoverageDegradation(
+                reason=CoverageDegradationReason.SPLIT_HALF_FAILED,
+                chunk_index=request.chunk_index,
+            ),
+        )
     return replace(
         merged,
-        coverage_degradations=(*merged.coverage_degradations, degradation),
+        coverage_degradations=(
+            *merged.coverage_degradations,
+            degradation,
+            *half_failed,
+        ),
     )
 
 

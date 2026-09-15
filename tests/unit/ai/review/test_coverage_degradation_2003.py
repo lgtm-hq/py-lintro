@@ -742,7 +742,10 @@ async def test_exhaustion_on_a_half_keeps_the_other_half(tmp_path: Path) -> None
     )
     reasons = [item.reason for item in partial.coverage_degradations]
     assert_that(reasons).is_equal_to(
-        [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
+        [
+            CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+            CoverageDegradationReason.SPLIT_HALF_FAILED,
+        ],
     )
 
 

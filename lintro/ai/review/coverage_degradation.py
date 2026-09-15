@@ -127,6 +127,19 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
             "window, so only a prefix of that file's change was reviewed",
         )
 
+    lost_half = {
+        item.chunk_index
+        for item in degradations
+        if item.reason is CoverageDegradationReason.SPLIT_HALF_FAILED
+    }
+    if lost_half:
+        clauses.append(
+            f"{len(lost_half)} split {_plural(count=len(lost_half), noun='chunk')} "
+            f"lost one half to a failed call, so "
+            f"{'its' if len(lost_half) == 1 else 'their'} files were not "
+            "reviewed",
+        )
+
     reasons = {item.reason for item in degradations}
     if CoverageDegradationReason.SYNTHESIS_TRUNCATED in reasons:
         clauses.append(
@@ -139,6 +152,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     known = {
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
         CoverageDegradationReason.DIFF_TRUNCATED,
+        CoverageDegradationReason.SPLIT_HALF_FAILED,
         CoverageDegradationReason.SYNTHESIS_TRUNCATED,
         CoverageDegradationReason.SYNTHESIS_FAILED,
         *_DEPTH_PASS_CLAUSES,
@@ -155,8 +169,9 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         )
 
     # A run can be capped *and* stopped early; only claim full chunk
-    # coverage when ``partial`` says the run reached every chunk.
-    coverage = "" if metadata.partial else "Every chunk was reviewed, but "
+    # coverage when ``partial`` says the run reached every chunk and no
+    # split chunk lost a half (its files went unreviewed).
+    coverage = "" if metadata.partial or lost_half else "Every chunk was reviewed, but "
     # A split chunk lost its whole-chunk view; a run degraded solely by an
     # incomplete optional pass says so instead.
     tail = (

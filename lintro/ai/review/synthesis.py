@@ -441,7 +441,11 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             truncated=truncated,
             failed=False,
             duplicates_merged=duplicates_merged,
-            narrative_missing=narrative.summary is None,
+            # The narrative is the pass's primary output: a reply missing
+            # either half of it is degraded, not a quieter success.
+            narrative_missing=(
+                narrative.summary is None or narrative.verdict_reasoning is None
+            ),
         ),
         degradations=degradations,
         input_tokens=response.input_tokens,

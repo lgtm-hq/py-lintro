@@ -50,6 +50,11 @@ class CoverageDegradationReason(StrEnum):
             (the context-window remainder) and was cut to fit, so the model
             reviewed only a prefix of that file's change and findings past
             the cut may go unreported.
+        SPLIT_HALF_FAILED: After an output-exhaustion split, one half's call
+            failed while the other completed. The surviving half's findings
+            are kept and the failed half's files are left unreviewed (they
+            are not credited as covered), so this run did not review every
+            file it started.
     """
 
     OUTPUT_EXHAUSTION_RETRIED = auto()
@@ -58,3 +63,4 @@ class CoverageDegradationReason(StrEnum):
     GENERATED_QUESTIONS_FAILED = auto()
     ADVERSARIAL_SWEEP_FAILED = auto()
     DIFF_TRUNCATED = auto()
+    SPLIT_HALF_FAILED = auto()

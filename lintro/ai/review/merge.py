@@ -17,6 +17,7 @@ assessments.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -62,6 +63,10 @@ class ChunkReviewPartial:
         provider_seconds: Wall-clock seconds of the chunk's main provider
             call, for the per-chunk timings (lintro-ops #37).
         turns: Agent turns the transport reported for that call, or ``None``.
+        truncated: True when the chunk's diff was cut to the context ceiling,
+            so the model saw only a prefix of its file. The file stays in
+            ``files`` for the synthesis digest but is never credited as
+            covered (see :func:`credited_paths`).
     """
 
     findings: tuple[ReviewFinding, ...]
@@ -75,6 +80,27 @@ class ChunkReviewPartial:
     )
     provider_seconds: float = 0.0
     turns: int | None = None
+    truncated: bool = False
+
+
+def credited_paths(*, partials: Iterable[ChunkReviewPartial]) -> set[str]:
+    """Return the changed paths the completed chunks may be credited for.
+
+    A truncated chunk reviewed only a prefix of its file, so its files are
+    left out: the file stays awaiting and the next round reviews it again
+    instead of skipping the unseen suffix. Both the final assembly and the
+    in-flight checkpoints credit through here, so an interrupted run can
+    never persist coverage the final result would have refused.
+
+    Args:
+        partials: Chunk partials finished so far.
+
+    Returns:
+        The set of paths credited as reviewed.
+    """
+    return {
+        path for partial in partials if not partial.truncated for path in partial.files
+    }
 
 
 def parse_review_response(*, content: str) -> dict[str, Any]:

@@ -32,7 +32,7 @@ from lintro.ai.review.file_selection import (
     resolve_file_selection,
 )
 from lintro.ai.review.finding_parser import reject_context_findings
-from lintro.ai.review.merge import merge_review_results
+from lintro.ai.review.merge import credited_paths, merge_review_results
 from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -220,7 +220,7 @@ def assemble_review_result(
         lint_facts_note=options.lint_note,
     )
 
-    completed_files = {path for item in outcome.partials for path in item.files}
+    completed_files = credited_paths(partials=outcome.partials)
     agent_files = {path for item in outcome.custom_results for path in item.files}
     actually_reviewed = tuple(
         path

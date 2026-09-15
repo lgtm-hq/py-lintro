@@ -61,7 +61,8 @@
     "flagged_files": [],
     "coverage_degradations": [],
     "provider_seconds": 0.0,
-    "turns": null
+    "turns": null,
+    "truncated": false
   },
   {
     "findings": [
@@ -125,6 +126,7 @@
     "flagged_files": [],
     "coverage_degradations": [],
     "provider_seconds": 0.0,
-    "turns": null
+    "turns": null,
+    "truncated": false
   }
 ]
