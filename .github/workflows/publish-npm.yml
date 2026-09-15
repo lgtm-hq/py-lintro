@@ -12,16 +12,19 @@ name: Publish - npm
 #            build-binaries.yml attestation, stages them into the npm tree,
 #            injects the version, smoke-tests the launcher, writes a
 #            SHA256SUMS over every file npm would pack, attests that set and
-#            uploads it as the `npm-dist` artifact. Carries the `npm`
-#            environment: every live publish waits for maintainer approval
-#            here, mirroring the `pypi` environment.
+#            uploads it as the `npm-dist` artifact. No environment: nothing
+#            here is irreversible.
 #   publish  lgtm-ci's reusable-publish-npm-set.yml: re-verifies every packed
 #            file against the manifest and the stage job's attestation
 #            BEFORE npm pack, publishes platform packages first and the meta
 #            package last (idempotent re-runs, bounded transient retry), then
 #            verifies the registry (dist.attestations per package, npm audit
-#            signatures, launcher smoke). A `uses:` job cannot declare
-#            `environment`, so the approval lives on `stage`.
+#            signatures, launcher smoke). Bound to the `npm` environment
+#            through the reusable's `environment` input (lgtm-ci 0.74.0,
+#            lgtm-hq/lgtm-ci#990): every live publish waits for maintainer
+#            approval on the job that mints the OIDC token, mirroring the
+#            `pypi` environment, and the npm trusted publisher stays
+#            registered against the `npm` environment name.
 #
 # npm trusted publishing matches the ENTRY workflow of the run — the tag
 # pipeline (publish-pypi-on-tag.yml), not this file. The reusable's entry
@@ -78,7 +81,6 @@ jobs:
     name: Verify and stage npm package set
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    environment: npm
     permissions:
       # read: checkout and download release assets
       contents: read
@@ -222,6 +224,10 @@ jobs:
       # provenance upload; the call startup-fails without it (#2484 class)
       attestations: write
     with:
+      # The approval gate and the OIDC environment claim live on the publish
+      # job itself (see the header); the trusted-publisher registration on
+      # npmjs keeps its `npm` environment binding.
+      environment: npm
       packages-dir: npm
       artifact-name: npm-dist
       # Platform packages first, meta package last: the meta package's

@@ -64,7 +64,7 @@ every manifest and into the meta-package's `@lgtm-hq/lintro-*` pins. The same sc
 (`publish-pypi-on-tag.yml`) after the GitHub Release job has attached the gated assets;
 stable releases only.
 
-**`stage`** (this repository, `environment: npm`):
+**`stage`** (this repository, no environment):
 
 1. `download_release_binaries.sh` fetches the three binaries and the release's
    `SHA256SUMS`.
@@ -112,9 +112,10 @@ Publishing uses npm **trusted publishing (OIDC)**: no `NODE_AUTH_TOKEN` secret i
 required and npm generates provenance attestations automatically (`--provenance` is
 passed as explicit intent). The `npm` environment gates every live publish behind
 maintainer approval, mirroring the `pypi` environment. A job that calls a reusable
-cannot declare `environment:`, so the approval sits on `stage`, which `publish` needs;
-the publish job itself carries no environment, so the trusted publisher on npmjs must be
-registered **without** an environment name.
+cannot declare `environment:` itself, so the call passes `environment: npm` to the
+reusable (lgtm-ci 0.74.0), which binds its publish job to it: the approval and the OIDC
+environment claim sit on the job that publishes, and the trusted publisher on npmjs
+stays registered against the `npm` environment, unchanged.
 
 ### Which runs npm actually trusts
 
@@ -163,7 +164,7 @@ trusts:
    gate → PyPI → GitHub Release → npm order and the entry-path identity. A failed run
    also has a `release-failure:publish-pypi-on-tag:<tag>` issue with the per-channel
    table; check it before approving the rerun.
-3. Approve the `npm` environment when that run reaches its waiting `stage` job.
+3. Approve the `npm` environment when that run reaches its waiting `publish` job.
 
 Re-running a tag run is designed to be cheap (#2435): once the release exists, the Linux
 and macOS binary jobs detect the verified binary already attached to it and skip the

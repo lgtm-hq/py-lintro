@@ -1634,17 +1634,22 @@ def test_publish_npm_calls_the_lgtm_ci_package_set_reusable() -> None:
     )
 
 
-def test_publish_npm_keeps_the_environment_approval_on_the_stage_job() -> None:
-    """The ``npm`` approval gate survives the move to a reusable.
+def test_publish_npm_binds_the_environment_approval_to_the_publish_job() -> None:
+    """The npm approval gate sits on the job that publishes, via the reusable.
 
-    A job that calls a reusable cannot declare ``environment``, so the gate
-    sits on the caller-side stage job the publish job ``needs``; a live
-    publish still waits for maintainer approval.
+    A ``uses:`` job cannot declare ``environment``; lgtm-ci 0.74.0's
+    package-set reusable takes it as an input and binds its publish job, so
+    the approval and the OIDC environment claim stay where the token is
+    minted and the npmjs trusted-publisher registration keeps its ``npm``
+    environment binding (#2632, lgtm-hq/lgtm-ci#990). ``stage`` carries no
+    environment: nothing there is irreversible.
     """
-    jobs = _publish_npm_jobs()
-    assert_that(jobs["stage"]["environment"]).is_equal_to("npm")
+    jobs = _load_workflow(name="publish-npm.yml")["jobs"]
+
+    assert_that(jobs["stage"]).does_not_contain_key("environment")
     assert_that(jobs["publish"]).does_not_contain_key("environment")
-    assert_that(jobs["stage"]["timeout-minutes"]).is_instance_of(int)
+    assert_that(jobs["publish"]["with"]["environment"]).is_equal_to("npm")
+    assert_that(jobs["publish"]["needs"]).is_equal_to("stage")
 
 
 def test_publish_npm_reusable_verifies_artifacts_before_packing() -> None:
