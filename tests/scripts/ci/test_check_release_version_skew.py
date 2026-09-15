@@ -61,17 +61,48 @@ def _npm_body(*, version: str, published: str = OLD) -> str:
     return json.dumps({"dist-tags": {"latest": version}, "time": {version: published}})
 
 
-def _formula_body(*, version: str) -> str:
-    """Build a stub Homebrew formula body."""
-    return "\n".join(
-        [
-            "class Lintro < Formula",
-            '  desc "Unified CLI"',
-            f'  version "{version}"',
-            '  license "MIT"',
-            "end",
-        ],
-    )
+def _formula_body(
+    *,
+    version: str,
+    shape: str = "url",
+    stanza_version: str | None = None,
+) -> str:
+    """Build a stub Homebrew formula body.
+
+    Args:
+        version: Release version carried by the arm64 release-asset ``url``.
+        shape: ``"url"`` for the current formula (release url, no ``version``
+            stanza), ``"stanza"`` for the legacy explicit ``version`` line
+            only, or ``"both"`` for a formula carrying both.
+        stanza_version: Version to put in the ``version`` stanza when the shape
+            includes one; defaults to ``version``.
+
+    Returns:
+        The formula source.
+    """
+    lines = ["class Lintro < Formula", '  desc "Unified CLI"']
+    if shape in {"stanza", "both"}:
+        lines.append(f'  version "{stanza_version or version}"')
+    lines.append('  license "MIT"')
+    if shape in {"url", "both"}:
+        lines.extend(
+            [
+                "  on_macos do",
+                "    on_arm do",
+                '      url "https://github.com/lgtm-hq/py-lintro/releases/'
+                f'download/v{version}/lintro-macos-arm64"',
+                '      sha256 "0" * 64',
+                "    end",
+                "    on_intel do",
+                '      url "https://files.pythonhosted.org/packages/ab/cd/'
+                f'lintro-{version}.tar.gz"',
+                '      sha256 "0" * 64',
+                "    end",
+                "  end",
+            ],
+        )
+    lines.append("end")
+    return "\n".join(lines)
 
 
 def _runs_body(*, statuses: list[str], version: str = "1.2.3") -> str:
@@ -188,8 +219,131 @@ def test_unreachable_channel_exits_two(module: Any, channel: str) -> None:
     assert_that(report).contains("unreachable")
 
 
+@pytest.mark.parametrize("shape", ["url", "stanza", "both"])
+def test_formula_version_is_read_from_url_or_stanza(module: Any, shape: str) -> None:
+    """Every supported formula shape resolves the Homebrew version."""
+    status = module.resolve_homebrew(
+        repo="lgtm-hq/homebrew-tap",
+        formula="Formula/lintro.rb",
+        branch="main",
+        fetch=_fetcher(
+            pypi="",
+            npm="",
+            formula=_formula_body(version="1.2.3", shape=shape),
+        ),
+    )
+    assert_that(status.reachable).is_true()
+    assert_that(status.version).is_equal_to("1.2.3")
+
+
+def test_formula_release_url_wins_over_version_stanza(module: Any) -> None:
+    """The release-asset url is authoritative when both shapes are present."""
+    body = _formula_body(version="1.2.3", shape="both", stanza_version="1.2.2")
+    assert_that(module.formula_version(body=body)).is_equal_to("1.2.3")
+
+
+def test_formula_ignores_release_urls_of_other_repositories(module: Any) -> None:
+    """A pinned resource from another project's releases never wins."""
+    body = "\n".join(
+        [
+            "class Lintro < Formula",
+            '  version "1.2.3"',
+            '  resource "dep" do',
+            '    url "https://github.com/other/dep/releases/download/v9.0.0/dep.tgz"',
+            "  end",
+            "end",
+        ],
+    )
+    assert_that(module.formula_version(body=body)).is_equal_to("1.2.3")
+    assert_that(
+        module.formula_version(body=body, source_repo="other/dep"),
+    ).is_equal_to("9.0.0")
+
+
+def test_formula_release_url_repo_match_is_case_insensitive(module: Any) -> None:
+    """GitHub owner/repository names compare case-insensitively."""
+    body = _formula_body(version="1.2.3", shape="url")
+    assert_that(
+        module.formula_version(body=body, source_repo="LGTM-HQ/Py-Lintro"),
+    ).is_equal_to("1.2.3")
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        '  URL "https://github.com/lgtm-hq/py-lintro/releases/download/v1.2.3/x"',
+        '  url "https://github.com/lgtm-hq/py-lintro/Releases/Download/v1.2.3/x"',
+        '  url "https://GitHub.com/lgtm-hq/py-lintro/releases/download/v1.2.3/x"',
+    ],
+)
+def test_formula_release_url_keyword_and_path_stay_case_sensitive(
+    module: Any,
+    line: str,
+) -> None:
+    """Case-insensitivity covers the repository fragment only."""
+    body = "\n".join(["class Lintro < Formula", line, "end"])
+    assert_that(module.formula_version(body=body)).is_none()
+
+
+def test_audit_forwards_repo_to_the_formula_parser(module: Any) -> None:
+    """``--repo`` decides which release urls count; metacharacters are literal."""
+    body = "\n".join(
+        [
+            "class Lintro < Formula",
+            '  url "https://github.com/lgtm-hq/py-lintro/releases/download/v1.2.2/x"',
+            '  url "https://github.com/acme/tool.v2/releases/download/v1.2.3/x"',
+            "end",
+        ],
+    )
+    code, report = module.audit(
+        args=_args(module, "--repo", "acme/tool.v2"),
+        fetch=_fetcher(
+            pypi=_pypi_body(version="1.2.3"),
+            npm=_npm_body(version="1.2.3"),
+            formula=body,
+        ),
+        now=NOW,
+    )
+    assert_that(code).is_equal_to(0)
+    assert_that(report).contains("all channels agree")
+    # ``tool.v2`` must not match ``toolXv2``: the dot is escaped.
+    assert_that(
+        module.formula_version(
+            body=body.replace("tool.v2", "toolXv2"),
+            source_repo="acme/tool.v2",
+        ),
+    ).is_none()
+
+
+def test_formula_pypi_sdist_url_is_not_a_release_url(module: Any) -> None:
+    """A formula with only a PyPI sdist url has no readable version."""
+    body = "\n".join(
+        [
+            "class Lintro < Formula",
+            '  url "https://files.pythonhosted.org/packages/ab/cd/lintro-1.2.3.tar.gz"',
+            "end",
+        ],
+    )
+    assert_that(module.formula_version(body=body)).is_none()
+
+
+def test_current_tap_formula_shape_without_version_stanza(module: Any) -> None:
+    """The post-#480 tap formula (url stanza only) audits without degrading."""
+    code, report = module.audit(
+        args=_args(module),
+        fetch=_fetcher(
+            pypi=_pypi_body(version="1.2.3"),
+            npm=_npm_body(version="1.2.3"),
+            formula=_formula_body(version="1.2.3", shape="url"),
+        ),
+        now=NOW,
+    )
+    assert_that(code).is_equal_to(0)
+    assert_that(report).contains("all channels agree")
+
+
 def test_malformed_payload_is_unreachable_not_skew(module: Any) -> None:
-    """A formula without a version stanza degrades rather than alarms."""
+    """A formula with neither a release url nor a version stanza degrades."""
     code, report = module.audit(
         args=_args(module),
         fetch=_fetcher(
@@ -201,6 +355,7 @@ def test_malformed_payload_is_unreachable_not_skew(module: Any) -> None:
     )
     assert_that(code).is_equal_to(2)
     assert_that(report).contains("Homebrew")
+    assert_that(report).contains("no release url or version stanza")
 
 
 def test_recent_release_is_inside_settle_window(module: Any) -> None:
