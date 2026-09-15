@@ -120,8 +120,14 @@ def review_findings_from_unposted(
     ``inline_comment_id``. Resume then skips COVERED files and would
     otherwise never post those issues. Records for files this run
     re-reviewed are omitted so absence can resolve them. Records outside the
-    inline severity tier are omitted too: a P3 never had a thread to miss,
-    and it is already listed in the sticky (lintro-ops #37).
+    inline severity tier are omitted too: a P3 opens no inline thread, so
+    there is nothing to re-post. Its record is not lost — an open record on
+    a file this resume did not re-read carries forward (see
+    :func:`match_findings`) and the sticky's nit index renders it from the
+    carried record set, subject to that section's open-record limit, which
+    marks whatever it prunes. The sticky may not have been posted yet when
+    the resume starts, so this is where the nit lands, not where it already
+    is (lintro-ops #37).
 
     Args:
         prior: Artifact state loaded for this resume.

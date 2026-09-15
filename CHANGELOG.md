@@ -22,15 +22,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `lintro review` reviews a single file that exceeds the per-chunk target whole, up to
   the context-window remainder, and records a `diff_truncated` coverage degradation when
   the file had to be cut; the synthesis JSON block carries `narrative_missing`.
+- **ai/review**: `merged_duplicates` on a finding in `lintro review --output json`,
+  naming each finding a duplicate merge folded into it so the lifecycle ledger keeps
+  their records open. Present only on a finding a merge actually folded into, elided
+  when empty, and not carried in the MCP payload (#2683)
 
 ### Changed
 
 - **ai/review**: the chunk answer is `findings` and `flagged_files` only; the
   `file_assessments` and `checklist` keys are gone from the review JSON and the MCP
-  payload, and `summary` / `pr_summary` / `verdict_reasoning` come from the synthesis
-  pass (null when it did not run or failed); `review.synthesis.enabled` defaults to
-  `true`; `ai.max_parallel_calls` is clamped to 3 on the CLI transport unless set
-  explicitly (#2680)
+  payload, and `pr_summary` / `verdict_reasoning` come from the synthesis pass (null
+  when it did not run or failed); `review.synthesis.enabled` defaults to `true`;
+  `ai.max_parallel_calls` is clamped to 3 on the CLI transport unless set explicitly
+  (#2680)
+- **ai/review**: with `review.synthesis.enabled: false`, or when the synthesis call
+  fails, `summary` is empty where earlier releases joined the per-chunk summaries, so
+  the sticky's Summary section renders nothing; the findings, TL;DR and verdict surfaces
+  are unaffected (#2683)
 
 ### Deprecated
 
@@ -47,6 +55,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   (#2680)
 
 ### Fixed
+
+- **ai/review**: a duplicate merge no longer marks live findings resolved in the
+  lifecycle ledger. The survivor carries each finding the merge folded into it, and the
+  matcher pairs those prior records to the survivor per record rather than per
+  fingerprint, so a merged-away finding is carried forward open instead of being stamped
+  "Addressed" while the defect is still live (#2683)
 
 ### Security
 
