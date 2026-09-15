@@ -369,6 +369,19 @@ inline. Questions stay in the notes block regardless of the floor — set
 `review_post_questions_inline: true` to open threads for them too. The two keys are
 independent; restoring the pre-#2572 behaviour of a thread per entry takes both.
 
+### Posting tiers: P1/P2 inline, P3 in the sticky
+
+On top of the confidence gate, findings are tiered by severity for posting. Only **P1
+and P2** findings that clear the policy open inline threads. **P3** findings never open a
+thread: they are listed in the sticky comment under a collapsed
+**🟡 N P3 nits (not posted inline)** block, title and location only, directly below the
+round's Δ table. The tier is rendering only: a P3 is still a tracked record, still
+counts toward the derived verdict (`nits only`), still appears in the fix prompts, and
+still shows as **✔ fixed** in the Δ table when a later round stops reporting it. The
+review body's _N findings posted_ header counts threads, so it excludes P3s as it
+excludes notes. There is no setting for the boundary; it is the constant
+`INLINE_SEVERITIES` in `lintro/ai/review/posting_tiers.py`.
+
 ### When inline comments cannot be posted
 
 A finding always has a surface. When GitHub refuses the inline review batch — or a

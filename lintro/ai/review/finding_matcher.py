@@ -36,6 +36,7 @@ from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.posting_tiers import is_inline_tier
 
 __all__ = [
     "FINGERPRINT_LENGTH",
@@ -259,7 +260,9 @@ def review_findings_from_unposted(
     A SIGTERM after a coverage checkpoint leaves ``FindingRecord``s with no
     ``inline_comment_id``. Resume then skips COVERED files and would
     otherwise never post those issues. Records for files this run
-    re-reviewed are omitted so absence can resolve them.
+    re-reviewed are omitted so absence can resolve them. Records outside the
+    inline severity tier are omitted too: a P3 never had a thread to miss,
+    and it is already listed in the sticky (lintro-ops #37).
 
     Args:
         prior: Artifact state loaded for this resume.
@@ -282,6 +285,8 @@ def review_findings_from_unposted(
         if record.status is not FindingStatus.OPEN:
             continue
         if record.inline_comment_id is not None:
+            continue
+        if not is_inline_tier(severity=record.severity):
             continue
         if record.fingerprint in seen:
             continue
