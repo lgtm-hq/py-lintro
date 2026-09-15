@@ -56,13 +56,19 @@ version of the validation packages is the mapped form.
 
 - Every sibling of #2633 is merged and pinned: #2562, #2632, #2670, lgtm-hq/lgtm-ci#964
   and lgtm-hq/lgtm-ci#966, lgtm-hq/homebrew-tap#471.
-- The four candidates are `0.160.3rc1`, `0.160.3rc2`, `0.160.3rc3` and `0.160.3rc4`, cut
-  with the checkpoint procedure in `.github/workflows/README.md` (a version-bump PR
-  titled `ci(release): checkpoint prerelease 0.160.3rcN (#2633)` touching only
+- Four candidates were cut in order with the checkpoint procedure in
+  `.github/workflows/README.md` (a version-bump PR titled
+  `ci(release): checkpoint prerelease 0.160.3rcN (#2633)` touching only
   `pyproject.toml`, `lintro/__init__.py` and `uv.lock`, then a signed `v0.160.3rcN` tag
-  on the squash-merge commit). One PR and one tag per scenario, in order.
+  on the squash-merge commit): `0.160.3rc1` (first S1 attempt, superseded after #2676),
+  `0.160.3rc2` (S1), `0.160.3rc3` (S2) and `0.160.3rc4` (S3; S4 reuses it). One PR and
+  one tag per proving scenario; a candidate that fails for a reason outside its scenario
+  is re-cut, never re-run, and its run ids are kept in the fixture's `attempts[]` so
+  they stay meaningful.
 - Approval gates still require a human on the `pypi` and `npm` environments for each
-  candidate: budget four `pypi` approvals and two `npm` approvals (S1 and S4).
+  candidate: budget two `pypi` approvals per proving rc (the upload job and the npm
+  stage's approval on S1; S2 needs none; S3 one) and one `npm` approval (S1); S4 never
+  reaches an approval because the recovery refuses the prerelease.
 - Set `RELEASE_VALIDATION_CHANNELS=true` before S1 and leave it set until cleanup.
   `RELEASE_FAULT` is unset before S1, set per scenario below, and deleted after S3.
 - `cosign` 2.6 or newer for `--new-bundle-format`, `gh` with the attestation subcommand,
@@ -74,7 +80,9 @@ digests, and every issue or comment linked, in the JSON fixture for that scenari
 
 ## S1 green
 
-`RELEASE_VALIDATION_CHANNELS=true`, `RELEASE_FAULT` unset. Tag `v0.160.3rc1`.
+`RELEASE_VALIDATION_CHANNELS=true`, `RELEASE_FAULT` unset. Tag `v0.160.3rc2` (the rc1
+attempt died on a promote allowlist bug, #2676, and was superseded; its two attempts are
+recorded in S1's `attempts[]`).
 
 Expected: the run is green; `sbom`, `pypi-build`, `build-binaries`, `docker-build`,
 `release-gate`, `pypi-upload`, `github-release`, `docker-promote` and `npm-publish`
@@ -86,9 +94,9 @@ Verify every artifact class with the policy's commands (the same ones `docs/dock
 `docs/npm-distribution.md` and `.github/SECURITY.md` carry):
 
 ```bash
-TAG=v0.160.3rc1
-VERSION=0.160.3rc1          # PyPI, GitHub Release assets
-NPM_VERSION=0.160.3-rc.1    # npm (SemVer form of the same version)
+TAG=v0.160.3rc2
+VERSION=0.160.3rc2          # PyPI, GitHub Release assets
+NPM_VERSION=0.160.3-rc.2    # npm (SemVer form of the same version)
 
 # PyPI: the release exists and the files match the gate's SHA256SUMS
 curl -fsS "https://pypi.org/pypi/lintro/${VERSION}/json" | jq -r '.urls[] | "\(.digests.sha256)  \(.filename)"'
@@ -149,17 +157,19 @@ into `wall_clock_seconds`.
 
 ## S2 build failure
 
-`RELEASE_FAULT=fail-build`. Tag `v0.160.3rc2`.
+`RELEASE_FAULT=fail-build`. Tag `v0.160.3rc3`.
 
 Expected: `release-gate` fails at `Inject fault (fail-build)` with the
 `::error title=Injected release fault::` annotation; `pypi-upload`, `github-release`,
 `docker-promote`, `npm-publish`, `homebrew-tap` and the mirror lane are skipped; nothing
 reaches any channel. `notify-failure` runs (the gate is a row in its table). By the
 policy a pre-publish failure is not an incident: record whether the notifier filed
-nothing, or filed and closed, and quote the policy text you matched it against.
+nothing, or filed and closed, and quote the policy text you matched it against (it filed
+issue #2682 on attempt 2; attempt 1 was an infra flake re-run by the pre-0.74.2
+auto-rerun, so the recorded attempt is 2 and attempt 1 sits in `attempts[]`).
 
 ```bash
-VERSION=0.160.3rc2; NPM_VERSION=0.160.3-rc.2; TAG=v0.160.3rc2
+VERSION=0.160.3rc3; NPM_VERSION=0.160.3-rc.3; TAG=v0.160.3rc3
 curl -s -o /dev/null -w '%{http_code}\n' "https://pypi.org/pypi/lintro/${VERSION}/json"   # 404
 npm view "@lgtm-hq/lintro@${NPM_VERSION}" version                                        # E404
 docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro:${VERSION}"                    # not found
@@ -172,18 +182,18 @@ The staging images (`build-<run_id>` tags) may exist: they are not a release cha
 
 ## S3 publish failure
 
-`RELEASE_FAULT=fail-publish-npm`. Tag `v0.160.3rc3`.
+`RELEASE_FAULT=fail-publish-npm`. Tag `v0.160.3rc4`.
 
 Expected: PyPI, the GitHub Release and the Docker promote succeed; `npm-publish` fails
 at `Inject fault (fail-publish-npm)` in the stage job, so nothing was packed, attested
 or published on npm; the release-failure issue
-`release-failure:publish-pypi-on-tag:v0.160.3rc3` exists with the per-channel table (npm
-failed, Homebrew and mirror skipped, everything else success). The injected fault
-matches no infra signature, so `auto-rerun-on-infra-failure.yml` must not have re-run
-the workflow: the run has exactly one attempt.
+`release-failure:publish-pypi-on-tag:v0.160.3rc4` exists (#2688) with the per-channel
+table (npm failed, Homebrew and mirror skipped, everything else success). The injected
+fault matches no infra signature, so `auto-rerun-on-infra-failure.yml` must not have
+re-run the workflow: the run has exactly one attempt.
 
 ```bash
-VERSION=0.160.3rc3; NPM_VERSION=0.160.3-rc.3; TAG=v0.160.3rc3
+VERSION=0.160.3rc4; NPM_VERSION=0.160.3-rc.4; TAG=v0.160.3rc4
 curl -fsS "https://pypi.org/pypi/lintro/${VERSION}/json" | jq -r '.urls[].filename'
 gh release view "$TAG" --repo lgtm-hq/py-lintro --json isPrerelease,assets --jq '.assets[].name'
 docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro:${VERSION}" --format '{{ .Manifest.Digest }}'
@@ -198,47 +208,46 @@ three image digests too.
 ## S4 recovery
 
 Delete `RELEASE_FAULT` (leave `RELEASE_VALIDATION_CHANNELS=true`). No new tag: S4 runs
-against S3's run.
+against S3's run (`v0.160.3rc4`, run 35003302274).
 
-Prereleases are **exempt from recovery by policy** (lgtm-hq/lgtm-ci#962: a candidate is
-never completed after the fact). S4 exercises the recovery tooling on an `rc` anyway,
-deliberately, because it is the only place the live path can be run without touching a
-stable release; the exemption is a statement about when to recover, not about whether
-the tooling works. Say so in the fixture's `notes`.
+Prereleases are **exempt from recovery by policy** (lgtm-hq/lgtm-ci#962, "Which tier
+applies" in lgtm-ci's release-recovery runbook: a candidate is never completed after the
+fact). S4 exercises the recovery tooling on an `rc` deliberately. Because the exemption
+is enforced by the tooling, the expected outcome is a **refusal**: the resolve job fails
+with
+
+```text
+refusing to recover prerelease tag '<tag>': prereleases are abandoned by policy — cut a new prerelease version instead
+```
+
+No channel is resumed, and the dry-run summary is posted on the release-failure issue.
+The live path is proven only on a stable tag. Say so in the fixture's `notes`, and
+record the rule in `recovery.dry_run.policy`.
 
 1. Dry run, from the default branch:
 
    ```bash
    gh workflow run release-recover.yml --repo lgtm-hq/py-lintro --ref main \
-     -f tag=v0.160.3rc3 -f source-run-id=<S3 run id> -f dry-run=true
+     -f tag=v0.160.3rc4 -f source-run-id=35003302274 -f dry-run=true
    ```
 
-   Expected: the summary lists exactly one channel to resume, `npm`; PyPI, the GitHub
-   Release and the Docker images are reported present. Record the dry-run run id.
+   Expected: `Resolve tag, artifacts, and channels` fails with the refusal above; the
+   summary table shows resolve = failure and every resume skipped; the missing set at
+   detection is empty because detection never ran. Record the dry-run run id.
 
-2. Live run (`-f dry-run=false`, same inputs); approve the `npm` environment.
-
-   Expected: the four packages are published under `next` at `0.160.3-rc.3` from S3's
-   `npm-dist` artifact (nothing rebuilt), the issue is closed with the recovery summary,
-   and nothing else changed.
+2. No live run: the prerelease refusal makes a live dispatch pointless; the live path is
+   validated on the first stable recovery instead.
 
 ```bash
-NPM_VERSION=0.160.3-rc.3; VERSION=0.160.3rc3; TAG=v0.160.3rc3
-for p in lintro lintro-darwin-arm64 lintro-linux-arm64 lintro-linux-x64; do
-  npm view "@lgtm-hq/${p}@${NPM_VERSION}" dist.attestations dist.integrity
-done
-# Original binaries: the packaged binary's sha256 equals S3's SHA256SUMS entry
-mkdir -p /tmp/lintro-npm-s4 && cd /tmp/lintro-npm-s4 && npm init -y >/dev/null
-npm install --ignore-scripts "@lgtm-hq/lintro@${NPM_VERSION}"
-sha256sum node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro
-grep lintro-linux-x64 /path/to/S3/SHA256SUMS
-# Nothing else moved: asset and image digests equal S3's
+NPM_VERSION=0.160.3-rc.4; VERSION=0.160.3rc4; TAG=v0.160.3rc4
+# Nothing moved: npm still empty, asset and image digests equal S3's record
+npm view "@lgtm-hq/lintro@${NPM_VERSION}" version                                        # E404
 gh release download "$TAG" --repo lgtm-hq/py-lintro --pattern SHA256SUMS --output - | diff - /path/to/S3/SHA256SUMS
 docker buildx imagetools inspect "ghcr.io/lgtm-hq/py-lintro:${VERSION}" --format '{{ .Manifest.Digest }}'
-gh issue list --repo lgtm-hq/py-lintro --search "release-failure:publish-pypi-on-tag:${TAG}" --state closed
+gh issue view 2688 --repo lgtm-hq/py-lintro --comments                                     # dry-run summary comment
 ```
 
-Link S3's issue and S4's closing comment in the S4 fixture.
+Link S3's issue (#2688) and the dry-run summary comment in the S4 fixture.
 
 ## Cleanup
 
@@ -246,7 +255,7 @@ Leave the tags, the releases, the PyPI files and the image tags: all immutable b
 policy. Deprecate the validation packages on npm and put the switches back:
 
 ```bash
-for v in 0.160.3-rc.1 0.160.3-rc.3; do
+for v in 0.160.3-rc.1 0.160.3-rc.2; do
   for p in lintro lintro-darwin-arm64 lintro-linux-arm64 lintro-linux-x64; do
     npm deprecate "@lgtm-hq/${p}@${v}" \
       "Release validation build (lgtm-hq/py-lintro#2633); not for use. Install the latest stable."
@@ -260,20 +269,34 @@ gh variable delete RELEASE_VALIDATION_CHANNELS --repo lgtm-hq/py-lintro
 gh variable delete RELEASE_FAULT --repo lgtm-hq/py-lintro   # if still present
 ```
 
-Then record the four run ids (plus the S4 dry run) on #2633, commit the four fixtures
-under `tests/fixtures/release-validation/`, and check the epic's exit criteria off with
-this issue as the evidence.
+Then record the five run ids (rc1 attempt, S1, S2, S3, S4 dry run) on #2633, commit the
+four fixtures under `tests/fixtures/release-validation/`, and check the epic's exit
+criteria off with this issue as the evidence.
 
 ## Checklist
 
 - [ ] `RELEASE_VALIDATION_CHANNELS=true` set; `RELEASE_FAULT` unset.
-- [ ] S1 `v0.160.3rc1` green; every verify command above passed; wall clock recorded.
-- [ ] S2 `v0.160.3rc2` with `fail-build`: nothing on any channel; notifier behaviour
-      matched against the policy text.
-- [ ] S3 `v0.160.3rc3` with `fail-publish-npm`: PyPI, release, Docker present; npm
-      absent; issue filed with the channel table; one attempt only.
-- [ ] S4 dry run lists `npm` only; live run published S3's binaries under `next`; issue
-      closed; asset and image digests unchanged.
-- [ ] npm packages deprecated, `next` removed, variables deleted.
-- [ ] Four fixtures committed; `tests/unit/test_release_validation.py` green.
-- [ ] Run ids, the S3 issue and the S4 closing comment linked on #2633; owner sign-off.
+- [x] S1 `v0.160.3rc2` green; every verify command above passed (`cosign verify` not run
+      on the recording host); wall clock recorded (2887 s).
+- [x] S2 `v0.160.3rc3` with `fail-build`: nothing on any channel; notifier behaviour
+      matched against the policy text (#2682 filed and closed).
+- [x] S3 `v0.160.3rc4` with `fail-publish-npm`: PyPI, release, Docker present; npm
+      absent; issue filed with the channel table (#2688); one attempt only.
+- [x] S4 dry run refused by the prerelease exemption; no live run; asset and image
+      digests unchanged; issue closed by the owner citing the exemption.
+- [x] npm packages deprecated, `next` removed, variables deleted.
+- [x] Four fixtures committed; `tests/unit/test_release_validation.py` green.
+- [x] Run ids, the S3 issue and the S4 dry-run summary linked on #2633; owner sign-off.
+
+## Recorded runs
+
+The scenario series ran on 2026-09-15. These are the runs the fixtures record and what
+each proved, for #2634's exit checklist:
+
+| Run                                                                          | Tag           | Scenario          | Outcome                                                                                                                            |
+| ---------------------------------------------------------------------------- | ------------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| [34967569536](https://github.com/lgtm-hq/py-lintro/actions/runs/34967569536) | `v0.160.3rc1` | S1, first attempt | `docker-promote` blocked on the attestation-store host (#2676); auto-rerun cancelled at the npm gate; superseded (S1 `attempts[]`) |
+| [34986261473](https://github.com/lgtm-hq/py-lintro/actions/runs/34986261473) | `v0.160.3rc2` | S1                | Green end to end; every channel but Homebrew verified                                                                              |
+| [34995758541](https://github.com/lgtm-hq/py-lintro/actions/runs/34995758541) | `v0.160.3rc3` | S2                | Gate failed on the injected build fault; nothing published; #2682 filed and closed                                                 |
+| [35003302274](https://github.com/lgtm-hq/py-lintro/actions/runs/35003302274) | `v0.160.3rc4` | S3                | npm stage failed on the injected fault; PyPI, release and Docker present; #2688 filed                                              |
+| [35007214074](https://github.com/lgtm-hq/py-lintro/actions/runs/35007214074) | `v0.160.3rc4` | S4                | Recovery dry run refused by the prerelease exemption; nothing moved                                                                |

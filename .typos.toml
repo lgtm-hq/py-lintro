@@ -19,6 +19,8 @@ extend-ignore-re = [
   "\\b[A-Z]{2,}ed\\b",
   # Example ``rustc``/``clippy --version`` strings quote a real commit hash.
   "ded5c06cf2?",
+  # S1 release-validation fixture records the npm integrity prefixes verbatim.
+  "sha512-m2M7UeSj",
   # Deliberate misspellings that exist *because* they are wrong: they drive
   # unknown-key / unknown-tool error paths and a misspell-linter parser
   # fixture. The surrounding context is part of each pattern so the same word

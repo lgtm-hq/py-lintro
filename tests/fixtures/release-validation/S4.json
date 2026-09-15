@@ -1,0 +1,84 @@
+{
+  "scenario": "S4",
+  "tag": "v0.160.3rc4",
+  "version": "0.160.3rc4",
+  "npm_version": "0.160.3-rc.4",
+  "run": {
+    "id": 35003302274,
+    "url": "https://github.com/lgtm-hq/py-lintro/actions/runs/35003302274",
+    "attempt": 1,
+    "conclusion": "failure"
+  },
+  "switches": {
+    "RELEASE_VALIDATION_CHANNELS": "true",
+    "RELEASE_FAULT": ""
+  },
+  "jobs": {
+    "classify-tag": "success",
+    "sbom": "success",
+    "pypi-build": "success",
+    "release-gate": "success",
+    "pypi-upload": "success",
+    "github-release": "success",
+    "mirror-token": "skipped",
+    "mirror-release": "skipped",
+    "build-binaries": "success",
+    "homebrew-tap": "skipped",
+    "npm-publish": "failure",
+    "docker-build": "success",
+    "docker-promote": "success",
+    "notify-failure": "success"
+  },
+  "published": {
+    "pypi": {
+      "lintro-0.160.3rc4.tar.gz": "dfe3ebd25428a5e5c480a84fcdb85724788c00f6b0fb2da1bb6758a063871a11",
+      "lintro-0.160.3rc4-py3-none-any.whl": "e8301526beca7d623c933469bc1280ca5c08eb09839dcc4c7b18fe2501875394"
+    },
+    "github_release": {
+      "prerelease": true,
+      "assets": {
+        "lintro-0.160.3rc4-py3-none-any.whl": "e8301526beca7d623c933469bc1280ca5c08eb09839dcc4c7b18fe2501875394",
+        "lintro-0.160.3rc4-py3-none-any.whl.intoto.jsonl": "d0c43ef4fa3b67ec18013f518d8ba2e61c7d140787bc7ffae4d723dc3f458e37",
+        "lintro-0.160.3rc4.tar.gz": "dfe3ebd25428a5e5c480a84fcdb85724788c00f6b0fb2da1bb6758a063871a11",
+        "lintro-0.160.3rc4.tar.gz.intoto.jsonl": "d0c43ef4fa3b67ec18013f518d8ba2e61c7d140787bc7ffae4d723dc3f458e37",
+        "lintro-linux-arm64": "9113ba9c41fed89dd6cf4eed69e0c6cfcaec0e01812595b198fb71903db704b8",
+        "lintro-linux-arm64.intoto.jsonl": "6e3c29e6901935da52a26a1bfa52495c50c5192439d3528494e97e48a5b33987",
+        "lintro-linux-x64": "8b6a5f0549b086211efd26eb765e37cc6307b24189be2e9b73b1c28ff9d7aee2",
+        "lintro-linux-x64.intoto.jsonl": "974af0b3685857e3ec16687e83c92d5a461952be32ac0a923e33f7d144d24d88",
+        "lintro-macos-arm64": "ed18d3006fff91436d95186c6ad4d4ae4e07f09c3077dd9062be86eec6274361",
+        "lintro-macos-arm64.intoto.jsonl": "49df4b0b3f63eeeed0d7b4979d0a238845aeac805d459c47e50f5d1bb65aab3d",
+        "lintro.1": "162b72adfe43ead3a4c431f7fc27079d2d70617a1d82082e5af29caf4b15c52a"
+      }
+    },
+    "docker": {
+      "ghcr.io/lgtm-hq/py-lintro-base": "sha256:8201ce819eb5bbc6ab71258bc8e326be78369f5c14cf35c3404c53accdfc5054",
+      "ghcr.io/lgtm-hq/py-lintro": "sha256:78165b54994e5425b5c2d2eeebb71fad913592bbddc41920ea31ea77deae9a86",
+      "ghcr.io/lgtm-hq/py-lintro-ai": "sha256:c55cf416ab8db10981ab5073034cd6c68a3e526549cea56689de390bd8aa5519"
+    },
+    "npm": {},
+    "homebrew": null
+  },
+  "issues": {
+    "release_failure": {
+      "url": "https://github.com/lgtm-hq/py-lintro/issues/2688",
+      "state": "closed",
+      "closed_by": "TurboCoder13",
+      "closed_at": "2026-09-15T18:28:54Z"
+    },
+    "closing_comment": "https://github.com/lgtm-hq/py-lintro/issues/2688#issuecomment-5685749452"
+  },
+  "wall_clock_seconds": null,
+  "recovery": {
+    "source_run_id": 35003302274,
+    "dry_run": {
+      "id": 35007214074,
+      "url": "https://github.com/lgtm-hq/py-lintro/actions/runs/35007214074",
+      "channels": [],
+      "conclusion": "failure",
+      "refusal": "ERROR: refusing to recover prerelease tag 'v0.160.3rc4': prereleases are abandoned by policy — cut a new prerelease version instead",
+      "policy": "lgtm-ci#962 prerelease exemption (docs/release-recovery.md, Which tier applies)"
+    },
+    "live": null
+  },
+  "notes": "S4 exercised the recovery tooling on rc4 deliberately: prereleases are exempt from recovery by policy (lgtm-hq/lgtm-ci#962), and the dry run (release-recover.yml, tag v0.160.3rc4, source run 35003302274) refused as designed in 'Resolve tag, artifacts, and channels': \"ERROR: refusing to recover prerelease tag 'v0.160.3rc4': prereleases are abandoned by policy — cut a new prerelease version instead\". No channel was resumed, no live run was dispatched, PyPI/release/Docker digests are S3's unchanged, npm stays absent, and the run posted the dry-run summary on #2688 (Missing set at detection: [] because detection never ran). The owner closed #2688 on 2026-09-15T18:28:53Z citing the exemption."
+}

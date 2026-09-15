@@ -1,0 +1,122 @@
+{
+  "scenario": "S1",
+  "tag": "v0.160.3rc2",
+  "version": "0.160.3rc2",
+  "npm_version": "0.160.3-rc.2",
+  "run": {
+    "id": 34986261473,
+    "url": "https://github.com/lgtm-hq/py-lintro/actions/runs/34986261473",
+    "attempt": 1,
+    "conclusion": "success"
+  },
+  "switches": {
+    "RELEASE_VALIDATION_CHANNELS": "true",
+    "RELEASE_FAULT": ""
+  },
+  "jobs": {
+    "classify-tag": "success",
+    "sbom": "success",
+    "pypi-build": "success",
+    "release-gate": "success",
+    "pypi-upload": "success",
+    "github-release": "success",
+    "mirror-token": "skipped",
+    "mirror-release": "skipped",
+    "build-binaries": "success",
+    "homebrew-tap": "skipped",
+    "npm-publish": "success",
+    "docker-build": "success",
+    "docker-promote": "success",
+    "notify-failure": "success"
+  },
+  "published": {
+    "pypi": {
+      "lintro-0.160.3rc2.tar.gz": "9b8d924e42fe28aad7530bb77eb711f3be27165820ff629b10c28c9d6565ea0b",
+      "lintro-0.160.3rc2-py3-none-any.whl": "6a0956330beab65302485bbf91d5bbb6235470a1e01bf1476d8e8c521003ccda"
+    },
+    "github_release": {
+      "prerelease": true,
+      "assets": {
+        "lintro-0.160.3rc2-py3-none-any.whl": "6a0956330beab65302485bbf91d5bbb6235470a1e01bf1476d8e8c521003ccda",
+        "lintro-0.160.3rc2-py3-none-any.whl.intoto.jsonl": "53ed61d5b65cc7a3a3b43da7a270a2d3c78884a017543fe4be47a6c198e77c47",
+        "lintro-0.160.3rc2.tar.gz": "9b8d924e42fe28aad7530bb77eb711f3be27165820ff629b10c28c9d6565ea0b",
+        "lintro-0.160.3rc2.tar.gz.intoto.jsonl": "53ed61d5b65cc7a3a3b43da7a270a2d3c78884a017543fe4be47a6c198e77c47",
+        "lintro-linux-arm64": "01e90a38bf82a3022ae326b5896ad86bd892bab818fa44e0fdd4cdd172db3be9",
+        "lintro-linux-arm64.intoto.jsonl": "6d878074856395c46cb0d766233017a6f87937d7973d5d9232e5758d950ff5d3",
+        "lintro-linux-x64": "bc299924d3c3ed5cd983e7fc4bcf065a3e7cb5ee4bd3e53147fb31830e6f43f6",
+        "lintro-linux-x64.intoto.jsonl": "2e414e1b6f27da4b7e7c9973bc4369e3b4e8af632b498ea1377fff051a2da11c",
+        "lintro-macos-arm64": "b90c1b70665405a701de0d11b1ce3234aa047e5818ef7a2dde03899702149b5a",
+        "lintro-macos-arm64.intoto.jsonl": "7e17886dafdb4f0a63e55e5a7b4bff34430d318770660565a0ef1a25493aa74e",
+        "lintro.1": "8bfcfae1ceb00258fcc9a49a88480545a18ed71c5ba511ace1e47fa062623e13"
+      }
+    },
+    "docker": {
+      "ghcr.io/lgtm-hq/py-lintro-base": "sha256:7ec26ae59d25cba1625fd4ce677fee08dc35b9f9c642273878b9cb34a796fc86",
+      "ghcr.io/lgtm-hq/py-lintro": "sha256:c02e0dec8db7d1946a3a4a26d657b010bdb3bc44337413c89d555fa51c6fd54d",
+      "ghcr.io/lgtm-hq/py-lintro-ai": "sha256:3a7766eca0ba252857f7a978f04d8ea8aa8ecc5167252451d136f8db6d25f9a3"
+    },
+    "npm": {
+      "@lgtm-hq/lintro": {
+        "version": "0.160.3-rc.2",
+        "dist_tag": "next"
+      },
+      "@lgtm-hq/lintro-darwin-arm64": {
+        "version": "0.160.3-rc.2",
+        "dist_tag": "next",
+        "binary_sha256": "b90c1b70665405a701de0d11b1ce3234aa047e5818ef7a2dde03899702149b5a"
+      },
+      "@lgtm-hq/lintro-linux-arm64": {
+        "version": "0.160.3-rc.2",
+        "dist_tag": "next",
+        "binary_sha256": "01e90a38bf82a3022ae326b5896ad86bd892bab818fa44e0fdd4cdd172db3be9"
+      },
+      "@lgtm-hq/lintro-linux-x64": {
+        "version": "0.160.3-rc.2",
+        "dist_tag": "next",
+        "binary_sha256": "bc299924d3c3ed5cd983e7fc4bcf065a3e7cb5ee4bd3e53147fb31830e6f43f6"
+      }
+    },
+    "homebrew": null
+  },
+  "issues": {
+    "release_failure": null,
+    "closing_comment": null
+  },
+  "wall_clock_seconds": 2887,
+  "verification": {
+    "curl -fsS https://pypi.org/pypi/lintro/0.160.3rc2/json | jq -r '.urls[] | \"\\(.digests.sha256)  \\(.filename)\"'": "6a0956330beab65302485bbf91d5bbb6235470a1e01bf1476d8e8c521003ccda  lintro-0.160.3rc2-py3-none-any.whl\n9b8d924e42fe28aad7530bb77eb711f3be27165820ff629b10c28c9d6565ea0b  lintro-0.160.3rc2.tar.gz",
+    "gh release view v0.160.3rc2 --repo lgtm-hq/py-lintro --json isPrerelease,assets --jq '{prerelease: .isPrerelease, assets: [.assets[].name]}'": "{\"prerelease\": true, \"assets\": [\"lintro-0.160.3rc2-py3-none-any.whl\", \"lintro-0.160.3rc2-py3-none-any.whl.intoto.jsonl\", \"lintro-0.160.3rc2.tar.gz\", \"lintro-0.160.3rc2.tar.gz.intoto.jsonl\", \"lintro-linux-arm64\", \"lintro-linux-arm64.intoto.jsonl\", \"lintro-linux-x64\", \"lintro-linux-x64.intoto.jsonl\", \"lintro-macos-arm64\", \"lintro-macos-arm64.intoto.jsonl\", \"lintro.1\", \"SHA256SUMS\"]}",
+    "sha256sum -c SHA256SUMS": "lintro-0.160.3rc2-py3-none-any.whl: OK\nlintro-0.160.3rc2-py3-none-any.whl.intoto.jsonl: OK\nlintro-0.160.3rc2.tar.gz: OK\nlintro-0.160.3rc2.tar.gz.intoto.jsonl: OK\nlintro-linux-arm64: OK\nlintro-linux-arm64.intoto.jsonl: OK\nlintro-linux-x64: OK\nlintro-linux-x64.intoto.jsonl: OK\nlintro-macos-arm64: OK\nlintro-macos-arm64.intoto.jsonl: OK\nlintro.1: OK",
+    "gh attestation verify lintro-0.160.3rc2.tar.gz --repo lgtm-hq/py-lintro --signer-workflow lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml": "exit 0; 1 attestation verified; signer https://github.com/lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@2145a9aa0b1c82939be0506763442df6ea36884d; predicateType https://slsa.dev/provenance/v1",
+    "gh attestation verify lintro-0.160.3rc2-py3-none-any.whl --repo lgtm-hq/py-lintro --signer-workflow lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml": "exit 0; 1 attestation verified; signer https://github.com/lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@2145a9aa0b1c82939be0506763442df6ea36884d; predicateType https://slsa.dev/provenance/v1",
+    "for bin in lintro-macos-arm64 lintro-linux-arm64 lintro-linux-x64; do gh attestation verify \"$bin\" --repo lgtm-hq/py-lintro --signer-workflow lgtm-hq/py-lintro/.github/workflows/build-binaries.yml; gh attestation verify \"$bin\" --repo lgtm-hq/py-lintro --bundle \"${bin}.intoto.jsonl\"; done": "exit 0 for all six calls; each: 1 attestation verified; signer https://github.com/lgtm-hq/py-lintro/.github/workflows/build-binaries.yml@refs/tags/v0.160.3rc2; predicateType https://slsa.dev/provenance/v1; subject equals the binary name",
+    "for image in py-lintro-base py-lintro py-lintro-ai; do docker buildx imagetools inspect \"ghcr.io/lgtm-hq/${image}:0.160.3rc2\" --format '{{ .Manifest.Digest }}'; done": "py-lintro-base sha256:7ec26ae59d25cba1625fd4ce677fee08dc35b9f9c642273878b9cb34a796fc86\npy-lintro sha256:c02e0dec8db7d1946a3a4a26d657b010bdb3bc44337413c89d555fa51c6fd54d\npy-lintro-ai sha256:3a7766eca0ba252857f7a978f04d8ea8aa8ecc5167252451d136f8db6d25f9a3",
+    "for image in py-lintro-base py-lintro py-lintro-ai; do gh attestation verify \"oci://ghcr.io/lgtm-hq/${image}@${DIGEST}\" --repo lgtm-hq/py-lintro --signer-repo lgtm-hq/lgtm-ci; done": "exit 0 for all three digests; sigstore bundle v0.3 attestation verified for each",
+    "for image in py-lintro-base py-lintro py-lintro-ai; do docker buildx imagetools inspect \"ghcr.io/lgtm-hq/${image}@${DIGEST}\" --format '{{ json .Provenance }}' | jq -e '. != null'; docker buildx imagetools inspect \"ghcr.io/lgtm-hq/${image}@${DIGEST}\" --format '{{ json .SBOM }}' | jq -e '. != null'; done": "true\ntrue\ntrue\ntrue\ntrue\ntrue",
+    "docker buildx imagetools inspect ghcr.io/lgtm-hq/py-lintro:latest --format '{{ .Manifest.Digest }}'": "sha256:6211b42ab3d8e3c7ed19e82cc8cbf5d58aa58cba84bab07bbf2e2a37364314fe (previous stable 0.160.2; not the candidate)",
+    "for p in lintro lintro-darwin-arm64 lintro-linux-arm64 lintro-linux-x64; do npm view \"@lgtm-hq/${p}@0.160.3-rc.2\" dist.attestations dist.integrity; done": "every package: dist.attestations.provenance.predicateType = https://slsa.dev/provenance/v1 (registry attestations URL present); dist.integrity: lintro sha512-xGT6xmZY...; lintro-darwin-arm64 sha512-4xfEGshH...; lintro-linux-arm64 sha512-neNkwzkZ...; lintro-linux-x64 sha512-m2M7UeSj...",
+    "for p in lintro lintro-darwin-arm64 lintro-linux-arm64 lintro-linux-x64; do npm dist-tag ls \"@lgtm-hq/${p}\"; done": "every package: latest: 0.160.2, next: 0.160.3-rc.2",
+    "npm install --ignore-scripts @lgtm-hq/lintro@0.160.3-rc.2 && npm audit signatures": "4 packages have verified registry signatures\n4 packages have verified attestations",
+    "./node_modules/.bin/lintro --version": "lintro, version 0.160.3rc2",
+    "sha256sum node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro": "bc299924d3c3ed5cd983e7fc4bcf065a3e7cb5ee4bd3e53147fb31830e6f43f6  node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro (equals the release SHA256SUMS entry)",
+    "gh attestation verify node_modules/@lgtm-hq/lintro-linux-x64/bin/lintro --repo lgtm-hq/py-lintro --signer-workflow lgtm-hq/py-lintro/.github/workflows/build-binaries.yml": "exit 0; 1 attestation verified; signer https://github.com/lgtm-hq/py-lintro/.github/workflows/build-binaries.yml@refs/tags/v0.160.3rc2",
+    "gh pr list --repo lgtm-hq/homebrew-tap --search 0.160.3rc2 --state all": "(no pull requests; no prerelease lane)",
+    "for image in py-lintro-base py-lintro py-lintro-ai; do cosign verify --new-bundle-format \"ghcr.io/lgtm-hq/${image}@${DIGEST}\" --certificate-identity-regexp '^https://github\\.com/lgtm-hq/(py-lintro/\\.github/workflows/(docker-ci|publish-pypi-on-tag)\\.yml|lgtm-ci/\\.github/workflows/reusable-docker-(build|multiplatform)\\.yml)@' --certificate-oidc-issuer https://token.actions.githubusercontent.com; done": "not run on the recording host (cosign not installed)"
+  },
+  "recovery": null,
+  "notes": "S1 green on v0.160.3rc2 (tag 2026-09-15T15:07:03Z, last job 15:55:10Z). The first S1 candidate v0.160.3rc1 (run 34967569536) is not a scenario record: docker-promote failed on a missing attestation-store egress host (fixed in #2676), its automatic re-run reached the npm approval gate before lgtm-ci 0.74.2's publish protection landed and was cancelled, and its notifier filed #2677 (closed). S1 was re-cut as rc2 after #2676, #2678 and lgtm-ci 0.74.2 (npm propagation wait). Every runbook verify command passed; cosign is not installed on the recording host, so the cosign line of the runbook is covered by gh attestation verify on the same digests.",
+  "attempts": [
+    {
+      "run_id": 34967569536,
+      "attempt": 1,
+      "conclusion": "failure",
+      "note": "First S1 candidate v0.160.3rc1: docker-promote failed on a missing attestation-store egress host (#2676)."
+    },
+    {
+      "run_id": 34967569536,
+      "attempt": 2,
+      "conclusion": "cancelled",
+      "note": "Automatic re-run of the failed jobs by the pre-0.74.2 auto-rerun; it reached the npm approval gate and was cancelled (lgtm-ci#1003 now protects publish runs). rc1 was superseded by rc2."
+    }
+  ]
+}

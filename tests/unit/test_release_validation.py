@@ -1,8 +1,8 @@
 """Scenario invariants over the recorded release validation runs (#2633).
 
 ``docs/release-validation.md`` drives four ``rc`` tags through the tag pipeline:
-S1 green, S2 forced build failure, S3 forced npm publish failure, S4 recovery of
-S3. Each run is recorded as one JSON fixture under
+S1 green, S2 forced build failure, S3 forced npm publish failure, S4 the recovery
+dry run against S3, refused by the prerelease exemption. Each run is recorded as one JSON fixture under
 ``tests/fixtures/release-validation/`` (schema in that directory's README). This
 module asserts the runbook's invariants over whatever fixtures exist, so a
 future pipeline change that alters the shape breaks a test here rather than a
@@ -45,10 +45,20 @@ _REQUIRED_KEYS = {
     "recovery",
     "notes",
 }
-_OPTIONAL_KEYS = {"verification"}
+_OPTIONAL_KEYS = {"verification", "attempts"}
 _RUN_KEYS = {"id", "url", "attempt", "conclusion"}
+_ATTEMPT_KEYS = {"run_id", "attempt", "conclusion", "note"}
 _PUBLISHED_KEYS = {"pypi", "github_release", "docker", "npm", "homebrew"}
 _ISSUE_KEYS = {"release_failure", "closing_comment"}
+_RELEASE_FAILURE_KEYS = {"url", "state"}
+_RELEASE_FAILURE_OPTIONAL_KEYS = {"closed_by", "closed_at"}
+_RECOVERY_KEYS = {"source_run_id", "dry_run", "live"}
+_DRY_RUN_KEYS = {"id", "url", "conclusion", "channels"}
+_DRY_RUN_REFUSAL_KEYS = {"refusal", "policy"}
+#: The rule S4 records when the recovery refuses a prerelease (lgtm-ci#962).
+_PRERELEASE_EXEMPTION = (
+    "lgtm-ci#962 prerelease exemption (docs/release-recovery.md, Which tier applies)"
+)
 
 _RELEASE_IMAGES = (
     "ghcr.io/lgtm-hq/py-lintro-base",
@@ -228,8 +238,16 @@ def test_fixture_follows_the_schema(scenario: str) -> None:
     assert_that(set(fixture["issues"])).is_equal_to(_ISSUE_KEYS)
     issue = fixture["issues"]["release_failure"]
     if issue is not None:
-        assert_that(set(issue)).is_equal_to({"url", "state"})
+        assert_that(set(issue) - _RELEASE_FAILURE_OPTIONAL_KEYS).is_equal_to(
+            _RELEASE_FAILURE_KEYS,
+        )
         assert_that(issue["state"]).is_in("open", "closed")
+    for attempt in fixture.get("attempts", []):
+        assert_that(set(attempt)).is_equal_to(_ATTEMPT_KEYS)
+        assert_that(attempt["run_id"]).is_instance_of(int)
+        assert_that(attempt["attempt"]).is_instance_of(int)
+        assert_that(attempt["conclusion"]).is_in(*_CONCLUSIONS)
+        assert_that(attempt["note"].strip()).is_not_empty()
     assert_that(fixture["notes"]).is_instance_of(str)
 
 
@@ -354,20 +372,28 @@ def test_s3_publish_failure_files_the_issue_and_leaves_npm_empty() -> None:
 # --- S4 recovery -------------------------------------------------------------
 
 
-def test_s4_recovery_resumes_only_npm_with_the_original_binaries() -> None:
-    """S4: dry run lists npm alone; live run ships S3's bytes; nothing else moves."""
+def test_s4_recovery_is_refused_for_a_prerelease_and_changes_nothing() -> None:
+    """S4: the dry run applies the prerelease exemption; nothing moves after S3."""
     s3 = _fixture("S3")
     s4 = _fixture("S4")
     assert_that(s4["tag"]).is_equal_to(s3["tag"])
     recovery = s4["recovery"]
     assert_that(recovery).is_not_none()
     assert recovery is not None
-    assert_that(set(recovery)).is_equal_to({"source_run_id", "dry_run", "live"})
+    assert_that(set(recovery)).is_equal_to(_RECOVERY_KEYS)
     assert_that(recovery["source_run_id"]).is_equal_to(s3["run"]["id"])
-    assert_that(recovery["dry_run"]["channels"]).is_equal_to(["npm"])
-    assert_that(recovery["live"]["conclusion"]).is_equal_to("success")
-    assert_that(recovery["dry_run"]["id"]).is_not_equal_to(recovery["live"]["id"])
-    # The record of the ORIGINAL run is unchanged by the recovery.
+    dry_run = recovery["dry_run"]
+    assert_that(set(dry_run)).is_equal_to(_DRY_RUN_KEYS | _DRY_RUN_REFUSAL_KEYS)
+    assert_that(dry_run["url"]).ends_with(f"/actions/runs/{dry_run['id']}")
+    assert_that(dry_run["id"]).is_not_equal_to(s3["run"]["id"])
+    # The rule is the assertion; the message is how the tooling voiced it.
+    assert_that(dry_run["policy"]).is_equal_to(_PRERELEASE_EXEMPTION)
+    assert_that(dry_run["conclusion"]).is_equal_to("failure")
+    assert_that(dry_run["channels"]).is_equal_to([])
+    assert_that(dry_run["refusal"]).contains("refusing to recover prerelease tag")
+    assert_that(dry_run["refusal"]).contains("prereleases are abandoned by policy")
+    assert_that(recovery["live"]).is_none()
+    # The record of the ORIGINAL run is unchanged by the refused recovery.
     assert_that(s4["run"]).is_equal_to(s3["run"])
     assert_that(s4["jobs"]).is_equal_to(s3["jobs"])
     published = s4["published"]
@@ -376,16 +402,14 @@ def test_s4_recovery_resumes_only_npm_with_the_original_binaries() -> None:
         s3["published"]["github_release"],
     )
     assert_that(published["docker"]).is_equal_to(s3["published"]["docker"])
-    _assert_npm_present(
-        published,
-        npm_version=s3["npm_version"],
-        assets=s3["published"]["github_release"]["assets"],
-    )
+    assert_that(_is_empty(published["npm"])).is_true()
     issue = s4["issues"]["release_failure"]
     assert_that(issue).is_not_none()
     assert issue is not None
     assert_that(issue["url"]).is_equal_to(s3["issues"]["release_failure"]["url"])
     assert_that(issue["state"]).is_equal_to("closed")
+    assert_that(issue["closed_by"].strip()).is_not_empty()
+    assert_that(issue["closed_at"]).matches(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
     assert_that(s4["issues"]["closing_comment"]).is_not_none()
     assert_that(str(s4["issues"]["closing_comment"])).starts_with(issue["url"])
     # The runbook's caveat travels with the evidence.
