@@ -455,8 +455,9 @@ reports every finding it has, on every transport. What can still reduce a run's 
 depth is recorded and surfaced rather than left silent. Under `--transport cli`, a chunk
 whose answer exhausts the provider's output-token ceiling is **split by file into two
 halves** that are each reviewed once (a single-file chunk is retried once unchanged);
-every file is still reviewed, but the model never saw that chunk in one view, so
-findings that need the whole chunk in view may go unreported.
+unless one half fails (`split_half_failed` below), every file is still reviewed, but the
+model never saw that chunk in one view, so findings that need the whole chunk in view
+may go unreported.
 
 - `ReviewMetadata.coverage_degradations` holds one `CoverageDegradation` per limit
   event, each with a `reason` (`output_exhaustion_retried`, `split_half_failed` when one
