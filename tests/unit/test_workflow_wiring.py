@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import io
 import json
 import os
 import re
@@ -11,6 +12,7 @@ import shlex
 import subprocess  # nosec B404 - subprocess runs fixed git argv against this repo
 import sys
 import tempfile
+import tokenize
 from collections import Counter
 from copy import deepcopy
 from pathlib import Path
@@ -2503,28 +2505,60 @@ _ATTESTATION_VERIFY_HOSTS = frozenset(
 )
 
 
-def _code_lines(text: str) -> str:
-    """Return ``text`` without full-line ``#`` comments.
+def _code_lines(text: str, *, python: bool = False) -> str:
+    """Return ``text`` with comments and, for Python, string literals removed.
 
     Args:
-        text: Shell or YAML ``run:`` source.
+        text: Shell or YAML ``run:`` source, or a Python module.
+        python: Tokenize as Python and drop string and comment tokens, so a
+            docstring or help text quoting the verifier does not count.
 
     Returns:
-        The source with comment-only lines dropped, so a mention of the
-        verifier in a comment does not count as an invocation.
+        The executable part of the source.
     """
-    return "\n".join(
-        line for line in text.splitlines() if not line.lstrip().startswith("#")
-    )
+    if python:
+        try:
+            tokens = tokenize.generate_tokens(io.StringIO(text).readline)
+            return " ".join(
+                token.string
+                for token in tokens
+                if token.type not in {tokenize.STRING, tokenize.COMMENT}
+            )
+        except (tokenize.TokenError, SyntaxError):
+            return ""
+    kept: list[str] = []
+    heredoc_end: str | None = None
+    for line in text.splitlines():
+        if heredoc_end is not None:
+            # Inside a heredoc (usage text, templates): data, not code.
+            if line.strip() == heredoc_end:
+                heredoc_end = None
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        kept.append(line)
+        opener = _HEREDOC_OPENER.search(line)
+        if opener is not None:
+            heredoc_end = opener.group("tag")
+    return "\n".join(kept)
+
+
+_HEREDOC_OPENER = re.compile(r"""<<-?\s*['"]?(?P<tag>[A-Za-z_][A-Za-z0-9_]*)['"]?""")
+
+
+# ``gh attestation verify`` as a command: the ``gh`` binary or a variable
+# holding it (``"$gh_cmd" attestation verify``), not prose quoting it.
+_VERIFIER_CALL = re.compile(r'(?:\bgh|gh_cmd"?\}?)\s+attestation\s+verify\b')
 
 
 def _attestation_verifying_scripts() -> set[str]:
     """Return the repo-relative paths of every script running the verifier.
 
-    Any shell or Python script under ``scripts/`` whose code (comments
-    stripped) invokes ``gh attestation verify`` counts, and so does any
-    script that runs one of those scripts by path, transitively, so a
-    wrapper cannot hide the call. Documentation files are not consulted.
+    Any shell or Python script under ``scripts/`` whose code (comments and,
+    for Python, string literals stripped) runs ``gh attestation verify``
+    counts, and so does any script that invokes one of those scripts,
+    transitively, so a wrapper cannot hide the call. Documentation files are
+    not consulted.
 
     Returns:
         Repo-relative paths (``scripts/...``).
@@ -2533,11 +2567,12 @@ def _attestation_verifying_scripts() -> set[str]:
     sources = {
         str(path.relative_to(_REPO_ROOT)): _code_lines(
             path.read_text(encoding="utf-8"),
+            python=path.suffix == ".py",
         )
         for path in scripts_dir.rglob("*")
         if path.is_file() and path.suffix in {".sh", ".bash", ".py"}
     }
-    verifying = {name for name, code in sources.items() if "attestation verify" in code}
+    verifying = {name for name, code in sources.items() if _VERIFIER_CALL.search(code)}
     while True:
         wrappers = {
             name
@@ -2551,16 +2586,38 @@ def _attestation_verifying_scripts() -> set[str]:
 
 
 def _invokes(*, code: str, script: str) -> bool:
-    """Return whether ``code`` runs ``script`` by repo path or by ``/name``.
+    """Return whether ``code`` invokes ``script`` as a command or argument.
+
+    Matches the script by its repo-relative path or by its basename as a
+    whole path token (``bash verify_artifacts.sh``, ``./x/verify_artifacts.sh``,
+    ``"$ROOT/scripts/ci/x.sh"``), but not a same-named file in another
+    directory tree and not a bare mention inside a longer word.
 
     Args:
         code: Script or ``run:`` source with comments stripped.
         script: Repo-relative script path.
 
     Returns:
-        ``True`` when the full path or a ``/<basename>`` path segment occurs.
+        ``True`` when the script is invoked.
     """
-    return script in code or f"/{Path(script).name}" in code
+    name = Path(script).name
+    parent = Path(script).parent.name
+    pattern = re.compile(
+        r"""(?:^|[\s"'=(])(?P<path>(?:[A-Za-z0-9_.${}-]+/)*"""
+        + re.escape(name)
+        + r""")(?=$|[\s"')])""",
+        re.MULTILINE,
+    )
+    for match in pattern.finditer(code):
+        path = match.group("path")
+        if path == script or path.endswith(f"/{script}"):
+            return True
+        parts = path.split("/")
+        if len(parts) == 1:
+            return True
+        if parts[-2] == parent and all(part in {".", ".."} for part in parts[:-2]):
+            return True
+    return False
 
 
 def _attestation_verifying_jobs() -> list[tuple[str, str, set[str] | None]]:
