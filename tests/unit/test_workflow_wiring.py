@@ -2493,6 +2493,106 @@ def test_every_attesting_job_allows_the_sigstore_hosts() -> None:
     ).is_empty()
 
 
+_ATTESTATION_STORE_HOST = "*.blob.core.windows.net:443"
+_ATTESTATION_VERIFY_HOSTS = frozenset(
+    {
+        "api.github.com:443",
+        "tuf-repo-cdn.sigstore.dev:443",
+        _ATTESTATION_STORE_HOST,
+    },
+)
+
+
+def _attestation_verifying_scripts() -> set[str]:
+    """Return the repo-relative paths of every script running the verifier.
+
+    Returns:
+        Paths (``scripts/...``) of shell scripts that invoke
+        ``gh attestation verify``.
+    """
+    scripts_dir = _REPO_ROOT / "scripts"
+    return {
+        str(path.relative_to(_REPO_ROOT))
+        for path in scripts_dir.rglob("*.sh")
+        if "attestation verify" in path.read_text(encoding="utf-8")
+    }
+
+
+def _attestation_verifying_jobs() -> list[tuple[str, str, set[str] | None]]:
+    """Collect every job that runs ``gh attestation verify`` and its allowlist.
+
+    A job verifies when one of its ``run:`` steps invokes the verifier
+    directly or runs a repo script that does. Only jobs with their own
+    harden-runner step are collected; reusable callers are covered by the
+    reusable's own default allowlist unless they pass a replace-mode list.
+
+    Returns:
+        Tuples of (workflow file, job name, literal allowlist or None).
+    """
+    scripts = _attestation_verifying_scripts()
+    found: list[tuple[str, str, set[str] | None]] = []
+    for path in _workflow_paths():
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for job_name, job in (workflow.get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            runs = [str(step.get("run", "")) for step in steps]
+            verifies = any(
+                "attestation verify" in run or any(script in run for script in scripts)
+                for run in runs
+            )
+            if not verifies:
+                continue
+            harden = [
+                step
+                for step in steps
+                if str(step.get("uses", "")).startswith("step-security/harden-runner@")
+            ]
+            assert_that(harden).described_as(
+                f"{path.name}:{job_name} verifies attestations but has no "
+                "harden-runner step",
+            ).is_length(1)
+            found.append(
+                (
+                    path.name,
+                    job_name,
+                    _endpoint_set(
+                        (harden[0].get("with") or {}).get("allowed-endpoints"),
+                    ),
+                ),
+            )
+    return found
+
+
+def test_every_attestation_verifying_job_allows_the_attestation_store() -> None:
+    """Every job running ``gh attestation verify`` must reach the bundle store.
+
+    ``gh attestation verify`` reads the attestations API, then downloads the
+    Sigstore bundle from GitHub's attestation store on Azure blob storage and
+    checks it against the TUF root. The S1 checkpoint v0.160.3rc1 died in
+    docker-promote's "Verify attestations on the staging digests" step
+    because that job's allowlist had no ``*.blob.core.windows.net:443``
+    while release-gate's did (#2633). A missing allowlist counts as empty.
+    """
+    jobs = _attestation_verifying_jobs()
+    names = {(workflow, job) for workflow, job, _ in jobs}
+    assert_that(names).contains(
+        ("publish-pypi-on-tag.yml", "release-gate"),
+        ("publish-pypi-on-tag.yml", "docker-promote"),
+        ("publish-npm.yml", "stage"),
+    )
+
+    offenders: list[str] = []
+    for workflow, job, endpoints in jobs:
+        if endpoints is None:
+            continue
+        missing = sorted(_ATTESTATION_VERIFY_HOSTS - endpoints)
+        if missing:
+            offenders.append(f"{workflow}:{job} missing {missing}")
+    assert_that(offenders).described_as(
+        "attestation-verifying jobs whose allowlist blocks the verifier",
+    ).is_empty()
+
+
 def test_all_lgtm_ci_refs_use_the_canonical_pin() -> None:
     """Every lgtm-ci ref in workflows must match the single canonical pin.
 
