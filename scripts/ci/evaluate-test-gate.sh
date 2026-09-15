@@ -18,23 +18,27 @@ Fails when any upstream job reports "failure" or "cancelled"; treats
 "skipped" (draft PRs, pipeline-skip) as acceptable.
 
 Usage:
-  COMPAT_RESULT=success COVERAGE_RESULT=success scripts/ci/evaluate-test-gate.sh
+  COMPAT_RESULT=success COVERAGE_RESULT=success SHELL_RESULT=success \
+    scripts/ci/evaluate-test-gate.sh
 
 Required environment variables:
   COMPAT_RESULT   needs.test-compat.result
   COVERAGE_RESULT needs.test-coverage.result
+  SHELL_RESULT    needs.test-shell.result
 EOF
 	exit 0
 fi
 
 : "${COMPAT_RESULT:?}"
 : "${COVERAGE_RESULT:?}"
+: "${SHELL_RESULT:?}"
 
-echo "test-compat:  ${COMPAT_RESULT}"
+echo "test-compat:   ${COMPAT_RESULT}"
 echo "test-coverage: ${COVERAGE_RESULT}"
+echo "test-shell:    ${SHELL_RESULT}"
 
 failed=()
-for job in "test-compat:${COMPAT_RESULT}" "test-coverage:${COVERAGE_RESULT}"; do
+for job in "test-compat:${COMPAT_RESULT}" "test-coverage:${COVERAGE_RESULT}" "test-shell:${SHELL_RESULT}"; do
 	name="${job%%:*}"
 	result="${job##*:}"
 	if [[ "${result}" == "failure" || "${result}" == "cancelled" ]]; then
