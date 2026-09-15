@@ -2503,28 +2503,74 @@ _ATTESTATION_VERIFY_HOSTS = frozenset(
 )
 
 
+def _code_lines(text: str) -> str:
+    """Return ``text`` without full-line ``#`` comments.
+
+    Args:
+        text: Shell or YAML ``run:`` source.
+
+    Returns:
+        The source with comment-only lines dropped, so a mention of the
+        verifier in a comment does not count as an invocation.
+    """
+    return "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+
+
 def _attestation_verifying_scripts() -> set[str]:
     """Return the repo-relative paths of every script running the verifier.
 
+    Any shell or Python script under ``scripts/`` whose code (comments
+    stripped) invokes ``gh attestation verify`` counts, and so does any
+    script that runs one of those scripts by path, transitively, so a
+    wrapper cannot hide the call. Documentation files are not consulted.
+
     Returns:
-        Paths (``scripts/...``) of shell scripts that invoke
-        ``gh attestation verify``.
+        Repo-relative paths (``scripts/...``).
     """
     scripts_dir = _REPO_ROOT / "scripts"
-    return {
-        str(path.relative_to(_REPO_ROOT))
-        for path in scripts_dir.rglob("*.sh")
-        if "attestation verify" in path.read_text(encoding="utf-8")
+    sources = {
+        str(path.relative_to(_REPO_ROOT)): _code_lines(
+            path.read_text(encoding="utf-8"),
+        )
+        for path in scripts_dir.rglob("*")
+        if path.is_file() and path.suffix in {".sh", ".bash", ".py"}
     }
+    verifying = {name for name, code in sources.items() if "attestation verify" in code}
+    while True:
+        wrappers = {
+            name
+            for name, code in sources.items()
+            if name not in verifying
+            and any(_invokes(code=code, script=script) for script in verifying)
+        }
+        if not wrappers:
+            return verifying
+        verifying |= wrappers
+
+
+def _invokes(*, code: str, script: str) -> bool:
+    """Return whether ``code`` runs ``script`` by repo path or by ``/name``.
+
+    Args:
+        code: Script or ``run:`` source with comments stripped.
+        script: Repo-relative script path.
+
+    Returns:
+        ``True`` when the full path or a ``/<basename>`` path segment occurs.
+    """
+    return script in code or f"/{Path(script).name}" in code
 
 
 def _attestation_verifying_jobs() -> list[tuple[str, str, set[str] | None]]:
     """Collect every job that runs ``gh attestation verify`` and its allowlist.
 
-    A job verifies when one of its ``run:`` steps invokes the verifier
-    directly or runs a repo script that does. Only jobs with their own
-    harden-runner step are collected; reusable callers are covered by the
-    reusable's own default allowlist unless they pass a replace-mode list.
+    A job verifies when the code of one of its ``run:`` steps (comments
+    stripped) invokes the verifier directly or runs a repo script that does.
+    Only jobs with their own harden-runner step are collected; reusable
+    callers are covered by the reusable's own default allowlist unless they
+    pass a replace-mode list.
 
     Returns:
         Tuples of (workflow file, job name, literal allowlist or None).
@@ -2535,9 +2581,10 @@ def _attestation_verifying_jobs() -> list[tuple[str, str, set[str] | None]]:
         workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
         for job_name, job in (workflow.get("jobs") or {}).items():
             steps = job.get("steps") or []
-            runs = [str(step.get("run", "")) for step in steps]
+            runs = [_code_lines(str(step.get("run", ""))) for step in steps]
             verifies = any(
-                "attestation verify" in run or any(script in run for script in scripts)
+                "attestation verify" in run
+                or any(_invokes(code=run, script=script) for script in scripts)
                 for run in runs
             )
             if not verifies:
@@ -2571,7 +2618,10 @@ def test_every_attestation_verifying_job_allows_the_attestation_store() -> None:
     checks it against the TUF root. The S1 checkpoint v0.160.3rc1 died in
     docker-promote's "Verify attestations on the staging digests" step
     because that job's allowlist had no ``*.blob.core.windows.net:443``
-    while release-gate's did (#2633). A missing allowlist counts as empty.
+    while release-gate's did (#2633). A missing allowlist counts as empty,
+    and an expression-valued allowlist fails closed: none of these jobs uses
+    one today, and a future resolver job must extend this test to check the
+    resolved list rather than be skipped.
     """
     jobs = _attestation_verifying_jobs()
     names = {(workflow, job) for workflow, job, _ in jobs}
@@ -2584,6 +2634,7 @@ def test_every_attestation_verifying_job_allows_the_attestation_store() -> None:
     offenders: list[str] = []
     for workflow, job, endpoints in jobs:
         if endpoints is None:
+            offenders.append(f"{workflow}:{job} uses an expression allowlist")
             continue
         missing = sorted(_ATTESTATION_VERIFY_HOSTS - endpoints)
         if missing:
