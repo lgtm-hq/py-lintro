@@ -40,9 +40,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Removed
 
-- **ai/review**: the per-call findings cap (`ai.cli_max_findings_per_call`,
-  `findings_cap_applied`, the `findings_cap` degradation field); an oversized chunk
-  answer splits the chunk by file and reviews each half instead (#2680)
+- **ai/review**: the enforced per-call findings cap (`findings_cap_applied`, the
+  `findings_cap` degradation field, the tighter-cap retry); the
+  `ai.cli_max_findings_per_call` key itself stays a deprecated no-op (see Deprecated).
+  An oversized chunk answer splits the chunk by file and reviews each half instead
+  (#2680)
 
 ### Fixed
 

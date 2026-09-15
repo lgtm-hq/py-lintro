@@ -274,6 +274,8 @@ SYNTHESIS_CLI_SCHEMA: dict[str, object] = {
                 "required": ["keep", "drop"],
                 "additionalProperties": False,
                 "properties": {
+                    # Digest finding ids (``F3``); a ``file:line`` is accepted
+                    # by the parser only when it names exactly one finding.
                     "keep": {"type": "string"},
                     "drop": {"type": "array", "items": {"type": "string"}},
                 },

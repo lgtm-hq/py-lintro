@@ -14,8 +14,8 @@ All {changed_file_count} changed files in this PR:
 {changed_files}
 </{boundary}>
 
-What each piece reviewed, and every finding it reported (severity, file:line,
-title):
+What each piece reviewed, and every finding it reported (id, severity,
+file:line, title):
 <{boundary}>
 {chunk_summaries}
 </{boundary}>
@@ -54,7 +54,8 @@ Hard rules:
    given.
 5. Report at most {max_findings} cross-file findings. Fewer is normal. An
    empty list is the correct answer when the pieces are consistent.
-6. `duplicates` references use the exact `file:line` strings listed above.
+6. `duplicates` references use the finding ids printed above (`F1`, `F2`, ...),
+   never `file:line`.
 
 Every finding must name the file and line of the SIDE THAT IS WRONG, and its
 `description` must name the other file it contradicts.
@@ -67,7 +68,7 @@ Output JSON only, no prose, no code fence:
 "verdict_reasoning": {{"deciding_factor": "One short paragraph — the single issue that decides mergeability, or why nothing blocks the merge",
 "failure_mechanism": "One short paragraph — how that issue fails in production; empty string when nothing blocks",
 "files_needing_attention": ["path/to/file"]}},
-"duplicates": [{{"keep": "path/to/file.py:12", "drop": ["path/to/other.py:40"]}}],
+"duplicates": [{{"keep": "F3", "drop": ["F7"]}}],
 "findings": [{{"severity": "P1|P2|P3",
 "category": "logic-bug|silent-failure|integration|test-gap|contract-drift|security|breaking-change|code-smell",
 "file": "path/to/file.py", "line": 12, "title": "one line",

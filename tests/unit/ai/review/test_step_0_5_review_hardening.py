@@ -714,6 +714,101 @@ def test_a_complete_review_at_the_hash_clears_every_sibling() -> None:
     assert_that(carried_truncated_paths(plan=later, prior=prior)).is_empty()
 
 
+def test_a_files_own_complete_record_beats_a_stale_sibling_marker() -> None:
+    """A file's own newer complete record beats an older sibling marker."""
+    twin = _twin_context()
+    plan = plan_resume(context=twin, prior=None)
+    shared_hash = plan.hashes["pkg/api.py"]
+    prior = ReviewState(
+        coverage=(
+            # Round 1: pkg/api.py reviewed only in part at the shared hash.
+            CoverageRecord(
+                path="pkg/api.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r1",
+                round=1,
+                truncated=True,
+            ),
+            # Round 2: a sibling at the same hash, also cut, and never redone.
+            CoverageRecord(
+                path="pkg/api_copy.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r2",
+                round=2,
+                truncated=True,
+            ),
+            # Round 3: pkg/api.py re-reviewed whole at the same hash.
+            CoverageRecord(
+                path="pkg/api.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r3",
+                round=3,
+            ),
+        ),
+    )
+    later = plan_resume(context=twin, prior=prior)
+    carried = carried_truncated_paths(plan=later, prior=prior)
+    # The file's own latest record is authoritative for the file itself ...
+    assert_that(carried).does_not_contain("pkg/api.py")
+    # ... and the sibling's identical content was completely reviewed in a
+    # later round than its own cut record, so it is clear as well.
+    assert_that(carried).is_empty()
+
+    # A cut record newer than the file's own complete one wins again: the
+    # ceiling may have shrunk, so the gap is reported rather than hidden.
+    stale_after = ReviewState(
+        coverage=(
+            *prior.coverage,
+            CoverageRecord(
+                path="pkg/api_copy.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r4",
+                round=4,
+                truncated=True,
+            ),
+        ),
+    )
+    later = plan_resume(context=twin, prior=stale_after)
+    assert_that(carried_truncated_paths(plan=later, prior=stale_after)).is_equal_to(
+        ("pkg/api.py", "pkg/api_copy.py"),
+    )
+
+
+def test_a_sibling_without_its_own_record_falls_back_to_the_hash() -> None:
+    """A path with no record at its hash inherits the newest sibling verdict."""
+    twin = _twin_context()
+    plan = plan_resume(context=twin, prior=None)
+    shared_hash = plan.hashes["pkg/api.py"]
+    marked = ReviewState(
+        coverage=(
+            CoverageRecord(
+                path="pkg/api.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r1",
+                round=1,
+                truncated=True,
+            ),
+        ),
+    )
+    later = plan_resume(context=twin, prior=marked)
+    assert_that(carried_truncated_paths(plan=later, prior=marked)).contains(
+        "pkg/api_copy.py",
+    )
+    cleared = ReviewState(
+        coverage=(
+            *marked.coverage,
+            CoverageRecord(
+                path="pkg/api.py",
+                patch_hash=shared_hash,
+                reviewed_sha="r2",
+                round=2,
+            ),
+        ),
+    )
+    later = plan_resume(context=twin, prior=cleared)
+    assert_that(carried_truncated_paths(plan=later, prior=cleared)).is_empty()
+
+
 def test_truncated_patch_hashes_prefers_the_marked_record_on_a_round_tie() -> None:
     """Same-round records at one hash never hide a gap behind an unmarked twin."""
     records = (

@@ -15,7 +15,8 @@ to a merged finding, and a merge never drops the more severe side.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -30,11 +31,21 @@ from lintro.ai.review.narrative_parser import parse_narrative
 
 __all__ = [
     "DuplicateGroup",
+    "FindingKey",
     "SynthesisNarrative",
     "apply_duplicate_groups",
+    "finding_ids",
     "parse_synthesis_envelope",
     "parse_duplicate_groups",
 ]
+
+#: The identity :func:`~lintro.ai.review.merge.merge_findings` keeps findings
+#: distinct by, so a digest id names exactly one merged finding.
+FindingKey = tuple[str, int, str]
+
+#: A digest finding id: ``F`` followed by the finding's one-based position in
+#: the merged list, as printed in the synthesis digest.
+_FINDING_ID = re.compile(r"^F(?P<index>[1-9][0-9]*)$")
 
 #: Severity rank used to decide which side of a duplicate survives.
 _SEVERITY_RANK: dict[Severity, int] = {
@@ -49,8 +60,9 @@ class DuplicateGroup:
     """One duplicate merge the synthesis pass proposed.
 
     Attributes:
-        keep: ``file:line`` reference of the finding to keep.
-        drop: ``file:line`` references of the findings that restate it.
+        keep: Digest id (``F3``) of the finding to keep; a ``file:line`` is
+            accepted only when it names exactly one merged finding.
+        drop: References, in the same form, of the findings that restate it.
     """
 
     keep: str
@@ -137,8 +149,58 @@ def parse_duplicate_groups(*, raw_duplicates: object) -> tuple[DuplicateGroup, .
 
 
 def _as_ref(value: object) -> str:
-    """Return a stripped ``file:line`` reference, or an empty string."""
+    """Return a stripped finding reference, or an empty string."""
     return value.strip() if isinstance(value, str) else ""
+
+
+def finding_ids(*, findings: Sequence[ReviewFinding]) -> dict[FindingKey, str]:
+    """Assign every merged finding the digest id the synthesis pass refers by.
+
+    ``file:line`` does not identify a finding: two findings at one location
+    with different titles both survive :func:`~lintro.ai.review.merge.merge_findings`.
+    The digest therefore prints ``F<n>``, the finding's one-based position in
+    the merged list, and duplicate groups name that id.
+
+    Args:
+        findings: The merged chunk findings, in reported order.
+
+    Returns:
+        Mapping from each finding's merge key ``(file, line, title)`` to its
+        id. Questions are keyed too, so a digest that omits them still
+        numbers the findings around them consistently.
+    """
+    return {
+        (finding.file, finding.line, finding.title): f"F{index}"
+        for index, finding in enumerate(findings, start=1)
+    }
+
+
+def _resolve_reference(
+    *,
+    ref: str,
+    findings: Sequence[ReviewFinding],
+    by_label: Mapping[str, tuple[ReviewFinding, ...]],
+) -> ReviewFinding | None:
+    """Return the merged finding a duplicate reference names, or ``None``.
+
+    A digest id resolves by position. A ``file:line`` resolves only when
+    exactly one merged finding occurs there; an ambiguous location cannot
+    say which finding the model meant, so it resolves to nothing.
+
+    Args:
+        ref: The ``keep`` or ``drop`` reference as the model wrote it.
+        findings: The merged chunk findings, in reported order.
+        by_label: Findings occurring at each ``file:line`` label.
+
+    Returns:
+        The referenced finding, or ``None`` when unresolved or ambiguous.
+    """
+    match = _FINDING_ID.match(ref)
+    if match is not None:
+        index = int(match.group("index"))
+        return findings[index - 1] if index <= len(findings) else None
+    candidates = by_label.get(ref, ())
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def apply_duplicate_groups(
@@ -149,11 +211,13 @@ def apply_duplicate_groups(
     """Collapse duplicate findings the synthesis pass pointed out.
 
     A group is applied only when its ``keep`` and every ``drop`` reference
-    resolve to a merged finding by ``file:line`` (any of a finding's
-    occurrences counts). The model's choice of which side to keep is
-    advisory: the highest severity in the group survives, and among equals
-    the earliest reported; the dropped sites are folded into the survivor's
-    ``occurrences`` so no location disappears from the report.
+    resolve to a merged finding — by digest id, or by a ``file:line`` that
+    exactly one finding occurs at — and every member is the same kind: a
+    question never merges with a finding in either direction, because
+    questions carry no verdict weight. The model's choice of which side to
+    keep is advisory: the highest severity in the group survives, and among
+    equals the earliest reported; the dropped sites are folded into the
+    survivor's ``occurrences`` so no location disappears from the report.
 
     Args:
         findings: The merged chunk findings, in reported order.
@@ -212,10 +276,13 @@ def _plan_duplicate_drops(
         and the occurrences each surviving finding absorbs, keyed the same way.
     """
     order = {id(finding): index for index, finding in enumerate(findings)}
-    by_ref: dict[str, ReviewFinding] = {}
+    labelled: dict[str, list[ReviewFinding]] = {}
     for finding in findings:
         for occurrence in finding.all_occurrences:
-            by_ref.setdefault(occurrence.label, finding)
+            holders = labelled.setdefault(occurrence.label, [])
+            if not any(holder is finding for holder in holders):
+                holders.append(finding)
+    by_label = {label: tuple(holders) for label, holders in labelled.items()}
     dropped: dict[int, ReviewFinding] = {}
     absorbed: dict[int, list[FindingOccurrence]] = {}
     survivor_of: dict[int, ReviewFinding] = {}
@@ -227,10 +294,14 @@ def _plan_duplicate_drops(
 
     for group in groups:
         refs = (group.keep, *group.drop)
-        members = [by_ref.get(ref) for ref in refs]
+        members = [
+            _resolve_reference(ref=ref, findings=findings, by_label=by_label)
+            for ref in refs
+        ]
         if any(member is None for member in members):
             logger.debug(
-                "Ignoring synthesis duplicate group {refs}: unresolved reference.",
+                "Ignoring synthesis duplicate group {refs}: unresolved or "
+                "ambiguous reference.",
                 refs=refs,
             )
             continue
@@ -239,6 +310,13 @@ def _plan_duplicate_drops(
             for current in (live(member) for member in members if member is not None)
         }
         if len(resolved) < 2:
+            continue
+        if len({member.kind for member in resolved.values()}) > 1:
+            logger.debug(
+                "Ignoring synthesis duplicate group {refs}: a question and a "
+                "finding never merge.",
+                refs=refs,
+            )
             continue
         survivor = min(
             resolved.values(),

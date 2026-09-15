@@ -13,9 +13,10 @@ from lintro.ai.review.coverage import (
     classify_files,
     coverage_counts,
     hashes_for_diffs,
+    newest_records_by_hash,
+    own_records_at_hash,
     queue_paths,
     review_eligible_paths,
-    truncated_patch_hashes,
 )
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.import_graph import importers_of
@@ -218,20 +219,30 @@ def carried_truncated_paths(
         prior: Previous state, or ``None`` on a first run.
 
     Returns:
-        Sorted paths classified ``COVERED`` this round whose current hash is
-        one the prior records still mark ``truncated`` — the file's own
-        record or, for a sampled sibling that inherited coverage, the
-        identical diff's record, however many rounds ago it was written (see
+        Sorted paths classified ``COVERED`` this round that still carry only
+        a prefix review. A file's own latest record at its current hash is
+        authoritative over any sibling's record of the same or an earlier
+        round: a complete re-review at that hash clears the file even while
+        a stale sibling record at the same hash stays marked. Only a strictly
+        newer record at the same hash from another path overrides it, because
+        a later complete review of identical content is a complete review of
+        this file too. A file with no record of its own at that hash — a
+        sampled sibling that inherited coverage — takes the newest record at
+        the hash, however many rounds ago it was written (see
         :func:`~lintro.ai.review.coverage_rounds.truncated_patch_hashes`).
     """
     if prior is None:
         return ()
-    truncated_hashes = truncated_patch_hashes(prior.coverage)
-    return tuple(
-        sorted(
-            item.path
-            for item in plan.classified
-            if item.need is FileReviewNeed.COVERED
-            and item.patch_hash in truncated_hashes
-        ),
-    )
+    own = own_records_at_hash(prior.coverage)
+    newest = newest_records_by_hash(prior.coverage)
+    carried: list[str] = []
+    for item in plan.classified:
+        if item.need is not FileReviewNeed.COVERED:
+            continue
+        record = own.get((item.path, item.patch_hash))
+        latest = newest.get(item.patch_hash)
+        if record is not None and (latest is None or latest.round <= record.round):
+            latest = record
+        if latest is not None and latest.truncated:
+            carried.append(item.path)
+    return tuple(sorted(carried))

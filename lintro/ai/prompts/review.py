@@ -7,7 +7,7 @@ remain here as Python; only the static prompt copy lives in template files.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from lintro.ai.prompts._loader import load_prompt_template
@@ -199,7 +199,11 @@ def format_pr_changed_files_for_prompt(
     )
 
 
-def _chunk_summary_finding_line(*, finding: ReviewFinding) -> str:
+def _chunk_summary_finding_line(
+    *,
+    finding: ReviewFinding,
+    finding_id: str | None = None,
+) -> str:
     """Render one already-reported finding as a digest line.
 
     Carries every location the finding covers, not only its primary one: the
@@ -209,10 +213,11 @@ def _chunk_summary_finding_line(*, finding: ReviewFinding) -> str:
 
     Args:
         finding: A finding one chunk already reported.
+        finding_id: The digest id duplicate groups name it by, if it has one.
 
     Returns:
-        One indented digest line — severity, primary location, any further
-        locations, and the title. Never the finding's prose.
+        One indented digest line — id, severity, primary location, any
+        further locations, and the title. Never the finding's prose.
     """
     primary = FindingOccurrence(file=finding.file, line=finding.line).label
     locations = [
@@ -221,16 +226,26 @@ def _chunk_summary_finding_line(*, finding: ReviewFinding) -> str:
         if occurrence.label != primary
     ]
     also = f" (also {', '.join(locations)})" if locations else ""
-    return f"  - already reported: {finding.severity} {primary}{also} — {finding.title}"
+    tag = f"{finding_id} " if finding_id else ""
+    return (
+        f"  - already reported: {tag}{finding.severity} {primary}{also} — "
+        f"{finding.title}"
+    )
 
 
-def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> str:
+def format_chunk_summaries_for_prompt(
+    *,
+    summaries: Sequence[ChunkSummary],
+    finding_ids: Mapping[tuple[str, int, str], str] | None = None,
+) -> str:
     """Format the per-chunk digest the cross-chunk synthesis pass reasons over.
 
     One block per chunk: the files that chunk reviewed, and one line per
     finding it already reported. The finding lines exist so the pass can be
     told not to restate them, so they carry only what makes a finding
-    recognizable — severity, every location, title — and never its prose.
+    recognizable — its digest id, severity, every location, title — and
+    never its prose. The id (``F3``) is what a duplicate group names, because
+    ``file:line`` alone does not tell two findings at one location apart.
 
     Questions (#1925) are skipped. They are excluded from every other prompt
     scope, and rendering one here would put a `P2 file:line — title` line in
@@ -239,6 +254,9 @@ def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> s
 
     Args:
         summaries: Per-chunk digests in chunk order.
+        finding_ids: Digest id per merged-finding key ``(file, line, title)``
+            (see :func:`~lintro.ai.review.synthesis_narrative.finding_ids`);
+            a finding without one is listed without an id.
 
     Returns:
         A plain-text block suitable for prompt injection, or a sentinel line
@@ -246,6 +264,7 @@ def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> s
     """
     if not summaries:
         return "- (no chunk summaries)"
+    ids = finding_ids or {}
     blocks: list[str] = []
     for summary in summaries:
         files = ", ".join(f"`{path}`" for path in summary.files) or "(no files)"
@@ -253,7 +272,11 @@ def format_chunk_summaries_for_prompt(*, summaries: Sequence[ChunkSummary]) -> s
         reported = [finding for finding in summary.findings if not finding.is_question]
         if reported:
             lines.extend(
-                _chunk_summary_finding_line(finding=finding) for finding in reported
+                _chunk_summary_finding_line(
+                    finding=finding,
+                    finding_id=ids.get((finding.file, finding.line, finding.title)),
+                )
+                for finding in reported
             )
         else:
             lines.append("  - already reported: (nothing)")

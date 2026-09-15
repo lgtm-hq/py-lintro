@@ -29,9 +29,10 @@ class SynthesisOutcome:
         duplicates_merged: Number of chunk findings the pass collapsed into
             another finding with the same root cause (lintro-ops milestone 0).
         narrative_missing: True when the pass answered but wrote no usable
-            ``summary``, so the round renders the TL;DR-only fallback. The
+            ``summary`` or no usable ``verdict_reasoning``, so the round
+            renders the TL;DR-only fallback for whichever is missing. The
             findings half of the answer still counts; this flag keeps a
-            summary-less round from reading as a fully successful pass.
+            narrative-less round from reading as a fully successful pass.
     """
 
     findings_added: int = 0

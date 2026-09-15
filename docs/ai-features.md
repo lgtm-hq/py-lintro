@@ -562,11 +562,14 @@ the whole-PR diff as its token budget allows. It is asked for four things:
    walkthrough, each bullet optionally pointing at a finding by `file:line`.
 2. `verdict_reasoning` — the single issue that decides mergeability and how it fails in
    production. The verdict itself is still derived in code from the open severities.
-3. `duplicates` — chunk findings that report the same root cause at different sites.
-   lintro applies them deterministically: a group is used only when every `file:line` it
-   names resolves to a reported finding, the highest severity in the group survives (the
-   earliest reported among equals), and the dropped sites are folded into the survivor's
-   `occurrences` so no location leaves the report.
+3. `duplicates` — chunk findings that report the same root cause at different sites. The
+   digest prints an id in front of every finding (`F1`, `F2`, ..., its position in the
+   merged list) and a group names those ids (`keep: "F3"`, `drop: ["F7"]`); a
+   `file:line` is accepted only when exactly one finding occurs there. lintro applies
+   groups deterministically: a group is used only when every reference resolves and all
+   its members are the same kind (a question never merges with a finding); the highest
+   severity survives, then the earliest reported; the dropped sites are folded into the
+   survivor's occurrences so no location disappears.
 4. `findings` — inconsistencies between files reviewed in different chunks, exactly as
    the cross-chunk pass always reported them (same evidence gate, sensitivity policy,
    cross-chunk contradiction guard, dedupe and `max_findings` cap).
@@ -828,9 +831,10 @@ Reading the block:
   answers "how long did the user wait". The summary line lists nested phases inside the
   provider parenthetical for the same reason, e.g.
   `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
-- `synthesis` is the optional cross-chunk pass (see _The synthesis pass_ above). It is
-  off by default and only runs on a multi-chunk round, so the phase is absent from most
-  runs; when it is absent the round made no extra call.
+- `synthesis` is the round's synthesis pass (see _The synthesis pass_ above). It is on
+  by default and runs after every completed round with at least one chunk, so the phase
+  is present on a normal run; it is absent only when `review.synthesis.enabled` is
+  `false` or no chunk completed, and then the round made no extra call.
 - `validation` is the post-merge tail of the run: provider session teardown and progress
   callbacks, then the pass that decides what survives (context-finding rejection,
   coverage and resume bookkeeping, flag reconciliation). A slow session close therefore

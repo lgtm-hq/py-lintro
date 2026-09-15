@@ -48,9 +48,11 @@ per-call markers do.
 - A duplicate is two or more digest findings with the same root cause reported at
   different sites (the same missing guard in three handlers, the same renamed key read
   in two consumers). Different defects in one file are not duplicates.
-- Reference findings only by the exact `file:line` the digest lists. `keep` is the
-  finding that best states the defect; `drop` lists the others. lintro keeps the highest
-  severity regardless of which you name.
+- Reference findings only by the id the digest prints in front of each one (`F1`,
+  `F2`, ...): `keep` is the id of the finding that best states the defect; `drop` lists
+  the ids of the others. Never reference a finding by `file:line`; two findings can
+  share a location. lintro keeps the highest severity regardless of which you name, and
+  never merges a question with a finding.
 - An empty `duplicates` array is the normal answer.
 
 **Cross-file finding rules:**

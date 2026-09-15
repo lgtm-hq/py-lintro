@@ -43,6 +43,7 @@ from lintro.ai.review.sensitivity import filter_findings_by_policy
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_narrative import (
     apply_duplicate_groups,
+    finding_ids,
     parse_synthesis_envelope,
 )
 from lintro.ai.review.synthesis_prompt import (
@@ -329,6 +330,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
         context=context,
         summaries=summaries,
         diff_budget=diff_budget,
+        finding_ids=finding_ids(findings=existing_findings),
     )
     truncated = plan.truncated
     system_prompt, user_prompt = build_synthesis_prompt(

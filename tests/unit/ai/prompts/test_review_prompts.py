@@ -417,6 +417,39 @@ def test_chunk_summaries_render_severity_location_and_title() -> None:
     assert_that(rendered).does_not_contain("body")
 
 
+def test_chunk_summary_digest_prints_the_finding_id_when_given() -> None:
+    """A finding with a digest id is listed as ``F<n>`` so duplicates can name it."""
+    finding = ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file="pkg/api.py",
+        line=12,
+        title="Signature drift",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+    )
+    rendered = format_chunk_summaries_for_prompt(
+        summaries=[
+            ChunkSummary(chunk_id=1, files=("pkg/api.py",), findings=(finding,)),
+        ],
+        finding_ids={("pkg/api.py", 12, "Signature drift"): "F4"},
+    )
+    assert_that(rendered).contains(
+        "already reported: F4 P2 pkg/api.py:12 — Signature drift",
+    )
+    unlabelled = format_chunk_summaries_for_prompt(
+        summaries=[
+            ChunkSummary(chunk_id=1, files=("pkg/api.py",), findings=(finding,)),
+        ],
+        finding_ids={},
+    )
+    assert_that(unlabelled).contains(
+        "already reported: P2 pkg/api.py:12 — Signature drift",
+    )
+
+
 def test_chunk_summaries_list_every_occurrence_of_a_finding() -> None:
     """Secondary locations are named, so "do not restate" covers them too."""
     rendered = format_chunk_summaries_for_prompt(

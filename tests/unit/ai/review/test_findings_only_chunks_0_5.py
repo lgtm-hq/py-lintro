@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import warnings
+from dataclasses import replace
 from typing import Any, cast
 from unittest.mock import MagicMock
 
@@ -21,6 +22,7 @@ from lintro.ai.review.cli_limits import (
     REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     resolve_chunk_diff_budget,
 )
+from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -30,6 +32,7 @@ from lintro.ai.review.synthesis import should_run_synthesis
 from lintro.ai.review.synthesis_narrative import (
     DuplicateGroup,
     apply_duplicate_groups,
+    finding_ids,
     parse_duplicate_groups,
     parse_synthesis_envelope,
 )
@@ -296,6 +299,78 @@ def test_duplicates_with_equal_severity_keep_the_earliest_finding() -> None:
 
     assert_that(merged).is_equal_to(1)
     assert_that(kept[0].title).is_equal_to("First")
+
+
+def test_duplicates_resolve_by_digest_id() -> None:
+    """Two findings at one location are told apart by their digest ids."""
+    findings = (
+        _finding(file="a.py", line=3, severity=Severity.P3, title="Missing guard"),
+        _finding(file="a.py", line=3, severity=Severity.P2, title="Wrong default"),
+        _finding(file="b.py", line=9, severity=Severity.P3, title="Guard again"),
+    )
+    assert_that(finding_ids(findings=findings)).is_equal_to(
+        {
+            ("a.py", 3, "Missing guard"): "F1",
+            ("a.py", 3, "Wrong default"): "F2",
+            ("b.py", 9, "Guard again"): "F3",
+        },
+    )
+
+    kept, merged = apply_duplicate_groups(
+        findings=findings,
+        groups=(DuplicateGroup(keep="F1", drop=("F3",)),),
+    )
+
+    assert_that(merged).is_equal_to(1)
+    assert_that([finding.title for finding in kept]).is_equal_to(
+        ["Missing guard", "Wrong default"],
+    )
+    assert_that(
+        [occurrence.label for occurrence in kept[0].all_occurrences],
+    ).is_equal_to(["a.py:3", "b.py:9"])
+
+
+def test_duplicates_ignore_an_ambiguous_location_and_an_unknown_id() -> None:
+    """A ``file:line`` shared by two findings, or an id past the list, resolves to nothing."""
+    findings = (
+        _finding(file="a.py", line=3, severity=Severity.P3, title="Missing guard"),
+        _finding(file="a.py", line=3, severity=Severity.P2, title="Wrong default"),
+        _finding(file="b.py", line=9, severity=Severity.P3, title="Guard again"),
+    )
+
+    for group in (
+        DuplicateGroup(keep="a.py:3", drop=("b.py:9",)),
+        DuplicateGroup(keep="F9", drop=("F3",)),
+    ):
+        kept, merged = apply_duplicate_groups(findings=findings, groups=(group,))
+        assert_that(merged).is_equal_to(0)
+        assert_that(kept).is_equal_to(findings)
+
+
+def test_duplicates_never_merge_a_question_with_a_finding() -> None:
+    """A mixed-kind group is ignored; a question-only group still merges."""
+    question = replace(
+        _finding(file="a.py", line=3, severity=Severity.P1, title="Is this reachable?"),
+        kind=FindingKind.QUESTION,
+    )
+    finding = _finding(file="b.py", line=9, severity=Severity.P2, title="Unreachable")
+    kept, merged = apply_duplicate_groups(
+        findings=(question, finding),
+        groups=(DuplicateGroup(keep="F1", drop=("F2",)),),
+    )
+    assert_that(merged).is_equal_to(0)
+    assert_that(kept).is_equal_to((question, finding))
+
+    other_question = replace(
+        _finding(file="c.py", line=1, severity=Severity.P3, title="Same question?"),
+        kind=FindingKind.QUESTION,
+    )
+    kept, merged = apply_duplicate_groups(
+        findings=(question, other_question),
+        groups=(DuplicateGroup(keep="F1", drop=("F2",)),),
+    )
+    assert_that(merged).is_equal_to(1)
+    assert_that(kept[0].title).is_equal_to("Is this reachable?")
 
 
 def test_duplicates_with_an_unresolved_reference_are_ignored() -> None:

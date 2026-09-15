@@ -287,11 +287,18 @@ def _run(
             raise synthesis_error
         return _response(content=synthesis_content or _synthesis_payload())
 
-    def _forced_plan(*, context: Any, summaries: Any, diff_budget: int) -> Any:
+    def _forced_plan(
+        *,
+        context: Any,
+        summaries: Any,
+        diff_budget: int,
+        finding_ids: Any = None,
+    ) -> Any:
         return plan_synthesis_prompt(
             context=context,
             summaries=summaries,
             diff_budget=synthesis_diff_budget or diff_budget,
+            finding_ids=finding_ids,
         )
 
     with ExitStack() as stack:

@@ -17,7 +17,7 @@ the prompt in a run that overruns the context window on diff volume.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -216,6 +216,7 @@ def _trim_chunk_digest(
     *,
     summaries: Sequence[ChunkSummary],
     budget: int,
+    finding_ids: Mapping[tuple[str, int, str], str] | None = None,
 ) -> tuple[str, bool]:
     """Render the per-chunk digest, shedding finding lines until it fits.
 
@@ -228,11 +229,15 @@ def _trim_chunk_digest(
     Args:
         summaries: Per-chunk digests in chunk order.
         budget: Token ceiling the rendered digest must fit.
+        finding_ids: Digest id per merged finding, printed on its line.
 
     Returns:
         Tuple of ``(digest_text, truncated)``.
     """
-    text = format_chunk_summaries_for_prompt(summaries=summaries)
+    text = format_chunk_summaries_for_prompt(
+        summaries=summaries,
+        finding_ids=finding_ids,
+    )
     if estimate_tokens(text) <= budget:
         return text, False
 
@@ -243,7 +248,10 @@ def _trim_chunk_digest(
             key=lambda index: (len(trimmed[index].findings), -index),
         )
         trimmed[widest] = replace(trimmed[widest], findings=())
-        text = format_chunk_summaries_for_prompt(summaries=trimmed)
+        text = format_chunk_summaries_for_prompt(
+            summaries=trimmed,
+            finding_ids=finding_ids,
+        )
         if estimate_tokens(text) <= budget:
             return text, True
 
@@ -259,6 +267,7 @@ def plan_synthesis_prompt(
     context: ReviewContext,
     summaries: Sequence[ChunkSummary],
     diff_budget: int,
+    finding_ids: Mapping[tuple[str, int, str], str] | None = None,
 ) -> SynthesisPromptPlan:
     """Fit the whole synthesis prompt — not only its diff — into one budget.
 
@@ -270,6 +279,9 @@ def plan_synthesis_prompt(
         context: Collected review diff context.
         summaries: Per-chunk digests in chunk order.
         diff_budget: Token budget available for the prompt's untrusted spans.
+        finding_ids: Digest id per merged finding (see
+            :func:`~lintro.ai.review.synthesis_narrative.finding_ids`), so a
+            duplicate group can name a finding unambiguously.
 
     Returns:
         The fitted plan. ``truncated`` is True when the digest was trimmed or
@@ -281,6 +293,7 @@ def plan_synthesis_prompt(
     chunk_digest, digest_truncated = _trim_chunk_digest(
         summaries=summaries,
         budget=digest_budget,
+        finding_ids=finding_ids,
     )
     reserve = estimate_tokens(changed_files) + estimate_tokens(chunk_digest)
     diff, diff_truncated = select_synthesis_diff(

@@ -21,6 +21,9 @@ __all__ = [
     "hashes_for_diffs",
     "inherit_same_round_paths",
     "latest_coverage_by_path",
+    "newest_records_by_hash",
+    "own_records_at_hash",
+    "truncated_patch_hashes",
 ]
 
 
@@ -134,6 +137,34 @@ def latest_coverage_by_path(
     return latest
 
 
+def own_records_at_hash(
+    coverage: Sequence[CoverageRecord],
+) -> dict[tuple[str, str], CoverageRecord]:
+    """Return each file's latest record at each hash it was reviewed at.
+
+    Coverage is keyed ``(path, hash)``; a file re-reviewed at the same hash
+    writes a newer record for that key, and the newest one is what says
+    whether the file's review at that hash is complete (lintro-ops #37).
+
+    Args:
+        coverage: All prior coverage records.
+
+    Returns:
+        The highest-round record per ``(path, hash)``; on a round tie a
+        marked record wins, so a gap is never hidden by a same-round twin.
+    """
+    latest: dict[tuple[str, str], CoverageRecord] = {}
+    for record in coverage:
+        current = latest.get(record.identity)
+        if (
+            current is None
+            or record.round > current.round
+            or (record.round == current.round and record.truncated)
+        ):
+            latest[record.identity] = record
+    return latest
+
+
 def truncated_patch_hashes(coverage: Sequence[CoverageRecord]) -> frozenset[str]:
     """Return the patch hashes whose most recent review was truncated.
 
@@ -152,6 +183,25 @@ def truncated_patch_hashes(coverage: Sequence[CoverageRecord]) -> frozenset[str]
     Returns:
         The hashes still known to carry only a prefix review.
     """
+    return frozenset(
+        patch_hash
+        for patch_hash, record in newest_records_by_hash(coverage).items()
+        if record.truncated
+    )
+
+
+def newest_records_by_hash(
+    coverage: Sequence[CoverageRecord],
+) -> dict[str, CoverageRecord]:
+    """Return the most recent record at each patch hash, from any path.
+
+    Args:
+        coverage: All prior coverage records.
+
+    Returns:
+        The highest-round record per hash; on a round tie a marked record
+        wins, so a gap is never hidden by a same-round sibling.
+    """
     latest: dict[str, CoverageRecord] = {}
     for record in coverage:
         current = latest.get(record.patch_hash)
@@ -161,9 +211,7 @@ def truncated_patch_hashes(coverage: Sequence[CoverageRecord]) -> frozenset[str]
             or (record.round == current.round and record.truncated)
         ):
             latest[record.patch_hash] = record
-    return frozenset(
-        patch_hash for patch_hash, record in latest.items() if record.truncated
-    )
+    return latest
 
 
 def hashes_for_diffs(*, diffs: Mapping[str, str]) -> dict[str, str]:

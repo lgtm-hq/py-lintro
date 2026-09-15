@@ -11,6 +11,8 @@ from lintro.ai.review.coverage_rounds import (
     hashes_for_diffs,
     inherit_same_round_paths,
     latest_coverage_by_path,
+    newest_records_by_hash,
+    own_records_at_hash,
     truncated_patch_hashes,
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
@@ -35,6 +37,8 @@ __all__ = [
     "directly_changed_paths",
     "inherit_same_round_paths",
     "latest_coverage_by_path",
+    "newest_records_by_hash",
+    "own_records_at_hash",
     "truncated_patch_hashes",
     "carry_unserved_flags",
     "consume_served_flags",
