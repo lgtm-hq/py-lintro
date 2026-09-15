@@ -2295,8 +2295,9 @@ def _attesting_jobs() -> list[tuple[str, str, set[str] | None, bool]]:
     A job attests when it runs ``actions/attest-build-provenance`` or
     ``sigstore/cosign-installer`` directly, calls lgtm-ci's
     ``reusable-build-python-dist.yml`` (which attests dist/* since v0.70.0),
-    or calls a ``reusable-docker*`` workflow with ``cosign-sign: true``. For a
-    reusable call the caller's list only matters under ``replace`` semantics.
+    ``reusable-sbom.yml`` with ``create-attestation: true``, or a
+    ``reusable-docker*`` workflow with ``cosign-sign: true``. For a reusable
+    call the caller's list only matters under ``replace`` semantics.
 
     Returns:
         Tuples of (workflow file, job name, allowlist or None, needs OIDC).
@@ -2318,7 +2319,25 @@ def _attesting_jobs() -> list[tuple[str, str, set[str] | None, bool]]:
                         ),
                     )
                 continue
+            if (
+                "reusable-sbom.yml" in uses
+                and with_block.get("create-attestation") is True
+            ):
+                if with_block.get("allowed-endpoints-mode") == "replace":
+                    found.append(
+                        (
+                            path.name,
+                            job_name,
+                            _endpoint_set(with_block.get("allowed-endpoints")),
+                            True,
+                        ),
+                    )
+                continue
             if "reusable-docker" in uses and with_block.get("cosign-sign") is True:
+                # The reusable mints the OIDC token inside its own job; the
+                # docker-tools-* callers sign keyless under replace mode
+                # without listing token.actions.githubusercontent.com and
+                # release fine, so only the Sigstore hosts are required here.
                 if with_block.get("allowed-endpoints-mode") == "replace":
                     found.append(
                         (
@@ -2352,7 +2371,9 @@ def _attesting_jobs() -> list[tuple[str, str, set[str] | None, bool]]:
                     _endpoint_set(
                         (harden[0].get("with") or {}).get("allowed-endpoints"),
                     ),
-                    attests,
+                    # A direct attest or keyless cosign step fetches its own
+                    # identity token, so the OIDC host is required too.
+                    attests or signs,
                 ),
             )
     return found
