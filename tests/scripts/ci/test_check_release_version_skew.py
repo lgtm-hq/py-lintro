@@ -260,6 +260,44 @@ def test_formula_ignores_release_urls_of_other_repositories(module: Any) -> None
     ).is_equal_to("9.0.0")
 
 
+def test_formula_release_url_repo_match_is_case_insensitive(module: Any) -> None:
+    """GitHub owner/repository names compare case-insensitively."""
+    body = _formula_body(version="1.2.3", shape="url")
+    assert_that(
+        module.formula_version(body=body, source_repo="LGTM-HQ/Py-Lintro"),
+    ).is_equal_to("1.2.3")
+
+
+def test_audit_forwards_repo_to_the_formula_parser(module: Any) -> None:
+    """``--repo`` decides which release urls count; metacharacters are literal."""
+    body = "\n".join(
+        [
+            "class Lintro < Formula",
+            '  url "https://github.com/lgtm-hq/py-lintro/releases/download/v1.2.2/x"',
+            '  url "https://github.com/acme/tool.v2/releases/download/v1.2.3/x"',
+            "end",
+        ],
+    )
+    code, report = module.audit(
+        args=_args(module, "--repo", "acme/tool.v2"),
+        fetch=_fetcher(
+            pypi=_pypi_body(version="1.2.3"),
+            npm=_npm_body(version="1.2.3"),
+            formula=body,
+        ),
+        now=NOW,
+    )
+    assert_that(code).is_equal_to(0)
+    assert_that(report).contains("all channels agree")
+    # ``tool.v2`` must not match ``toolXv2``: the dot is escaped.
+    assert_that(
+        module.formula_version(
+            body=body.replace("tool.v2", "toolXv2"),
+            source_repo="acme/tool.v2",
+        ),
+    ).is_none()
+
+
 def test_formula_pypi_sdist_url_is_not_a_release_url(module: Any) -> None:
     """A formula with only a PyPI sdist url has no readable version."""
     body = "\n".join(

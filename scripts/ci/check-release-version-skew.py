@@ -96,7 +96,8 @@ def _formula_release_url_pattern(*, source_repo: str) -> re.Pattern[str]:
     return re.compile(
         rf'^\s*url\s+"https://github\.com/{re.escape(source_repo)}/'
         r'releases/download/v?([^/"]+)/[^"]+"',
-        re.MULTILINE,
+        # GitHub owner and repository names are case-insensitive.
+        re.MULTILINE | re.IGNORECASE,
     )
 
 
