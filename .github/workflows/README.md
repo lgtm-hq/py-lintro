@@ -144,8 +144,9 @@ the checkpoint version as usual.
   the manifest and pings the tap), `npm-publish` (no longer behind Homebrew) and the
   mirror lane; `notify-failure` runs last under `!cancelled()` and reports the
   per-channel result (see Release above). Prereleases run the build stage, the gate,
-  PyPI and the GitHub Release as before and skip the Docker promote, Homebrew and npm.
-  Lint runs on `main` via `docker-ci` only (no duplicate quality on tag).
+  PyPI and the GitHub Release (marked prerelease, derived from `classify-tag`) and skip
+  the Docker promote, Homebrew, npm and the pre-commit mirror bump. Lint runs on `main`
+  via `docker-ci` only (no duplicate quality on tag).
 - **docker-build-publish.yml** — Multi-arch GHCR build via `reusable-docker.yml` (base +
   full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
   pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical
@@ -214,8 +215,9 @@ The binaries ship in two `workflow_call` stages, both called from
   `github-release`) — `Notify Homebrew Tap` reads the arm64 sha256 from the
   `release-manifest` artifact the gate wrote, waits for PyPI and dispatches the formula
   update. The binaries and `lintro.1` are attached to the release by
-  `reusable-github-release` from the gate's `release-assets` artifact (immutable
-  assets), so nothing in this workflow holds `contents: write` any more.
+  `reusable-github-release` from the gate's `release-assets` artifact (under the
+  `immutable-assets` rerun guard), so nothing in this workflow holds `contents: write`
+  any more.
 
 Artifacts (`lintro-macos-arm64`, `lintro-linux-x64`, `lintro-linux-arm64`, `sha256-*`,
 `lintro-man-page`) are retained for 90 days, the policy recovery window
@@ -251,7 +253,11 @@ the recovery workflow (lgtm-hq/lgtm-ci#966).
   on the release with the same digest is a no-op, a different or unverifiable digest
   fails the job with the recovery rule instead of overwriting. No job in the tag
   pipeline deletes or renames a published asset any more; the former upload-then-swap
-  path and its `<asset>.new` recovery are gone with the upload jobs.
+  path and its `<asset>.new` recovery are gone with the upload jobs. This is the
+  reusable's own guard, not GitHub's immutable releases: that is a repository setting
+  (Settings → General → Releases → "Immutable releases") which, once the owner enables
+  it, locks every published release's assets and tag at the API level; releases show
+  `immutable: false` until then.
 - `docker-promote` verifies and cosign-signs the staging digests before its retags,
   which are the job's last steps and pin to the digests the build stage exported; a
   rerun retags the same digests again (registry no-op).

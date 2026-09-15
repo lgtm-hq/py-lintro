@@ -7575,7 +7575,7 @@ def test_github_release_attaches_the_gated_assets_immutably() -> None:
     """The release carries exactly what the gate assembled, never overwritten."""
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     release = publish["jobs"]["github-release"]
-    assert_that(release["needs"]).is_equal_to(["pypi-upload"])
+    assert_that(release["needs"]).is_equal_to(["classify-tag", "pypi-upload"])
     with_block = release["with"]
     assert_that(with_block["artifact-name"]).is_equal_to("release-assets")
     assert_that(with_block["artifact-path"]).is_equal_to("release")
@@ -7675,6 +7675,48 @@ def test_docker_promote_promotes_the_full_release_tag_set() -> None:
 # --- #2562 PR (d): the release failure notifier ------------------------------
 
 _NOTIFIER_REUSABLE = "reusable-release-failure-notifier.yml"
+
+
+def test_github_release_derives_prerelease_from_the_tag_classifier() -> None:
+    """A checkpoint tag must be published as a GitHub prerelease.
+
+    The call used to pass a hard-coded ``prerelease: false``, so the
+    v0.160.3a4 checkpoint became GitHub's "latest" release until it was
+    edited by hand. The flag now comes from the same ``classify-tag`` output
+    that gates Homebrew, npm, Docker and the mirror (#2562).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = publish["jobs"]["github-release"]
+
+    assert_that(job["needs"]).contains("classify-tag", "pypi-upload")
+    assert_that(_normalize_github_expr(str(job["with"]["prerelease"]))).is_equal_to(
+        "${{ needs.classify-tag.outputs.is_prerelease == 'true' }}",
+    )
+
+
+@pytest.mark.parametrize("job_name", ["mirror-token", "mirror-release"])
+def test_mirror_lane_runs_for_stable_releases_only(job_name: str) -> None:
+    """The pre-commit mirror bump must skip prerelease tags explicitly.
+
+    The mirror pins the wheel that pre-commit consumers install, so a
+    checkpoint prerelease must never bump it. The v0.160.3a4 checkpoint ran
+    the lane (harmlessly, the script pushed nothing); both jobs now gate on
+    the classifier like Homebrew and npm, keeping the ``actions-v`` recursion
+    guard and, for the bump itself, the token guard (#2562).
+    """
+    publish = _load_workflow(name="publish-pypi-on-tag.yml")
+    job = publish["jobs"][job_name]
+    condition = _normalize_github_expr(str(job["if"]))
+
+    assert_that(job["needs"]).contains("classify-tag")
+    assert_that(condition).contains(
+        "needs.classify-tag.outputs.is_prerelease == 'false'",
+    )
+    assert_that(condition).contains("!startsWith(github.ref_name, 'actions-v')")
+    if job_name == "mirror-release":
+        assert_that(condition).contains(
+            "needs.mirror-token.outputs.has_token == 'true'",
+        )
 
 
 def test_release_failure_notifier_runs_after_every_publish_job() -> None:

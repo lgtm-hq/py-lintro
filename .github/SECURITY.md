@@ -172,8 +172,10 @@ Software Bill of Materials (SBOM) is generated for each release using:
   `gh attestation verify` on every one of them, checks `SHA256SUMS`, and only then does
   PyPI, the GitHub Release or any other channel receive anything; nothing is rebuilt
   after the `pypi` approval. The Sigstore bundles ship on the GitHub Release as
-  `<asset>.intoto.jsonl` next to `SHA256SUMS`, and the release's assets are immutable (a
-  rerun never overwrites a published asset whose bytes differ).
+  `<asset>.intoto.jsonl` next to `SHA256SUMS`. A rerun never overwrites a published
+  asset whose bytes differ (the reusable's `immutable-assets` guard); locking published
+  releases at the API level is GitHub's repository-wide "Immutable releases" setting,
+  which is enabled separately by the repository owner.
 - BuildKit SBOM and provenance attestations on every published container image
   (`py-lintro`, `py-lintro-base`, `py-lintro-ai` and the tools images), plus a GitHub
   build-provenance attestation and a Cosign keyless signature on each image digest. The

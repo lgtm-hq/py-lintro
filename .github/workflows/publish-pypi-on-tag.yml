@@ -325,7 +325,7 @@ jobs:
 
   github-release:
     name: Create GitHub Release
-    needs: [pypi-upload]
+    needs: [classify-tag, pypi-upload]
     if: ${{ !startsWith(github.ref_name, 'actions-v') }}
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
@@ -342,6 +342,11 @@ jobs:
       checksums: true
       immutable-assets: true
       generate-release-notes: true
+      # A checkpoint tag (X.Y.ZaN) must not become GitHub's "latest": the
+      # v0.160.3a4 checkpoint was created as a full release by the old
+      # hard-coded false and had to be edited by hand (#2562). Derived from
+      # the same classifier that gates Homebrew, npm, Docker and the mirror.
+      prerelease: ${{ needs.classify-tag.outputs.is_prerelease == 'true' }}
       tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
       egress-policy: block
       egress-preset: github-tooling
@@ -364,9 +369,14 @@ jobs:
     # MIRROR_REPO_TOKEN is resolved in a step and re-exported as an output the
     # mirror job can gate on. Until the owner creates the secret the mirror
     # bump is skipped with a warning instead of failing the whole tag run
-    # (#2622).
-    needs: [github-release]
-    if: ${{ !startsWith(github.ref_name, 'actions-v') }}
+    # (#2622). Stable releases only: the mirror pins the wheel pre-commit
+    # consumers install, so a checkpoint prerelease must never bump it; gated
+    # explicitly like Homebrew and npm (the v0.160.3a4 checkpoint ran the
+    # lane, harmlessly, #2562).
+    needs: [classify-tag, github-release]
+    if: >-
+      ${{ !startsWith(github.ref_name, 'actions-v') &&
+      needs.classify-tag.outputs.is_prerelease == 'false' }}
     runs-on: ubuntu-latest
     permissions: {}
     outputs:
@@ -394,9 +404,11 @@ jobs:
     # creates the release with GITHUB_TOKEN and GitHub suppresses workflow
     # events for it, so mirror-release.yml never fired (#2599). Calling it
     # here is the only trigger that sees the automated release train.
-    needs: [github-release, mirror-token]
-    # yamllint disable-line rule:line-length
-    if: ${{ !startsWith(github.ref_name, 'actions-v') && needs.mirror-token.outputs.has_token == 'true' }}
+    needs: [classify-tag, github-release, mirror-token]
+    if: >-
+      ${{ !startsWith(github.ref_name, 'actions-v') &&
+      needs.classify-tag.outputs.is_prerelease == 'false' &&
+      needs.mirror-token.outputs.has_token == 'true' }}
     uses: ./.github/workflows/mirror-release.yml
     permissions:
       # read: sparse checkout of scripts/ci/mirror in this repo. Mirror-side
@@ -690,7 +702,7 @@ jobs:
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@0fec207d579bcf9961df170ef982da6d268c3fd1 # v0.73.1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
     permissions:
       # read: failed-job logs for the infra-signature classifier
       actions: read
@@ -716,7 +728,7 @@ jobs:
         reading ID token
         Get "https://registry-1.docker.io/v2/": context deadline exceeded
         No lint verdict (runner loss); auto-rerun will retry
-      tooling-ref: '0fec207d579bcf9961df170ef982da6d268c3fd1' # v0.73.1
+      tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
       # The reusable hardens its own runner first and resolves the
       # github-minimal allowlist itself; the caller passes no endpoints.
       egress-policy: block
