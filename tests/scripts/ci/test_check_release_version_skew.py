@@ -268,6 +268,23 @@ def test_formula_release_url_repo_match_is_case_insensitive(module: Any) -> None
     ).is_equal_to("1.2.3")
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        '  URL "https://github.com/lgtm-hq/py-lintro/releases/download/v1.2.3/x"',
+        '  url "https://github.com/lgtm-hq/py-lintro/Releases/Download/v1.2.3/x"',
+        '  url "https://GitHub.com/lgtm-hq/py-lintro/releases/download/v1.2.3/x"',
+    ],
+)
+def test_formula_release_url_keyword_and_path_stay_case_sensitive(
+    module: Any,
+    line: str,
+) -> None:
+    """Case-insensitivity covers the repository fragment only."""
+    body = "\n".join(["class Lintro < Formula", line, "end"])
+    assert_that(module.formula_version(body=body)).is_none()
+
+
 def test_audit_forwards_repo_to_the_formula_parser(module: Any) -> None:
     """``--repo`` decides which release urls count; metacharacters are literal."""
     body = "\n".join(

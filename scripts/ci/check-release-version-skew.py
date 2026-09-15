@@ -94,10 +94,11 @@ def _formula_release_url_pattern(*, source_repo: str) -> re.Pattern[str]:
         A compiled multiline pattern whose first group is the release tag.
     """
     return re.compile(
-        rf'^\s*url\s+"https://github\.com/{re.escape(source_repo)}/'
+        # Only the owner/name fragment compares case-insensitively (GitHub
+        # names are); the ``url`` keyword and the release path stay exact.
+        rf'^\s*url\s+"https://github\.com/(?i:{re.escape(source_repo)})/'
         r'releases/download/v?([^/"]+)/[^"]+"',
-        # GitHub owner and repository names are case-insensitive.
-        re.MULTILINE | re.IGNORECASE,
+        re.MULTILINE,
     )
 
 
