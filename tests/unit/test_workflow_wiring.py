@@ -7753,14 +7753,19 @@ def test_release_failure_notifier_sees_every_channel_result() -> None:
     """Every job downstream of the gate is a row in the notifier's table."""
     publish = _load_workflow(name="publish-pypi-on-tag.yml")
     needs = set(publish["jobs"]["notify-failure"]["needs"])
+    every_other_job = {
+        job_id for job_id in publish["jobs"] if job_id != "notify-failure"
+    }
     channel_jobs = {
         job_id
-        for job_id in publish["jobs"]
-        if job_id != "notify-failure"
-        and "release-gate" in _job_ancestors(publish, job_id=job_id)
+        for job_id in every_other_job
+        if "release-gate" in _job_ancestors(publish, job_id=job_id)
     }
     assert_that(channel_jobs).is_not_empty()
     assert_that(channel_jobs).is_subset_of(needs)
+    # Build-stage jobs too: a failed build skips the gate and every
+    # publisher, and a table of skipped rows alone reads as a green run.
+    assert_that(needs).is_equal_to(every_other_job)
 
 
 def test_release_failure_notifier_matches_the_auto_rerun_budget() -> None:

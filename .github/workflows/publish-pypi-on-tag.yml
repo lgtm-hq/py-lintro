@@ -683,19 +683,25 @@ jobs:
     # every publish job unless the run was cancelled (a human stop is not an
     # incident); a green run closes the tag's
     # issue if one exists. Skipped channels (prereleases, no mirror token)
-    # count as success. classify-tag and release-gate are listed so a gate
-    # failure shows up as the reason nothing published. Gated on ref_type so
-    # a branch dispatch never files an issue keyed to a branch name. Must
-    # stay the last job in this file.
+    # count as success. Every job in the file is listed, build stage
+    # included: when a build job fails, the gate and every publisher are
+    # skipped, and a table made only of skipped rows would read as a green
+    # run (and close an open issue), so the failed build must be a row too.
+    # Gated on ref_type so a branch dispatch never files an issue keyed to a
+    # branch name. Must stay the last job in this file.
     needs:
       - classify-tag
+      - sbom
+      - pypi-build
       - release-gate
       - pypi-upload
       - github-release
       - mirror-token
       - mirror-release
+      - build-binaries
       - homebrew-tap
       - npm-publish
+      - docker-build
       - docker-promote
     if: >-
       !cancelled() &&
