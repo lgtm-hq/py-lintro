@@ -14,7 +14,9 @@ comments so Renovate can track digest updates. Policy is enforced by
 ## CI (main branch)
 
 - **test-ci.yml** — Python unit/component tests (3.11 + 3.14) via
-  `reusable-test-python.yml`
+  `reusable-test-python.yml`, plus the bats suites under `tests/bats` via
+  `reusable-test-shell.yml` (`test-shell`, no coverage); all three feed `test-gate` and
+  the required `test-suite-coverage` check.
 - **docker-ci.yml** — Multi-stage Docker build, dogfooding quality
   (`reusable-quality-lint.yml` + PR-only `reusable-publish-quality-summary.yml`,
   CI-built image), integration tests, security audit, GHCR publish (main). Ephemeral

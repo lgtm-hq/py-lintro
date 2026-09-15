@@ -142,9 +142,46 @@ jobs:
       pull-requests: write
 
   # Evaluate both upstream jobs into a single result for the required-check gate
+  # Shell tests: the bats suites under tests/bats (build, release-gate, CI
+  # and npm scripts) ran only through the local pre-push gate until #2665;
+  # no workflow invoked bats, so a broken release script reached main with
+  # green CI. Same reusable lgtm-ci runs on itself. No kcov coverage: it
+  # needs apt and extra egress for no gating value yet.
+  test-shell:
+    if: '!cancelled()'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@97cb6ddb0d00eaaa38c208033020abc85f2ff1d0 # v0.73.2
+    with:
+      job-name: 🐚 Shell Tests
+      test-path: tests/bats
+      coverage: false
+      publish-test-summary: false
+      draft-pr-skip: true
+      runner-image: ubuntu-24.04
+      tooling-ref: '97cb6ddb0d00eaaa38c208033020abc85f2ff1d0' # v0.73.2
+      egress-policy: block
+      egress-preset: github-tooling
+      # Replace semantics (see test-compat): the github-tooling baseline plus
+      # nothing else. bats-core and its helper libraries are cloned from
+      # github.com by the reusable's install step.
+      allowed-endpoints-mode: replace
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        results-receiver.actions.githubusercontent.com:443
+    permissions:
+      contents: read
+      # The reusable's summary job declares pull-requests: write statically;
+      # a caller that grants less fails at startup even with the summary off.
+      pull-requests: write
+
   test-gate:
     name: 🚦 Test Gate
-    needs: [test-compat, test-coverage]
+    needs: [test-compat, test-coverage, test-shell]
     if: always() && !cancelled()
     runs-on: ubuntu-24.04
     permissions: {}
@@ -164,6 +201,7 @@ jobs:
         env:
           COMPAT_RESULT: ${{ needs.test-compat.result }}
           COVERAGE_RESULT: ${{ needs.test-coverage.result }}
+          SHELL_RESULT: ${{ needs.test-shell.result }}
         run: |
           if bash scripts/ci/evaluate-test-gate.sh; then
             echo "result=success" >> "$GITHUB_OUTPUT"
