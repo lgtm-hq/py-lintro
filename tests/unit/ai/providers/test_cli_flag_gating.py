@@ -696,10 +696,14 @@ async def test_claude_reports_a_turn_limited_envelope_as_a_turn_limit_error(
         cli_bounds._CURRENT_CALL.reset(token)
 
 
-async def test_claude_renders_no_bound_flags_without_bounds_in_force(
+async def test_claude_renders_tools_and_no_max_turns_without_bounds(
     _claude_on_path: None,
 ) -> None:
-    """A call without bounds is read-only but carries no turn limit."""
+    """A direct provider call without bounds is read-only but turn-unlimited.
+
+    ``--tools`` rides the base argv of every Claude call; only ``--max-turns``
+    comes from the bounds context variable (#2685).
+    """
     calls: list[list[str]] = []
     runner = _runner(
         help_text="  --json-schema <schema>\n  --tools <list>\n  --max-turns <n>\n",

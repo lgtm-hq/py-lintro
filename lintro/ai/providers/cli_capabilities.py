@@ -319,23 +319,37 @@ class CliCapabilityGuard:
             )
 
         contract = self._contract
-        if (
-            contract is not None
-            and contract.fail_closed_flags
-            and await self.help_text() is None
-        ):
+        if contract is not None and contract.fail_closed_flags:
             # A fail-closed flag must be confirmed, not assumed: the provider
-            # refuses every call until the help surface names it, so reporting
-            # the binary live here would be a false green in `lintro doctor`.
-            return incompatible_cli_result(
-                provider=provider_name,
-                message=(
-                    f"{self._binary_name} CLI --help could not be read, so "
-                    f"{', '.join(contract.fail_closed_flags)} cannot be "
-                    "confirmed and every call would be refused"
-                ),
-                hint=contract.upgrade_hint,
+            # refuses every call until the help surface *names* it, so
+            # reporting the binary live here would be a false green in
+            # `lintro doctor`. The check is self-contained: it does not rely
+            # on the flag also being in ``required_flags`` (the contract
+            # enforces that subset separately).
+            help_text = await self.help_text()
+            unconfirmed = (
+                tuple(contract.fail_closed_flags)
+                if help_text is None
+                else unadvertised_flags(
+                    lowered_help=help_text.lower(),
+                    flags=contract.fail_closed_flags,
+                )
             )
+            if unconfirmed:
+                why = (
+                    "--help could not be read"
+                    if help_text is None
+                    else "--help does not name"
+                )
+                return incompatible_cli_result(
+                    provider=provider_name,
+                    message=(
+                        f"{self._binary_name} CLI {why} "
+                        f"{', '.join(unconfirmed)}, so the read-only bound "
+                        "cannot be confirmed and every call would be refused"
+                    ),
+                    hint=contract.upgrade_hint,
+                )
 
         version = await self.binary_version()
         if version is None and await self.help_text() is None:

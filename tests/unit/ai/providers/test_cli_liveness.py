@@ -233,6 +233,51 @@ async def test_unreadable_help_is_incompatible_for_a_fail_closed_flag() -> None:
     assert_that(result.hint).contains("npm install -g")
 
 
+async def test_help_that_does_not_name_a_fail_closed_flag_is_incompatible() -> None:
+    """Readable help is not confirmation: the flag must be named in it (#2685).
+
+    Self-contained check: it holds even if the flag were absent from
+    ``required_flags``, so the read-only bound never depends on a lockstep
+    declaration elsewhere in the contract.
+    """
+    with patch_cli_exec(
+        side_effect=_probe_replies(
+            version="2.5.0",
+            help_text=(
+                "Usage: claude [options]\n  --bare\n  --print\n  --output-format\n"
+                "  --permission-mode\n  --model\n  --append-system-prompt\n"
+                "  --json-schema\n"
+            ),
+        ),
+    ):
+        transport = _FakeTransport(
+            binary_path="/usr/local/bin/claude",
+            binary_name="Claude",
+            install_hint="Install Claude Code.",
+            contract=cli_contract_for(AIProvider.ANTHROPIC),
+        )
+        result = await transport.probe_liveness(provider_name="anthropic")
+
+    assert_that(result.state).is_equal_to(LivenessState.INCOMPATIBLE_CLI)
+    assert_that(result.message).contains("--tools")
+    assert_that(result.hint).contains("npm install -g")
+
+
+def test_a_fail_closed_flag_must_also_be_required() -> None:
+    """A contract cannot declare a fail-closed flag it treats as optional."""
+    with pytest.raises(ValueError, match="--tools"):
+        CliContract(
+            binary="fake",
+            display_name="Fake",
+            upgrade_hint="Upgrade the fake CLI.",
+            required_flags=("--print",),
+            fail_closed_flags=("--tools",),
+        )
+    assert_that(cli_contract_for(AIProvider.ANTHROPIC).fail_closed_flags).is_equal_to(
+        ("--tools",),
+    )
+
+
 async def test_unrunnable_binary_is_not_reported_live() -> None:
     """On PATH is not the same as runnable, and only one of them is liveness.
 

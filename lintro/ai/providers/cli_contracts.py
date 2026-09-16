@@ -122,6 +122,26 @@ class CliContract:
     optional_flags: tuple[OptionalCliFlag, ...] = field(default=())
     fail_closed_flags: tuple[str, ...] = field(default=())
 
+    def __post_init__(self) -> None:
+        """Enforce that every fail-closed flag is also a required flag.
+
+        A fail-closed flag is sent on every call and refused when unconfirmed,
+        which only holds if it is never treated as optional; declaring one
+        outside ``required_flags`` would silently make it help-gated.
+
+        Raises:
+            ValueError: When ``fail_closed_flags`` is not a subset of
+                ``required_flags``.
+        """
+        stray = tuple(
+            flag for flag in self.fail_closed_flags if flag not in self.required_flags
+        )
+        if stray:
+            raise ValueError(
+                f"{self.display_name} CLI contract declares fail-closed flag(s) "
+                f"{', '.join(stray)} outside required_flags",
+            )
+
     @property
     def optional_flag_names(self) -> tuple[str, ...]:
         """Return the bare flag names of every declared optional flag.
