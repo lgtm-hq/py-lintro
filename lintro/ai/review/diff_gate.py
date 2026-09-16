@@ -57,7 +57,7 @@ _HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILI
 #: A diff section that changes a file without any text line: binary content
 #: or file mode only. Such a file can host no line-anchored finding.
 _LINELESS_SECTION = re.compile(
-    r"^(?:Binary files .* differ|GIT binary patch|old mode \d+|new mode \d+)$",
+    r"^(?:Binary files .* differ|GIT binary patch|old mode \d+|new mode \d+)\r?$",
     re.MULTILINE,
 )
 
@@ -146,7 +146,9 @@ def hunks_from_diff(*, diff: str) -> dict[str, FileHunks]:
     The new-file range of a hunk is taken from the lines actually present in
     its body, not from the header's declared count: a chunk cut to the token
     ceiling can end mid-hunk, and a header-trusting range would then accept
-    findings on lines the model never saw. A body stops at the declared
+    findings on lines the model never saw (a hunk cut before its first
+    new-side line yields no range at all; only a declared-zero hunk, a pure
+    deletion, is a point). A body stops at the declared
     count, at the next hunk header or at the next ``diff --git`` header (the
     same path can contribute several sections), so file headers are never
     read as added lines.
@@ -161,8 +163,11 @@ def hunks_from_diff(*, diff: str) -> dict[str, FileHunks]:
         and no such marker) is omitted and left to the path gate.
     """
     result: dict[str, FileHunks] = {}
-    for path, section in split_unified_diff_by_file(unified_diff=diff).items():
+    for raw_path, section in split_unified_diff_by_file(unified_diff=diff).items():
+        # A CRLF diff leaves the header's trailing CR on the path key.
+        path = raw_path.rstrip("\r")
         hunks: list[Hunk] = []
+        saw_header = False
         lines = section.splitlines()
         index = 0
         while index < len(lines):
@@ -170,6 +175,7 @@ def hunks_from_diff(*, diff: str) -> dict[str, FileHunks]:
             index += 1
             if match is None:
                 continue
+            saw_header = True
             start = int(match.group(1))
             declared = int(match.group(2)) if match.group(2) is not None else 1
             new_line = start
@@ -187,9 +193,14 @@ def hunks_from_diff(*, diff: str) -> dict[str, FileHunks]:
                 else:
                     new_line += 1
             present = new_line - start
+            if present == 0 and declared > 0:
+                # The body was cut before any new-side line: the model saw no
+                # line here, so nothing in this hunk can host a finding. The
+                # file stays known so such a finding reads as outside.
+                continue
             end = start + present - 1 if present else start
             hunks.append(Hunk(start=start, end=end, changed_lines=frozenset(changed)))
-        if hunks or _LINELESS_SECTION.search(section):
+        if hunks or saw_header or _LINELESS_SECTION.search(section):
             result[path] = FileHunks(hunks=tuple(hunks))
     return result
 

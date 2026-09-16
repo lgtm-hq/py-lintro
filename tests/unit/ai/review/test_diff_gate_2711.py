@@ -135,6 +135,35 @@ def test_a_truncated_hunk_body_bounds_the_range_to_the_lines_present() -> None:
     assert_that(gate.apply(findings=(_finding(file="x.py", line=50),))).is_empty()
 
 
+def test_a_hunk_cut_before_its_first_new_line_hosts_nothing() -> None:
+    """Declared count 1 with no new-side line present is not a point range."""
+    diff = "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-old\n"
+    hunks = hunks_from_diff(diff=diff)
+    assert_that(hunks).contains_key("x.py")
+    assert_that(hunks["x.py"].hunks).is_empty()
+    gate = DiffGate(hunks=hunks, near_lines=3)
+    assert_that(gate.apply(findings=(_finding(file="x.py", line=1),))).is_empty()
+    assert_that(gate.counts.outside_diff).is_equal_to(1)
+    # A declared-zero hunk (pure deletion) is still a point.
+    deletion = (
+        "diff --git a/y.py b/y.py\n--- a/y.py\n+++ b/y.py\n@@ -3,2 +3,0 @@\n-a\n-b\n"
+    )
+    assert_that(hunks_from_diff(diff=deletion)["y.py"].ranges).is_equal_to(((3, 3),))
+
+
+def test_crlf_lineless_sections_are_still_recognised() -> None:
+    """A binary or mode-only marker followed by CRLF is not bypassed."""
+    diff = (
+        "diff --git a/logo.png b/logo.png\r\n"
+        "Binary files a/logo.png and b/logo.png differ\r\n"
+        "diff --git a/x b/x\r\nold mode 100644\r\nnew mode 100755\r\n"
+    )
+    hunks = hunks_from_diff(diff=diff)
+    assert_that(hunks).contains_key("logo.png", "x")
+    gate = DiffGate(hunks=hunks, near_lines=3)
+    assert_that(gate.apply(findings=(_finding(file="logo.png", line=2),))).is_empty()
+
+
 def test_a_path_with_two_sections_does_not_read_file_headers_as_lines() -> None:
     """The second section's ``+++`` header is never counted as an added line."""
     diff = (
