@@ -313,10 +313,11 @@ def plan_synthesis_prompt(
         diff=diff,
         truncated=digest_truncated or diff_truncated,
         diff_files_included=_count_whole_files(
-            kept=diff, unified_diff=context.unified_diff
+            kept=diff,
+            unified_diff=context.unified_diff,
         ),
         diff_files_total=len(
-            split_unified_diff_by_file(unified_diff=context.unified_diff)
+            split_unified_diff_by_file(unified_diff=context.unified_diff),
         ),
     )
 

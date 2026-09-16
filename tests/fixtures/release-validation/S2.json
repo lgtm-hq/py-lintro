@@ -1,0 +1,57 @@
+{
+  "scenario": "S2",
+  "tag": "v0.160.3rc3",
+  "version": "0.160.3rc3",
+  "npm_version": "0.160.3-rc.3",
+  "run": {
+    "id": 34995758541,
+    "url": "https://github.com/lgtm-hq/py-lintro/actions/runs/34995758541",
+    "attempt": 2,
+    "conclusion": "failure"
+  },
+  "switches": {
+    "RELEASE_VALIDATION_CHANNELS": "true",
+    "RELEASE_FAULT": "fail-build"
+  },
+  "jobs": {
+    "classify-tag": "success",
+    "sbom": "success",
+    "pypi-build": "success",
+    "release-gate": "failure",
+    "pypi-upload": "skipped",
+    "github-release": "skipped",
+    "mirror-token": "skipped",
+    "mirror-release": "skipped",
+    "build-binaries": "success",
+    "homebrew-tap": "skipped",
+    "npm-publish": "skipped",
+    "docker-build": "success",
+    "docker-promote": "skipped",
+    "notify-failure": "success"
+  },
+  "published": {
+    "pypi": null,
+    "github_release": null,
+    "docker": null,
+    "npm": null,
+    "homebrew": null
+  },
+  "issues": {
+    "release_failure": {
+      "url": "https://github.com/lgtm-hq/py-lintro/issues/2682",
+      "state": "closed"
+    },
+    "closing_comment": null
+  },
+  "wall_clock_seconds": null,
+  "recovery": null,
+  "notes": "S2 on v0.160.3rc3 with RELEASE_FAULT=fail-build: release-gate failed at 'Inject fault (fail-build)'; every publish job skipped; PyPI 404, no GitHub release, no 0.160.3rc3 image tag, npm E404. GitHub reports attempt 2: attempt 1 died on an arm64 resolver timeout (infra) and the auto-rerun re-ran it before lgtm-ci 0.74.2's publish protection landed; attempt 2 is the designed gate failure. The notifier filed #2682 (per-channel table, gate row failure) and the owner closed it on 2026-09-15T18:30:28Z under the prerelease exemption: a pre-publish failure is not an incident.",
+  "attempts": [
+    {
+      "run_id": 34995758541,
+      "attempt": 1,
+      "conclusion": "failure",
+      "note": "Infra flake (arm64 resolver timeout) re-run by the pre-0.74.2 auto-rerun; the recorded attempt is 2."
+    }
+  ]
+}
