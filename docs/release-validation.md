@@ -64,9 +64,9 @@ version of the validation packages is the mapped form.
   `0.160.3rc2` (S1), `0.160.3rc3` (S2) and `0.160.3rc4` (S3; S4 reuses it). One PR and
   one tag per proving scenario; a candidate that fails for a reason outside its scenario
   is re-cut, never retried by hand. The automatic re-runs the pre-0.74.2 auto-rerun made
-  (rc1's second attempt, rc3's first) are not retries of a candidate: they are kept,
-  with the superseded candidate's run ids, in the fixture's `attempts[]` so they stay
-  meaningful.
+  (rc1's second attempt; rc3's second, which is the recorded one) are not retries of a
+  candidate: they are kept, with the superseded candidate's run ids, in the fixture's
+  `attempts[]` so they stay meaningful.
 - Approval gates still require a human on the `pypi` environment (`pypi-upload`) and the
   `npm` environment (the npm publish job) for each candidate that reaches them: budget
   two `pypi` approvals in total (S1 and S3; S2 fails before upload) and one `npm`
