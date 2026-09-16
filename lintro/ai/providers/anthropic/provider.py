@@ -45,7 +45,7 @@ from lintro.ai.providers.base import (
     ProviderCapabilities,
 )
 from lintro.ai.providers.claude_auth import should_send_bare
-from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_contracts import cli_contract_for, flag_named_in
 from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
@@ -517,13 +517,22 @@ class AnthropicProvider(ApiStreamingProvider):
         # Fail closed on the read-only bound (#2685): ``--tools`` is a
         # required contract flag, and a binary that cannot restrict its tool
         # surface is refused before any session starts rather than reviewing
-        # prompt-injectable repository content with writable tools.
-        if not await self._cli.supports_flag("--tools"):
+        # prompt-injectable repository content with writable tools. This
+        # reads the help text directly instead of ``supports_flag``, whose
+        # optimistic answer on an unreadable ``--help`` is right for optional
+        # flags and wrong for a security bound: no help, no session.
+        help_text = await self._cli.help_text()
+        if help_text is None or not flag_named_in(help_text.lower(), "--tools"):
             contract = self._cli.contract
             hint = contract.upgrade_hint if contract is not None else ""
+            why = (
+                "its --help could not be read"
+                if help_text is None
+                else "it does not offer --tools"
+            )
             raise AINotAvailableError(
-                "Claude CLI does not offer --tools, so a review session cannot "
-                f"be restricted to read-only tools; refusing to start it. {hint}",
+                f"Claude CLI cannot be restricted to read-only tools ({why}), "
+                f"so no review session is started. {hint}",
             )
         # Prompt rides on stdin (#1967): a single argv element on Linux is
         # capped at MAX_ARG_STRLEN (128 KiB), so large review diffs must not

@@ -639,6 +639,40 @@ async def test_claude_refuses_a_binary_that_cannot_restrict_tools(
         cli_bounds._CURRENT_CALL.reset(token)
 
 
+async def test_claude_refuses_when_help_cannot_be_read(
+    _claude_on_path: None,
+) -> None:
+    """An unreadable --help cannot confirm --tools, so the CLI is refused.
+
+    ``supports_flag`` is optimistic on a failed probe, which suits optional
+    flags; the read-only bound must not inherit that optimism (#2685).
+    """
+    from lintro.ai.exceptions import AINotAvailableError
+
+    calls: list[list[str]] = []
+
+    def _run(
+        cmd: list[str],
+        *args: object,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "2.1.273", "")
+        if "--help" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "help crashed")
+        return subprocess.CompletedProcess(cmd, 0, _CLAUDE_COMPLETION, "")
+
+    provider = AnthropicProvider(transport=AITransport.CLI)
+    with (
+        patch_cli_exec(side_effect=_run),
+        pytest.raises(AINotAvailableError) as info,
+    ):
+        await provider.complete("Review this", cli_schema=_SCHEMA)
+    assert_that(str(info.value)).contains("could not be read", "npm install -g")
+    assert_that(_completion_calls(calls)).is_empty()
+
+
 async def test_claude_reports_a_turn_limited_envelope_as_a_turn_limit_error(
     _claude_on_path: None,
 ) -> None:
