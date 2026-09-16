@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from lintro.ai.json_response import parse_review_response_payload
+from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.sensitivity import filter_findings_by_policy
@@ -63,6 +64,8 @@ class ChunkReviewPartial:
         provider_seconds: Wall-clock seconds of the chunk's main provider
             call, for the per-chunk timings (lintro-ops #37).
         turns: Agent turns the transport reported for that call, or ``None``.
+        diff_gate: What the diff-bounded gate did to this chunk's findings
+            (#2711): outside drops, re-anchors, unanchored keeps.
         truncated: True when the chunk's diff was cut to the context ceiling,
             so the model saw only a prefix of its file. The file stays in
             ``files`` for the synthesis digest and is credited as covered at
@@ -84,6 +87,7 @@ class ChunkReviewPartial:
     provider_seconds: float = 0.0
     turns: int | None = None
     truncated: bool = False
+    diff_gate: DiffGateCounts = field(default_factory=DiffGateCounts)
 
 
 def truncated_paths(*, partials: Iterable[ChunkReviewPartial]) -> set[str]:

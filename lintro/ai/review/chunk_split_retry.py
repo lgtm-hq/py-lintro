@@ -35,6 +35,7 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.review.cli_limits import is_cli_output_exhaustion
 from lintro.ai.review.context import split_unified_diff_by_file
+from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
@@ -137,6 +138,7 @@ def merge_half_partials(
         coverage_degradations=tuple(
             item for partial in ordered for item in partial.coverage_degradations
         ),
+        diff_gate=sum((partial.diff_gate for partial in ordered), DiffGateCounts()),
     )
 
 
@@ -164,7 +166,12 @@ async def _parse_call(
         use_one_shot=request.use_one_shot,
         elapsed=call.elapsed,
     )
-    partial = payload_to_partial(response=response, payload=payload)
+    partial = payload_to_partial(
+        response=response,
+        payload=payload,
+        chunk=request.chunk,
+        near_lines=request.ai_config.review_diff_gate_lines,
+    )
     # The files this answer actually covered (a half carries only its own),
     # and the call's own wall time for the per-chunk timings.
     return replace(

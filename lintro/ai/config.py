@@ -436,6 +436,17 @@ class AIConfig(BaseModel):
             "over it by construction (#2702)."
         ),
     )
+    review_diff_gate_lines: int = Field(
+        default=3,
+        ge=0,
+        description=(
+            "Diff-bounded finding gate (#2711): a finding whose line lies "
+            "outside every hunk of the chunk that produced it is dropped, "
+            "unless it is within this many lines of a hunk, in which case it "
+            "is re-anchored to the nearest changed line. 0 re-anchors "
+            "nothing. Counts are reported as findings_dropped_by_reason."
+        ),
+    )
     cli_max_diff_tokens: int | None = Field(
         default=None,
         ge=1_000,
@@ -862,6 +873,7 @@ class AIConfig(BaseModel):
             fix_search_radius=self.fix_search_radius,
             review_chunk_diff_tokens=self.review_chunk_diff_tokens,
             review_synthesis_diff_tokens=self.review_synthesis_diff_tokens,
+            review_diff_gate_lines=self.review_diff_gate_lines,
             cli_max_diff_bytes=self.cli_max_diff_bytes,
         )
 

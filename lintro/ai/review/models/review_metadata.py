@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
     SYNTHESIS_DEGRADATION_REASONS,
@@ -70,6 +71,8 @@ class ReviewMetadata:
             ``provider`` (chunk + custom-agent provider calls), and
             ``parse_merge``. Kept as a flat mapping for backward
             compatibility; ``timings`` carries the full breakdown.
+        diff_gate (DiffGateCounts): What the diff-bounded finding gate did
+            across every chunk (#2711): outside drops, re-anchors, unanchored.
         timings (ReviewTimings | None): Full per-phase timing breakdown
             (ordered spans plus per-chunk queued/in-flight detail, #2148).
             ``None`` on legacy records and merge-only placeholders.
@@ -129,6 +132,7 @@ class ReviewMetadata:
     max_cost_usd: float | None = None
     max_cost_usd_source: str = ""
     phase_timings: dict[str, float] = field(default_factory=dict)
+    diff_gate: DiffGateCounts = field(default_factory=DiffGateCounts)
     timings: ReviewTimings | None = None
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0

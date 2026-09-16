@@ -29,6 +29,12 @@
     "max_cost_usd": null,
     "max_cost_usd_source": "",
     "phase_timings": {},
+    "diff_gate": {
+      "outside_diff": 0,
+      "reanchored": 0,
+      "unanchored": 0,
+      "occurrences_dropped": 0
+    },
     "timings": null,
     "custom_agents_run": 0,
     "custom_agents_skipped": 0,

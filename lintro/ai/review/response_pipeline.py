@@ -38,6 +38,12 @@ from lintro.ai.prompts.review import (
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review import provider_call
 from lintro.ai.review.confirmation_filter import drop_confirmation_findings
+from lintro.ai.review.diff_gate import (
+    DEFAULT_NEAR_LINES,
+    DiffGate,
+    DiffGateCounts,
+    hunks_from_diff,
+)
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
@@ -391,6 +397,8 @@ def payload_to_partial(
     *,
     response: AIResponse,
     payload: dict[str, Any],
+    chunk: ReviewChunk | None = None,
+    near_lines: int = DEFAULT_NEAR_LINES,
 ) -> ChunkReviewPartial:
     """Convert a parsed chunk payload to a chunk partial result.
 
@@ -400,17 +408,30 @@ def payload_to_partial(
     summary, checklist or per-file overview degrades to nothing rather than
     failing the chunk.
 
-    Findings whose body says they are not a defect are dropped here (#2430).
+    Findings whose body says they are not a defect are dropped here (#2430),
+    and, when the chunk is known, findings outside its hunks are dropped or
+    re-anchored by the diff-bounded gate (#2711) with the counts recorded on
+    the partial.
 
     Args:
         response: Provider response the payload was parsed from.
         payload: Parsed model response for one chunk.
+        chunk: The chunk the payload answers; its diff bounds the findings.
+        near_lines: Re-anchor distance for the diff-bounded gate.
 
     Returns:
         The chunk partial result.
     """
+    gate = (
+        DiffGate(hunks=hunks_from_diff(diff=chunk.diff), near_lines=near_lines)
+        if chunk is not None
+        else None
+    )
     findings = drop_confirmation_findings(
-        findings=parse_findings(raw_findings=payload.get("findings", [])),
+        findings=parse_findings(
+            raw_findings=payload.get("findings", []),
+            diff_gate=gate,
+        ),
     )
     flagged_files = parse_flagged_files(raw_flags=payload.get("flagged_files"))
     return ChunkReviewPartial(
@@ -420,4 +441,5 @@ def payload_to_partial(
         cost_estimate=response.cost_estimate,
         turns=response.turns,
         flagged_files=flagged_files,
+        diff_gate=gate.counts if gate is not None else DiffGateCounts(),
     )

@@ -185,6 +185,9 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     # block (#2148): the breakdown is run instrumentation, not review
     # content, and consumers should not have to dig for it.
     metadata.pop("timings", None)
+    # #2711: the diff-bounded gate's counts are emitted as explicit top-level
+    # keys (below), not as a nested dataclass dict.
+    metadata.pop("diff_gate", None)
     # #2269: same treatment for the synthesis block. It is hoisted to the top
     # level and emitted only when the optional pass actually ran, so a default
     # (disabled) run's payload is byte-identical to one from before the pass
@@ -228,6 +231,13 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
             findings=result.findings,
         ),
         "output_exhaustion_retried": result.metadata.output_exhaustion_retried,
+        # #2711: findings the diff-bounded gate dropped or moved are never
+        # silent; ``outside_diff`` is the count the issue asked for.
+        "findings_dropped_by_reason": {
+            "outside_diff": result.metadata.diff_gate.outside_diff,
+        },
+        "findings_reanchored": result.metadata.diff_gate.reanchored,
+        "findings_unanchored": result.metadata.diff_gate.unanchored,
     }
     if result.metadata.synthesis is not None:
         payload["synthesis"] = result.metadata.synthesis.to_dict()
