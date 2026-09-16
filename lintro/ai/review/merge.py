@@ -64,8 +64,6 @@ class ChunkReviewPartial:
         provider_seconds: Wall-clock seconds of the chunk's main provider
             call, for the per-chunk timings (lintro-ops #37).
         turns: Agent turns the transport reported for that call, or ``None``.
-        diff_gate: What the diff-bounded gate did to this chunk's findings
-            (#2711): outside drops, re-anchors, unanchored keeps.
         truncated: True when the chunk's diff was cut to the context ceiling,
             so the model saw only a prefix of its file. The file stays in
             ``files`` for the synthesis digest and is credited as covered at
@@ -73,6 +71,8 @@ class ChunkReviewPartial:
             stamped on its coverage record (see :func:`truncated_paths`) and
             ``findings_coverage_complete`` stays false until the file's diff
             changes.
+        diff_gate: What the diff-bounded gate did to this chunk's findings
+            (#2711): outside drops, re-anchors, unanchored keeps.
     """
 
     findings: tuple[ReviewFinding, ...]
