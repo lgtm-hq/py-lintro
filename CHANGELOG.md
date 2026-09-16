@@ -25,8 +25,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **ai/review**: parallel findings-only chunks, retiring the per-call findings cap
-  (#2683) (cdff8f2)
 - **ai/review**: review every transport in small parallel file-group chunks
   (`ai.review_chunk_diff_tokens`, default 7000) with a findings-only chunk contract; the
   synthesis pass now runs by default on every round and writes the summary, walkthrough
@@ -37,7 +35,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   milestone 0 step 0.5)
 - `lintro review` reviews a single file that exceeds the per-chunk target whole, up to
   the context-window remainder, and records a `diff_truncated` coverage degradation when
-  the file had to be cut; the synthesis JSON block carries `narrative_missing`.
+  the file had to be cut. The synthesis JSON block carries `narrative_missing` when the
+  synthesis answer lacks its required summary or verdict.
 - **ai/review**: `merged_duplicates` on a finding in `lintro review --output json`,
   naming each finding a duplicate merge folded into it so the lifecycle ledger keeps
   their records open. Present only on a finding a merge actually folded into, elided
@@ -108,8 +107,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: stop counting synthesis truncation as a partial review (#2705)
-  (77f0dde)
 - **ai/review**: stop classifying 4xx provider prose as output exhaustion (#2701)
   (a1704f5)
 - **ai/review**: a truncated or failed synthesis pass no longer makes a review
