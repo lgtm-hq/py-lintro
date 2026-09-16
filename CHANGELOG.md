@@ -25,8 +25,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **ai/review**: bound each CLI review call to a turn limit and read-only tools (#2709)
-  (090bc57)
 - **ai/review**: every CLI call is bounded per provider: Claude gets
   `--tools Read,Grep,Glob` (a required contract flag, so a binary without it is refused
   before any session) and `--max-turns N` (accepted but unadvertised, so sent with the
