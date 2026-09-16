@@ -67,6 +67,15 @@ class AIAuthenticationError(AIProviderError):
     """
 
 
+class AITurnLimitError(AIProviderError):
+    """The CLI agent hit its per-call turn limit before answering (#2685).
+
+    The same prompt would spend the same turns again, so the generic
+    transient retry does not help; the review's schema-recovery retry runs
+    once as usual, and a second failure degrades the chunk's coverage.
+    """
+
+
 class AIRateLimitError(AIProviderError):
     """Rate limit exceeded on the AI provider.
 

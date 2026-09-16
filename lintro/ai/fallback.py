@@ -12,6 +12,7 @@ from typing import TypeVar
 
 from loguru import logger
 
+from lintro.ai.cli_bounds import CliCallOptions
 from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
@@ -133,6 +134,7 @@ async def complete_with_fallback(
     repo_root: str | None = None,
     use_one_shot: bool = False,
     cli_schema: CliSchemaRequest | None = None,
+    cli_options: CliCallOptions | None = None,
 ) -> AIResponse:
     """Call ``provider.complete()`` with automatic model fallback.
 
@@ -153,6 +155,7 @@ async def complete_with_fallback(
         repo_root: Git repository root forwarded to the provider.
         use_one_shot: When True, skip durable session resume on the provider.
         cli_schema: Optional native CLI JSON schema request.
+        cli_options: Per-call CLI bounds forwarded to the provider (#2685).
 
     Returns:
         The first successful ``AIResponse``.
@@ -186,6 +189,10 @@ async def complete_with_fallback(
             use_one_shot=use_one_shot,
             model=model,
             cli_schema=cli_schema,
+            # Only a CLI-transport call carries bounds; keeping the keyword
+            # unset otherwise leaves API providers and test doubles that
+            # predate it untouched (#2685).
+            **({"cli_options": cli_options} if cli_options is not None else {}),
         )
 
     return await _with_fallback(

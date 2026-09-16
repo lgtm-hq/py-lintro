@@ -17,7 +17,7 @@ from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_auth_probe import CliAuthProbe
 from lintro.ai.providers.openai.cli_contract import OPENAI_CLI_CONTRACT
-from lintro.ai.providers.protocol import ProviderMetadata
+from lintro.ai.providers.protocol import CliBounds, ProviderMetadata
 
 __all__ = ["OPENAI_CLI_BINARY", "OPENAI_METADATA"]
 
@@ -46,6 +46,8 @@ OPENAI_METADATA = ProviderMetadata(
     cli_binary=OPENAI_CLI_BINARY,
     cli_contract_id=AIProvider.OPENAI.value,
     cli_contract=OPENAI_CLI_CONTRACT,
+    # codex exec already runs read-only; it has no per-call turn limit (#2685).
+    cli_bounds=CliBounds(read_only_args=("--sandbox", "read-only")),
     cli_install_hint="Install Codex CLI: https://developers.openai.com/codex/cli",
     cli_auth_probe=CliAuthProbe(
         # `codex` reads its own CODEX_API_KEY and its login writes

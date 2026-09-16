@@ -10,7 +10,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from lintro.ai.budget import CostBudget
+from lintro.ai.cli_bounds import CliCallOptions, resolve_max_turns
 from lintro.ai.cost import estimate_cost_with_floor
+from lintro.ai.enums.ai_call_kind import AICallKind
+from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.response import AIResponse
@@ -41,6 +44,7 @@ async def call_ai(
     use_one_shot: bool = False,
     cli_schema: CliSchemaRequest | None = None,
     timeout: float | None = None,
+    call_kind: AICallKind = AICallKind.REVIEW,
 ) -> AIResponse:
     """Retry, fallback, and budget tracking for all AI products.
 
@@ -54,6 +58,8 @@ async def call_ai(
         repo_root: Optional repository root for CLI providers.
         use_one_shot: When True, avoid durable CLI sessions.
         cli_schema: Optional native CLI JSON schema request.
+        call_kind: What the call is for; sets the CLI turn limit unless
+            ``ai.transports.cli.max_turns`` overrides it (#2685).
         timeout: Per-call timeout override in seconds; defaults to
             ``ai_config.api_timeout``. Callers making a supplementary call
             inside an existing timeout budget pass what remains of it so the
@@ -63,6 +69,18 @@ async def call_ai(
         The provider response with usage metadata.
     """
     tokens = max_tokens if max_tokens is not None else ai_config.max_tokens
+    # Bounds are a CLI-transport concern: an API call has no agent loop to
+    # limit, so it carries none and the provider keyword stays unset.
+    cli_options = (
+        CliCallOptions(
+            max_turns=resolve_max_turns(
+                call_kind=call_kind,
+                configured=ai_config.transports.cli.max_turns,
+            ),
+        )
+        if ai_config.transport == AITransport.CLI
+        else None
+    )
     effective_timeout = timeout if timeout is not None else ai_config.api_timeout
 
     async def _call_once() -> AIResponse:
@@ -81,6 +99,7 @@ async def call_ai(
             repo_root=repo_root,
             use_one_shot=use_one_shot,
             cli_schema=cli_schema,
+            cli_options=cli_options,
         )
 
     async def _budgeted_call() -> AIResponse:

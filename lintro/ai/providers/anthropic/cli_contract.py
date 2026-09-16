@@ -49,5 +49,13 @@ ANTHROPIC_CLI_CONTRACT = CliContract(
             flag="--resume",
             purpose="reuses one CLI session across review turns",
         ),
+        OptionalCliFlag(
+            flag="--tools",
+            purpose="restricts the agent to the read-only built-in tools",
+        ),
+        OptionalCliFlag(
+            flag="--max-turns",
+            purpose="bounds the agent loop per call",
+        ),
     ),
 )

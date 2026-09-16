@@ -17,6 +17,7 @@ from loguru import logger
 from lintro.ai.cli_schemas import cli_schema_for_summary
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.invoke import call_ai
 from lintro.ai.json_response import parse_summary_response_payload
 from lintro.ai.models import AISummary
@@ -272,6 +273,7 @@ async def _call_summary_provider(
             max_tokens=max_tokens,
             repo_root=str(workspace_root) if workspace_root is not None else None,
             cli_schema=cli_schema_for_summary(transport=ai_config.transport),
+            call_kind=AICallKind.SUMMARY,
         )
         return _parse_summary_response(
             response.content,

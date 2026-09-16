@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "PROVIDER_PLUGIN_API_VERSION",
+    "CliBounds",
     "ProviderMetadata",
     "ProviderPlugin",
 ]
@@ -70,6 +71,33 @@ PROVIDER_PLUGIN_API_VERSION: int = 2
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
+class CliBounds:
+    """How a provider's CLI is bounded per call (#2685).
+
+    Attributes:
+        read_only_args: Argv the provider sends to restrict the agent to a
+            read-only tool surface. Declared here so the docs and the tests can
+            state per provider what is bounded and how.
+        read_only_in_base_argv: True when the provider already sends
+            ``read_only_args`` unconditionally (codex ``--sandbox read-only``,
+            cursor ``--mode ask``); False when they ride as help-gated
+            optional flags (claude ``--tools``).
+        max_turns_flag: The flag that carries the per-call turn limit, or
+            ``None`` when the binary has no such flag; the limit is then
+            documented as unsupported and ignored.
+    """
+
+    read_only_args: tuple[str, ...] = ()
+    read_only_in_base_argv: bool = True
+    max_turns_flag: str | None = None
+
+    @property
+    def max_turns_supported(self) -> bool:
+        """Return whether the binary accepts a per-call turn limit."""
+        return self.max_turns_flag is not None
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderMetadata:
     """Static description of one AI provider.
 
@@ -143,6 +171,7 @@ class ProviderMetadata:
     cli_install_hint: str | None = None
     cli_auth_probe: CliAuthProbe | None = None
     pricing: Mapping[str, ModelPricing] = field(default_factory=dict)
+    cli_bounds: CliBounds | None = None
 
     def __post_init__(self) -> None:
         """Store *pricing* behind a read-only view and check the transports.

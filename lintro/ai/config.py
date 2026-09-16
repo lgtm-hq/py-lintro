@@ -103,6 +103,17 @@ class CliTransportProfile(BaseModel):
             "enforce spend on the CLI path."
         ),
     )
+    max_turns: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Agent turn limit per CLI call. Unset means the per-kind default: "
+            "3 for review-type calls (chunk review and its schema retry, the "
+            "depth passes, synthesis, custom agents), 1 for summary and fix. "
+            "An explicit value applies to every kind. Providers whose binary "
+            "has no turn flag ignore it (#2685)."
+        ),
+    )
 
 
 class AITransportProfiles(BaseModel):

@@ -5,6 +5,7 @@ they are consumed by the core SARIF renderer. They are re-exported here for
 backwards compatibility with existing ``lintro.ai.enums`` importers.
 """
 
+from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.enums.cli_bare_mode import CliBareMode
 from lintro.ai.enums.config_source import ConfigSource
@@ -14,6 +15,7 @@ from lintro.enums.confidence_level import ConfidenceLevel
 from lintro.enums.risk_level import RiskLevel
 
 __all__ = [
+    "AICallKind",
     "AITransport",
     "CliBareMode",
     "ConfidenceLevel",

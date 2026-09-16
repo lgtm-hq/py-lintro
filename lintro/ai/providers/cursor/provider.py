@@ -20,6 +20,7 @@ from typing import Any
 
 from loguru import logger
 
+from lintro.ai.cli_bounds import CliCallOptions
 from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
@@ -289,6 +290,7 @@ class CursorProvider(BaseAIProvider):
         use_one_shot: bool = False,
         model: str | None = None,
         cli_schema: CliSchemaRequest | None = None,
+        cli_options: CliCallOptions | None = None,
     ) -> AIResponse:
         """Run a completion via ``agent --print``.
 
@@ -304,13 +306,15 @@ class CursorProvider(BaseAIProvider):
             use_one_shot: When True, do not resume an existing CLI session.
             model: Optional per-call model override.
             cli_schema: Unused; accepted for provider API parity.
+            cli_options: Unused: ``agent`` has no turn flag and ``--mode ask``
+                is already read-only (#2685).
 
         Returns:
             Parsed model response with usage metadata.
         """
         effective_model = model or self._model
         effective_max = min(max_tokens, self._max_tokens)
-        del cli_schema
+        del cli_schema, cli_options
         combined_prompt = prompt
         if system:
             combined_prompt = f"{system}\n\n---\n\n{prompt}"

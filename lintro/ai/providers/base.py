@@ -36,6 +36,7 @@ from lintro.ai.providers.response import AIResponse
 from lintro.ai.providers.stream_result import AIStreamResult
 
 if TYPE_CHECKING:
+    from lintro.ai.cli_bounds import CliCallOptions
     from lintro.ai.json_response import CliSchemaRequest
     from lintro.ai.providers.cli_transport import CliTransport
 
@@ -298,6 +299,7 @@ class BaseAIProvider(ABC):
         use_one_shot: bool = False,
         model: str | None = None,
         cli_schema: CliSchemaRequest | None = None,
+        cli_options: CliCallOptions | None = None,
     ) -> AIResponse:
         """Generate a completion from the AI model.
 
@@ -311,6 +313,8 @@ class BaseAIProvider(ABC):
             model: Optional per-call model override without mutating
                 ``model_name``.
             cli_schema: Optional native CLI JSON schema request.
+            cli_options: Per-call CLI bounds (turn limit); API transports and
+                CLIs without a turn flag ignore it (#2685).
 
         Returns:
             AIResponse: The model's response with usage metadata.
