@@ -1,31 +1,4 @@
 {
-  "summary": {
-    "headline": "ONE sentence — what this change does",
-    "walkthrough": [
-      {
-        "text": "One sentence about a coherent part of the change (3-6 bullets total)",
-        "finding_ref": "file:line of the related finding, or empty string"
-      }
-    ]
-  },
-  "verdict_reasoning": {
-    "deciding_factor": "One short paragraph — the single issue that decides mergeability, or why nothing blocks the merge",
-    "failure_mechanism": "One short paragraph — how that issue fails in production; empty string when nothing blocks",
-    "files_needing_attention": ["path/to/file"]
-  },
-  "file_assessments": [
-    {
-      "file": "path/to/file",
-      "overview": "One sentence — what changed in this file"
-    }
-  ],
-  "checklist": [
-    {
-      "id": 1,
-      "answer": "yes|no",
-      "evidence": "One sentence — file:line or logic trace"
-    }
-  ],
   "findings": [
     {
       "kind": "finding|question",

@@ -16,80 +16,22 @@ __all__ = [
     "FIX_CLI_SCHEMA",
     "REVIEW_CLI_SCHEMA",
     "SUMMARY_CLI_SCHEMA",
+    "SYNTHESIS_CLI_SCHEMA",
     "cli_schema_for_fix",
     "cli_schema_for_review",
     "cli_schema_for_summary",
+    "cli_schema_for_synthesis",
 ]
 
 REVIEW_CLI_SCHEMA: dict[str, object] = {
     "type": "object",
-    # summary is intentionally not required at the root: parse_review_summary
-    # already degrades to None (TL;DR-only rendering) when it is absent, so a
-    # CLI response with only findings and checklist must still validate.
-    "required": ["checklist", "findings"],
+    # Findings-only chunk contract (lintro-ops milestone 0, decision A): a
+    # chunk answers with its findings and its re-read flags. The summary,
+    # walkthrough and verdict reasoning are written once per round by the
+    # synthesis pass (:data:`SYNTHESIS_CLI_SCHEMA`), never per chunk.
+    "required": ["findings"],
     "additionalProperties": False,
     "properties": {
-        # The narrative fields (#1907) are optional: the schema stays
-        # satisfiable by a model that only produces findings, and the parsers
-        # degrade to TL;DR-only rendering when they are absent.
-        "summary": {
-            "type": "object",
-            "required": ["headline"],
-            "additionalProperties": False,
-            "properties": {
-                "headline": {"type": "string"},
-                "walkthrough": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "required": ["text"],
-                        "additionalProperties": False,
-                        "properties": {
-                            "text": {"type": "string"},
-                            "finding_ref": {"type": "string"},
-                        },
-                    },
-                },
-            },
-        },
-        "verdict_reasoning": {
-            "type": "object",
-            "required": ["deciding_factor"],
-            "additionalProperties": False,
-            "properties": {
-                "deciding_factor": {"type": "string"},
-                "failure_mechanism": {"type": "string"},
-                "files_needing_attention": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                },
-            },
-        },
-        "file_assessments": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["file", "overview"],
-                "additionalProperties": False,
-                "properties": {
-                    "file": {"type": "string"},
-                    "overview": {"type": "string"},
-                },
-            },
-        },
-        "checklist": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "required": ["id", "answer", "evidence"],
-                "additionalProperties": False,
-                "properties": {
-                    "id": {"type": "integer"},
-                    "answer": {"type": "string", "enum": ["yes", "no"]},
-                    "evidence": {"type": "string"},
-                },
-            },
-        },
         "findings": {
             "type": "array",
             "items": {
@@ -282,11 +224,115 @@ FIX_BATCH_CLI_SCHEMA: dict[str, object] = {
 }
 
 
+SYNTHESIS_CLI_SCHEMA: dict[str, object] = {
+    "type": "object",
+    # The round's synthesis envelope (lintro-ops milestone 0): the narrative
+    # the chunks no longer write, the duplicate merges, and the cross-file
+    # findings. The narrative is the pass's primary output now that chunks
+    # write none, so ``summary`` and ``verdict_reasoning`` are required;
+    # ``duplicates`` stays optional (an empty list is the common answer).
+    "required": ["summary", "verdict_reasoning", "findings"],
+    "additionalProperties": False,
+    "properties": {
+        "summary": {
+            "type": "object",
+            "required": ["headline"],
+            "additionalProperties": False,
+            "properties": {
+                "headline": {"type": "string"},
+                "walkthrough": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "required": ["text"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "text": {"type": "string"},
+                            "finding_ref": {"type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+        "verdict_reasoning": {
+            "type": "object",
+            "required": ["deciding_factor"],
+            "additionalProperties": False,
+            "properties": {
+                "deciding_factor": {"type": "string"},
+                "failure_mechanism": {"type": "string"},
+                "files_needing_attention": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+        },
+        "duplicates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["keep", "drop"],
+                "additionalProperties": False,
+                "properties": {
+                    # Digest finding ids (``F3``); a ``file:line`` is accepted
+                    # by the parser only when it names exactly one finding.
+                    "keep": {"type": "string"},
+                    "drop": {"type": "array", "items": {"type": "string"}},
+                },
+            },
+        },
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": [
+                    "severity",
+                    "category",
+                    "file",
+                    "line",
+                    "title",
+                    "description",
+                    "cause",
+                    "fix",
+                    "confidence",
+                ],
+                "additionalProperties": False,
+                "properties": {
+                    "severity": {"type": "string", "enum": ["P1", "P2", "P3"]},
+                    "category": {"type": "string"},
+                    "file": {"type": "string"},
+                    "line": {"type": "integer"},
+                    "title": {"type": "string"},
+                    "description": {"type": "string"},
+                    "cause": {"type": "string"},
+                    "fix": {"type": "string"},
+                    "failure_scenario": {"type": "string"},
+                    "confidence": {
+                        "type": "string",
+                        "enum": ["high", "medium", "low"],
+                    },
+                },
+            },
+        },
+    },
+}
+
+
 def cli_schema_for_review(*, transport: AITransport | None) -> CliSchemaRequest | None:
     """Return native review schema args for CLI transport."""
     if transport != AITransport.CLI:
         return None
     return CliSchemaRequest(schema=REVIEW_CLI_SCHEMA, schema_name="lintro_review")
+
+
+def cli_schema_for_synthesis(
+    *,
+    transport: AITransport | None,
+) -> CliSchemaRequest | None:
+    """Return native synthesis schema args for CLI transport."""
+    if transport != AITransport.CLI:
+        return None
+    return CliSchemaRequest(schema=SYNTHESIS_CLI_SCHEMA, schema_name="lintro_synthesis")
 
 
 def cli_schema_for_summary(*, transport: AITransport | None) -> CliSchemaRequest | None:

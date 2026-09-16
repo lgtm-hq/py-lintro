@@ -118,29 +118,31 @@ class ReviewSensitivityOverrides(BaseModel):
 
 
 class ReviewSynthesisConfig(BaseModel):
-    """Cross-chunk synthesis pass configuration (#2269).
+    """The round's synthesis pass (#2269, lintro-ops milestone 0).
 
-    Each review chunk is reviewed in isolation, so a bug that only exists in
-    the combination of two files split across chunks is invisible to every
-    chunk. The synthesis pass is one extra provider call, made after the chunk
-    findings are merged, that sees the whole changed-file list, a compact
-    per-chunk summary, and as much of the whole-PR diff as its token budget
-    allows, and is asked for cross-file inconsistencies only.
+    Every review chunk reports findings only and sees only its own files'
+    diff. The synthesis pass is the one extra provider call per round, made
+    after the chunk findings are merged, that sees the whole changed-file
+    list, a digest of every reported finding, and as much of the whole-PR
+    diff as its token budget allows. It writes the round's summary and
+    verdict reasoning, merges findings that share a root cause, and reports
+    inconsistencies between files reviewed in different chunks.
 
-    Off by default: it adds a call per round, and the cost and wall-clock
-    delta is measured through the #2148 phase timings and the #2147 matrix
-    before it is switched on.
+    On by default: without it a round has findings but no summary. A failure
+    is never fatal — the findings stand and the surfaces fall back to their
+    findings-only rendering — and it is recorded as ``synthesis_failed``.
     """
 
     model_config = ConfigDict(frozen=False, extra="forbid")
 
     enabled: bool = Field(
-        default=False,
+        default=True,
         description=(
-            "Run one extra whole-PR pass after the chunk findings are merged, "
-            "asked only for inconsistencies between files reviewed in "
-            "different chunks. Costs one additional provider call per round "
-            "and only runs when the review used more than one chunk."
+            "Run the per-round synthesis pass after the chunk findings are "
+            "merged: it writes the summary, walkthrough and verdict "
+            "reasoning, merges duplicate findings and reports cross-file "
+            "inconsistencies. One provider call per round, on every run "
+            "including single-chunk ones. Disable to get findings only."
         ),
     )
     max_findings: int = Field(

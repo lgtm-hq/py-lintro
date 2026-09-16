@@ -237,6 +237,7 @@ def _run(
     strictness: ReviewStrictness | None = None,
     synthesis_diff_budget: int | None = None,
     synthesis_system_prompts: list[str] | None = None,
+    prior_state: ReviewState | None = None,
 ) -> Any:
     """Run a review with the chunk and synthesis provider calls mocked apart.
 
@@ -257,6 +258,8 @@ def _run(
             budget can still exercise the truncation path end to end.
         synthesis_system_prompts: Optional sink recording the system prompt
             each synthesis call was made with.
+        prior_state: Optional prior artifact state, so a test can run a
+            later round against carried coverage.
 
     Returns:
         The review result.
@@ -284,11 +287,18 @@ def _run(
             raise synthesis_error
         return _response(content=synthesis_content or _synthesis_payload())
 
-    def _forced_plan(*, context: Any, summaries: Any, diff_budget: int) -> Any:
+    def _forced_plan(
+        *,
+        context: Any,
+        summaries: Any,
+        diff_budget: int,
+        finding_ids: Any = None,
+    ) -> Any:
         return plan_synthesis_prompt(
             context=context,
             summaries=summaries,
             diff_budget=synthesis_diff_budget or diff_budget,
+            finding_ids=finding_ids,
         )
 
     with ExitStack() as stack:
@@ -333,6 +343,7 @@ def _run(
                     else resolve_sensitivity_policy(strictness=strictness)
                 ),
                 synthesis=synthesis,
+                prior_state=prior_state,
             ),
         )
 
@@ -456,8 +467,8 @@ def test_disabled_config_makes_no_extra_call() -> None:
 # --- (b) enabled but only one chunk ------------------------------------------
 
 
-def test_enabled_with_one_chunk_makes_no_extra_call() -> None:
-    """A single-chunk run has no chunk boundary to reason across."""
+def test_enabled_with_one_chunk_still_runs_the_pass() -> None:
+    """A single-chunk run still needs its summary, so the pass runs (lintro-ops #37)."""
     synthesis_calls: list[str] = []
     one_chunk = [
         ReviewChunk(
@@ -474,8 +485,8 @@ def test_enabled_with_one_chunk_makes_no_extra_call() -> None:
         synthesis_calls=synthesis_calls,
     )
 
-    assert_that(synthesis_calls).is_empty()
-    assert_that(result.metadata.synthesis).is_none()
+    assert_that(synthesis_calls).is_length(1)
+    assert_that(result.metadata.synthesis).is_not_none()
 
 
 # --- (c) the fixture PR the issue names --------------------------------------
@@ -896,16 +907,6 @@ def test_unparseable_response_degrades_the_run_instead_of_ending_it() -> None:
     assert_that(note).contains("did not complete")
 
 
-def test_a_findings_cap_is_never_reported_for_a_synthesis_degradation() -> None:
-    """Synthesis reasons carry a placeholder cap and stay out of the ceiling."""
-    result = _run(
-        synthesis=ReviewSynthesisConfig(enabled=True),
-        synthesis_error=AIError("provider exploded"),
-    )
-
-    assert_that(result.metadata.findings_cap_applied).is_none()
-
-
 def test_select_synthesis_diff_sends_the_whole_pr_when_it_fits() -> None:
     """An in-budget PR reaches the pass whole and unmarked."""
     context = _pr_context()
@@ -984,9 +985,9 @@ def test_a_cut_input_is_declared_to_the_model_in_the_prompt() -> None:
 # --- (g) config validation ----------------------------------------------------
 
 
-def test_synthesis_is_disabled_by_default() -> None:
-    """The pass ships off pending the #2147 cost measurement."""
-    assert_that(ReviewConfig().synthesis.enabled).is_false()
+def test_synthesis_is_enabled_by_default() -> None:
+    """The pass writes the round's narrative, so it ships on (lintro-ops #37)."""
+    assert_that(ReviewConfig().synthesis.enabled).is_true()
     assert_that(ReviewConfig().synthesis.max_findings).is_equal_to(5)
 
 
@@ -1034,6 +1035,8 @@ def test_new_value_objects_construct_and_serialize_from_the_package() -> None:
             "findings_added": 2,
             "truncated": True,
             "failed": False,
+            "duplicates_merged": 0,
+            "narrative_missing": False,
         },
     )
     assert_that(str(enums.FindingOrigin.SYNTHESIS)).is_equal_to("synthesis")

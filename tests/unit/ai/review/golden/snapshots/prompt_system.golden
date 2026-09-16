@@ -25,9 +25,9 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 2. Trace every interaction path provided in the user prompt.
 3. Cross-check OpenAPI/docs against new routes, presets, and error shapes when
    applicable.
-4. Complete every checklist item — answer yes/no with file:line evidence.
+4. Check every checklist item against the diff; report a finding where it fails.
 5. Scan for additional issues not covered by the checklist.
-6. Output JSON only.
+6. Output JSON only: findings and re-read flags, nothing else.
 
 **Focus on:**
 

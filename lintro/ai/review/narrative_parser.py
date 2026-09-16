@@ -1,18 +1,17 @@
 """Parsing of the narrative review outputs (#1907).
 
-The diff review call returns three editorial fields alongside its findings: a
-structured ``summary``, ``verdict_reasoning`` and ``file_assessments``. Older
-models, prose answers and third-party transports do not produce them, so every
-parser here degrades to ``None``/empty rather than raising: a missing narrative
-field must never fail a run that produced real findings (the #1853 regression
-class).
+The round's synthesis pass returns two editorial fields alongside its findings:
+a structured ``summary`` and ``verdict_reasoning`` (lintro-ops milestone 0,
+decision A: chunks report findings only). Older models, prose answers and
+third-party transports do not produce them, so every parser here degrades to
+``None``/empty rather than raising: a missing narrative field must never fail
+a run that produced real findings (the #1853 regression class).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from lintro.ai.review.models.file_assessment import FileAssessment
 from lintro.ai.review.models.review_summary import ReviewSummary
 from lintro.ai.review.models.summary_bullet import SummaryBullet
 from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
@@ -20,7 +19,6 @@ from lintro.ai.review.models.verdict_reasoning import VerdictReasoning
 __all__ = [
     "MAX_WALKTHROUGH_BULLETS",
     "collapse_to_single_line",
-    "parse_file_assessments",
     "parse_narrative",
     "parse_review_summary",
     "parse_summary_text",
@@ -172,47 +170,19 @@ def parse_verdict_reasoning(*, raw_reasoning: object) -> VerdictReasoning | None
     return None if reasoning.is_empty else reasoning
 
 
-def parse_file_assessments(*, raw_assessments: object) -> tuple[FileAssessment, ...]:
-    """Parse per-file assessments from a review payload.
-
-    Args:
-        raw_assessments: Raw ``file_assessments`` value from a parsed response.
-
-    Returns:
-        Assessments in payload order, one per named file. Entries without a
-        file path or a non-empty overview are dropped; the first entry for a
-        repeated path wins.
-    """
-    if not isinstance(raw_assessments, list):
-        return ()
-
-    assessments: dict[str, FileAssessment] = {}
-    for item in raw_assessments:
-        if not isinstance(item, dict):
-            continue
-        path = _as_text(item.get("file"))
-        overview = _as_text(item.get("overview"))
-        if not path or not overview or path in assessments:
-            continue
-        assessments[path] = FileAssessment(file=path, overview=overview)
-    return tuple(assessments.values())
-
-
 def parse_narrative(
     *,
     payload: dict[str, Any],
-) -> tuple[ReviewSummary | None, VerdictReasoning | None, tuple[FileAssessment, ...]]:
-    """Parse every narrative field from a review payload in one call.
+) -> tuple[ReviewSummary | None, VerdictReasoning | None]:
+    """Parse every narrative field from a synthesis payload.
 
     Args:
-        payload: Parsed model response for one review chunk.
+        payload: Parsed model response.
 
     Returns:
-        Tuple of structured summary, verdict reasoning and file assessments,
-        each degrading to ``None``/empty when the model omitted it.
+        Tuple of ``(summary, verdict_reasoning)``, each ``None`` when absent.
     """
     return (
         parse_review_summary(raw_summary=payload.get("summary")),
         parse_verdict_reasoning(raw_reasoning=payload.get("verdict_reasoning")),
-        parse_file_assessments(raw_assessments=payload.get("file_assessments")),
     )

@@ -13,8 +13,6 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.config import AIConfig
-from lintro.ai.review.cli_limits import resolve_cli_findings_cap
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.prompts import (
@@ -104,7 +102,6 @@ def test_build_review_prompt_matches_golden(chunk_index: int) -> None:
             interaction_paths=_INTERACTION_PATHS,
             lint_results=_LINT_DIGEST,
             strictness_section=_STRICTNESS,
-            max_findings=10,
         ),
     )
 
@@ -132,7 +129,6 @@ def test_build_git_native_review_prompt_matches_golden(chunk_index: int) -> None
             interaction_paths=_INTERACTION_PATHS,
             lint_results=_LINT_DIGEST,
             strictness_section=_STRICTNESS,
-            max_findings=10,
         ),
     )
 
@@ -204,9 +200,9 @@ def test_api_prompt_with_production_defaults_matches_golden() -> None:
 
     The other prompt goldens call the builders as pure functions with stand-in
     knobs. This one feeds them the values production actually passes for the
-    API transport — an uncapped findings rule from ``resolve_cli_findings_cap``,
-    the balanced strictness section, generated interaction paths, and no lint
-    digest — so a change to any of those defaults reddens a golden.
+    API transport — the balanced strictness section, generated interaction
+    paths, and no lint digest — so a change to any of those defaults reddens a
+    golden. No findings cap exists on any transport (lintro-ops milestone 0).
     """
     _, user_prompt = build_review_prompt(
         inputs=PromptInputs(
@@ -217,10 +213,6 @@ def test_api_prompt_with_production_defaults_matches_golden() -> None:
             interaction_paths=_production_interaction_paths(),
             lint_results=None,
             strictness_section=_production_strictness_section(),
-            max_findings=resolve_cli_findings_cap(
-                transport_is_cli=False,
-                cli_max_findings_per_call=AIConfig().cli_max_findings_per_call,
-            ),
         ),
     )
 
@@ -230,9 +222,9 @@ def test_api_prompt_with_production_defaults_matches_golden() -> None:
 def test_cli_prompt_with_production_defaults_matches_golden() -> None:
     """The CLI-transport prompt built the way ``run_review`` builds it is pinned.
 
-    The findings cap comes from ``AIConfig.cli_max_findings_per_call`` through
-    ``resolve_cli_findings_cap`` rather than a literal, so bumping that default
-    reddens this golden instead of passing silently.
+    The CLI transport gets the same uncapped output rules as the API one: a
+    per-call findings ceiling reappearing on either transport reddens the
+    golden instead of passing silently (lintro-ops milestone 0, decision A).
     """
     _, user_prompt = build_git_native_review_prompt(
         inputs=PromptInputs(
@@ -243,10 +235,6 @@ def test_cli_prompt_with_production_defaults_matches_golden() -> None:
             interaction_paths=_production_interaction_paths(),
             lint_results=None,
             strictness_section=_production_strictness_section(),
-            max_findings=resolve_cli_findings_cap(
-                transport_is_cli=True,
-                cli_max_findings_per_call=AIConfig().cli_max_findings_per_call,
-            ),
         ),
     )
 

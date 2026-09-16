@@ -255,8 +255,6 @@ async def test_adversarial_timeout_is_recorded_as_a_degraded_pass(
     )
     assert_that(degradations[0].chunk_index).is_equal_to(0)
     assert_that(result.metadata.findings_coverage_complete).is_false()
-    # The sweep carries no per-call ceiling, so it must not be read as one.
-    assert_that(result.metadata.findings_cap_applied).is_none()
 
 
 async def test_degraded_sweep_warns_on_every_surface(
@@ -591,7 +589,6 @@ def _degraded_metadata() -> ReviewMetadata:
             CoverageDegradation(
                 reason=CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
                 chunk_index=0,
-                findings_cap=0,
             ),
         ),
     )

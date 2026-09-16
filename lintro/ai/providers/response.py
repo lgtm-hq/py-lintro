@@ -22,6 +22,9 @@ class AIResponse:
         output_tokens: Number of output tokens generated.
         cost_estimate: Estimated cost in USD for this call.
         provider: Name of the provider (e.g., "anthropic", "openai").
+        turns: Agent turns the transport reported for this call, when it
+            reports any (the Claude CLI envelope's ``num_turns``); ``None``
+            for transports that do not count turns.
     """
 
     content: str
@@ -30,3 +33,4 @@ class AIResponse:
     output_tokens: int = field(default=0)
     cost_estimate: float = field(default=0.0)
     provider: AIProvider | str = field(default="")
+    turns: int | None = field(default=None)

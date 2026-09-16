@@ -1,13 +1,12 @@
-"""Shared wording for findings-cap / output-exhaustion coverage limits (#2003).
+"""Shared wording for coverage limits a review run recorded (#2003).
 
 Every surface (terminal, GitHub review body, sticky comment) describes a
-degraded run with the same sentence built here, so a capped review can never
+degraded run with the same sentence built here, so a degraded review can never
 read as complete on one surface and limited on another.
 
-The wording says a chunk *hit* the cap, not that it ran under one: the
-degradation is recorded only when a chunk's parsed answer actually reached the
-ceiling, so a configured cap nobody bumped into produces no sentence at all
-(#2283).
+There is no per-call findings cap to describe (lintro-ops milestone 0,
+decision A): the per-chunk limits are an output-exhaustion split and a failed
+optional depth pass, and the whole-run limits are the synthesis pass's.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
-from lintro.ai.review.models.coverage_degradation import SYNTHESIS_CHUNK_INDEX
+from lintro.ai.review.models.coverage_degradation import CARRIED_CHUNK_INDEX
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -70,58 +69,50 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         metadata: Review run metadata carrying ``coverage_degradations``.
 
     Returns:
-        A plain-text sentence naming how many chunks *hit* a per-call cap, the
-        caps in force, and any incomplete optional pass, or an empty string
-        when the run recorded no degradation. A configured ceiling no chunk
-        reached is not a degradation and produces no sentence (#2283). The
-        text carries no markup so the terminal and the GitHub surfaces can
-        share it verbatim.
+        A plain-text sentence naming how many chunks were split after output
+        exhaustion and any incomplete optional pass, or an empty string when
+        the run recorded no degradation. The text carries no markup so the
+        terminal and the GitHub surfaces can share it verbatim.
     """
     degradations = metadata.coverage_degradations
     if not degradations:
         return ""
 
-    capped = [
-        item
-        for item in degradations
-        if item.reason is CoverageDegradationReason.FINDINGS_CAP_APPLIED
-    ]
     retried = [
         item
         for item in degradations
         if item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
     ]
-    # Rows are per limit event, not per chunk: a capped chunk that also
-    # retried contributes two rows with one chunk_index. Count chunks by
+    # Rows are per limit event, not per chunk: a chunk whose depth pass also
+    # failed contributes two rows with one chunk_index. Count chunks by
     # distinct index and never let the row count inflate the denominator.
     # A whole-run degradation carries the synthesis sentinel rather than a
     # real chunk index, so it must not be counted as a chunk either: without
     # this, a single-chunk run whose synthesis pass was truncated would read
     # as "1 of 2 chunks".
-    affected = {
-        item.chunk_index
-        for item in degradations
-        if item.chunk_index != SYNTHESIS_CHUNK_INDEX
-    }
+    affected = {item.chunk_index for item in degradations if item.chunk_index >= 0}
     total = max(metadata.chunks_total, len(affected))
 
     clauses: list[str] = []
-    if capped:
-        capped_chunks = len({item.chunk_index for item in capped})
-        caps = sorted({item.findings_cap for item in capped})
-        cap_text = "/".join(str(cap) for cap in caps)
+    # A single-file chunk cannot be split, so it is retried once unchanged and
+    # keeps the whole-chunk view a split gives up. Reporting both as splits
+    # would claim a loss of context the unchanged retry never took.
+    split_chunks = len({item.chunk_index for item in retried if item.split})
+    unsplit_chunks = len({item.chunk_index for item in retried if not item.split})
+    if split_chunks:
         clauses.append(
-            f"{capped_chunks} of {total} {_plural(count=total, noun='chunk')} "
-            f"hit the {cap_text}-finding per-call cap",
+            f"{split_chunks} of {total} {_plural(count=total, noun='chunk')} "
+            "exhausted the provider output limit and "
+            f"{'was' if split_chunks == 1 else 'were'} split and re-reviewed "
+            "in halves",
         )
-    if retried:
-        retried_chunks = len({item.chunk_index for item in retried})
-        caps = sorted({item.findings_cap for item in retried})
-        cap_text = "/".join(str(cap) for cap in caps)
+    if unsplit_chunks:
         clauses.append(
-            f"{retried_chunks} {_plural(count=retried_chunks, noun='chunk')} "
-            f"retried at a tighter {cap_text}-finding cap after exhausting the "
-            "provider output limit",
+            f"{unsplit_chunks} of {total} single-file "
+            f"{_plural(count=unsplit_chunks, noun='chunk')} exhausted the "
+            "provider output limit and "
+            f"{'was' if unsplit_chunks == 1 else 'were'} retried once "
+            "unchanged",
         )
 
     for reason, wording in _DEPTH_PASS_CLAUSES.items():
@@ -131,6 +122,41 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
                 f"{len(chunks)} {_plural(count=len(chunks), noun='chunk')} kept "
                 f"only the main pass after {wording}",
             )
+
+    truncated = [
+        item
+        for item in degradations
+        if item.reason is CoverageDegradationReason.DIFF_TRUNCATED
+    ]
+    cut = {item.chunk_index for item in truncated if item.chunk_index >= 0}
+    if cut:
+        clauses.append(
+            f"{len(cut)} of {total} {_plural(count=total, noun='chunk')} had "
+            f"{'its' if len(cut) == 1 else 'their'} diff cut to the context "
+            "window, so only a prefix of each affected file's change was "
+            "reviewed",
+        )
+    carried = sum(1 for item in truncated if item.chunk_index == CARRIED_CHUNK_INDEX)
+    if carried:
+        clauses.append(
+            f"{carried} {_plural(count=carried, noun='file')} carried from an "
+            "earlier round had only a prefix of "
+            f"{'its' if carried == 1 else 'their'} diff reviewed; a change to "
+            "the file re-reviews it",
+        )
+
+    lost_half = {
+        item.chunk_index
+        for item in degradations
+        if item.reason is CoverageDegradationReason.SPLIT_HALF_FAILED
+    }
+    if lost_half:
+        clauses.append(
+            f"{len(lost_half)} split {_plural(count=len(lost_half), noun='chunk')} "
+            "lost one half to a failed call, so the files in "
+            f"{'that half' if len(lost_half) == 1 else 'those halves'} were "
+            "not reviewed",
+        )
 
     reasons = {item.reason for item in degradations}
     if CoverageDegradationReason.SYNTHESIS_TRUNCATED in reasons:
@@ -142,8 +168,9 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         clauses.append("the cross-chunk synthesis pass did not complete")
 
     known = {
-        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+        CoverageDegradationReason.DIFF_TRUNCATED,
+        CoverageDegradationReason.SPLIT_HALF_FAILED,
         CoverageDegradationReason.SYNTHESIS_TRUNCATED,
         CoverageDegradationReason.SYNTHESIS_FAILED,
         *_DEPTH_PASS_CLAUSES,
@@ -160,13 +187,14 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         )
 
     # A run can be capped *and* stopped early; only claim full chunk
-    # coverage when ``partial`` says the run reached every chunk.
-    coverage = "" if metadata.partial else "Every chunk was reviewed, but "
-    # Only a real per-call ceiling can be blamed for lost low-severity depth;
-    # a run degraded solely by an incomplete optional pass says so instead.
+    # coverage when ``partial`` says the run reached every chunk and no
+    # split chunk lost a half (its files went unreviewed).
+    coverage = "" if metadata.partial or lost_half else "Every chunk was reviewed, but "
+    # A split chunk lost its whole-chunk view; a run degraded solely by an
+    # incomplete optional pass says so instead.
     tail = (
-        "lower-severity findings in those chunks may go unreported."
-        if (capped or retried)
+        "findings that need the whole chunk in view may go unreported."
+        if split_chunks
         else "some issues may go unreported."
     )
     if not coverage:

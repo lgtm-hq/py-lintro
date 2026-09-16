@@ -365,7 +365,7 @@ def _suggestion_drops_row(*, result: ReviewResult) -> str:
 
 
 def _coverage_limited_row(*, result: ReviewResult) -> str:
-    """Render the warning row shown when a findings cap limited this round.
+    """Render the warning row shown when a coverage limit degraded this round.
 
     Sits with the other no-silent-caps notices (``_degraded_row``,
     ``_suggestion_drops_row``) and shares its text with the per-review body

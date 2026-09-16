@@ -23,15 +23,14 @@ from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.cli_limits import (
     CLI_DIFF_HARD_CEILING_BYTES,
-    CLI_FINDINGS_RETRY_CAP,
-    CLI_MAX_FINDINGS_PER_CALL,
-    CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+    REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     assert_cli_diff_within_ceiling,
     is_output_exhaustion_error,
     measure_diff_size,
-    resolve_cli_diff_budget,
-    resolve_cli_findings_cap,
-    tighter_findings_cap,
+    resolve_chunk_diff_budget,
+)
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
 )
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -46,7 +45,6 @@ from lintro.ai.review.response_pipeline import (
     # because driving it through run_review_async needs a full provider
     # + chunking stack for no extra coverage (#1967 review).
     ChunkReviewRequest,
-    invoke_chunk_review,
 )
 from lintro.ai.review.run_planning import resolve_review_chunks
 from lintro.ai.review.session import ReviewSessionOptions
@@ -152,22 +150,22 @@ def test_measure_diff_size_counts_lines_bytes_and_tokens() -> None:
     assert_that(size.tokens).is_equal_to(estimate_tokens(diff))
 
 
-def test_resolve_cli_diff_budget_caps_context_window_remainder() -> None:
+def test_resolve_chunk_diff_budget_caps_context_window_remainder() -> None:
     """CLI soft ceiling wins over a huge context-window remainder."""
-    budget = resolve_cli_diff_budget(
+    budget = resolve_chunk_diff_budget(
         context_window_budget=190_000,
-        cli_max_diff_tokens=CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+        review_chunk_diff_tokens=REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     )
 
-    assert_that(budget).is_equal_to(CLI_TRANSPORT_DIFF_TOKEN_BUDGET)
+    assert_that(budget).is_equal_to(REVIEW_CHUNK_DIFF_TOKEN_BUDGET)
     assert_that(budget).is_less_than(190_000)
 
 
-def test_resolve_cli_diff_budget_keeps_smaller_context_remainder() -> None:
+def test_resolve_chunk_diff_budget_keeps_smaller_context_remainder() -> None:
     """A tiny model window is not inflated to the CLI soft ceiling."""
-    budget = resolve_cli_diff_budget(
+    budget = resolve_chunk_diff_budget(
         context_window_budget=1_000,
-        cli_max_diff_tokens=CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+        review_chunk_diff_tokens=REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     )
 
     assert_that(budget).is_equal_to(1_000)
@@ -215,9 +213,9 @@ def test_cli_chunk_threshold_routes_large_diff_through_chunker() -> None:
         repo_root="",
     )
     window_budget = 190_000
-    cli_budget = resolve_cli_diff_budget(
+    cli_budget = resolve_chunk_diff_budget(
         context_window_budget=window_budget,
-        cli_max_diff_tokens=CLI_TRANSPORT_DIFF_TOKEN_BUDGET,
+        review_chunk_diff_tokens=REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     )
 
     assert_that(estimate_tokens(unified_diff)).is_greater_than(cli_budget)
@@ -238,29 +236,12 @@ def test_cli_chunk_threshold_routes_large_diff_through_chunker() -> None:
     assert_that(len(chunked)).is_greater_than(1)
 
 
-def test_resolve_cli_findings_cap_only_for_cli_transport() -> None:
-    """API transport leaves findings uncapped; CLI applies the configured cap."""
-    assert_that(
-        resolve_cli_findings_cap(transport_is_cli=False, cli_max_findings_per_call=12),
-    ).is_none()
-    assert_that(
-        resolve_cli_findings_cap(transport_is_cli=True, cli_max_findings_per_call=12),
-    ).is_equal_to(12)
+def test_output_rules_state_there_is_no_findings_cap() -> None:
+    """The prompt contract tells the model to report every finding it has."""
+    rules = format_output_rules(checklist_count=4)
 
-
-def test_tighter_findings_cap_reduces_but_stays_positive() -> None:
-    """Output-exhaustion retries halve toward the retry floor."""
-    assert_that(tighter_findings_cap(current=CLI_MAX_FINDINGS_PER_CALL)).is_equal_to(
-        CLI_FINDINGS_RETRY_CAP,
-    )
-    assert_that(tighter_findings_cap(current=1)).is_equal_to(1)
-
-
-def test_output_rules_bound_findings_per_call_when_capped() -> None:
-    """Prompt contract states the findings cap used to avoid mid-JSON cuts."""
-    rules = format_output_rules(checklist_count=4, max_findings=7)
-
-    assert_that(rules).contains("**7**")
+    assert_that(rules).contains("There is no cap on findings")
+    assert_that(rules.lower()).does_not_contain("cap `findings` at")
     assert_that(rules.lower()).contains("do not report the same problem twice")
 
 
@@ -405,7 +386,7 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
 ) -> None:
     """run_review_async applies the CLI diff budget and reviews in chunks.
 
-    Locks the orchestrator wiring (``diff_budget = resolve_cli_diff_budget``):
+    Locks the orchestrator wiring (``diff_budget = resolve_chunk_diff_budget``):
     if that line disappears, a CLI-sized diff runs one-shot again and this
     test fails on ``chunks_total``, even though every helper unit test passes.
     """
@@ -470,23 +451,36 @@ async def test_run_review_chunks_large_cli_diff_end_to_end(
     assert_that(mock_call.await_count).is_equal_to(result.metadata.chunks_total)
 
 
-async def test_invoke_chunk_retries_on_cli_output_exhaustion(
+async def test_main_pass_splits_a_chunk_on_cli_output_exhaustion(
     tmp_path: Path,
 ) -> None:
-    """Output-cap failures retry once with a tighter findings budget."""
+    """Output-cap failures split the chunk instead of tightening a cap.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
+
+    diff = (
+        "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n"
+        "@@ -1 +1 @@\n+x = 1\n"
+        "diff --git a/src/b.py b/src/b.py\n--- a/src/b.py\n+++ b/src/b.py\n"
+        "@@ -1 +1 @@\n+y = 2\n"
+    )
     chunk = ReviewChunk(
         id=1,
-        files=["src/a.py"],
-        diff="+x = 1\n",
-        relationship="single-file",
+        files=["src/a.py", "src/b.py"],
+        diff=diff,
+        relationship="directory-prefix",
     )
     context = ReviewContext(
         base_ref="main",
         head_ref="feature",
         changed_files=[
             ChangedFile(path="src/a.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="src/b.py", status="modified", additions=1, deletions=0),
         ],
-        unified_diff=chunk.diff,
+        unified_diff=diff,
         pr_metadata=None,
         repo_root=str(tmp_path),
     )
@@ -538,7 +532,7 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
         "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        call = await invoke_chunk_review(
+        partial = await review_chunk_main_pass(
             request=ChunkReviewRequest(
                 chunk=chunk,
                 context=context,
@@ -554,12 +548,18 @@ async def test_invoke_chunk_retries_on_cli_output_exhaustion(
                 repo_root=str(tmp_path),
                 use_one_shot=True,
                 diff_budget=10_000,
-                max_findings=CLI_MAX_FINDINGS_PER_CALL,
                 chunk_index=0,
             ),
         )
 
-    assert_that(calls).is_length(2)
-    assert_that(calls[0]).contains(f"**{CLI_MAX_FINDINGS_PER_CALL}**")
-    assert_that(calls[1]).contains(f"**{CLI_FINDINGS_RETRY_CAP}**")
-    assert_that(call.response.content).contains("Adds a constant")
+    # One exhausted call, then one call per half; no prompt ever names a cap.
+    assert_that(calls).is_length(3)
+    for prompt in calls:
+        assert_that(prompt.lower()).does_not_contain("cap `findings` at")
+    assert_that(calls[1]).contains("+x = 1")
+    assert_that(calls[1]).does_not_contain("+y = 2")
+    assert_that(calls[2]).contains("+y = 2")
+    assert_that(partial.coverage_degradations).is_length(1)
+    assert_that(partial.coverage_degradations[0].reason).is_equal_to(
+        CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+    )

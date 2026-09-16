@@ -39,11 +39,9 @@
     "lint_facts_note": ""
   },
   "summary": "No review output.",
-  "checklist": [],
   "findings": [],
   "pr_summary": null,
   "verdict_reasoning": null,
-  "file_assessments": [],
   "coverage": null,
   "coverage_records": [],
   "flagged_files": [],

@@ -134,6 +134,8 @@ def finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
     origin = payload.pop("origin", None)
     if origin is not None:
         payload["origin"] = str(origin)
+    if not payload.get("merged_duplicates"):
+        payload.pop("merged_duplicates", None)
     return payload
 
 
@@ -151,15 +153,14 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     block is absent entirely when the pass did not run, which is the default.
 
     The top-level ``findings_coverage_complete`` / ``coverage_degradations`` /
-    ``findings_cap_applied`` / ``output_exhaustion_retried`` keys report
-    whether the run's finding depth was limited (#2003). A CLI findings cap or
-    an output-exhaustion retry is a per-chunk limit; an incomplete cross-chunk
-    synthesis pass (#2269) is a whole-run one, and it lands in
-    ``coverage_degradations`` and flips ``findings_coverage_complete`` too.
-    Only the two per-chunk reasons feed ``findings_cap_applied``, which stays
-    ``null`` on a run degraded solely by the synthesis pass. They are always
-    present, so a classifier can tell "the model found N issues" from "we
-    capped the model at N".
+    ``output_exhaustion_retried`` keys report whether the run's finding depth
+    was limited (#2003). An output-exhaustion split or a failed depth pass is
+    a per-chunk limit; an incomplete cross-chunk synthesis pass (#2269) is a
+    whole-run one, and it lands in ``coverage_degradations`` and flips
+    ``findings_coverage_complete`` too. They are always present, so a
+    classifier can tell "the model found N issues" from "the run could not
+    look everywhere". There is no per-call findings cap (lintro-ops milestone
+    0, decision A).
 
     Every finding is serialized whether or not the posting policy (#2572)
     posted it inline; each carries ``posted_inline`` so the gate is visible
@@ -207,10 +208,6 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
             if result.verdict_reasoning is not None
             else None
         ),
-        "file_assessments": [
-            asdict(assessment) for assessment in result.file_assessments
-        ],
-        "checklist": [asdict(answer) for answer in result.checklist],
         "findings": [finding_to_dict(finding=finding) for finding in result.findings],
         # #2101: dropped suggestions are never silent. Each finding carries its
         # own ``suggestion_dropped`` tag; these keys give consumers the run
@@ -229,7 +226,6 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         "cross_chunk_contradictions": count_cross_chunk_contradictions(
             findings=result.findings,
         ),
-        "findings_cap_applied": result.metadata.findings_cap_applied,
         "output_exhaustion_retried": result.metadata.output_exhaustion_retried,
     }
     if result.metadata.synthesis is not None:

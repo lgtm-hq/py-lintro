@@ -252,7 +252,6 @@ def test_unstructured_fallback_preserves_the_full_answer() -> None:
     result, _ = _run(responses=[_response(_PROSE), _response(_PROSE)])
 
     assert_that(result.findings[0].description).is_equal_to(_PROSE.strip())
-    assert_that(result.summary).contains(_PROSE.strip())
 
 
 def test_short_timeout_budget_skips_the_retry() -> None:

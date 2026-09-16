@@ -6,9 +6,8 @@ own body said "positive verification, not a defect" with a fix of "No code
 change" (seen on lgtm-hq/homebrew-tap#411, where it opened an inline thread a
 human had to resolve before the release could merge). The prompt rule is gone;
 this module is the backstop for a model that still produces one. It runs in
-:func:`lintro.ai.review.response_pipeline.payload_to_partial`, before the
-caller counts the answer against its findings cap, so a dropped confirmation
-never counts as a capped-out finding.
+:func:`lintro.ai.review.response_pipeline.payload_to_partial`, so a dropped
+confirmation never reaches a surface as a finding.
 
 Only self-classifying statements count. A phrase that merely occurs inside
 defect prose ("treats HTTP 200 as a confirmation of rollback success") or

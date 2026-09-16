@@ -51,7 +51,6 @@ def _empty_result() -> ReviewResult:
             checklist_items=0,
         ),
         summary="No changes found to review.",
-        checklist=(),
         findings=(),
     )
 
@@ -73,7 +72,6 @@ def _partial_result(*, stopped_reason: str) -> ReviewResult:
             stopped_reason=stopped_reason,
         ),
         summary="Partial review.",
-        checklist=(),
         findings=(),
     )
 

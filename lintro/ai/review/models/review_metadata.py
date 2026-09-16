@@ -12,16 +12,6 @@ from lintro.ai.review.models.review_timings import ReviewTimings
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 
-#: Degradation reasons whose ``findings_cap`` is a real per-call ceiling.
-#: Reasons outside this set carry a placeholder and are excluded from
-#: :attr:`ReviewMetadata.findings_cap_applied`.
-_CAP_REASONS: frozenset[CoverageDegradationReason] = frozenset(
-    {
-        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-        CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
-    },
-)
-
 
 @dataclass(frozen=True, slots=True)
 class ReviewMetadata:
@@ -91,11 +81,11 @@ class ReviewMetadata:
             the review, each carrying the reason it was excluded (#1910).
         coverage_degradations (tuple[CoverageDegradation, ...]): Chunk-level
             limits that may have suppressed findings (#2003), one entry per
-            limit event — a CLI per-call findings cap, or an
-            output-exhaustion retry at a tighter cap — so one chunk can
-            contribute both. Every chunk was still reviewed, so this is a
-            *depth* limit and deliberately distinct from ``partial``, which
-            means chunks went unreviewed. Empty for a fully uncapped run.
+            limit event — an output-exhaustion split, or a failed depth
+            pass — so one chunk can contribute both. Every chunk was still
+            reviewed, so this is a *depth* limit and deliberately distinct
+            from ``partial``, which means chunks went unreviewed. Empty for a
+            clean run.
         synthesis (SynthesisOutcome | None): What the final cross-chunk
             synthesis pass did (#2269), or ``None`` when the pass did not
             run — which is the default, and every run before the pass
@@ -153,16 +143,11 @@ class ReviewMetadata:
         """Return whether the run's finding depth was limited in any way.
 
         "Complete" means the run recorded no coverage degradation of any kind
-        — no chunk *hit* its per-chunk findings cap, no chunk was retried
-        after output exhaustion, and no cross-chunk synthesis pass was
+        — no chunk was split and re-reviewed after output exhaustion, no
+        optional depth pass failed, and no cross-chunk synthesis pass was
         truncated or failed (#2269). Any entry in ``coverage_degradations``
-        makes this false, including a whole-run one that carries no per-call
-        ceiling; ``findings_cap_applied`` is the narrower signal that stays
-        ``None`` for a run degraded only by the synthesis pass.
-
-        A cap that was merely *configured* is not a degradation: a CLI run
-        whose chunks all came back under ``ai.cli_max_findings_per_call``
-        stays complete, because no finding was displaced (#2283).
+        makes this false, including a whole-run one. There is no per-call
+        findings cap to hit (lintro-ops milestone 0, decision A).
 
         Returns:
             True when ``coverage_degradations`` is empty. ``partial`` is a
@@ -172,31 +157,14 @@ class ReviewMetadata:
         return not self.coverage_degradations
 
     @property
-    def findings_cap_applied(self) -> int | None:
-        """Return the tightest findings ceiling any chunk ran under.
-
-        Only the two cap-carrying reasons contribute: a degradation that
-        records no per-call ceiling (the synthesis reasons, #2269) reports
-        ``findings_cap`` as a placeholder and must never be read as the
-        tightest ceiling a chunk ran under.
-
-        Returns:
-            The smallest recorded cap, or ``None`` when no cap was applied.
-        """
-        caps = [
-            item.findings_cap
-            for item in self.coverage_degradations
-            if item.reason in _CAP_REASONS
-        ]
-        return min(caps) if caps else None
-
-    @property
     def output_exhaustion_retried(self) -> bool:
         """Return whether any chunk was retried after output exhaustion.
 
         Returns:
             True when at least one chunk hit the provider output-token
-            ceiling and was re-run under a tighter findings cap.
+            ceiling and had its answer re-obtained — split and re-reviewed in
+            halves, or, for a single-file chunk that cannot be split, retried
+            once unchanged.
         """
         return any(
             item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED

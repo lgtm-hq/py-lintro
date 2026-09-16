@@ -1,17 +1,20 @@
-"""Findings-cap / output-exhaustion coverage signals (issue #2003).
+"""Output-exhaustion coverage signals (issue #2003).
 
-A CLI review that ran under ``ai.cli_max_findings_per_call``, or that retried a
-chunk at a tighter cap after exhausting the provider output ceiling, reviewed
-every chunk but was told to stop at N findings. These tests pin that such a run
-is distinguishable from an uncapped one in metadata, on the terminal, on both
-posted GitHub surfaces, and in the JSON and MCP payloads — and that an uncapped
-run still renders byte-identically to before the signal existed.
+A CLI review whose chunk answer exhausted the provider output ceiling was split
+in two and each half reviewed on its own, so the model never saw that chunk in
+one view. These tests pin that such a run is distinguishable from a clean one
+in metadata, on the terminal, on both posted GitHub surfaces, and in the JSON
+and MCP payloads — that a clean run still renders byte-identically to before
+the signal existed — and that no per-call findings cap exists any more
+(lintro-ops milestone 0, decision A): however many findings a chunk returns,
+nothing is recorded against it.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -27,10 +30,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIProviderError
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
-from lintro.ai.review.cli_limits import (
-    CLI_FINDINGS_RETRY_CAP,
-    CLI_MAX_FINDINGS_PER_CALL,
-)
+from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
 from lintro.ai.review.coverage_degradation import (
     COVERAGE_LIMITED_HEADLINE,
     PARTIAL_REVIEW_LABEL,
@@ -42,6 +42,7 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
 )
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.github_review_body import build_review_body
+from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -54,24 +55,25 @@ from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review_async
 from lintro.ai.review.output import review_result_to_dict
-from lintro.ai.review.response_pipeline import (
-    ChunkCallResult,
-    ChunkReviewRequest,
-    invoke_chunk_review,
-)
+from lintro.ai.review.response_pipeline import ChunkReviewRequest
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.sticky import build_sticky_comment
 from lintro.mcp.toolkits.review import _run_metadata
 
-_CAP = CoverageDegradation(
-    reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-    chunk_index=0,
-    findings_cap=12,
-)
 _RETRY = CoverageDegradation(
     reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+    chunk_index=0,
+)
+_RETRY_OTHER = CoverageDegradation(
+    reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
     chunk_index=1,
-    findings_cap=6,
+)
+#: The same limit on a chunk that could not be split: one file, retried once
+#: unchanged, so it never gave up the whole-chunk view a split costs.
+_RETRY_UNSPLIT = CoverageDegradation(
+    reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+    chunk_index=2,
+    split=False,
 )
 
 
@@ -157,7 +159,7 @@ def _terminal(*, result: ReviewResult) -> str:
 # --- metadata schema ---------------------------------------------------------
 
 
-def test_uncapped_run_reports_complete_coverage(
+def test_clean_run_reports_complete_coverage(
     sample_review_result: ReviewResult,
 ) -> None:
     """A run with no recorded degradation is coverage-complete.
@@ -169,48 +171,43 @@ def test_uncapped_run_reports_complete_coverage(
 
     assert_that(metadata.coverage_degradations).is_empty()
     assert_that(metadata.findings_coverage_complete).is_true()
-    assert_that(metadata.findings_cap_applied).is_none()
     assert_that(metadata.output_exhaustion_retried).is_false()
 
 
-def test_findings_cap_is_recorded_without_flipping_partial(
+def test_split_is_recorded_without_flipping_partial(
     sample_review_result: ReviewResult,
 ) -> None:
-    """A capped run is coverage-limited but not ``partial``.
+    """A split chunk is coverage-limited but not ``partial``.
 
-    ``partial`` means chunks went unreviewed; a findings cap reviewed every
-    chunk at reduced depth, so the two axes stay independent.
+    ``partial`` means chunks went unreviewed; a split chunk was reviewed in
+    halves, so the two axes stay independent.
 
     Args:
         sample_review_result: Shared review result fixture.
     """
     result = _with_degradations(
         result=sample_review_result,
-        degradations=(_CAP,),
+        degradations=(_RETRY,),
     )
 
     assert_that(result.metadata.findings_coverage_complete).is_false()
-    assert_that(result.metadata.findings_cap_applied).is_equal_to(12)
-    assert_that(result.metadata.output_exhaustion_retried).is_false()
+    assert_that(result.metadata.output_exhaustion_retried).is_true()
     assert_that(result.metadata.partial).is_false()
     assert_that(result.metadata.stopped_reason).is_equal_to("")
 
 
-def test_exhaustion_retry_reports_the_tightened_cap(
+def test_metadata_exposes_no_findings_cap(
     sample_review_result: ReviewResult,
 ) -> None:
-    """The retry records the tighter ceiling it actually ran under.
+    """The per-call findings cap is gone from the metadata contract.
 
     Args:
         sample_review_result: Shared review result fixture.
     """
-    result = _with_degradations(
-        result=sample_review_result,
-        degradations=(_CAP, _RETRY),
+    assert_that(hasattr(CoverageDegradationReason, "FINDINGS_CAP_APPLIED")).is_false()
+    assert_that(CoverageDegradation.__dataclass_fields__).does_not_contain_key(
+        "findings_cap",
     )
-
-    assert_that(result.metadata.output_exhaustion_retried).is_true()
-    assert_that(result.metadata.findings_cap_applied).is_equal_to(6)
 
 
 # --- shared wording ----------------------------------------------------------
@@ -219,7 +216,7 @@ def test_exhaustion_retry_reports_the_tightened_cap(
 def test_description_is_empty_for_a_complete_run(
     sample_review_result: ReviewResult,
 ) -> None:
-    """An uncapped run produces no coverage sentence at all.
+    """A clean run produces no coverage sentence at all.
 
     Args:
         sample_review_result: Shared review result fixture.
@@ -234,17 +231,17 @@ def test_description_is_empty_for_a_complete_run(
 @pytest.mark.parametrize(
     ("degradations", "expected"),
     [
-        ((_CAP,), "12-finding per-call cap"),
-        ((_CAP, _RETRY), "tighter 6-finding cap"),
+        ((_RETRY,), "exhausted the provider output limit"),
+        ((_RETRY, _RETRY_OTHER), "split and re-reviewed in halves"),
     ],
-    ids=["case=cap_only", "case=cap_and_retry"],
+    ids=["case=one_split", "case=two_splits"],
 )
-def test_description_names_the_cap_in_force(
+def test_description_names_the_split(
     sample_review_result: ReviewResult,
     degradations: tuple[CoverageDegradation, ...],
     expected: str,
 ) -> None:
-    """The shared sentence names the ceiling and warns findings may be missing.
+    """The shared sentence names the split and warns findings may be missing.
 
     Args:
         sample_review_result: Shared review result fixture.
@@ -262,13 +259,61 @@ def test_description_names_the_cap_in_force(
     assert_that(described).contains("may go unreported")
 
 
+def test_description_never_calls_an_unchanged_retry_a_split(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A single-file retry is described as the retry it was.
+
+    The chunk kept its whole-file view and was simply asked again, so the
+    sentence must claim neither the split nor the whole-chunk tail that only
+    a real split earns.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = _with_degradations(
+        result=sample_review_result,
+        degradations=(_RETRY_UNSPLIT,),
+    )
+
+    described = describe_coverage_degradations(metadata=result.metadata)
+
+    assert_that(described).contains("retried once unchanged")
+    assert_that(described).does_not_contain("split and re-reviewed in halves")
+    assert_that(described).contains("some issues may go unreported")
+    assert_that(described).does_not_contain("whole chunk in view")
+
+
+def test_description_separates_a_split_from_an_unchanged_retry(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A run with both limits gets a clause for each.
+
+    One chunk did lose its whole-chunk view, so the stronger tail still
+    stands for the run as a whole.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = _with_degradations(
+        result=sample_review_result,
+        degradations=(_RETRY, _RETRY_UNSPLIT),
+    )
+
+    described = describe_coverage_degradations(metadata=result.metadata)
+
+    assert_that(described).contains("split and re-reviewed in halves")
+    assert_that(described).contains("retried once unchanged")
+    assert_that(described).contains("whole chunk in view")
+
+
 # --- surfaces ----------------------------------------------------------------
 
 
-def test_terminal_banner_only_appears_for_a_capped_run(
+def test_terminal_banner_only_appears_for_a_split_run(
     sample_review_result: ReviewResult,
 ) -> None:
-    """The terminal warns on a capped run and is unchanged on a clean one.
+    """The terminal warns on a split run and is unchanged on a clean one.
 
     Args:
         sample_review_result: Shared review result fixture.
@@ -277,19 +322,19 @@ def test_terminal_banner_only_appears_for_a_capped_run(
     capped = _terminal(
         result=_with_degradations(
             result=sample_review_result,
-            degradations=(_CAP, _RETRY),
+            degradations=(_RETRY, _RETRY_OTHER),
         ),
     )
 
     assert_that(clean).does_not_contain(COVERAGE_LIMITED_HEADLINE)
     assert_that(capped).contains(COVERAGE_LIMITED_HEADLINE)
-    assert_that(capped).contains("12-finding per-call cap")
+    assert_that(capped).contains("exhausted the provider output limit")
 
 
-def test_review_body_carries_the_warning_only_when_capped(
+def test_review_body_carries_the_warning_only_when_split(
     sample_review_result: ReviewResult,
 ) -> None:
-    """The posted review body warns on a capped run, byte-identical otherwise.
+    """The posted review body warns on a split run, byte-identical otherwise.
 
     Args:
         sample_review_result: Shared review result fixture.
@@ -298,7 +343,7 @@ def test_review_body_carries_the_warning_only_when_capped(
     capped = _body(
         result=_with_degradations(
             result=sample_review_result,
-            degradations=(_CAP,),
+            degradations=(_RETRY,),
         ),
     )
 
@@ -306,14 +351,14 @@ def test_review_body_carries_the_warning_only_when_capped(
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
     # Production-independent copy: the detail sentence, not just the headline.
     assert_that(clean).does_not_contain("may go unreported")
-    assert_that(capped).contains("hit the 12-finding per-call cap")
+    assert_that(capped).contains("exhausted the provider output limit")
     assert_that(capped).contains("may go unreported")
 
 
-def test_sticky_carries_the_warning_only_when_capped(
+def test_sticky_carries_the_warning_only_when_split(
     sample_review_result: ReviewResult,
 ) -> None:
-    """The sticky comment marks a capped round, byte-identical otherwise.
+    """The sticky comment marks a split round, byte-identical otherwise.
 
     Args:
         sample_review_result: Shared review result fixture.
@@ -330,11 +375,11 @@ def test_sticky_carries_the_warning_only_when_capped(
     assert_that(capped).contains(f"> ⚠️ **{COVERAGE_LIMITED_HEADLINE}**")
     # Production-independent copy: the detail sentence, not just the headline.
     assert_that(clean).does_not_contain("may go unreported")
-    assert_that(capped).contains("retried at a tighter 6-finding cap")
+    assert_that(capped).contains("split and re-reviewed in halves")
     assert_that(capped).contains("may go unreported")
 
 
-def test_uncapped_run_renders_identically_on_every_surface(
+def test_clean_run_renders_identically_on_every_surface(
     sample_review_result: ReviewResult,
 ) -> None:
     """An explicitly-empty degradation tuple changes no rendered surface.
@@ -387,35 +432,64 @@ def test_json_payload_exposes_the_coverage_fields(
     """
     result = _with_degradations(
         result=sample_review_result,
-        degradations=(_CAP, _RETRY),
+        degradations=(_RETRY, _RETRY_OTHER),
     )
 
     payload = review_result_to_dict(result=result)
 
     assert_that(payload["findings_coverage_complete"]).is_false()
-    assert_that(payload["findings_cap_applied"]).is_equal_to(6)
     assert_that(payload["output_exhaustion_retried"]).is_true()
+    # ``split`` rides along on this reason only, so a consumer can tell a
+    # chunk that gave up its whole-chunk view from a single-file chunk that
+    # was simply asked again.
     assert_that(payload["coverage_degradations"]).is_equal_to(
         [
             {
-                "reason": "findings_cap_applied",
+                "reason": "output_exhaustion_retried",
                 "chunk_index": 0,
-                "findings_cap": 12,
+                "split": True,
             },
             {
                 "reason": "output_exhaustion_retried",
                 "chunk_index": 1,
-                "findings_cap": 6,
+                "split": True,
             },
         ],
     )
+    # The retired cap never comes back as a payload key.
     # The reason must survive JSON encoding as a plain string, not an enum repr.
     assert_that(json.loads(json.dumps(payload))["coverage_degradations"]).is_equal_to(
         payload["coverage_degradations"],
     )
 
 
-def test_json_payload_marks_an_uncapped_run_complete(
+def test_json_payload_marks_an_unchanged_retry_unsplit(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A consumer can tell a real split from a single-file retry.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    result = _with_degradations(
+        result=sample_review_result,
+        degradations=(_RETRY_UNSPLIT,),
+    )
+
+    payload = review_result_to_dict(result=result)
+
+    assert_that(payload["coverage_degradations"]).is_equal_to(
+        [
+            {
+                "reason": "output_exhaustion_retried",
+                "chunk_index": 2,
+                "split": False,
+            },
+        ],
+    )
+
+
+def test_json_payload_marks_a_clean_run_complete(
     sample_review_result: ReviewResult,
 ) -> None:
     """A clean run states completeness rather than omitting the key.
@@ -427,7 +501,6 @@ def test_json_payload_marks_an_uncapped_run_complete(
 
     assert_that(payload["findings_coverage_complete"]).is_true()
     assert_that(payload["coverage_degradations"]).is_empty()
-    assert_that(payload["findings_cap_applied"]).is_none()
     assert_that(payload["output_exhaustion_retried"]).is_false()
 
 
@@ -441,16 +514,16 @@ def test_mcp_run_block_exposes_the_coverage_fields(
     """
     result = _with_degradations(
         result=sample_review_result,
-        degradations=(_CAP,),
+        degradations=(_RETRY,),
     )
 
     run = _run_metadata(metadata=result.metadata)
 
     assert_that(run["findings_coverage_complete"]).is_false()
-    assert_that(run["findings_cap_applied"]).is_equal_to(12)
-    assert_that(run["output_exhaustion_retried"]).is_false()
+    assert_that(run["output_exhaustion_retried"]).is_true()
     assert_that(run["coverage_degradations"]).is_length(1)
-    # A capped run is not the same condition as an early stop.
+    assert_that(run).does_not_contain_key("findings_cap_applied")
+    # A split chunk is not the same condition as an early stop.
     assert_that(run["partial"]).is_false()
 
 
@@ -485,13 +558,14 @@ def _chunk_and_context(*, repo_root: str) -> tuple[ReviewChunk, ReviewContext]:
     return chunk, context
 
 
-def _ok_response(*, findings: int = 0) -> AIResponse:
+def _ok_response(*, findings: int = 0, file: str = "src/a.py") -> AIResponse:
     """Return a minimal well-formed chunk review response.
 
     Args:
-        findings: How many distinct findings the answer carries. The count is
-            what decides whether a per-call cap was hit (#2283), so it is the
-            only interesting variable in this payload.
+        findings: How many distinct findings the answer carries. No per-call
+            cap exists, so any count must leave the run coverage-complete.
+        file: Path the findings point at, so a split chunk's halves can be
+            told apart by what they reported.
 
     Returns:
         A parseable provider response carrying ``findings`` findings.
@@ -503,8 +577,8 @@ def _ok_response(*, findings: int = 0) -> AIResponse:
             {
                 "severity": "P3",
                 "category": "style",
-                "title": f"Nit {index}",
-                "file": "src/a.py",
+                "title": f"Nit {index} in {file}",
+                "file": file,
                 "line": index + 1,
                 "description": f"Minor point {index}.",
             }
@@ -527,53 +601,106 @@ def _ok_response(*, findings: int = 0) -> AIResponse:
     )
 
 
-async def _chunk_call_for(
+def _two_file_chunk_and_context(
     *,
-    tmp_path: Path,
-    max_findings: int | None,
-    exhaust_first_call: bool,
-) -> ChunkCallResult:
-    """Drive the chunk-review seam and return what it reported.
+    repo_root: str,
+) -> tuple[ReviewChunk, ReviewContext]:
+    """Build a two-file chunk whose diff carries a section per file.
 
     Args:
-        tmp_path: Temporary directory used as the repository root.
-        max_findings: Per-call findings ceiling handed to the chunk call.
-        exhaust_first_call: When True, the first provider call fails with an
-            output-token exhaustion error so the tighter-cap retry runs.
+        repo_root: Absolute path used as the review's repository root.
 
     Returns:
-        The chunk call result, carrying the degradations it recorded and the
-        findings cap that was in force for the answer it returns.
+        The chunk and the context that carries its diff.
     """
-    chunk, context = _chunk_and_context(repo_root=str(tmp_path))
+    diff = (
+        "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n"
+        "@@ -1 +1 @@\n+x = 1\n"
+        "diff --git a/src/b.py b/src/b.py\n--- a/src/b.py\n+++ b/src/b.py\n"
+        "@@ -1 +1 @@\n+y = 2\n"
+    )
+    chunk = ReviewChunk(
+        id=1,
+        files=["src/a.py", "src/b.py"],
+        diff=diff,
+        relationship="directory-prefix",
+    )
+    context = ReviewContext(
+        base_ref="main",
+        head_ref="feature",
+        changed_files=[
+            ChangedFile(path="src/a.py", status="modified", additions=1, deletions=0),
+            ChangedFile(path="src/b.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff=diff,
+        pr_metadata=None,
+        repo_root=repo_root,
+    )
+    return chunk, context
+
+
+def _stub_provider() -> MagicMock:
+    """Return a provider double the run session can close."""
     provider = MagicMock()
     # The run session closes every provider it owns (#2302), so the
     # double has to model an awaitable ``aclose``.
     provider.aclose = AsyncMock()
     provider.model_name = "claude-sonnet-4-6"
     provider.name = "anthropic"
+    provider.capabilities.supports_sessions = False
+    return provider
+
+
+async def _main_pass_for(
+    *,
+    tmp_path: Path,
+    two_files: bool,
+    exhaust_calls: frozenset[int],
+    prompts: list[str],
+) -> ChunkReviewPartial:
+    """Drive the chunk main-pass seam and return the partial it produced.
+
+    Args:
+        tmp_path: Temporary directory used as the repository root.
+        two_files: Whether the chunk carries two files (splittable) or one.
+        exhaust_calls: One-based provider call numbers that fail with an
+            output-token exhaustion error.
+        prompts: Receives the user prompt of every provider call, in order.
+
+    Returns:
+        The chunk partial, carrying whatever degradations the seam recorded.
+    """
+    if two_files:
+        chunk, context = _two_file_chunk_and_context(repo_root=str(tmp_path))
+    else:
+        chunk, context = _chunk_and_context(repo_root=str(tmp_path))
     budget = MagicMock()
     budget.check = MagicMock()
-    calls: list[int] = []
 
     async def _fake_call_ai(**kwargs: object) -> AIResponse:
-        """Fail the first call on output exhaustion when asked to."""
-        calls.append(1)
-        if exhaust_first_call and len(calls) == 1:
+        """Fail the configured calls on output exhaustion, else answer."""
+        prompt = str(kwargs.get("user_prompt", ""))
+        prompts.append(prompt)
+        if len(prompts) in exhaust_calls:
             raise AIProviderError(
                 "Claude CLI reported error: maximum output tokens reached",
             )
-        return _ok_response()
+        # A half's prompt carries only its own diff section; the changed-file
+        # list names every file, so the diff text is what tells them apart.
+        file = (
+            "src/b.py" if "+y = 2" in prompt and "+x = 1" not in prompt else "src/a.py"
+        )
+        return _ok_response(findings=1, file=file)
 
     with patch(
         "lintro.ai.review.provider_call.call_ai",
         new=AsyncMock(side_effect=_fake_call_ai),
     ):
-        return await invoke_chunk_review(
+        return await review_chunk_main_pass(
             request=ChunkReviewRequest(
                 chunk=chunk,
                 context=context,
-                provider=provider,
+                provider=_stub_provider(),
                 ai_config=AIConfig(
                     enabled=True,
                     review=True,
@@ -589,114 +716,202 @@ async def _chunk_call_for(
                 repo_root=str(tmp_path),
                 use_one_shot=True,
                 diff_budget=10_000,
-                max_findings=max_findings,
                 chunk_index=3,
             ),
         )
 
 
-async def test_chunk_review_reports_the_cap_without_recording_it(
-    tmp_path: Path,
-) -> None:
-    """A capped chunk call reports its ceiling but records no degradation.
-
-    The call site decides whether the ceiling bit, from the parsed finding
-    count; the call itself only says which ceiling was in force (#2283).
+async def test_clean_main_pass_records_nothing(tmp_path: Path) -> None:
+    """A chunk call that answers first time records no degradation.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    call = await _chunk_call_for(
+    prompts: list[str] = []
+    partial = await _main_pass_for(
         tmp_path=tmp_path,
-        max_findings=CLI_MAX_FINDINGS_PER_CALL,
-        exhaust_first_call=False,
+        two_files=True,
+        exhaust_calls=frozenset(),
+        prompts=prompts,
     )
 
-    assert_that(call.degradations).is_empty()
-    assert_that(call.findings_cap).is_equal_to(CLI_MAX_FINDINGS_PER_CALL)
+    assert_that(prompts).is_length(1)
+    assert_that(partial.coverage_degradations).is_empty()
+    # No per-call ceiling is written into the prompt any more.
+    assert_that(prompts[0].lower()).does_not_contain("cap `findings`")
+    assert_that(prompts[0]).contains("There is no cap on findings")
 
 
-async def test_chunk_review_records_the_exhaustion_retry(
+async def test_exhausted_multi_file_chunk_is_split_and_merged(
     tmp_path: Path,
 ) -> None:
-    """An output-exhaustion retry records the tightened cap it re-ran under.
+    """Output exhaustion splits a two-file chunk into two calls, one per file.
+
+    The halves' findings merge under the original chunk, and exactly one
+    ``OUTPUT_EXHAUSTION_RETRIED`` degradation is recorded for the chunk.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    call = await _chunk_call_for(
+    prompts: list[str] = []
+    partial = await _main_pass_for(
         tmp_path=tmp_path,
-        max_findings=CLI_MAX_FINDINGS_PER_CALL,
-        exhaust_first_call=True,
+        two_files=True,
+        exhaust_calls=frozenset({1}),
+        prompts=prompts,
     )
 
-    reasons = [item.reason for item in call.degradations]
+    assert_that(prompts).is_length(3)
+    # The first half sees only a.py's section, the second only b.py's.
+    assert_that(prompts[1]).contains("+x = 1")
+    assert_that(prompts[1]).does_not_contain("+y = 2")
+    assert_that(prompts[2]).contains("+y = 2")
+    assert_that(prompts[2]).does_not_contain("+x = 1")
+    assert_that([finding.file for finding in partial.findings]).is_equal_to(
+        ["src/a.py", "src/b.py"],
+    )
+    reasons = [item.reason for item in partial.coverage_degradations]
     assert_that(reasons).is_equal_to(
         [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
     )
-    assert_that(call.degradations[-1].findings_cap).is_equal_to(CLI_FINDINGS_RETRY_CAP)
-    assert_that(call.degradations[-1].chunk_index).is_equal_to(3)
-    # The answer that came back is the retry's, so the cap the caller gates on
-    # is the tightened one.
-    assert_that(call.findings_cap).is_equal_to(CLI_FINDINGS_RETRY_CAP)
+    assert_that(partial.coverage_degradations[0].chunk_index).is_equal_to(3)
+    # The chunk really was split, so it gave up its whole-chunk view.
+    assert_that(partial.coverage_degradations[0].split).is_true()
+    # Usage is the sum of both halves.
+    assert_that(partial.input_tokens).is_equal_to(20)
+    assert_that(partial.output_tokens).is_equal_to(40)
 
 
-async def test_uncapped_chunk_review_records_nothing(
+async def test_exhausted_single_file_chunk_is_retried_once(
     tmp_path: Path,
 ) -> None:
-    """A transport with no findings ceiling records no degradation.
+    """A single-file chunk cannot be split, so it is retried once unchanged.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    call = await _chunk_call_for(
+    prompts: list[str] = []
+    partial = await _main_pass_for(
         tmp_path=tmp_path,
-        max_findings=None,
-        exhaust_first_call=False,
+        two_files=False,
+        exhaust_calls=frozenset({1}),
+        prompts=prompts,
     )
 
-    assert_that(call.degradations).is_empty()
-    assert_that(call.findings_cap).is_none()
+    assert_that(prompts).is_length(2)
+    # The retry is the same prompt; only the per-call boundary marker differs.
+    boundary = re.compile(r"CODE_BLOCK_[0-9a-f]+")
+    assert_that(boundary.sub("CODE_BLOCK", prompts[1])).is_equal_to(
+        boundary.sub("CODE_BLOCK", prompts[0]),
+    )
+    reasons = [item.reason for item in partial.coverage_degradations]
+    assert_that(reasons).is_equal_to(
+        [CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED],
+    )
+    # Nothing was split: the chunk kept its whole-file view and was simply
+    # asked again, so the run must not report it as a chunk that lost it.
+    assert_that(partial.coverage_degradations[0].split).is_false()
+    assert_that(partial.findings).is_length(1)
 
 
-#: Per-call ceiling used by the end-to-end CLI runs below. Small enough that
-#: a chunk answer can reach it without inventing a dozen findings.
-_END_TO_END_CAP = 2
+async def test_exhaustion_on_a_half_keeps_the_other_half(tmp_path: Path) -> None:
+    """A half that exhausts the ceiling again is dropped, not the whole chunk.
+
+    The surviving half's findings are kept and only its files count as
+    reviewed; the failed half's files are left unreviewed for the coverage
+    surfaces to report.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    prompts: list[str] = []
+    partial = await _main_pass_for(
+        tmp_path=tmp_path,
+        two_files=True,
+        exhaust_calls=frozenset({1, 2}),
+        prompts=prompts,
+    )
+
+    assert_that(prompts).is_length(3)
+    assert_that(partial.files).is_equal_to(("src/b.py",))
+    assert_that([finding.file for finding in partial.findings]).is_equal_to(
+        ["src/b.py"],
+    )
+    reasons = [item.reason for item in partial.coverage_degradations]
+    assert_that(reasons).is_equal_to(
+        [
+            CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
+            CoverageDegradationReason.SPLIT_HALF_FAILED,
+        ],
+    )
 
 
-async def _cli_run(*, tmp_path: Path, findings: int) -> ReviewResult:
-    """Run a one-chunk CLI review whose single answer carries ``findings``.
+async def test_exhaustion_on_both_halves_propagates(tmp_path: Path) -> None:
+    """With neither half answering, the provider error is raised.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    prompts: list[str] = []
+    with pytest.raises(AIProviderError, match="maximum output tokens"):
+        await _main_pass_for(
+            tmp_path=tmp_path,
+            two_files=True,
+            exhaust_calls=frozenset({1, 2, 3}),
+            prompts=prompts,
+        )
+
+    assert_that(prompts).is_length(3)
+
+
+#: Findings count large enough that the old default cap (12) would have bitten.
+_MANY_FINDINGS = 25
+
+
+async def _cli_run(
+    *,
+    tmp_path: Path,
+    findings: int,
+    exhaust_first_call: bool = False,
+) -> ReviewResult:
+    """Run a CLI review whose replayed chunk answers carry ``findings`` each.
 
     Args:
         tmp_path: Temporary directory used as the repository root.
-        findings: How many findings the replayed chunk answer returns, which
-            decides whether the :data:`_END_TO_END_CAP` ceiling was reached.
+        findings: How many findings each replayed chunk answer returns.
+        exhaust_first_call: When True, the review context carries two files
+            and the first provider call fails with output exhaustion, so the
+            chunk is split and each half answered.
 
     Returns:
         The completed review result.
     """
-    _chunk, context = _chunk_and_context(repo_root=str(tmp_path))
-    provider = MagicMock()
-    # The run session closes every provider it owns (#2302), so the
-    # double has to model an awaitable ``aclose``.
-    provider.aclose = AsyncMock()
-    provider.model_name = "claude-sonnet-4-6"
-    provider.name = "anthropic"
-    provider.capabilities.supports_sessions = False
+    if exhaust_first_call:
+        _chunk, context = _two_file_chunk_and_context(repo_root=str(tmp_path))
+    else:
+        _chunk, context = _chunk_and_context(repo_root=str(tmp_path))
+    calls: list[int] = []
+
+    async def _fake_call_ai(**kwargs: object) -> AIResponse:
+        calls.append(1)
+        if exhaust_first_call and len(calls) == 1:
+            raise AIProviderError(
+                "Claude CLI reported error: maximum output tokens reached",
+            )
+        return _ok_response(findings=findings)
 
     with patch(
         "lintro.ai.review.provider_call.call_ai",
-        new=AsyncMock(return_value=_ok_response(findings=findings)),
+        new=AsyncMock(side_effect=_fake_call_ai),
     ):
         return await run_review_async(
             context=context,
             options=ReviewSessionOptions(
-                provider=provider,
+                provider=_stub_provider(),
                 ai_config=AIConfig(
                     enabled=True,
                     review=True,
                     transport=AITransport.CLI,
-                    cli_max_findings_per_call=_END_TO_END_CAP,
                 ),
                 depth=1,
                 checklist_items=[],
@@ -706,53 +921,52 @@ async def _cli_run(*, tmp_path: Path, findings: int) -> ReviewResult:
         )
 
 
-async def test_cli_run_below_the_cap_stays_coverage_complete(
+async def test_cli_run_records_no_cap_however_many_findings(
     tmp_path: Path,
 ) -> None:
-    """A configured ceiling nobody reached is not a coverage degradation.
+    """A chunk answering with many findings records no degradation at all.
 
-    Before #2283 the cap was recorded whenever it was *configured*, so every
-    CLI review came back degraded. This is the loud failure mode for a
-    regression back to that.
+    Before lintro-ops milestone 0 a chunk answering with exactly the configured
+    ceiling recorded a cap hit and reddened the check. There is no ceiling:
+    a chunk reports every finding it has and the run stays complete.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP - 1)
+    result = await _cli_run(tmp_path=tmp_path, findings=_MANY_FINDINGS)
 
+    assert_that(result.findings).is_length(_MANY_FINDINGS)
     assert_that(result.metadata.coverage_degradations).is_empty()
     assert_that(result.metadata.findings_coverage_complete).is_true()
-    assert_that(result.metadata.findings_cap_applied).is_none()
     assert_that(result.metadata.partial).is_false()
 
 
-async def test_cli_run_that_hits_the_cap_records_it_end_to_end(
+async def test_cli_run_that_exhausts_output_records_the_split_end_to_end(
     tmp_path: Path,
 ) -> None:
-    """A chunk answering with exactly K findings records the cap it reached.
+    """A split chunk reaches ``ReviewMetadata`` as one degradation.
 
     Locks the orchestrator wiring: if the per-chunk degradation stops being
-    aggregated onto ``ReviewMetadata``, a genuinely capped CLI review would
-    present as an unlimited one again.
+    aggregated onto ``ReviewMetadata``, a re-reviewed chunk would present as
+    an untouched one again.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP)
+    result = await _cli_run(tmp_path=tmp_path, findings=1, exhaust_first_call=True)
 
     assert_that(result.metadata.coverage_degradations).is_length(1)
     recorded = result.metadata.coverage_degradations[0]
     assert_that(recorded.reason).is_equal_to(
-        CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+        CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
     )
-    assert_that(recorded.findings_cap).is_equal_to(_END_TO_END_CAP)
     assert_that(recorded.chunk_index).is_equal_to(0)
     assert_that(result.metadata.findings_coverage_complete).is_false()
-    assert_that(result.metadata.findings_cap_applied).is_equal_to(_END_TO_END_CAP)
+    assert_that(result.metadata.output_exhaustion_retried).is_true()
     assert_that(result.metadata.partial).is_false()
     assert_that(
         describe_coverage_degradations(metadata=result.metadata),
-    ).contains(f"1 of 1 chunk hit the {_END_TO_END_CAP}-finding per-call cap")
+    ).contains("1 of 1 chunk exhausted the provider output limit")
 
 
 #: The CI classifier that turns a review envelope into a check outcome. It is
@@ -797,16 +1011,13 @@ def _classify_run(*, result: ReviewResult) -> Any:
     )
 
 
-async def test_below_cap_cli_run_classifies_as_reviewed(tmp_path: Path) -> None:
-    """The CI check is green for a CLI round no chunk capped.
-
-    This is the outcome #2283 exists to restore: before it, every CLI round
-    classified ``degraded`` and the AI Review check was red on every PR.
+async def test_many_findings_cli_run_classifies_as_reviewed(tmp_path: Path) -> None:
+    """The CI check is green for a CLI round however many findings it found.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP - 1)
+    result = await _cli_run(tmp_path=tmp_path, findings=_MANY_FINDINGS)
 
     report = _classify_run(result=result)
 
@@ -814,36 +1025,36 @@ async def test_below_cap_cli_run_classifies_as_reviewed(tmp_path: Path) -> None:
     assert_that(report.exit_code).is_equal_to(0)
 
 
-async def test_cli_run_that_hits_the_cap_classifies_as_degraded(
+async def test_cli_run_that_split_a_chunk_classifies_as_degraded(
     tmp_path: Path,
 ) -> None:
-    """A genuinely capped chunk still reddens the CI check.
+    """A split chunk still reddens the CI check.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP)
+    result = await _cli_run(tmp_path=tmp_path, findings=1, exhaust_first_call=True)
 
     report = _classify_run(result=result)
 
     assert_that(report.outcome.value).is_equal_to("degraded")
     assert_that(report.exit_code).is_equal_to(1)
-    assert_that(report.detail).contains("findings_cap_applied")
+    assert_that(report.detail).contains("output_exhaustion_retried")
 
 
-async def test_below_cap_cli_run_renders_like_an_uncapped_run(
+async def test_many_findings_cli_run_renders_like_a_clean_run(
     tmp_path: Path,
 ) -> None:
-    """Every surface of a below-cap CLI run matches its uncapped counterpart.
+    """Every surface of a many-findings CLI run matches a clean counterpart.
 
     Terminal, JSON, review body and sticky are compared byte for byte against
-    the same result with an explicitly empty degradation tuple — the shape an
-    uncapped transport produces (#2283).
+    the same result with an explicitly empty degradation tuple — there is no
+    cap-shaped difference between transports any more.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
-    result = await _cli_run(tmp_path=tmp_path, findings=_END_TO_END_CAP - 1)
+    result = await _cli_run(tmp_path=tmp_path, findings=_MANY_FINDINGS)
     uncapped = _with_degradations(result=result, degradations=())
 
     assert_that(_terminal(result=result)).is_equal_to(_terminal(result=uncapped))
@@ -861,8 +1072,8 @@ async def test_below_cap_cli_run_renders_like_an_uncapped_run(
         assert_that(surface).does_not_contain(PARTIAL_REVIEW_LABEL)
 
 
-def test_partial_and_capped_run_does_not_claim_every_chunk_reviewed() -> None:
-    """A run that is both capped and stopped early never over-claims coverage."""
+def test_partial_and_split_run_does_not_claim_every_chunk_reviewed() -> None:
+    """A run that is both split and stopped early never over-claims coverage."""
     from lintro.ai.review.coverage_degradation import describe_coverage_degradations
     from lintro.ai.review.enums.coverage_degradation_reason import (
         CoverageDegradationReason,
@@ -871,9 +1082,8 @@ def test_partial_and_capped_run_does_not_claim_every_chunk_reviewed() -> None:
     from lintro.ai.review.models.review_metadata import ReviewMetadata
 
     capped = CoverageDegradation(
-        reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+        reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
         chunk_index=0,
-        findings_cap=25,
     )
     complete = ReviewMetadata(
         model="m",
@@ -894,7 +1104,7 @@ def test_partial_and_capped_run_does_not_claim_every_chunk_reviewed() -> None:
     )
     text = describe_coverage_degradations(metadata=partial)
     assert_that(text).does_not_contain("Every chunk was reviewed")
-    assert_that(text).contains("Lower-severity findings in those chunks")
+    assert_that(text).contains("Findings that need the whole chunk in view")
 
 
 def test_run_record_coverage_limited_uses_strict_bool_parsing() -> None:
@@ -916,7 +1126,7 @@ def test_run_record_coverage_limited_uses_strict_bool_parsing() -> None:
     assert_that(RunRecord.from_dict(base).coverage.coverage_limited).is_false()
 
 
-def test_capped_and_retried_chunk_counts_once_in_the_description() -> None:
+def test_split_and_failed_pass_on_one_chunk_count_once_in_the_description() -> None:
     """Two limit events on one chunk never inflate the chunk denominator."""
     from lintro.ai.review.coverage_degradation import describe_coverage_degradations
     from lintro.ai.review.enums.coverage_degradation_reason import (
@@ -937,22 +1147,20 @@ def test_capped_and_retried_chunk_counts_once_in_the_description() -> None:
         checklist_items=0,
         coverage_degradations=(
             CoverageDegradation(
-                reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
-                chunk_index=0,
-                findings_cap=25,
-            ),
-            CoverageDegradation(
                 reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
                 chunk_index=0,
-                findings_cap=12,
+            ),
+            CoverageDegradation(
+                reason=CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
+                chunk_index=0,
             ),
         ),
     )
 
     text = describe_coverage_degradations(metadata=metadata)
 
-    assert_that(text).contains("1 of 1 chunk hit the 25-finding per-call cap")
-    assert_that(text).contains("1 chunk retried at a tighter 12-finding cap")
+    assert_that(text).contains("1 of 1 chunk exhausted the provider output limit")
+    assert_that(text).contains("1 chunk kept only the main pass")
     assert_that(text).does_not_contain("of 2 chunks")
 
 
@@ -970,10 +1178,10 @@ def test_run_record_partial_uses_strict_bool_parsing() -> None:
     ).is_true()
 
 
-def test_sticky_history_marks_a_prior_capped_round(
+def test_sticky_history_marks_a_prior_limited_round(
     sample_review_result: ReviewResult,
 ) -> None:
-    """The run-history recap keeps a capped round visible in later rounds.
+    """The run-history recap keeps a limited round visible in later rounds.
 
     Args:
         sample_review_result: Shared review result fixture.
@@ -1015,10 +1223,10 @@ def test_sticky_history_marks_a_prior_capped_round(
     assert_that(without_marker).does_not_contain("⚠️ coverage limited")
 
 
-def test_advanced_state_persists_coverage_limited_from_a_capped_result(
+def test_advanced_state_persists_coverage_limited_from_a_split_result(
     sample_review_result: ReviewResult,
 ) -> None:
-    """A capped result stamps coverage_limited on the persisted run record.
+    """A split result stamps coverage_limited on the persisted run record.
 
     Args:
         sample_review_result: Shared review result fixture.
@@ -1030,7 +1238,7 @@ def test_advanced_state_persists_coverage_limited_from_a_capped_result(
         request=StickyRequest(
             result=_with_degradations(
                 result=sample_review_result,
-                degradations=(_CAP,),
+                degradations=(_RETRY,),
             ),
             head_sha="abc1234",
             transport="cli",
@@ -1070,7 +1278,7 @@ def test_unknown_degradation_reason_still_renders_a_clause(
         def __str__(self) -> str:
             return "novel_limit"
 
-    novel = replace(_CAP, reason=_Novel())  # type: ignore[arg-type]
+    novel = replace(_RETRY, reason=_Novel())  # type: ignore[arg-type]
     metadata = ReviewMetadata(
         model="m",
         provider="p",
@@ -1111,7 +1319,7 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk(
 
     Both whole-run reasons are pinned: exclusion keys on the sentinel chunk
     index, so a reason the aggregators forgot to special-case would inflate
-    the denominator or win the ``findings_cap_applied`` min().
+    the denominator.
 
     Args:
         reason: The whole-run degradation reason under test.
@@ -1133,24 +1341,19 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk(
         checklist_items=0,
         coverage_degradations=(
             CoverageDegradation(
-                reason=CoverageDegradationReason.FINDINGS_CAP_APPLIED,
+                reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
                 chunk_index=0,
-                findings_cap=25,
             ),
             CoverageDegradation(
                 reason=reason,
                 chunk_index=SYNTHESIS_CHUNK_INDEX,
-                findings_cap=0,
             ),
         ),
     )
 
     text = describe_coverage_degradations(metadata=metadata)
 
-    assert_that(text).contains("1 of 1 chunk hit the 25-finding per-call cap")
+    assert_that(text).contains("1 of 1 chunk exhausted the provider output limit")
     assert_that(text).does_not_contain("of 2 chunks")
     assert_that(text).contains(clause)
-    # The synthesis row's placeholder cap of 0 must never win the min(): the
-    # tightest ceiling a chunk actually ran under is the cap row's 25.
-    assert_that(metadata.findings_cap_applied).is_equal_to(25)
     assert_that(metadata.findings_coverage_complete).is_false()

@@ -117,8 +117,10 @@ def test_parse_review_response_validates_required_keys() -> None:
     """Parser accepts valid review JSON payloads."""
     payload = parse_review_response(content=_sample_response_json())
 
+    assert_that(payload["findings"]).is_length(1)
+    # ``findings`` is the only required key; a legacy summary or checklist
+    # the model still emits is passed through untouched and ignored later.
     assert_that(payload["summary"]).contains("Merge")
-    assert_that(payload["checklist"]).is_length(1)
 
 
 def _one_file_context() -> ReviewContext:
@@ -1157,7 +1159,9 @@ def test_run_review_depth1_returns_review_result() -> None:
             ),
         )
 
-    assert_that(result.summary).contains("Merge")
+    # Chunks report findings only; the fake's plain-string summary is ignored
+    # and the synthesis answer carries no structured headline.
+    assert_that(result.summary).is_equal_to("")
     assert_that(result.findings).is_not_empty()
     assert_that(result.has_p1_findings).is_true()
 
@@ -2047,7 +2051,7 @@ def test_run_review_returns_result_when_progress_complete_raises() -> None:
             ),
         )
 
-    assert_that(result.summary).contains("Merge")
+    assert_that(result.summary).is_equal_to("")
     progress.on_complete.assert_called_once_with(total_findings=1)
 
 

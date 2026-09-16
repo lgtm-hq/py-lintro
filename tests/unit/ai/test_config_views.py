@@ -87,16 +87,15 @@ def test_budget_config_construction_and_frozen() -> None:
         cache_max_entries=500,
         context_lines=3,
         fix_search_radius=5,
-        cli_max_diff_tokens=config_defaults.cli_max_diff_tokens,
+        review_chunk_diff_tokens=config_defaults.review_chunk_diff_tokens,
         cli_max_diff_bytes=config_defaults.cli_max_diff_bytes,
-        cli_max_findings_per_call=config_defaults.cli_max_findings_per_call,
     )
 
     assert_that(view.max_fix_attempts).is_equal_to(3)
     assert_that(view.max_cost_usd).is_equal_to(1.5)
     assert_that(view.enable_cache).is_true()
-    assert_that(view.cli_max_diff_tokens).is_equal_to(
-        config_defaults.cli_max_diff_tokens,
+    assert_that(view.review_chunk_diff_tokens).is_equal_to(
+        config_defaults.review_chunk_diff_tokens,
     )
     with pytest.raises(dataclasses.FrozenInstanceError):
         view.max_fix_attempts = 99  # type: ignore[misc]

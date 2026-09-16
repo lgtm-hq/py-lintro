@@ -1,20 +1,18 @@
 """Provider call and response handling for a single review chunk.
 
 One chunk's main provider round-trip lives here: build the prompt and call the
-model (retrying once with a tighter findings ceiling when CLI transport hits its
-output-token cap), parse the answer (recovering prose instead of discarding it),
-and convert the parsed payload into a
+model, parse the answer (recovering prose instead of discarding it), and
+convert the parsed payload into a
 :class:`~lintro.ai.review.merge.ChunkReviewPartial` the merge layer folds
 together (issue #2301).
 
-The output-exhaustion retry is recorded here as a :class:`CoverageDegradation`
-entry so a chunk that re-ran under a tighter ceiling can never present as an
-unlimited one. The findings cap is *not* recorded here: a configured ceiling is
-only a degradation once a chunk's parsed answer actually reaches it, which is
-known after parsing, so :mod:`lintro.ai.review.chunk_pass` records it against
-the effective cap this module reports back (#2283). The parse ladder never
-drops a paid-for answer either: a non-JSON reply becomes unstructured findings
-rather than an error.
+A call that exhausts the provider's output-token ceiling is not retried here:
+:mod:`lintro.ai.review.chunk_split_retry` answers it by splitting the chunk in
+two and reviewing each half, recording the split as a coverage degradation so
+a re-reviewed chunk can never present as an untouched one. No per-call
+findings cap exists (lintro-ops milestone 0, decision A): a chunk reports
+every finding it has. The parse ladder never drops a paid-for answer either:
+a non-JSON reply becomes unstructured findings rather than an error.
 """
 
 from __future__ import annotations
@@ -35,23 +33,12 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review import provider_call
-from lintro.ai.review.cli_limits import (
-    is_cli_output_exhaustion,
-    tighter_findings_cap,
-)
 from lintro.ai.review.confirmation_filter import drop_confirmation_findings
-from lintro.ai.review.enums.coverage_degradation_reason import (
-    CoverageDegradationReason,
-)
 from lintro.ai.review.finding_parser import parse_findings, parse_flagged_files
 from lintro.ai.review.merge import (
     ChunkReviewPartial,
-    normalize_checklist_answer_value,
     parse_review_response,
 )
-from lintro.ai.review.models.checklist_answer import ChecklistAnswer
-from lintro.ai.review.models.coverage_degradation import CoverageDegradation
-from lintro.ai.review.narrative_parser import parse_narrative, parse_summary_text
 from lintro.ai.review.prompts import (
     PromptInputs,
     build_git_native_review_prompt,
@@ -76,7 +63,6 @@ __all__ = [
     "ChunkReviewRequest",
     "invoke_chunk_review",
     "merge_response_usage",
-    "parse_checklist",
     "parse_review_payload_with_recovery",
     "payload_to_partial",
 ]
@@ -105,7 +91,6 @@ class ChunkReviewRequest:
         repo_root: Absolute path to the repository under review.
         use_one_shot: When True, avoid durable provider sessions.
         diff_budget: Token budget available for embedded diffs.
-        max_findings: Optional per-call findings ceiling.
         chunk_index: Zero-based position of the chunk in the run, stamped on
             any recorded coverage degradation.
     """
@@ -124,7 +109,6 @@ class ChunkReviewRequest:
     repo_root: str
     use_one_shot: bool
     diff_budget: int
-    max_findings: int | None
     chunk_index: int
 
 
@@ -132,132 +116,70 @@ class ChunkReviewRequest:
 class ChunkCallResult:
     """What one chunk's main provider call produced.
 
-    The findings cap is reported rather than recorded here: whether the
-    ceiling actually bit is only knowable once the answer is parsed, so the
-    caller gates the degradation on the parsed finding count (#2283).
-
     Attributes:
         response: The provider response whose usage the chunk is charged.
-        elapsed: Wall-clock seconds the successful (or final) attempt took.
-        degradations: Coverage degradations this call itself incurred, today
-            only the output-exhaustion retry.
-        findings_cap: The per-call findings ceiling actually in force for the
-            answer in ``response``, tightened when a retry ran, or ``None``
-            when the call was uncapped.
+        elapsed: Wall-clock seconds the call took.
     """
 
     response: AIResponse
     elapsed: float
-    degradations: tuple[CoverageDegradation, ...]
-    findings_cap: int | None
 
 
 async def invoke_chunk_review(
     *,
     request: ChunkReviewRequest,
 ) -> ChunkCallResult:
-    """Build the chunk prompt, call the provider, and retry on output exhaustion.
-
-    When CLI transport hits the ~32k output-token cap mid-JSON, retry once with
-    a tighter findings ceiling so the call can finish a complete object (#1967).
-    The retry is recorded as a coverage degradation; the cap in force is only
-    reported, because a configured ceiling becomes a degradation once a chunk's
-    parsed answer reaches it, not when it is configured (#2283).
+    """Build the chunk prompt and call the provider once.
 
     Args:
         request: The chunk, prompt material, provider handles and limits for
             this call.
 
-    Returns:
-        The provider response, the wall-clock seconds it took, the coverage
-        degradations this call incurred, and the findings cap in force for the
-        returned answer.
+    A failed provider call raises as is: an ``AICostBudgetExceededError`` when
+    the session cost ceiling is hit, otherwise the ``AIError`` the provider
+    raised, including on output-token exhaustion, which
+    :mod:`lintro.ai.review.chunk_split_retry` recognises and answers by
+    splitting the chunk.
 
-    Raises:
-        AICostBudgetExceededError: When the session cost ceiling is hit.
-        AIError: When the provider call fails for a non-retryable reason, or
-            when an output-exhaustion retry still fails.
+    Returns:
+        The provider response and the wall-clock seconds it took.
     """
     ai_config = request.ai_config
     use_git_native = ai_config.transport == AITransport.CLI
-    findings_cap = request.max_findings
-    allow_output_retry = findings_cap is not None and findings_cap > 1
-    degradations: list[CoverageDegradation] = []
     started = time.monotonic()
-    while True:
-        prompt_inputs = PromptInputs(
-            chunk=request.chunk,
-            context=request.context,
-            checklist_text=request.checklist_text,
-            checklist_count=request.checklist_count,
-            interaction_paths=request.interaction_paths,
-            lint_results=request.lint_results,
-            extra_checklist=request.extra_checklist,
-            strictness_section=request.strictness_section,
-            max_findings=findings_cap,
+    prompt_inputs = PromptInputs(
+        chunk=request.chunk,
+        context=request.context,
+        checklist_text=request.checklist_text,
+        checklist_count=request.checklist_count,
+        interaction_paths=request.interaction_paths,
+        lint_results=request.lint_results,
+        extra_checklist=request.extra_checklist,
+        strictness_section=request.strictness_section,
+    )
+    if use_git_native:
+        embed_diff = estimate_tokens(request.chunk.diff) <= max(
+            request.diff_budget,
+            1,
         )
-        if use_git_native:
-            embed_diff = estimate_tokens(request.chunk.diff) <= max(
-                request.diff_budget,
-                1,
-            )
-            system_prompt, user_prompt = build_git_native_review_prompt(
-                inputs=prompt_inputs,
-                embed_diff=embed_diff,
-                allow_unredacted_git_native=(
-                    ai_config.review_allow_unredacted_git_native
-                ),
-            )
-        else:
-            system_prompt, user_prompt = build_review_prompt(inputs=prompt_inputs)
-        try:
-            response = await provider_call.call_ai(
-                provider=request.provider,
-                ai_config=ai_config,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                budget=request.budget,
-                repo_root=request.repo_root or None,
-                use_one_shot=request.use_one_shot,
-                cli_schema=cli_schema_for_review(transport=ai_config.transport),
-            )
-        except AICostBudgetExceededError:
-            raise
-        except AIError as exc:
-            if (
-                allow_output_retry
-                and findings_cap is not None
-                and is_cli_output_exhaustion(exc)
-            ):
-                next_cap = tighter_findings_cap(current=findings_cap)
-                if next_cap < findings_cap:
-                    logger.warning(
-                        "CLI review hit an output-token ceiling; retrying "
-                        f"chunk with findings cap {findings_cap} → {next_cap}.",
-                    )
-                    findings_cap = next_cap
-                    allow_output_retry = False
-                    degradations.append(
-                        CoverageDegradation(
-                            reason=(
-                                CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
-                            ),
-                            chunk_index=request.chunk_index,
-                            findings_cap=next_cap,
-                        ),
-                    )
-                    # Each attempt gets its own schema-retry window: charging
-                    # the retry with the first attempt's elapsed time starves
-                    # the recovery the retry exists to provide.
-                    started = time.monotonic()
-                    continue
-            raise
-        return ChunkCallResult(
-            response=response,
-            elapsed=time.monotonic() - started,
-            degradations=tuple(degradations),
-            findings_cap=findings_cap,
+        system_prompt, user_prompt = build_git_native_review_prompt(
+            inputs=prompt_inputs,
+            embed_diff=embed_diff,
+            allow_unredacted_git_native=(ai_config.review_allow_unredacted_git_native),
         )
+    else:
+        system_prompt, user_prompt = build_review_prompt(inputs=prompt_inputs)
+    response = await provider_call.call_ai(
+        provider=request.provider,
+        ai_config=ai_config,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        budget=request.budget,
+        repo_root=request.repo_root or None,
+        use_one_shot=request.use_one_shot,
+        cli_schema=cli_schema_for_review(transport=ai_config.transport),
+    )
+    return ChunkCallResult(response=response, elapsed=time.monotonic() - started)
 
 
 async def parse_review_payload_with_recovery(
@@ -405,16 +327,15 @@ def payload_to_partial(
     response: AIResponse,
     payload: dict[str, Any],
 ) -> ChunkReviewPartial:
-    """Convert parsed JSON payload to a chunk partial result.
+    """Convert a parsed chunk payload to a chunk partial result.
 
-    Accepts both the extended ``summary`` object (#1907) and the plain summary
-    string; narrative fields degrade to ``None``/empty rather than failing the
-    chunk. The string shape reaches here from transports that do not enforce
-    :data:`~lintro.ai.cli_schemas.REVIEW_CLI_SCHEMA` and from the prose
-    recovery payload, not from a schema-constrained CLI-transport reply.
+    The chunk contract is findings only (lintro-ops milestone 0, decision
+    A): ``findings`` and the ``flagged_files`` re-read requests are read and
+    every other key is ignored, so an older model that still emits a
+    summary, checklist or per-file overview degrades to nothing rather than
+    failing the chunk.
 
-    Findings whose body says they are not a defect are dropped here, before
-    the caller counts the answer against its findings cap (#2430).
+    Findings whose body says they are not a defect are dropped here (#2430).
 
     Args:
         response: Provider response the payload was parsed from.
@@ -423,63 +344,15 @@ def payload_to_partial(
     Returns:
         The chunk partial result.
     """
-    raw_summary = payload.get("summary", "")
-    summary = parse_summary_text(raw_summary=raw_summary)
-    pr_summary, verdict_reasoning, file_assessments = parse_narrative(payload=payload)
-
-    checklist = parse_checklist(raw_checklist=payload.get("checklist", []))
     findings = drop_confirmation_findings(
         findings=parse_findings(raw_findings=payload.get("findings", [])),
     )
     flagged_files = parse_flagged_files(raw_flags=payload.get("flagged_files"))
-
     return ChunkReviewPartial(
-        summary=summary,
-        checklist=checklist,
         findings=findings,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
-        pr_summary=pr_summary,
-        verdict_reasoning=verdict_reasoning,
-        file_assessments=file_assessments,
+        turns=response.turns,
         flagged_files=flagged_files,
     )
-
-
-def parse_checklist(*, raw_checklist: object) -> tuple[ChecklistAnswer, ...]:
-    """Parse checklist answers from AI JSON.
-
-    Args:
-        raw_checklist: The ``checklist`` value from a parsed model payload.
-
-    Returns:
-        The well-formed checklist answers, in payload order.
-    """
-    if not isinstance(raw_checklist, list):
-        return ()
-    answers: list[ChecklistAnswer] = []
-    for item in raw_checklist:
-        if not isinstance(item, dict):
-            continue
-        answer_id = item.get("id")
-        answer = item.get("answer", "no")
-        evidence_raw = item.get("evidence", "")
-        if not isinstance(answer_id, int):
-            continue
-        if not isinstance(answer, str):
-            answer = str(answer)
-        if evidence_raw is None:
-            evidence = ""
-        elif isinstance(evidence_raw, str):
-            evidence = evidence_raw
-        else:
-            evidence = str(evidence_raw)
-        answers.append(
-            ChecklistAnswer(
-                id=answer_id,
-                answer=normalize_checklist_answer_value(answer=answer),
-                evidence=evidence.strip(),
-            ),
-        )
-    return tuple(answers)

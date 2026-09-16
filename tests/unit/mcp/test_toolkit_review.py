@@ -1078,6 +1078,8 @@ def test_review_payload_carries_synthesis_origin_and_block(
             "findings_added": 1,
             "truncated": True,
             "failed": False,
+            "duplicates_merged": 0,
+            "narrative_missing": False,
         },
     )
 

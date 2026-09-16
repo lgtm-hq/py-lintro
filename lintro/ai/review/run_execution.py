@@ -284,8 +284,7 @@ async def finalize_completed_run(
         chunks_reviewed=len(partials),
     ):
         return outcome
-    # ``should_run_synthesis`` already rejected a None config; bind it so the
-    # type checker knows that too.
+    # ``should_run_synthesis`` already rejected a None config; bind for mypy.
     synthesis_config = options.synthesis
     assert synthesis_config is not None
     with plan.timings.phase(name=ReviewPhase.SYNTHESIS):
@@ -311,7 +310,13 @@ async def finalize_completed_run(
                 stop=interrupt,
             ),
         )
-    findings = outcome.filtered_findings + synthesis_pass.findings
+    # A successful pass returns the chunk findings with duplicates merged.
+    base_findings = (
+        synthesis_pass.merged_findings
+        if synthesis_pass.merged_findings is not None
+        else outcome.filtered_findings
+    )
+    findings = base_findings + synthesis_pass.findings
     return replace(
         outcome,
         synthesis_pass=synthesis_pass,

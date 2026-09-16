@@ -41,12 +41,13 @@ class ReviewPhase(StrEnum):
     (context-finding rejection, coverage and resume bookkeeping, flag
     reconciliation), through to the assembled result.
 
-    ``synthesis`` is the optional final cross-chunk pass (#2269). It is one
-    extra provider call made after the chunk findings are merged, and it is
-    recorded outside the ``provider`` envelope so its cost and wall-clock
-    delta per round can be read directly off the existing timing surfaces.
-    The phase is absent from runs where the pass did not run, which is the
-    default.
+    ``synthesis`` is the round's synthesis pass (#2269, lintro-ops #37): one
+    extra provider call after the chunk findings are merged that writes the
+    summary and verdict reasoning, merges duplicates and reports cross-file
+    findings. It is recorded outside the ``provider`` envelope so its cost
+    and wall-clock delta per round can be read directly off the existing
+    timing surfaces. On by default, so the phase is present on a normal run
+    and absent only when the pass is disabled or no chunk completed.
 
     ``provider`` is an envelope: it spans the whole chunk fan-out, including
     the per-chunk ``generated_questions`` (depth >= 2) and ``adversarial``
@@ -167,8 +168,10 @@ class ReviewTimingRecorder:
         queued_seconds: float,
         in_flight_seconds: float,
         failed: bool = False,
+        provider_seconds: float = 0.0,
+        turns: int | None = None,
     ) -> None:
-        """Record one chunk's queued/in-flight split.
+        """Record one chunk's queued/in-flight split and its call detail.
 
         Args:
             chunk_index: Position of the chunk in the run.
@@ -176,6 +179,8 @@ class ReviewTimingRecorder:
             queued_seconds: Seconds spent waiting on the concurrency semaphore.
             in_flight_seconds: Seconds spent reviewing once admitted.
             failed: True when the chunk ended in an error or a stop.
+            provider_seconds: Wall-clock seconds of the main provider call.
+            turns: Transport-reported agent turns for that call, if any.
         """
         self._chunks.append(
             ChunkTiming(
@@ -184,6 +189,8 @@ class ReviewTimingRecorder:
                 queued_seconds=max(queued_seconds, 0.0),
                 in_flight_seconds=max(in_flight_seconds, 0.0),
                 failed=failed,
+                provider_seconds=max(provider_seconds, 0.0),
+                turns=turns,
             ),
         )
 

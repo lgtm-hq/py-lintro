@@ -119,7 +119,7 @@ def _run(
         round_number: 1-based round number.
         score: Recorded convergence score, or ``None`` for a legacy record.
         partial: Whether the round stopped before reviewing every chunk.
-        coverage_limited: Whether a findings cap may have suppressed findings.
+        coverage_limited: Whether a coverage limit may have suppressed findings.
 
     Returns:
         The run record.
@@ -447,7 +447,7 @@ def test_a_degraded_round_cannot_attest_stability(
 
     Args:
         partial: Whether the round stopped with chunks unreviewed.
-        coverage_limited: Whether a findings cap may have hidden findings.
+        coverage_limited: Whether a coverage limit may have hidden findings.
     """
     runs = (
         _run(round_number=1, score=0.5),

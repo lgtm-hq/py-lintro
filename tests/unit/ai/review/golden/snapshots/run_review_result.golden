@@ -50,21 +50,7 @@
     "synthesis": null,
     "lint_facts_note": ""
   },
-  "summary": "Session gate now fails closed, but a hardcoded key landed with it.\n\nToken decoding gained an unverified fast path.",
-  "checklist": [
-    {
-      "id": 1,
-      "answer": "yes",
-      "evidence": "src/auth/tokens.py:1 defaults to no verification",
-      "question": ""
-    },
-    {
-      "id": 2,
-      "answer": "no",
-      "evidence": "signature widened compatibly",
-      "question": ""
-    }
-  ],
+  "summary": "",
   "findings": [
     {
       "severity": "P1",
@@ -90,7 +76,8 @@
       "suggestion_dropped": null,
       "cross_chunk_contradiction": null,
       "origin": null,
-      "posted_inline": true
+      "posted_inline": true,
+      "merged_duplicates": []
     },
     {
       "severity": "P2",
@@ -116,7 +103,8 @@
       "suggestion_dropped": null,
       "cross_chunk_contradiction": null,
       "origin": null,
-      "posted_inline": true
+      "posted_inline": true,
+      "merged_duplicates": []
     },
     {
       "severity": "P2",
@@ -142,48 +130,12 @@
       "suggestion_dropped": null,
       "cross_chunk_contradiction": null,
       "origin": null,
-      "posted_inline": true
+      "posted_inline": true,
+      "merged_duplicates": []
     }
   ],
-  "pr_summary": {
-    "headline": "Session gate now fails closed, but a hardcoded key landed with it. Token decoding gained an unverified fast path.",
-    "walkthrough": [
-      {
-        "text": "is_active rejects the expired status explicitly.",
-        "finding_ref": "src/auth/session.py:6"
-      },
-      {
-        "text": "A module-level API key constant was added.",
-        "finding_ref": "src/auth/session.py:3"
-      },
-      {
-        "text": "decode accepts a verify flag that defaults to skipping verification.",
-        "finding_ref": "src/auth/tokens.py:1"
-      }
-    ]
-  },
-  "verdict_reasoning": {
-    "deciding_factor": "A credential is committed in the session module.",
-    "failure_mechanism": "The constant ships in the wheel and is readable by anyone who installs it.",
-    "files_needing_attention": [
-      "src/auth/session.py",
-      "src/auth/tokens.py"
-    ]
-  },
-  "file_assessments": [
-    {
-      "file": "src/auth/session.py",
-      "overview": "Adds an explicit expired branch and a module-level constant."
-    },
-    {
-      "file": "assets/logo.png",
-      "overview": "Binary asset replaced; not reviewable as text."
-    },
-    {
-      "file": "src/auth/tokens.py",
-      "overview": "Renamed module gains a verify keyword defaulting to False."
-    }
-  ],
+  "pr_summary": null,
+  "verdict_reasoning": null,
   "coverage": {
     "reviewed": 3,
     "carried": 0,
@@ -197,21 +149,24 @@
       "patch_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "reviewed_sha": "feature/session-gate",
       "round": 1,
-      "stopped_reason": ""
+      "stopped_reason": "",
+      "truncated": false
     },
     {
       "path": "src/auth/session.py",
       "patch_hash": "034a4a7f8ae64528866571130fc18c8450d6cef86249b2d46f9e0013a1da9e18",
       "reviewed_sha": "feature/session-gate",
       "round": 1,
-      "stopped_reason": ""
+      "stopped_reason": "",
+      "truncated": false
     },
     {
       "path": "src/auth/tokens.py",
       "patch_hash": "da74300485ec268bc02153f58f741a3c1988f70599ffc8b2c35390b9f114b5e8",
       "reviewed_sha": "feature/session-gate",
       "round": 1,
-      "stopped_reason": ""
+      "stopped_reason": "",
+      "truncated": false
     }
   ],
   "flagged_files": [],

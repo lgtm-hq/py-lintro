@@ -49,16 +49,22 @@ def chunk_review_context(
     max_tokens: int,
     classifications: list[FileClassification],
     allow_omitted_files: bool = True,
+    hard_max_tokens: int | None = None,
 ) -> ChunkingResult:
     """Split review context into token-bounded semantic chunks.
 
     Args:
         context: Collected review diff context.
-        max_tokens: Maximum estimated tokens per chunk diff.
+        max_tokens: Target estimated tokens per chunk diff. A group above it
+            is split by file count; a single file above it is still reviewed
+            whole when it fits ``hard_max_tokens``.
         classifications: Domain classifications for changed files.
         allow_omitted_files: When True (default), return omitted repetitive-diff
             files in ``skipped`` instead of raising. Pass False for strict
             behavior.
+        hard_max_tokens: Absolute ceiling for one chunk (the context-window
+            remainder). A single file above it is truncated and its chunk is
+            marked ``truncated``. ``None`` means the target is the ceiling.
 
     Returns:
         Chunking result with semantic groups and any truncation warnings.
@@ -171,6 +177,7 @@ def chunk_review_context(
                 files=split_files,
                 per_file_diffs=group_diffs,
                 max_tokens=max_tokens,
+                hard_max_tokens=hard_max_tokens,
                 classification_map=classification_map,
                 relationship=relationship,
                 metadata_note=note,
@@ -600,8 +607,15 @@ def _build_group_chunks(
     relationship: RelationshipLabel,
     metadata_note: str | None,
     start_id: int,
+    hard_max_tokens: int | None = None,
 ) -> tuple[list[ReviewChunk], bool, list[str]]:
-    """Build one or more review chunks covering all files in a semantic group."""
+    """Build one or more review chunks covering all files in a semantic group.
+
+    ``max_tokens`` is the per-chunk target. A single file that alone exceeds
+    it gets its own chunk, whole, as long as it fits ``hard_max_tokens`` (the
+    context-window remainder); only a file that exceeds the hard ceiling is
+    truncated, and that chunk is marked so the run records the cut.
+    """
     ordered_files = _sort_files_by_priority(
         files=files,
         classification_map=classification_map,
@@ -659,9 +673,30 @@ def _build_group_chunks(
             included_diff = solo
             continue
 
+        # An explicit ``None`` is the documented "no ceiling" sentinel; a
+        # caller-computed 0 is a real (if unusable) ceiling, so it is clamped
+        # by ``max`` rather than silently read as unset.
+        ceiling = (
+            max_tokens if hard_max_tokens is None else max(hard_max_tokens, max_tokens)
+        )
+        if estimate_tokens(solo) <= ceiling:
+            # Over the target but under the hard ceiling: one whole-file
+            # chunk beats a truncated one, at the cost of a slower call.
+            chunks.append(
+                ReviewChunk(
+                    id=chunk_id,
+                    files=[path],
+                    diff=solo,
+                    relationship=relationship,
+                    metadata_note=metadata_note,
+                ),
+            )
+            chunk_id += 1
+            continue
+
         truncated_diff, was_truncated = truncate_to_budget(
             text=per_file_diffs[path],
-            max_tokens=max_tokens,
+            max_tokens=ceiling,
         )
         truncated = truncated or was_truncated
         if was_truncated:
@@ -676,6 +711,7 @@ def _build_group_chunks(
                 diff=truncated_diff,
                 relationship=relationship,
                 metadata_note=metadata_note,
+                truncated=was_truncated,
             ),
         )
         chunk_id += 1

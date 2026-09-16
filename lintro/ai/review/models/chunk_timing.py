@@ -16,12 +16,21 @@ class ChunkTiming:
     makes semaphore starvation visible: a run where queued time dominates is
     capped by ``ai.max_parallel_calls``, not by provider latency.
 
+    ``provider_seconds`` is the main review call's own wall time, inside the
+    in-flight span: the gap between the two is prompt building, parsing and
+    any depth-2/3 pass. ``turns`` is the agent turn count the transport
+    reported for that call, or ``None`` when the transport reports none
+    (lintro-ops #37).
+
     Attributes:
         chunk_index (int): Position of the chunk in the run.
         files (int): Number of changed files in the chunk.
         queued_seconds (float): Seconds spent waiting for a concurrency slot.
         in_flight_seconds (float): Seconds spent reviewing once admitted.
         failed (bool): True when the chunk ended in an error or a stop.
+        provider_seconds (float): Wall-clock seconds of the main provider
+            call; ``0.0`` when the chunk never completed one.
+        turns (int | None): Transport-reported agent turns for that call.
     """
 
     chunk_index: int
@@ -29,6 +38,8 @@ class ChunkTiming:
     queued_seconds: float
     in_flight_seconds: float
     failed: bool = False
+    provider_seconds: float = 0.0
+    turns: int | None = None
 
     @property
     def total_seconds(self) -> float:
@@ -48,4 +59,8 @@ class ChunkTiming:
             "in_flight_seconds": round(self.in_flight_seconds, 3),
             "total_seconds": round(self.total_seconds, 3),
             "failed": self.failed,
+            "provider_seconds": round(self.provider_seconds, 3),
+            # ``null`` rather than absent, so a consumer sees the key on
+            # every chunk and can tell "unknown" from "not emitted".
+            "turns": self.turns,
         }

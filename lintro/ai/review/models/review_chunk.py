@@ -17,6 +17,8 @@ class ReviewChunk:
         diff: Unified diff text for the chunk.
         relationship: Valid semantic grouping label.
         metadata_note: Optional note for sampled or truncated content.
+        truncated: True when the chunk's diff was cut to fit the hard token
+            ceiling, so the model saw only a prefix of the file's change.
     """
 
     id: int
@@ -24,3 +26,4 @@ class ReviewChunk:
     diff: str
     relationship: RelationshipLabel
     metadata_note: str | None = None
+    truncated: bool = False

@@ -268,9 +268,11 @@ def parse_review_response_payload(*, content: str) -> dict[str, Any]:
     """
     payload = load_json_object(content=content)
 
-    for key in ("summary", "checklist", "findings"):
-        if key not in payload:
-            raise ValueError(f"Review response missing required key: {key}")
+    # Findings-only chunk contract (lintro-ops milestone 0): ``findings`` is
+    # the one required key; a summary or checklist an older model still emits
+    # is ignored downstream rather than demanded here.
+    if "findings" not in payload:
+        raise ValueError("Review response missing required key: findings")
 
     return payload
 

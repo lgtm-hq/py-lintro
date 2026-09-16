@@ -44,10 +44,11 @@ treat it as evidence that such a file was not updated, not touched, or missing a
 
 ---
 
-### Mandatory checklist (complete all 2 before finalizing)
+### Review checklist (2 items to check the diff against)
 
-Answer every item and record it in `checklist` with brief evidence (file:line). A
-**yes** is NOT a finding unless it also identifies a defect.
+Check the diff against every item. Do not answer the items: report a finding, with
+file:line evidence, for each item where the diff has a defect, and nothing for items
+that hold. A concern is NOT a finding unless it also identifies a defect.
 
 1. [security] Does the change fail closed on unknown input?
 2. [logic-bug] Is the renamed module's public signature still compatible?
@@ -90,33 +91,6 @@ Report only defects you can trace to a concrete failure.
 ### Required JSON output
 
 {
-  "summary": {
-    "headline": "ONE sentence — what this change does",
-    "walkthrough": [
-      {
-        "text": "One sentence about a coherent part of the change (3-6 bullets total)",
-        "finding_ref": "file:line of the related finding, or empty string"
-      }
-    ]
-  },
-  "verdict_reasoning": {
-    "deciding_factor": "One short paragraph — the single issue that decides mergeability, or why nothing blocks the merge",
-    "failure_mechanism": "One short paragraph — how that issue fails in production; empty string when nothing blocks",
-    "files_needing_attention": ["path/to/file"]
-  },
-  "file_assessments": [
-    {
-      "file": "path/to/file",
-      "overview": "One sentence — what changed in this file"
-    }
-  ],
-  "checklist": [
-    {
-      "id": 1,
-      "answer": "yes|no",
-      "evidence": "One sentence — file:line or logic trace"
-    }
-  ],
   "findings": [
     {
       "kind": "finding|question",
@@ -151,29 +125,18 @@ Report only defects you can trace to a concrete failure.
 
 **Rules:**
 
-- Include all **2** checklist entries in `checklist` (even if answer is
-  "no").
+- You write **findings only**. Do not score or state a verdict, and do not write a
+  summary, a walkthrough, or per-file overviews: lintro derives the merge-readiness
+  verdict from the severities of the open findings (any P1 → Blocked; else any
+  P2 → Changes requested; else any P3 → Nits only; else
+  Ready), and a later pass writes the summary from every chunk's findings.
+- There is no ceiling on the number of findings: report every defect you can
+  evidence, serious ones first. Collapse repeated occurrences of one root cause into a
+  single finding with an `occurrences` list rather than one finding per site.
 - Finding nothing is a normal result; an empty findings array is valid.
 - Do not duplicate findings — merge related checklist items when they share a root
-  cause.
+  cause; the checklist is guidance for what to look for, not a list to answer.
 - Prioritize cross-file integration bugs over isolated nits.
-- `summary.headline` is exactly one sentence stating what the change does — not an
-  assessment of whether it should merge.
-- `summary.walkthrough` holds 3–6 bullets, each one sentence, covering the change in
-  the order a reviewer would read it. When a bullet describes code you also reported a
-  finding for, set that bullet's `finding_ref` to the finding's `file:line`; otherwise
-  use an empty string.
-- **Do not score or state a verdict.** The merge-readiness verdict is computed by
-  lintro from the severities of the open findings (any P1 → Blocked; else any
-  P2 → Changes requested; else any P3 → Nits only; else
-  Ready). Write only the reasoning:
-  `verdict_reasoning.deciding_factor` names the single issue that decides it (or says
-  plainly that nothing blocks the merge) and `verdict_reasoning.failure_mechanism`
-  traces how that issue fails in production. Two short paragraphs at most, total.
-- `verdict_reasoning.files_needing_attention` lists the paths a reviewer should open
-  first; leave it empty when nothing needs attention.
-- `file_assessments` holds one entry per reviewed file with a single-sentence
-  `overview`. Do not include severity counts — lintro derives those from `findings`.
 - Every finding `title` must be a single line with no line breaks.
 - **P1 requires a concrete `failure_scenario`** — the inputs, the path taken, and the
   observable result. "Could be a problem" is not a failure mechanism. A P1 without one
@@ -216,5 +179,8 @@ Report only defects you can trace to a concrete failure.
   described `fix`. Omitting `before` means only the line range's existence can be
   verified, so a misnumbered hunk survives; include it whenever you include
   `suggested_change`.
-- Cap `findings` at **10** for this call (questions still capped at 3). Prefer the highest-severity issues; summarize any overflow in one walkthrough bullet. Never emit truncated or mid-object JSON.
-- **Do not report the same problem twice**. When one problem repeats across locations, report it once and list every location in `occurrences` as `file`/`line` pairs — including the primary one. It renders as a single collapsed thread, and its fix prompt enumerates every location.
+- There is no cap on findings: report every real problem you find, most serious
+  first, and **do not report the same problem twice**. When one problem repeats across
+  locations, report it once and list every location in `occurrences` as `file`/`line`
+  pairs — including the primary one. It renders as a single collapsed thread, and its
+  fix prompt enumerates every location.

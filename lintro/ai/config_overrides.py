@@ -592,11 +592,17 @@ def _apply_overlay(
                 payload,
                 overlay["max_cost_usd"],
             )
-        return AIConfig.model_validate(payload)
+        validated = AIConfig.model_validate(payload)
     except ValidationError as exc:
         raise AIConfigOverrideError(
             _describe_validation_error(exc=exc, overlay=overlay, names=names),
         ) from exc
+    # Validating a full ``model_dump()`` marks every field as explicitly set,
+    # which would make a default look user-chosen to consumers that key off
+    # ``model_fields_set`` (the CLI parallelism clamp in run_planning). Keep
+    # only what the user set on the base config plus what this overlay set.
+    validated.__pydantic_fields_set__ = set(config.model_fields_set) | set(overlay)
+    return validated
 
 
 def _stamp_overlay_cost_on_profiles(
