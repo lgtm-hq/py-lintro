@@ -443,6 +443,19 @@ def test_semantic_pr_title_enforces_a_merge_safe_length_limit() -> None:
     assert_that(limit).is_less_than_or_equal_to(92)
 
 
+def test_release_version_pr_does_not_arm_auto_merge() -> None:
+    """The version-PR workflow must not arm auto-merge on the PRs it opens.
+
+    A version PR is merged deliberately once its generated ``CHANGELOG.md``
+    has been read; with ``auto-merge`` on, the reusable squashes every bump,
+    minor included, about 14 minutes after opening (#2694).
+    """
+    workflow = _load_workflow(name="release-version-pr.yml")
+    with_block = workflow["jobs"]["version-pr"]["with"]
+    assert_that(with_block).contains_key("auto-merge")
+    assert_that(with_block["auto-merge"]).is_false()
+
+
 def test_semantic_pr_title_can_write_failure_comments() -> None:
     """Semantic PR title workflow can upsert failure comments on PRs."""
     workflow = _load_workflow(name="semantic-pr-title.yml")
