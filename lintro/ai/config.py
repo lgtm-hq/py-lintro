@@ -413,6 +413,18 @@ class AIConfig(BaseModel):
             "leave most PRs as one slow chunk."
         ),
     )
+    review_synthesis_diff_tokens: int = Field(
+        default=24_000,
+        ge=1_000,
+        description=(
+            "Token budget for the cross-chunk synthesis pass's input: the "
+            "changed-file list, the per-chunk digest and as much of the "
+            "whole-PR diff as fits, clamped to the context-window remainder. "
+            "Separate from the per-chunk budget because the pass is one call "
+            "over the whole PR; at the chunk budget every multi-chunk PR was "
+            "over it by construction (#2702)."
+        ),
+    )
     cli_max_diff_tokens: int | None = Field(
         default=None,
         ge=1_000,
@@ -838,6 +850,7 @@ class AIConfig(BaseModel):
             context_lines=self.context_lines,
             fix_search_radius=self.fix_search_radius,
             review_chunk_diff_tokens=self.review_chunk_diff_tokens,
+            review_synthesis_diff_tokens=self.review_synthesis_diff_tokens,
             cli_max_diff_bytes=self.cli_max_diff_bytes,
         )
 

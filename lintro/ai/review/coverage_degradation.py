@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.enums.coverage_degradation_reason import (
+    NARRATIVE_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
 from lintro.ai.review.models.coverage_degradation import CARRIED_CHUNK_INDEX
@@ -74,7 +75,13 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         the run recorded no degradation. The text carries no markup so the
         terminal and the GitHub surfaces can share it verbatim.
     """
-    degradations = metadata.coverage_degradations
+    # The synthesis reasons are narrative degradations; the synthesis note
+    # describes them and they never make the finding set incomplete (#2702).
+    degradations = tuple(
+        item
+        for item in metadata.coverage_degradations
+        if item.reason not in NARRATIVE_DEGRADATION_REASONS
+    )
     if not degradations:
         return ""
 
@@ -158,21 +165,10 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
             "not reviewed",
         )
 
-    reasons = {item.reason for item in degradations}
-    if CoverageDegradationReason.SYNTHESIS_TRUNCATED in reasons:
-        clauses.append(
-            "the cross-chunk synthesis pass saw less than its whole input "
-            "(whole-PR token budget)",
-        )
-    if CoverageDegradationReason.SYNTHESIS_FAILED in reasons:
-        clauses.append("the cross-chunk synthesis pass did not complete")
-
     known = {
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
         CoverageDegradationReason.DIFF_TRUNCATED,
         CoverageDegradationReason.SPLIT_HALF_FAILED,
-        CoverageDegradationReason.SYNTHESIS_TRUNCATED,
-        CoverageDegradationReason.SYNTHESIS_FAILED,
         *_DEPTH_PASS_CLAUSES,
     }
     other = sorted(

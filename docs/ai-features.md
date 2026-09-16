@@ -470,9 +470,13 @@ may go unreported.
   synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
   `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
   chunk that was split and whose depth-3 sweep also failed contributes two entries with
-  the same `chunk_index`. `findings_coverage_complete` is the derived "no coverage
-  degradation of any kind" boolean: **any** entry in `coverage_degradations` makes it
-  false, including a synthesis pass that was truncated or did not complete.
+  the same `chunk_index`. `findings_coverage_complete` is the derived "per-file finding
+  depth was not limited" boolean: any per-file entry in `coverage_degradations` makes it
+  false. The two synthesis reasons do **not** (#2702): findings coverage is per file and
+  every file was reviewed at depth whether or not the whole-PR narrative pass saw all of
+  it, so a truncated or failed synthesis is a narrative degradation, exposed as
+  `ReviewMetadata.synthesis_degraded` and described by the synthesis note, never as a
+  partial review.
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
@@ -592,14 +596,16 @@ How it behaves:
 - It runs only on the completed path. A round that already stopped on a cost cap, a
   timeout, or an interrupt (`partial`) skips the pass and spends no extra call, so a
   partial round carries no `synthesis` block at all.
-- Its input is bounded by the same per-chunk diff-token budget the chunk calls were
-  planned against, and the budget covers the **whole prompt**: the changed-file list and
-  the finding digest are rendered and charged first, and the diff takes only what they
-  leave over. A digest too large for the budget sheds its finding lines, largest chunk
-  first, before the per-chunk file lines are touched. If the whole PR does not fit, the
-  files that more than one chunk referenced go in first and the rest follow in path
-  order until the budget is spent. Anything cut or dropped anywhere in the prompt sets
-  `truncated`.
+- Its input is bounded by its own budget, `ai.review_synthesis_diff_tokens` (default
+  24,000, clamped to the context-window remainder), not the per-chunk budget: the pass
+  is one call over the whole PR, and at the chunk budget every multi-chunk PR was over
+  it by construction (#2702). The budget covers the **whole prompt**: the changed-file
+  list and the finding digest are rendered and charged first, and the diff takes only
+  what they leave over. A digest too large for the budget sheds its finding lines,
+  largest chunk first, before the per-chunk file lines are touched. If the whole PR does
+  not fit, the files that more than one chunk referenced go in first and the rest follow
+  in path order until the budget is spent. Anything cut or dropped anywhere in the
+  prompt sets `truncated`.
 - **Its cross-file findings pass every filter a chunk finding passes**: the P1 evidence
   gate, the run's sensitivity policy, the cross-chunk contradiction guard, deduplication
   against the (duplicate-merged) chunk findings by the state ledger's fingerprint, and
@@ -624,8 +630,17 @@ What it adds to the surfaces:
 - One shared note on the terminal, the GitHub review body's run-stats block, and the
   sticky's `This run` table, rendered only when the pass ran:
   `Cross-chunk synthesis added 1 cross-file finding.` (plural, empty and failed forms as
-  before, plus a trailing sentence when the input was truncated).
-- A `synthesis` block at the root of `--output json`, present only when the pass ran:
+  before). When the input was cut the note adds
+  `It saw N of M changed files (whole-PR token budget); cross-chunk duplicate merging may be incomplete.`:
+  that, and a cross-file finding across the unseen files, is what a cut input can miss
+  (#2269); the per-file findings are complete.
+- A `synthesis` block at the root of `--output json`, present only when the pass ran.
+  Besides `findings_added`, `truncated`, `failed`, `duplicates_merged` and
+  `narrative_missing` it records the call's `input_tokens` and `output_tokens`, the
+  `output_limit_tokens` it ran under (`ai.max_tokens` on the API transport, `null` on
+  the CLI transport), the `input_budget_tokens` the prompt was fitted to, the
+  `prompt_tokens_estimated` it came out at, and `diff_files_included` of
+  `diff_files_total` (#2702):
 
   ```json
   {
