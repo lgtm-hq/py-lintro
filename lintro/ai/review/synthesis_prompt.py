@@ -204,8 +204,9 @@ class SynthesisPromptPlan:
         diff: Diff text selected by :func:`select_synthesis_diff`.
         truncated: True when any span was cut or dropped, so the run can
             record that the pass saw less than the whole PR.
-        diff_files_included: Changed files whose diff section made it into
-            the prompt, whole or cut (#2702).
+        diff_files_included: Changed files whose diff section reached the
+            prompt whole (#2704). A cut section does not count, so
+            ``included == total`` means only the finding digest was trimmed.
         diff_files_total: Changed files in the PR's diff.
     """
 
@@ -311,21 +312,31 @@ def plan_synthesis_prompt(
         chunk_digest=chunk_digest,
         diff=diff,
         truncated=digest_truncated or diff_truncated,
-        diff_files_included=_count_diff_files(diff),
-        diff_files_total=_count_diff_files(context.unified_diff),
+        diff_files_included=_count_whole_files(
+            kept=diff, unified_diff=context.unified_diff
+        ),
+        diff_files_total=len(
+            split_unified_diff_by_file(unified_diff=context.unified_diff)
+        ),
     )
 
 
-def _count_diff_files(diff: str) -> int:
-    """Return how many per-file sections a unified diff carries.
+def _count_whole_files(*, kept: str, unified_diff: str) -> int:
+    """Return how many of the PR's per-file sections the fitted diff kept whole.
 
     Args:
-        diff: Unified diff text, possibly a budget-cut selection.
+        kept: The diff text selected for the prompt, possibly cut.
+        unified_diff: The PR's whole unified diff.
 
     Returns:
-        The number of ``diff --git`` headers; a cut section still counts.
+        The number of files whose complete section appears in *kept*. A
+        section the budget cut short is not counted, so the count equals the
+        total only when no file's diff was dropped or cut (#2704).
     """
-    return len(split_unified_diff_by_file(unified_diff=diff)) if diff else 0
+    if not kept:
+        return 0
+    sections = split_unified_diff_by_file(unified_diff=unified_diff)
+    return sum(1 for section in sections.values() if section and section in kept)
 
 
 def build_synthesis_prompt(

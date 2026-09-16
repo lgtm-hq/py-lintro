@@ -43,7 +43,8 @@ class SynthesisOutcome:
             (``ai.review_synthesis_diff_tokens`` after the context-window
             clamp).
         prompt_tokens_estimated: Estimated size of the fitted prompt.
-        diff_files_included: Changed files whose diff reached the prompt.
+        diff_files_included: Changed files whose diff reached the prompt
+            whole; a cut section does not count.
         diff_files_total: Changed files in the PR's diff.
     """
 

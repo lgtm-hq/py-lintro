@@ -129,6 +129,28 @@ def test_three_default_chunks_fit_the_default_synthesis_budget_whole() -> None:
     assert_that(at_chunk_budget.diff_files_included).is_less_than(3)
 
 
+def test_a_cut_file_is_not_counted_as_included() -> None:
+    """A budget that cuts the last file mid-section leaves it out of the count.
+
+    Otherwise ``included == total`` could hold with a cut diff, and the note
+    would blame the finding digest for a cut that hit the diff (#2704).
+    """
+    sections = [_file_section(path=f"pkg/mod{i}.py", tokens=2_000) for i in range(2)]
+    summaries = [
+        ChunkSummary(chunk_id=i, files=(f"pkg/mod{i}.py",), findings=())
+        for i in range(2)
+    ]
+    # Room for the first file whole and about half of the second.
+    plan = plan_synthesis_prompt(
+        context=_context(sections=sections),
+        summaries=summaries,
+        diff_budget=3_200,
+    )
+    assert_that(plan.truncated).is_true()
+    assert_that(plan.diff_files_total).is_equal_to(2)
+    assert_that(plan.diff_files_included).is_equal_to(1)
+
+
 def test_synthesis_budget_is_clamped_to_the_context_window_remainder() -> None:
     """The knob never exceeds what the context window leaves for the prompt."""
     assert_that(
