@@ -1799,3 +1799,40 @@ def test_a_partial_run_never_spends_the_extra_call() -> None:
     assert_that(synthesis_calls).is_empty()
     assert_that(result.metadata.synthesis).is_none()
     assert_that(format_synthesis_note_line(metadata=result.metadata)).is_empty()
+
+
+# --- (m) the pass gets its own input budget (#2704) ----------------------------
+
+
+def test_the_synthesis_pass_is_planned_against_its_own_budget() -> None:
+    """The pass receives ``ai.review_synthesis_diff_tokens``, not the chunk slice.
+
+    At the chunk budget every multi-chunk PR was over it by construction
+    (#2702); the run plan now carries a separate synthesis budget, clamped to
+    the context-window remainder, and the execution path hands that one to
+    the pass.
+    """
+    from lintro.ai.review import synthesis as synthesis_module
+    from lintro.ai.review.cli_limits import REVIEW_CHUNK_DIFF_TOKEN_BUDGET
+
+    seen: dict[str, int] = {}
+    real_pass = synthesis_module.run_synthesis_pass
+
+    async def _spy(*, request: Any) -> Any:
+        seen["diff_budget"] = request.diff_budget
+        return await real_pass(request=request)
+
+    with patch(
+        "lintro.ai.review.run_execution.run_synthesis_pass",
+        side_effect=_spy,
+    ):
+        result = _run(synthesis=ReviewSynthesisConfig(enabled=True))
+
+    assert_that(_outcome(result=result).failed).is_false()
+    assert_that(seen["diff_budget"]).is_greater_than(REVIEW_CHUNK_DIFF_TOKEN_BUDGET)
+    assert_that(seen["diff_budget"]).is_less_than_or_equal_to(
+        AIConfig().review_synthesis_diff_tokens,
+    )
+    assert_that(_outcome(result=result).input_budget_tokens).is_equal_to(
+        seen["diff_budget"],
+    )

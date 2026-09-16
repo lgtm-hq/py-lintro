@@ -1035,6 +1035,12 @@ ai:
   # at depth and run in parallel. (int >= 1000, default: 7000)
   review_chunk_diff_tokens: 7000
 
+  # Input budget of the cross-chunk synthesis pass (changed-file list, finding
+  # digest and as much of the whole-PR diff as fits), clamped to what the
+  # context window leaves after the prompt overhead. Separate from the chunk
+  # budget: the pass is one call over the whole PR. (int >= 1000, default: 24000)
+  review_synthesis_diff_tokens: 24000
+
   # Deprecated alias for review_chunk_diff_tokens: still read (and warned
   # about) when the new key is absent; removed not before 2026-10-15.
   # cli_max_diff_tokens: 7000
