@@ -39,6 +39,10 @@ ANTHROPIC_CLI_CONTRACT = CliContract(
         "--model",
         "--append-system-prompt",
         "--json-schema",
+        # The read-only tool surface is a security bound, not a convenience:
+        # a binary that cannot restrict tools is refused before any review
+        # session starts, with the upgrade hint (#2685).
+        "--tools",
     ),
     optional_flags=(
         OptionalCliFlag(
@@ -48,10 +52,6 @@ ANTHROPIC_CLI_CONTRACT = CliContract(
         OptionalCliFlag(
             flag="--resume",
             purpose="reuses one CLI session across review turns",
-        ),
-        OptionalCliFlag(
-            flag="--tools",
-            purpose="restricts the agent to the read-only built-in tools",
         ),
         # Accepted by claude 2.x in print mode but not listed by --help, so
         # Tier 1 reports it as unadvertised and the provider sends it without

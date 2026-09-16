@@ -80,11 +80,14 @@ class AITurnLimitError(AIProviderError):
         input_tokens: Prompt tokens the stopped call consumed.
         output_tokens: Completion tokens it produced.
         cost_estimate: Its reported or estimated USD cost.
+        turns: Agent turns the transport reported for the stopped call, or
+            ``None`` when the envelope carried no count.
     """
 
     input_tokens: int
     output_tokens: int
     cost_estimate: float
+    turns: int | None
 
     def __init__(
         self,
@@ -93,6 +96,7 @@ class AITurnLimitError(AIProviderError):
         input_tokens: int = 0,
         output_tokens: int = 0,
         cost_estimate: float = 0.0,
+        turns: int | None = None,
     ) -> None:
         """Record the message and the usage the stopped call still consumed.
 
@@ -101,11 +105,13 @@ class AITurnLimitError(AIProviderError):
             input_tokens: Prompt tokens the stopped call consumed.
             output_tokens: Completion tokens it produced.
             cost_estimate: Its reported or estimated USD cost.
+            turns: Agent turns the transport reported, when it did.
         """
         super().__init__(message)
         self.input_tokens = input_tokens
         self.output_tokens = output_tokens
         self.cost_estimate = cost_estimate
+        self.turns = turns
 
 
 class AIRateLimitError(AIProviderError):

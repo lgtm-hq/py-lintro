@@ -202,7 +202,11 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # A run can be capped *and* stopped early; only claim full chunk
     # coverage when ``partial`` says the run reached every chunk and no
     # split chunk lost a half (its files went unreviewed).
-    coverage = "" if metadata.partial or lost_half else "Every chunk was reviewed, but "
+    coverage = (
+        ""
+        if metadata.partial or lost_half or turn_limited
+        else "Every chunk was reviewed, but "
+    )
     # A split chunk lost its whole-chunk view; a run degraded solely by an
     # incomplete optional pass says so instead.
     tail = (

@@ -12,9 +12,10 @@ Why a context variable and not a ``complete()`` keyword: the providers'
 baseline may only shrink, and the only object argument they take is the JSON
 schema request, which several review calls do not pass. ``call_ai`` therefore
 binds the bounds around the provider call with :func:`bound_cli_call`, and
-the CLI providers read them with :func:`current_cli_call_options`. A call that
-reaches a provider without bounds is explicitly unbounded: no flag is
-rendered. The intended replacement is a single per-call request object on
+the CLI providers read them with :func:`current_cli_call_options`. Only the
+turn limit depends on them: the read-only tool surface is part of each
+provider's base argv, so a call that reaches a provider without bounds is
+read-only but turn-unlimited. The intended replacement is a single per-call request object on
 ``complete()`` carrying the schema request and the bounds together (tracked
 on #2553); this module's two functions are the seam that refactor removes.
 """

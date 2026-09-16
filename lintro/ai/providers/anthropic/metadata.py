@@ -86,13 +86,12 @@ ANTHROPIC_METADATA = ProviderMetadata(
     cli_contract_id=AIProvider.ANTHROPIC.value,
     cli_contract=ANTHROPIC_CLI_CONTRACT,
     # `--tools Read,Grep,Glob` removes every other built-in tool from the
-    # session (read-only under `--permission-mode dontAsk`); `--max-turns`
-    # bounds the agent loop. `--tools` is help-gated; `--max-turns` is
-    # accepted but unadvertised, so it is sent regardless with the
-    # unknown-option backstop behind it (#2685).
+    # session (read-only under `--permission-mode dontAsk`): a required
+    # contract flag sent on every call, and a binary without it is refused.
+    # `--max-turns` bounds the agent loop: accepted but unadvertised, so it
+    # is sent regardless with the unknown-option backstop behind it (#2685).
     cli_bounds=CliBounds(
         read_only_args=("--tools", "Read,Grep,Glob"),
-        read_only_in_base_argv=False,
         max_turns_flag="--max-turns",
     ),
     cli_install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",

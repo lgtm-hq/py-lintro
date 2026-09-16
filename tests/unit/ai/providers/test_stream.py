@@ -20,7 +20,7 @@ from lintro.ai.providers.base import (
 )
 from lintro.ai.providers.constants import DEFAULT_PER_CALL_MAX_TOKENS, DEFAULT_TIMEOUT
 from lintro.ai.providers.openai.provider import OpenAIProvider
-from tests.unit.ai.conftest import patch_cli_exec
+from tests.unit.ai.conftest import CLAUDE_HELP, patch_cli_exec
 
 #: Claude CLI stdout for a successful one-shot completion.
 _CLAUDE_STDOUT = '{"result":"ok","usage":{"input_tokens":1,"output_tokens":1}}'
@@ -364,7 +364,7 @@ async def test_cli_stream_fallback_forwards_the_per_call_model(
     with patch(finder, return_value=binary):
         provider = provider_class(transport=AITransport.CLI)
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,

@@ -198,8 +198,22 @@ class _FakeProcess:
 HANG = object()
 
 
+#: Help text advertising the Claude contract's required flags, for tests that
+#: replay one canned completion for every spawn: ``--tools`` is required and a
+#: binary whose help omits it is refused before any session (#2685).
+CLAUDE_HELP = (
+    "  --print\n  --output-format <format>\n  --permission-mode <mode>\n"
+    "  --model <model>\n  --append-system-prompt <prompt>\n"
+    "  --json-schema <schema>\n  --tools <list>\n"
+)
+
+
 @contextmanager
-def patch_cli_exec(**mock_kwargs: Any) -> Iterator[MagicMock]:
+def patch_cli_exec(
+    *,
+    help_text: str | None = None,
+    **mock_kwargs: Any,
+) -> Iterator[MagicMock]:
     """Patch ``asyncio.create_subprocess_exec`` for CLI transport tests.
 
     The yielded ``MagicMock`` behaves exactly like a patched
@@ -210,6 +224,10 @@ def patch_cli_exec(**mock_kwargs: Any) -> Iterator[MagicMock]:
     ``CompletedProcess``.
 
     Args:
+        help_text: When given, a ``--help`` probe is answered with this text
+            (exit 0) instead of the configured result, so a test that replays
+            one canned completion can still advertise the contract's required
+            flags (see :data:`CLAUDE_HELP`). ``None`` leaves probes to the mock.
         **mock_kwargs: Forwarded to the recording ``MagicMock`` (e.g.
             ``return_value=...`` or ``side_effect=...``). Returning
             :data:`HANG` makes that spawn hang so a timeout can be tested.
@@ -280,6 +298,17 @@ def patch_cli_exec(**mock_kwargs: Any) -> Iterator[MagicMock]:
             TypeError: When the configured result is not a CompletedProcess.
         """
         del spawn_kwargs
+        if help_text is not None and "--help" in argv:
+            help_process = _FakeProcess(
+                subprocess.CompletedProcess(
+                    args=list(argv),
+                    returncode=0,
+                    stdout=help_text,
+                    stderr="",
+                ),
+            )
+            processes.append(help_process)
+            return help_process
         result = recorder(list(argv))
         if result is HANG:
             hung_process = _FakeProcess(None, hang=True)

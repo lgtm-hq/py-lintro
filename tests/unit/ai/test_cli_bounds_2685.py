@@ -154,7 +154,7 @@ def test_each_provider_declares_how_it_is_bounded() -> None:
     claude = ANTHROPIC_METADATA.cli_bounds
     assert claude is not None
     assert_that(claude.read_only_args).is_equal_to(("--tools", "Read,Grep,Glob"))
-    assert_that(claude.read_only_in_base_argv).is_false()
+    assert_that(claude.read_only_in_base_argv).is_true()
     assert_that(claude.max_turns_flag).is_equal_to("--max-turns")
     assert_that(claude.max_turns_supported).is_true()
     for metadata, args in (
@@ -168,8 +168,8 @@ def test_each_provider_declares_how_it_is_bounded() -> None:
         assert_that(bounds.max_turns_supported).is_false()
     contract = ANTHROPIC_METADATA.cli_contract
     assert contract is not None
-    flags = {flag.flag for flag in contract.optional_flags}
-    assert_that(flags).contains("--tools", "--max-turns")
+    assert_that(contract.required_flags).contains("--tools")
+    assert_that({flag.flag for flag in contract.optional_flags}).contains("--max-turns")
 
 
 # --- the envelope -----------------------------------------------------------------
@@ -193,6 +193,19 @@ def test_the_turn_limit_is_read_from_the_subtype_or_the_turn_count() -> None:
     # A successful answer that used every turn is not a limit hit.
     assert_that(
         _hit_turn_limit(data={"is_error": False, "num_turns": 3}, max_turns=3),
+    ).is_false()
+    # A named API failure is that failure, however many turns it reports.
+    assert_that(
+        _hit_turn_limit(
+            data={"is_error": True, "num_turns": 3, "api_error_status": 429},
+            max_turns=3,
+        ),
+    ).is_false()
+    assert_that(
+        _hit_turn_limit(
+            data={"is_error": True, "num_turns": 3, "terminal_reason": "api_error"},
+            max_turns=3,
+        ),
     ).is_false()
 
 
@@ -238,6 +251,8 @@ def test_a_turn_limited_chunk_is_an_incomplete_finding_set() -> None:
         "1 chunk hit the per-call turn limit (12 turns) before answering",
     )
     assert_that(text).contains("its files were left unreviewed")
+    # Its files were not reviewed, so the sentence never claims every chunk was.
+    assert_that(text).does_not_contain("Every chunk was reviewed")
     two = _metadata(
         CoverageDegradationReason.TURN_LIMIT_REACHED,
         CoverageDegradationReason.TURN_LIMIT_REACHED,
@@ -257,8 +272,20 @@ async def test_a_chunk_that_hits_the_limit_twice_is_left_unreviewed() -> None:
     )
     invoke = AsyncMock(
         side_effect=[
-            AITurnLimitError("a", input_tokens=100, output_tokens=7, cost_estimate=0.3),
-            AITurnLimitError("b", input_tokens=110, output_tokens=8, cost_estimate=0.4),
+            AITurnLimitError(
+                "a",
+                input_tokens=100,
+                output_tokens=7,
+                cost_estimate=0.3,
+                turns=13,
+            ),
+            AITurnLimitError(
+                "b",
+                input_tokens=110,
+                output_tokens=8,
+                cost_estimate=0.4,
+                turns=13,
+            ),
         ],
     )
     with patch.object(chunk_split_retry, "invoke_chunk_review", invoke):
@@ -267,10 +294,11 @@ async def test_a_chunk_that_hits_the_limit_twice_is_left_unreviewed() -> None:
     assert_that(invoke.await_count).is_equal_to(2)
     assert_that(partial.findings).is_empty()
     assert_that(partial.files).is_empty()
-    # Both stopped attempts were billed; the partial keeps their usage.
+    # Both stopped attempts were billed; the partial keeps their usage and turns.
     assert_that(partial.input_tokens).is_equal_to(210)
     assert_that(partial.output_tokens).is_equal_to(15)
     assert_that(partial.cost_estimate).is_close_to(0.7, 1e-9)
+    assert_that(partial.turns).is_equal_to(26)
     assert_that([d.reason for d in partial.coverage_degradations]).is_equal_to(
         [CoverageDegradationReason.TURN_LIMIT_REACHED],
     )
@@ -297,10 +325,17 @@ async def test_a_chunk_that_answers_on_the_retry_is_reviewed_normally() -> None:
         output_tokens=5,
         cost_estimate=0.1,
         files=("a.py",),
+        turns=7,
     )
     invoke = AsyncMock(
         side_effect=[
-            AITurnLimitError("a", input_tokens=100, output_tokens=7, cost_estimate=0.3),
+            AITurnLimitError(
+                "a",
+                input_tokens=100,
+                output_tokens=7,
+                cost_estimate=0.3,
+                turns=13,
+            ),
             "call",
         ],
     )
@@ -320,6 +355,7 @@ async def test_a_chunk_that_answers_on_the_retry_is_reviewed_normally() -> None:
     assert_that(result.input_tokens).is_equal_to(150)
     assert_that(result.output_tokens).is_equal_to(12)
     assert_that(result.cost_estimate).is_close_to(0.4, 1e-9)
+    assert_that(result.turns).is_equal_to(20)
 
 
 async def test_another_error_on_the_retry_still_raises() -> None:

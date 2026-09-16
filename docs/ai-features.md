@@ -1467,25 +1467,27 @@ On the `cli` transport every provider call is a whole agentic session, so lintro
 each one (#2685): the agent gets a read-only tool surface and a turn limit, declared per
 provider in its metadata.
 
-| Provider    | Read-only tools                       | Turn limit                       |
-| ----------- | ------------------------------------- | -------------------------------- |
-| `anthropic` | `--tools Read,Grep,Glob` (help-gated) | `--max-turns N` (sent; backstop) |
-| `openai`    | `--sandbox read-only` (always)        | none: `codex exec` has no flag   |
-| `cursor`    | `--mode ask` (always)                 | none: `agent` has no flag        |
+| Provider    | Read-only tools                     | Turn limit                       |
+| ----------- | ----------------------------------- | -------------------------------- |
+| `anthropic` | `--tools Read,Grep,Glob` (required) | `--max-turns N` (sent; backstop) |
+| `openai`    | `--sandbox read-only` (always)      | none: `codex exec` has no flag   |
+| `cursor`    | `--mode ask` (always)               | none: `agent` has no flag        |
 
 The limit comes from the call's kind: 12 turns for review-type calls (each chunk's main
 call and its schema-recovery retry, the depth-2 and depth-3 passes, the synthesis pass
 and custom review agents), 1 for the summary and fix calls.
-`ai.transports.cli.max_turns` (int >= 1, default unset) overrides every kind. Both
-Claude flags are optional-contract flags. `--tools` is help-gated: a binary whose
-`--help` does not advertise it gets today's full tool surface rather than a failed
-review. `--max-turns` is accepted by Claude Code 2.x in print mode but not listed by its
-`--help`, so it is sent without the help gate; a binary that rejects it triggers the
-usual unknown-option backstop (the call is retried once without the flag and the loss is
+`ai.transports.cli.max_turns` (int >= 1, default unset) overrides every kind. The two
+Claude flags differ in kind. `--tools` is a security bound and fails closed: it is a
+required contract flag sent on every call, and a binary whose `--help` does not
+advertise it is refused before any review session starts, with the upgrade hint, because
+prompt-injected repository content must never reach a writable tool. `--max-turns` is a
+time bound: accepted by Claude Code 2.x in print mode but not listed by its `--help`, so
+it is sent without the help gate; a binary that rejects it triggers the usual
+unknown-option backstop (the call is retried once without the flag and the loss is
 logged), and the Tier 1 contract check reports it as unadvertised while the Tier 2 live
-probe proves acceptance. The bounds are set by lintro's call layer for every call kind;
-a caller that drives a provider directly without them gets an explicitly unbounded call,
-with neither flag rendered.
+probe proves acceptance. The turn limit is set by lintro's call layer for every call
+kind; a caller that drives a provider directly without it gets a read-only but
+turn-unlimited call.
 
 A Claude call that spends its whole turn budget without answering (envelope subtype
 `error_max_turns`, or an error envelope whose `num_turns` reached the limit sent) raises

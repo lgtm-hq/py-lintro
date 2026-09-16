@@ -162,7 +162,7 @@ async def test_claude_sends_schema_name_when_advertised(_claude_on_path: None) -
     """Send --json-schema-name to a binary whose help advertises it."""
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n",
+        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         calls=calls,
@@ -185,7 +185,7 @@ async def test_claude_omits_schema_name_when_not_advertised(
     """
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>  JSON Schema for structured output\n",
+        help_text="  --json-schema <schema>  JSON Schema for structured output\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         calls=calls,
@@ -205,7 +205,7 @@ async def test_claude_backstop_retries_without_schema_name(
     """Retry without --json-schema-name when help lied about supporting it."""
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n",
+        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         reject="--json-schema-name",
@@ -227,7 +227,7 @@ async def test_claude_below_version_floor_raises(_claude_on_path: None) -> None:
 
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>\n",
+        help_text="  --json-schema <schema>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="1.0.88 (Claude Code)",
         calls=calls,
@@ -244,7 +244,7 @@ async def test_claude_durable_session_hooks_reset_resume(_claude_on_path: None) 
     """Resume within a durable session and drop the id when it ends."""
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --resume <id>\n",
+        help_text="  --resume <id>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         calls=calls,
@@ -608,31 +608,33 @@ async def test_claude_bounds_the_call_when_help_advertises_the_flags(
         cli_bounds._CURRENT_CALL.reset(token)
 
 
-async def test_claude_omits_the_bounds_when_help_does_not_advertise_them(
+async def test_claude_refuses_a_binary_that_cannot_restrict_tools(
     _claude_on_path: None,
 ) -> None:
-    """Without --tools in --help only the turn limit is sent (#2685).
+    """Without --tools the read-only bound cannot hold, so the CLI is refused.
 
-    ``--tools`` is help-gated; ``--max-turns`` is unadvertised by design and
-    rides through to the backstop.
+    Fail closed (#2685): prompt-injected repository content must never reach a
+    writable tool because an older binary happened to be installed.
     """
+    from lintro.ai.exceptions import AINotAvailableError
+
     token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
     try:
         calls: list[list[str]] = []
         runner = _runner(
-            help_text="  --json-schema <schema>\n  --json-schema-name <name>\n",
+            help_text="  --json-schema <schema>\n",
             completion=_CLAUDE_COMPLETION,
-            version="2.1.218 (Claude Code)",
+            version="2.1.273",
             calls=calls,
         )
         provider = AnthropicProvider(transport=AITransport.CLI)
-        with patch_cli_exec(side_effect=runner):
-            await provider.complete("Review this diff", cli_schema=_SCHEMA)
-
-        cmd = _completion_calls(calls)[-1]
-        cmd = _completion_calls(calls)[-1]
-        assert_that(cmd).does_not_contain("--tools")
-        assert_that(cmd).contains("--max-turns", "3")
+        with (
+            patch_cli_exec(side_effect=runner),
+            pytest.raises(AINotAvailableError) as info,
+        ):
+            await provider.complete("Review this", cli_schema=_SCHEMA)
+        assert_that(str(info.value)).contains("--tools", "npm install -g")
+        assert_that(_completion_calls(calls)).is_empty()
     finally:
         cli_bounds._CURRENT_CALL.reset(token)
 
@@ -663,7 +665,7 @@ async def test_claude_reports_a_turn_limited_envelope_as_a_turn_limit_error(
 async def test_claude_renders_no_bound_flags_without_bounds_in_force(
     _claude_on_path: None,
 ) -> None:
-    """A call that reaches the provider without bounds is explicitly unbounded."""
+    """A call without bounds is read-only but carries no turn limit."""
     calls: list[list[str]] = []
     runner = _runner(
         help_text="  --json-schema <schema>\n  --tools <list>\n  --max-turns <n>\n",
@@ -676,7 +678,8 @@ async def test_claude_renders_no_bound_flags_without_bounds_in_force(
     with patch_cli_exec(side_effect=runner):
         await provider.complete("Review this", cli_schema=_SCHEMA)
     cmd = _completion_calls(calls)[-1]
-    assert_that(cmd).does_not_contain("--tools")
+    # Read-only always; only the turn limit depends on bounds being in force.
+    assert_that(cmd).contains("--tools", "Read,Grep,Glob")
     assert_that(cmd).does_not_contain("--max-turns")
 
 
@@ -765,6 +768,7 @@ async def test_claude_turn_limit_wins_over_the_exit_code_auth_heuristic(
         assert_that(info.value.input_tokens).is_equal_to(10)
         assert_that(info.value.output_tokens).is_equal_to(4)
         assert_that(info.value.cost_estimate).is_equal_to(0.02)
+        assert_that(info.value.turns).is_equal_to(3)
     finally:
         cli_bounds._CURRENT_CALL.reset(token)
 

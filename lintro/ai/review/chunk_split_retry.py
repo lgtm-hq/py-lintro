@@ -352,6 +352,7 @@ async def _retry_after_turn_limit(
             input_tokens=first.input_tokens + again.input_tokens,
             output_tokens=first.output_tokens + again.output_tokens,
             cost_estimate=first.cost_estimate + again.cost_estimate,
+            turns=_add_turns(first.turns, again.turns),
             files=(),
             coverage_degradations=(
                 CoverageDegradation(
@@ -371,4 +372,18 @@ async def _retry_after_turn_limit(
         input_tokens=partial.input_tokens + first.input_tokens,
         output_tokens=partial.output_tokens + first.output_tokens,
         cost_estimate=partial.cost_estimate + first.cost_estimate,
+        turns=_add_turns(partial.turns, first.turns),
     )
+
+
+def _add_turns(*counts: int | None) -> int | None:
+    """Add reported turn counts, keeping ``None`` when none was reported.
+
+    Args:
+        *counts: Per-attempt turn counts, ``None`` where the transport gave none.
+
+    Returns:
+        The sum of the known counts, or ``None`` when every count is unknown.
+    """
+    known = [count for count in counts if count is not None]
+    return sum(known) if known else None

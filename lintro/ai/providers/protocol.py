@@ -78,10 +78,11 @@ class CliBounds:
         read_only_args: Argv the provider sends to restrict the agent to a
             read-only tool surface. Declared here so the docs and the tests can
             state per provider what is bounded and how.
-        read_only_in_base_argv: True when the provider already sends
-            ``read_only_args`` unconditionally (codex ``--sandbox read-only``,
-            cursor ``--mode ask``); False when they ride as help-gated
-            optional flags (claude ``--tools``).
+        read_only_in_base_argv: True when the provider sends
+            ``read_only_args`` unconditionally (claude ``--tools``, codex
+            ``--sandbox read-only``, cursor ``--mode ask``), which every
+            provider does today; False would mean they ride as help-gated
+            optional flags that an older binary silently loses.
         max_turns_flag: The flag that carries the per-call turn limit, or
             ``None`` when the binary has no such flag; the limit is then
             documented as unsupported and ignored.

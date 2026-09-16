@@ -139,6 +139,7 @@ def _raise_if_turn_limited(*, stdout: str, max_turns: int | None) -> None:
             input_tokens=_usage_int(usage.get("input_tokens")),
             output_tokens=_usage_int(usage.get("output_tokens")),
             cost_estimate=float(cost) if isinstance(cost, (int, float)) else 0.0,
+            turns=_usage_int(data.get("num_turns")) or None,
         )
 
 
@@ -175,6 +176,10 @@ def _hit_turn_limit(*, data: Mapping[str, Any], max_turns: int | None) -> bool:
     if data.get("subtype") == _MAX_TURNS_SUBTYPE:
         return True
     if max_turns is None or not data.get("is_error"):
+        return False
+    # An envelope that names an API failure is that failure, not a turn limit,
+    # however many turns it reports.
+    if data.get("api_error_status") is not None or data.get("terminal_reason"):
         return False
     turns = data.get("num_turns")
     return isinstance(turns, int) and not isinstance(turns, bool) and turns >= max_turns
@@ -509,6 +514,17 @@ class AnthropicProvider(ApiStreamingProvider):
         # sent when the binary can reach an API key. Forcing it locked every
         # subscription-authenticated user out of this transport (#1838).
         bare = should_send_bare(configured=self._cli_bare, cwd=working_dir)
+        # Fail closed on the read-only bound (#2685): ``--tools`` is a
+        # required contract flag, and a binary that cannot restrict its tool
+        # surface is refused before any session starts rather than reviewing
+        # prompt-injectable repository content with writable tools.
+        if not await self._cli.supports_flag("--tools"):
+            contract = self._cli.contract
+            hint = contract.upgrade_hint if contract is not None else ""
+            raise AINotAvailableError(
+                "Claude CLI does not offer --tools, so a review session cannot "
+                f"be restricted to read-only tools; refusing to start it. {hint}",
+            )
         # Prompt rides on stdin (#1967): a single argv element on Linux is
         # capped at MAX_ARG_STRLEN (128 KiB), so large review diffs must not
         # be passed as the ``-p``/``--print`` value.
@@ -520,6 +536,8 @@ class AnthropicProvider(ApiStreamingProvider):
             "json",
             "--permission-mode",
             "dontAsk",
+            "--tools",
+            _READ_ONLY_TOOLS,
             "--model",
             effective_model,
         ]
@@ -542,20 +560,16 @@ class AnthropicProvider(ApiStreamingProvider):
             candidates.append(
                 OptionalArg(flag="--resume", values=(resume_session_id,)),
             )
-        # Bound the agent per call (#2685): a read-only tool surface and a
-        # turn limit. ``--tools`` is help-gated; ``--max-turns`` is accepted
-        # by claude 2.x but not listed by ``--help``, so it is sent regardless
-        # and only the reactive unknown-option backstop drops it. Either way
-        # an older binary degrades to today's unbounded call instead of
-        # failing. ``call_ai`` sets the bounds for every call kind; a caller
-        # that reaches ``complete()`` without them gets an explicitly
-        # unbounded call, with neither flag rendered.
+        # Bound the agent per call (#2685). The read-only tool surface is a
+        # security bound and fails closed: ``--tools`` is a required contract
+        # flag, a binary that does not advertise it is refused above, and it
+        # is sent on every call. ``--max-turns`` is a time bound: accepted by
+        # claude 2.x but not listed by ``--help``, so it is sent regardless
+        # and only the reactive unknown-option backstop drops it. ``call_ai``
+        # sets the turn limit for every call kind; a caller that reaches
+        # ``complete()`` without bounds is read-only but turn-unlimited.
         bounds = current_cli_call_options()
         max_turns = bounds.max_turns if bounds is not None else None
-        if bounds is not None:
-            candidates.append(
-                OptionalArg(flag="--tools", values=(_READ_ONLY_TOOLS,)),
-            )
         if max_turns is not None:
             candidates.append(
                 OptionalArg(
