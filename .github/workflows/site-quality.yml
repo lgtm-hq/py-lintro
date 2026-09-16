@@ -59,18 +59,18 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.2
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.3
 
       - name: Setup Python and uv
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.2
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.3
         with:
           python-version: '3.12'
           install-dependencies: false
 
       - name: Setup Node and Bun
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.2
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.3
         with:
           node-version: '24'
           working-directory: apps/site
@@ -89,7 +89,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: 48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.2
+          ref: 48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.3
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -153,18 +153,18 @@ jobs:
 
       - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.2
+        uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.3
 
       - name: Setup Python and uv
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.2
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.3
         with:
           python-version: '3.12'
           install-dependencies: false
 
       - name: Setup Node and Bun
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.2
+        uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@48cd54fedf9d8baa2636e58b78912cfd297f919a # v0.74.3
         with:
           node-version: '24'
           working-directory: apps/site
