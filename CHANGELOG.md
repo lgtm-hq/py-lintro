@@ -25,8 +25,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **ai/review**: give the synthesis pass its own input budget and record its sizes
-  (#2706) (1d001a8)
 - **ai/review**: `ai.review_synthesis_diff_tokens` (default 24000) gives the cross-chunk
   synthesis pass its own input budget, clamped to the context-window remainder, instead
   of the per-chunk budget; the `synthesis` JSON block records the call's input and
