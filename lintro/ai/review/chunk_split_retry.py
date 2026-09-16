@@ -364,4 +364,11 @@ async def _retry_after_turn_limit(
                 ),
             ),
         )
-    return await _parse_call(request=request, call=call)
+    partial = await _parse_call(request=request, call=call)
+    # The stopped first attempt was billed too; the chunk reports both.
+    return replace(
+        partial,
+        input_tokens=partial.input_tokens + first.input_tokens,
+        output_tokens=partial.output_tokens + first.output_tokens,
+        cost_estimate=partial.cost_estimate + first.cost_estimate,
+    )

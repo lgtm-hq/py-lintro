@@ -27,6 +27,7 @@ from loguru import logger
 
 from lintro.ai.cli_schemas import cli_schema_for_synthesis
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.invoke import call_ai
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -387,6 +388,18 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             "chunk findings and marking coverage degraded.",
         )
         return _failed_pass(truncated=truncated, record=record)
+    except AITurnLimitError as exc:
+        logger.warning(
+            "The cross-chunk synthesis pass hit its per-call turn limit; "
+            "keeping the chunk findings and marking the narrative degraded.",
+        )
+        return _failed_pass(
+            truncated=truncated,
+            input_tokens=exc.input_tokens,
+            output_tokens=exc.output_tokens,
+            cost_estimate=exc.cost_estimate,
+            record=record,
+        )
     except Exception:
         # Deliberately broad: this pass is additive, so nothing it can raise —
         # a cost-cap stop, a provider error, a timeout — may be allowed to

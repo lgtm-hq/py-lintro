@@ -99,6 +99,12 @@ async def _with_fallback(
             )
         except AIAuthenticationError:
             raise
+        except AITurnLimitError:
+            # Not a model failure: the agent spent its turn budget. The review
+            # layer owns the single unchanged retry, and trying another model
+            # here would drop this attempt's billed usage from the budget
+            # (#2685).
+            raise
         except (AIProviderError, AIRateLimitError) as exc:
             last_error = exc
             if idx < len(models_to_try) - 1:
@@ -120,17 +126,6 @@ async def _with_fallback(
 
     if isinstance(last_error, AIRateLimitError):
         raise AIRateLimitError(str(last_error)) from last_error
-    if isinstance(last_error, AITurnLimitError):
-        # Keep the subtype: the retry loop never repeats a turn-limited call
-        # and the chunk pass retries it exactly once, both keyed on this
-        # class (#2685). Re-raising it as the base class turned a bounded call
-        # into three generic retries and an aborted review.
-        raise AITurnLimitError(
-            str(last_error),
-            input_tokens=last_error.input_tokens,
-            output_tokens=last_error.output_tokens,
-            cost_estimate=last_error.cost_estimate,
-        ) from last_error
     if isinstance(last_error, AIProviderError):
         raise AIProviderError(str(last_error)) from last_error
     raise AIProviderError(f"{label_prefix} exhausted")

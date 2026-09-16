@@ -288,10 +288,22 @@ async def test_a_chunk_that_hits_the_limit_twice_is_left_unreviewed() -> None:
 async def test_a_chunk_that_answers_on_the_retry_is_reviewed_normally() -> None:
     """The retry's answer is parsed as if the first call had succeeded."""
     from lintro.ai.review import chunk_split_retry
+    from lintro.ai.review.merge import ChunkReviewPartial
 
     request = _chunk_request()
-    parsed = object()
-    invoke = AsyncMock(side_effect=[AITurnLimitError("a"), "call"])
+    parsed = ChunkReviewPartial(
+        findings=(),
+        input_tokens=50,
+        output_tokens=5,
+        cost_estimate=0.1,
+        files=("a.py",),
+    )
+    invoke = AsyncMock(
+        side_effect=[
+            AITurnLimitError("a", input_tokens=100, output_tokens=7, cost_estimate=0.3),
+            "call",
+        ],
+    )
     with (
         patch.object(chunk_split_retry, "invoke_chunk_review", invoke),
         patch.object(
@@ -302,8 +314,12 @@ async def test_a_chunk_that_answers_on_the_retry_is_reviewed_normally() -> None:
     ):
         result = await chunk_split_retry.review_chunk_main_pass(request=request)
 
-    assert_that(result).is_same_as(parsed)
     parse.assert_awaited_once()
+    assert_that(result.files).is_equal_to(("a.py",))
+    # The stopped first attempt's usage is reported alongside the answer's.
+    assert_that(result.input_tokens).is_equal_to(150)
+    assert_that(result.output_tokens).is_equal_to(12)
+    assert_that(result.cost_estimate).is_close_to(0.4, 1e-9)
 
 
 async def test_another_error_on_the_retry_still_raises() -> None:
@@ -421,3 +437,29 @@ async def test_call_ai_charges_a_turn_limited_call_to_the_budget() -> None:
             budget=budget,
         )
     budget.record.assert_called_once_with(0.25)
+
+
+async def test_the_fallback_wrapper_does_not_try_another_model_after_a_turn_limit() -> (
+    None
+):
+    """A spent turn budget is not a model failure; the primary's usage survives."""
+    from lintro.ai.fallback import complete_with_fallback
+
+    attempts: list[str | None] = []
+
+    class _Limited:
+        model_name = "m"
+
+        async def complete(self, prompt: str, **kwargs: Any) -> AIResponse:
+            attempts.append(kwargs.get("model"))
+            raise AITurnLimitError("limit", input_tokens=9, cost_estimate=0.5)
+
+    with pytest.raises(AITurnLimitError) as info:
+        await complete_with_fallback(
+            _Limited(),  # type: ignore[arg-type]
+            "p",
+            fallback_models=["other"],
+        )
+    assert_that(attempts).is_length(1)
+    assert_that(info.value.cost_estimate).is_equal_to(0.5)
+    assert_that(info.value.input_tokens).is_equal_to(9)
