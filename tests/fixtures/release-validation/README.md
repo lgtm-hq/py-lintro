@@ -100,8 +100,15 @@ Field notes:
   `homebrew` is always `null` (no prerelease lane).
 - `issues.release_failure`: `null`, or `{"url": "...", "state": "open" | "closed"}` for
   the `release-failure:publish-pypi-on-tag:<tag>` issue as it stood when the scenario
-  was recorded. `issues.closing_comment`: the URL of the recovery summary comment (S4
-  only), else `null`.
+  was recorded (S3 records it open; S4, recorded after the owner closed it, records it
+  closed and adds `closed_by` and `closed_at`, the only two optional keys of that
+  object). `issues.closing_comment`: the URL of the recovery summary comment (S4 only):
+  the live run's closing summary, or the dry-run summary when the recovery was refused;
+  else `null`.
+- `attempts`: optional; earlier attempts or superseded candidates whose run ids would
+  otherwise go unrecorded, each `{"run_id", "attempt", "conclusion", "note"}`. S1 lists
+  the rc1 attempts it superseded; S2 lists the infra-flake attempt the auto-rerun re-ran
+  before the recorded one.
 - `wall_clock_seconds`: S1 only (tag push to last job); `null` elsewhere.
 - `verification`: optional; S1's copied command outputs.
 - `recovery`: S4 only, else `null`:
@@ -109,16 +116,30 @@ Field notes:
   ```json
   {
     "source_run_id": 12345678901,
-    "dry_run": { "id": 1, "url": "...", "channels": ["npm"] },
-    "live": { "id": 2, "url": "...", "conclusion": "success" }
+    "dry_run": {
+      "id": 1,
+      "url": "...",
+      "conclusion": "failure",
+      "channels": [],
+      "refusal": "ERROR: refusing to recover prerelease tag ...",
+      "policy": "lgtm-ci#962 prerelease exemption (docs/release-recovery.md, Which tier applies)"
+    },
+    "live": null
   }
   ```
+
+  `dry_run.conclusion` is the dry run's conclusion; `channels` is what it listed to
+  resume (`[]` when detection never ran); `refusal` and `policy` are present only when
+  the run refused: the verbatim message and the rule it applied. `live` is the live run
+  (`{"id", "url", "conclusion"}`) or `null` when no live run was dispatched, which is
+  the recorded outcome for a prerelease.
 
 - `notes`: free text; S4's must state that prereleases are exempt from recovery by
   policy and that the scenario exercises the tooling on an `rc` deliberately.
 
 The invariants the test holds each scenario to are the ones in the runbook: S1 green
 with every channel but Homebrew present; S2 nothing published and no open issue; S3
-PyPI, release and Docker present, npm absent, the issue filed, one attempt; S4 npm
-resumed from S3's binaries (digest equality against S3's assets), the issue closed,
-every other digest equal to S3's.
+PyPI, release and Docker present, npm absent, the issue filed, one attempt; S4 the
+recovery dry run refused by the prerelease exemption (the rule named in
+`recovery.dry_run.policy`): no channel resumed, no live run, npm still empty, the issue
+closed by the owner citing the exemption, every digest equal to S3's.
