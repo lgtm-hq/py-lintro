@@ -27,6 +27,7 @@ from lintro.ai.review.chunker import chunk_review_context
 from lintro.ai.review.cli_limits import (
     assert_cli_diff_within_ceiling,
     resolve_chunk_diff_budget,
+    resolve_synthesis_diff_budget,
 )
 from lintro.ai.review.custom_agents import select_custom_agents
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -65,6 +66,9 @@ class ReviewRunPlan:
         strictness_section: Pre-formatted strictness prompt section.
         context_window: Context window resolved for the provider model.
         diff_budget: Token budget available for embedded diffs.
+        synthesis_diff_budget: Input token budget of the cross-chunk
+            synthesis pass (``ai.review_synthesis_diff_tokens`` clamped to
+            the context-window remainder, #2702).
         chunks: The chunks the run will review, in plan order.
         chunk_skips: Per-file skips the chunker recorded.
         resume: Resume plan for the current diff.
@@ -85,6 +89,7 @@ class ReviewRunPlan:
     strictness_section: str
     context_window: int
     diff_budget: int
+    synthesis_diff_budget: int
     chunks: list[ReviewChunk]
     chunk_skips: list[SkippedFile]
     resume: ResumePlan
@@ -301,6 +306,10 @@ def plan_run(
         options=options,
         context_window=context_window,
     )
+    synthesis_diff_budget = resolve_synthesis_diff_budget(
+        context_window_budget=hard_diff_ceiling,
+        review_synthesis_diff_tokens=options.ai_config.review_synthesis_diff_tokens,
+    )
     chunk_skips: list[SkippedFile] = []
     with timings.phase(name=ReviewPhase.CHUNKING):
         chunks = (
@@ -349,6 +358,7 @@ def plan_run(
         strictness_section=format_strictness_prompt_section(policy=policy),
         context_window=context_window,
         diff_budget=diff_budget,
+        synthesis_diff_budget=synthesis_diff_budget,
         chunks=chunks,
         chunk_skips=chunk_skips,
         resume=resume,

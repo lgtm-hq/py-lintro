@@ -67,6 +67,7 @@ _ALWAYS_WRITTEN = (
 #: existed re-encodes with no new keys.
 _OPTIONAL_KEYS = (
     "coverage_limited",
+    "synthesis_degraded",
     "cost_basis",
     "resolved",
     "open_after",
@@ -101,6 +102,7 @@ def _full_record() -> RunRecord:
             coverage_limited=True,
             chunks_reviewed=2,
             chunks_total=3,
+            synthesis_degraded=True,
         ),
         usage=RunUsage(
             duration=12.34,

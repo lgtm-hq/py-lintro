@@ -1072,15 +1072,23 @@ def test_review_payload_carries_synthesis_origin_and_block(
     # one carries it, so a blanket stamp cannot pass.
     assert_that(payload["findings"][0]).does_not_contain_key("origin")
     assert_that(payload["findings"][1]["origin"]).is_equal_to("synthesis")
-    assert_that(payload["synthesis"]).is_equal_to(
-        {
-            "enabled": True,
-            "findings_added": 1,
-            "truncated": True,
-            "failed": False,
-            "duplicates_merged": 0,
-            "narrative_missing": False,
-        },
+    assert_that(payload["synthesis"]).contains_entry(
+        {"enabled": True},
+        {"findings_added": 1},
+        {"truncated": True},
+        {"failed": False},
+        {"duplicates_merged": 0},
+        {"narrative_missing": False},
+    )
+    # #2702: the record names what the prompt was fitted to and how big it was.
+    assert_that(payload["synthesis"]).contains_key(
+        "input_tokens",
+        "output_tokens",
+        "output_limit_tokens",
+        "input_budget_tokens",
+        "prompt_tokens_estimated",
+        "diff_files_included",
+        "diff_files_total",
     )
 
 
