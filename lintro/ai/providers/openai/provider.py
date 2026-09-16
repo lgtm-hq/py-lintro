@@ -21,7 +21,6 @@ from typing import Any
 
 from loguru import logger
 
-from lintro.ai.cli_bounds import CliCallOptions
 from lintro.ai.cost import estimate_cost
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import (
@@ -477,11 +476,7 @@ class OpenAIProvider(ApiStreamingProvider):
         repo_root: str | None,
         model: str | None = None,
         cli_schema: CliSchemaRequest | None = None,
-        cli_options: CliCallOptions | None = None,
     ) -> AIResponse:
-        # codex exec has no per-call turn flag; --sandbox read-only is already
-        # the read-only surface (#2685).
-        del cli_options
         if self._cli is None:
             raise AINotAvailableError("Codex CLI transport is not initialized")
 
@@ -563,7 +558,6 @@ class OpenAIProvider(ApiStreamingProvider):
         use_one_shot: bool = False,
         model: str | None = None,
         cli_schema: CliSchemaRequest | None = None,
-        cli_options: CliCallOptions | None = None,
     ) -> AIResponse:
         """Generate a completion using GPT (API or Codex CLI).
 
@@ -591,10 +585,9 @@ class OpenAIProvider(ApiStreamingProvider):
                 repo_root=repo_root,
                 model=model,
                 cli_schema=cli_schema,
-                cli_options=cli_options,
             )
 
-        del repo_root, use_one_shot, cli_schema, cli_options
+        del repo_root, use_one_shot, cli_schema
         client = self._get_client()
         effective_model = model or self._model
         # Per-call cap: the lower of the caller's request and the

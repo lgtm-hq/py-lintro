@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from lintro.ai.budget import CostBudget
-from lintro.ai.cli_bounds import CliCallOptions, resolve_max_turns
+from lintro.ai.cli_bounds import CliCallOptions, bound_cli_call, resolve_max_turns
 from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.enums.ai_transport import AITransport
@@ -58,12 +58,12 @@ async def call_ai(
         repo_root: Optional repository root for CLI providers.
         use_one_shot: When True, avoid durable CLI sessions.
         cli_schema: Optional native CLI JSON schema request.
-        call_kind: What the call is for; sets the CLI turn limit unless
-            ``ai.transports.cli.max_turns`` overrides it (#2685).
         timeout: Per-call timeout override in seconds; defaults to
             ``ai_config.api_timeout``. Callers making a supplementary call
             inside an existing timeout budget pass what remains of it so the
             extra call cannot double the budgeted wall time.
+        call_kind: What the call is for; sets the CLI turn limit unless
+            ``ai.transports.cli.max_turns`` overrides it (#2685).
 
     Returns:
         The provider response with usage metadata.
@@ -89,18 +89,18 @@ async def call_ai(
         Returns:
             The provider response.
         """
-        return await complete_with_fallback(
-            provider,
-            user_prompt,
-            fallback_models=list(ai_config.fallback_models),
-            system=system_prompt,
-            max_tokens=tokens,
-            timeout=effective_timeout,
-            repo_root=repo_root,
-            use_one_shot=use_one_shot,
-            cli_schema=cli_schema,
-            cli_options=cli_options,
-        )
+        with bound_cli_call(cli_options):
+            return await complete_with_fallback(
+                provider,
+                user_prompt,
+                fallback_models=list(ai_config.fallback_models),
+                system=system_prompt,
+                max_tokens=tokens,
+                timeout=effective_timeout,
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+                cli_schema=cli_schema,
+            )
 
     async def _budgeted_call() -> AIResponse:
         """Perform one call, recording its cost against the budget.

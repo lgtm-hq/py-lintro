@@ -22,6 +22,7 @@ from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
     AIRateLimitError,
+    AITurnLimitError,
 )
 from lintro.ai.output_exhaustion import is_output_exhaustion_error
 
@@ -131,6 +132,23 @@ def _is_output_exhausted(*, error: BaseException) -> bool:
     return isinstance(error, AIProviderError) and is_output_exhaustion_error(
         str(error),
     )
+
+
+def _never_retried(*, error: BaseException) -> bool:
+    """Return whether repeating the same request cannot help.
+
+    An output-ceiling overrun reproduces on the same prompt (#1967), and so
+    does a call that spent its whole per-call turn budget without answering
+    (#2685): the review layer decides on a single unchanged retry for the
+    latter, not this loop.
+
+    Args:
+        error: The provider error the retry loop caught.
+
+    Returns:
+        True for output exhaustion and for :class:`AITurnLimitError`.
+    """
+    return isinstance(error, AITurnLimitError) or _is_output_exhausted(error=error)
 
 
 def with_retry(
@@ -247,9 +265,7 @@ def with_retry(
                     )
                     rate_limit_retries += 1
                 except AIProviderError as e:
-                    if transient_retries >= max_retries or _is_output_exhausted(
-                        error=e,
-                    ):
+                    if transient_retries >= max_retries or _never_retried(error=e):
                         raise
                     await _sleep_before_retry(
                         error=e,

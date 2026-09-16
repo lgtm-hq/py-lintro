@@ -26,7 +26,11 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.exceptions import AICostBudgetExceededError, AIError
+from lintro.ai.exceptions import (
+    AICostBudgetExceededError,
+    AIError,
+    AITurnLimitError,
+)
 from lintro.ai.review.cli_limits import is_cli_output_exhaustion
 from lintro.ai.review.context import split_unified_diff_by_file
 from lintro.ai.review.enums.coverage_degradation_reason import (
@@ -291,8 +295,67 @@ async def review_chunk_main_pass(
         call = await invoke_chunk_review(request=request)
     except AICostBudgetExceededError:
         raise
+    except AITurnLimitError as exc:
+        return await _retry_after_turn_limit(request=request, first=exc)
     except AIError as exc:
         if not is_cli_output_exhaustion(exc):
             raise
         return await _retry_after_exhaustion(request=request)
+    return await _parse_call(request=request, call=call)
+
+
+async def _retry_after_turn_limit(
+    *,
+    request: ChunkReviewRequest,
+    first: AITurnLimitError,
+) -> ChunkReviewPartial:
+    """Retry a turn-limited call once; degrade the chunk if it hits it again.
+
+    The agent spent its whole turn budget without answering. One unchanged
+    retry covers a run that merely wandered; a second limit means the chunk
+    does not answer under this bound, so its files are left unreviewed for a
+    later round and the run records a ``TURN_LIMIT_REACHED`` degradation
+    instead of failing (#2685).
+
+    Args:
+        request: The chunk, prompt material, provider handles and limits.
+        first: The error the first call raised.
+
+    Returns:
+        The retry's parsed partial, or an empty partial carrying the
+        degradation and no reviewed files.
+
+    Raises:
+        AICostBudgetExceededError: When the retry hits the session cost cap.
+    """
+    logger.warning(
+        "CLI review hit its per-call turn limit on chunk {index} ({error}); "
+        "retrying the call once unchanged.",
+        index=request.chunk_index,
+        error=first,
+    )
+    try:
+        call = await invoke_chunk_review(request=request)
+    except AICostBudgetExceededError:
+        raise
+    except AITurnLimitError as again:
+        logger.warning(
+            "CLI review hit its per-call turn limit again on chunk {index}; "
+            "leaving its files unreviewed for a later round: {error}",
+            index=request.chunk_index,
+            error=again,
+        )
+        return ChunkReviewPartial(
+            findings=(),
+            input_tokens=0,
+            output_tokens=0,
+            cost_estimate=0.0,
+            files=(),
+            coverage_degradations=(
+                CoverageDegradation(
+                    reason=CoverageDegradationReason.TURN_LIMIT_REACHED,
+                    chunk_index=request.chunk_index,
+                ),
+            ),
+        )
     return await _parse_call(request=request, call=call)

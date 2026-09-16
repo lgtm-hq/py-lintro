@@ -165,10 +165,24 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
             "not reviewed",
         )
 
+    turn_limited = {
+        item.chunk_index
+        for item in degradations
+        if item.reason is CoverageDegradationReason.TURN_LIMIT_REACHED
+    }
+    if turn_limited:
+        clauses.append(
+            f"{len(turn_limited)} {_plural(count=len(turn_limited), noun='chunk')} "
+            "hit the per-call turn limit before answering, so "
+            f"{'its' if len(turn_limited) == 1 else 'their'} files were left "
+            "unreviewed",
+        )
+
     known = {
         CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
         CoverageDegradationReason.DIFF_TRUNCATED,
         CoverageDegradationReason.SPLIT_HALF_FAILED,
+        CoverageDegradationReason.TURN_LIMIT_REACHED,
         *_DEPTH_PASS_CLAUSES,
     }
     other = sorted(

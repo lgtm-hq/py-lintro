@@ -60,6 +60,10 @@ class CoverageDegradationReason(StrEnum):
             are kept and the files in the failed half are left unreviewed
             (they are not credited as covered), so this run did not review
             every file it started.
+        TURN_LIMIT_REACHED: The chunk's CLI call hit its per-call turn limit
+            before answering, twice (the call is retried once unchanged). The
+            chunk's files are left unreviewed so a later round picks them up,
+            and the run is not a complete finding set (#2685).
     """
 
     OUTPUT_EXHAUSTION_RETRIED = auto()
@@ -69,6 +73,7 @@ class CoverageDegradationReason(StrEnum):
     ADVERSARIAL_SWEEP_FAILED = auto()
     DIFF_TRUNCATED = auto()
     SPLIT_HALF_FAILED = auto()
+    TURN_LIMIT_REACHED = auto()
 
 
 #: Degradations of the whole-PR narrative pass, not of per-file findings

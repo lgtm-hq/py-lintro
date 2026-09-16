@@ -19,7 +19,7 @@ from typing import Any
 
 from loguru import logger
 
-from lintro.ai.cli_bounds import CliCallOptions
+from lintro.ai.cli_bounds import current_cli_call_options
 from lintro.ai.cost import estimate_cost
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import (
@@ -452,7 +452,6 @@ class AnthropicProvider(ApiStreamingProvider):
         use_one_shot: bool,
         model: str | None = None,
         cli_schema: CliSchemaRequest | None = None,
-        cli_options: CliCallOptions | None = None,
     ) -> AIResponse:
         if self._cli is None:
             raise AINotAvailableError("Claude CLI transport is not initialized")
@@ -500,7 +499,8 @@ class AnthropicProvider(ApiStreamingProvider):
         # turn limit, both help-gated so an older binary degrades to today's
         # unbounded call instead of failing.
         candidates.append(OptionalArg(flag="--tools", values=(_READ_ONLY_TOOLS,)))
-        max_turns = cli_options.max_turns if cli_options is not None else None
+        bounds = current_cli_call_options()
+        max_turns = bounds.max_turns if bounds is not None else None
         if max_turns is not None:
             candidates.append(
                 OptionalArg(flag="--max-turns", values=(str(max_turns),)),
@@ -548,7 +548,6 @@ class AnthropicProvider(ApiStreamingProvider):
         use_one_shot: bool = False,
         model: str | None = None,
         cli_schema: CliSchemaRequest | None = None,
-        cli_options: CliCallOptions | None = None,
     ) -> AIResponse:
         """Generate a completion using Claude (API or CLI).
 
@@ -575,10 +574,9 @@ class AnthropicProvider(ApiStreamingProvider):
                 use_one_shot=use_one_shot,
                 model=model,
                 cli_schema=cli_schema,
-                cli_options=cli_options,
             )
 
-        del repo_root, use_one_shot, cli_schema, cli_options
+        del repo_root, use_one_shot, cli_schema
         client = self._get_client()
         effective_model = model or self._model
         # Per-call cap: the lower of the caller's request and the

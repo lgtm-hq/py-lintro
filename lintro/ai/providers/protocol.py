@@ -155,6 +155,8 @@ class ProviderMetadata:
         pricing: Known model identifiers mapped to their per-million-token
             pricing. Empty when the provider publishes no per-token price
             (for example a flat-rate subscription CLI).
+        cli_bounds: How the provider's CLI is bounded per call (read-only tool
+            surface, turn-limit flag), or ``None`` when it has no CLI (#2685).
     """
 
     provider: AIProvider

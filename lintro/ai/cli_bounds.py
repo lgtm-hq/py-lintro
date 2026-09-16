@@ -10,12 +10,21 @@ can honour it alongside a read-only tool surface.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from types import MappingProxyType
 
 from lintro.ai.enums.ai_call_kind import AICallKind
 
-__all__ = ["DEFAULT_MAX_TURNS", "CliCallOptions", "resolve_max_turns"]
+__all__ = [
+    "DEFAULT_MAX_TURNS",
+    "CliCallOptions",
+    "bound_cli_call",
+    "current_cli_call_options",
+    "resolve_max_turns",
+]
 
 #: Turn limit per call kind when ``ai.transports.cli.max_turns`` is unset.
 #: Review-type calls get three turns: the answer plus a little room to
@@ -55,3 +64,38 @@ def resolve_max_turns(*, call_kind: AICallKind, configured: int | None) -> int:
     if configured is not None:
         return configured
     return DEFAULT_MAX_TURNS[call_kind]
+
+
+#: The bounds of the provider call in flight, set by ``call_ai`` for the
+#: duration of one call. A context variable rather than a ``complete()``
+#: keyword: the providers' ``complete`` signatures sit at the parameter
+#: ratchet (PLR0913 baseline may only shrink), and the bounds are a
+#: CLI-transport concern that only the CLI code paths read. Context variables
+#: follow ``await`` and task boundaries, so parallel chunk calls each see
+#: their own value.
+_CURRENT_CALL: ContextVar[CliCallOptions | None] = ContextVar(
+    "lintro_cli_call_options",
+    default=None,
+)
+
+
+@contextmanager
+def bound_cli_call(options: CliCallOptions | None) -> Iterator[None]:
+    """Make *options* the bounds of the provider call issued inside the block.
+
+    Args:
+        options: The bounds to expose, or ``None`` for an unbounded call.
+
+    Yields:
+        None: The previous value is restored on exit.
+    """
+    token = _CURRENT_CALL.set(options)
+    try:
+        yield
+    finally:
+        _CURRENT_CALL.reset(token)
+
+
+def current_cli_call_options() -> CliCallOptions | None:
+    """Return the bounds of the provider call in flight, if any."""
+    return _CURRENT_CALL.get()
