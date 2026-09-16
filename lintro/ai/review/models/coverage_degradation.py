@@ -40,11 +40,15 @@ class CoverageDegradation:
             ``OUTPUT_EXHAUSTION_RETRIED``, and this is what tells them apart.
             Meaningful only for that reason, and ``True`` by default so a
             degradation recorded without it reads as the ordinary split.
+        limit: The numeric bound the degradation reports, when it has one: the
+            per-call turn limit for ``TURN_LIMIT_REACHED`` (#2685). Serialized
+            only when set, so older records round-trip byte-identically.
     """
 
     reason: CoverageDegradationReason
     chunk_index: int
     split: bool = True
+    limit: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the degradation for JSON and MCP payloads.
@@ -62,4 +66,8 @@ class CoverageDegradation:
         }
         if self.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED:
             payload["split"] = self.split
+
+        if self.limit is not None:
+
+            payload["limit"] = self.limit
         return payload

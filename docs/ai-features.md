@@ -1473,7 +1473,7 @@ provider in its metadata.
 | `openai`    | `--sandbox read-only` (always)        | none: `codex exec` has no flag   |
 | `cursor`    | `--mode ask` (always)                 | none: `agent` has no flag        |
 
-The limit comes from the call's kind: 3 turns for review-type calls (each chunk's main
+The limit comes from the call's kind: 8 turns for review-type calls (each chunk's main
 call and its schema-recovery retry, the depth-2 and depth-3 passes, the synthesis pass
 and custom review agents), 1 for the summary and fix calls.
 `ai.transports.cli.max_turns` (int >= 1, default unset) overrides every kind. Both
@@ -1499,7 +1499,7 @@ the working tree the agent can read is the base ref and that the diff is authori
 ai:
   transports:
     cli:
-      max_turns: 3 # optional; default is per call kind (3 review, 1 summary/fix)
+      max_turns: 8 # optional; default is per call kind (8 review, 1 summary/fix)
 ```
 
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the

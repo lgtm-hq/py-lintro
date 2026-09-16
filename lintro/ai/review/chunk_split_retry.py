@@ -26,6 +26,8 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.cli_bounds import resolve_max_turns
+from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.exceptions import (
     AICostBudgetExceededError,
     AIError,
@@ -355,6 +357,10 @@ async def _retry_after_turn_limit(
                 CoverageDegradation(
                     reason=CoverageDegradationReason.TURN_LIMIT_REACHED,
                     chunk_index=request.chunk_index,
+                    limit=resolve_max_turns(
+                        call_kind=AICallKind.REVIEW,
+                        configured=request.ai_config.transports.cli.max_turns,
+                    ),
                 ),
             ),
         )
