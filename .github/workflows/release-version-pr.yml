@@ -85,7 +85,10 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@2145a9aa0b1c82939be0506763442df6ea36884d # v0.74.2
     with:
       ecosystems: python
-      auto-merge: true
+      # Never armed: a version PR is merged deliberately after its generated
+      # CHANGELOG.md has been read, not squashed by the bot 14 minutes after it
+      # opens (#2694). Guarded by test_release_version_pr_does_not_arm_auto_merge.
+      auto-merge: false
       max-bump: minor
       # Finalize the generated version PR before it is committed: reflow
       # CHANGELOG.md to lintro's 88-column markdown budget so release PRs pass

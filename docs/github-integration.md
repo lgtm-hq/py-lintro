@@ -295,7 +295,8 @@ reusable workflows.
 - **Automated Release PR** (`.github/workflows/release-version-pr.yml`)
   - On push to `main`, computes the next version from Conventional Commits
   - Updates version files via lgtm-ci ecosystem updaters
-  - Opens a Release PR (no direct push to main) with auto-merge enabled
+  - Opens a Release PR (no direct push to main); it is merged deliberately once its
+    generated changelog has been read, never auto-merged (#2694)
 
 - **Auto Tag on Main** (`.github/workflows/release-auto-tag.yml`)
   - After the Release PR is merged, creates/pushes the version tag
@@ -306,7 +307,7 @@ reusable workflows.
   - Uses Trusted Publishing (OIDC) to upload to PyPI
   - Also creates a GitHub Release and attaches built artifacts
 
-> End-to-end: Conventional commits → Release PR (auto-merged) → Tag created → PyPI
+> End-to-end: Conventional commits → Release PR (merged by hand) → Tag created → PyPI
 > publish.
 
 ### Permissions Model (least privilege)

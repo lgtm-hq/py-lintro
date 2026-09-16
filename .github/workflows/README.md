@@ -76,7 +76,7 @@ comments so Renovate can track digest updates. Policy is enforced by
 ## Release
 
 - **release-version-pr.yml** — Opens version bump PR via
-  `reusable-release-version-pr.yml` (Python ecosystem, auto-merge, max minor). The
+  `reusable-release-version-pr.yml` (Python ecosystem, no auto-merge, max minor). The
   `publish-gate` job runs `scripts/ci/check-last-publish-green.py` first and skips the
   version PR only when the newest version-tag publish run concluded `startup_failure` —
   the workflow itself being broken; every other conclusion, and any run still queued or
