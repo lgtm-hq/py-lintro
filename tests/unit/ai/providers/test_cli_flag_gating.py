@@ -609,7 +609,11 @@ async def test_claude_bounds_the_call_when_help_advertises_the_flags(
 async def test_claude_omits_the_bounds_when_help_does_not_advertise_them(
     _claude_on_path: None,
 ) -> None:
-    """An older binary keeps today's unbounded call instead of failing (#2685)."""
+    """Without --tools in --help only the turn limit is sent (#2685).
+
+    ``--tools`` is help-gated; ``--max-turns`` is unadvertised by design and
+    rides through to the backstop.
+    """
     token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
     try:
         calls: list[list[str]] = []
@@ -626,7 +630,7 @@ async def test_claude_omits_the_bounds_when_help_does_not_advertise_them(
         cmd = _completion_calls(calls)[-1]
         cmd = _completion_calls(calls)[-1]
         assert_that(cmd).does_not_contain("--tools")
-        assert_that(cmd).does_not_contain("--max-turns")
+        assert_that(cmd).contains("--max-turns", "3")
     finally:
         cli_bounds._CURRENT_CALL.reset(token)
 

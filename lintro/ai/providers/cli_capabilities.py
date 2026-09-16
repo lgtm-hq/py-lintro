@@ -89,10 +89,16 @@ class OptionalArg:
     Attributes:
         flag: The flag itself, e.g. ``--resume``.
         values: Values that follow the flag and must be dropped with it.
+        gate_on_help: Whether the ``--help`` probe decides if the flag is sent.
+            False for a flag the binary accepts but does not advertise
+            (claude's ``--max-turns``, #2685): it is sent regardless and the
+            reactive ``unknown option`` backstop still drops it, once, on a
+            binary that rejects it.
     """
 
     flag: str
     values: tuple[str, ...] = field(default=())
+    gate_on_help: bool = True
 
     def as_argv(self) -> list[str]:
         """Return the flag and its values as an argv fragment.
@@ -408,7 +414,15 @@ class CliCapabilityGuard:
         """
         kept: list[OptionalArg] = []
         for arg in optional_args:
-            if await self.supports_flag(arg.flag):
+            if not arg.gate_on_help:
+                # Unadvertised but accepted: only a rejection the backstop
+                # already saw (``note_unsupported_flag``) keeps it out.
+                with self._capability_lock:
+                    rejected = self._flag_support.get(arg.flag) is False
+                if not rejected:
+                    kept.append(arg)
+                    continue
+            elif await self.supports_flag(arg.flag):
                 kept.append(arg)
                 continue
             logger.debug(

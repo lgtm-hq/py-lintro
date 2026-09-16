@@ -87,7 +87,9 @@ ANTHROPIC_METADATA = ProviderMetadata(
     cli_contract=ANTHROPIC_CLI_CONTRACT,
     # `--tools Read,Grep,Glob` removes every other built-in tool from the
     # session (read-only under `--permission-mode dontAsk`); `--max-turns`
-    # bounds the agent loop. Both are help-gated optional flags (#2685).
+    # bounds the agent loop. `--tools` is help-gated; `--max-turns` is
+    # accepted but unadvertised, so it is sent regardless with the
+    # unknown-option backstop behind it (#2685).
     cli_bounds=CliBounds(
         read_only_args=("--tools", "Read,Grep,Glob"),
         read_only_in_base_argv=False,

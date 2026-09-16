@@ -496,10 +496,13 @@ class AnthropicProvider(ApiStreamingProvider):
                 OptionalArg(flag="--resume", values=(resume_session_id,)),
             )
         # Bound the agent per call (#2685): a read-only tool surface and a
-        # turn limit, both help-gated so an older binary degrades to today's
-        # unbounded call instead of failing. ``call_ai`` sets the bounds for
-        # every call kind; a caller that reaches ``complete()`` without them
-        # gets an explicitly unbounded call, with neither flag rendered.
+        # turn limit. ``--tools`` is help-gated; ``--max-turns`` is accepted
+        # by claude 2.x but not listed by ``--help``, so it is sent regardless
+        # and only the reactive unknown-option backstop drops it. Either way
+        # an older binary degrades to today's unbounded call instead of
+        # failing. ``call_ai`` sets the bounds for every call kind; a caller
+        # that reaches ``complete()`` without them gets an explicitly
+        # unbounded call, with neither flag rendered.
         bounds = current_cli_call_options()
         max_turns = bounds.max_turns if bounds is not None else None
         if bounds is not None:
@@ -508,7 +511,11 @@ class AnthropicProvider(ApiStreamingProvider):
             )
         if max_turns is not None:
             candidates.append(
-                OptionalArg(flag="--max-turns", values=(str(max_turns),)),
+                OptionalArg(
+                    flag="--max-turns",
+                    values=(str(max_turns),),
+                    gate_on_help=False,
+                ),
             )
 
         optional_args = await self._cli.apply_optional_args(cmd, candidates)

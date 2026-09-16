@@ -53,6 +53,9 @@ ANTHROPIC_CLI_CONTRACT = CliContract(
             flag="--tools",
             purpose="restricts the agent to the read-only built-in tools",
         ),
+        # Accepted by claude 2.x in print mode but not listed by --help, so
+        # Tier 1 reports it as unadvertised and the provider sends it without
+        # the help gate; Tier 2 proves acceptance (#2685).
         OptionalCliFlag(
             flag="--max-turns",
             purpose="bounds the agent loop per call",
