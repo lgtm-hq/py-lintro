@@ -15,9 +15,10 @@ binds the bounds around the provider call with :func:`bound_cli_call`, and
 the CLI providers read them with :func:`current_cli_call_options`. Only
 the turn limit depends on them: the read-only tool surface is part of each
 provider's base argv, so a call that reaches a provider without bounds is
-read-only but turn-unlimited. The intended replacement is a single per-call request object on
-``complete()`` carrying the schema request and the bounds together (tracked
-on #2553); this module's two functions are the seam that refactor removes.
+read-only but turn-unlimited. The intended replacement is a single per-call
+request object on ``complete()`` carrying the schema request and the bounds
+together (tracked on #2553); this module's two functions are the seam that
+refactor removes.
 """
 
 from __future__ import annotations
