@@ -129,11 +129,33 @@ def _raise_if_turn_limited(*, stdout: str, max_turns: int | None) -> None:
     except ValueError:
         return
     if isinstance(data, dict) and _hit_turn_limit(data=data, max_turns=max_turns):
+        raw_usage = data.get("usage")
+        usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
+        cost = data.get("total_cost_usd")
         raise AITurnLimitError(
             "Claude CLI stopped at the per-call turn limit"
             f"{f' ({max_turns} turns)' if max_turns is not None else ''} "
             "before answering (#2685).",
+            input_tokens=_usage_int(usage.get("input_tokens")),
+            output_tokens=_usage_int(usage.get("output_tokens")),
+            cost_estimate=float(cost) if isinstance(cost, (int, float)) else 0.0,
         )
+
+
+def _usage_int(value: object) -> int:
+    """Return *value* as a non-negative int, or 0 when it is not one.
+
+    Args:
+        value: A usage counter from the envelope.
+
+    Returns:
+        The counter, or 0.
+    """
+    return (
+        value
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        else 0
+    )
 
 
 def _hit_turn_limit(*, data: Mapping[str, Any], max_turns: int | None) -> bool:
@@ -563,7 +585,12 @@ class AnthropicProvider(ApiStreamingProvider):
         # stdout. Recognise it before the exit-code mapping, whose auth
         # heuristic greps stderr for "login" and would otherwise misread the
         # CLI's own auth-source warning as an authentication failure (#2685).
-        _raise_if_turn_limited(stdout=result.stdout, max_turns=max_turns)
+        # The limit used for detection is the one the executed argv carried:
+        # the backstop may have dropped ``--max-turns``, and an unbounded
+        # error must not be read as a turn limit through the count fallback.
+        executed = list(result.args) if isinstance(result.args, (list, tuple)) else []
+        sent_limit = max_turns if "--max-turns" in executed else None
+        _raise_if_turn_limited(stdout=result.stdout, max_turns=sent_limit)
         self._cli.check_exit_code(
             result,
             auth_patterns=("authentication", "login", "not logged in"),
@@ -572,7 +599,7 @@ class AnthropicProvider(ApiStreamingProvider):
 
         response, session_id = self._cli.parse_stdout(
             result.stdout,
-            max_turns=max_turns,
+            max_turns=sent_limit,
         )
         if not use_one_shot and session_id is not None:
             with self._session_lock:

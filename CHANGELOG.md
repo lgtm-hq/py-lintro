@@ -14,7 +14,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - **ai/review**: every CLI call is bounded per provider: Claude gets
   `--tools Read,Grep,Glob` (help-gated) and `--max-turns N` (accepted but unadvertised,
   so sent with the unknown-option backstop; both now in its contract), codex and cursor
-  keep their read-only modes; the limit follows the call's kind (3 for review-type
+  keep their read-only modes; the limit follows the call's kind (12 for review-type
   calls, 1 for summary and fix) unless `ai.transports.cli.max_turns` overrides it; a
   call that hits the limit twice records a `turn_limit_reached` coverage degradation and
   leaves the chunk's files for a later round; the review prompt states that the readable

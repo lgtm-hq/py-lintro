@@ -20,7 +20,7 @@ from assertpy import assert_that
 from lintro.ai import cli_bounds
 from lintro.ai.cli_bounds import CliCallOptions
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AITurnLimitError
+from lintro.ai.exceptions import AIProviderError, AITurnLimitError
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.cursor.provider import CursorProvider
@@ -577,7 +577,8 @@ _CLAUDE_TURN_LIMITED = json.dumps(
         "num_turns": 3,
         "result": "",
         "session_id": "sess-123",
-        "usage": {"input_tokens": 10, "output_tokens": 0},
+        "usage": {"input_tokens": 10, "output_tokens": 4},
+        "total_cost_usd": 0.02,
     },
 )
 
@@ -757,8 +758,51 @@ async def test_claude_turn_limit_wins_over_the_exit_code_auth_heuristic(
             )
 
         provider = AnthropicProvider(transport=AITransport.CLI)
-        with patch_cli_exec(side_effect=_run), pytest.raises(AITurnLimitError):
+        with patch_cli_exec(side_effect=_run), pytest.raises(AITurnLimitError) as info:
             await provider.complete("Review this", cli_schema=_SCHEMA)
         assert_that(_completion_calls(calls)[-1]).contains("--max-turns", "3")
+        # The stopped call's usage rides on the error for the budget (#2685).
+        assert_that(info.value.input_tokens).is_equal_to(10)
+        assert_that(info.value.output_tokens).is_equal_to(4)
+        assert_that(info.value.cost_estimate).is_equal_to(0.02)
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_does_not_read_a_turn_limit_after_the_backstop_dropped_it(
+    _claude_on_path: None,
+) -> None:
+    """Once --max-turns is stripped, an unrelated error is not a turn limit.
+
+    The count fallback (``is_error`` with ``num_turns`` at the limit) must key
+    on the limit the executed argv carried, not the one requested (#2685).
+    """
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        unrelated = json.dumps(
+            {"is_error": True, "num_turns": 5, "result": "something else broke"},
+        )
+
+        def _run(cmd: list[str], *args: object, **kwargs: object) -> Any:
+            calls.append(list(cmd))
+            if "--version" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "2.1.273", "")
+            if "--help" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "  --tools <list>\n", "")
+            if "--max-turns" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    1,
+                    "",
+                    "error: unknown option '--max-turns'",
+                )
+            return subprocess.CompletedProcess(cmd, 1, unrelated, "")
+
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=_run), pytest.raises(AIProviderError) as info:
+            await provider.complete("Review this", cli_schema=_SCHEMA)
+        assert_that(type(info.value)).is_equal_to(AIProviderError)
+        assert_that(_completion_calls(calls)[-1]).does_not_contain("--max-turns")
     finally:
         cli_bounds._CURRENT_CALL.reset(token)

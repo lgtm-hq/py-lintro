@@ -255,13 +255,22 @@ async def test_a_chunk_that_hits_the_limit_twice_is_left_unreviewed() -> None:
         _chunk_request(),
         chunk_index=4,
     )
-    invoke = AsyncMock(side_effect=[AITurnLimitError("a"), AITurnLimitError("b")])
+    invoke = AsyncMock(
+        side_effect=[
+            AITurnLimitError("a", input_tokens=100, output_tokens=7, cost_estimate=0.3),
+            AITurnLimitError("b", input_tokens=110, output_tokens=8, cost_estimate=0.4),
+        ],
+    )
     with patch.object(chunk_split_retry, "invoke_chunk_review", invoke):
         partial = await chunk_split_retry.review_chunk_main_pass(request=request)
 
     assert_that(invoke.await_count).is_equal_to(2)
     assert_that(partial.findings).is_empty()
     assert_that(partial.files).is_empty()
+    # Both stopped attempts were billed; the partial keeps their usage.
+    assert_that(partial.input_tokens).is_equal_to(210)
+    assert_that(partial.output_tokens).is_equal_to(15)
+    assert_that(partial.cost_estimate).is_close_to(0.7, 1e-9)
     assert_that([d.reason for d in partial.coverage_degradations]).is_equal_to(
         [CoverageDegradationReason.TURN_LIMIT_REACHED],
     )
@@ -389,3 +398,26 @@ async def test_the_fallback_wrapper_keeps_a_turn_limit_error_typed() -> None:
 
     with pytest.raises(AITurnLimitError):
         await complete_with_fallback(_Limited(), "p")  # type: ignore[arg-type]
+
+
+async def test_call_ai_charges_a_turn_limited_call_to_the_budget() -> None:
+    """The stopped call's cost is recorded before the error propagates."""
+    from unittest.mock import MagicMock
+
+    class _Limited:
+        model_name = "m"
+
+        async def complete(self, prompt: str, **kwargs: Any) -> AIResponse:
+            raise AITurnLimitError("limit", cost_estimate=0.25)
+
+    budget = MagicMock()
+    budget.max_cost_usd = None
+    with pytest.raises(AITurnLimitError):
+        await call_ai(
+            provider=_Limited(),  # type: ignore[arg-type]
+            ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+            user_prompt="p",
+            system_prompt=None,
+            budget=budget,
+        )
+    budget.record.assert_called_once_with(0.25)

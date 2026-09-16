@@ -349,9 +349,9 @@ async def _retry_after_turn_limit(
         )
         return ChunkReviewPartial(
             findings=(),
-            input_tokens=0,
-            output_tokens=0,
-            cost_estimate=0.0,
+            input_tokens=first.input_tokens + again.input_tokens,
+            output_tokens=first.output_tokens + again.output_tokens,
+            cost_estimate=first.cost_estimate + again.cost_estimate,
             files=(),
             coverage_degradations=(
                 CoverageDegradation(

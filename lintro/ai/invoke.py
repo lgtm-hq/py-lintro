@@ -14,6 +14,7 @@ from lintro.ai.cli_bounds import CliCallOptions, bound_cli_call, resolve_max_tur
 from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.enums.ai_transport import AITransport
+from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.response import AIResponse
@@ -107,20 +108,30 @@ async def call_ai(
 
         Returns:
             The provider response.
+
+        Raises:
+            AITurnLimitError: When the call stopped at its turn limit; its
+                cost is charged to the budget first (#2685).
         """
-        if budget is not None and budget.max_cost_usd is not None:
-            input_chars = len(user_prompt) + len(system_prompt or "")
-            estimate = estimate_cost_with_floor(
-                provider.model_name,
-                input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
-                output_tokens=tokens,
-            )
-            return await budget.execute(
-                _call_once,
-                cost_of=lambda response: response.cost_estimate,
-                estimate=estimate,
-            )
-        response = await _call_once()
+        try:
+            if budget is not None and budget.max_cost_usd is not None:
+                input_chars = len(user_prompt) + len(system_prompt or "")
+                estimate = estimate_cost_with_floor(
+                    provider.model_name,
+                    input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
+                    output_tokens=tokens,
+                )
+                return await budget.execute(
+                    _call_once,
+                    cost_of=lambda response: response.cost_estimate,
+                    estimate=estimate,
+                )
+            response = await _call_once()
+        except AITurnLimitError as exc:
+            # The stopped call still spent its turns; charge them (#2685).
+            if budget is not None and exc.cost_estimate:
+                budget.record(exc.cost_estimate)
+            raise
         if budget is not None:
             budget.record(response.cost_estimate)
         return response
