@@ -1,10 +1,11 @@
-"""The synthesis pass has its own input budget and never makes a review partial (#2702).
+"""The synthesis pass has its own input budget and records what it saw (#2704).
 
 The chunker splits any diff above ``ai.review_chunk_diff_tokens``, so when the
 synthesis pass was fitted to that same budget every multi-chunk PR was over it
 by construction and every such round was recorded as ``synthesis_truncated``
 and, through ``findings_coverage_complete``, reported as a partial review with
-exit code 1. Findings coverage is per file; the narrative pass is not.
+exit code 1. #2702 fixed the semantics (see ``test_synthesis_not_partial_2702``);
+this file pins the budget the pass now gets and the record it writes.
 """
 
 from __future__ import annotations
@@ -18,16 +19,11 @@ from lintro.ai.review.cli_limits import (
     REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
     resolve_synthesis_diff_budget,
 )
-from lintro.ai.review.coverage_degradation import describe_coverage_degradations
 from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
-from lintro.ai.review.github_notes import (
-    format_coverage_limited_warning,
-    format_partial_review_label,
-    format_synthesis_note_line,
-)
+from lintro.ai.review.github_notes import format_synthesis_note_line
 from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.coverage_degradation import (
     SYNTHESIS_CHUNK_INDEX,
@@ -168,37 +164,7 @@ def test_synthesis_budget_knob_defaults_and_validates() -> None:
         AIConfig(review_synthesis_diff_tokens=500)
 
 
-# --- the semantics --------------------------------------------------------------
-
-
-def test_a_synthesis_degradation_alone_keeps_findings_coverage_complete() -> None:
-    """Truncated or failed synthesis is a narrative degradation, not a partial review."""
-    for reason in (
-        CoverageDegradationReason.SYNTHESIS_TRUNCATED,
-        CoverageDegradationReason.SYNTHESIS_FAILED,
-    ):
-        metadata = _metadata(reason)
-        assert_that(metadata.findings_coverage_complete).described_as(
-            str(reason),
-        ).is_true()
-        assert_that(metadata.synthesis_degraded).is_true()
-        assert_that(format_partial_review_label(metadata=metadata)).is_empty()
-        assert_that(format_coverage_limited_warning(metadata=metadata)).is_empty()
-        assert_that(describe_coverage_degradations(metadata=metadata)).is_empty()
-
-
-def test_a_per_file_degradation_still_makes_the_review_partial() -> None:
-    """The per-file reasons keep their meaning alongside a synthesis reason."""
-    metadata = _metadata(
-        CoverageDegradationReason.SYNTHESIS_TRUNCATED,
-        CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
-    )
-    assert_that(metadata.findings_coverage_complete).is_false()
-    assert_that(metadata.synthesis_degraded).is_true()
-    assert_that(format_partial_review_label(metadata=metadata)).is_not_empty()
-    warning = format_coverage_limited_warning(metadata=metadata)
-    assert_that(warning).contains("output")
-    assert_that(warning).does_not_contain("synthesis")
+# --- the note -------------------------------------------------------------------
 
 
 def test_the_synthesis_note_names_the_files_seen_and_the_merge_caveat() -> None:
