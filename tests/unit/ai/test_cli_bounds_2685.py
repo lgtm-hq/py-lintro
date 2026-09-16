@@ -357,3 +357,25 @@ async def test_parallel_calls_each_see_their_own_bounds() -> None:
     assert_that(seen).is_equal_to(
         {n: CliCallOptions(max_turns=n) for n in (1, 2, 3)},
     )
+
+
+# --- the fallback wrapper keeps the subtype ------------------------------------------
+
+
+async def test_the_fallback_wrapper_keeps_a_turn_limit_error_typed() -> None:
+    """Measured on #2676: re-raising as the base class defeated both retries.
+
+    ``complete_with_fallback`` rebuilds the last error after the model loop;
+    a turn-limited call must come out as ``AITurnLimitError`` so the retry
+    loop skips it and the chunk pass retries it once (#2685).
+    """
+    from lintro.ai.fallback import complete_with_fallback
+
+    class _Limited:
+        model_name = "m"
+
+        async def complete(self, prompt: str, **kwargs: Any) -> AIResponse:
+            raise AITurnLimitError("stopped at the per-call turn limit")
+
+    with pytest.raises(AITurnLimitError):
+        await complete_with_fallback(_Limited(), "p")  # type: ignore[arg-type]

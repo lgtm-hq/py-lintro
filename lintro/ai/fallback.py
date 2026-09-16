@@ -16,6 +16,7 @@ from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
     AIRateLimitError,
+    AITurnLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import (
@@ -69,6 +70,8 @@ async def _with_fallback(
         AIProviderError: If the primary model and all fallbacks fail.
         AIRateLimitError: If the primary model and all fallbacks fail
             with rate-limit errors.
+        AITurnLimitError: When the last attempt stopped at its per-call
+            turn limit; re-raised with its type intact (#2685).
     """
     primary_model = provider.model_name
     models_to_try: list[str | None] = [None]
@@ -117,6 +120,12 @@ async def _with_fallback(
 
     if isinstance(last_error, AIRateLimitError):
         raise AIRateLimitError(str(last_error)) from last_error
+    if isinstance(last_error, AITurnLimitError):
+        # Keep the subtype: the retry loop never repeats a turn-limited call
+        # and the chunk pass retries it exactly once, both keyed on this
+        # class (#2685). Re-raising it as the base class turned a bounded call
+        # into three generic retries and an aborted review.
+        raise AITurnLimitError(str(last_error)) from last_error
     if isinstance(last_error, AIProviderError):
         raise AIProviderError(str(last_error)) from last_error
     raise AIProviderError(f"{label_prefix} exhausted")
