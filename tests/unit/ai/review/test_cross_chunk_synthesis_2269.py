@@ -1920,3 +1920,47 @@ def test_a_cut_synthesis_input_records_the_files_it_kept() -> None:
     assert_that(note).contains(
         f"saw {outcome.diff_files_included} of 2 changed files, less than its whole input",
     )
+
+
+def test_the_synthesis_budget_is_clamped_by_a_small_context_window() -> None:
+    """With a small context window the pass receives the clamped budget, not the knob.
+
+    The default 24,000 fits any default-window run, so a bound alone cannot tell
+    clamped from unclamped; forcing the window below the knob can (#2704).
+    """
+    from lintro.ai.review import synthesis as synthesis_module
+    from lintro.ai.review.cli_limits import resolve_synthesis_diff_budget
+
+    small_window = 6_000
+    seen: dict[str, int] = {}
+    real_pass = synthesis_module.run_synthesis_pass
+
+    async def _spy(*, request: Any) -> Any:
+        seen["diff_budget"] = request.diff_budget
+        return await real_pass(request=request)
+
+    with (
+        patch(
+            "lintro.ai.review.run_planning.get_context_window",
+            return_value=small_window,
+        ),
+        patch(
+            "lintro.ai.review.run_execution.run_synthesis_pass",
+            side_effect=_spy,
+        ),
+    ):
+        result = _run(synthesis=ReviewSynthesisConfig(enabled=True))
+
+    knob = AIConfig().review_synthesis_diff_tokens
+    assert_that(seen["diff_budget"]).is_less_than(knob)
+    assert_that(seen["diff_budget"]).is_less_than_or_equal_to(small_window)
+    # The clamp is the resolver's: the ceiling the window left is what won.
+    assert_that(seen["diff_budget"]).is_equal_to(
+        resolve_synthesis_diff_budget(
+            context_window_budget=seen["diff_budget"],
+            review_synthesis_diff_tokens=knob,
+        ),
+    )
+    assert_that(_outcome(result=result).input_budget_tokens).is_equal_to(
+        seen["diff_budget"],
+    )
