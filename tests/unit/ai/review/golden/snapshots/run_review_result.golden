@@ -12,7 +12,8 @@
     "token_usage": {
       "prompt": 2100,
       "completion": 600,
-      "total": 2700
+      "total": 2700,
+      "context": 0
     },
     "cost_estimate_usd": 0.038000000000000006,
     "base_ref": "main",

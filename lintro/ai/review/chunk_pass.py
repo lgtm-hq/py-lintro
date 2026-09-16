@@ -128,6 +128,7 @@ async def review_chunk(
             use_one_shot=plan.use_one_shot,
             diff_budget=plan.diff_budget,
             chunk_index=chunk_index,
+            repo_context=plan.repo_context,
         ),
     )
     truncation_degradations: tuple[CoverageDegradation, ...] = (

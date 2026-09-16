@@ -89,6 +89,7 @@ def test_budget_config_construction_and_frozen() -> None:
         fix_search_radius=5,
         review_chunk_diff_tokens=config_defaults.review_chunk_diff_tokens,
         review_synthesis_diff_tokens=config_defaults.review_synthesis_diff_tokens,
+        review_context_tokens=config_defaults.review_context_tokens,
         cli_max_diff_bytes=config_defaults.cli_max_diff_bytes,
     )
 

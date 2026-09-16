@@ -129,6 +129,7 @@ def merge_half_partials(
         output_tokens=sum(partial.output_tokens for partial in ordered),
         cost_estimate=sum(partial.cost_estimate for partial in ordered),
         provider_seconds=sum(partial.provider_seconds for partial in ordered),
+        context_tokens=sum(partial.context_tokens for partial in ordered),
         turns=_sum_turns(partials=ordered),
         files=tuple(path for partial in ordered for path in partial.files),
         flagged_files=tuple(
@@ -171,6 +172,7 @@ async def _parse_call(
         partial,
         files=tuple(request.chunk.files),
         provider_seconds=call.elapsed,
+        context_tokens=call.context_tokens,
         coverage_degradations=(
             *partial.coverage_degradations,
             *call.coverage_degradations,

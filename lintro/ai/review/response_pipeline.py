@@ -52,6 +52,7 @@ from lintro.ai.review.prompts import (
     build_git_native_review_prompt,
     build_review_prompt,
 )
+from lintro.ai.review.repo_context import RepoContextSource, build_repo_context
 from lintro.ai.review.response_recovery import (
     build_schema_reminder_prompt,
     resolve_schema_retry_timeout,
@@ -102,6 +103,8 @@ class ChunkReviewRequest:
         diff_budget: Token budget available for embedded diffs.
         chunk_index: Zero-based position of the chunk in the run, stamped on
             any recorded coverage degradation.
+        repo_context: Cached head-side reader for the read-only repository
+            context section (#2714); ``None`` renders no section.
     """
 
     chunk: ReviewChunk
@@ -119,6 +122,7 @@ class ChunkReviewRequest:
     use_one_shot: bool
     diff_budget: int
     chunk_index: int
+    repo_context: RepoContextSource | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -131,10 +135,13 @@ class ChunkCallResult:
         coverage_degradations: Limits the call itself applied before asking
             (today only the delegated-diff fallback, #2685); the chunk pass
             records them on the partial.
+        context_tokens: Estimated tokens of the read-only repository context
+            the prompt carried (#2714), for the run's usage record.
     """
 
     response: AIResponse
     elapsed: float
+    context_tokens: int = 0
     coverage_degradations: tuple[CoverageDegradation, ...] = ()
 
 
@@ -190,6 +197,16 @@ async def invoke_chunk_review(
         lint_results=request.lint_results,
         extra_checklist=request.extra_checklist,
         strictness_section=request.strictness_section,
+        repo_context=(
+            build_repo_context(
+                chunk=request.chunk,
+                context=request.context,
+                source=request.repo_context,
+                budget_tokens=ai_config.review_context_tokens,
+            )
+            if request.repo_context is not None
+            else None
+        ),
     )
     degradations: tuple[CoverageDegradation, ...] = ()
     if use_git_native:
@@ -244,6 +261,11 @@ async def invoke_chunk_review(
         response=response,
         elapsed=time.monotonic() - started,
         coverage_degradations=degradations,
+        context_tokens=(
+            prompt_inputs.repo_context.tokens
+            if prompt_inputs.repo_context is not None
+            else 0
+        ),
     )
 
 

@@ -64,7 +64,8 @@
     "coverage_degradations": [],
     "provider_seconds": 0.0,
     "turns": null,
-    "truncated": false
+    "truncated": false,
+    "context_tokens": 0
   },
   {
     "findings": [
@@ -131,6 +132,7 @@
     "coverage_degradations": [],
     "provider_seconds": 0.0,
     "turns": null,
-    "truncated": false
+    "truncated": false,
+    "context_tokens": 0
   }
 ]

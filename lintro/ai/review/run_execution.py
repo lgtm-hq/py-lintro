@@ -1,14 +1,12 @@
 """Provider calls for one review run, and how the run is finalized (#2301).
 
-Split out of :mod:`lintro.ai.review.orchestrator`, which keeps the public
-facade and the three-step sequence. Everything between "the plan is resolved"
-and "the outcome is assembled" lives here: the chunk fan-out, the custom-agent
-passes, the merge, the optional synthesis pass, and the two finalizers — one
-for a completed run, one for a run a cost cap, timeout or SIGTERM stopped.
+Split out of :mod:`lintro.ai.review.orchestrator` (the public facade and the
+three-step sequence). Everything between "the plan is resolved" and "the
+outcome is assembled" lives here: chunk fan-out, custom-agent passes, merge,
+optional synthesis, and the finalizers for completed and stopped runs.
 
-Every function was moved verbatim, so the run's behaviour, its timings and its
-graceful-stop handling are unchanged. See
-``docs/architecture/AI-REVIEW-EXECUTION.md``.
+Every function was moved verbatim (behaviour, timings and graceful-stop
+handling unchanged); see ``docs/architecture/AI-REVIEW-EXECUTION.md``.
 """
 
 from __future__ import annotations
@@ -33,6 +31,7 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.interrupt import install_review_interrupt
 from lintro.ai.review.merge import finalize_partials
+from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import (
     ReviewRunOutcome,
     chunk_summaries,
@@ -110,6 +109,7 @@ def chunk_run_plan(
         max_parallel_calls=plan.max_parallel_calls,
         stop=interrupt,
         timings=plan.timings,
+        repo_context=repo_context_source_for(context=context, ai_config=plan.ai_config),
     )
 
 

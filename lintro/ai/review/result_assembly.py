@@ -201,6 +201,10 @@ def assemble_review_result(
             "prompt": total_input,
             "completion": total_output,
             "total": total_input + total_output,
+            # #2714: prompt tokens spent on the read-only repository context,
+            # a subset of ``prompt`` reported on its own so the before/after
+            # measurement can see what the section cost.
+            "context": sum(item.context_tokens for item in outcome.partials),
         },
         cost_estimate_usd=total_cost,
         base_ref=context.base_ref,

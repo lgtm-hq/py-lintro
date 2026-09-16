@@ -436,6 +436,19 @@ class AIConfig(BaseModel):
             "over it by construction (#2702)."
         ),
     )
+    review_context_tokens: int = Field(
+        default=6_000,
+        ge=0,
+        description=(
+            "Per-chunk token budget for the read-only repository context the "
+            "review prompt carries besides the diff (#2714): the post-change "
+            "content of the chunk's files (whole, or definition windows "
+            "around the hunks when large), their one-hop importers and "
+            "sibling tests among the PR's changed files. 0 disables the "
+            "section. Separate from review_chunk_diff_tokens, which still "
+            "bounds the diff itself."
+        ),
+    )
     cli_max_diff_tokens: int | None = Field(
         default=None,
         ge=1_000,
@@ -862,6 +875,7 @@ class AIConfig(BaseModel):
             fix_search_radius=self.fix_search_radius,
             review_chunk_diff_tokens=self.review_chunk_diff_tokens,
             review_synthesis_diff_tokens=self.review_synthesis_diff_tokens,
+            review_context_tokens=self.review_context_tokens,
             cli_max_diff_bytes=self.cli_max_diff_bytes,
         )
 

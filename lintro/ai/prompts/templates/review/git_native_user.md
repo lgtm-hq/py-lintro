@@ -31,6 +31,7 @@ Review this code change for actionable findings.
 
 {working_tree_note}
 
+{repo_context_section}
 ---
 
 ### Interaction paths (trace each explicitly)
