@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lintro.ai.config import AIConfig
-from lintro.ai.exceptions import AIProviderError
+from lintro.ai.exceptions import (
+    AIAuthenticationError,
+    AIProviderError,
+    AIRateLimitError,
+)
 from lintro.ai.output_exhaustion import is_output_exhaustion_error
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
@@ -138,8 +142,13 @@ def is_cli_output_exhaustion(error: BaseException) -> bool:
         error: Exception raised by a CLI provider call.
 
     Returns:
-        True when the error is an ``AIProviderError`` with a matching message.
+        True when the error is a plain ``AIProviderError`` with a matching
+        message. Rate-limit and authentication errors subclass it but are
+        never exhaustion (#2695): a split would repeat a request the provider
+        has already refused.
     """
+    if isinstance(error, AIRateLimitError | AIAuthenticationError):
+        return False
     if not isinstance(error, AIProviderError):
         return False
     return is_output_exhaustion_error(str(error))
