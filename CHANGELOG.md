@@ -11,6 +11,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.162.0] - 2026-09-16
+
+### Added
+
+- **ai/review**: give the synthesis pass its own input budget and record its sizes
+  (#2706) (1d001a8)
 - **ai/review**: `ai.review_synthesis_diff_tokens` (default 24000) gives the cross-chunk
   synthesis pass its own input budget, clamped to the context-window remainder, instead
   of the per-chunk budget; the `synthesis` JSON block records the call's input and
@@ -21,13 +37,8 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
+- **release**: record the #2633 scenario runs and close out the validation runbook
+  (#2698) (3996683)
 
 ## [0.161.0] - 2026-09-16
 
