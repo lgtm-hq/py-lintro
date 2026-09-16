@@ -20,8 +20,12 @@ class SuggestionDropReason(StrEnum):
             change's ``before`` block was not found anywhere in the file.
         AMBIGUOUS_ANCHOR: The ``before`` block occurs more than once at head,
             so re-anchoring would be a guess between equally good matches.
+        REANCHORED: The diff-bounded gate moved the finding's primary line
+            onto a changed line (#2711), so a suggestion written for the
+            original line would replace the wrong line; it is dropped.
     """
 
     FILE_MISSING = auto()
     STALE_ANCHOR = auto()
     AMBIGUOUS_ANCHOR = auto()
+    REANCHORED = auto()

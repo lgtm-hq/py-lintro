@@ -12,9 +12,11 @@ from lintro.ai.review.diff_gate import (
     DiffGate,
     DiffGateCounts,
     FileHunks,
+    Hunk,
     hunks_from_diff,
 )
 from lintro.ai.review.finding_parser import parse_findings
+from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -78,32 +80,124 @@ def test_hunks_carry_new_file_ranges_and_changed_lines() -> None:
     # 10..15 for the first hunk; the pure deletion at +42,0 is a point.
     assert_that(a.ranges).is_equal_to(((10, 15), (42, 42)))
     assert_that(a.changed_lines).is_equal_to(frozenset({11, 12, 14}))
+    assert_that(a.hunks[1].changed_lines).is_empty()
     assert_that(hunks["src/b.py"].changed_lines).is_equal_to(frozenset({2}))
 
 
-def test_files_without_hunks_are_omitted() -> None:
-    """A mode-only section has no hunk and therefore nothing to bound."""
-    diff = "diff --git a/x b/x\nold mode 100644\nnew mode 100755\n"
-    assert_that(hunks_from_diff(diff=diff)).is_empty()
+def test_lineless_sections_are_recorded_without_hunks() -> None:
+    """A mode-only or binary section is known but can host no line."""
+    diff = (
+        "diff --git a/x b/x\nold mode 100644\nnew mode 100755\n"
+        "diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n"
+    )
+    hunks = hunks_from_diff(diff=diff)
+    assert_that(hunks).contains_key("x", "logo.png")
+    assert_that(hunks["x"].hunks).is_empty()
+    # A placeholder section with neither hunks nor markers is left alone.
+    assert_that(hunks_from_diff(diff="diff --git a/p.py b/p.py\n+change")).is_empty()
 
 
 def test_file_hunks_distance_and_nearest_changed_line() -> None:
     """Distance is to the nearest range edge; re-anchor prefers added lines."""
-    hunks = FileHunks(ranges=((10, 15),), changed_lines=frozenset({11, 14}))
+    hunk = Hunk(start=10, end=15, changed_lines=frozenset({11, 14}))
+    hunks = FileHunks(hunks=(hunk,))
     assert_that(hunks.distance(12)).is_equal_to(0)
     assert_that(hunks.distance(8)).is_equal_to(2)
     assert_that(hunks.distance(18)).is_equal_to(3)
     assert_that(hunks.nearest_changed_line(8)).is_equal_to(11)
     assert_that(hunks.nearest_changed_line(18)).is_equal_to(14)
-    deletion_only = FileHunks(ranges=((42, 42),), changed_lines=frozenset())
+    deletion_only = FileHunks(hunks=(Hunk(start=42, end=42),))
     assert_that(deletion_only.nearest_changed_line(44)).is_equal_to(42)
+
+
+def test_reanchoring_picks_the_nearest_hunk_before_its_changed_line() -> None:
+    """Near a pure-deletion hunk the anchor is that hunk's start.
+
+    An added line of a farther hunk is never chosen.
+    """
+    hunks = hunks_from_diff(diff=_DIFF)["src/a.py"]
+    assert_that(hunks.nearest_changed_line(44)).is_equal_to(42)
+    assert_that(hunks.nearest_changed_line(40)).is_equal_to(42)
+    gate = _gate()
+    (kept,) = gate.apply(findings=(_finding(line=44),))
+    assert_that(kept.line).is_equal_to(42)
+
+
+def test_a_truncated_hunk_body_bounds_the_range_to_the_lines_present() -> None:
+    """A header claiming 100 lines with one present covers one line only."""
+    diff = (
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n"
+        "@@ -1,100 +1,100 @@\n+first\n"
+    )
+    (hunk,) = hunks_from_diff(diff=diff)["x.py"].hunks
+    assert_that((hunk.start, hunk.end)).is_equal_to((1, 1))
+    gate = DiffGate(hunks=hunks_from_diff(diff=diff), near_lines=0)
+    assert_that(gate.apply(findings=(_finding(file="x.py", line=50),))).is_empty()
+
+
+def test_a_path_with_two_sections_does_not_read_file_headers_as_lines() -> None:
+    """The second section's ``+++`` header is never counted as an added line."""
+    diff = (
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n"
+        "@@ -1,2 +1,3 @@\n a\n+b\n c\n"
+        "diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n"
+        "@@ -10,1 +11,2 @@\n d\n+e\n"
+    )
+    hunks = hunks_from_diff(diff=diff)["x.py"]
+    assert_that(hunks.ranges).is_equal_to(((1, 3), (11, 12)))
+    assert_that(hunks.changed_lines).is_equal_to(frozenset({2, 12}))
 
 
 # --- classification -----------------------------------------------------------
 
 
 def _gate(near_lines: int = DEFAULT_NEAR_LINES) -> DiffGate:
-    return DiffGate(hunks=hunks_from_diff(diff=_DIFF), near_lines=near_lines)
+    diff = _DIFF + (
+        "diff --git a/assets/logo.png b/assets/logo.png\n"
+        "Binary files a/assets/logo.png and b/assets/logo.png differ\n"
+    )
+    return DiffGate(hunks=hunks_from_diff(diff=diff), near_lines=near_lines)
+
+
+def test_a_binary_or_mode_only_file_cannot_host_a_line() -> None:
+    """A binary or mode-only chunk file has no hunk, so a line on it is outside."""
+    gate = _gate()
+    assert_that(
+        gate.apply(findings=(_finding(file="assets/logo.png", line=3),)),
+    ).is_empty()
+    assert_that(gate.counts.outside_diff).is_equal_to(1)
+    # Line-less findings on it stay unanchored.
+    kept = gate.apply(findings=(_finding(file="assets/logo.png", line=0),))
+    assert_that(kept).is_length(1)
+
+
+def test_reanchoring_drops_a_suggestion_written_for_the_old_line() -> None:
+    """A suggestion replaces the line it was written for; moving it would misfire."""
+    from dataclasses import replace
+
+    from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
+    from lintro.ai.review.models.suggested_change import SuggestedChange
+
+    gate = _gate()
+    legacy = replace(_finding(line=8), suggested_code="x = 2")
+    (kept,) = gate.apply(findings=(legacy,))
+    assert_that(kept.line).is_equal_to(11)
+    assert_that(kept.suggested_code).is_empty()
+    assert_that(kept.suggestion_dropped).is_equal_to(SuggestionDropReason.REANCHORED)
+    structured = replace(
+        _finding(line=18),
+        suggested_change=SuggestedChange(
+            start_line=18,
+            end_line=18,
+            replacement="y = 1",
+        ),
+    )
+    (kept,) = gate.apply(findings=(structured,))
+    assert_that(kept.suggested_change).is_none()
+    assert_that(kept.suggestion_dropped).is_equal_to(SuggestionDropReason.REANCHORED)
+    # No suggestion: nothing to drop, nothing recorded.
+    (plain,) = gate.apply(findings=(_finding(line=8),))
+    assert_that(plain.suggestion_dropped).is_none()
 
 
 def test_in_diff_findings_pass_untouched() -> None:
@@ -276,3 +370,58 @@ def test_the_run_record_carries_the_outside_count_only_when_non_zero() -> None:
     assert_that(payload).contains_entry({"dropped_outside_diff": 2})
     restored = RunRecord.from_dict(payload)
     assert_that(restored.outcome.dropped_outside_diff).is_equal_to(2)
+
+
+async def test_the_depth_3_sweep_is_bounded_and_its_counts_fold_in() -> None:
+    """Adversarial findings pass the same gate; counts reach the chunk partial."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from lintro.ai.review.adversarial_pass import run_adversarial_pass
+    from lintro.ai.review.chunk_pass import _add_usage
+
+    chunk = ReviewChunk(
+        id=1,
+        files=["src/a.py"],
+        diff=_DIFF,
+        relationship="directory-prefix",
+    )
+    response = AIResponse(
+        content=(
+            '{"findings": [{"severity": "P2", "file": "src/a.py", "line": 100, '
+            '"title": "outside", "description": "d", "cause": "c", "fix": "f", '
+            '"confidence": "high"}, {"severity": "P2", "file": "src/a.py", '
+            '"line": 12, "title": "inside", "description": "d", "cause": "c", '
+            '"fix": "f", "confidence": "high"}]}'
+        ),
+        model="m",
+        provider=AIProvider.ANTHROPIC,
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+    )
+    provider = MagicMock()
+    provider.name = "anthropic"
+    budget = MagicMock()
+    with patch(
+        "lintro.ai.review.provider_call.call_ai",
+        new=AsyncMock(return_value=response),
+    ):
+        sweep = await run_adversarial_pass(
+            chunk=chunk,
+            provider=provider,
+            ai_config=AIConfig(enabled=True, review=True),
+            prior_findings=(),
+            budget=budget,
+        )
+    assert_that([f.title for f in sweep.findings]).is_equal_to(["inside"])
+    assert_that(sweep.diff_gate.outside_diff).is_equal_to(1)
+    main = ChunkReviewPartial(
+        findings=(),
+        input_tokens=0,
+        output_tokens=0,
+        cost_estimate=0.0,
+        diff_gate=DiffGateCounts(reanchored=1),
+    )
+    assert_that(_add_usage(partial=main, extra=sweep).diff_gate).is_equal_to(
+        DiffGateCounts(outside_diff=1, reanchored=1),
+    )

@@ -423,7 +423,10 @@ def payload_to_partial(
         The chunk partial result.
     """
     gate = (
-        DiffGate(hunks=hunks_from_diff(diff=chunk.diff), near_lines=near_lines)
+        DiffGate(
+            hunks=hunks_from_diff(diff=chunk.diff),
+            near_lines=near_lines,
+        )
         if chunk is not None
         else None
     )
