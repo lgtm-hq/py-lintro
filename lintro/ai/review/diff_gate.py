@@ -163,9 +163,12 @@ def hunks_from_diff(*, diff: str) -> dict[str, FileHunks]:
         and no such marker) is omitted and left to the path gate.
     """
     result: dict[str, FileHunks] = {}
-    for raw_path, section in split_unified_diff_by_file(unified_diff=diff).items():
-        # A CRLF diff leaves the header's trailing CR on the path key.
-        path = raw_path.rstrip("\r")
+    # A CRLF diff is normalised first: the file-header regexes reject a CR
+    # before the newline (a quoted path would then split to nothing and the
+    # file would fall out of the gate), and the CR would otherwise stay on
+    # the path key.
+    sections = split_unified_diff_by_file(unified_diff=diff.replace("\r\n", "\n"))
+    for path, section in sections.items():
         hunks: list[Hunk] = []
         saw_header = False
         lines = section.splitlines()

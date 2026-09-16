@@ -151,6 +151,24 @@ def test_a_hunk_cut_before_its_first_new_line_hosts_nothing() -> None:
     assert_that(hunks_from_diff(diff=deletion)["y.py"].ranges).is_equal_to(((3, 3),))
 
 
+def test_quoted_paths_in_crlf_diffs_stay_inside_the_gate() -> None:
+    """A quoted CRLF header must not split to nothing and free the file."""
+    text = (
+        'diff --git "a/x y.py" "b/x y.py"\r\n--- "a/x y.py"\r\n+++ "b/x y.py"\r\n'
+        "@@ -1,2 +1,3 @@\r\n a\r\n+b\r\n c\r\n"
+    )
+    hunks = hunks_from_diff(diff=text)
+    assert_that(hunks).contains_key("x y.py")
+    assert_that(hunks["x y.py"].ranges).is_equal_to(((1, 3),))
+    gate = DiffGate(hunks=hunks, near_lines=0)
+    assert_that(gate.apply(findings=(_finding(file="x y.py", line=100),))).is_empty()
+    lineless = (
+        'diff --git "a/a b.png" "b/a b.png"\r\n'
+        'Binary files "a/a b.png" and "b/a b.png" differ\r\n'
+    )
+    assert_that(hunks_from_diff(diff=lineless)["a b.png"].hunks).is_empty()
+
+
 def test_crlf_lineless_sections_are_still_recognised() -> None:
     """A binary or mode-only marker followed by CRLF is not bypassed."""
     diff = (
