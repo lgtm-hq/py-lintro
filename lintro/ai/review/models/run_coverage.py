@@ -21,9 +21,10 @@ class RunCoverage:
         files_skipped: Number of changed files excluded from the review.
         checks: Number of checklist items in the prompt.
         partial: True when the review stopped before every chunk was reviewed.
-        coverage_limited: True when an output-exhaustion split, a failed
-            depth pass or an incomplete synthesis pass may have suppressed
-            findings in this round (#2003). A
+        coverage_limited: True when an output-exhaustion split, a cut file
+            diff, a lost split half or a failed depth pass may have suppressed
+            findings in this round (#2003); an incomplete synthesis pass does
+            not set it (#2702). A
             separate axis from ``partial``: every chunk was reviewed, but not
             at full depth. Serialized only when True, so a record written
             before the field existed round-trips byte-identically and keeps

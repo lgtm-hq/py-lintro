@@ -599,7 +599,7 @@ How it behaves:
 - Its input is bounded by its own budget, `ai.review_synthesis_diff_tokens` (default
   24,000, clamped to the context-window remainder), not the per-chunk budget: the pass
   is one call over the whole PR, and at the chunk budget every multi-chunk PR was over
-  it by construction (#2702). The budget covers the **whole prompt**: the changed-file
+  it by construction (#2702, #2704). The budget covers the **whole prompt**: the changed-file
   list and the finding digest are rendered and charged first, and the diff takes only
   what they leave over. A digest too large for the budget sheds its finding lines,
   largest chunk first, before the per-chunk file lines are touched. If the whole PR does
