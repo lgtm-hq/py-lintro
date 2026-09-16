@@ -11,6 +11,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.161.0] - 2026-09-16
+
+### Added
+
+- **ai/review**: parallel findings-only chunks, retiring the per-call findings cap
+  (#2683) (cdff8f2)
 - **ai/review**: review every transport in small parallel file-group chunks
   (`ai.review_chunk_diff_tokens`, default 7000) with a findings-only chunk contract; the
   synthesis pass now runs by default on every round and writes the summary, walkthrough
@@ -29,6 +45,42 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **docker**: verify images against the nested lgtm-ci signer and the cosign bundle
+  format (#2652) (c60e6ae)
+- **deps**: pin lgtm-ci to v0.74.3 (#2703) (602482e)
+- **release**: stop arming auto-merge on version PRs (#2699) (349cdbe)
+- **pr**: enforce a 90-character PR title limit before merge (#2686) (3225606)
+- **release**: checkpoint prerelease 0.160.3rc4 (#2633) (#2684) (95ea5ea)
+- **release**: checkpoint prerelease 0.160.3rc3 (#2633) (#2681) (b96e987)
+- **release**: checkpoint prerelease 0.160.3rc2 (#2633) (#2679) (1a2aaec)
+- **ci**: bump every lgtm-ci pin to v0.74.2 and protect the publish workflows from
+  auto-rerun (#2678) (6906686)
+- **release**: allow the attestation-store host in the Docker promote job (#2676)
+  (48d287a)
+- **release**: checkpoint prerelease 0.160.3rc1 (#2633) (#2675) (8ce0078)
+- **release**: add the validation channel switch, fault injection and the S1-S4 runbook
+  (#2672) (88e9ca4)
+- **audit**: read the Homebrew version from the formula url when no version stanza
+  exists (#2674) (4f3e0ec)
+- **ci**: bump every lgtm-ci pin to v0.74.1 (#2671) (4925b8b)
+- **release**: add the release recovery entry workflow (9eb6506)
+- **npm**: verify binaries and packed files before publishing to npm (d7d796a)
+- **ci**: bump every lgtm-ci pin to v0.74.0 (#2666) (cabcf90)
+- **test**: run the bats suites in CI and gate merges on them (#2665) (dc784be)
+- **release**: notify on failed tag runs and document the gated release (9bc371b)
+- **release**: allow Sigstore egress for the dist attestation and cut checkpoint
+  0.160.3a4 (#2562) (5118a8a)
+- **release**: checkpoint prerelease 0.160.3a3 (#2562) (#2662) (3e5f363)
+- **ci**: bump every lgtm-ci pin to v0.73.2 (#2661) (ddba512)
+- **release**: checkpoint prerelease 0.160.3a2 (#2562) (#2660) (522e9b4)
+- **release**: gate every publish behind verified, attested artifacts (#2659) (870b69b)
+- **release**: stage Docker images before the pypi gate and promote by digest (#2658)
+  (00666b6)
+- **ci**: bump every lgtm-ci pin to v0.73.1 (#2657) (14f55ab)
+- **release**: split build-binary.yml into build and publish stages (#2655) (1a84107)
+- **ci**: bump every lgtm-ci pin to v0.72.0 (#2656) (fab87de)
+- **ci**: bump every lgtm-ci pin to v0.71.0 and grant the build-dist attestation
+  permissions (#2653) (fafef7a)
 - **ai/review**: the chunk answer is `findings` and `flagged_files` only; the
   `file_assessments` and `checklist` keys are gone from the review JSON and the MCP
   payload, and `pr_summary` / `verdict_reasoning` come from the synthesis pass (null
@@ -56,6 +108,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **ai/review**: stop counting synthesis truncation as a partial review (#2705)
+  (77f0dde)
+- **ai/review**: stop classifying 4xx provider prose as output exhaustion (#2701)
+  (a1704f5)
 - **ai/review**: a truncated or failed synthesis pass no longer makes a review
   "partial": `findings_coverage_complete` now tracks per-file finding depth only, so the
   CI check no longer exits 1 on a complete review whose whole-PR narrative pass saw part
@@ -66,8 +122,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   matcher pairs those prior records to the survivor per record rather than per
   fingerprint, so a merged-away finding is carried forward open instead of being stamped
   "Addressed" while the defect is still live (#2683)
-
-### Security
 
 ## [0.160.2] - 2026-09-14
 
