@@ -206,6 +206,33 @@ async def test_unreadable_help_is_not_treated_as_missing_flags() -> None:
     assert_that(result.state).is_equal_to(LivenessState.OK)
 
 
+async def test_unreadable_help_is_incompatible_for_a_fail_closed_flag() -> None:
+    """Claude's --tools must be confirmed, so unreadable help is not live.
+
+    The provider refuses every completion until the help surface names
+    ``--tools`` (#2685); a liveness probe that still said OK would be a false
+    green in ``lintro doctor``.
+    """
+    with patch_cli_exec(
+        side_effect=_probe_replies(
+            version="2.5.0",
+            help_text="fake: unexpected error",
+            help_returncode=1,
+        ),
+    ):
+        transport = _FakeTransport(
+            binary_path="/usr/local/bin/claude",
+            binary_name="Claude",
+            install_hint="Install Claude Code.",
+            contract=cli_contract_for(AIProvider.ANTHROPIC),
+        )
+        result = await transport.probe_liveness(provider_name="anthropic")
+
+    assert_that(result.state).is_equal_to(LivenessState.INCOMPATIBLE_CLI)
+    assert_that(result.message).contains("--tools", "could not be read")
+    assert_that(result.hint).contains("npm install -g")
+
+
 async def test_unrunnable_binary_is_not_reported_live() -> None:
     """On PATH is not the same as runnable, and only one of them is liveness.
 

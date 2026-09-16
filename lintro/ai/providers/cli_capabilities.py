@@ -318,6 +318,25 @@ class CliCapabilityGuard:
                 hint=hint,
             )
 
+        contract = self._contract
+        if (
+            contract is not None
+            and contract.fail_closed_flags
+            and await self.help_text() is None
+        ):
+            # A fail-closed flag must be confirmed, not assumed: the provider
+            # refuses every call until the help surface names it, so reporting
+            # the binary live here would be a false green in `lintro doctor`.
+            return incompatible_cli_result(
+                provider=provider_name,
+                message=(
+                    f"{self._binary_name} CLI --help could not be read, so "
+                    f"{', '.join(contract.fail_closed_flags)} cannot be "
+                    "confirmed and every call would be refused"
+                ),
+                hint=contract.upgrade_hint,
+            )
+
         version = await self.binary_version()
         if version is None and await self.help_text() is None:
             # Neither free probe produced usable output. Being on ``PATH`` is not

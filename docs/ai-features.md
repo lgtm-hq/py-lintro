@@ -1480,14 +1480,15 @@ and custom review agents), 1 for the summary and fix calls.
 Claude flags differ in kind. `--tools` is a security bound and fails closed: it is a
 required contract flag sent on every call, and a binary whose `--help` does not
 advertise it is refused before any review session starts, with the upgrade hint, because
-prompt-injected repository content must never reach a writable tool. `--max-turns` is a
-time bound: accepted by Claude Code 2.x in print mode but not listed by its `--help`, so
-it is sent without the help gate; a binary that rejects it triggers the usual
-unknown-option backstop (the call is retried once without the flag and the loss is
-logged), and the Tier 1 contract check reports it as unadvertised while the Tier 2 live
-probe proves acceptance. The turn limit is set by lintro's call layer for every call
-kind; a caller that drives a provider directly without it gets a read-only but
-turn-unlimited call.
+prompt-injected repository content must never reach a writable tool; an unreadable
+`--help` is refused the same way, and the liveness probe (`lintro doctor`) reports such
+a binary as incompatible rather than live. `--max-turns` is a time bound: accepted by
+Claude Code 2.x in print mode but not listed by its `--help`, so it is sent without the
+help gate; a binary that rejects it triggers the usual unknown-option backstop (the call
+is retried once without the flag and the loss is logged), and the Tier 1 contract check
+reports it as unadvertised while the Tier 2 live probe proves acceptance. The turn limit
+is set by lintro's call layer for every call kind; a caller that drives a provider
+directly without it gets a read-only but turn-unlimited call.
 
 A Claude call that spends its whole turn budget without answering (envelope subtype
 `error_max_turns`, or an error envelope whose `num_turns` reached the limit sent) raises

@@ -44,6 +44,9 @@ ANTHROPIC_CLI_CONTRACT = CliContract(
         # session starts, with the upgrade hint (#2685).
         "--tools",
     ),
+    # A liveness probe that cannot read the help surface must not report the
+    # binary usable: every completion refuses until --tools is confirmed.
+    fail_closed_flags=("--tools",),
     optional_flags=(
         OptionalCliFlag(
             flag="--json-schema-name",

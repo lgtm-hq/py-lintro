@@ -106,6 +106,10 @@ class CliContract:
             degrade without.
         optional_flags (tuple[OptionalCliFlag, ...]): Flags gated by capability
             detection.
+        fail_closed_flags (tuple[str, ...]): Required flags that are security
+            bounds rather than conveniences: they must be *confirmed* by a
+            readable help surface, so an unreadable ``--help`` makes the
+            binary incompatible instead of unknown (#2685).
     """
 
     binary: str
@@ -116,6 +120,7 @@ class CliContract:
     version_floor: tuple[int, ...] | None = None
     required_flags: tuple[str, ...] = field(default=())
     optional_flags: tuple[OptionalCliFlag, ...] = field(default=())
+    fail_closed_flags: tuple[str, ...] = field(default=())
 
     @property
     def optional_flag_names(self) -> tuple[str, ...]:
