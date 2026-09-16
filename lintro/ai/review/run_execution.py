@@ -302,7 +302,7 @@ async def finalize_completed_run(
                 # Never reuse the built-in review's durable session: the pass
                 # is a standalone whole-PR question, not a chunk.
                 use_one_shot=True,
-                diff_budget=plan.diff_budget,
+                diff_budget=plan.synthesis_diff_budget,
                 # The chunk fan-out already raced this event so a SIGTERM can
                 # persist coverage inside the runner's shutdown window; the
                 # extra call gets the same treatment, and a stop that lands

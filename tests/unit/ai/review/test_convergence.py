@@ -464,6 +464,26 @@ def test_a_degraded_round_cannot_attest_stability(
     assert_that(decision.converged).is_false()
 
 
+def test_a_synthesis_degraded_round_still_attests_stability() -> None:
+    """A cut or failed synthesis pass is a narrative degradation, not a gap.
+
+    Under the #2702 semantics per-file coverage is complete on such a round;
+    keying the guard on it would make a large PR re-review forever (#2704).
+    """
+    runs = (
+        _run(round_number=1, score=0.5),
+        RunRecord(
+            identity=RunIdentity(round=2),
+            coverage=RunCoverage(synthesis_degraded=True),
+            outcome=RunOutcome(convergence_score=0.5),
+        ),
+    )
+
+    decision = evaluate_convergence(runs=runs, threshold=3.0, stable_rounds=2)
+
+    assert_that(decision.converged).is_true()
+
+
 def test_an_unscored_round_in_the_window_cannot_converge() -> None:
     """History from before scoring existed is not evidence either way."""
     runs = (_run(round_number=1, score=None), _run(round_number=2, score=0.5))

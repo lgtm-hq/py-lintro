@@ -11,6 +11,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai/review**: `ai.review_synthesis_diff_tokens` (default 24000) gives the cross-chunk
+  synthesis pass its own input budget, clamped to the context-window remainder, instead
+  of the per-chunk budget; the `synthesis` JSON block records the call's input and
+  output tokens, the output limit it ran under, the input budget, the estimated prompt
+  size and how many changed files reached the prompt; the persisted run record carries
+  `synthesis_degraded` so the sticky's run history marks such a round, without feeding
+  the convergence guard (#2704)
+
 ### Changed
 
 ### Deprecated

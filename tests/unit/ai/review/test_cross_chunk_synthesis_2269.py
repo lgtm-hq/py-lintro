@@ -1037,6 +1037,13 @@ def test_new_value_objects_construct_and_serialize_from_the_package() -> None:
             "failed": False,
             "duplicates_merged": 0,
             "narrative_missing": False,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "output_limit_tokens": None,
+            "input_budget_tokens": 0,
+            "prompt_tokens_estimated": 0,
+            "diff_files_included": 0,
+            "diff_files_total": 0,
         },
     )
     assert_that(str(enums.FindingOrigin.SYNTHESIS)).is_equal_to("synthesis")
@@ -1793,3 +1800,167 @@ def test_a_partial_run_never_spends_the_extra_call() -> None:
     assert_that(synthesis_calls).is_empty()
     assert_that(result.metadata.synthesis).is_none()
     assert_that(format_synthesis_note_line(metadata=result.metadata)).is_empty()
+
+
+# --- (m) the pass gets its own input budget (#2704) ----------------------------
+
+
+def test_the_synthesis_pass_is_planned_against_its_own_budget() -> None:
+    """The pass receives ``ai.review_synthesis_diff_tokens``, not the chunk slice.
+
+    At the chunk budget every multi-chunk PR was over it by construction
+    (#2702); the run plan now carries a separate synthesis budget, clamped to
+    the context-window remainder, and the execution path hands that one to
+    the pass.
+    """
+    from lintro.ai.review import synthesis as synthesis_module
+    from lintro.ai.review.cli_limits import REVIEW_CHUNK_DIFF_TOKEN_BUDGET
+
+    seen: dict[str, int] = {}
+    real_pass = synthesis_module.run_synthesis_pass
+
+    async def _spy(*, request: Any) -> Any:
+        seen["diff_budget"] = request.diff_budget
+        return await real_pass(request=request)
+
+    with patch(
+        "lintro.ai.review.run_execution.run_synthesis_pass",
+        side_effect=_spy,
+    ):
+        result = _run(synthesis=ReviewSynthesisConfig(enabled=True))
+
+    assert_that(_outcome(result=result).failed).is_false()
+    assert_that(seen["diff_budget"]).is_greater_than(REVIEW_CHUNK_DIFF_TOKEN_BUDGET)
+    assert_that(seen["diff_budget"]).is_less_than_or_equal_to(
+        AIConfig().review_synthesis_diff_tokens,
+    )
+    assert_that(_outcome(result=result).input_budget_tokens).is_equal_to(
+        seen["diff_budget"],
+    )
+
+
+# --- (n) the synthesis record is filled end to end (#2704) ---------------------
+
+
+def test_the_synthesis_record_is_filled_on_the_success_path() -> None:
+    """Every record field comes from the real call, plan and config."""
+    result = _run(synthesis=ReviewSynthesisConfig(enabled=True))
+
+    outcome = _outcome(result=result)
+    assert_that(outcome.failed).is_false()
+    assert_that(outcome.input_tokens).is_equal_to(_RESPONSE_INPUT_TOKENS)
+    assert_that(outcome.output_tokens).is_equal_to(_RESPONSE_OUTPUT_TOKENS)
+    # The harness reviews on the API transport, whose ceiling is ai.max_tokens.
+    assert_that(outcome.output_limit_tokens).is_equal_to(AIConfig().max_tokens)
+    assert_that(outcome.input_budget_tokens).is_greater_than(0)
+    assert_that(outcome.prompt_tokens_estimated).is_greater_than(0)
+    assert_that(outcome.prompt_tokens_estimated).is_less_than_or_equal_to(
+        outcome.input_budget_tokens + 2_000,
+    )
+    # The two-file PR fit whole.
+    assert_that(outcome.diff_files_total).is_equal_to(2)
+    assert_that(outcome.diff_files_included).is_equal_to(2)
+    assert_that(outcome.truncated).is_false()
+
+    block = review_result_to_dict(result=result)["synthesis"]
+    assert_that(block).contains_entry(
+        {"input_tokens": _RESPONSE_INPUT_TOKENS},
+        {"output_tokens": _RESPONSE_OUTPUT_TOKENS},
+        {"output_limit_tokens": AIConfig().max_tokens},
+        {"input_budget_tokens": outcome.input_budget_tokens},
+        {"prompt_tokens_estimated": outcome.prompt_tokens_estimated},
+        {"diff_files_included": 2},
+        {"diff_files_total": 2},
+    )
+
+
+def test_the_synthesis_record_is_filled_on_the_failed_path() -> None:
+    """A call that raised still records what the prompt was fitted to."""
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_error=AIError("provider exploded"),
+    )
+
+    outcome = _outcome(result=result)
+    assert_that(outcome.failed).is_true()
+    # No response ever came back, so the usage counters stay at zero ...
+    assert_that(outcome.input_tokens).is_equal_to(0)
+    assert_that(outcome.output_tokens).is_equal_to(0)
+    # ... but the budget, the prompt size, the ceiling and the file counts were
+    # known before the call and are kept for the diagnosis.
+    assert_that(outcome.output_limit_tokens).is_equal_to(AIConfig().max_tokens)
+    assert_that(outcome.input_budget_tokens).is_greater_than(0)
+    assert_that(outcome.prompt_tokens_estimated).is_greater_than(0)
+    assert_that(outcome.diff_files_total).is_equal_to(2)
+    assert_that(outcome.diff_files_included).is_equal_to(2)
+
+    block = review_result_to_dict(result=result)["synthesis"]
+    assert_that(block["failed"]).is_true()
+    assert_that(block["input_budget_tokens"]).is_equal_to(outcome.input_budget_tokens)
+    assert_that(block["diff_files_total"]).is_equal_to(2)
+
+
+def test_a_cut_synthesis_input_records_the_files_it_kept() -> None:
+    """With a one-token budget the plan keeps a cut first file and says so."""
+    result = _run(
+        synthesis=ReviewSynthesisConfig(enabled=True),
+        synthesis_diff_budget=1,
+    )
+
+    outcome = _outcome(result=result)
+    assert_that(outcome.truncated).is_true()
+    # The harness forces the plan's budget below the request's, so the record
+    # keeps the request budget the run was configured with.
+    assert_that(outcome.input_budget_tokens).is_equal_to(
+        AIConfig().review_synthesis_diff_tokens,
+    )
+    assert_that(outcome.diff_files_total).is_equal_to(2)
+    assert_that(outcome.diff_files_included).is_less_than(2)
+    note = format_synthesis_note_line(metadata=result.metadata)
+    assert_that(note).contains(
+        f"saw {outcome.diff_files_included} of 2 changed files, less than its whole input",
+    )
+
+
+def test_the_synthesis_budget_is_clamped_by_a_small_context_window() -> None:
+    """With a small context window the pass receives the clamped budget, not the knob.
+
+    The default 24,000 fits any default-window run, so a bound alone cannot tell
+    clamped from unclamped; forcing the window below the knob can (#2704).
+    """
+    from lintro.ai.review import synthesis as synthesis_module
+    from lintro.ai.review.cli_limits import resolve_synthesis_diff_budget
+
+    small_window = 6_000
+    seen: dict[str, int] = {}
+    real_pass = synthesis_module.run_synthesis_pass
+
+    async def _spy(*, request: Any) -> Any:
+        seen["diff_budget"] = request.diff_budget
+        return await real_pass(request=request)
+
+    with (
+        patch(
+            "lintro.ai.review.run_planning.get_context_window",
+            return_value=small_window,
+        ),
+        patch(
+            "lintro.ai.review.run_execution.run_synthesis_pass",
+            side_effect=_spy,
+        ),
+    ):
+        result = _run(synthesis=ReviewSynthesisConfig(enabled=True))
+
+    knob = AIConfig().review_synthesis_diff_tokens
+    assert_that(seen["diff_budget"]).is_less_than(knob)
+    assert_that(seen["diff_budget"]).is_less_than_or_equal_to(small_window)
+    # The clamp is the resolver's: the ceiling the window left is what won.
+    assert_that(seen["diff_budget"]).is_equal_to(
+        resolve_synthesis_diff_budget(
+            context_window_budget=seen["diff_budget"],
+            review_synthesis_diff_tokens=knob,
+        ),
+    )
+    assert_that(_outcome(result=result).input_budget_tokens).is_equal_to(
+        seen["diff_budget"],
+    )

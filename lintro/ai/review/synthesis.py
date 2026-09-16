@@ -18,7 +18,7 @@ findings stand, the narrative is absent, and ``synthesis_failed`` is recorded.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Coroutine, Sequence
+from collections.abc import Coroutine, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from lintro.ai.cli_schemas import cli_schema_for_synthesis
+from lintro.ai.enums import AITransport
 from lintro.ai.invoke import call_ai
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -55,6 +56,7 @@ from lintro.ai.review.synthesis_response import (
     deduplicate_synthesis_findings,
     parse_synthesis_findings,
 )
+from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.budget import CostBudget
@@ -151,6 +153,7 @@ def _failed_pass(
     input_tokens: int = 0,
     output_tokens: int = 0,
     cost_estimate: float = 0.0,
+    record: Mapping[str, Any] | None = None,
 ) -> SynthesisPass:
     """Build the result for a pass that ran but produced nothing usable.
 
@@ -159,6 +162,8 @@ def _failed_pass(
         input_tokens: Prompt tokens spent before the failure, if any.
         output_tokens: Completion tokens produced before the failure, if any.
         cost_estimate: Estimated USD cost incurred before the failure.
+        record: Budget and size fields for the outcome (#2702), when the
+            prompt was planned before the failure.
 
     Returns:
         A pass carrying no findings, a failed outcome, and the degradations
@@ -180,7 +185,14 @@ def _failed_pass(
             ),
         )
     return SynthesisPass(
-        outcome=SynthesisOutcome(findings_added=0, truncated=truncated, failed=True),
+        outcome=SynthesisOutcome(
+            findings_added=0,
+            truncated=truncated,
+            failed=True,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            **dict(record or {}),
+        ),
         degradations=tuple(degradations),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -338,6 +350,22 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
         plan=plan,
         max_findings=config.max_findings,
     )
+    # Recorded on every outcome so the next truncation is diagnosable from
+    # the review state alone: what the prompt was fitted to, how big it came
+    # out, how many files it carried, and the output ceiling it ran under
+    # (#2702). The CLI transport has no per-call max_tokens; its only ceiling
+    # is the agent's own, so the limit is recorded as unknown there.
+    record: dict[str, Any] = {
+        "input_budget_tokens": diff_budget,
+        "prompt_tokens_estimated": (
+            estimate_tokens(system_prompt) + estimate_tokens(user_prompt)
+        ),
+        "output_limit_tokens": (
+            None if ai_config.transport == AITransport.CLI else ai_config.max_tokens
+        ),
+        "diff_files_included": plan.diff_files_included,
+        "diff_files_total": plan.diff_files_total,
+    }
     try:
         budget.check()
         response = await _await_call_until_stop(
@@ -358,7 +386,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             "The cross-chunk synthesis pass was interrupted; keeping the "
             "chunk findings and marking coverage degraded.",
         )
-        return _failed_pass(truncated=truncated)
+        return _failed_pass(truncated=truncated, record=record)
     except Exception:
         # Deliberately broad: this pass is additive, so nothing it can raise —
         # a cost-cap stop, a provider error, a timeout — may be allowed to
@@ -377,7 +405,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             "The cross-chunk synthesis pass failed; keeping the chunk "
             "findings and marking coverage degraded.",
         )
-        return _failed_pass(truncated=truncated)
+        return _failed_pass(truncated=truncated, record=record)
 
     parsed = parse_synthesis_findings(content=response.content)
     if parsed is None:
@@ -386,6 +414,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
             cost_estimate=response.cost_estimate,
+            record=record,
         )
     narrative = parse_synthesis_envelope(content=response.content)
     if narrative.summary is None:
@@ -448,6 +477,9 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             narrative_missing=(
                 narrative.summary is None or narrative.verdict_reasoning is None
             ),
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            **record,
         ),
         degradations=degradations,
         input_tokens=response.input_tokens,

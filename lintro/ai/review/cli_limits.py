@@ -36,6 +36,7 @@ __all__ = [
     "assert_cli_diff_within_ceiling",
     "is_cli_output_exhaustion",
     "is_output_exhaustion_error",
+    "resolve_synthesis_diff_budget",
     "measure_diff_size",
     "resolve_chunk_diff_budget",
 ]
@@ -133,6 +134,31 @@ def resolve_chunk_diff_budget(
         Positive per-chunk token budget.
     """
     return max(min(context_window_budget, review_chunk_diff_tokens), 1)
+
+
+def resolve_synthesis_diff_budget(
+    *,
+    context_window_budget: int,
+    review_synthesis_diff_tokens: int,
+) -> int:
+    """Return the input budget for the cross-chunk synthesis pass.
+
+    The pass is one call over the whole PR, so it gets its own budget
+    (``ai.review_synthesis_diff_tokens``) rather than the per-chunk slice:
+    the chunker splits any diff above the chunk budget, so at that budget
+    every multi-chunk PR was over it by construction and every such round
+    was recorded as truncated (#2702). The context-window remainder still
+    caps it.
+
+    Args:
+        context_window_budget: Diff tokens the context window leaves after
+            the prompt overhead.
+        review_synthesis_diff_tokens: Configured synthesis input budget.
+
+    Returns:
+        The smaller of the two, never below one.
+    """
+    return max(min(context_window_budget, review_synthesis_diff_tokens), 1)
 
 
 def is_cli_output_exhaustion(error: BaseException) -> bool:
