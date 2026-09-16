@@ -160,6 +160,11 @@ def test_chunk_prompt_warns_that_other_files_are_stale_on_disk(
     prompt = " ".join(_build(builder_name=builder_name).split())
 
     assert_that(prompt).contains("stale base-commit version")
+    if builder_name == "git_native":
+        # #2685: the git-native block also states which tree the agent can
+        # read and that the diff, not the tree, is authoritative.
+        assert_that(prompt).contains("The working tree you can read is the base ref")
+        assert_that(prompt).contains("the diff below is authoritative")
     assert_that(prompt).contains(
         "never treat it as evidence that such a file was not updated",
     )
