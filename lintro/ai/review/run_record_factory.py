@@ -138,6 +138,7 @@ def _coverage(*, result: ReviewResult) -> RunCoverage:
         coverage_limited=not metadata.findings_coverage_complete,
         chunks_reviewed=metadata.chunks_reviewed,
         chunks_total=metadata.chunks_total,
+        synthesis_degraded=metadata.synthesis_degraded,
     )
 
 

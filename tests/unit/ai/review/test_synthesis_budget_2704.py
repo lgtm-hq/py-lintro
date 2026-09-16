@@ -233,3 +233,39 @@ def test_the_synthesis_record_carries_its_budget_and_sizes() -> None:
             "narrative_missing"
         ],
     ).is_true()
+
+
+# --- the persisted record -------------------------------------------------------
+
+
+def test_the_run_record_keeps_a_synthesis_degraded_round_visible() -> None:
+    """History shows the round as synthesis-limited without calling it capped."""
+    from lintro.ai.review.models.run_coverage import RunCoverage
+    from lintro.ai.review.models.run_identity import RunIdentity
+    from lintro.ai.review.models.run_record import RunRecord
+
+    degraded = RunRecord(
+        identity=RunIdentity(round=1, sha="abc1234"),
+        coverage=RunCoverage(synthesis_degraded=True),
+    )
+    payload = degraded.to_dict()
+    assert_that(payload["synthesis_degraded"]).is_true()
+    assert_that(payload).does_not_contain_key("coverage_limited")
+    restored = RunRecord.from_dict(payload)
+    assert_that(restored.coverage.synthesis_degraded).is_true()
+    assert_that(restored.coverage.coverage_limited).is_false()
+    # A record from before the field existed re-encodes without it.
+    plain = RunRecord(identity=RunIdentity(round=1, sha="abc1234")).to_dict()
+    assert_that(plain).does_not_contain_key("synthesis_degraded")
+
+
+def test_the_factory_records_synthesis_degraded_from_the_result() -> None:
+    """``run_record_from_result`` copies ``ReviewMetadata.synthesis_degraded``."""
+    from lintro.ai.review.models.review_result import ReviewResult
+    from lintro.ai.review.run_record_factory import _coverage
+
+    metadata = _metadata(CoverageDegradationReason.SYNTHESIS_TRUNCATED)
+    result = ReviewResult(findings=(), metadata=metadata, summary="")
+    coverage = _coverage(result=result)
+    assert_that(coverage.synthesis_degraded).is_true()
+    assert_that(coverage.coverage_limited).is_false()

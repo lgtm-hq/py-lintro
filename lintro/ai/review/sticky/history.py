@@ -265,6 +265,11 @@ def _round_expander(
     # A capped round stays marked in history (#2003) so a later reader can
     # tell a genuinely clean round from one that reported fewer findings.
     limited = " · ⚠️ coverage limited" if coverage.coverage_limited else ""
+    # A round whose synthesis pass was cut or failed is marked too (#2704),
+    # as a note rather than a warning: per-file coverage was complete and the
+    # marker never feeds the convergence guard.
+    if coverage.synthesis_degraded:
+        limited += " · ℹ️ synthesis limited"
     verdict = verdict_label(verdict=outcome.verdict).lower()
     summary = (
         f"<b>Round {identity.round}</b>{sha_bit} · "

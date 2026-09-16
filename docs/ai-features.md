@@ -476,7 +476,11 @@ may go unreported.
   every file was reviewed at depth whether or not the whole-PR narrative pass saw all of
   it, so a truncated or failed synthesis is a narrative degradation, exposed as
   `ReviewMetadata.synthesis_degraded` and described by the synthesis note, never as a
-  partial review.
+  partial review. The persisted run record carries the same flag as
+  `synthesis_degraded`, so the sticky's run history marks the round
+  `ℹ️ synthesis limited`; it never keys the convergence stop rule or forces another
+  round, because per-file coverage is complete and a large PR would otherwise re-review
+  forever (#2704).
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.

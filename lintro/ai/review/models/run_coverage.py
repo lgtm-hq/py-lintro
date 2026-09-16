@@ -31,6 +31,13 @@ class RunCoverage:
             rendering as an unlimited round.
         chunks_reviewed: Number of chunks actually reviewed.
         chunks_total: Total number of chunks in the diff.
+        synthesis_degraded: True when the round's cross-chunk synthesis pass
+            was truncated or failed (#2704). A narrative degradation, not a
+            coverage gap: it is kept so the run history can show it, and it
+            never keys the convergence guard or forces another round, since
+            under the #2702 semantics per-file coverage is complete and a
+            large PR would otherwise re-review forever. Serialized only when
+            True, like ``coverage_limited``.
     """
 
     files_reviewed: int = 0
@@ -40,3 +47,4 @@ class RunCoverage:
     coverage_limited: bool = False
     chunks_reviewed: int = 0
     chunks_total: int = 0
+    synthesis_degraded: bool = False
