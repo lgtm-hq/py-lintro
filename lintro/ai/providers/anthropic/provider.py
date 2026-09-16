@@ -111,6 +111,31 @@ _READ_ONLY_TOOLS = "Read,Grep,Glob"
 _MAX_TURNS_SUBTYPE = "error_max_turns"
 
 
+def _raise_if_turn_limited(*, stdout: str, max_turns: int | None) -> None:
+    """Raise :class:`AITurnLimitError` when *stdout* carries a turn-limit envelope.
+
+    Args:
+        stdout: Raw CLI stdout; the envelope is its last non-empty line.
+        max_turns: The limit that was sent, when any.
+
+    Raises:
+        AITurnLimitError: When the envelope says the loop stopped at the limit.
+    """
+    lines = [line for line in stdout.strip().splitlines() if line.strip()]
+    if not lines:
+        return
+    try:
+        data = json.loads(lines[-1])
+    except ValueError:
+        return
+    if isinstance(data, dict) and _hit_turn_limit(data=data, max_turns=max_turns):
+        raise AITurnLimitError(
+            "Claude CLI stopped at the per-call turn limit"
+            f"{f' ({max_turns} turns)' if max_turns is not None else ''} "
+            "before answering (#2685).",
+        )
+
+
 def _hit_turn_limit(*, data: Mapping[str, Any], max_turns: int | None) -> bool:
     """Return whether the envelope says the per-call turn limit stopped the run.
 
@@ -534,6 +559,11 @@ class AnthropicProvider(ApiStreamingProvider):
             timeout=timeout,
             cwd=working_dir,
         )
+        # A turn-limited run exits non-zero with a well-formed envelope on
+        # stdout. Recognise it before the exit-code mapping, whose auth
+        # heuristic greps stderr for "login" and would otherwise misread the
+        # CLI's own auth-source warning as an authentication failure (#2685).
+        _raise_if_turn_limited(stdout=result.stdout, max_turns=max_turns)
         self._cli.check_exit_code(
             result,
             auth_patterns=("authentication", "login", "not logged in"),

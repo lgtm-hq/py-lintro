@@ -11,6 +11,7 @@ import json
 import subprocess  # nosec B404 - CompletedProcess objects are constructed to drive the providers under test
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -725,3 +726,39 @@ async def test_concurrent_claude_calls_each_render_their_own_turn_limit(
     assert_that(rendered).is_equal_to(["2", "5"])
     for cmd in _completion_calls(calls):
         assert_that(cmd).contains("--tools", "Read,Grep,Glob")
+
+
+async def test_claude_turn_limit_wins_over_the_exit_code_auth_heuristic(
+    _claude_on_path: None,
+) -> None:
+    """A limited run exits 1 and warns about the login on stderr; it is not auth.
+
+    Claude prints "claude.ai connectors are disabled ... your claude.ai login"
+    on stderr when another auth source is set, and a turn-limited run exits
+    non-zero. Read the envelope first so the run is a turn limit, never an
+    authentication failure (#2685).
+    """
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+
+        def _run(cmd: list[str], *args: object, **kwargs: object) -> Any:
+            calls.append(list(cmd))
+            if "--version" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "2.1.273", "")
+            if "--help" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "  --tools <list>\n", "")
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                _CLAUDE_TURN_LIMITED,
+                "claude.ai connectors are disabled because another auth source "
+                "takes precedence over your claude.ai login",
+            )
+
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=_run), pytest.raises(AITurnLimitError):
+            await provider.complete("Review this", cli_schema=_SCHEMA)
+        assert_that(_completion_calls(calls)[-1]).contains("--max-turns", "3")
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
