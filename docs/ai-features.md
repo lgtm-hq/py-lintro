@@ -674,6 +674,26 @@ What it adds to the surfaces:
   _Review coverage completeness_ above) when the input was cut or the pass did not
   complete.
 
+### Diff-bounded findings
+
+Every chunk's findings are bounded to that chunk's diff before the P1 evidence gate
+(#2711, lintro-ops milestone 0 step 0.7). The path gate already drops findings on files
+outside the review scope; this gate checks the **line**: a finding whose `file:line`
+lies inside a hunk of the chunk that produced it (context lines included, which is what
+inline comments accept) is kept; one within `ai.review_diff_gate_lines` lines of a hunk
+(default 3) is re-anchored to the nearest changed line of that hunk; one further away is
+dropped. A finding with no line (a whole-file or deleted-file finding) is kept and
+counted as unanchored, and a finding on a file the chunk's diff does not cover is left
+to the path gate. Secondary occurrences are checked one by one (dropped or re-anchored
+individually); only the primary location decides whether the finding survives.
+
+Nothing is silent: the JSON output carries `findings_dropped_by_reason.outside_diff`,
+`findings_reanchored` and `findings_unanchored`, and the run record carries
+`dropped_outside_diff` when non-zero, so a regression in the model's anchoring shows in
+the numbers before it shows as a thread on an untouched line or an inline-post failure.
+Set `ai.review_diff_gate_lines: 0` to re-anchor nothing (near findings are then dropped
+too).
+
 ### Review convergence (deterministic re-review stop)
 
 File-level resume already spares a long-lived PR from re-reading files it has covered at
@@ -1044,6 +1064,12 @@ ai:
   # context window leaves after the prompt overhead. Separate from the chunk
   # budget: the pass is one call over the whole PR. (int >= 1000, default: 24000)
   review_synthesis_diff_tokens: 24000
+
+  # Diff-bounded finding gate (#2711): a finding whose line lies outside every
+  # hunk of the chunk that produced it is dropped and counted; within this many
+  # lines of a hunk it is re-anchored to the nearest changed line instead.
+  # (int >= 0, default: 3; 0 re-anchors nothing)
+  review_diff_gate_lines: 3
 
   # Deprecated alias for review_chunk_diff_tokens: still read (and warned
   # about) when the new key is absent; removed not before 2026-10-15.

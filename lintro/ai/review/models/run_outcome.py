@@ -37,6 +37,9 @@ class RunOutcome:
     Attributes:
         verdict: Readiness verdict derived from open findings after this round.
         confidence: Aggregate confidence label reported for the round.
+        dropped_outside_diff: Findings the diff-bounded gate dropped because
+            their location lay outside the chunk's hunks (#2711). Serialized
+            only when non-zero.
         p1: Count of P1 findings reported in this round.
         p2: Count of P2 findings reported in this round.
         p3: Count of P3 findings reported in this round.
@@ -67,6 +70,7 @@ class RunOutcome:
 
     verdict: ReviewVerdict = ReviewVerdict.READY
     confidence: str = ""
+    dropped_outside_diff: int = 0
     p1: int = 0
     p2: int = 0
     p3: int = 0

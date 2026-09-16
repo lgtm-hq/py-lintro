@@ -64,7 +64,13 @@
     "coverage_degradations": [],
     "provider_seconds": 0.0,
     "turns": null,
-    "truncated": false
+    "truncated": false,
+    "diff_gate": {
+      "outside_diff": 0,
+      "reanchored": 0,
+      "unanchored": 0,
+      "occurrences_dropped": 0
+    }
   },
   {
     "findings": [
@@ -131,6 +137,12 @@
     "coverage_degradations": [],
     "provider_seconds": 0.0,
     "turns": null,
-    "truncated": false
+    "truncated": false,
+    "diff_gate": {
+      "outside_diff": 0,
+      "reanchored": 0,
+      "unanchored": 0,
+      "occurrences_dropped": 0
+    }
   }
 ]

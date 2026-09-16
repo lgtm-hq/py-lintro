@@ -119,6 +119,8 @@ class RunRecord:
             payload["synthesis_degraded"] = True
         if coverage.delegated_diff_embedded:
             payload["delegated_diff_embedded"] = True
+        if outcome.dropped_outside_diff:
+            payload["dropped_outside_diff"] = outcome.dropped_outside_diff
         if usage.cost_basis:
             payload["cost_basis"] = usage.cost_basis
         if outcome.resolved is not None:
@@ -259,6 +261,7 @@ def _outcome_from_payload(*, payload: dict[str, Any]) -> RunOutcome:
         p3=coerce_int(payload.get("p3")),
         questions=coerce_int(payload.get("questions")),
         downgraded=coerce_int(payload.get("downgraded")),
+        dropped_outside_diff=coerce_int(payload.get("dropped_outside_diff")),
         resolved=_optional_count(payload.get("resolved")),
         open_after=_optional_count(payload.get("open_after")),
         narrative=str(payload.get("narrative", "")),

@@ -25,6 +25,7 @@ from lintro.ai.review.coverage import (
     inherit_same_round_paths,
     pending_invalidations_for,
 )
+from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
@@ -212,6 +213,10 @@ def assemble_review_result(
         stopped_reason=outcome.stopped_reason,
         phase_timings=phase_timings,
         custom_agents_run=len(outcome.custom_results),
+        diff_gate=sum(
+            (item.diff_gate for item in outcome.partials),
+            DiffGateCounts(),
+        ),
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)
         ),
