@@ -18,6 +18,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `findings_dropped_by_reason.outside_diff`, `findings_reanchored` and
   `findings_unanchored` in the JSON output and `dropped_outside_diff` on the run record
   (#2711, lintro-ops milestone 0 step 0.7)
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.163.0] - 2026-09-16
+
+### Added
+
 - **ai/review**: every CLI call is bounded per provider: Claude gets
   `--tools Read,Grep,Glob` (a required contract flag, so a binary without it is refused
   before any session) and `--max-turns N` (accepted but unadvertised, so sent with the
@@ -34,13 +49,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
+- **deps**: pin lgtm-ci to v0.74.4 (#2710) (584eedc)
 
 ## [0.162.0] - 2026-09-16
 
