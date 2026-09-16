@@ -1,13 +1,13 @@
 Review this code change for actionable findings.
 
-**PR:** <CODE_BLOCK_0d15ea5e> Harden the session gate </CODE_BLOCK_0d15ea5e>
+**PR:** <CODE_BLOCK_0d15ea5e> Local changes </CODE_BLOCK_0d15ea5e>
 
-**Base → Head:** <CODE_BLOCK_0d15ea5e> `0123456789abcdef0123456789abcdef01234567`...`WORKTREE` </CODE_BLOCK_0d15ea5e>
+**Base → Head:** <CODE_BLOCK_0d15ea5e> `0123456789abcdef0123456789abcdef01234567`...`89abcdef0123456789abcdef0123456789abcdef` </CODE_BLOCK_0d15ea5e>
 
 **Summary:**
 
 <CODE_BLOCK_0d15ea5e>
-Fail closed on unknown session status and widen token decoding.
+(no PR summary)
 </CODE_BLOCK_0d15ea5e>
 
 

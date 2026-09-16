@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.skipped_file import SkippedFile
@@ -25,6 +26,8 @@ class ReviewContext:
         skipped_files: Changed files dropped during context collection, each
             carrying why it was dropped. Reported on the per-review comment so
             a narrowed review scope is visible rather than implied (#1910).
+        checkout: Which side of the range the working tree holds, so the
+            git-native prompt can say what a disk read means (#2685).
     """
 
     base_ref: str
@@ -35,3 +38,4 @@ class ReviewContext:
     post_image_files: dict[str, str] = field(default_factory=dict)
     repo_root: str = ""
     skipped_files: list[SkippedFile] = field(default_factory=list)
+    checkout: ReviewCheckout = ReviewCheckout.UNKNOWN

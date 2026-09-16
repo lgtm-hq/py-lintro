@@ -17,6 +17,7 @@ from lintro.ai.review.context import (
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.changed_file import ChangedFile
@@ -144,6 +145,7 @@ def test_collect_branch_context_uses_merge_base(
 
     assert_that(context.base_ref).is_equal_to("base123")
     assert_that(context.head_ref).is_equal_to("head456")
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.HEAD)
     assert_that(context.repo_root).is_equal_to("/repo/root")
     assert_that(context.changed_files).is_length(1)
     assert_that(context.changed_files[0]).is_equal_to(
@@ -195,6 +197,7 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
 
     assert_that(context.base_ref).is_equal_to("head456")
     assert_that(context.head_ref).is_equal_to("WORKTREE")
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.WORKTREE)
     assert_that(context.unified_diff).contains("unstaged.py")
     assert_that({file.path for file in context.changed_files}).is_equal_to(
         {"unstaged.py", "staged.py"},
@@ -238,12 +241,16 @@ def test_collect_pr_context_uses_gh(
                 "+new\n"
             ),
         ),
+        # git rev-parse HEAD: the checkout probe (#2685); this is the base.
+        _completed(stdout="abc123\n"),
     ]
 
     context = collect_review_context(pr_number=42, repo="lgtm-hq/py-lintro")
 
     for call in mock_run.call_args_list:
         argv = call.args[0]
+        if Path(argv[0]).name == "git":
+            continue  # the best-effort checkout probe, not a fetch
         assert_that(Path(argv[0]).name).is_equal_to("gh")
         assert_that(argv).contains("--repo", "lgtm-hq/py-lintro")
 
@@ -255,6 +262,7 @@ def test_collect_pr_context_uses_gh(
     assert_that(metadata.repo).is_equal_to("lgtm-hq/py-lintro")
     assert_that(context.base_ref).is_equal_to("abc123")
     assert_that(context.head_ref).is_equal_to("deadbeef")
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.BASE)
     assert_that(context.changed_files).extracting("path").contains("a.py")
 
 
@@ -309,6 +317,8 @@ def test_collect_pr_context_requests_only_valid_gh_pr_view_fields(
                 "+new\n"
             ),
         ),
+        # git rev-parse HEAD: the checkout probe (#2685); this is the base.
+        _completed(stdout="abc123\n"),
     ]
 
     collect_review_context(pr_number=42, repo="lgtm-hq/py-lintro")
@@ -370,6 +380,7 @@ def test_collect_pr_context_works_without_local_git_repo(
 
     assert_that(context.pr_metadata).is_not_none()
     assert_that(context.unified_diff).contains("a.py")
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.UNKNOWN)
     assert_that(context.changed_files).extracting("path").contains("a.py")
 
 
@@ -721,6 +732,8 @@ def test_collect_pr_context_accepts_repo_override_when_head_repository_null(
                 "+new\n"
             ),
         ),
+        # git rev-parse HEAD: the checkout probe (#2685); this is the base.
+        _completed(stdout="abc123\n"),
     ]
 
     context = collect_review_context(pr_number=42, repo="lgtm-hq/py-lintro")
@@ -760,6 +773,8 @@ def test_collect_pr_context_fetches_workflow_post_image_via_gh(
                 " run: scripts/deploy.sh\n"
             ),
         ),
+        # git rev-parse HEAD: the checkout probe (#2685); this is the base.
+        _completed(stdout="abc123\n"),
         _completed(returncode=1, stdout="", stderr="bad object"),
         _completed(stdout="name: CI\nenv:\n  CI: true\nrun: scripts/deploy.sh\n"),
     ]
@@ -810,6 +825,8 @@ def test_collect_pr_context_uses_head_repository_for_workflow_fetch(
                 " run: scripts/deploy.sh\n"
             ),
         ),
+        # git rev-parse HEAD: the checkout probe (#2685); this is the base.
+        _completed(stdout="abc123\n"),
         _completed(returncode=1, stdout="", stderr="bad object"),
         _completed(stdout="name: CI\nenv:\n  CI: true\nrun: scripts/deploy.sh\n"),
     ]

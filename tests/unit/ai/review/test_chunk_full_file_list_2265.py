@@ -13,6 +13,7 @@ import pytest
 from assertpy import assert_that
 
 from lintro.ai.prompts.review import CHUNK_FILE_MARKER
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -40,6 +41,9 @@ def _make_context() -> ReviewContext:
     return ReviewContext(
         base_ref="main",
         head_ref="feature",
+        # A CI PR review runs on a base-ref checkout (#2685): the stale-on-disk
+        # warning this module pins is the pre-change claim.
+        checkout=ReviewCheckout.BASE,
         changed_files=[
             ChangedFile(
                 path=path,

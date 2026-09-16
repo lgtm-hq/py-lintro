@@ -27,6 +27,7 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -42,14 +43,20 @@ from lintro.ai.review.response_pipeline import (
 
 _PR_NOTE = "any file you read from disk shows its pre-change content"
 _WORKTREE_NOTE = "any file you read from disk shows its post-change content"
+_UNKNOWN_NOTE = "Which side of the range the working tree holds was"
 _DELEGATED = "Run this command in the repository root"
 
 
-def _chunk_and_context(*, head_ref: str) -> tuple[ReviewChunk, ReviewContext]:
+def _chunk_and_context(
+    *,
+    head_ref: str,
+    checkout: ReviewCheckout = ReviewCheckout.UNKNOWN,
+) -> tuple[ReviewChunk, ReviewContext]:
     """Return a one-file chunk and the context it belongs to.
 
     Args:
         head_ref: Head ref of the context, ``WORKTREE`` for an uncommitted review.
+        checkout: Which side of the range the context says is on disk.
 
     Returns:
         The chunk and its review context.
@@ -65,6 +72,7 @@ def _chunk_and_context(*, head_ref: str) -> tuple[ReviewChunk, ReviewContext]:
         changed_files=[changed],
         unified_diff=diff,
         pr_metadata=None,
+        checkout=checkout,
     )
     chunk = ReviewChunk(
         id=1,
@@ -75,8 +83,12 @@ def _chunk_and_context(*, head_ref: str) -> tuple[ReviewChunk, ReviewContext]:
     return chunk, context
 
 
-def _inputs(*, head_ref: str) -> PromptInputs:
-    chunk, context = _chunk_and_context(head_ref=head_ref)
+def _inputs(
+    *,
+    head_ref: str,
+    checkout: ReviewCheckout = ReviewCheckout.UNKNOWN,
+) -> PromptInputs:
+    chunk, context = _chunk_and_context(head_ref=head_ref, checkout=checkout)
     return PromptInputs(
         chunk=chunk,
         context=context,
@@ -89,24 +101,50 @@ def _inputs(*, head_ref: str) -> PromptInputs:
     )
 
 
-def test_pr_mode_says_disk_is_pre_change() -> None:
-    """A PR review runs on a base-ref checkout, so disk reads are pre-change."""
+def test_a_base_checkout_says_disk_is_pre_change() -> None:
+    """A CI PR review runs on a base-ref checkout, so disk reads are pre-change."""
     _, prompt = build_git_native_review_prompt(
-        inputs=_inputs(head_ref="feature/x"),
+        inputs=_inputs(head_ref="feature/x", checkout=ReviewCheckout.BASE),
         embed_diff=True,
     )
     assert_that(prompt).contains(_PR_NOTE, "base ref `abc123`")
-    assert_that(prompt).does_not_contain(_WORKTREE_NOTE)
+    assert_that(prompt).does_not_contain(_WORKTREE_NOTE, _UNKNOWN_NOTE)
+
+
+def test_a_head_checkout_says_disk_is_post_change() -> None:
+    """A branch review runs on the branch itself, so disk is post-change."""
+    _, prompt = build_git_native_review_prompt(
+        inputs=_inputs(head_ref="feature/x", checkout=ReviewCheckout.HEAD),
+        embed_diff=True,
+    )
+    assert_that(prompt).contains(_WORKTREE_NOTE, "base of the range is `abc123`")
+    assert_that(prompt).does_not_contain(_PR_NOTE, _UNKNOWN_NOTE)
 
 
 def test_worktree_mode_says_disk_is_post_change() -> None:
     """An uncommitted review reads the change itself, so disk is post-change."""
     _, prompt = build_git_native_review_prompt(
+        inputs=_inputs(head_ref="WORKTREE", checkout=ReviewCheckout.WORKTREE),
+        embed_diff=True,
+    )
+    assert_that(prompt).contains(_WORKTREE_NOTE)
+    assert_that(prompt).does_not_contain(_PR_NOTE, _UNKNOWN_NOTE)
+    # The sentinel alone is enough: an older context without ``checkout``.
+    _, prompt = build_git_native_review_prompt(
         inputs=_inputs(head_ref="WORKTREE"),
         embed_diff=True,
     )
-    assert_that(prompt).contains(_WORKTREE_NOTE, "committed base is `abc123`")
-    assert_that(prompt).does_not_contain(_PR_NOTE)
+    assert_that(prompt).contains(_WORKTREE_NOTE)
+
+
+def test_an_undetermined_checkout_tells_the_agent_to_check() -> None:
+    """Neither claim is made when the checkout is unknown."""
+    _, prompt = build_git_native_review_prompt(
+        inputs=_inputs(head_ref="feature/x"),
+        embed_diff=True,
+    )
+    assert_that(prompt).contains(_UNKNOWN_NOTE)
+    assert_that(prompt).does_not_contain(_PR_NOTE, _WORKTREE_NOTE)
 
 
 def test_only_claude_withholds_the_shell() -> None:

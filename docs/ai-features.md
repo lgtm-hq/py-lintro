@@ -1495,8 +1495,11 @@ A Claude call that spends its whole turn budget without answering (envelope subt
 a turn-limit error that the retry loop never repeats. The chunk pass retries it once
 unchanged; a second limit records a `turn_limit_reached` coverage degradation, the
 chunk's files are left unreviewed for a later round, and the run is reported as a
-partial finding set with the reason in run details. The review prompt also states that
-the working tree the agent can read is the base ref and that the diff is authoritative.
+partial finding set with the reason in run details. The review prompt also states what
+the working tree the agent can read holds, from the context's `checkout`: the base ref
+for a CI pull-request review (disk is pre-change), the change itself for a branch or
+uncommitted review (disk is post-change), or a request to check when it is not known;
+the diff is always authoritative.
 
 ```yaml
 ai:
