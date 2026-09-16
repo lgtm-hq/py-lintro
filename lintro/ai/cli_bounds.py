@@ -38,13 +38,15 @@ __all__ = [
 ]
 
 #: Turn limit per call kind when ``ai.transports.cli.max_turns`` is unset.
-#: Review-type calls get eight turns: measured chunk calls answered in six to
-#: nine, and at three a two-file PR was left unreviewed (#2685); the cap is
-#: there to stop runaway exploration and make exhaustion explicit, not to
-#: trade coverage for round time. Summary and fix calls answer in one.
+#: Review-type calls get twelve turns. Measured chunk calls answered in six
+#: to nine turns, a cap of three left a two-file PR unreviewed and a cap of
+#: eight still bound on first attempts inside normal variance, each bind
+#: costing a ~200 s retry (#2685). The cap exists to stop runaway exploration
+#: and make exhaustion explicit, so it sits above the observed range with
+#: headroom. Summary and fix calls answer in one.
 DEFAULT_MAX_TURNS = MappingProxyType(
     {
-        AICallKind.REVIEW: 8,
+        AICallKind.REVIEW: 12,
         AICallKind.SUMMARY: 1,
         AICallKind.FIX: 1,
     },

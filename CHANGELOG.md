@@ -20,6 +20,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   leaves the chunk's files for a later round; the review prompt states that the readable
   tree is the base ref and the diff is authoritative (#2685, lintro-ops milestone 0 step
   0.6)
+
 ### Changed
 
 ### Deprecated

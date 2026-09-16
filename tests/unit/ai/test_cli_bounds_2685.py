@@ -41,7 +41,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 def test_kind_defaults_and_the_override() -> None:
     """Review-type calls get 3 turns, summary and fix 1; the knob wins over all."""
     assert_that(dict(DEFAULT_MAX_TURNS)).is_equal_to(
-        {AICallKind.REVIEW: 8, AICallKind.SUMMARY: 1, AICallKind.FIX: 1},
+        {AICallKind.REVIEW: 12, AICallKind.SUMMARY: 1, AICallKind.FIX: 1},
     )
     for kind, expected in DEFAULT_MAX_TURNS.items():
         assert_that(resolve_max_turns(call_kind=kind, configured=None)).is_equal_to(
@@ -87,7 +87,7 @@ class _Recorder:
 
 @pytest.mark.parametrize(
     ("kind", "expected"),
-    [(AICallKind.REVIEW, 8), (AICallKind.SUMMARY, 1), (AICallKind.FIX, 1)],
+    [(AICallKind.REVIEW, 12), (AICallKind.SUMMARY, 1), (AICallKind.FIX, 1)],
 )
 async def test_call_ai_binds_the_kind_default_on_the_cli_transport(
     kind: AICallKind,
@@ -138,7 +138,7 @@ async def test_call_ai_binds_nothing_on_the_api_transport() -> None:
 
 
 def test_review_passes_default_to_the_review_kind() -> None:
-    """``call_kind`` defaults to review, so every review seam is bounded to 8."""
+    """``call_kind`` defaults to review, so every review seam is bounded to 12."""
     import inspect
 
     assert_that(inspect.signature(call_ai).parameters["call_kind"].default).is_equal_to(
@@ -223,7 +223,7 @@ def _metadata(*reasons: CoverageDegradationReason) -> ReviewMetadata:
         files_total=2,
         checklist_items=0,
         coverage_degradations=tuple(
-            CoverageDegradation(reason=reason, chunk_index=index, limit=8)
+            CoverageDegradation(reason=reason, chunk_index=index, limit=12)
             for index, reason in enumerate(reasons)
         ),
     )
@@ -235,7 +235,7 @@ def test_a_turn_limited_chunk_is_an_incomplete_finding_set() -> None:
     assert_that(metadata.findings_coverage_complete).is_false()
     text = describe_coverage_degradations(metadata=metadata)
     assert_that(text).contains(
-        "1 chunk hit the per-call turn limit (8 turns) before answering",
+        "1 chunk hit the per-call turn limit (12 turns) before answering",
     )
     assert_that(text).contains("its files were left unreviewed")
     two = _metadata(
@@ -266,8 +266,8 @@ async def test_a_chunk_that_hits_the_limit_twice_is_left_unreviewed() -> None:
         [CoverageDegradationReason.TURN_LIMIT_REACHED],
     )
     assert_that(partial.coverage_degradations[0].chunk_index).is_equal_to(4)
-    assert_that(partial.coverage_degradations[0].limit).is_equal_to(8)
-    assert_that(partial.coverage_degradations[0].to_dict()["limit"]).is_equal_to(8)
+    assert_that(partial.coverage_degradations[0].limit).is_equal_to(12)
+    assert_that(partial.coverage_degradations[0].to_dict()["limit"]).is_equal_to(12)
     # An older record without a limit serializes exactly as before.
     plain = CoverageDegradation(
         reason=CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED,
