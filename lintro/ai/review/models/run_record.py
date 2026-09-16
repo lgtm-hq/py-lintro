@@ -117,6 +117,8 @@ class RunRecord:
             payload["coverage_limited"] = True
         if coverage.synthesis_degraded:
             payload["synthesis_degraded"] = True
+        if coverage.delegated_diff_embedded:
+            payload["delegated_diff_embedded"] = True
         if usage.cost_basis:
             payload["cost_basis"] = usage.cost_basis
         if outcome.resolved is not None:
@@ -200,6 +202,9 @@ def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
         chunks_reviewed=coerce_int(payload.get("chunks_reviewed")),
         chunks_total=coerce_int(payload.get("chunks_total")),
         synthesis_degraded=_strict_bool(payload.get("synthesis_degraded")),
+        delegated_diff_embedded=_strict_bool(
+            payload.get("delegated_diff_embedded"),
+        ),
     )
 
 

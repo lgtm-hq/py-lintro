@@ -27,6 +27,7 @@ from loguru import logger
 
 from lintro.ai.cli_schemas import cli_schema_for_synthesis
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.invoke import call_ai
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -350,11 +351,8 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
         plan=plan,
         max_findings=config.max_findings,
     )
-    # Recorded on every outcome so the next truncation is diagnosable from
-    # the review state alone: what the prompt was fitted to, how big it came
-    # out, how many files it carried, and the output ceiling it ran under
-    # (#2702). The CLI transport has no per-call max_tokens; its only ceiling
-    # is the agent's own, so the limit is recorded as unknown there.
+    # Recorded on every outcome so a truncation is diagnosable from the review
+    # state alone (#2702); the CLI transport has no per-call max_tokens.
     record: dict[str, Any] = {
         "input_budget_tokens": diff_budget,
         "prompt_tokens_estimated": (
@@ -387,6 +385,15 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
             "chunk findings and marking coverage degraded.",
         )
         return _failed_pass(truncated=truncated, record=record)
+    except AITurnLimitError as exc:
+        logger.warning("The cross-chunk synthesis pass hit its per-call turn limit.")
+        return _failed_pass(
+            truncated=truncated,
+            input_tokens=exc.input_tokens,
+            output_tokens=exc.output_tokens,
+            cost_estimate=exc.cost_estimate,
+            record=record,
+        )
     except Exception:
         # Deliberately broad: this pass is additive, so nothing it can raise —
         # a cost-cap stop, a provider error, a timeout — may be allowed to

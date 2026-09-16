@@ -21,6 +21,7 @@ from lintro.ai.cache import cache_suggestion
 from lintro.ai.cli_schemas import cli_schema_for_fix
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
+from lintro.ai.enums.ai_call_kind import AICallKind
 from lintro.ai.enums.sanitize_mode import SanitizeMode
 from lintro.ai.fix_context import (
     CONTEXT_LINES,
@@ -117,6 +118,7 @@ async def _call_fix_ai(
             transport=ai_config.transport,
             batch=batch,
         ),
+        call_kind=AICallKind.FIX,
     )
 
 

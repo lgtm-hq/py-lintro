@@ -25,6 +25,10 @@ step that can distinguish a usable credential from a merely present one.
 from __future__ import annotations
 
 import asyncio
+import json
+import shutil
+import subprocess  # nosec B404 - the probe spawns the pinned agent binary
+from pathlib import Path
 
 import pytest
 from assertpy import assert_that
@@ -244,3 +248,65 @@ def test_live_cli_accepts_every_request_schema(
     assert_that(payload).described_as(
         f"{instance.name} returned no object for {schema_name}",
     ).is_instance_of(dict)
+
+
+# --- per-call bounds (#2685) ---------------------------------------------------
+
+#: A prompt the agent cannot satisfy in one turn without tools: it has to read
+#: a file first, so ``--max-turns 1`` stops it before an answer exists.
+TURN_LIMIT_PROMPT = (
+    "Use your Read tool to open pyproject.toml and then tell me its first line. "
+    "Do not answer from memory."
+)
+
+
+def test_live_claude_reports_a_real_turn_limit_exhaustion(tmp_path: Path) -> None:
+    """The pinned ``claude`` accepts the bound flags and reports the limit.
+
+    Proves the envelope shape the parser keys on (#2685): with
+    ``--max-turns 1`` and the read-only tool set, a prompt that needs a tool
+    call stops at the limit, and the envelope says so through the
+    ``error_max_turns`` subtype or, failing that, an error with ``num_turns``
+    at the limit.
+    """
+    binary = shutil.which("claude")
+    if binary is None:
+        unmet_precondition("claude binary not on PATH (link 1 of 3)")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname = 'probe'\n")
+    cmd = [
+        binary,
+        "--print",
+        "--output-format",
+        "json",
+        "--permission-mode",
+        "dontAsk",
+        "--tools",
+        "Read,Grep,Glob",
+        "--max-turns",
+        "1",
+        TURN_LIMIT_PROMPT,
+    ]
+    proc = subprocess.run(  # nosec B603 - fixed argv against the pinned binary
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=SMOKE_TIMEOUT,
+        cwd=tmp_path,
+        check=False,
+    )
+    combined = (proc.stdout + proc.stderr).casefold()
+    if "unknown option" in combined:
+        pytest.fail(f"pinned claude rejected a bound flag: {combined[:300]}")
+    if "not logged in" in combined:
+        unmet_precondition("claude CLI is not authenticated (link 3 of 3)")
+    try:
+        envelope = json.loads(proc.stdout.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        pytest.fail(f"claude did not print a JSON envelope: {proc.stdout[:300]!r}")
+    turns = envelope.get("num_turns")
+    limited = envelope.get("subtype") == "error_max_turns" or (
+        bool(envelope.get("is_error")) and isinstance(turns, int) and turns >= 1
+    )
+    assert_that(limited).described_as(
+        f"expected a turn-limit envelope, got {envelope!r}",
+    ).is_true()

@@ -1,13 +1,13 @@
 Review this code change for actionable findings.
 
-**PR:** <CODE_BLOCK_0d15ea5e> Harden the session gate </CODE_BLOCK_0d15ea5e>
+**PR:** <CODE_BLOCK_0d15ea5e> Local changes </CODE_BLOCK_0d15ea5e>
 
-**Base → Head:** <CODE_BLOCK_0d15ea5e> `main`...`feature/session-gate` </CODE_BLOCK_0d15ea5e>
+**Base → Head:** <CODE_BLOCK_0d15ea5e> `0123456789abcdef0123456789abcdef01234567`...`89abcdef0123456789abcdef0123456789abcdef` </CODE_BLOCK_0d15ea5e>
 
 **Summary:**
 
 <CODE_BLOCK_0d15ea5e>
-Fail closed on unknown session status and widen token decoding.
+(no PR summary)
 </CODE_BLOCK_0d15ea5e>
 
 
@@ -16,26 +16,27 @@ Fail closed on unknown session status and widen token decoding.
 
 </CODE_BLOCK_0d15ea5e>
 
-**Changed files (1):**
+**Changed files (2):**
 
 <CODE_BLOCK_0d15ea5e>
-- `src/auth/tokens.py` (renamed, +1/-1)
+- `src/auth/session.py` (modified, +5/-1)
+- `assets/logo.png` (modified, +0/-0)
 </CODE_BLOCK_0d15ea5e>
 
 **Every file this PR changes (this chunk's own files are marked
 `— **(this chunk)**`):**
 
 <CODE_BLOCK_0d15ea5e>
-- `src/auth/session.py` (modified, +5/-1)
-- `assets/logo.png` (modified, +0/-0)
-- `src/auth/tokens.py` (renamed, +1/-1) — **(this chunk)**
+- `src/auth/session.py` (modified, +5/-1) — **(this chunk)**
+- `assets/logo.png` (modified, +0/-0) — **(this chunk)**
+- `src/auth/tokens.py` (renamed, +1/-1)
 </CODE_BLOCK_0d15ea5e>
 
-The working tree you can read is the base ref `main`, not this PR: the diff below
-is authoritative, and any file you read from disk shows its pre-change content. Unmarked
-files above are part of this PR but are not in this chunk's diff; a copy of them read
-from disk is that stale base-commit version, so never treat it as evidence that such a
-file was not updated, not touched, or missing a change.
+The working tree you can read already carries this change: the diff below is
+authoritative, and any file you read from disk shows its post-change content (the
+base of the range is `0123456789abcdef0123456789abcdef01234567`). Unmarked files above are part of this change but
+are not in this chunk's diff; read them only as context for this chunk, and never
+report their own changes here.
 
 ---
 
@@ -60,17 +61,23 @@ that hold. A concern is NOT a finding unless it also identifies a defect.
 
 The diff is included below — review it directly (do not run git commands):
 
-<pull_request_diff> <CODE_BLOCK_0d15ea5e> diff --git a/src/auth/token_utils.py b/src/auth/tokens.py
-similarity index 92%
-rename from src/auth/token_utils.py
-rename to src/auth/tokens.py
-index 5555555..6666666 100644
---- a/src/auth/token_utils.py
-+++ b/src/auth/tokens.py
-@@ -1,4 +1,4 @@
--def decode(token: str) -> dict[str, str]:
-+def decode(token: str, *, verify: bool = False) -> dict[str, str]:
-     return {}
+<pull_request_diff> <CODE_BLOCK_0d15ea5e> diff --git a/src/auth/session.py b/src/auth/session.py
+index 1111111..2222222 100644
+--- a/src/auth/session.py
++++ b/src/auth/session.py
+@@ -1,6 +1,9 @@
+ from __future__ import annotations
+
++[REDACTED]"
++
+ def is_active(status: str) -> bool:
+-    return status == "active"
++    if status == "expired":
++        return False
++    return True
+diff --git a/assets/logo.png b/assets/logo.png
+index 3333333..4444444 100644
+Binary files a/assets/logo.png and b/assets/logo.png differ
  </CODE_BLOCK_0d15ea5e> </pull_request_diff>
 
 

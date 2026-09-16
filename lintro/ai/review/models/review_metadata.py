@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
+    SYNTHESIS_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
@@ -173,7 +174,20 @@ class ReviewMetadata:
             (#2702). Orthogonal to :attr:`findings_coverage_complete`.
         """
         return any(
-            item.reason in NARRATIVE_DEGRADATION_REASONS
+            item.reason in SYNTHESIS_DEGRADATION_REASONS
+            for item in self.coverage_degradations
+        )
+
+    @property
+    def delegated_diff_embedded(self) -> bool:
+        """Return whether a delegated-diff opt-in was not honoured.
+
+        Returns:
+            True when at least one chunk embedded the redacted diff because the
+            provider's read-only tool surface cannot run ``git diff`` (#2685).
+        """
+        return any(
+            item.reason is CoverageDegradationReason.DELEGATED_DIFF_EMBEDDED
             for item in self.coverage_degradations
         )
 

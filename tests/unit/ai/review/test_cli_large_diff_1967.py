@@ -49,7 +49,7 @@ from lintro.ai.review.response_pipeline import (
 from lintro.ai.review.run_planning import resolve_review_chunks
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.token_budget import estimate_tokens
-from tests.unit.ai.conftest import patch_cli_exec
+from tests.unit.ai.conftest import CLAUDE_HELP, patch_cli_exec
 from tests.unit.ai.providers.test_cli_capability_guard import _FakeTransport
 
 _TEST_CONTRACT = CliContract(
@@ -267,7 +267,7 @@ async def test_claude_cli_argv_length_is_constant_in_prompt_size(
     small = "small prompt"
     large = "x" * 200_000
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -301,7 +301,7 @@ async def test_codex_cli_uses_stdin_sentinel(
     provider = OpenAIProvider(transport=AITransport.CLI)
     large = "y" * 180_000
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,

@@ -22,7 +22,7 @@ from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.anthropic.cli_contract import ANTHROPIC_CLI_CONTRACT
 from lintro.ai.providers.cli_auth_probe import CliAuthProbe
-from lintro.ai.providers.protocol import ProviderMetadata
+from lintro.ai.providers.protocol import CliBounds, ProviderMetadata
 
 __all__ = [
     "ANTHROPIC_CLI_BINARY",
@@ -85,6 +85,18 @@ ANTHROPIC_METADATA = ProviderMetadata(
     cli_binary=ANTHROPIC_CLI_BINARY,
     cli_contract_id=AIProvider.ANTHROPIC.value,
     cli_contract=ANTHROPIC_CLI_CONTRACT,
+    # `--tools Read,Grep,Glob` removes every other built-in tool from the
+    # session (read-only under `--permission-mode dontAsk`): a required
+    # contract flag sent on every call, and a binary without it is refused.
+    # `--max-turns` bounds the agent loop: accepted but unadvertised, so it
+    # is sent regardless with the unknown-option backstop behind it (#2685).
+    cli_bounds=CliBounds(
+        read_only_args=("--tools", "Read,Grep,Glob"),
+        max_turns_flag="--max-turns",
+        # No Bash in that tool set, so a delegated `git diff` prompt could
+        # never be executed; the pipeline embeds the diff instead.
+        shell_available=False,
+    ),
     cli_install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
     cli_auth_probe=CliAuthProbe(
         # Pre-#2308 behaviour, preserved verbatim: doctor accepts whichever

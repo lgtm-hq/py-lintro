@@ -22,7 +22,7 @@ from lintro.ai.providers.claude_auth import (
     resolve_bare_mode,
     should_send_bare,
 )
-from tests.unit.ai.conftest import patch_cli_exec
+from tests.unit.ai.conftest import CLAUDE_HELP, patch_cli_exec
 
 
 @pytest.fixture()
@@ -345,7 +345,7 @@ async def _argv_for(
             "total_cost_usd": 0.0,
         },
     )
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,

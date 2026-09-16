@@ -13,12 +13,13 @@ from __future__ import annotations
 import json
 import os
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
 from loguru import logger
 
+from lintro.ai.cli_bounds import current_cli_call_options
 from lintro.ai.cost import estimate_cost
 from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import (
@@ -26,6 +27,7 @@ from lintro.ai.exceptions import (
     AINotAvailableError,
     AIProviderError,
     AIRateLimitError,
+    AITurnLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.provider_enum import AIProvider
@@ -43,7 +45,7 @@ from lintro.ai.providers.base import (
     ProviderCapabilities,
 )
 from lintro.ai.providers.claude_auth import should_send_bare
-from lintro.ai.providers.cli_contracts import cli_contract_for
+from lintro.ai.providers.cli_contracts import cli_contract_for, flag_named_in
 from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
     DEFAULT_MAX_TOKENS,
@@ -101,6 +103,88 @@ def _auth_hint(*, bare: bool) -> str:
     )
 
 
+#: The built-in tools a review call may use: read-only under
+#: ``--permission-mode dontAsk`` (#2685).
+_READ_ONLY_TOOLS = "Read,Grep,Glob"
+
+#: The envelope subtype the CLI reports when ``--max-turns`` stopped the loop.
+_MAX_TURNS_SUBTYPE = "error_max_turns"
+
+
+def _raise_if_turn_limited(*, stdout: str, max_turns: int | None) -> None:
+    """Raise :class:`AITurnLimitError` when *stdout* carries a turn-limit envelope.
+
+    Args:
+        stdout: Raw CLI stdout; the envelope is its last non-empty line.
+        max_turns: The limit that was sent, when any.
+
+    Raises:
+        AITurnLimitError: When the envelope says the loop stopped at the limit.
+    """
+    lines = [line for line in stdout.strip().splitlines() if line.strip()]
+    if not lines:
+        return
+    try:
+        data = json.loads(lines[-1])
+    except ValueError:
+        return
+    if isinstance(data, dict) and _hit_turn_limit(data=data, max_turns=max_turns):
+        raw_usage = data.get("usage")
+        usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
+        cost = data.get("total_cost_usd")
+        raise AITurnLimitError(
+            "Claude CLI stopped at the per-call turn limit"
+            f"{f' ({max_turns} turns)' if max_turns is not None else ''} "
+            "before answering (#2685).",
+            input_tokens=_usage_int(usage.get("input_tokens")),
+            output_tokens=_usage_int(usage.get("output_tokens")),
+            cost_estimate=float(cost) if isinstance(cost, (int, float)) else 0.0,
+            turns=_usage_int(data.get("num_turns")) or None,
+        )
+
+
+def _usage_int(value: object) -> int:
+    """Return *value* as a non-negative int, or 0 when it is not one.
+
+    Args:
+        value: A usage counter from the envelope.
+
+    Returns:
+        The counter, or 0.
+    """
+    return (
+        value
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0
+        else 0
+    )
+
+
+def _hit_turn_limit(*, data: Mapping[str, Any], max_turns: int | None) -> bool:
+    """Return whether the envelope says the per-call turn limit stopped the run.
+
+    Keys on the dedicated subtype, with a fallback on an error envelope whose
+    reported turn count reached the limit that was sent, so a binary that
+    words the subtype differently is still recognised (#2685).
+
+    Args:
+        data: Decoded ``claude --output-format json`` envelope.
+        max_turns: The limit that was sent, when any.
+
+    Returns:
+        True when the loop stopped at the limit rather than by answering.
+    """
+    if data.get("subtype") == _MAX_TURNS_SUBTYPE:
+        return True
+    if max_turns is None or not data.get("is_error"):
+        return False
+    # An envelope that names an API failure is that failure, not a turn limit,
+    # however many turns it reports.
+    if data.get("api_error_status") is not None or data.get("terminal_reason"):
+        return False
+    turns = data.get("num_turns")
+    return isinstance(turns, int) and not isinstance(turns, bool) and turns >= max_turns
+
+
 class _AnthropicCliTransport(CliTransport):
     """Anthropic ``claude -p`` subprocess transport."""
 
@@ -120,7 +204,12 @@ class _AnthropicCliTransport(CliTransport):
         )
         self._model = model
 
-    def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
+    def parse_stdout(
+        self,
+        stdout: str,
+        *,
+        max_turns: int | None = None,
+    ) -> tuple[AIResponse, str | None]:
         """Parse JSON envelope from ``claude --output-format json``."""
         try:
             data = json.loads(stdout.strip())
@@ -148,6 +237,12 @@ class _AnthropicCliTransport(CliTransport):
                 None,
             )
 
+        if _hit_turn_limit(data=data, max_turns=max_turns):
+            raise AITurnLimitError(
+                "Claude CLI stopped at the per-call turn limit"
+                f"{f' ({max_turns} turns)' if max_turns is not None else ''} "
+                "before answering (#2685).",
+            )
         if data.get("is_error") or data.get("subtype") == "error":
             cause = data.get("result") or describe_raw_response(
                 provider="Claude",
@@ -419,6 +514,26 @@ class AnthropicProvider(ApiStreamingProvider):
         # sent when the binary can reach an API key. Forcing it locked every
         # subscription-authenticated user out of this transport (#1838).
         bare = should_send_bare(configured=self._cli_bare, cwd=working_dir)
+        # Fail closed on the read-only bound (#2685): ``--tools`` is a
+        # required contract flag, and a binary that cannot restrict its tool
+        # surface is refused before any session starts rather than reviewing
+        # prompt-injectable repository content with writable tools. This
+        # reads the help text directly instead of ``supports_flag``, whose
+        # optimistic answer on an unreadable ``--help`` is right for optional
+        # flags and wrong for a security bound: no help, no session.
+        help_text = await self._cli.help_text()
+        if help_text is None or not flag_named_in(help_text.lower(), "--tools"):
+            contract = self._cli.contract
+            hint = contract.upgrade_hint if contract is not None else ""
+            why = (
+                "its --help could not be read"
+                if help_text is None
+                else "it does not offer --tools"
+            )
+            raise AINotAvailableError(
+                f"Claude CLI cannot be restricted to read-only tools ({why}), "
+                f"so no review session is started. {hint}",
+            )
         # Prompt rides on stdin (#1967): a single argv element on Linux is
         # capped at MAX_ARG_STRLEN (128 KiB), so large review diffs must not
         # be passed as the ``-p``/``--print`` value.
@@ -430,6 +545,8 @@ class AnthropicProvider(ApiStreamingProvider):
             "json",
             "--permission-mode",
             "dontAsk",
+            "--tools",
+            _READ_ONLY_TOOLS,
             "--model",
             effective_model,
         ]
@@ -452,6 +569,24 @@ class AnthropicProvider(ApiStreamingProvider):
             candidates.append(
                 OptionalArg(flag="--resume", values=(resume_session_id,)),
             )
+        # Bound the agent per call (#2685). The read-only tool surface is a
+        # security bound and fails closed: ``--tools`` is a required contract
+        # flag, a binary that does not advertise it is refused above, and it
+        # is sent on every call. ``--max-turns`` is a time bound: accepted by
+        # claude 2.x but not listed by ``--help``, so it is sent regardless
+        # and only the reactive unknown-option backstop drops it. ``call_ai``
+        # sets the turn limit for every call kind; a caller that reaches
+        # ``complete()`` without bounds is read-only but turn-unlimited.
+        bounds = current_cli_call_options()
+        max_turns = bounds.max_turns if bounds is not None else None
+        if max_turns is not None:
+            candidates.append(
+                OptionalArg(
+                    flag="--max-turns",
+                    values=(str(max_turns),),
+                    gate_on_help=False,
+                ),
+            )
 
         optional_args = await self._cli.apply_optional_args(cmd, candidates)
 
@@ -469,13 +604,26 @@ class AnthropicProvider(ApiStreamingProvider):
             timeout=timeout,
             cwd=working_dir,
         )
+        # A turn-limited run exits non-zero with a well-formed envelope on
+        # stdout. Recognise it before the exit-code mapping, whose auth
+        # heuristic greps stderr for "login" and would otherwise misread the
+        # CLI's own auth-source warning as an authentication failure (#2685).
+        # The limit used for detection is the one the executed argv carried:
+        # the backstop may have dropped ``--max-turns``, and an unbounded
+        # error must not be read as a turn limit through the count fallback.
+        executed = list(result.args) if isinstance(result.args, (list, tuple)) else []
+        sent_limit = max_turns if "--max-turns" in executed else None
+        _raise_if_turn_limited(stdout=result.stdout, max_turns=sent_limit)
         self._cli.check_exit_code(
             result,
             auth_patterns=("authentication", "login", "not logged in"),
             auth_hint=_auth_hint(bare=bare),
         )
 
-        response, session_id = self._cli.parse_stdout(result.stdout)
+        response, session_id = self._cli.parse_stdout(
+            result.stdout,
+            max_turns=sent_limit,
+        )
         if not use_one_shot and session_id is not None:
             with self._session_lock:
                 self._session_id = session_id

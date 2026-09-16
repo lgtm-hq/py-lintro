@@ -1461,6 +1461,53 @@ ai:
   transport: api # or "cli"
 ```
 
+### Bounded CLI calls
+
+On the `cli` transport every provider call is a whole agentic session, so lintro bounds
+each one (#2685): the agent gets a read-only tool surface and a turn limit, declared per
+provider in its metadata.
+
+| Provider    | Read-only tools                     | Turn limit                       |
+| ----------- | ----------------------------------- | -------------------------------- |
+| `anthropic` | `--tools Read,Grep,Glob` (required) | `--max-turns N` (sent; backstop) |
+| `openai`    | `--sandbox read-only` (always)      | none: `codex exec` has no flag   |
+| `cursor`    | `--mode ask` (always)               | none: `agent` has no flag        |
+
+The limit comes from the call's kind: 12 turns for review-type calls (each chunk's main
+call and its schema-recovery retry, the depth-2 and depth-3 passes, the synthesis pass
+and custom review agents), 1 for the summary and fix calls.
+`ai.transports.cli.max_turns` (int >= 1, default unset) overrides every kind. The two
+Claude flags differ in kind. `--tools` is a security bound and fails closed: it is a
+required contract flag sent on every call, and a binary whose `--help` does not
+advertise it is refused before any review session starts, with the upgrade hint, because
+prompt-injected repository content must never reach a writable tool; an unreadable
+`--help` is refused the same way, and the liveness probe (`lintro doctor`) reports such
+a binary as incompatible rather than live. `--max-turns` is a time bound: accepted by
+Claude Code 2.x in print mode but not listed by its `--help`, so it is sent without the
+help gate; a binary that rejects it triggers the usual unknown-option backstop (the call
+is retried once without the flag and the loss is logged), and the Tier 1 contract check
+reports it as unadvertised while the Tier 2 live probe proves acceptance. The turn limit
+is set by lintro's call layer for every call kind; a caller that drives a provider
+directly without it gets a read-only but turn-unlimited call.
+
+A Claude call that spends its whole turn budget without answering (envelope subtype
+`error_max_turns`, or an error envelope whose `num_turns` reached the limit sent) raises
+a turn-limit error that the retry loop never repeats. The chunk pass retries it once
+unchanged; a second limit records a `turn_limit_reached` coverage degradation, the
+chunk's files are left unreviewed for a later round, and the run is reported as a
+partial finding set with the reason in run details. The review prompt also states what
+the working tree the agent can read holds, from the context's `checkout`: the base ref
+for a CI pull-request review (disk is pre-change), the change itself for a branch or
+uncommitted review (disk is post-change), or a request to check when it is not known;
+the diff is always authoritative.
+
+```yaml
+ai:
+  transports:
+    cli:
+      max_turns: 12 # optional; default is per call kind (12 review, 1 summary/fix)
+```
+
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
 config for a single invocation. `lintro review` also accepts `--provider`, `--model`,
 `--review/--no-review`, `--max-cost-usd`, and the repeatable
@@ -1941,6 +1988,14 @@ persistent rate limiting:
 > the diff reaches the provider's backend verbatim**. It defaults to `false`. Enable it
 > only in a controlled, trusted environment, on diffs you have confirmed carry no
 > secrets, and only when delegated retrieval is needed for a very large diff.
+>
+> The delegated path also needs an agent that can run a command. Under the bounded
+> read-only tool surface (see [Bounded CLI calls](#bounded-cli-calls)) Claude's
+> `--tools Read,Grep,Glob` has no shell, so for the `anthropic` provider the opt-in is
+> ignored: an oversized chunk takes the embedded (redacted) path with its usual split
+> and truncation handling, a warning is logged, and the run record carries
+> `delegated_diff_embedded: true`. Codex and Cursor can still run `git diff` in their
+> read-only modes.
 
 ### How much source code fix mode sends
 

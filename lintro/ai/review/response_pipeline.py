@@ -25,7 +25,11 @@ from loguru import logger
 
 from lintro.ai.cli_schemas import cli_schema_for_review
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AICostBudgetExceededError, AIError
+from lintro.ai.exceptions import (
+    AICostBudgetExceededError,
+    AIError,
+    AIProviderNotRegisteredError,
+)
 from lintro.ai.prompts.review import (
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SCHEMA_REMINDER_TEMPLATE,
@@ -34,11 +38,15 @@ from lintro.ai.prompts.review import (
 from lintro.ai.raw_response import persist_raw_response
 from lintro.ai.review import provider_call
 from lintro.ai.review.confirmation_filter import drop_confirmation_findings
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.finding_parser import parse_findings, parse_flagged_files
 from lintro.ai.review.merge import (
     ChunkReviewPartial,
     parse_review_response,
 )
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.prompts import (
     PromptInputs,
     build_git_native_review_prompt,
@@ -63,6 +71,7 @@ __all__ = [
     "ChunkReviewRequest",
     "invoke_chunk_review",
     "merge_response_usage",
+    "provider_can_run_commands",
     "parse_review_payload_with_recovery",
     "payload_to_partial",
 ]
@@ -119,10 +128,35 @@ class ChunkCallResult:
     Attributes:
         response: The provider response whose usage the chunk is charged.
         elapsed: Wall-clock seconds the call took.
+        coverage_degradations: Limits the call itself applied before asking
+            (today only the delegated-diff fallback, #2685); the chunk pass
+            records them on the partial.
     """
 
     response: AIResponse
     elapsed: float
+    coverage_degradations: tuple[CoverageDegradation, ...] = ()
+
+
+def provider_can_run_commands(provider: BaseAIProvider) -> bool:
+    """Return whether the provider's bounded CLI agent can run a shell command.
+
+    A provider without registered metadata, or without declared CLI bounds,
+    is assumed able to: only a declared bound withholds the shell (#2685).
+
+    Args:
+        provider: The configured provider instance.
+
+    Returns:
+        False when the provider's read-only tool surface has no shell.
+    """
+    from lintro.ai.registry import metadata_for
+
+    try:
+        bounds = metadata_for(provider.name).cli_bounds
+    except AIProviderNotRegisteredError:
+        return True
+    return bounds is None or bounds.shell_available
 
 
 async def invoke_chunk_review(
@@ -157,11 +191,38 @@ async def invoke_chunk_review(
         extra_checklist=request.extra_checklist,
         strictness_section=request.strictness_section,
     )
+    degradations: tuple[CoverageDegradation, ...] = ()
     if use_git_native:
         embed_diff = estimate_tokens(request.chunk.diff) <= max(
             request.diff_budget,
             1,
         )
+        if (
+            not embed_diff
+            and ai_config.review_allow_unredacted_git_native
+            and not provider_can_run_commands(request.provider)
+        ):
+            # The opt-in asks the agent to run `git diff` itself, but the
+            # bounded read-only tool surface has no shell (#2685), so the
+            # prompt would be unexecutable and the call would only burn its
+            # turn limit. Take the embedded (redacted) path instead and
+            # record that the opt-in was not honoured.
+            logger.warning(
+                "Chunk {} exceeds the diff budget but the {} CLI's read-only "
+                "tools cannot run git diff; embedding the redacted diff "
+                "instead of delegating it (review_allow_unredacted_git_native "
+                "ignored).",
+                request.chunk_index,
+                request.provider.name,
+            )
+            embed_diff = True
+            degradations = (
+                CoverageDegradation(
+                    reason=CoverageDegradationReason.DELEGATED_DIFF_EMBEDDED,
+                    chunk_index=request.chunk_index,
+                    split=False,
+                ),
+            )
         system_prompt, user_prompt = build_git_native_review_prompt(
             inputs=prompt_inputs,
             embed_diff=embed_diff,
@@ -179,7 +240,11 @@ async def invoke_chunk_review(
         use_one_shot=request.use_one_shot,
         cli_schema=cli_schema_for_review(transport=ai_config.transport),
     )
-    return ChunkCallResult(response=response, elapsed=time.monotonic() - started)
+    return ChunkCallResult(
+        response=response,
+        elapsed=time.monotonic() - started,
+        coverage_degradations=degradations,
+    )
 
 
 async def parse_review_payload_with_recovery(

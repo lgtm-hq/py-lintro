@@ -10,7 +10,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, cast
 
 from lintro.ai.budget import CostBudget
+from lintro.ai.cli_bounds import CliCallOptions, bound_cli_call, resolve_max_turns
 from lintro.ai.cost import estimate_cost_with_floor
+from lintro.ai.enums.ai_call_kind import AICallKind
+from lintro.ai.enums.ai_transport import AITransport
+from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.response import AIResponse
@@ -41,6 +45,7 @@ async def call_ai(
     use_one_shot: bool = False,
     cli_schema: CliSchemaRequest | None = None,
     timeout: float | None = None,
+    call_kind: AICallKind = AICallKind.REVIEW,
 ) -> AIResponse:
     """Retry, fallback, and budget tracking for all AI products.
 
@@ -58,11 +63,25 @@ async def call_ai(
             ``ai_config.api_timeout``. Callers making a supplementary call
             inside an existing timeout budget pass what remains of it so the
             extra call cannot double the budgeted wall time.
+        call_kind: What the call is for; sets the CLI turn limit unless
+            ``ai.transports.cli.max_turns`` overrides it (#2685).
 
     Returns:
         The provider response with usage metadata.
     """
     tokens = max_tokens if max_tokens is not None else ai_config.max_tokens
+    # Bounds are a CLI-transport concern: an API call has no agent loop to
+    # limit, so it carries none and the provider keyword stays unset.
+    cli_options = (
+        CliCallOptions(
+            max_turns=resolve_max_turns(
+                call_kind=call_kind,
+                configured=ai_config.transports.cli.max_turns,
+            ),
+        )
+        if ai_config.transport == AITransport.CLI
+        else None
+    )
     effective_timeout = timeout if timeout is not None else ai_config.api_timeout
 
     async def _call_once() -> AIResponse:
@@ -71,37 +90,48 @@ async def call_ai(
         Returns:
             The provider response.
         """
-        return await complete_with_fallback(
-            provider,
-            user_prompt,
-            fallback_models=list(ai_config.fallback_models),
-            system=system_prompt,
-            max_tokens=tokens,
-            timeout=effective_timeout,
-            repo_root=repo_root,
-            use_one_shot=use_one_shot,
-            cli_schema=cli_schema,
-        )
+        with bound_cli_call(cli_options):
+            return await complete_with_fallback(
+                provider,
+                user_prompt,
+                fallback_models=list(ai_config.fallback_models),
+                system=system_prompt,
+                max_tokens=tokens,
+                timeout=effective_timeout,
+                repo_root=repo_root,
+                use_one_shot=use_one_shot,
+                cli_schema=cli_schema,
+            )
 
     async def _budgeted_call() -> AIResponse:
         """Perform one call, recording its cost against the budget.
 
         Returns:
             The provider response.
+
+        Raises:
+            AITurnLimitError: When the call stopped at its turn limit; its
+                cost is charged to the budget first (#2685).
         """
-        if budget is not None and budget.max_cost_usd is not None:
-            input_chars = len(user_prompt) + len(system_prompt or "")
-            estimate = estimate_cost_with_floor(
-                provider.model_name,
-                input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
-                output_tokens=tokens,
-            )
-            return await budget.execute(
-                _call_once,
-                cost_of=lambda response: response.cost_estimate,
-                estimate=estimate,
-            )
-        response = await _call_once()
+        try:
+            if budget is not None and budget.max_cost_usd is not None:
+                input_chars = len(user_prompt) + len(system_prompt or "")
+                estimate = estimate_cost_with_floor(
+                    provider.model_name,
+                    input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
+                    output_tokens=tokens,
+                )
+                return await budget.execute(
+                    _call_once,
+                    cost_of=lambda response: response.cost_estimate,
+                    estimate=estimate,
+                )
+            response = await _call_once()
+        except AITurnLimitError as exc:
+            # The stopped call still spent its turns; charge them (#2685).
+            if budget is not None and exc.cost_estimate:
+                budget.record(exc.cost_estimate)
+            raise
         if budget is not None:
             budget.record(response.cost_estimate)
         return response

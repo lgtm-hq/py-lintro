@@ -24,6 +24,7 @@ from lintro.ai.review.context.pr_metadata import (
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_skip_reason import FileSkipReason
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.glob_utils import path_matches_any_glob
@@ -277,6 +278,8 @@ def _collect_branch_context(*, base: str) -> ReviewContext:
         changed_files=changed_files,
         unified_diff=unified_diff,
         pr_metadata=None,
+        # The range ends at HEAD, which is what is checked out.
+        checkout=ReviewCheckout.HEAD,
     )
 
 
@@ -321,6 +324,7 @@ def _collect_uncommitted_context() -> ReviewContext:
         changed_files=changed_files,
         unified_diff=unified_diff,
         pr_metadata=None,
+        checkout=ReviewCheckout.WORKTREE,
     )
 
 
@@ -377,7 +381,37 @@ def _collect_pr_context(
         changed_files=changed_files,
         unified_diff=unified_diff,
         pr_metadata=pr_metadata,
+        checkout=_probe_pr_checkout(base_ref=base_ref, head_ref=head_ref),
     )
+
+
+def _probe_pr_checkout(*, base_ref: str, head_ref: str) -> ReviewCheckout:
+    """Work out which end of a PR range the local checkout holds, if any.
+
+    PR mode needs no local repository (the diff comes from ``gh``), so this
+    is best effort: the dogfood workflow checks out the base ref, a
+    developer running ``--pr`` locally may have either end or something
+    else entirely, and a missing repository is simply unknown.
+
+    Args:
+        base_ref: The PR's base commit OID.
+        head_ref: The PR's head commit OID.
+
+    Returns:
+        The checkout kind, ``UNKNOWN`` when it cannot be determined.
+    """
+    try:
+        result = _run_git(args=["rev-parse", "HEAD"], check=False)
+    except (OSError, ReviewContextError):
+        return ReviewCheckout.UNKNOWN
+    if result.returncode != 0:
+        return ReviewCheckout.UNKNOWN
+    current = result.stdout.strip()
+    if current and current == base_ref:
+        return ReviewCheckout.BASE
+    if current and current == head_ref:
+        return ReviewCheckout.HEAD
+    return ReviewCheckout.UNKNOWN
 
 
 def _populate_post_image_files(*, context: ReviewContext) -> ReviewContext:
@@ -413,6 +447,7 @@ def _populate_post_image_files(*, context: ReviewContext) -> ReviewContext:
         changed_files=context.changed_files,
         unified_diff=context.unified_diff,
         pr_metadata=context.pr_metadata,
+        checkout=context.checkout,
         post_image_files=post_image_files,
         skipped_files=context.skipped_files,
     )
@@ -681,6 +716,7 @@ def _restrict_context(
         changed_files=retained,
         unified_diff=unified_diff,
         pr_metadata=context.pr_metadata,
+        checkout=context.checkout,
         post_image_files=retained_post_image,
         skipped_files=skipped,
     )

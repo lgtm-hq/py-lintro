@@ -89,10 +89,16 @@ class OptionalArg:
     Attributes:
         flag: The flag itself, e.g. ``--resume``.
         values: Values that follow the flag and must be dropped with it.
+        gate_on_help: Whether the ``--help`` probe decides if the flag is sent.
+            False for a flag the binary accepts but does not advertise
+            (claude's ``--max-turns``, #2685): it is sent regardless and the
+            reactive ``unknown option`` backstop still drops it, once, on a
+            binary that rejects it.
     """
 
     flag: str
     values: tuple[str, ...] = field(default=())
+    gate_on_help: bool = True
 
     def as_argv(self) -> list[str]:
         """Return the flag and its values as an argv fragment.
@@ -312,6 +318,39 @@ class CliCapabilityGuard:
                 hint=hint,
             )
 
+        contract = self._contract
+        if contract is not None and contract.fail_closed_flags:
+            # A fail-closed flag must be confirmed, not assumed: the provider
+            # refuses every call until the help surface *names* it, so
+            # reporting the binary live here would be a false green in
+            # `lintro doctor`. The check is self-contained: it does not rely
+            # on the flag also being in ``required_flags`` (the contract
+            # enforces that subset separately).
+            help_text = await self.help_text()
+            unconfirmed = (
+                tuple(contract.fail_closed_flags)
+                if help_text is None
+                else unadvertised_flags(
+                    lowered_help=help_text.lower(),
+                    flags=contract.fail_closed_flags,
+                )
+            )
+            if unconfirmed:
+                why = (
+                    "--help could not be read"
+                    if help_text is None
+                    else "--help does not name"
+                )
+                return incompatible_cli_result(
+                    provider=provider_name,
+                    message=(
+                        f"{self._binary_name} CLI {why} "
+                        f"{', '.join(unconfirmed)}, so the read-only bound "
+                        "cannot be confirmed and every call would be refused"
+                    ),
+                    hint=contract.upgrade_hint,
+                )
+
         version = await self.binary_version()
         if version is None and await self.help_text() is None:
             # Neither free probe produced usable output. Being on ``PATH`` is not
@@ -408,7 +447,15 @@ class CliCapabilityGuard:
         """
         kept: list[OptionalArg] = []
         for arg in optional_args:
-            if await self.supports_flag(arg.flag):
+            if not arg.gate_on_help:
+                # Unadvertised but accepted: only a rejection the backstop
+                # already saw (``note_unsupported_flag``) keeps it out.
+                with self._capability_lock:
+                    rejected = self._flag_support.get(arg.flag) is False
+                if not rejected:
+                    kept.append(arg)
+                    continue
+            elif await self.supports_flag(arg.flag):
                 kept.append(arg)
                 continue
             logger.debug(

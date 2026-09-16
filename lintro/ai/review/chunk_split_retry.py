@@ -26,7 +26,13 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.exceptions import AICostBudgetExceededError, AIError
+from lintro.ai.cli_bounds import resolve_max_turns
+from lintro.ai.enums.ai_call_kind import AICallKind
+from lintro.ai.exceptions import (
+    AICostBudgetExceededError,
+    AIError,
+    AITurnLimitError,
+)
 from lintro.ai.review.cli_limits import is_cli_output_exhaustion
 from lintro.ai.review.context import split_unified_diff_by_file
 from lintro.ai.review.enums.coverage_degradation_reason import (
@@ -165,6 +171,10 @@ async def _parse_call(
         partial,
         files=tuple(request.chunk.files),
         provider_seconds=call.elapsed,
+        coverage_degradations=(
+            *partial.coverage_degradations,
+            *call.coverage_degradations,
+        ),
     )
 
 
@@ -291,8 +301,93 @@ async def review_chunk_main_pass(
         call = await invoke_chunk_review(request=request)
     except AICostBudgetExceededError:
         raise
+    except AITurnLimitError as exc:
+        return await _retry_after_turn_limit(request=request, first=exc)
     except AIError as exc:
         if not is_cli_output_exhaustion(exc):
             raise
         return await _retry_after_exhaustion(request=request)
     return await _parse_call(request=request, call=call)
+
+
+async def _retry_after_turn_limit(
+    *,
+    request: ChunkReviewRequest,
+    first: AITurnLimitError,
+) -> ChunkReviewPartial:
+    """Retry a turn-limited call once; degrade the chunk if it hits it again.
+
+    The agent spent its whole turn budget without answering. One unchanged
+    retry covers a run that merely wandered; a second limit means the chunk
+    does not answer under this bound, so its files are left unreviewed for a
+    later round and the run records a ``TURN_LIMIT_REACHED`` degradation
+    instead of failing (#2685).
+
+    Args:
+        request: The chunk, prompt material, provider handles and limits.
+        first: The error the first call raised.
+
+    Returns:
+        The retry's parsed partial, or an empty partial carrying the
+        degradation and no reviewed files.
+
+    Raises:
+        AICostBudgetExceededError: When the retry hits the session cost cap.
+    """
+    logger.warning(
+        "CLI review hit its per-call turn limit on chunk {index} ({error}); "
+        "retrying the call once unchanged.",
+        index=request.chunk_index,
+        error=first,
+    )
+    try:
+        call = await invoke_chunk_review(request=request)
+    except AICostBudgetExceededError:
+        raise
+    except AITurnLimitError as again:
+        logger.warning(
+            "CLI review hit its per-call turn limit again on chunk {index}; "
+            "leaving its files unreviewed for a later round: {error}",
+            index=request.chunk_index,
+            error=again,
+        )
+        return ChunkReviewPartial(
+            findings=(),
+            input_tokens=first.input_tokens + again.input_tokens,
+            output_tokens=first.output_tokens + again.output_tokens,
+            cost_estimate=first.cost_estimate + again.cost_estimate,
+            turns=_add_turns(first.turns, again.turns),
+            files=(),
+            coverage_degradations=(
+                CoverageDegradation(
+                    reason=CoverageDegradationReason.TURN_LIMIT_REACHED,
+                    chunk_index=request.chunk_index,
+                    limit=resolve_max_turns(
+                        call_kind=AICallKind.REVIEW,
+                        configured=request.ai_config.transports.cli.max_turns,
+                    ),
+                ),
+            ),
+        )
+    partial = await _parse_call(request=request, call=call)
+    # The stopped first attempt was billed too; the chunk reports both.
+    return replace(
+        partial,
+        input_tokens=partial.input_tokens + first.input_tokens,
+        output_tokens=partial.output_tokens + first.output_tokens,
+        cost_estimate=partial.cost_estimate + first.cost_estimate,
+        turns=_add_turns(partial.turns, first.turns),
+    )
+
+
+def _add_turns(*counts: int | None) -> int | None:
+    """Add reported turn counts, keeping ``None`` when none was reported.
+
+    Args:
+        *counts: Per-attempt turn counts, ``None`` where the transport gave none.
+
+    Returns:
+        The sum of the known counts, or ``None`` when every count is unknown.
+    """
+    known = [count for count in counts if count is not None]
+    return sum(known) if known else None

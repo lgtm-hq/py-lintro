@@ -14,7 +14,7 @@ from lintro.ai.enums import AITransport, CliBareMode
 from lintro.ai.exceptions import AIAuthenticationError, AINotAvailableError
 from lintro.ai.providers.anthropic.provider import AnthropicProvider, _find_claude
 from lintro.ai.registry import AIProvider
-from tests.unit.ai.conftest import patch_cli_exec
+from tests.unit.ai.conftest import CLAUDE_HELP, patch_cli_exec
 
 
 @pytest.fixture()
@@ -69,7 +69,7 @@ async def test_claude_cli_complete_success(_mock_claude_on_path: None) -> None:
         cli_bare=CliBareMode.ALWAYS,
     )
     stdout = _cli_json(result='{"summary": "ok"}')
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -102,7 +102,7 @@ async def test_claude_cli_complete_cli_schema_flag_when_requested(
         schema_name="lintro_review",
     )
     stdout = _cli_json(result='{"summary": "ok"}')
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = subprocess.CompletedProcess(
             args=[],
             returncode=0,
@@ -144,7 +144,7 @@ async def test_claude_cli_complete_json_schema_name_sent_when_cli_advertises_it(
             return subprocess.CompletedProcess(
                 args=cmd,
                 returncode=0,
-                stdout="  --json-schema-name <name>  Name the schema\n",
+                stdout="  --json-schema-name <name>  Name the schema\n  --tools <list>\n",
                 stderr="",
             )
         return subprocess.CompletedProcess(
@@ -190,7 +190,7 @@ async def test_claude_cli_complete_json_schema_name_omitted_when_cli_lacks_it(
             return subprocess.CompletedProcess(
                 args=cmd,
                 returncode=0,
-                stdout="  --json-schema <schema>  Provide a JSON schema\n",
+                stdout="  --json-schema <schema>  Provide a JSON schema\n  --tools <list>\n",
                 stderr="",
             )
         return subprocess.CompletedProcess(
@@ -215,7 +215,7 @@ async def test_claude_cli_complete_auth_error(_mock_claude_on_path: None) -> Non
     """Surface authentication failures from claude stderr."""
     provider = AnthropicProvider(transport=AITransport.CLI)
     with (
-        patch_cli_exec() as mock_run,
+        patch_cli_exec(help_text=CLAUDE_HELP) as mock_run,
         pytest.raises(AIAuthenticationError, match="login"),
     ):
         mock_run.return_value = subprocess.CompletedProcess(

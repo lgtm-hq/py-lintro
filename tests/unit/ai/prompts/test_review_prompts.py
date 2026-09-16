@@ -93,7 +93,11 @@ def test_review_user_prompt_interpolates_the_full_pr_file_list() -> None:
 def test_git_native_user_prompt_interpolates_the_full_pr_file_list() -> None:
     """The git-native template carries the same full-PR list and marker."""
     rendered = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
-        **{**_USER_PROMPT_KWARGS, "diff_section": "inline-diff"},
+        **{
+            **_USER_PROMPT_KWARGS,
+            "diff_section": "inline-diff",
+            "working_tree_note": "tree note",
+        },
         output_rules=format_output_rules(checklist_count=1),
     )
 
@@ -199,6 +203,7 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
                 **_USER_PROMPT_KWARGS,
                 "boundary": boundary,
                 "diff_section": "inline-diff",
+                "working_tree_note": "tree note",
             },
             output_rules=format_output_rules(checklist_count=1),
         ),

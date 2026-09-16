@@ -22,6 +22,9 @@ from lintro.ai.prompts.review import (
     REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND,
     REVIEW_GIT_NATIVE_DIFF_INLINE,
     REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND,
+    REVIEW_GIT_NATIVE_TREE_POST_CHANGE_NOTE,
+    REVIEW_GIT_NATIVE_TREE_PRE_CHANGE_NOTE,
+    REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
     REVIEW_SYSTEM,
@@ -31,6 +34,7 @@ from lintro.ai.prompts.review import (
     format_output_rules,
     format_pr_changed_files_for_prompt,
 )
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.sanitize import make_boundary_marker
@@ -212,9 +216,14 @@ def build_git_native_review_prompt(
             head_ref=context.head_ref,
             git_diff_paths=git_diff_paths,
         )
+    base_ref = redact_prompt_text(text=context.base_ref, source="git refs")
+    # The tree claim must match what is actually checked out: telling the
+    # agent the wrong side inverts what every disk read means to it.
+    tree_note = _tree_note_for(context=context)
     user_prompt = REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
-        base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
+        base_ref=base_ref,
+        working_tree_note=tree_note.format(base_ref=base_ref).rstrip("\n"),
         head_ref=redact_prompt_text(text=context.head_ref, source="git refs"),
         pr_summary=pr_summary,
         deferred_scope_section="",
@@ -280,3 +289,23 @@ def estimate_prompt_overhead(
     )
     estimated = estimate_tokens(overhead_text)
     return int(max(estimated, _PROMPT_OVERHEAD_TOKENS))
+
+
+def _tree_note_for(*, context: ReviewContext) -> str:
+    """Return the working-tree note matching the context's checkout.
+
+    Args:
+        context: The review context, whose ``checkout`` says which side of
+            the range is on disk.
+
+    Returns:
+        The note template for that checkout.
+    """
+    checkout = context.checkout
+    if checkout is ReviewCheckout.BASE:
+        return REVIEW_GIT_NATIVE_TREE_PRE_CHANGE_NOTE
+    if checkout in (ReviewCheckout.HEAD, ReviewCheckout.WORKTREE) or (
+        context.head_ref == "WORKTREE"
+    ):
+        return REVIEW_GIT_NATIVE_TREE_POST_CHANGE_NOTE
+    return REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE

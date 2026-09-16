@@ -147,7 +147,14 @@ async def review_chunk(
         # unreviewed instead of claiming them. A truncated chunk keeps its
         # file here and says so: the file is credited at its hash so the
         # round converges, and its coverage record carries the truncation.
-        files=main_pass.files or tuple(chunk.files),
+        files=(
+            ()
+            if any(
+                item.reason is CoverageDegradationReason.TURN_LIMIT_REACHED
+                for item in main_pass.coverage_degradations
+            )
+            else (main_pass.files or tuple(chunk.files))
+        ),
         truncated=chunk.truncated,
         coverage_degradations=(
             *depth_degradations,

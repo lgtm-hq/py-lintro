@@ -24,7 +24,7 @@ from lintro.ai.providers.base import BaseAIProvider
 from lintro.ai.providers.cursor.provider import CursorProvider
 from lintro.ai.providers.openai.provider import OpenAIProvider
 from lintro.ai.raw_response import RAW_RESPONSE_DIR
-from tests.unit.ai.conftest import patch_cli_exec
+from tests.unit.ai.conftest import CLAUDE_HELP, patch_cli_exec
 
 _PROSE = (
     "Reviewed the four commits. Two actionable findings:\n\n"
@@ -106,7 +106,7 @@ async def test_prose_envelope_is_recovered_in_full(
     """Prose stdout becomes unstructured content instead of an error."""
     provider = _providers()[name]
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = _completed(_PROSE)
         response = await provider.complete("Review this")
 
@@ -122,7 +122,7 @@ async def test_prose_envelope_is_persisted(
     """The complete prose response is written to the capture directory."""
     provider = _providers()[name]
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = _completed(_PROSE)
         await provider.complete("Review this")
 
@@ -140,7 +140,7 @@ async def test_blank_envelope_reports_untruncated_evidence(
     provider = _providers()[name]
     # Whitespace-only stdout carries no answer to recover, so it stays an error;
     # the evidence block must still name the full-output capture.
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = _completed("   \n\t ")
         with pytest.raises(AIProviderError) as excinfo:
             await provider.complete("Review this")
@@ -158,7 +158,7 @@ async def test_prose_with_an_inline_json_span_is_not_reduced_to_it(
     provider = _providers()[name]
     prose = f'Finding 1: the config `{{"retries": 3}}` is wrong.\n{_PROSE}'
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = _completed(prose)
         response = await provider.complete("Review this")
 
@@ -177,7 +177,7 @@ async def test_error_envelope_evidence_is_never_truncated_to_500_chars(
     envelope = json.dumps({"is_error": True, "result": "", "note": _PROSE})
     tail = _PROSE[-40:]
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = _completed(envelope)
         with pytest.raises(AIProviderError) as excinfo:
             await provider.complete("Review this")
@@ -205,7 +205,7 @@ async def test_claude_error_envelope_keeps_its_api_error_markers(
         },
     )
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = _completed(envelope)
         with pytest.raises(AIProviderError) as excinfo:
             await provider.complete("Review this")
@@ -223,7 +223,7 @@ async def test_claude_error_envelope_without_markers_is_unchanged(
     provider = _providers()["anthropic"]
     envelope = json.dumps({"is_error": True, "result": "something broke"})
 
-    with patch_cli_exec() as mock_run:
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
         mock_run.return_value = _completed(envelope)
         with pytest.raises(AIProviderError) as excinfo:
             await provider.complete("Review this")

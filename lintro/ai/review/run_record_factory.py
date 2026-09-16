@@ -139,6 +139,7 @@ def _coverage(*, result: ReviewResult) -> RunCoverage:
         chunks_reviewed=metadata.chunks_reviewed,
         chunks_total=metadata.chunks_total,
         synthesis_degraded=metadata.synthesis_degraded,
+        delegated_diff_embedded=metadata.delegated_diff_embedded,
     )
 
 

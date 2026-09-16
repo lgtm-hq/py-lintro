@@ -20,7 +20,7 @@ from lintro.ai.model_pricing import ModelPricing
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.cli_auth_probe import CliAuthProbe
 from lintro.ai.providers.cursor.cli_contract import CURSOR_CLI_CONTRACT
-from lintro.ai.providers.protocol import ProviderMetadata
+from lintro.ai.providers.protocol import CliBounds, ProviderMetadata
 
 __all__ = ["CURSOR_CLI_BINARY", "CURSOR_METADATA"]
 
@@ -43,6 +43,8 @@ CURSOR_METADATA = ProviderMetadata(
     cli_binary=CURSOR_CLI_BINARY,
     cli_contract_id=AIProvider.CURSOR.value,
     cli_contract=CURSOR_CLI_CONTRACT,
+    # `--mode ask` is the read-only mode; no per-call turn limit (#2685).
+    cli_bounds=CliBounds(read_only_args=("--mode", "ask")),
     cli_install_hint="Install agent CLI: curl https://cursor.com/install -fsS | bash",
     cli_auth_probe=CliAuthProbe(
         # The `agent` CLI reads CURSOR_API_KEY itself.

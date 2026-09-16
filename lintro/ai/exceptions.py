@@ -67,6 +67,53 @@ class AIAuthenticationError(AIProviderError):
     """
 
 
+class AITurnLimitError(AIProviderError):
+    """The CLI agent hit its per-call turn limit before answering (#2685).
+
+    The same prompt would spend the same turns again, so the generic
+    transient retry does not help; the chunk pass retries the call once
+    unchanged, and a second limit degrades the chunk's coverage. The turns
+    it spent were billed, so the error carries the envelope's usage for the
+    cost budget and the chunk's usage record.
+
+    Attributes:
+        input_tokens: Prompt tokens the stopped call consumed.
+        output_tokens: Completion tokens it produced.
+        cost_estimate: Its reported or estimated USD cost.
+        turns: Agent turns the transport reported for the stopped call, or
+            ``None`` when the envelope carried no count.
+    """
+
+    input_tokens: int
+    output_tokens: int
+    cost_estimate: float
+    turns: int | None
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost_estimate: float = 0.0,
+        turns: int | None = None,
+    ) -> None:
+        """Record the message and the usage the stopped call still consumed.
+
+        Args:
+            message: Human-readable description naming the limit.
+            input_tokens: Prompt tokens the stopped call consumed.
+            output_tokens: Completion tokens it produced.
+            cost_estimate: Its reported or estimated USD cost.
+            turns: Agent turns the transport reported, when it did.
+        """
+        super().__init__(message)
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cost_estimate = cost_estimate
+        self.turns = turns
+
+
 class AIRateLimitError(AIProviderError):
     """Rate limit exceeded on the AI provider.
 

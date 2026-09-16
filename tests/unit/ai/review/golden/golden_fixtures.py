@@ -12,6 +12,7 @@ from __future__ import annotations
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.file_domain import FileDomain
 from lintro.ai.review.enums.review_category import ReviewCategory
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.checklist_item import ChecklistItem
@@ -105,6 +106,8 @@ def golden_review_context() -> ReviewContext:
     return ReviewContext(
         base_ref="main",
         head_ref="feature/session-gate",
+        # The dogfood workflow reviews a PR from a base-ref checkout (#2685).
+        checkout=ReviewCheckout.BASE,
         changed_files=golden_changed_files(),
         unified_diff=_UNIFIED_DIFF,
         pr_metadata=PRMetadata(

@@ -38,6 +38,10 @@ class RunCoverage:
             under the #2702 semantics per-file coverage is complete and a
             large PR would otherwise re-review forever. Serialized only when
             True, like ``coverage_limited``.
+        delegated_diff_embedded: True when the delegated ``git diff`` opt-in
+            was ignored for at least one chunk because the provider's bounded
+            read-only tools cannot run it, so the redacted diff was embedded
+            instead (#2685). Not a coverage gap. Serialized only when True.
     """
 
     files_reviewed: int = 0
@@ -48,3 +52,4 @@ class RunCoverage:
     chunks_reviewed: int = 0
     chunks_total: int = 0
     synthesis_degraded: bool = False
+    delegated_diff_embedded: bool = False

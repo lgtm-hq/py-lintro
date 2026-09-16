@@ -16,6 +16,7 @@ from lintro.ai.exceptions import (
     AIAuthenticationError,
     AIProviderError,
     AIRateLimitError,
+    AITurnLimitError,
 )
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.base import (
@@ -69,6 +70,8 @@ async def _with_fallback(
         AIProviderError: If the primary model and all fallbacks fail.
         AIRateLimitError: If the primary model and all fallbacks fail
             with rate-limit errors.
+        AITurnLimitError: When the last attempt stopped at its per-call
+            turn limit; re-raised with its type intact (#2685).
     """
     primary_model = provider.model_name
     models_to_try: list[str | None] = [None]
@@ -95,6 +98,12 @@ async def _with_fallback(
                 effective_model,
             )
         except AIAuthenticationError:
+            raise
+        except AITurnLimitError:
+            # Not a model failure: the agent spent its turn budget. The review
+            # layer owns the single unchanged retry, and trying another model
+            # here would drop this attempt's billed usage from the budget
+            # (#2685).
             raise
         except (AIProviderError, AIRateLimitError) as exc:
             last_error = exc

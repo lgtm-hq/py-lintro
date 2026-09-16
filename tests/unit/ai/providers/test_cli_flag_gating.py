@@ -11,12 +11,16 @@ import json
 import subprocess  # nosec B404 - CompletedProcess objects are constructed to drive the providers under test
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
 
+from lintro.ai import cli_bounds
+from lintro.ai.cli_bounds import CliCallOptions
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AIProviderError, AITurnLimitError
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.cursor.provider import CursorProvider
@@ -158,7 +162,7 @@ async def test_claude_sends_schema_name_when_advertised(_claude_on_path: None) -
     """Send --json-schema-name to a binary whose help advertises it."""
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n",
+        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         calls=calls,
@@ -181,7 +185,7 @@ async def test_claude_omits_schema_name_when_not_advertised(
     """
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>  JSON Schema for structured output\n",
+        help_text="  --json-schema <schema>  JSON Schema for structured output\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         calls=calls,
@@ -201,7 +205,7 @@ async def test_claude_backstop_retries_without_schema_name(
     """Retry without --json-schema-name when help lied about supporting it."""
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n",
+        help_text="  --json-schema <schema>\n  --json-schema-name <name>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         reject="--json-schema-name",
@@ -223,7 +227,7 @@ async def test_claude_below_version_floor_raises(_claude_on_path: None) -> None:
 
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --json-schema <schema>\n",
+        help_text="  --json-schema <schema>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="1.0.88 (Claude Code)",
         calls=calls,
@@ -240,7 +244,7 @@ async def test_claude_durable_session_hooks_reset_resume(_claude_on_path: None) 
     """Resume within a durable session and drop the id when it ends."""
     calls: list[list[str]] = []
     runner = _runner(
-        help_text="  --resume <id>\n",
+        help_text="  --resume <id>\n  --tools <list>\n",
         completion=_CLAUDE_COMPLETION,
         version="2.1.218 (Claude Code)",
         calls=calls,
@@ -561,3 +565,286 @@ async def test_codex_backstop_retries_without_output_schema(
     assert_that(completions[-1]).does_not_contain("--output-schema")
     assert_that(completions[-1][-1]).is_equal_to("-")
     assert_that(response.content).is_equal_to("ok")
+
+
+# -- Anthropic: per-call bounds (#2685) --------------------------------------
+
+_CLAUDE_TURN_LIMITED = json.dumps(
+    {
+        "type": "result",
+        "subtype": "error_max_turns",
+        "is_error": True,
+        "num_turns": 3,
+        "result": "",
+        "session_id": "sess-123",
+        "usage": {"input_tokens": 10, "output_tokens": 4},
+        "total_cost_usd": 0.02,
+    },
+)
+
+
+async def test_claude_bounds_the_call_when_help_advertises_the_flags(
+    _claude_on_path: None,
+) -> None:
+    """Send --tools Read,Grep,Glob and --max-turns to a binary that advertises them (#2685)."""
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        runner = _runner(
+            help_text="  --tools <list>\n  --max-turns <n>\n  --json-schema <schema>\n  --json-schema-name <name>\n",
+            completion=_CLAUDE_COMPLETION,
+            version="2.1.218 (Claude Code)",
+            calls=calls,
+        )
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=runner):
+            await provider.complete("Review this diff", cli_schema=_SCHEMA)
+
+        cmd = _completion_calls(calls)[-1]
+        cmd = _completion_calls(calls)[-1]
+        assert_that(cmd).contains("--tools", "Read,Grep,Glob", "--max-turns", "3")
+        assert_that(cmd.index("--max-turns") + 1).is_equal_to(cmd.index("3"))
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_refuses_a_binary_that_cannot_restrict_tools(
+    _claude_on_path: None,
+) -> None:
+    """Without --tools the read-only bound cannot hold, so the CLI is refused.
+
+    Fail closed (#2685): prompt-injected repository content must never reach a
+    writable tool because an older binary happened to be installed.
+    """
+    from lintro.ai.exceptions import AINotAvailableError
+
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        runner = _runner(
+            help_text="  --json-schema <schema>\n",
+            completion=_CLAUDE_COMPLETION,
+            version="2.1.273",
+            calls=calls,
+        )
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with (
+            patch_cli_exec(side_effect=runner),
+            pytest.raises(AINotAvailableError) as info,
+        ):
+            await provider.complete("Review this", cli_schema=_SCHEMA)
+        assert_that(str(info.value)).contains("--tools", "npm install -g")
+        assert_that(_completion_calls(calls)).is_empty()
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_refuses_when_help_cannot_be_read(
+    _claude_on_path: None,
+) -> None:
+    """An unreadable --help cannot confirm --tools, so the CLI is refused.
+
+    ``supports_flag`` is optimistic on a failed probe, which suits optional
+    flags; the read-only bound must not inherit that optimism (#2685).
+    """
+    from lintro.ai.exceptions import AINotAvailableError
+
+    calls: list[list[str]] = []
+
+    def _run(
+        cmd: list[str],
+        *args: object,
+        **kwargs: object,
+    ) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        if "--version" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "2.1.273", "")
+        if "--help" in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "help crashed")
+        return subprocess.CompletedProcess(cmd, 0, _CLAUDE_COMPLETION, "")
+
+    provider = AnthropicProvider(transport=AITransport.CLI)
+    with (
+        patch_cli_exec(side_effect=_run),
+        pytest.raises(AINotAvailableError) as info,
+    ):
+        await provider.complete("Review this", cli_schema=_SCHEMA)
+    assert_that(str(info.value)).contains("could not be read", "npm install -g")
+    assert_that(_completion_calls(calls)).is_empty()
+
+
+async def test_claude_reports_a_turn_limited_envelope_as_a_turn_limit_error(
+    _claude_on_path: None,
+) -> None:
+    """An error_max_turns envelope raises AITurnLimitError, never a parsed answer (#2685)."""
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        runner = _runner(
+            help_text="  --tools <list>\n  --max-turns <n>\n  --json-schema <schema>\n  --json-schema-name <name>\n",
+            completion=_CLAUDE_TURN_LIMITED,
+            version="2.1.218 (Claude Code)",
+            calls=calls,
+        )
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=runner):
+            with pytest.raises(AITurnLimitError):
+                await provider.complete("Review this diff", cli_schema=_SCHEMA)
+
+        _completion_calls(calls)[-1]
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_renders_tools_and_no_max_turns_without_bounds(
+    _claude_on_path: None,
+) -> None:
+    """A direct provider call without bounds is read-only but turn-unlimited.
+
+    ``--tools`` rides the base argv of every Claude call; only ``--max-turns``
+    comes from the bounds context variable (#2685).
+    """
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json-schema <schema>\n  --tools <list>\n  --max-turns <n>\n",
+        completion=_CLAUDE_COMPLETION,
+        version="2.1.273",
+        calls=calls,
+    )
+    assert_that(cli_bounds.current_cli_call_options()).is_none()
+    provider = AnthropicProvider(model="claude-sonnet-4-6", transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("Review this", cli_schema=_SCHEMA)
+    cmd = _completion_calls(calls)[-1]
+    # Read-only always; only the turn limit depends on bounds being in force.
+    assert_that(cmd).contains("--tools", "Read,Grep,Glob")
+    assert_that(cmd).does_not_contain("--max-turns")
+
+
+async def test_concurrent_claude_calls_each_render_their_own_turn_limit(
+    _claude_on_path: None,
+) -> None:
+    """Task-local bounds: two overlapping calls never see each other's limit."""
+    import asyncio
+
+    from lintro.ai.config import AIConfig
+    from lintro.ai.invoke import call_ai
+
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json-schema <schema>\n  --tools <list>\n  --max-turns <n>\n",
+        completion=_CLAUDE_COMPLETION,
+        version="2.1.273",
+        calls=calls,
+    )
+    provider = AnthropicProvider(model="claude-sonnet-4-6", transport=AITransport.CLI)
+
+    def _config(limit: int) -> AIConfig:
+        return AIConfig.model_validate(
+            {
+                "enabled": True,
+                "transport": "cli",
+                "max_parallel_calls": 2,
+                "transports": {"cli": {"max_turns": limit}},
+            },
+        )
+
+    async def _one(limit: int) -> None:
+        await call_ai(
+            provider=provider,
+            ai_config=_config(limit),
+            user_prompt=f"prompt {limit}",
+            system_prompt=None,
+            budget=None,
+            use_one_shot=True,
+        )
+
+    with patch_cli_exec(side_effect=runner):
+        await asyncio.gather(_one(2), _one(5))
+
+    rendered = sorted(
+        cmd[cmd.index("--max-turns") + 1] for cmd in _completion_calls(calls)
+    )
+    assert_that(rendered).is_equal_to(["2", "5"])
+    for cmd in _completion_calls(calls):
+        assert_that(cmd).contains("--tools", "Read,Grep,Glob")
+
+
+async def test_claude_turn_limit_wins_over_the_exit_code_auth_heuristic(
+    _claude_on_path: None,
+) -> None:
+    """A limited run exits 1 and warns about the login on stderr; it is not auth.
+
+    Claude prints "claude.ai connectors are disabled ... your claude.ai login"
+    on stderr when another auth source is set, and a turn-limited run exits
+    non-zero. Read the envelope first so the run is a turn limit, never an
+    authentication failure (#2685).
+    """
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+
+        def _run(cmd: list[str], *args: object, **kwargs: object) -> Any:
+            calls.append(list(cmd))
+            if "--version" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "2.1.273", "")
+            if "--help" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "  --tools <list>\n", "")
+            return subprocess.CompletedProcess(
+                cmd,
+                1,
+                _CLAUDE_TURN_LIMITED,
+                "claude.ai connectors are disabled because another auth source "
+                "takes precedence over your claude.ai login",
+            )
+
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=_run), pytest.raises(AITurnLimitError) as info:
+            await provider.complete("Review this", cli_schema=_SCHEMA)
+        assert_that(_completion_calls(calls)[-1]).contains("--max-turns", "3")
+        # The stopped call's usage rides on the error for the budget (#2685).
+        assert_that(info.value.input_tokens).is_equal_to(10)
+        assert_that(info.value.output_tokens).is_equal_to(4)
+        assert_that(info.value.cost_estimate).is_equal_to(0.02)
+        assert_that(info.value.turns).is_equal_to(3)
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_does_not_read_a_turn_limit_after_the_backstop_dropped_it(
+    _claude_on_path: None,
+) -> None:
+    """Once --max-turns is stripped, an unrelated error is not a turn limit.
+
+    The count fallback (``is_error`` with ``num_turns`` at the limit) must key
+    on the limit the executed argv carried, not the one requested (#2685).
+    """
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        unrelated = json.dumps(
+            {"is_error": True, "num_turns": 5, "result": "something else broke"},
+        )
+
+        def _run(cmd: list[str], *args: object, **kwargs: object) -> Any:
+            calls.append(list(cmd))
+            if "--version" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "2.1.273", "")
+            if "--help" in cmd:
+                return subprocess.CompletedProcess(cmd, 0, "  --tools <list>\n", "")
+            if "--max-turns" in cmd:
+                return subprocess.CompletedProcess(
+                    cmd,
+                    1,
+                    "",
+                    "error: unknown option '--max-turns'",
+                )
+            return subprocess.CompletedProcess(cmd, 1, unrelated, "")
+
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=_run), pytest.raises(AIProviderError) as info:
+            await provider.complete("Review this", cli_schema=_SCHEMA)
+        assert_that(type(info.value)).is_equal_to(AIProviderError)
+        assert_that(_completion_calls(calls)[-1]).does_not_contain("--max-turns")
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
