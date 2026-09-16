@@ -155,9 +155,10 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     The top-level ``findings_coverage_complete`` / ``coverage_degradations`` /
     ``output_exhaustion_retried`` keys report whether the run's finding depth
     was limited (#2003). An output-exhaustion split or a failed depth pass is
-    a per-chunk limit; an incomplete cross-chunk synthesis pass (#2269) is a
-    whole-run one, and it lands in ``coverage_degradations`` and flips
-    ``findings_coverage_complete`` too. They are always present, so a
+    a per-chunk limit and flips ``findings_coverage_complete``; an incomplete
+    cross-chunk synthesis pass (#2269) is a narrative degradation: it lands in
+    ``coverage_degradations`` and in the ``synthesis`` block but leaves the
+    flag alone (#2702). They are always present, so a
     classifier can tell "the model found N issues" from "the run could not
     look everywhere". There is no per-call findings cap (lintro-ops milestone
     0, decision A).

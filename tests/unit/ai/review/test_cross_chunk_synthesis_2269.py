@@ -886,7 +886,7 @@ def test_provider_failure_degrades_the_run_instead_of_ending_it() -> None:
 
     assert_that(result.metadata.partial).is_false()
     assert_that(_outcome(result=result).failed).is_true()
-    assert_that(result.metadata.findings_coverage_complete).is_false()
+    assert_that(result.metadata.findings_coverage_complete).is_true()
     reasons = [item.reason for item in result.metadata.coverage_degradations]
     assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_FAILED)
 
@@ -900,7 +900,7 @@ def test_unparseable_response_degrades_the_run_instead_of_ending_it() -> None:
 
     assert_that(_outcome(result=result).failed).is_true()
     assert_that(_outcome(result=result).findings_added).is_equal_to(0)
-    assert_that(result.metadata.findings_coverage_complete).is_false()
+    assert_that(result.metadata.findings_coverage_complete).is_true()
     reasons = [item.reason for item in result.metadata.coverage_degradations]
     assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_FAILED)
     note = format_synthesis_note_line(metadata=result.metadata)
@@ -1252,7 +1252,7 @@ def test_a_non_priority_file_that_does_not_fit_ends_the_selection() -> None:
 
 
 def test_a_truncated_pass_degrades_coverage_end_to_end() -> None:
-    """A pass that saw part of the diff says so on every derived surface."""
+    """A pass that saw part of the diff says so, without a partial review."""
     result = _run(
         synthesis=ReviewSynthesisConfig(enabled=True),
         synthesis_diff_budget=1,
@@ -1261,15 +1261,19 @@ def test_a_truncated_pass_degrades_coverage_end_to_end() -> None:
     reasons = [item.reason for item in result.metadata.coverage_degradations]
     assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_TRUNCATED)
     assert_that(_outcome(result=result).truncated).is_true()
-    assert_that(result.metadata.findings_coverage_complete).is_false()
+    assert_that(result.metadata.findings_coverage_complete).is_true()
     assert_that(result.metadata.partial).is_false()
 
     payload = review_result_to_dict(result=result)
     assert_that(payload["synthesis"]["truncated"]).is_true()
     assert_that(payload["synthesis"]["failed"]).is_false()
-    assert_that(payload["findings_coverage_complete"]).is_false()
+    # #2702: findings coverage is per file and stays complete; the cut input
+    # is a narrative degradation carried by the synthesis note (#2269).
+    assert_that(payload["findings_coverage_complete"]).is_true()
+    assert_that(result.metadata.synthesis_degraded).is_true()
     note = format_synthesis_note_line(metadata=result.metadata)
     assert_that(note).contains("less than its whole input")
+    assert_that(note).contains("cross-chunk duplicate merging may be incomplete")
 
 
 # --- (l) the sensitivity policy applies to synthesized findings ---------------
@@ -1658,7 +1662,7 @@ def test_a_non_list_findings_value_is_a_failed_pass(content: str) -> None:
     assert_that(_outcome(result=result).findings_added).is_equal_to(0)
     reasons = [item.reason for item in result.metadata.coverage_degradations]
     assert_that(reasons).contains(CoverageDegradationReason.SYNTHESIS_FAILED)
-    assert_that(result.metadata.findings_coverage_complete).is_false()
+    assert_that(result.metadata.findings_coverage_complete).is_true()
 
 
 def test_an_empty_findings_list_is_an_empty_success() -> None:

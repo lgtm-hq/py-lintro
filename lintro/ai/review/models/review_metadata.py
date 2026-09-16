@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from lintro.ai.review.enums.coverage_degradation_reason import (
+    NARRATIVE_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
@@ -140,21 +141,41 @@ class ReviewMetadata:
 
     @property
     def findings_coverage_complete(self) -> bool:
-        """Return whether the run's finding depth was limited in any way.
+        """Return whether the run's per-file finding depth was limited.
 
-        "Complete" means the run recorded no coverage degradation of any kind
-        — no chunk was split and re-reviewed after output exhaustion, no
-        optional depth pass failed, and no cross-chunk synthesis pass was
-        truncated or failed (#2269). Any entry in ``coverage_degradations``
-        makes this false, including a whole-run one. There is no per-call
-        findings cap to hit (lintro-ops milestone 0, decision A).
+        "Complete" means no chunk was split and re-reviewed after output
+        exhaustion, no file's diff was cut, no split half was lost and no
+        optional depth pass failed. The cross-chunk synthesis reasons do not
+        count (#2702): findings coverage is per file and every file was
+        reviewed at depth whether or not the whole-PR narrative pass saw all
+        of it; a truncated or failed synthesis is a narrative degradation,
+        reported through :attr:`synthesis_degraded` and the synthesis note,
+        because what it can miss is cross-chunk duplicate merging and
+        cross-file findings, not per-file coverage (#2269). There is no
+        per-call findings cap to hit (lintro-ops milestone 0, decision A).
 
         Returns:
-            True when ``coverage_degradations`` is empty. ``partial`` is a
-            separate axis: a run can be complete in coverage depth and still
-            have stopped early.
+            True when ``coverage_degradations`` holds no per-file reason.
+            ``partial`` is a separate axis: a run can be complete in coverage
+            depth and still have stopped early.
         """
-        return not self.coverage_degradations
+        return all(
+            item.reason in NARRATIVE_DEGRADATION_REASONS
+            for item in self.coverage_degradations
+        )
+
+    @property
+    def synthesis_degraded(self) -> bool:
+        """Return whether the cross-chunk synthesis pass was limited.
+
+        Returns:
+            True when the run recorded a truncated or failed synthesis pass
+            (#2702). Orthogonal to :attr:`findings_coverage_complete`.
+        """
+        return any(
+            item.reason in NARRATIVE_DEGRADATION_REASONS
+            for item in self.coverage_degradations
+        )
 
     @property
     def output_exhaustion_retried(self) -> bool:

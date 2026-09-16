@@ -470,9 +470,11 @@ may go unreported.
   synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
   `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
   chunk that was split and whose depth-3 sweep also failed contributes two entries with
-  the same `chunk_index`. `findings_coverage_complete` is the derived "no coverage
-  degradation of any kind" boolean: **any** entry in `coverage_degradations` makes it
-  false, including a synthesis pass that was truncated or did not complete.
+  the same `chunk_index`. `findings_coverage_complete` is the derived "per-file finding
+  depth was not limited" boolean: any per-file entry in `coverage_degradations` makes it
+  false, while the two synthesis reasons do not (#2702): they are narrative
+  degradations, exposed as `ReviewMetadata.synthesis_degraded` and described by the
+  synthesis note.
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.

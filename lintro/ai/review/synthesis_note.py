@@ -37,7 +37,8 @@ def format_synthesis_note(*, metadata: ReviewMetadata) -> str:
     if outcome.failed:
         return (
             f"{SYNTHESIS_NOTE_LABEL} did not complete; the chunk findings "
-            "below are unaffected."
+            "below are unaffected and cross-chunk duplicate merging was not "
+            "applied."
         )
     added = outcome.findings_added
     if added == 0:
@@ -48,8 +49,11 @@ def format_synthesis_note(*, metadata: ReviewMetadata) -> str:
         body = f"added {added} cross-file findings"
     sentence = f"{SYNTHESIS_NOTE_LABEL} {body}."
     if outcome.truncated:
+        # Findings coverage is per file and stays complete; what a cut input
+        # can miss is a duplicate merge or a cross-file finding across the
+        # files it did not see (#2269, #2702).
         sentence += (
-            " Its input was truncated to the whole-PR token budget, so it saw "
-            "less than its whole input."
+            " It saw less than its whole input (whole-PR token budget); "
+            "cross-chunk duplicate merging may be incomplete."
         )
     return sentence

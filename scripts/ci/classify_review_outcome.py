@@ -11,9 +11,10 @@ nothing (#1826). This module is the decision point that fixes that — it maps a
 * **degraded** -- a review was produced and posted, and every eligible file was
   reviewed, but not at full depth: the envelope's
   ``findings_coverage_complete`` is false, so a chunk that was split and
-  re-reviewed after exhausting the provider output limit, an incomplete
-  cross-chunk synthesis pass, or a failed depth-2/3 pass may have suppressed
-  findings (#2395). There is no per-call findings cap (lintro-ops milestone 0,
+  re-reviewed after exhausting the provider output limit or a failed
+  depth-2/3 pass may have suppressed findings (#2395). An incomplete
+  cross-chunk synthesis pass is a narrative degradation and does not clear
+  the flag (#2702). There is no per-call findings cap (lintro-ops milestone 0,
   decision A), so however many findings a chunk returns it stays green. The
   findings are kept; the check goes red and the annotation names every
   recorded reason, because a partial finding set must never read as a clean
@@ -121,10 +122,10 @@ CONVERGED_OUTCOME: Final[str] = "converged"
 # Top-level keys `lintro review` writes for the finding-depth axis (#2003 /
 # #2395). Mirror lintro.ai.review.output.review_result_to_dict; a contract
 # test in tests/scripts/test_classify_review_outcome.py pins the names.
-# ``findings_coverage_complete`` is false whenever the run recorded any
+# ``findings_coverage_complete`` is false whenever the run recorded a per-file
 # coverage degradation -- a chunk split and re-reviewed after exhausting the
-# provider output limit, an incomplete cross-chunk synthesis pass, or a
-# depth-2/3 pass that failed and left the chunk on its main-pass result. No
+# provider output limit, or a depth-2/3 pass that failed and left the chunk on
+# its main-pass result; an incomplete synthesis pass does not clear it. No
 # per-call findings cap exists, so a normal CLI round classifies ``reviewed``.
 DEPTH_COMPLETE_KEY: Final[str] = "findings_coverage_complete"
 DEPTH_DEGRADATIONS_KEY: Final[str] = "coverage_degradations"

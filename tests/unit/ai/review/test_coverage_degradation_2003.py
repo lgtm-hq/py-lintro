@@ -1319,11 +1319,15 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk(
 
     Both whole-run reasons are pinned: exclusion keys on the sentinel chunk
     index, so a reason the aggregators forgot to special-case would inflate
-    the denominator.
+    the denominator. Since #2702 the synthesis reasons are narrative
+    degradations: the coverage sentence no longer carries their clause (the
+    synthesis note does) and they do not make the finding set incomplete on
+    their own; the per-file reason alongside still does.
 
     Args:
         reason: The whole-run degradation reason under test.
-        clause: Wording that reason must contribute to the sentence.
+        clause: Wording that reason used to contribute to the sentence and
+            now must not.
     """
     from lintro.ai.review.coverage_degradation import describe_coverage_degradations
     from lintro.ai.review.models.coverage_degradation import SYNTHESIS_CHUNK_INDEX
@@ -1355,5 +1359,6 @@ def test_synthesis_degradation_is_never_counted_as_a_chunk(
 
     assert_that(text).contains("1 of 1 chunk exhausted the provider output limit")
     assert_that(text).does_not_contain("of 2 chunks")
-    assert_that(text).contains(clause)
+    assert_that(text).does_not_contain(clause)
     assert_that(metadata.findings_coverage_complete).is_false()
+    assert_that(metadata.synthesis_degraded).is_true()
