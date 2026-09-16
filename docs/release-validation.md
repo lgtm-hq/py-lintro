@@ -63,12 +63,15 @@ version of the validation packages is the mapped form.
   on the squash-merge commit): `0.160.3rc1` (first S1 attempt, superseded after #2676),
   `0.160.3rc2` (S1), `0.160.3rc3` (S2) and `0.160.3rc4` (S3; S4 reuses it). One PR and
   one tag per proving scenario; a candidate that fails for a reason outside its scenario
-  is re-cut, never re-run, and its run ids are kept in the fixture's `attempts[]` so
-  they stay meaningful.
-- Approval gates still require a human on the `pypi` and `npm` environments for each
-  candidate: budget two `pypi` approvals per proving rc (the upload job and the npm
-  stage's approval on S1; S2 needs none; S3 one) and one `npm` approval (S1); S4 never
-  reaches an approval because the recovery refuses the prerelease.
+  is re-cut, never retried by hand. The automatic re-runs the pre-0.74.2 auto-rerun made
+  (rc1's second attempt, rc3's first) are not retries of a candidate: they are kept,
+  with the superseded candidate's run ids, in the fixture's `attempts[]` so they stay
+  meaningful.
+- Approval gates still require a human on the `pypi` environment (`pypi-upload`) and the
+  `npm` environment (the npm publish job) for each candidate that reaches them: budget
+  two `pypi` approvals in total (S1 and S3; S2 fails before upload) and one `npm`
+  approval (S1; S3's npm stage fails before its publish job); S4 never reaches an
+  approval because the recovery refuses the prerelease.
 - Set `RELEASE_VALIDATION_CHANNELS=true` before S1 and leave it set until cleanup.
   `RELEASE_FAULT` is unset before S1, set per scenario below, and deleted after S3.
 - `cosign` 2.6 or newer for `--new-bundle-format`, `gh` with the attestation subcommand,

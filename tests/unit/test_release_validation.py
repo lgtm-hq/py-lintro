@@ -297,6 +297,16 @@ def test_s1_green_run_publishes_every_channel_but_homebrew() -> None:
     assert_that(fixture["wall_clock_seconds"]).is_instance_of(int)
     assert_that(fixture["wall_clock_seconds"]).is_greater_than(0)
     assert_that(fixture["recovery"]).is_none()
+    # The superseded rc1 candidate is history, not the recorded run: its
+    # attempts belong to another run id, none of them succeeded, and the
+    # automatic re-run is there next to the attempt it re-ran.
+    attempts = fixture["attempts"]
+    assert_that(attempts).is_not_empty()
+    for attempt in attempts:
+        assert_that(attempt["run_id"]).is_not_equal_to(fixture["run"]["id"])
+        assert_that(attempt["conclusion"]).is_not_equal_to("success")
+    assert_that({attempt["attempt"] for attempt in attempts}).is_equal_to({1, 2})
+    assert_that({attempt["run_id"] for attempt in attempts}).is_length(1)
 
 
 def test_s1_records_the_policy_verification_output() -> None:
@@ -341,6 +351,15 @@ def test_s2_build_failure_publishes_nothing() -> None:
     assert_that(fixture["issues"]["closing_comment"]).is_none()
     assert_that(fixture["wall_clock_seconds"]).is_none()
     assert_that(fixture["recovery"]).is_none()
+    # The recorded attempt is the auto-rerun's; the infra-flake attempt it
+    # re-ran is the same run, an earlier attempt number, and also failed.
+    assert_that(fixture["run"]["attempt"]).is_greater_than(1)
+    attempts = fixture["attempts"]
+    assert_that(attempts).is_length(fixture["run"]["attempt"] - 1)
+    for attempt in attempts:
+        assert_that(attempt["run_id"]).is_equal_to(fixture["run"]["id"])
+        assert_that(attempt["attempt"]).is_less_than(fixture["run"]["attempt"])
+        assert_that(attempt["conclusion"]).is_equal_to("failure")
 
 
 # --- S3 publish failure ------------------------------------------------------
@@ -365,6 +384,9 @@ def test_s3_publish_failure_files_the_issue_and_leaves_npm_empty() -> None:
     assert_that(issue).is_not_none()
     assert issue is not None
     assert_that(issue["url"]).contains("/issues/")
+    # The snapshot is taken at scenario time, before S4's owner close-out.
+    assert_that(issue["state"]).is_equal_to("open")
+    assert_that(fixture["issues"]["closing_comment"]).is_none()
     assert_that(fixture["wall_clock_seconds"]).is_none()
     assert_that(fixture["recovery"]).is_none()
 
