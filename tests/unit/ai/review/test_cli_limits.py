@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.exceptions import AIProviderError
+from lintro.ai.exceptions import (
+    AIAuthenticationError,
+    AIProviderError,
+    AIRateLimitError,
+)
 from lintro.ai.review.cli_limits import (
     CLI_DIFF_HARD_CEILING_BYTES,
     REVIEW_CHUNK_DIFF_TOKEN_BUDGET,
@@ -121,6 +125,79 @@ def test_is_output_exhaustion_error_matches_known_signatures() -> None:
     assert_that(
         is_output_exhaustion_error("upstream proxy error: response truncated"),
     ).is_false()
+
+
+#: The exhaustion prose a Claude CLI envelope quotes verbatim (#1967 fixtures).
+_EXHAUSTED_PROSE = "Claude CLI reported error: maximum output tokens reached"
+
+
+def test_rejected_requests_quoting_exhaustion_prose_are_not_exhaustion() -> None:
+    """A 400 or 429 that mentions output tokens is a refusal, not an overrun.
+
+    Splitting the input cannot repair an invalid ``max_tokens`` parameter or
+    a rate limit, so neither may trigger the split-and-retry path (#2695).
+    """
+    # Codex's case: an invalid-request response whose prose names the cap.
+    assert_that(
+        is_output_exhaustion_error(
+            "400 Bad Request: requested max_tokens exceeds maximum output "
+            "tokens for this model",
+        ),
+    ).is_false()
+    # The Claude CLI's API-error envelope, as the provider now surfaces it.
+    assert_that(
+        is_output_exhaustion_error(
+            "Claude CLI reported error: maximum output tokens for your plan "
+            '({"terminal_reason":"api_error","api_error_status":429})',
+        ),
+    ).is_false()
+    # Vendor error types carry the same verdict without an HTTP status.
+    assert_that(
+        is_output_exhaustion_error(
+            '{"type":"invalid_request_error","message":"max output tokens"}',
+        ),
+    ).is_false()
+    # A 4xx number only counts in status position; token counts and model
+    # names that happen to contain one must not mask a genuine overrun.
+    assert_that(
+        is_output_exhaustion_error(
+            "maximum output tokens reached after 400 tokens of JSON",
+        ),
+    ).is_true()
+    assert_that(
+        is_output_exhaustion_error("claude-4-0429: hit max output tokens"),
+    ).is_true()
+    assert_that(
+        is_output_exhaustion_error("HTTP 429: maximum output tokens for plan"),
+    ).is_false()
+    assert_that(
+        is_output_exhaustion_error("status_code=400 max output tokens invalid"),
+    ).is_false()
+    # The genuine CLI overrun and the structured fields still classify.
+    assert_that(is_output_exhaustion_error(_EXHAUSTED_PROSE)).is_true()
+    assert_that(
+        is_output_exhaustion_error('... "stop_reason": "max_tokens" ...'),
+    ).is_true()
+
+
+def test_typed_provider_errors_are_never_output_exhaustion() -> None:
+    """Rate-limit and auth errors subclass AIProviderError but never split."""
+    from lintro.ai.retry import _is_output_exhausted
+
+    exhausted_budget = AIRateLimitError(
+        "Rate limit retries exhausted. Last provider error: " + _EXHAUSTED_PROSE,
+    )
+    auth = AIAuthenticationError(_EXHAUSTED_PROSE)
+    for error in (exhausted_budget, auth):
+        assert_that(is_cli_output_exhaustion(error)).described_as(
+            type(error).__name__,
+        ).is_false()
+        assert_that(_is_output_exhausted(error=error)).described_as(
+            type(error).__name__,
+        ).is_false()
+    plain = AIProviderError(_EXHAUSTED_PROSE)
+    assert_that(is_cli_output_exhaustion(plain)).is_true()
+    assert_that(_is_output_exhausted(error=plain)).is_true()
 
 
 def test_measure_diff_size_empty_and_multibyte() -> None:

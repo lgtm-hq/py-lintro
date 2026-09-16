@@ -154,7 +154,19 @@ class _AnthropicCliTransport(CliTransport):
                 stage=CLI_ENVELOPE_STAGE,
                 raw=stdout,
             )
-            raise AIProviderError(f"Claude CLI reported error: {cause}")
+            # Keep the envelope's API-error fields next to the prose: they are
+            # what tells a rejected request (400, 429) apart from an answer
+            # that overran the output ceiling, and the output-exhaustion
+            # classifier reads them from the message (#2695).
+            markers = {
+                key: data[key]
+                for key in ("terminal_reason", "api_error_status")
+                if data.get(key) is not None
+            }
+            suffix = (
+                f" ({json.dumps(markers, separators=(',', ':'))})" if markers else ""
+            )
+            raise AIProviderError(f"Claude CLI reported error: {cause}{suffix}")
 
         content = data.get("result", "")
         structured = data.get("structured_output")

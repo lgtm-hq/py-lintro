@@ -119,9 +119,15 @@ def _is_output_exhausted(*, error: BaseException) -> bool:
         error: The provider error the retry loop caught.
 
     Returns:
-        True when the error is a provider error carrying an output-exhaustion
-        signature.
+        True when the error is a plain provider error carrying an
+        output-exhaustion signature. The typed subclasses are never
+        exhaustion: an exhausted rate-limit budget re-raises an
+        ``AIRateLimitError`` that quotes the provider's last message, and
+        splitting the work would multiply load the provider already refused
+        (#2695).
     """
+    if isinstance(error, AIRateLimitError | AIAuthenticationError):
+        return False
     return isinstance(error, AIProviderError) and is_output_exhaustion_error(
         str(error),
     )

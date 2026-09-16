@@ -184,3 +184,50 @@ async def test_error_envelope_evidence_is_never_truncated_to_500_chars(
 
     assert_that(len(envelope)).is_greater_than(500)
     assert_that(str(excinfo.value)).contains(tail)
+
+
+async def test_claude_error_envelope_keeps_its_api_error_markers(
+    _binaries_on_path: None,
+) -> None:
+    """``terminal_reason`` and ``api_error_status`` ride along with the prose.
+
+    The output-exhaustion classifier tells a rejected request apart from an
+    overrun by these fields, so dropping them would let a 429 whose prose
+    mentions output tokens trigger a chunk split (#2695).
+    """
+    provider = _providers()["anthropic"]
+    envelope = json.dumps(
+        {
+            "is_error": True,
+            "terminal_reason": "api_error",
+            "api_error_status": 429,
+            "result": "maximum output tokens for your plan this hour",
+        },
+    )
+
+    with patch_cli_exec() as mock_run:
+        mock_run.return_value = _completed(envelope)
+        with pytest.raises(AIProviderError) as excinfo:
+            await provider.complete("Review this")
+
+    message = str(excinfo.value)
+    assert_that(message).starts_with("Claude CLI reported error: maximum output")
+    assert_that(message).contains('"terminal_reason":"api_error"')
+    assert_that(message).contains('"api_error_status":429')
+
+
+async def test_claude_error_envelope_without_markers_is_unchanged(
+    _binaries_on_path: None,
+) -> None:
+    """A plain error envelope surfaces exactly as before: prose, no suffix."""
+    provider = _providers()["anthropic"]
+    envelope = json.dumps({"is_error": True, "result": "something broke"})
+
+    with patch_cli_exec() as mock_run:
+        mock_run.return_value = _completed(envelope)
+        with pytest.raises(AIProviderError) as excinfo:
+            await provider.complete("Review this")
+
+    assert_that(str(excinfo.value)).is_equal_to(
+        "Claude CLI reported error: something broke",
+    )
