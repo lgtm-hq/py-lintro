@@ -5,7 +5,8 @@ End-to-end failure and recovery validation of the tag pipeline on prerelease tag
 scenario, prove that a green release produces every piece of evidence the
 release-security policy (lgtm-hq/lgtm-ci#962) requires, that a forced build failure
 publishes nothing, that a forced publish-stage failure files the release-failure issue,
-and that the recovery workflow resumes the missing channel with the original artifacts.
+and that the recovery tooling enforces the prerelease exemption (it refuses to resume a
+prerelease; the live resume path is validated on the first stable recovery instead).
 
 The scenario results are recorded as JSON under `tests/fixtures/release-validation/`
 (schema in that directory's README) and asserted by
@@ -258,7 +259,8 @@ Leave the tags, the releases, the PyPI files and the image tags: all immutable b
 policy. Deprecate the validation packages on npm and put the switches back:
 
 ```bash
-for v in 0.160.3-rc.1 0.160.3-rc.2; do
+# Only rc.2 reached npm: rc1's publish was cancelled at the gate, rc3 and rc4 never got there.
+for v in 0.160.3-rc.2; do
   for p in lintro lintro-darwin-arm64 lintro-linux-arm64 lintro-linux-x64; do
     npm deprecate "@lgtm-hq/${p}@${v}" \
       "Release validation build (lgtm-hq/py-lintro#2633); not for use. Install the latest stable."
