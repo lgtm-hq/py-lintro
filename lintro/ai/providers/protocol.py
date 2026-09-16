@@ -86,11 +86,16 @@ class CliBounds:
         max_turns_flag: The flag that carries the per-call turn limit, or
             ``None`` when the binary has no such flag; the limit is then
             documented as unsupported and ignored.
+        shell_available: Whether the bounded agent can still run a shell
+            command (codex's read-only sandbox and cursor's ask mode can;
+            claude's ``--tools Read,Grep,Glob`` cannot). The review pipeline
+            refuses to delegate ``git diff`` to an agent that cannot run it.
     """
 
     read_only_args: tuple[str, ...] = ()
     read_only_in_base_argv: bool = True
     max_turns_flag: str | None = None
+    shell_available: bool = True
 
     @property
     def max_turns_supported(self) -> bool:

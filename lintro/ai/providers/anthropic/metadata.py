@@ -93,6 +93,9 @@ ANTHROPIC_METADATA = ProviderMetadata(
     cli_bounds=CliBounds(
         read_only_args=("--tools", "Read,Grep,Glob"),
         max_turns_flag="--max-turns",
+        # No Bash in that tool set, so a delegated `git diff` prompt could
+        # never be executed; the pipeline embeds the diff instead.
+        shell_available=False,
     ),
     cli_install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
     cli_auth_probe=CliAuthProbe(

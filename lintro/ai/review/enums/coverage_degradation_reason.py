@@ -64,6 +64,12 @@ class CoverageDegradationReason(StrEnum):
             before answering, twice (the call is retried once unchanged). The
             chunk's files are left unreviewed so a later round picks them up,
             and the run is not a complete finding set (#2685).
+        DELEGATED_DIFF_EMBEDDED: The delegated ``git diff`` path was opted
+            into for an oversized chunk, but the provider's bounded read-only
+            tool surface cannot run a command, so the chunk embedded the
+            redacted diff instead (#2685). Not a coverage loss: the embedded
+            path is the default one and records its own truncation; kept so
+            the run shows the opt-in was not honoured.
     """
 
     OUTPUT_EXHAUSTION_RETRIED = auto()
@@ -74,14 +80,24 @@ class CoverageDegradationReason(StrEnum):
     DIFF_TRUNCATED = auto()
     SPLIT_HALF_FAILED = auto()
     TURN_LIMIT_REACHED = auto()
+    DELEGATED_DIFF_EMBEDDED = auto()
 
 
-#: Degradations of the whole-PR narrative pass, not of per-file findings
-#: coverage (#2702). They stay in ``coverage_degradations`` for the record and
-#: the synthesis note, but never make a review "partial".
-NARRATIVE_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
+#: Degradations of the whole-PR synthesis pass (#2702, #2704).
+SYNTHESIS_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
     {
         CoverageDegradationReason.SYNTHESIS_TRUNCATED,
         CoverageDegradationReason.SYNTHESIS_FAILED,
+    },
+)
+
+#: Reasons that are not per-file coverage losses (#2702): the synthesis
+#: degradations and the delegated-diff fallback. They stay in
+#: ``coverage_degradations`` for the record but never make a review "partial"
+#: or its finding coverage incomplete.
+NARRATIVE_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
+    {
+        *SYNTHESIS_DEGRADATION_REASONS,
+        CoverageDegradationReason.DELEGATED_DIFF_EMBEDDED,
     },
 )

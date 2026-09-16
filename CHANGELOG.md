@@ -18,8 +18,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   follows the call's kind (12 for review-type calls, 1 for summary and fix) unless
   `ai.transports.cli.max_turns` overrides it; a call that hits the limit twice records a
   `turn_limit_reached` coverage degradation and leaves the chunk's files for a later
-  round; the review prompt states that the readable tree is the base ref and the diff is
-  authoritative (#2685, lintro-ops milestone 0 step 0.6)
+  round; the review prompt states that the readable tree is the base ref in a PR review
+  and the change itself in an uncommitted review, and that the diff is authoritative;
+  under Claude's shell-less tool surface the delegated `git diff` opt-in is ignored for
+  oversized chunks (redacted diff embedded, recorded as `delegated_diff_embedded` on the
+  run) (#2685, lintro-ops milestone 0 step 0.6)
 
 ### Changed
 

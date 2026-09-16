@@ -1985,6 +1985,14 @@ persistent rate limiting:
 > the diff reaches the provider's backend verbatim**. It defaults to `false`. Enable it
 > only in a controlled, trusted environment, on diffs you have confirmed carry no
 > secrets, and only when delegated retrieval is needed for a very large diff.
+>
+> The delegated path also needs an agent that can run a command. Under the bounded
+> read-only tool surface (see [Bounded CLI calls](#bounded-cli-calls)) Claude's
+> `--tools Read,Grep,Glob` has no shell, so for the `anthropic` provider the opt-in is
+> ignored: an oversized chunk takes the embedded (redacted) path with its usual split
+> and truncation handling, a warning is logged, and the run record carries
+> `delegated_diff_embedded: true`. Codex and Cursor can still run `git diff` in their
+> read-only modes.
 
 ### How much source code fix mode sends
 

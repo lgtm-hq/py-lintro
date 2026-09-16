@@ -8,6 +8,7 @@ coverage over a fixed context before this suite. The #1972 decomposition
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from unittest.mock import patch
 
 import pytest
@@ -135,6 +136,37 @@ def test_build_git_native_review_prompt_matches_golden(chunk_index: int) -> None
     assert_golden(name="prompt_system.golden", actual=system_prompt)
     assert_golden(
         name=f"prompt_git_native_user_chunk_{chunk.id}.golden",
+        actual=user_prompt,
+    )
+
+
+def test_git_native_worktree_prompt_matches_golden() -> None:
+    """The uncommitted-review render pins the post-change tree note.
+
+    ``lintro review --uncommitted`` renders the same template with
+    ``head_ref == "WORKTREE"``, where disk reads show the change itself; the
+    PR-mode goldens above pin the opposite claim (#2685).
+    """
+    context = replace(
+        golden_review_context(),
+        base_ref="0123456789abcdef0123456789abcdef01234567",
+        head_ref="WORKTREE",
+    )
+    _, user_prompt = build_git_native_review_prompt(
+        inputs=PromptInputs(
+            chunk=golden_chunks()[0],
+            context=context,
+            checklist_text=golden_checklist_text(),
+            checklist_count=_CHECKLIST_COUNT,
+            interaction_paths=_INTERACTION_PATHS,
+            lint_results=_LINT_DIGEST,
+            strictness_section=_STRICTNESS,
+        ),
+        embed_diff=True,
+    )
+
+    assert_golden(
+        name="prompt_git_native_user_worktree_chunk_1.golden",
         actual=user_prompt,
     )
 

@@ -171,6 +171,10 @@ async def _parse_call(
         partial,
         files=tuple(request.chunk.files),
         provider_seconds=call.elapsed,
+        coverage_degradations=(
+            *partial.coverage_degradations,
+            *call.coverage_degradations,
+        ),
     )
 
 

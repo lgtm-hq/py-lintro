@@ -31,6 +31,8 @@ __all__ = [
     "REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND",
     "REVIEW_GIT_NATIVE_DIFF_INLINE",
     "REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND",
+    "REVIEW_GIT_NATIVE_TREE_PR_NOTE",
+    "REVIEW_GIT_NATIVE_TREE_WORKTREE_NOTE",
     "REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE",
     "REVIEW_OUTPUT_RULES_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
@@ -71,6 +73,19 @@ REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND = load_prompt_template(
 REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND = load_prompt_template(
     "review",
     "git_native_diff_worktree_command.md",
+)
+
+# What the agent's readable tree holds, per review mode (#2685): a PR review
+# runs on a base-ref checkout (disk is pre-change), an uncommitted review
+# (``head_ref == "WORKTREE"``) runs on the change itself (disk is post-change).
+REVIEW_GIT_NATIVE_TREE_PR_NOTE = load_prompt_template(
+    "review",
+    "git_native_tree_pr.md",
+)
+
+REVIEW_GIT_NATIVE_TREE_WORKTREE_NOTE = load_prompt_template(
+    "review",
+    "git_native_tree_worktree.md",
 )
 
 REVIEW_OUTPUT_SCHEMA = load_prompt_template("review", "output_schema.json")
