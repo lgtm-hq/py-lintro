@@ -497,10 +497,15 @@ class AnthropicProvider(ApiStreamingProvider):
             )
         # Bound the agent per call (#2685): a read-only tool surface and a
         # turn limit, both help-gated so an older binary degrades to today's
-        # unbounded call instead of failing.
-        candidates.append(OptionalArg(flag="--tools", values=(_READ_ONLY_TOOLS,)))
+        # unbounded call instead of failing. ``call_ai`` sets the bounds for
+        # every call kind; a caller that reaches ``complete()`` without them
+        # gets an explicitly unbounded call, with neither flag rendered.
         bounds = current_cli_call_options()
         max_turns = bounds.max_turns if bounds is not None else None
+        if bounds is not None:
+            candidates.append(
+                OptionalArg(flag="--tools", values=(_READ_ONLY_TOOLS,)),
+            )
         if max_turns is not None:
             candidates.append(
                 OptionalArg(flag="--max-turns", values=(str(max_turns),)),

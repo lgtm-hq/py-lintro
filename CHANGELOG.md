@@ -11,6 +11,15 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai/review**: every CLI call is bounded per provider: Claude gets
+  `--tools Read,Grep,Glob` and `--max-turns N` (help-gated optional flags, now in its
+  contract), codex and cursor keep their read-only modes; the limit follows the call's
+  kind (3 for review-type calls, 1 for summary and fix) unless
+  `ai.transports.cli.max_turns` overrides it; a call that hits the limit twice records a
+  `turn_limit_reached` coverage degradation and leaves the chunk's files for a later
+  round; the review prompt states that the readable tree is the base ref and the diff is
+  authoritative (#2685, lintro-ops milestone 0 step 0.6)
+
 ### Changed
 
 ### Deprecated

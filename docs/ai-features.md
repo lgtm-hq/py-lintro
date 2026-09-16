@@ -1438,6 +1438,43 @@ ai:
   transport: api # or "cli"
 ```
 
+### Bounded CLI calls
+
+On the `cli` transport every provider call is a whole agentic session, so lintro bounds
+each one (#2685): the agent gets a read-only tool surface and a turn limit, declared per
+provider in its metadata.
+
+| Provider    | Read-only tools                       | Turn limit                     |
+| ----------- | ------------------------------------- | ------------------------------ |
+| `anthropic` | `--tools Read,Grep,Glob` (help-gated) | `--max-turns N` (help-gated)   |
+| `openai`    | `--sandbox read-only` (always)        | none: `codex exec` has no flag |
+| `cursor`    | `--mode ask` (always)                 | none: `agent` has no flag      |
+
+The limit comes from the call's kind: 3 turns for review-type calls (each chunk's main
+call and its schema-recovery retry, the depth-2 and depth-3 passes, the synthesis pass
+and custom review agents), 1 for the summary and fix calls.
+`ai.transports.cli.max_turns` (int >= 1, default unset) overrides every kind. Both
+Claude flags are optional-contract flags: a binary whose `--help` does not advertise
+them gets today's unbounded call rather than a failed review, and the Tier 1 contract
+check reports the gap. The bounds are set by lintro's call layer for every call kind; a
+caller that drives a provider directly without them gets an explicitly unbounded call,
+with neither flag rendered.
+
+A Claude call that spends its whole turn budget without answering (envelope subtype
+`error_max_turns`, or an error envelope whose `num_turns` reached the limit sent) raises
+a turn-limit error that the retry loop never repeats. The chunk pass retries it once
+unchanged; a second limit records a `turn_limit_reached` coverage degradation, the
+chunk's files are left unreviewed for a later round, and the run is reported as a
+partial finding set with the reason in run details. The review prompt also states that
+the working tree the agent can read is the base ref and that the diff is authoritative.
+
+```yaml
+ai:
+  transports:
+    cli:
+      max_turns: 3 # optional; default is per call kind (3 review, 1 summary/fix)
+```
+
 Both `lintro check` and `lintro review` accept `--transport api|cli` to override the
 config for a single invocation. `lintro review` also accepts `--provider`, `--model`,
 `--review/--no-review`, `--max-cost-usd`, and the repeatable

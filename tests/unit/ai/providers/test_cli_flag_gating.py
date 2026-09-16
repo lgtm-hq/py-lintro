@@ -16,7 +16,10 @@ from unittest.mock import patch
 import pytest
 from assertpy import assert_that
 
+from lintro.ai import cli_bounds
+from lintro.ai.cli_bounds import CliCallOptions
 from lintro.ai.enums import AITransport
+from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.providers.anthropic.provider import AnthropicProvider
 from lintro.ai.providers.cursor.provider import CursorProvider
@@ -561,3 +564,160 @@ async def test_codex_backstop_retries_without_output_schema(
     assert_that(completions[-1]).does_not_contain("--output-schema")
     assert_that(completions[-1][-1]).is_equal_to("-")
     assert_that(response.content).is_equal_to("ok")
+
+
+# -- Anthropic: per-call bounds (#2685) --------------------------------------
+
+_CLAUDE_TURN_LIMITED = json.dumps(
+    {
+        "type": "result",
+        "subtype": "error_max_turns",
+        "is_error": True,
+        "num_turns": 3,
+        "result": "",
+        "session_id": "sess-123",
+        "usage": {"input_tokens": 10, "output_tokens": 0},
+    },
+)
+
+
+async def test_claude_bounds_the_call_when_help_advertises_the_flags(
+    _claude_on_path: None,
+) -> None:
+    """Send --tools Read,Grep,Glob and --max-turns to a binary that advertises them (#2685)."""
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        runner = _runner(
+            help_text="  --tools <list>\n  --max-turns <n>\n  --json-schema <schema>\n  --json-schema-name <name>\n",
+            completion=_CLAUDE_COMPLETION,
+            version="2.1.218 (Claude Code)",
+            calls=calls,
+        )
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=runner):
+            await provider.complete("Review this diff", cli_schema=_SCHEMA)
+
+        cmd = _completion_calls(calls)[-1]
+        cmd = _completion_calls(calls)[-1]
+        assert_that(cmd).contains("--tools", "Read,Grep,Glob", "--max-turns", "3")
+        assert_that(cmd.index("--max-turns") + 1).is_equal_to(cmd.index("3"))
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_omits_the_bounds_when_help_does_not_advertise_them(
+    _claude_on_path: None,
+) -> None:
+    """An older binary keeps today's unbounded call instead of failing (#2685)."""
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        runner = _runner(
+            help_text="  --json-schema <schema>\n  --json-schema-name <name>\n",
+            completion=_CLAUDE_COMPLETION,
+            version="2.1.218 (Claude Code)",
+            calls=calls,
+        )
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=runner):
+            await provider.complete("Review this diff", cli_schema=_SCHEMA)
+
+        cmd = _completion_calls(calls)[-1]
+        cmd = _completion_calls(calls)[-1]
+        assert_that(cmd).does_not_contain("--tools")
+        assert_that(cmd).does_not_contain("--max-turns")
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_reports_a_turn_limited_envelope_as_a_turn_limit_error(
+    _claude_on_path: None,
+) -> None:
+    """An error_max_turns envelope raises AITurnLimitError, never a parsed answer (#2685)."""
+    token = cli_bounds._CURRENT_CALL.set(CliCallOptions(max_turns=3))
+    try:
+        calls: list[list[str]] = []
+        runner = _runner(
+            help_text="  --tools <list>\n  --max-turns <n>\n  --json-schema <schema>\n  --json-schema-name <name>\n",
+            completion=_CLAUDE_TURN_LIMITED,
+            version="2.1.218 (Claude Code)",
+            calls=calls,
+        )
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=runner):
+            with pytest.raises(AITurnLimitError):
+                await provider.complete("Review this diff", cli_schema=_SCHEMA)
+
+        _completion_calls(calls)[-1]
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
+async def test_claude_renders_no_bound_flags_without_bounds_in_force(
+    _claude_on_path: None,
+) -> None:
+    """A call that reaches the provider without bounds is explicitly unbounded."""
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json-schema <schema>\n  --tools <list>\n  --max-turns <n>\n",
+        completion=_CLAUDE_COMPLETION,
+        version="2.1.273",
+        calls=calls,
+    )
+    assert_that(cli_bounds.current_cli_call_options()).is_none()
+    provider = AnthropicProvider(model="claude-sonnet-4-6", transport=AITransport.CLI)
+    with patch_cli_exec(side_effect=runner):
+        await provider.complete("Review this", cli_schema=_SCHEMA)
+    cmd = _completion_calls(calls)[-1]
+    assert_that(cmd).does_not_contain("--tools")
+    assert_that(cmd).does_not_contain("--max-turns")
+
+
+async def test_concurrent_claude_calls_each_render_their_own_turn_limit(
+    _claude_on_path: None,
+) -> None:
+    """Task-local bounds: two overlapping calls never see each other's limit."""
+    import asyncio
+
+    from lintro.ai.config import AIConfig
+    from lintro.ai.invoke import call_ai
+
+    calls: list[list[str]] = []
+    runner = _runner(
+        help_text="  --json-schema <schema>\n  --tools <list>\n  --max-turns <n>\n",
+        completion=_CLAUDE_COMPLETION,
+        version="2.1.273",
+        calls=calls,
+    )
+    provider = AnthropicProvider(model="claude-sonnet-4-6", transport=AITransport.CLI)
+
+    def _config(limit: int) -> AIConfig:
+        return AIConfig.model_validate(
+            {
+                "enabled": True,
+                "transport": "cli",
+                "max_parallel_calls": 2,
+                "transports": {"cli": {"max_turns": limit}},
+            },
+        )
+
+    async def _one(limit: int) -> None:
+        await call_ai(
+            provider=provider,
+            ai_config=_config(limit),
+            user_prompt=f"prompt {limit}",
+            system_prompt=None,
+            budget=None,
+            use_one_shot=True,
+        )
+
+    with patch_cli_exec(side_effect=runner):
+        await asyncio.gather(_one(2), _one(5))
+
+    rendered = sorted(
+        cmd[cmd.index("--max-turns") + 1] for cmd in _completion_calls(calls)
+    )
+    assert_that(rendered).is_equal_to(["2", "5"])
+    for cmd in _completion_calls(calls):
+        assert_that(cmd).contains("--tools", "Read,Grep,Glob")
