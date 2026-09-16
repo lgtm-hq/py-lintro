@@ -351,11 +351,8 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
         plan=plan,
         max_findings=config.max_findings,
     )
-    # Recorded on every outcome so the next truncation is diagnosable from
-    # the review state alone: what the prompt was fitted to, how big it came
-    # out, how many files it carried, and the output ceiling it ran under
-    # (#2702). The CLI transport has no per-call max_tokens; its only ceiling
-    # is the agent's own, so the limit is recorded as unknown there.
+    # Recorded on every outcome so a truncation is diagnosable from the review
+    # state alone (#2702); the CLI transport has no per-call max_tokens.
     record: dict[str, Any] = {
         "input_budget_tokens": diff_budget,
         "prompt_tokens_estimated": (
@@ -389,10 +386,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
         )
         return _failed_pass(truncated=truncated, record=record)
     except AITurnLimitError as exc:
-        logger.warning(
-            "The cross-chunk synthesis pass hit its per-call turn limit; "
-            "keeping the chunk findings and marking the narrative degraded.",
-        )
+        logger.warning("The cross-chunk synthesis pass hit its per-call turn limit.")
         return _failed_pass(
             truncated=truncated,
             input_tokens=exc.input_tokens,
