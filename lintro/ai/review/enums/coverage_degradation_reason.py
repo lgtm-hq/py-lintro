@@ -69,3 +69,14 @@ class CoverageDegradationReason(StrEnum):
     ADVERSARIAL_SWEEP_FAILED = auto()
     DIFF_TRUNCATED = auto()
     SPLIT_HALF_FAILED = auto()
+
+
+#: Degradations of the whole-PR narrative pass, not of per-file findings
+#: coverage (#2702). They stay in ``coverage_degradations`` for the record and
+#: the synthesis note, but never make a review "partial".
+NARRATIVE_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
+    {
+        CoverageDegradationReason.SYNTHESIS_TRUNCATED,
+        CoverageDegradationReason.SYNTHESIS_FAILED,
+    },
+)

@@ -56,6 +56,11 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **ai/review**: a truncated or failed synthesis pass no longer makes a review
+  "partial": `findings_coverage_complete` now tracks per-file finding depth only, so the
+  CI check no longer exits 1 on a complete review whose whole-PR narrative pass saw part
+  of the diff; the synthesis note says that cross-chunk duplicate merging may be
+  incomplete (#2702)
 - **ai/review**: a duplicate merge no longer marks live findings resolved in the
   lifecycle ledger. The survivor carries each finding the merge folded into it, and the
   matcher pairs those prior records to the survivor per record rather than per
