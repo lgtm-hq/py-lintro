@@ -172,8 +172,29 @@ def test_the_synthesis_note_names_the_files_seen_and_the_merge_caveat() -> None:
     note = format_synthesis_note_line(
         metadata=_metadata(CoverageDegradationReason.SYNTHESIS_TRUNCATED),
     )
-    assert_that(note).contains("saw 2 of 5 changed files")
+    assert_that(note).contains("saw 2 of 5 changed files, less than its whole input")
     assert_that(note).contains("cross-chunk duplicate merging may be incomplete")
+    # Every file kept but the digest trimmed: never claim files were dropped.
+    digest_only = ReviewMetadata(
+        model="m",
+        provider="anthropic",
+        context_window=1,
+        depth=1,
+        chunks_total=1,
+        chunks_current=1,
+        files_reviewed=1,
+        files_total=1,
+        checklist_items=0,
+        synthesis=SynthesisOutcome(
+            truncated=True,
+            diff_files_included=5,
+            diff_files_total=5,
+        ),
+    )
+    trimmed = format_synthesis_note_line(metadata=digest_only)
+    assert_that(trimmed).contains("finding digest was trimmed")
+    assert_that(trimmed).contains("less than its whole input")
+    assert_that(trimmed).does_not_contain("of 5 changed files")
     failed = format_synthesis_note_line(
         metadata=_metadata(CoverageDegradationReason.SYNTHESIS_FAILED),
     )

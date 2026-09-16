@@ -52,10 +52,17 @@ def format_synthesis_note(*, metadata: ReviewMetadata) -> str:
         # Findings coverage is per file and stays complete; what a cut input
         # can miss is a duplicate merge or a cross-file finding across the
         # files it did not see (#2269, #2702).
-        if outcome.diff_files_total > 0:
+        if outcome.diff_files_included < outcome.diff_files_total:
             seen = (
                 f"It saw {outcome.diff_files_included} of "
-                f"{outcome.diff_files_total} changed files"
+                f"{outcome.diff_files_total} changed files, less than its whole "
+                "input"
+            )
+        elif outcome.diff_files_total > 0:
+            # Every file's diff was kept; what the budget cut was the finding
+            # digest in front of it.
+            seen = (
+                "Its finding digest was trimmed, so it saw less than its whole " "input"
             )
         else:
             seen = "It saw less than its whole input"
