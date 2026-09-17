@@ -234,48 +234,58 @@ def carry_converted_flags(
     carried: Sequence[FlaggedFile],
     converted: Sequence[FlaggedFile],
 ) -> tuple[FlaggedFile, ...]:
-    """Append cross-chunk flags to the carried set, whether served or not.
+    """Merge cross-chunk flags into the carried set, converted flags first.
 
     A flag converted from a finding on another chunk's file (#2719) is kept
     even when that file was reviewed this run: that review did not have the
-    concern, so the re-read it promises can only happen next run.
+    concern, so the re-read it promises can only happen next run. A fresh
+    converted flag also displaces a carried prior flag on the same path, as
+    a current-run flag always did, so its reason is the one that survives.
 
     Args:
         carried: Flags :func:`carry_unserved_flags` kept for the next run.
         converted: The run's converted cross-chunk flags, in chunk order.
 
     Returns:
-        The carried flags followed by the converted ones not already present.
+        The converted flags (first occurrence per path) followed by the
+        carried flags on other paths.
     """
-    seen = {flag.path for flag in carried}
-    extra: list[FlaggedFile] = []
-    for flag in converted:
+    kept: list[FlaggedFile] = []
+    seen: set[str] = set()
+    for flag in (*converted, *carried):
         if flag.path not in seen:
             seen.add(flag.path)
-            extra.append(flag)
-    return (*carried, *extra)
+            kept.append(flag)
+    return tuple(kept)
 
 
 def unconsume_converted(
     *,
     consumed: Sequence[tuple[str, str]],
     converted: Sequence[FlaggedFile],
+    current_hashes: Mapping[str, str],
 ) -> tuple[tuple[str, str], ...]:
-    """Drop consumed keys for paths that carry a fresh converted flag.
+    """Drop the consumed key a fresh converted flag would otherwise hit.
 
     A served prior flag records ``(path, hash)`` as consumed; if the same run
     converted a new cross-chunk finding on that path into a flag (#2719), the
-    key would make the next run reject the fresh flag as already served.
+    key for the flag's own hash would make the next run reject the fresh flag
+    as already served. Only that key is dropped: consumed keys at other
+    hashes are history and stay.
 
     Args:
         consumed: The consumed keys computed for this run.
         converted: The run's converted cross-chunk flags.
+        current_hashes: Patch hashes of the current diff, per path.
 
     Returns:
-        ``consumed`` without the keys of paths in ``converted``.
+        ``consumed`` without the converted flags' effective keys.
     """
-    paths = {flag.path for flag in converted}
-    return tuple(entry for entry in consumed if entry[0] not in paths)
+    fresh = {
+        (flag.path, flag.patch_hash or current_hashes.get(flag.path, ""))
+        for flag in converted
+    }
+    return tuple(entry for entry in consumed if entry not in fresh)
 
 
 def resolve_run_flags(
@@ -318,5 +328,9 @@ def resolve_run_flags(
     )
     return (
         carry_converted_flags(carried=carried, converted=converted),
-        unconsume_converted(consumed=consumed, converted=converted),
+        unconsume_converted(
+            consumed=consumed,
+            converted=converted,
+            current_hashes=current_hashes,
+        ),
     )

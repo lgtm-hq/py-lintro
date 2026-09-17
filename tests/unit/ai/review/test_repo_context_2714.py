@@ -718,20 +718,27 @@ def test_converted_flags_are_kept_apart_from_model_flags_in_split_halves() -> No
 
 
 def test_a_served_prior_flag_does_not_consume_a_fresh_converted_one() -> None:
-    """The consumed key for a path with a fresh converted flag is dropped."""
+    """Only the fresh flag's own key is dropped; other hashes stay history."""
     from lintro.ai.review.coverage_rounds import (
         carry_converted_flags,
         unconsume_converted,
     )
     from lintro.ai.review.models.flagged_file import FlaggedFile
 
-    prior_served = ("src/pkg/b.py", "hash-b")
+    served_now = ("src/pkg/b.py", "hash-b2")
+    served_before = ("src/pkg/b.py", "hash-b1")
     other = ("src/pkg/c.py", "hash-c")
     fresh = FlaggedFile(path="src/pkg/b.py", reason="other chunk saw a defect")
-    assert_that(
-        unconsume_converted(consumed=(prior_served, other), converted=(fresh,)),
-    ).is_equal_to(
-        (other,),
+    remaining = unconsume_converted(
+        consumed=(served_before, served_now, other),
+        converted=(fresh,),
+        current_hashes={"src/pkg/b.py": "hash-b2"},
     )
-    carried = carry_converted_flags(carried=(), converted=(fresh, fresh))
-    assert_that([f.path for f in carried]).is_equal_to(["src/pkg/b.py"])
+    assert_that(remaining).is_equal_to((served_before, other))
+    # A fresh converted flag displaces a carried prior flag on the same path.
+    prior = FlaggedFile(path="src/pkg/b.py", reason="prior reason")
+    keep = FlaggedFile(path="src/pkg/d.py", reason="unrelated")
+    carried = carry_converted_flags(carried=(prior, keep), converted=(fresh, fresh))
+    assert_that([(f.path, f.reason) for f in carried]).is_equal_to(
+        [("src/pkg/b.py", "other chunk saw a defect"), ("src/pkg/d.py", "unrelated")],
+    )
