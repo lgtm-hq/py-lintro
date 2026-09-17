@@ -715,3 +715,23 @@ def test_converted_flags_are_kept_apart_from_model_flags_in_split_halves() -> No
     merged = merge_half_partials(partials=[half_a, half_b])
     assert_that([f.path for f in merged.flagged_files]).is_equal_to(["x.py"])
     assert_that([f.path for f in merged.converted_flags]).is_equal_to(["y.py"])
+
+
+def test_a_served_prior_flag_does_not_consume_a_fresh_converted_one() -> None:
+    """The consumed key for a path with a fresh converted flag is dropped."""
+    from lintro.ai.review.coverage_rounds import (
+        carry_converted_flags,
+        unconsume_converted,
+    )
+    from lintro.ai.review.models.flagged_file import FlaggedFile
+
+    prior_served = ("src/pkg/b.py", "hash-b")
+    other = ("src/pkg/c.py", "hash-c")
+    fresh = FlaggedFile(path="src/pkg/b.py", reason="other chunk saw a defect")
+    assert_that(
+        unconsume_converted(consumed=(prior_served, other), converted=(fresh,)),
+    ).is_equal_to(
+        (other,),
+    )
+    carried = carry_converted_flags(carried=(), converted=(fresh, fresh))
+    assert_that([f.path for f in carried]).is_equal_to(["src/pkg/b.py"])
