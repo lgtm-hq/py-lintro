@@ -443,6 +443,7 @@ include = [
   "lintro/tools/pydoclint",
   "lintro/tools/pylint",
   "lintro/tools/pytest",
+  "lintro/tools/rubocop",
   "lintro/tools/ruff",
   "lintro/tools/rustfmt",
   "lintro/tools/semgrep",
@@ -791,6 +792,9 @@ ignore_imports = [
   "lintro.tools.pytest.definition -> lintro.plugins.base",                          # owned by #2410
   "lintro.tools.pytest.definition -> lintro.plugins.protocol",                      # owned by #2410
   "lintro.tools.pytest.definition -> lintro.plugins.registry",                      # owned by #2410
+  "lintro.tools.rubocop.definition -> lintro.plugins.base",                         # owned by #2410
+  "lintro.tools.rubocop.definition -> lintro.plugins.protocol",                     # owned by #2410
+  "lintro.tools.rubocop.definition -> lintro.plugins.registry",                     # owned by #2410
   "lintro.tools.ruff.definition -> lintro.plugins.base",                            # owned by #2410
   "lintro.tools.ruff.definition -> lintro.plugins.protocol",                        # owned by #2410
   "lintro.tools.ruff.definition -> lintro.plugins.registry",                        # owned by #2410

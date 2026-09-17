@@ -39,6 +39,7 @@ class ToolName(StrEnum):
     PYDOCLINT = auto()
     PYLINT = auto()
     PYTEST = auto()
+    RUBOCOP = auto()
     RUFF = auto()
     RUSTC = auto()
     RUSTFMT = auto()

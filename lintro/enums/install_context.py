@@ -27,6 +27,7 @@ class PackageManager(StrEnum):
     BREW = auto()
     BUN = auto()
     CARGO = auto()
+    GEM = auto()
     NPM = auto()
     PIP = auto()
     PNPM = auto()
