@@ -8,8 +8,8 @@ Currently supporting the latest stable version:
 
 | Version | Supported |
 | ------- | --------- |
-| 0.164.x | ✅        |
-| < 0.164 | ❌        |
+| 0.165.x | ✅        |
+| < 0.165 | ❌        |
 
 <!-- markdownlint-enable MD060 -->
 

@@ -21,6 +21,17 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.165.0] - 2026-09-17
+
+### Added
+
+- **ai/review**: carry post-change file content and one-hop neighbours in the prompt
+  (#2719) (7aeedfd)
+
+### Changed
+
+- **deps**: pin lgtm-ci to v0.74.5 (#2718) (5961563)
+
 ## [0.164.0] - 2026-09-17
 
 ### Added
