@@ -35,10 +35,12 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.review.cli_limits import is_cli_output_exhaustion
 from lintro.ai.review.context import split_unified_diff_by_file
+from lintro.ai.review.coverage import review_eligible_paths
 from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.finding_parser import reject_context_findings
 from lintro.ai.review.merge import (
     ChunkReviewPartial,
     merge_findings,
@@ -56,7 +58,12 @@ from lintro.ai.review.response_pipeline import (
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["merge_half_partials", "review_chunk_main_pass", "split_chunk"]
+__all__ = [
+    "merge_half_partials",
+    "review_chunk_main_pass",
+    "scope_partial_to_chunk",
+    "split_chunk",
+]
 
 
 def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None:
@@ -130,10 +137,14 @@ def merge_half_partials(
         output_tokens=sum(partial.output_tokens for partial in ordered),
         cost_estimate=sum(partial.cost_estimate for partial in ordered),
         provider_seconds=sum(partial.provider_seconds for partial in ordered),
+        context_tokens=sum(partial.context_tokens for partial in ordered),
         turns=_sum_turns(partials=ordered),
         files=tuple(path for partial in ordered for path in partial.files),
         flagged_files=tuple(
             flag for partial in ordered for flag in partial.flagged_files
+        ),
+        converted_flags=tuple(
+            flag for partial in ordered for flag in partial.converted_flags
         ),
         coverage_degradations=tuple(
             item for partial in ordered for item in partial.coverage_degradations
@@ -172,12 +183,14 @@ async def _parse_call(
         chunk=request.chunk,
         near_lines=request.ai_config.review_diff_gate_lines,
     )
+    partial = scope_partial_to_chunk(partial=partial, request=request)
     # The files this answer actually covered (a half carries only its own),
     # and the call's own wall time for the per-chunk timings.
     return replace(
         partial,
         files=tuple(request.chunk.files),
         provider_seconds=call.elapsed,
+        context_tokens=call.context_tokens,
         coverage_degradations=(
             *partial.coverage_degradations,
             *call.coverage_degradations,
@@ -398,3 +411,43 @@ def _add_turns(*counts: int | None) -> int | None:
     """
     known = [count for count in counts if count is not None]
     return sum(known) if known else None
+
+
+def scope_partial_to_chunk(
+    *,
+    partial: ChunkReviewPartial,
+    request: ChunkReviewRequest,
+) -> ChunkReviewPartial:
+    """Keep only findings on the chunk's own files; the rest become flags.
+
+    The run-level path gate allows any file in the resume queue, so a chunk
+    answering about another queued chunk's file (which the repository context
+    section may have shown it, #2714) would otherwise post a finding the
+    chunk never had the diff for. Findings on other review-eligible files
+    become re-read flags, everything else is dropped, exactly as the run-level
+    gate does but with the chunk's file set as the allowed set (#2719).
+
+    Args:
+        partial: The parsed chunk partial.
+        request: The request that produced it (chunk files, run context).
+
+    Returns:
+        The partial with out-of-chunk findings converted or dropped.
+    """
+    kept, flags = reject_context_findings(
+        findings=partial.findings,
+        allowed_paths=set(request.chunk.files),
+        eligible_paths=set(
+            review_eligible_paths(
+                changed_files=request.context.changed_files,
+                skipped=request.context.skipped_files,
+            ),
+        ),
+    )
+    if len(kept) == len(partial.findings) and not flags:
+        return partial
+    return replace(
+        partial,
+        findings=kept,
+        converted_flags=(*partial.converted_flags, *flags),
+    )

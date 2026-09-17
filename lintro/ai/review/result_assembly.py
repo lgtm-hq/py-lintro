@@ -20,11 +20,10 @@ from typing import TYPE_CHECKING
 from lintro.ai.enums import AITransport
 from lintro.ai.model_pricing import get_context_window
 from lintro.ai.review.coverage import (
-    carry_unserved_flags,
-    consume_served_flags,
     inherit_same_round_paths,
     pending_invalidations_for,
 )
+from lintro.ai.review.coverage_rounds import resolve_run_flags
 from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -202,6 +201,10 @@ def assemble_review_result(
             "prompt": total_input,
             "completion": total_output,
             "total": total_input + total_output,
+            # #2714: prompt tokens spent on the read-only repository context,
+            # a subset of ``prompt`` reported on its own so the before/after
+            # measurement can see what the section cost.
+            "context": sum(item.context_tokens for item in outcome.partials),
         },
         cost_estimate_usd=total_cost,
         base_ref=context.base_ref,
@@ -308,14 +311,14 @@ def assemble_review_result(
         if options.force_full or options.prior_state is None
         else options.prior_state.consumed_flags
     )
-    flagged_files = carry_unserved_flags(
-        new_flags=(*payload_flags, *converted_flags),
+    flagged_files, consumed_flags = resolve_run_flags(
+        payload_flags=payload_flags,
+        converted=(
+            *converted_flags,
+            *(f for item in outcome.partials for f in item.converted_flags),
+        ),
         prior_flags=prior_flags,
-        covered_now=covered_now,
-    )
-    consumed_flags = consume_served_flags(
         prior_consumed=prior_consumed,
-        flags=(*payload_flags, *converted_flags, *prior_flags),
         covered_now=covered_now,
         current_hashes=plan.resume.hashes,
     )

@@ -25,6 +25,8 @@ class RunUsage:
         estimated: True when token counts were estimated locally.
         cost_basis: How ``cost`` should be read (``billed``, ``estimated``,
             or ``unpriceable``) (#1923).
+        context: Prompt tokens spent on the read-only repository context
+            (#2714), a subset of ``prompt``; serialized only when non-zero.
     """
 
     duration: float = 0.0
@@ -34,3 +36,4 @@ class RunUsage:
     cost: float = 0.0
     estimated: bool = False
     cost_basis: str = ""
+    context: int = 0

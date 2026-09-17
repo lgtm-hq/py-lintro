@@ -37,6 +37,10 @@ from lintro.ai.prompts.review import (
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.prompt_redaction import redact_prompt_text
+from lintro.ai.review.repo_context import (
+    RepoContextSection,
+    format_repo_context_section,
+)
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 
@@ -73,6 +77,8 @@ class PromptInputs:
         lint_results: Optional lint digest for prompt injection.
         extra_checklist: Additional generated checklist rows for depth 2.
         strictness_section: Sensitivity instructions for the review pass.
+        repo_context: Post-change file content and one-hop neighbours for the
+            chunk (#2714), rendered read-only; ``None`` renders nothing.
     """
 
     chunk: ReviewChunk
@@ -83,6 +89,7 @@ class PromptInputs:
     lint_results: str | None = None
     extra_checklist: str = ""
     strictness_section: str = ""
+    repo_context: RepoContextSection | None = None
 
 
 def _combined_checklist(*, inputs: PromptInputs) -> tuple[str, int]:
@@ -124,6 +131,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     combined_checklist, checklist_count = _combined_checklist(inputs=inputs)
 
+    boundary = make_boundary_marker()
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
         base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
@@ -131,6 +139,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
         pr_summary=pr_summary,
         deferred_scope_section="",
         external_review_section="",
+        repo_context_section=_repo_context_section(inputs=inputs, boundary=boundary),
         changed_file_count=len(changed_files),
         changed_files=redact_prompt_text(
             text=format_changed_files_for_prompt(files=changed_files),
@@ -146,7 +155,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
         interaction_paths=inputs.interaction_paths,
         checklist_count=checklist_count,
         checklist=combined_checklist,
-        boundary=make_boundary_marker(),
+        boundary=boundary,
         diff=redacted_diff,
         lint_results_section=redact_prompt_text(
             text=format_lint_results_section(digest=inputs.lint_results),
@@ -228,6 +237,7 @@ def build_git_native_review_prompt(
         pr_summary=pr_summary,
         deferred_scope_section="",
         external_review_section="",
+        repo_context_section=_repo_context_section(inputs=inputs, boundary=boundary),
         changed_file_count=len(changed_files),
         changed_files=redact_prompt_text(
             text=format_changed_files_for_prompt(files=changed_files),
@@ -309,3 +319,18 @@ def _tree_note_for(*, context: ReviewContext) -> str:
     ):
         return REVIEW_GIT_NATIVE_TREE_POST_CHANGE_NOTE
     return REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE
+
+
+def _repo_context_section(*, inputs: PromptInputs, boundary: str) -> str:
+    """Render the read-only repository context, or nothing (#2714).
+
+    Args:
+        inputs: Shared prompt material; ``repo_context`` may be ``None``.
+        boundary: The prompt's boundary marker for fencing file bodies.
+
+    Returns:
+        The rendered section, empty when there is no context.
+    """
+    if inputs.repo_context is None:
+        return ""
+    return format_repo_context_section(section=inputs.repo_context, boundary=boundary)

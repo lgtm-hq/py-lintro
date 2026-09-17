@@ -24,7 +24,7 @@ from lintro.ai.prompts.review import (
 )
 from lintro.ai.review import provider_call
 from lintro.ai.review.diff_gate import DiffGate, hunks_from_diff
-from lintro.ai.review.finding_parser import parse_findings
+from lintro.ai.review.finding_parser import parse_findings, reject_context_findings
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.sanitize import make_boundary_marker
@@ -48,6 +48,7 @@ async def run_adversarial_pass(
     budget: CostBudget,
     repo_root: str = "",
     use_one_shot: bool = False,
+    eligible_paths: frozenset[str] = frozenset(),
 ) -> ChunkReviewPartial:
     """Run depth-3 adversarial sweep for missed findings.
 
@@ -59,6 +60,8 @@ async def run_adversarial_pass(
         budget: Session cost budget tracker.
         repo_root: Absolute path to the repository under review.
         use_one_shot: When True, avoid durable provider sessions.
+        eligible_paths: Review-eligible paths of the run; a finding on one
+            of them outside the chunk becomes a re-read flag (#2719).
 
     Returns:
         A partial carrying any additional findings and usage.
@@ -117,10 +120,18 @@ async def run_adversarial_pass(
         near_lines=ai_config.review_diff_gate_lines,
     )
     findings = parse_findings(raw_findings=findings_raw, diff_gate=gate)
-    return ChunkReviewPartial(
+    # Same chunk scope as the main pass (#2719): a sweep finding on another
+    # queued chunk's file becomes a re-read flag, never a posted finding.
+    kept, flags = reject_context_findings(
         findings=findings,
+        allowed_paths=set(chunk.files),
+        eligible_paths=set(eligible_paths),
+    )
+    return ChunkReviewPartial(
+        findings=kept,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
+        converted_flags=flags,
         diff_gate=gate.counts,
     )

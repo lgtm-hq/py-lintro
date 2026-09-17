@@ -38,6 +38,7 @@ from lintro.ai.review.errors_taxonomy import (
     resolve_cause_text,
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.repo_context import RepoContextSource
 
 if TYPE_CHECKING:
     import asyncio
@@ -284,6 +285,12 @@ class ChunkRunPlan:
         max_parallel_calls: Ceiling on concurrently in-flight chunk reviews.
         stop: Optional event set by a SIGTERM/SIGINT handler.
         timings: Optional recorder for per-phase and per-chunk spans (#2148).
+        repo_context: Cached head-side reader for the read-only repository
+            context section (#2714); ``None`` renders no section.
+        context_budget: Effective per-chunk token budget of that section,
+            already clamped to the context-window remainder.
+        diff_ceiling: The window remainder one chunk's diff may fill; a chunk
+            near it gets correspondingly less context.
     """
 
     context: ReviewContext
@@ -304,6 +311,9 @@ class ChunkRunPlan:
     max_parallel_calls: int = 1
     stop: asyncio.Event | None = None
     timings: ReviewTimingRecorder | None = None
+    repo_context: RepoContextSource | None = None
+    context_budget: int = 0
+    diff_ceiling: int = 0
 
 
 def aborted_before_completion(

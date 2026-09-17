@@ -78,6 +78,9 @@ def build_review_user_prompt(
             + f"\n</{boundary}>"
         )
     prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
+        # This builder has no chunk-scoped head reader; the shared inputs
+        # path (prompts.py) renders the repository context (#2714).
+        repo_context_section="",
         pr_title=redact_prompt_text(text=pr_title, source="PR title"),
         base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
         head_ref=redact_prompt_text(text=context.head_ref, source="git refs"),
