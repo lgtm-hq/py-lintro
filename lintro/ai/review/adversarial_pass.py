@@ -132,6 +132,6 @@ async def run_adversarial_pass(
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
-        flagged_files=flags,
+        converted_flags=flags,
         diff_gate=gate.counts,
     )

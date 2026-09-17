@@ -25,6 +25,7 @@ from lintro.ai.review.coverage import (
     inherit_same_round_paths,
     pending_invalidations_for,
 )
+from lintro.ai.review.coverage_rounds import carry_converted_flags
 from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -312,10 +313,13 @@ def assemble_review_result(
         if options.force_full or options.prior_state is None
         else options.prior_state.consumed_flags
     )
-    flagged_files = carry_unserved_flags(
-        new_flags=(*payload_flags, *converted_flags),
-        prior_flags=prior_flags,
-        covered_now=covered_now,
+    flagged_files = carry_converted_flags(
+        carried=carry_unserved_flags(
+            new_flags=(*payload_flags, *converted_flags),
+            prior_flags=prior_flags,
+            covered_now=covered_now,
+        ),
+        converted=tuple(f for item in outcome.partials for f in item.converted_flags),
     )
     consumed_flags = consume_served_flags(
         prior_consumed=prior_consumed,

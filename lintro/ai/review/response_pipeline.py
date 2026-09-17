@@ -58,7 +58,11 @@ from lintro.ai.review.prompts import (
     build_git_native_review_prompt,
     build_review_prompt,
 )
-from lintro.ai.review.repo_context import RepoContextSource, build_repo_context
+from lintro.ai.review.repo_context import (
+    RepoContextSource,
+    build_repo_context,
+    context_allowance,
+)
 from lintro.ai.review.response_recovery import (
     build_schema_reminder_prompt,
     resolve_schema_retry_timeout,
@@ -114,6 +118,9 @@ class ChunkReviewRequest:
         context_budget: Effective token budget of that section, clamped by
             the run plan to the context-window remainder; ``None`` falls back
             to the configured ``review_context_tokens``.
+        diff_ceiling: The window remainder this chunk's diff may fill; when
+            given, the section takes only what the chunk's own diff leaves,
+            so a single-file chunk near the ceiling cannot overrun the window.
     """
 
     chunk: ReviewChunk
@@ -133,6 +140,7 @@ class ChunkReviewRequest:
     chunk_index: int
     repo_context: RepoContextSource | None = None
     context_budget: int | None = None
+    diff_ceiling: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -212,10 +220,11 @@ async def invoke_chunk_review(
                 chunk=request.chunk,
                 context=request.context,
                 source=request.repo_context,
-                budget_tokens=(
-                    request.context_budget
-                    if request.context_budget is not None
-                    else ai_config.review_context_tokens
+                budget_tokens=context_allowance(
+                    budget=request.context_budget,
+                    default_budget=ai_config.review_context_tokens,
+                    diff_ceiling=request.diff_ceiling,
+                    diff=request.chunk.diff,
                 ),
             )
             if request.repo_context is not None

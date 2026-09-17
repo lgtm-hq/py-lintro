@@ -1,8 +1,7 @@
 """Provider calls for one review run, and how the run is finalized (#2301).
 
-Split out of :mod:`lintro.ai.review.orchestrator` (the public facade). Everything
-between "plan resolved" and "outcome assembled" lives here: chunk fan-out,
-custom-agent passes, merge, optional synthesis, and the run finalizers.
+Split out of :mod:`lintro.ai.review.orchestrator` (the public facade): chunk
+fan-out, custom-agent passes, merge, optional synthesis, and the run finalizers.
 
 Every function was moved verbatim (behaviour, timings and graceful-stop
 handling unchanged); see ``docs/architecture/AI-REVIEW-EXECUTION.md``.
@@ -110,6 +109,7 @@ def chunk_run_plan(
         timings=plan.timings,
         repo_context=repo_context_source_for(context=context, ai_config=plan.ai_config),
         context_budget=plan.context_budget,
+        diff_ceiling=plan.diff_ceiling,
     )
 
 

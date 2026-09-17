@@ -27,6 +27,7 @@ flag, never a posted finding. The static precursor of agentic retrieval
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -57,6 +58,7 @@ __all__ = [
     "RepoContextSection",
     "RepoContextSource",
     "build_repo_context",
+    "context_allowance",
     "format_repo_context_section",
     "repo_context_source_for",
 ]
@@ -334,8 +336,21 @@ def format_repo_context_section(
 
 
 def _one_line(path: str) -> str:
-    """Return *path* as a single-line escaped literal."""
-    return path.encode("unicode_escape").decode("ascii")
+    """Return *path* on one line: control characters and backslashes escaped.
+
+    Printable Unicode stays as it is (``café.py`` must read back as the same
+    path when the model reports a finding on it); only characters that could
+    break the line or the label are written as escapes.
+    """
+    out: list[str] = []
+    for char in path:
+        if char == "\\":
+            out.append("\\\\")
+        elif unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"}:
+            out.append(char.encode("unicode_escape").decode("ascii"))
+        else:
+            out.append(char)
+    return "".join(out)
 
 
 def _neighbours(
@@ -392,3 +407,33 @@ def _neighbours(
             if importer not in chunk_set and (importer, "test") not in found:
                 found.append((importer, "importer"))
     return found[:max_neighbours]
+
+
+def context_allowance(
+    *,
+    budget: int | None,
+    default_budget: int,
+    diff_ceiling: int | None,
+    diff: str,
+) -> int:
+    """Return the context tokens one chunk's prompt may carry.
+
+    The run plan's budget is already clamped to the window remainder minus
+    the per-chunk diff *target*, but the chunker lets a single file fill the
+    hard ceiling, so the allowance is re-derived from what this chunk's own
+    diff leaves under that ceiling.
+
+    Args:
+        budget: The plan's clamped budget, ``None`` for the configured default.
+        default_budget: ``ai.review_context_tokens``.
+        diff_ceiling: The window remainder a chunk's diff may fill, ``None``
+            when unknown (the budget then applies as is).
+        diff: This chunk's diff text.
+
+    Returns:
+        The allowance, ``0`` when the diff leaves nothing.
+    """
+    effective = budget if budget is not None else default_budget
+    if diff_ceiling is None:
+        return effective
+    return max(min(effective, diff_ceiling - estimate_tokens(diff)), 0)

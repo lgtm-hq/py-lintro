@@ -289,6 +289,8 @@ class ChunkRunPlan:
             context section (#2714); ``None`` renders no section.
         context_budget: Effective per-chunk token budget of that section,
             already clamped to the context-window remainder.
+        diff_ceiling: The window remainder one chunk's diff may fill; a chunk
+            near it gets correspondingly less context.
     """
 
     context: ReviewContext
@@ -311,6 +313,7 @@ class ChunkRunPlan:
     timings: ReviewTimingRecorder | None = None
     repo_context: RepoContextSource | None = None
     context_budget: int = 0
+    diff_ceiling: int = 0
 
 
 def aborted_before_completion(

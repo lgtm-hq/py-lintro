@@ -16,6 +16,7 @@ from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.patch_hash import normalized_patch_hash
 
 __all__ = [
+    "carry_converted_flags",
     "carry_unserved_flags",
     "consume_served_flags",
     "hashes_for_diffs",
@@ -224,3 +225,30 @@ def hashes_for_diffs(*, diffs: Mapping[str, str]) -> dict[str, str]:
         Path to normalized patch hash.
     """
     return {path: normalized_patch_hash(text) for path, text in diffs.items()}
+
+
+def carry_converted_flags(
+    *,
+    carried: Sequence[FlaggedFile],
+    converted: Sequence[FlaggedFile],
+) -> tuple[FlaggedFile, ...]:
+    """Append cross-chunk flags to the carried set, whether served or not.
+
+    A flag converted from a finding on another chunk's file (#2719) is kept
+    even when that file was reviewed this run: that review did not have the
+    concern, so the re-read it promises can only happen next run.
+
+    Args:
+        carried: Flags :func:`carry_unserved_flags` kept for the next run.
+        converted: The run's converted cross-chunk flags, in chunk order.
+
+    Returns:
+        The carried flags followed by the converted ones not already present.
+    """
+    seen = {flag.path for flag in carried}
+    extra: list[FlaggedFile] = []
+    for flag in converted:
+        if flag.path not in seen:
+            seen.add(flag.path)
+            extra.append(flag)
+    return (*carried, *extra)

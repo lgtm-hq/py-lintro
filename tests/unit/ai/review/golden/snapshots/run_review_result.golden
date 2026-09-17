@@ -186,10 +186,5 @@
   "awaiting_paths": [],
   "awaiting_reasons": [],
   "pending_invalidations": [],
-  "consumed_flags": [
-    [
-      "src/auth/session.py",
-      "034a4a7f8ae64528866571130fc18c8450d6cef86249b2d46f9e0013a1da9e18"
-    ]
-  ]
+  "consumed_flags": []
 }

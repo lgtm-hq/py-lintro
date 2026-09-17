@@ -143,6 +143,9 @@ def merge_half_partials(
         flagged_files=tuple(
             flag for partial in ordered for flag in partial.flagged_files
         ),
+        converted_flags=tuple(
+            flag for partial in ordered for flag in partial.converted_flags
+        ),
         coverage_degradations=tuple(
             item for partial in ordered for item in partial.coverage_degradations
         ),
@@ -446,5 +449,5 @@ def scope_partial_to_chunk(
     return replace(
         partial,
         findings=kept,
-        flagged_files=(*partial.flagged_files, *flags),
+        converted_flags=(*partial.converted_flags, *flags),
     )

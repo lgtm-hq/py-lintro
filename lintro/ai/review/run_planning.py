@@ -71,6 +71,8 @@ class ReviewRunPlan:
             the context-window remainder, #2702).
         context_budget: Effective per-chunk budget of the read-only repository
             context section, clamped to the window remainder (#2714).
+        diff_ceiling: The context-window remainder one chunk's diff may fill;
+            the context section takes only what a chunk's own diff leaves.
         chunks: The chunks the run will review, in plan order.
         chunk_skips: Per-file skips the chunker recorded.
         resume: Resume plan for the current diff.
@@ -93,6 +95,7 @@ class ReviewRunPlan:
     diff_budget: int
     synthesis_diff_budget: int
     context_budget: int = 0
+    diff_ceiling: int = 0
     chunks: list[ReviewChunk]
     chunk_skips: list[SkippedFile]
     resume: ResumePlan
@@ -392,6 +395,7 @@ def plan_run(
         diff_budget=diff_budget,
         synthesis_diff_budget=synthesis_diff_budget,
         context_budget=context_budget,
+        diff_ceiling=hard_diff_ceiling,
         chunks=chunks,
         chunk_skips=chunk_skips,
         resume=resume,

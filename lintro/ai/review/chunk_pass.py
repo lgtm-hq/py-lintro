@@ -131,6 +131,7 @@ async def review_chunk(
             chunk_index=chunk_index,
             repo_context=plan.repo_context,
             context_budget=plan.context_budget,
+            diff_ceiling=plan.diff_ceiling,
         ),
     )
     truncation_degradations: tuple[CoverageDegradation, ...] = (
@@ -205,6 +206,10 @@ async def review_chunk(
                 _add_usage(partial=partial, extra=adversarial),
                 findings=merge_findings(
                     findings_groups=[partial.findings, adversarial.findings],
+                ),
+                converted_flags=(
+                    *partial.converted_flags,
+                    *adversarial.converted_flags,
                 ),
             )
 

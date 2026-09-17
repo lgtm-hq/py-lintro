@@ -11,6 +11,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.provider_enum import AIProvider
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
+from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -615,6 +616,102 @@ async def test_a_chunk_finding_on_another_queued_file_becomes_a_flag() -> None:
     ):
         partial = await review_chunk_main_pass(request=request)
     assert_that([f.title for f in partial.findings]).is_equal_to(["own file"])
-    assert_that([flag.path for flag in partial.flagged_files]).is_equal_to(
+    assert_that(partial.flagged_files).is_empty()
+    assert_that([flag.path for flag in partial.converted_flags]).is_equal_to(
         ["src/pkg/consumer.py"],
     )
+
+
+# --- review round 2 (#2719) ---------------------------------------------------
+
+
+def test_printable_unicode_paths_are_kept_and_control_characters_escaped() -> None:
+    """``café.py`` must read back as the same path; only controls are escaped."""
+    from lintro.ai.review.repo_context import _one_line
+
+    assert_that(_one_line("src/café.py")).is_equal_to("src/café.py")
+    assert_that(_one_line("a\nb.py")).is_equal_to("a\\nb.py")
+    assert_that(_one_line("a\\b.py")).is_equal_to("a\\\\b.py")
+    assert_that(_one_line("a\u2028b.py")).is_equal_to("a\\u2028b.py")
+    section = RepoContextSection(
+        files=(
+            ContextFile(
+                path="src/café.py",
+                role="changed",
+                text="x",
+                windowed=False,
+                tokens=1,
+            ),
+        ),
+        tokens=1,
+    )
+    assert_that(format_repo_context_section(section=section, boundary="B")).contains(
+        "# file: src/café.py — changed",
+    )
+
+
+def test_the_allowance_is_what_the_chunk_diff_leaves_under_the_ceiling() -> None:
+    """A single-file chunk near the hard ceiling gets less context, never more."""
+    from lintro.ai.review.repo_context import context_allowance
+    from lintro.ai.token_budget import estimate_tokens
+
+    diff = _chunk().diff
+    diff_tokens = estimate_tokens(diff)
+    # No ceiling known: the plan budget (or the configured default) applies.
+    assert_that(
+        context_allowance(
+            budget=None,
+            default_budget=6_000,
+            diff_ceiling=None,
+            diff=diff,
+        ),
+    ).is_equal_to(6_000)
+    assert_that(
+        context_allowance(
+            budget=500,
+            default_budget=6_000,
+            diff_ceiling=None,
+            diff=diff,
+        ),
+    ).is_equal_to(500)
+    # The ceiling minus this chunk's own diff caps the allowance.
+    assert_that(
+        context_allowance(
+            budget=6_000,
+            default_budget=6_000,
+            diff_ceiling=diff_tokens + 100,
+            diff=diff,
+        ),
+    ).is_equal_to(100)
+    assert_that(
+        context_allowance(
+            budget=6_000,
+            default_budget=6_000,
+            diff_ceiling=diff_tokens,
+            diff=diff,
+        ),
+    ).is_zero()
+
+
+def test_converted_flags_are_kept_apart_from_model_flags_in_split_halves() -> None:
+    """Merging halves keeps converted flags in their own tuple."""
+    from lintro.ai.review.chunk_split_retry import merge_half_partials
+    from lintro.ai.review.models.flagged_file import FlaggedFile
+
+    half_a = ChunkReviewPartial(
+        findings=(),
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        flagged_files=(FlaggedFile(path="x.py", reason="model asked"),),
+    )
+    half_b = ChunkReviewPartial(
+        findings=(),
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        converted_flags=(FlaggedFile(path="y.py", reason="other chunk"),),
+    )
+    merged = merge_half_partials(partials=[half_a, half_b])
+    assert_that([f.path for f in merged.flagged_files]).is_equal_to(["x.py"])
+    assert_that([f.path for f in merged.converted_flags]).is_equal_to(["y.py"])
