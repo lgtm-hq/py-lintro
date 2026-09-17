@@ -11,6 +11,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.164.0] - 2026-09-17
+
+### Added
+
+- **ai/review**: drop or re-anchor findings outside the chunk diff hunks (#2713)
+  (abbc833)
 - **ai/review**: diff-bounded finding gate: a chunk finding whose line lies outside
   every hunk of the chunk's diff is dropped before the P1 evidence gate, one within
   `ai.review_diff_gate_lines` lines of a hunk (default 3) is re-anchored to the nearest
@@ -21,13 +37,10 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 6e8f529
+  (#2716) (609f1b0)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 7359dfe
+  (#2507) (f128661)
 
 ## [0.163.0] - 2026-09-16
 
