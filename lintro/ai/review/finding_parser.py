@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from loguru import logger
 
+from lintro.ai.review.diff_gate import DiffGate
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.models.finding_occurrence import parse_occurrences
@@ -144,6 +145,7 @@ def parse_findings(
     raw_findings: object,
     source: str = "",
     severity_override: Severity | None = None,
+    diff_gate: DiffGate | None = None,
 ) -> tuple[ReviewFinding, ...]:
     """Parse findings from AI JSON.
 
@@ -157,6 +159,9 @@ def parse_findings(
             declare a severity policy in front matter, and that declared policy
             wins over whatever the model labels an individual finding — it
             also exempts the pass from the P1 evidence gate.
+        diff_gate: Optional diff-bounded gate (#2711). When given, findings
+            outside the chunk's hunks are dropped and near ones re-anchored
+            before the P1 evidence gate; the gate records its counts.
 
     Returns:
         Parsed findings in payload order. Non-mapping entries are dropped.
@@ -221,12 +226,17 @@ def parse_findings(
                 ),
             ),
         )
+    bounded = (
+        diff_gate.apply(findings=tuple(findings))
+        if diff_gate is not None
+        else tuple(findings)
+    )
     if severity_override is not None:
         # An author-declared severity policy is configuration, not model
         # output, so the calibration gate has nothing to correct: downgrading
         # it would silently override the agent's own front matter.
-        return tuple(findings)
-    return apply_p1_evidence_gate(findings=findings)
+        return bounded
+    return apply_p1_evidence_gate(findings=list(bounded))
 
 
 def parse_flagged_files(*, raw_flags: object) -> tuple[FlaggedFile, ...]:

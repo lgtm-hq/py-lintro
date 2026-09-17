@@ -227,6 +227,7 @@ def _outcome(*, result: ReviewResult, totals: RoundTotals) -> RunOutcome:
         p3=counts[Severity.P3],
         questions=sum(1 for finding in result.findings if finding.is_question),
         downgraded=count_downgrades(findings=result.findings),
+        dropped_outside_diff=result.metadata.diff_gate.outside_diff,
         resolved=totals.resolved,
         open_after=totals.open_after,
         narrative=round_narrative(result=result),

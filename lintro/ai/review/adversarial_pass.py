@@ -23,6 +23,7 @@ from lintro.ai.prompts.review import (
     REVIEW_SYSTEM,
 )
 from lintro.ai.review import provider_call
+from lintro.ai.review.diff_gate import DiffGate, hunks_from_diff
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.prompt_redaction import redact_prompt_text
@@ -109,10 +110,17 @@ async def run_adversarial_pass(
         )
 
     findings_raw = payload.get("findings", [])
-    findings = parse_findings(raw_findings=findings_raw)
+    # The sweep answers for the same chunk, so its findings are bounded to
+    # the same hunks (#2711); the counts fold into the chunk partial.
+    gate = DiffGate(
+        hunks=hunks_from_diff(diff=chunk.diff),
+        near_lines=ai_config.review_diff_gate_lines,
+    )
+    findings = parse_findings(raw_findings=findings_raw, diff_gate=gate)
     return ChunkReviewPartial(
         findings=findings,
         input_tokens=response.input_tokens,
         output_tokens=response.output_tokens,
         cost_estimate=response.cost_estimate,
+        diff_gate=gate.counts,
     )

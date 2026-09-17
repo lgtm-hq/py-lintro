@@ -222,6 +222,7 @@ def _add_usage(
         input_tokens=partial.input_tokens + extra.input_tokens,
         output_tokens=partial.output_tokens + extra.output_tokens,
         cost_estimate=partial.cost_estimate + extra.cost_estimate,
+        diff_gate=partial.diff_gate + extra.diff_gate,
     )
 
 

@@ -674,6 +674,26 @@ What it adds to the surfaces:
   _Review coverage completeness_ above) when the input was cut or the pass did not
   complete.
 
+### Diff-bounded findings
+
+Every chunk's findings are bounded to that chunk's diff before the P1 evidence gate
+(#2711, lintro-ops milestone 0 step 0.7). The path gate already drops findings on files
+outside the review scope; this gate checks the **line**: a finding whose `file:line`
+lies inside a hunk of the chunk that produced it (context lines included, which is what
+inline comments accept) is kept; one within `ai.review_diff_gate_lines` lines of a hunk
+(default 3) is re-anchored to the nearest changed line of that hunk; one further away is
+dropped. A finding with no line (a whole-file or deleted-file finding) is kept and
+counted as unanchored, and a finding on a file the chunk's diff does not cover is left
+to the path gate. Secondary occurrences are checked one by one (dropped or re-anchored
+individually); only the primary location decides whether the finding survives.
+
+Nothing is silent: the JSON output carries `findings_dropped_by_reason.outside_diff`,
+`findings_reanchored` and `findings_unanchored`, and the run record carries
+`dropped_outside_diff` when non-zero, so a regression in the model's anchoring shows in
+the numbers before it shows as a thread on an untouched line or an inline-post failure.
+Set `ai.review_diff_gate_lines: 0` to re-anchor nothing (near findings are then dropped
+too).
+
 ### Repository context in the prompt
 
 Every chunk prompt carries, besides the diff, a **read-only repository context section**
@@ -690,8 +710,8 @@ path gate (a finding on a context file becomes a re-read flag, never a posted fi
 are one security bound and are tested verbatim.
 
 `ai.review_context_tokens` (int >= 0, default 6,000) is the per-chunk budget; `0`
-disables the section. The tokens spent on it are reported as `token_usage.context` in the
-JSON output and as `context` on the run record (when non-zero), so the before/after
+disables the section. The tokens spent on it are reported as `token_usage.context` in
+the JSON output and as `context` on the run record (when non-zero), so the before/after
 measurement can see what the section cost. Both transports get the same section; on the
 CLI transport it pre-loads what the agent would otherwise spend read turns on.
 
@@ -1065,6 +1085,12 @@ ai:
   # context window leaves after the prompt overhead. Separate from the chunk
   # budget: the pass is one call over the whole PR. (int >= 1000, default: 24000)
   review_synthesis_diff_tokens: 24000
+
+  # Diff-bounded finding gate (#2711): a finding whose line lies outside every
+  # hunk of the chunk that produced it is dropped and counted; within this many
+  # lines of a hunk it is re-anchored to the nearest changed line instead.
+  # (int >= 0, default: 3; 0 re-anchors nothing)
+  review_diff_gate_lines: 3
 
   # Per-chunk token budget for the read-only repository context the review
   # prompt carries besides the diff (post-change content of the chunk's files,
