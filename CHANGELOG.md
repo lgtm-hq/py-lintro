@@ -25,8 +25,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **ai/review**: drop or re-anchor findings outside the chunk diff hunks (#2713)
-  (abbc833)
 - **ai/review**: diff-bounded finding gate: a chunk finding whose line lies outside
   every hunk of the chunk's diff is dropped before the P1 evidence gate, one within
   `ai.review_diff_gate_lines` lines of a hunk (default 3) is re-anchored to the nearest
