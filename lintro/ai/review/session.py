@@ -287,6 +287,8 @@ class ChunkRunPlan:
         timings: Optional recorder for per-phase and per-chunk spans (#2148).
         repo_context: Cached head-side reader for the read-only repository
             context section (#2714); ``None`` renders no section.
+        context_budget: Effective per-chunk token budget of that section,
+            already clamped to the context-window remainder.
     """
 
     context: ReviewContext
@@ -308,6 +310,7 @@ class ChunkRunPlan:
     stop: asyncio.Event | None = None
     timings: ReviewTimingRecorder | None = None
     repo_context: RepoContextSource | None = None
+    context_budget: int = 0
 
 
 def aborted_before_completion(

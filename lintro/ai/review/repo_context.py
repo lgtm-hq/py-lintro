@@ -27,8 +27,6 @@ flag, never a posted finding. The static precursor of agentic retrieval
 
 from __future__ import annotations
 
-import ast
-import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -36,7 +34,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
+from lintro.ai.review.context_windows import fit_content, hunk_ranges
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.import_graph import importers_of
 from lintro.ai.review.path_utils import (
@@ -68,12 +66,13 @@ __all__ = [
 DEFAULT_CONTEXT_TOKENS = 6_000
 #: Default cap on neighbour files (importers plus sibling tests) per chunk.
 DEFAULT_MAX_NEIGHBOURS = 4
-#: Lines of surrounding content kept around each hunk in a non-Python file.
-_LINE_WINDOW = 30
-#: Lines of context kept around a Python definition window.
-_DEF_PADDING = 2
 #: Hard cap on one file's share so a single large file cannot starve the rest.
 _MAX_FILE_SHARE = 0.6
+#: A head-side blob longer than this is treated as unreadable: it could not
+#: be windowed usefully and would only cost memory and API time.
+_MAX_FILE_CHARS = 400_000
+#: Changed Python files considered as importer candidates, in path order.
+_MAX_IMPORTER_SCAN = 20
 
 #: The instruction the model reads before the context. Part of the security
 #: bound with the path gate: tested verbatim, do not reword casually.
@@ -86,7 +85,6 @@ CONTEXT_INSTRUCTION = (
     "chunk's diff, never on context lines or context files."
 )
 
-_HUNK_HEADER = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@", re.MULTILINE)
 _HEADER_LINE = "### Repository context (read-only, for understanding only)"
 
 #: Reads one repository file at the head revision; ``None`` when unavailable.
@@ -117,10 +115,14 @@ class RepoContextSource:
         """
         if path not in self.cache:
             try:
-                self.cache[path] = self.reader(path)
+                content = self.reader(path)
             except Exception as exc:
                 logger.debug("Repo context read failed for {}: {}", path, exc)
-                self.cache[path] = None
+                content = None
+            if content is not None and len(content) > _MAX_FILE_CHARS:
+                logger.debug("Repo context skips {} ({} chars)", path, len(content))
+                content = None
+            self.cache[path] = content
         return self.cache[path]
 
 
@@ -232,7 +234,12 @@ def build_repo_context(
     ]
     if not chunk_sources:
         return RepoContextSection()
-    hunks = _hunk_ranges(diff=chunk.diff)
+    # Neighbours are windowed around their own hunks in the PR diff; the
+    # chunk's files keep the chunk diff's ranges (the same, but authoritative).
+    hunks = {
+        **hunk_ranges(diff=context.unified_diff),
+        **hunk_ranges(diff=chunk.diff),
+    }
     candidates: list[tuple[str, str]] = [(path, "changed") for path in chunk_sources]
     candidates.extend(
         _neighbours(
@@ -256,7 +263,7 @@ def build_repo_context(
             skipped.append(path)
             continue
         allowance = min(remaining, share)
-        text, windowed = _fit(
+        text, windowed = fit_content(
             path=path,
             content=content,
             hunks=hunks.get(path, ()),
@@ -305,20 +312,30 @@ def format_repo_context_section(
     if section.empty:
         return ""
     parts = [_HEADER_LINE, "", CONTEXT_INSTRUCTION, ""]
+    # Every repository-derived byte, file names included, sits inside the
+    # boundary: git permits newlines in paths, so a name rendered outside the
+    # fence could carry prompt text. Names are escaped to one line as well.
     for item in section.files:
         note = " (windows around the changed hunks)" if item.windowed else ""
-        parts.append(f"**{item.path}** — {item.role}{note}")
-        parts.append("")
         parts.append(f"<{boundary}>")
+        parts.append(f"# file: {_one_line(item.path)} — {item.role}{note}")
         parts.append(item.text.rstrip("\n"))
         parts.append(f"</{boundary}>")
         parts.append("")
     if section.skipped:
+        parts.append(f"<{boundary}>")
         parts.append(
-            "Not shown (budget or unreadable at head): " + ", ".join(section.skipped),
+            "# not shown (budget or unreadable at head): "
+            + ", ".join(_one_line(path) for path in section.skipped),
         )
+        parts.append(f"</{boundary}>")
         parts.append("")
     return "\n".join(parts).rstrip("\n") + "\n"
+
+
+def _one_line(path: str) -> str:
+    """Return *path* as a single-line escaped literal."""
+    return path.encode("unicode_escape").decode("ascii")
 
 
 def _neighbours(
@@ -357,10 +374,14 @@ def _neighbours(
     python_changed = {path for path in changed if path.endswith((".py", ".pyi"))}
     targets = {path for path in chunk_paths if path in python_changed}
     if targets:
+        # Bounded: at most a fixed number of candidate importers are read,
+        # in path order, so a wide PR cannot turn neighbour discovery into a
+        # read of every file it touches.
+        candidates = sorted(path for path in python_changed if path not in chunk_set)
         contents = {
             path: text
-            for path in python_changed
-            if path not in chunk_set and (text := source.read(path)) is not None
+            for path in candidates[:_MAX_IMPORTER_SCAN]
+            if (text := source.read(path)) is not None
         }
         importers = importers_of(
             changed_paths=python_changed,
@@ -371,112 +392,3 @@ def _neighbours(
             if importer not in chunk_set and (importer, "test") not in found:
                 found.append((importer, "importer"))
     return found[:max_neighbours]
-
-
-def _hunk_ranges(*, diff: str) -> dict[str, tuple[tuple[int, int], ...]]:
-    """Return per-file new-side hunk line ranges of a unified diff."""
-    ranges: dict[str, tuple[tuple[int, int], ...]] = {}
-    for path, section in split_unified_diff_by_file(unified_diff=diff).items():
-        spans = []
-        for match in _HUNK_HEADER.finditer(section):
-            start = int(match.group(1))
-            count = int(match.group(2)) if match.group(2) is not None else 1
-            spans.append((start, start + max(count, 1) - 1))
-        if spans:
-            ranges[path] = tuple(spans)
-    return ranges
-
-
-def _fit(
-    *,
-    path: str,
-    content: str,
-    hunks: tuple[tuple[int, int], ...],
-    allowance: int,
-) -> tuple[str, bool]:
-    """Return the whole file when it fits, else windows around the hunks."""
-    if estimate_tokens(content) <= allowance:
-        return content, False
-    lines = content.splitlines()
-    if not hunks:
-        return "", True
-    spans = (
-        _python_definition_spans(content=content, hunks=hunks, total=len(lines))
-        if path.endswith((".py", ".pyi"))
-        else None
-    ) or [
-        (max(1, start - _LINE_WINDOW), min(len(lines), end + _LINE_WINDOW))
-        for start, end in hunks
-    ]
-    text = _render_spans(lines=lines, spans=_merge_spans(spans))
-    # A window set that still does not fit shrinks to the hunks themselves.
-    if estimate_tokens(text) > allowance:
-        tight = _merge_spans(
-            [
-                (max(1, s - _DEF_PADDING), min(len(lines), e + _DEF_PADDING))
-                for s, e in hunks
-            ],
-        )
-        text = _render_spans(lines=lines, spans=tight)
-    return text, True
-
-
-def _python_definition_spans(
-    *,
-    content: str,
-    hunks: tuple[tuple[int, int], ...],
-    total: int,
-) -> list[tuple[int, int]] | None:
-    """Return the enclosing function/class spans around each hunk, if parseable."""
-    try:
-        tree = ast.parse(content)
-    except (SyntaxError, ValueError):
-        return None
-    spans: list[tuple[int, int]] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            continue
-        end = getattr(node, "end_lineno", None) or node.lineno
-        start = min((d.lineno for d in node.decorator_list), default=node.lineno)
-        if any(hs <= end and he >= start for hs, he in hunks):
-            # Prefer the innermost definition: classes are only kept when the
-            # hunk is not inside one of their methods.
-            if isinstance(node, ast.ClassDef) and any(
-                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and any(
-                    hs <= (child.end_lineno or child.lineno) and he >= child.lineno
-                    for hs, he in hunks
-                )
-                for child in node.body
-            ):
-                continue
-            spans.append((max(1, start - _DEF_PADDING), min(total, end + _DEF_PADDING)))
-    # A hunk outside every definition (module level) keeps a line window.
-    for hs, he in hunks:
-        if not any(s <= hs and e >= he for s, e in spans):
-            spans.append((max(1, hs - _DEF_PADDING), min(total, he + _DEF_PADDING)))
-    return spans or None
-
-
-def _merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Merge overlapping or adjacent line spans, in order."""
-    merged: list[tuple[int, int]] = []
-    for start, end in sorted(spans):
-        if merged and start <= merged[-1][1] + 1:
-            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
-        else:
-            merged.append((start, end))
-    return merged
-
-
-def _render_spans(*, lines: list[str], spans: list[tuple[int, int]]) -> str:
-    """Render numbered line spans separated by ellipsis markers."""
-    out: list[str] = []
-    for index, (start, end) in enumerate(spans):
-        if index:
-            out.append("…")
-        out.append(f"# lines {start}-{end}")
-        out.extend(
-            f"{number:>5}| {lines[number - 1]}" for number in range(start, end + 1)
-        )
-    return "\n".join(out) + "\n"

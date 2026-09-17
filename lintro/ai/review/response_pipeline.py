@@ -111,6 +111,9 @@ class ChunkReviewRequest:
             any recorded coverage degradation.
         repo_context: Cached head-side reader for the read-only repository
             context section (#2714); ``None`` renders no section.
+        context_budget: Effective token budget of that section, clamped by
+            the run plan to the context-window remainder; ``None`` falls back
+            to the configured ``review_context_tokens``.
     """
 
     chunk: ReviewChunk
@@ -129,6 +132,7 @@ class ChunkReviewRequest:
     diff_budget: int
     chunk_index: int
     repo_context: RepoContextSource | None = None
+    context_budget: int | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -208,7 +212,11 @@ async def invoke_chunk_review(
                 chunk=request.chunk,
                 context=request.context,
                 source=request.repo_context,
-                budget_tokens=ai_config.review_context_tokens,
+                budget_tokens=(
+                    request.context_budget
+                    if request.context_budget is not None
+                    else ai_config.review_context_tokens
+                ),
             )
             if request.repo_context is not None
             else None

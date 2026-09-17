@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 from lintro.ai.review.adversarial_pass import run_adversarial_pass
 from lintro.ai.review.checklist_pass import generate_extra_checklist
 from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
+from lintro.ai.review.coverage import review_eligible_paths
 from lintro.ai.review.depth_degradation import run_degradable_depth_pass
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -129,6 +130,7 @@ async def review_chunk(
             diff_budget=plan.diff_budget,
             chunk_index=chunk_index,
             repo_context=plan.repo_context,
+            context_budget=plan.context_budget,
         ),
     )
     truncation_degradations: tuple[CoverageDegradation, ...] = (
@@ -179,6 +181,12 @@ async def review_chunk(
                     budget=plan.budget,
                     repo_root=plan.repo_root,
                     use_one_shot=plan.use_one_shot,
+                    eligible_paths=frozenset(
+                        review_eligible_paths(
+                            changed_files=plan.context.changed_files,
+                            skipped=plan.context.skipped_files,
+                        ),
+                    ),
                 ),
                 reason=CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
                 chunk_index=chunk_index,
