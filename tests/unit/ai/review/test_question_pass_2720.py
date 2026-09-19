@@ -205,7 +205,7 @@ async def test_the_prompt_carries_title_body_files_and_diff() -> None:
     seam = AsyncMock(return_value=_response(content=_questions_payload("Q?")))
 
     with patch("lintro.ai.review.provider_call.call_ai", new=seam):
-        await generate_run_questions(
+        questions = await generate_run_questions(
             context=_context(files=("a.py", "b.py")),
             provider=_provider(),
             ai_config=AIConfig(enabled=True, review=True),
@@ -213,6 +213,8 @@ async def test_the_prompt_carries_title_body_files_and_diff() -> None:
             diff_budget=10_000,
         )
 
+    assert_that(questions.lines).is_equal_to(("G1. Q?",))
+    assert_that(questions.diff_trimmed).is_false()
     prompt = seam.call_args.kwargs["user_prompt"]
     assert_that(prompt).contains("Rename the default")
     assert_that(prompt).contains("Callers must pass retries now.")
