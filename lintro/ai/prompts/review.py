@@ -28,7 +28,6 @@ __all__ = [
     "REVIEW_CUSTOM_AGENT_SYSTEM",
     "REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE",
     "REVIEW_GENERATE_QUESTIONS_TEMPLATE",
-    "REVIEW_RUBRIC",
     "REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND",
     "REVIEW_GIT_NATIVE_DIFF_INLINE",
     "REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND",
@@ -38,6 +37,7 @@ __all__ = [
     "REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE",
     "REVIEW_OUTPUT_RULES_TEMPLATE",
     "REVIEW_OUTPUT_SCHEMA",
+    "REVIEW_RUBRIC",
     "REVIEW_SCHEMA_REMINDER_TEMPLATE",
     "REVIEW_SYNTHESIS_SYSTEM_PROMPT",
     "REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE",
@@ -356,7 +356,7 @@ def format_lint_results_section(*, digest: str | None) -> str:
     return f"<lint_results>\n{digest.strip()}\n</lint_results>"
 
 
-def format_output_rules(*, checklist_count: int) -> str:
+def format_output_rules() -> str:
     """Render the shared output rules block for a review prompt.
 
     Both the diff-embedded and git-native review prompts require the exact
@@ -364,14 +364,10 @@ def format_output_rules(*, checklist_count: int) -> str:
     never drift apart. No per-call findings ceiling is written into the rules:
     a chunk reports every finding it has (lintro-ops milestone 0, decision A).
 
-    Args:
-        checklist_count: Number of checklist items the model must answer.
-
     Returns:
         The rendered rules block.
     """
     return REVIEW_OUTPUT_RULES_TEMPLATE.format(
-        checklist_count=checklist_count,
         label_blocked=VERDICT_LABELS[ReviewVerdict.BLOCKED],
         label_changes_requested=VERDICT_LABELS[ReviewVerdict.CHANGES_REQUESTED],
         label_nits_only=VERDICT_LABELS[ReviewVerdict.NITS_ONLY],

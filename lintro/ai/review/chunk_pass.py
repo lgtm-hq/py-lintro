@@ -80,7 +80,6 @@ async def review_chunk(
     # The per-PR questions are generated once per run and shared (#2720);
     # depth 2 no longer spends a call per chunk on them.
     extra_checklist = plan.generated_questions
-    depth_degradations: tuple[CoverageDegradation, ...] = ()
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
     # Gate before the main provider call so intra-chunk (depth-2/3) work
     # cannot overshoot the budget between the per-chunk checks.
@@ -134,7 +133,6 @@ async def review_chunk(
         ),
         truncated=chunk.truncated,
         coverage_degradations=(
-            *depth_degradations,
             *truncation_degradations,
             *main_pass.coverage_degradations,
         ),

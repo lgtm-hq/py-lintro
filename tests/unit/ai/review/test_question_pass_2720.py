@@ -188,13 +188,63 @@ def test_files_are_kept_whole_in_path_order_until_one_does_not_fit() -> None:
     assert_that(diff).does_not_contain("c.py")
 
 
-def test_a_diff_with_no_file_headers_is_all_or_nothing() -> None:
-    """A diff the splitter cannot section is embedded whole or dropped."""
+def test_a_diff_with_no_file_headers_is_one_file_kept_or_dropped() -> None:
+    """A diff the splitter cannot section counts as one file."""
     fits = fit_diff_to_budget(unified_diff="+x\n", diff_budget=10_000)
     dropped = fit_diff_to_budget(unified_diff="+x\n" * 100, diff_budget=1)
+    empty = fit_diff_to_budget(unified_diff="", diff_budget=1)
 
-    assert_that(fits).is_equal_to(("+x\n", 0, 0))
-    assert_that(dropped).is_equal_to(("", 0, 0))
+    assert_that(fits).is_equal_to(("+x\n", 1, 1))
+    assert_that(dropped).is_equal_to(("", 0, 1))
+    assert_that(empty).is_equal_to(("", 0, 0))
+
+
+@pytest.mark.parametrize(
+    ("unified_diff", "expected_note"),
+    [
+        (
+            _FILE_A + _FILE_B,
+            "(trimmed to the first 0 of 2 changed files to fit the budget)",
+        ),
+        ("+x\n" * 100, "(trimmed to the first 0 of 1 changed files to fit the budget)"),
+    ],
+    ids=["sectioned", "headerless"],
+)
+async def test_a_diff_dropped_whole_is_reported_as_trimmed(
+    unified_diff: str,
+    expected_note: str,
+) -> None:
+    """A budget too small for any file still says the model saw none of it.
+
+    Args:
+        unified_diff: The PR diff, sectioned or not.
+        expected_note: The trimming note the prompt must carry.
+    """
+    seam = AsyncMock(return_value=_response(content=_questions_payload("Q?")))
+    context = _context(files=("a.py", "b.py"))
+    context = ReviewContext(
+        base_ref=context.base_ref,
+        head_ref=context.head_ref,
+        changed_files=context.changed_files,
+        unified_diff=unified_diff,
+        pr_metadata=context.pr_metadata,
+    )
+
+    with patch("lintro.ai.review.provider_call.call_ai", new=seam):
+        questions = await generate_run_questions(
+            context=context,
+            provider=_provider(),
+            ai_config=AIConfig(enabled=True, review=True),
+            budget=CostBudget(max_cost_usd=None),
+            diff_budget=1,
+        )
+
+    prompt = seam.call_args.kwargs["user_prompt"]
+    assert_that(prompt).contains(expected_note)
+    assert_that(prompt).does_not_contain("+aa")
+    assert_that(questions.diff_trimmed).is_true()
+    assert_that(questions.files_seen).is_equal_to(0)
+    assert_that(questions.failed).is_false()
 
 
 # --- the generator call ------------------------------------------------------
@@ -221,7 +271,6 @@ async def test_the_prompt_carries_title_body_files_and_diff() -> None:
     assert_that(prompt).contains("`a.py`", "`b.py`")
     assert_that(prompt).contains(_FILE_B.strip())
     assert_that(prompt).does_not_contain("trimmed to the first")
-    assert_that(seam.call_args.kwargs["use_one_shot"]).is_false()
 
 
 async def test_a_trimmed_diff_says_so_in_the_prompt_and_the_result() -> None:
@@ -390,7 +439,7 @@ def test_folding_into_no_partials_is_a_no_op() -> None:
 
 
 def _chunk(*, path: str) -> ReviewChunk:
-    """Build a one-file chunk.
+    """Build a one-file chunk numbered like ``resolve_review_chunks`` would.
 
     Args:
         path: The chunk's file.
@@ -400,7 +449,7 @@ def _chunk(*, path: str) -> ReviewChunk:
     """
     sections = {"a.py": _FILE_A, "b.py": _FILE_B}
     return ReviewChunk(
-        id=1,
+        id=list(sections).index(path) + 1,
         files=[path],
         diff=sections[path],
         relationship="single-file",
@@ -508,6 +557,8 @@ async def test_the_pass_runs_once_per_run_and_every_chunk_shares_it(
     prompts = _prompts(seam)
     assert_that(prompts).is_length(3)
     assert_that(prompts[0]).contains("Rename the default")
+    # The pass never reuses the review's durable session (#2720).
+    assert_that(seam.call_args_list[0].kwargs["use_one_shot"]).is_true()
     for chunk_prompt in prompts[1:]:
         assert_that(chunk_prompt).contains(
             "### Questions for this change",
@@ -591,3 +642,42 @@ async def test_a_cost_cap_stop_on_the_question_call_ends_the_run_as_partial(
     assert_that(result.metadata.stopped_reason).contains("cost cap")
     assert_that(result.metadata.chunks_reviewed).is_equal_to(0)
     assert_that(result.metadata.coverage_degradations).is_empty()
+
+
+async def test_a_run_stopped_after_the_pass_still_reports_it(
+    tmp_path: Path,
+) -> None:
+    """A cost cap tripping in the fan-out keeps the questions and their usage.
+
+    The pass ran and was paid for before the stop; the partial run must carry
+    its questions, charge its tokens, and keep a failed pass's degradation.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    seam = _scripted_seam(
+        _response(content=_questions_payload("Q?")),
+        _main_pass_response(),
+        AICostBudgetExceededError("cost cap reached"),
+    )
+
+    result = await _run(tmp_path=tmp_path, call_ai=seam)
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(1)
+    assert_that(result.metadata.generated_questions).is_equal_to(("G1. Q?",))
+    # 10 (question call) + 10 (the one completed chunk).
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(20)
+
+    failed = _scripted_seam(
+        AIProviderError("question generator timed out"),
+        _main_pass_response(),
+        AICostBudgetExceededError("cost cap reached"),
+    )
+
+    stopped = await _run(tmp_path=tmp_path, call_ai=failed)
+
+    assert_that(stopped.metadata.partial).is_true()
+    assert_that(
+        [item.reason for item in stopped.metadata.coverage_degradations],
+    ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])

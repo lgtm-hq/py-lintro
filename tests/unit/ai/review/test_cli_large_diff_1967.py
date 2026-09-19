@@ -238,7 +238,7 @@ def test_cli_chunk_threshold_routes_large_diff_through_chunker() -> None:
 
 def test_output_rules_state_there_is_no_findings_cap() -> None:
     """The prompt contract tells the model to report every finding it has."""
-    rules = format_output_rules(checklist_count=4)
+    rules = format_output_rules()
 
     assert_that(rules).contains("There is no cap on findings")
     assert_that(rules.lower()).does_not_contain("cap `findings` at")

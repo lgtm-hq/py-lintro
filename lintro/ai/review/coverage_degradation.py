@@ -194,6 +194,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         CoverageDegradationReason.DIFF_TRUNCATED,
         CoverageDegradationReason.SPLIT_HALF_FAILED,
         CoverageDegradationReason.TURN_LIMIT_REACHED,
+        CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
         *_DEPTH_PASS_CLAUSES,
     }
     other = sorted(

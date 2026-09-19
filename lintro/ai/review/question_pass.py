@@ -98,7 +98,9 @@ def fit_diff_to_budget(*, unified_diff: str, diff_budget: int) -> tuple[str, int
 
     Files are taken whole in path order until the next one would not fit;
     the first file that does not fit ends the selection so the model never
-    reads a diff that stops mid-hunk.
+    reads a diff that stops mid-hunk. A diff with no ``diff --git`` headers
+    cannot be sectioned, so it counts as one file: kept whole when it fits,
+    dropped whole (and reported as such) when it does not.
 
     Args:
         unified_diff: The PR's unified diff.
@@ -107,13 +109,13 @@ def fit_diff_to_budget(*, unified_diff: str, diff_budget: int) -> tuple[str, int
     Returns:
         The selected diff text, the number of files kept and the total.
     """
+    if not unified_diff:
+        return "", 0, 0
     sections = split_unified_diff_by_file(unified_diff=unified_diff)
     if not sections:
-        return (
-            unified_diff if estimate_tokens(unified_diff) <= diff_budget else "",
-            0,
-            0,
-        )
+        if estimate_tokens(unified_diff) <= diff_budget:
+            return unified_diff, 1, 1
+        return "", 0, 1
     kept: list[str] = []
     used = 0
     for path in sorted(sections):
@@ -195,7 +197,9 @@ async def generate_run_questions(
         ),
         user_prompt=prompt,
         budget=budget,
-        max_tokens=1024,
+        # Ten questions with a rationale each run to ~1.5k tokens; a cut-off
+        # answer would fail the whole pass after paying for it.
+        max_tokens=2048,
         repo_root=repo_root or None,
         use_one_shot=use_one_shot,
     )

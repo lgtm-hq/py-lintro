@@ -64,7 +64,7 @@ def build_review_user_prompt(
     )
     # This builder renders one whole-diff prompt with no run-level question
     # pass behind it, so the questions section carries its placeholder line.
-    questions, additional_checks, checklist_count = render_rubric_sections(
+    questions, additional_checks = render_rubric_sections(
         generated_questions="",
         checklist_text=checklist_text,
         checklist_count=len(checklist_items),
@@ -123,6 +123,6 @@ def build_review_user_prompt(
         ),
         strictness_section="",
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=checklist_count),
+        output_rules=format_output_rules(),
     )
     return prompt, prompt_mapping

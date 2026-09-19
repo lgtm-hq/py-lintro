@@ -100,26 +100,27 @@ def render_rubric_sections(
     generated_questions: str,
     checklist_text: str,
     checklist_count: int,
-) -> tuple[str, str, int]:
+) -> tuple[str, str]:
     """Render the questions and the retained checklist for the prompt (#2720).
 
     Args:
         generated_questions: The run's per-PR questions, one per line.
         checklist_text: The retained checklist items already formatted for
             the prompt, empty when none were selected.
-        checklist_count: Number of items in ``checklist_text``.
+        checklist_count: Number of items in ``checklist_text``, named in the
+            "Additional checks" heading.
 
     Returns:
         The generated-questions text (a placeholder line when the run has
-        none), the "Additional checks" section for any retained checklist
-        items (empty when there are none), and that section's item count.
+        none) and the "Additional checks" section for any retained checklist
+        items (empty when there are none).
     """
     questions = generated_questions.strip() or (
         "(no questions were generated for this change; review against the rubric)"
     )
     checklist = checklist_text.strip()
     if not checklist:
-        return questions, "", 0
+        return questions, ""
     count = checklist_count
     additional = (
         f"\n### Additional checks ({count} retained checklist "
@@ -127,10 +128,10 @@ def render_rubric_sections(
         "diff has a defect)\n\n"
         f"{checklist}\n"
     )
-    return questions, additional, count
+    return questions, additional
 
 
-def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str, int]:
+def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str]:
     """Render the rubric sections from the shared prompt inputs.
 
     Args:
@@ -163,7 +164,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     redacted_diff = redact_prompt_text(text=chunk.diff, source="diff")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    questions, additional_checks, checklist_count = _rubric_sections(inputs=inputs)
+    questions, additional_checks = _rubric_sections(inputs=inputs)
 
     boundary = make_boundary_marker()
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
@@ -198,7 +199,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
         ),
         strictness_section=inputs.strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=checklist_count),
+        output_rules=format_output_rules(),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -240,7 +241,7 @@ def build_git_native_review_prompt(
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    questions, additional_checks, checklist_count = _rubric_sections(inputs=inputs)
+    questions, additional_checks = _rubric_sections(inputs=inputs)
 
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     boundary = make_boundary_marker()
@@ -297,7 +298,7 @@ def build_git_native_review_prompt(
         ),
         strictness_section=inputs.strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=checklist_count),
+        output_rules=format_output_rules(),
     )
     return REVIEW_SYSTEM, user_prompt
 

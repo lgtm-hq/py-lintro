@@ -351,9 +351,12 @@ async def test_both_depth_passes_failing_still_keeps_the_main_pass(
     assert_that(note).contains(
         "1 chunk kept only the main pass after the depth-3 adversarial sweep failed",
     )
-    # The whole-run row must not read as a second chunk.
+    # The whole-run row must not read as a second chunk, nor fall into the
+    # unknown-reason catch-all beside its own clause.
     assert_that(note).does_not_contain("2 chunks")
     assert_that(note).does_not_contain("of 2 chunk")
+    assert_that(note).does_not_contain("other limit")
+    assert_that(note).does_not_contain("generated_questions_failed")
 
 
 async def test_generated_questions_failure_still_runs_the_main_pass(
@@ -404,6 +407,10 @@ async def test_main_pass_failure_still_aborts_the_chunk(
 ) -> None:
     """A depth-1 failure keeps its pre-#2395 behaviour: the run stops.
 
+    The seam fails every call, so the question pass fails first (degrading,
+    not stopping) and the main pass then stops the run; the stopped run
+    still reports the pass it paid for (#2720).
+
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
@@ -416,6 +423,8 @@ async def test_main_pass_failure_still_aborts_the_chunk(
     assert_that(result.metadata.partial).is_true()
     assert_that(result.metadata.stopped_reason).contains("timeout")
     assert_that(result.findings).is_empty()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(0)
+    # No partial was harvested, so there is nothing to carry the row on.
     assert_that(result.metadata.coverage_degradations).is_empty()
 
 

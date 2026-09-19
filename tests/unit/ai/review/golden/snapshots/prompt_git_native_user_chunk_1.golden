@@ -80,9 +80,9 @@ file was not updated, not touched, or missing a change.
 10. Migration safety: a rename, removal or default change without the compatibility
     path or note it needs.
 
-Report a finding only when you can show the defect with file:line evidence in this
-chunk's diff. A concern without a shown defect is not a finding; finding nothing is a
-normal result.
+Report a finding only when you can show the defect with file:line evidence — in this
+chunk's diff, or in code you traced from it (mark those `cross_file`). A concern without
+a shown defect is not a finding; finding nothing is a normal result.
 
 
 ### Questions for this change (consider each; do not answer them)

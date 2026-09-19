@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -149,7 +149,7 @@ def _run(
     depth: int = 1,
     max_parallel_calls: int | None = None,
     call_delay: float = 0.0,
-    stop: str | None = None,
+    stop: Literal["cost_cap", "sigterm"] | None = None,
     max_cost_usd: float | None = None,
     generated_questions: bool = True,
 ) -> ReviewResult:

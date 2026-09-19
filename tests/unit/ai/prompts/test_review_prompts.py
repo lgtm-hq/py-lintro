@@ -84,7 +84,7 @@ def test_review_user_prompt_interpolates_the_full_pr_file_list() -> None:
     """The full-PR list, with its this-chunk marker, reaches the rendered prompt."""
     rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
         **_USER_PROMPT_KWARGS,
-        output_rules=format_output_rules(checklist_count=1),
+        output_rules=format_output_rules(),
     )
 
     assert_that(rendered).contains("- `src/other.py` (modified, +2/-0)")
@@ -101,7 +101,7 @@ def test_git_native_user_prompt_interpolates_the_full_pr_file_list() -> None:
             "diff_section": "inline-diff",
             "working_tree_note": "tree note",
         },
-        output_rules=format_output_rules(checklist_count=1),
+        output_rules=format_output_rules(),
     )
 
     assert_that(rendered).contains("- `src/other.py` (modified, +2/-0)")
@@ -110,11 +110,38 @@ def test_git_native_user_prompt_interpolates_the_full_pr_file_list() -> None:
     )
 
 
+def test_retained_checklist_items_render_as_additional_checks() -> None:
+    """The non-empty ``additional_checks`` shape lands after the questions."""
+    from lintro.ai.review.prompts import render_rubric_sections
+
+    questions, additional = render_rubric_sections(
+        generated_questions="G1. Does it?",
+        checklist_text="1. [logic-bug] Example question?",
+        checklist_count=1,
+    )
+    rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
+        **{
+            **_USER_PROMPT_KWARGS,
+            "generated_questions": questions,
+            "additional_checks": additional,
+        },
+        output_rules=format_output_rules(),
+    )
+
+    assert_that(rendered).contains(
+        "### Questions for this change (consider each; do not answer them)\n\n"
+        "G1. Does it?\n\n"
+        "### Additional checks (1 retained checklist item; report a finding only "
+        "where the diff has a defect)\n\n"
+        "1. [logic-bug] Example question?\n",
+    )
+
+
 def test_review_user_prompt_template_renders_all_placeholders() -> None:
     """User prompt template renders without KeyError for all placeholders."""
     rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
         **_USER_PROMPT_KWARGS,
-        output_rules=format_output_rules(checklist_count=1),
+        output_rules=format_output_rules(),
     )
 
     assert_that(rendered).contains("Test PR")
@@ -199,7 +226,7 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
     boundary = "CODE_BLOCK_deadbeef"
     rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
         **{**_USER_PROMPT_KWARGS, "boundary": boundary},
-        output_rules=format_output_rules(checklist_count=1),
+        output_rules=format_output_rules(),
     )
     assert_that(rendered).contains(f"<{boundary}>")
     assert_that(rendered).contains(f"</{boundary}>")
@@ -211,7 +238,7 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
                 "diff_section": "inline-diff",
                 "working_tree_note": "tree note",
             },
-            output_rules=format_output_rules(checklist_count=1),
+            output_rules=format_output_rules(),
         ),
         REVIEW_GIT_NATIVE_DIFF_INLINE.format(boundary=boundary, diff="diff body"),
         REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE.format(
@@ -340,7 +367,7 @@ def test_output_schema_declares_the_corpus_finding_fields() -> None:
 
 def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
     """Rendered rules carry the question cap and the occurrence instruction."""
-    rules = format_output_rules(checklist_count=4)
+    rules = format_output_rules()
 
     assert_that(rules).contains("3 per review")
     assert_that(rules).contains("automatically downgraded to P2")
@@ -360,7 +387,7 @@ def test_output_rules_cap_questions_and_explain_occurrence_collapse() -> None:
 
 def test_p2_eligibility_wording_is_shared_across_prompt_layers() -> None:
     """System prompt and rendered output rules use the same P2 eligibility rule."""
-    rules = format_output_rules(checklist_count=1)
+    rules = format_output_rules()
 
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_ELIGIBILITY)
     assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)

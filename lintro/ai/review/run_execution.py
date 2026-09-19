@@ -157,6 +157,9 @@ async def run_passes(
     partials: list[ChunkReviewPartial] = []
     if plan.chunks:
         questions = await run_question_pass(context=context, options=options, plan=plan)
+        # Recorded before the fan-out so a run the fan-out stops (cost cap,
+        # timeout, SIGTERM) still reports the pass it already paid for.
+        progress.questions = questions
         chunk_plan = replace(
             chunk_run_plan(
                 context=context,
@@ -179,7 +182,6 @@ async def run_passes(
             ),
         )
         partials = fold_question_pass(partials=partials, questions=questions)
-        progress.questions = questions
     if plan.resume.queue:
         await run_custom_agent_passes(
             request=CustomAgentPassRequest(
@@ -365,6 +367,10 @@ def finalize_stopped_run(
         provider_seconds = time.monotonic() - provider_started
         plan.timings.add_phase(name=ReviewPhase.PROVIDER, seconds=provider_seconds)
     partials = list(progress.collected)
+    if progress.questions is not None:
+        # The completed path folds the pass into the fan-out's return value;
+        # a stopped run only has the harvested partials to charge it to.
+        partials = fold_question_pass(partials=partials, questions=progress.questions)
     merge_started = time.monotonic()
     outcome = merge_partials(plan=plan, progress=progress, partials=partials)
     parse_merge_seconds = time.monotonic() - merge_started

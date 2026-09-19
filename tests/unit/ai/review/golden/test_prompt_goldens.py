@@ -37,6 +37,13 @@ from tests.unit.ai.review.golden.golden_fixtures import (
 from tests.unit.ai.review.golden.golden_io import assert_golden
 
 _CHECKLIST_COUNT = 2
+#: The per-PR questions a production run shares with every chunk (#2720);
+#: the two ``*_production_*`` goldens byte-lock the questions block the
+#: default configuration renders, the others pin the placeholder line.
+_GENERATED_QUESTIONS = (
+    "G1. Does the session TTL change reach every caller of `decode_token`?\n"
+    "G2. Is the new `expires_at` field written before the token is signed?"
+)
 _INTERACTION_PATHS = "- session status -> token decoding"
 _LINT_DIGEST = "ruff: 1 issue in src/auth/session.py"
 _STRICTNESS = "Report only defects you can trace to a concrete failure."
@@ -279,6 +286,7 @@ def test_api_prompt_with_production_defaults_matches_golden() -> None:
             checklist_count=_CHECKLIST_COUNT,
             interaction_paths=_production_interaction_paths(),
             lint_results=None,
+            extra_checklist=_GENERATED_QUESTIONS,
             strictness_section=_production_strictness_section(),
         ),
     )
@@ -301,6 +309,7 @@ def test_cli_prompt_with_production_defaults_matches_golden() -> None:
             checklist_count=_CHECKLIST_COUNT,
             interaction_paths=_production_interaction_paths(),
             lint_results=None,
+            extra_checklist=_GENERATED_QUESTIONS,
             strictness_section=_production_strictness_section(),
         ),
     )
