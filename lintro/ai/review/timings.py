@@ -50,9 +50,9 @@ class ReviewPhase(StrEnum):
     and absent only when the pass is disabled or no chunk completed.
 
     ``provider`` is an envelope: it spans the whole chunk fan-out, including
-    the per-chunk ``generated_questions`` (depth >= 2) and ``adversarial``
-    (depth >= 3) spans recorded inside it. Phase sums therefore exceed the run
-    total whenever those nested phases run, concurrency or not.
+    the once-per-run ``generated_questions`` span (#2720) and the per-chunk
+    ``adversarial`` (depth >= 3) spans recorded inside it. Phase sums therefore
+    exceed the run total whenever those nested phases run, concurrency or not.
 
     ``lintro review`` posts its GitHub comment *after* the result is rendered,
     so posting is outside the orchestrator's measured window and has no phase

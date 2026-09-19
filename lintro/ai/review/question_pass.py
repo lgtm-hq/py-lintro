@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.exceptions import AIProviderError
+from lintro.ai.exceptions import AIProviderError, AITurnLimitError
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.prompts.review import (
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
@@ -55,7 +55,9 @@ if TYPE_CHECKING:
     from lintro.ai.review.session import ReviewSessionOptions
 
 __all__ = [
+    "MAX_QUESTION_CHARS",
     "MAX_RUN_QUESTIONS",
+    "MAX_RUN_QUESTIONS_TOKENS",
     "RunQuestions",
     "generate_run_questions",
     "question_pass_degradations",
@@ -64,6 +66,16 @@ __all__ = [
 
 #: Upper bound on questions kept from the model's answer.
 MAX_RUN_QUESTIONS = 10
+
+#: Upper bound on one rendered question line (the ``G<n>. `` prefix
+#: included); a longer answer is cut at a word boundary with an ellipsis.
+MAX_QUESTION_CHARS = 600
+
+#: Upper bound on the whole rendered block, in tokens, reserved from every
+#: chunk's prompt overhead before the diff budget is fixed: the questions are
+#: model output added to every chunk prompt after chunking, so without a
+#: ceiling a long answer could push each chunk past its context window.
+MAX_RUN_QUESTIONS_TOKENS = (MAX_RUN_QUESTIONS * MAX_QUESTION_CHARS + 3) // 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,14 +137,16 @@ def fit_diff_to_budget(*, unified_diff: str, diff_budget: int) -> tuple[str, int
             return unified_diff, 1, 1
         return "", 0, 1
     kept: list[str] = []
-    used = 0
+    chars = 0
     for path in sorted(sections):
         section = sections[path]
-        cost = estimate_tokens(section)
-        if used + cost > diff_budget:
+        # Charge the concatenated text, not a per-file rounding: summing
+        # per-file estimates over-counts by up to one token a file and would
+        # trim a diff that fits the budget exactly.
+        if _tokens_for_chars(chars + len(section)) > diff_budget:
             break
         kept.append(section)
-        used += cost
+        chars += len(section)
     return "".join(kept), len(kept), len(sections)
 
 
@@ -254,7 +268,7 @@ async def generate_run_questions(
             continue
         question = item.get("question")
         if isinstance(question, str) and question.strip():
-            lines.append(f"G{len(lines) + 1}. {question.strip()}")
+            lines.append(_question_line(index=len(lines) + 1, question=question))
     if not lines:
         logger.warning(
             "Per-PR questions payload had no usable question; reviewing with the "
@@ -312,6 +326,39 @@ async def _await_call_until_stop(
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
+
+
+def _tokens_for_chars(chars: int) -> int:
+    """Return :func:`estimate_tokens`'s estimate for a text of ``chars`` bytes.
+
+    Args:
+        chars: Character count of the candidate text.
+
+    Returns:
+        The estimate (4 chars ~ 1 token, rounded up; 0 for empty text).
+    """
+    return (chars + 3) // 4 if chars else 0
+
+
+def _question_line(*, index: int, question: str) -> str:
+    """Render one question as a single bounded line.
+
+    The text is model output that every chunk prompt will carry, so it is
+    collapsed to one line (a multi-line answer would otherwise count as
+    several questions) and cut at :data:`MAX_QUESTION_CHARS`.
+
+    Args:
+        index: The question's 1-based position.
+        question: The raw question text.
+
+    Returns:
+        ``G<index>. <text>``.
+    """
+    line = f"G{index}. {' '.join(question.split())}"
+    if len(line) <= MAX_QUESTION_CHARS:
+        return line
+    cut = line[: MAX_QUESTION_CHARS - 1].rsplit(" ", 1)[0]
+    return f"{cut}…"
 
 
 def _failed(base: RunQuestions) -> RunQuestions:
@@ -383,7 +430,24 @@ async def run_question_pass(
                 "Per-PR question pass failed ({}); reviewing with the rubric alone",
                 exc,
             )
-            return RunQuestions(failed=True)
+            # A turn-limited CLI call was billed and already charged to the
+            # budget; the failed pass keeps that usage so the totals agree.
+            usage = (
+                ChunkReviewPartial(
+                    findings=(),
+                    input_tokens=exc.input_tokens,
+                    output_tokens=exc.output_tokens,
+                    cost_estimate=exc.cost_estimate,
+                )
+                if isinstance(exc, AITurnLimitError)
+                else ChunkReviewPartial(
+                    findings=(),
+                    input_tokens=0,
+                    output_tokens=0,
+                    cost_estimate=0.0,
+                )
+            )
+            return RunQuestions(failed=True, usage=usage)
 
 
 def question_pass_degradations(

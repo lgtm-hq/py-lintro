@@ -104,14 +104,14 @@ The second slice moves the two chunk prompt builders — `build_review_prompt` f
 transport and `build_git_native_review_prompt` for CLI-backed providers — and the
 non-diff token estimate `estimate_prompt_overhead` out of the orchestrator. The shared
 render inputs (chunk, context, checklist text and count, interaction paths, lint digest,
-generated checklist rows, strictness section) travel as one frozen `PromptInputs`; only
-the git-native diff-delivery flags stay as separate keywords, since they are the one
-thing the two builders do not share. `redact_prompt_text` and `make_boundary_marker` now
-fire inside this module, which makes it the redaction choke point for prompt bytes: the
-git-native builder still embeds the redacted diff unless the caller explicitly opts out.
-That slice left the emitted bytes unchanged and the #2298 prompt goldens passed without
-regeneration; the milestone 0.5 findings-only prompts have since changed those bytes, so
-the prompt goldens are regenerated here.
+the run's per-PR questions, strictness section) travel as one frozen `PromptInputs`;
+only the git-native diff-delivery flags stay as separate keywords, since they are the
+one thing the two builders do not share. `redact_prompt_text` and `make_boundary_marker`
+now fire inside this module, which makes it the redaction choke point for prompt bytes:
+the git-native builder still embeds the redacted diff unless the caller explicitly opts
+out. That slice left the emitted bytes unchanged and the #2298 prompt goldens passed
+without regeneration; the milestone 0.5 findings-only prompts have since changed those
+bytes, so the prompt goldens are regenerated here.
 
 ### Cross-chunk merge (`lintro/ai/review/merge.py`, #2301)
 

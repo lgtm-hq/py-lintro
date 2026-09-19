@@ -81,7 +81,7 @@ async def review_chunk(
     # depth 2 no longer spends a call per chunk on them.
     extra_checklist = plan.generated_questions
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
-    # Gate before the main provider call so intra-chunk (depth-2/3) work
+    # Gate before the main provider call so intra-chunk (depth-3) work
     # cannot overshoot the budget between the per-chunk checks.
     plan.budget.check()
     main_pass = await review_chunk_main_pass(

@@ -38,6 +38,7 @@ from lintro.ai.prompts.review import (
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.prompt_redaction import redact_prompt_text
+from lintro.ai.review.question_pass import MAX_RUN_QUESTIONS_TOKENS
 from lintro.ai.review.repo_context import (
     RepoContextSection,
     format_repo_context_section,
@@ -351,7 +352,9 @@ def estimate_prompt_overhead(
             lint_results or "",
         ],
     )
-    estimated = estimate_tokens(overhead_text)
+    # The per-PR questions are generated after chunking and added to every
+    # chunk prompt, so their ceiling is reserved here rather than measured.
+    estimated = estimate_tokens(overhead_text) + MAX_RUN_QUESTIONS_TOKENS
     return int(max(estimated, _PROMPT_OVERHEAD_TOKENS))
 
 

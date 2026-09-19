@@ -105,7 +105,7 @@ class ChunkReviewRequest:
         checklist_count: Number of checklist items in the prompt.
         interaction_paths: Domain-triggered interaction path text.
         lint_results: Optional lint digest for prompt injection.
-        extra_checklist: Additional generated checklist rows for depth 2.
+        extra_checklist: The run's per-PR "consider" questions (#2720).
         strictness_section: Pre-formatted strictness prompt section.
         budget: Session cost budget tracker.
         repo_root: Absolute path to the repository under review.

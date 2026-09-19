@@ -21,7 +21,11 @@ from assertpy import assert_that
 
 from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
-from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
+from lintro.ai.exceptions import (
+    AICostBudgetExceededError,
+    AIProviderError,
+    AITurnLimitError,
+)
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.review.enums.coverage_degradation_reason import (
@@ -37,7 +41,9 @@ from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.orchestrator import run_review_async
 from lintro.ai.review.question_pass import (
+    MAX_QUESTION_CHARS,
     MAX_RUN_QUESTIONS,
+    MAX_RUN_QUESTIONS_TOKENS,
     RunQuestions,
     fit_diff_to_budget,
     generate_run_questions,
@@ -188,6 +194,24 @@ def test_files_are_kept_whole_in_path_order_until_one_does_not_fit() -> None:
     assert_that(diff).does_not_contain("c.py")
 
 
+def test_a_diff_that_fits_the_budget_exactly_is_kept_whole() -> None:
+    """The fitter charges the concatenated text, not per-file roundings.
+
+    Summing per-file estimates over-counts by up to one token a file; a diff
+    whose whole-text estimate equals the budget must not be trimmed.
+    """
+    whole = _FILE_A + _FILE_B
+    budget = estimate_tokens(whole)
+    assert_that(estimate_tokens(_FILE_A) + estimate_tokens(_FILE_B)).is_greater_than(
+        budget,
+    )
+
+    diff, seen, total = fit_diff_to_budget(unified_diff=whole, diff_budget=budget)
+
+    assert_that(diff).is_equal_to(whole)
+    assert_that((seen, total)).is_equal_to((2, 2))
+
+
 def test_a_diff_with_no_file_headers_is_one_file_kept_or_dropped() -> None:
     """A diff the splitter cannot section counts as one file."""
     fits = fit_diff_to_budget(unified_diff="+x\n", diff_budget=10_000)
@@ -328,6 +352,66 @@ async def test_blank_and_malformed_items_are_skipped_without_gaps() -> None:
     questions = await _generate(content=payload)
 
     assert_that(questions.lines).is_equal_to(("G1. Real one?", "G2. Another?"))
+
+
+async def test_each_question_is_one_bounded_line() -> None:
+    """Multi-line and over-long answers cannot inflate the shared block."""
+    long = "word " * 300
+    questions = await _generate(
+        content=_questions_payload("First line\nsecond   line\n\nthird", long),
+    )
+
+    assert_that(questions.lines).is_length(2)
+    assert_that(questions.count).is_equal_to(2)
+    assert_that(questions.lines[0]).is_equal_to("G1. First line second line third")
+    assert_that(len(questions.lines[1])).is_less_than_or_equal_to(MAX_QUESTION_CHARS)
+    assert_that(questions.lines[1]).starts_with("G2. word word")
+    assert_that(questions.lines[1]).ends_with("…")
+    assert_that(estimate_tokens(questions.text)).is_less_than_or_equal_to(
+        MAX_RUN_QUESTIONS_TOKENS,
+    )
+
+
+def test_the_questions_ceiling_is_reserved_in_the_prompt_overhead() -> None:
+    """Chunking leaves room for the block every chunk prompt will carry."""
+    from lintro.ai.review.prompts import estimate_prompt_overhead
+
+    overhead = estimate_prompt_overhead(
+        context=_context(),
+        checklist_text="",
+        classifications=[],
+        lint_results=None,
+    )
+
+    assert_that(overhead).is_greater_than_or_equal_to(MAX_RUN_QUESTIONS_TOKENS)
+
+
+async def test_a_turn_limited_call_keeps_its_billed_usage(tmp_path: Path) -> None:
+    """A CLI call stopped at the turn limit was billed; the failed pass says so.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    seam = _scripted_seam(
+        AITurnLimitError(
+            "Claude CLI stopped at the per-call turn limit (12 turns)",
+            input_tokens=700,
+            output_tokens=30,
+            cost_estimate=0.07,
+        ),
+        _main_pass_response(),
+        _main_pass_response(),
+    )
+
+    result = await _run(tmp_path=tmp_path, call_ai=seam)
+
+    assert_that(result.metadata.partial).is_false()
+    assert_that(
+        [item.reason for item in result.metadata.coverage_degradations],
+    ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])
+    # 700 (the billed question call) + 10 + 10.
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(720)
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.09, 1e-9)
 
 
 async def test_fenced_json_is_accepted() -> None:

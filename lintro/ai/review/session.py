@@ -264,9 +264,9 @@ class ChunkRunPlan:
     """Run-scope inputs shared by every chunk of one review.
 
     One object instead of the ~18 keywords each layer used to forward by hand.
-    It is frozen: the two values that legitimately differ per chunk — the
-    progress tracker and the first generated-checklist id — are applied with
-    :func:`dataclasses.replace`, so a chunk can never mutate the run's plan.
+    It is frozen: the one value that legitimately differs per chunk — the
+    progress tracker — is applied with :func:`dataclasses.replace`, so a
+    chunk can never mutate the run's plan.
 
     Attributes:
         context: Collected review diff context.
