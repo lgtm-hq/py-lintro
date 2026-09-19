@@ -6,6 +6,7 @@ from pathlib import Path
 
 from lintro.ai.prompts.review import (
     REVIEW_OUTPUT_SCHEMA,
+    REVIEW_RUBRIC,
     REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
     format_deferred_scope_section,
@@ -20,6 +21,7 @@ from lintro.ai.review.models.file_classification import FileClassification
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.prompt_redaction import redact_prompt_text
+from lintro.ai.review.prompts import render_rubric_sections
 from lintro.ai.sanitize import make_boundary_marker
 
 __all__ = ["build_review_user_prompt"]
@@ -59,6 +61,13 @@ def build_review_user_prompt(
     )
     checklist_text, prompt_mapping = format_checklist_for_prompt(
         items=checklist_items,
+    )
+    # This builder renders one whole-diff prompt with no run-level question
+    # pass behind it, so the questions section carries its placeholder line.
+    questions, additional_checks, checklist_count = render_rubric_sections(
+        generated_questions="",
+        checklist_text=checklist_text,
+        checklist_count=len(checklist_items),
     )
     pr_title = (
         context.pr_metadata.title
@@ -103,8 +112,9 @@ def build_review_user_prompt(
             source="changed files",
         ),
         interaction_paths=interaction_paths,
-        checklist_count=len(checklist_items),
-        checklist=checklist_text,
+        rubric=REVIEW_RUBRIC,
+        generated_questions=questions,
+        additional_checks=additional_checks,
         boundary=boundary,
         diff=redact_prompt_text(text=raw_diff, source="diff"),
         lint_results_section=redact_prompt_text(
@@ -113,6 +123,6 @@ def build_review_user_prompt(
         ),
         strictness_section="",
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=len(checklist_items)),
+        output_rules=format_output_rules(checklist_count=checklist_count),
     )
     return prompt, prompt_mapping

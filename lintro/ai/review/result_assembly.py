@@ -50,12 +50,12 @@ from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 
 if TYPE_CHECKING:
-    from lintro.ai.review.question_pass import RunQuestions
     from lintro.ai.review.custom_agent_runner import CustomAgentPassResult
     from lintro.ai.review.merge import ChunkReviewPartial
     from lintro.ai.review.models.review_chunk import ReviewChunk
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_finding import ReviewFinding
+    from lintro.ai.review.question_pass import RunQuestions
     from lintro.ai.review.run_planning import ReviewRunPlan
     from lintro.ai.review.session import ReviewSessionOptions
     from lintro.ai.review.synthesis import SynthesisPass
@@ -223,11 +223,9 @@ def assemble_review_result(
             (item.diff_gate for item in outcome.partials),
             DiffGateCounts(),
         ),
-        generated_questions=(
-            tuple(outcome.questions.text.splitlines()) if outcome.questions else ()
-        ),
-        questions_diff_trimmed=bool(
-            outcome.questions is not None and outcome.questions.diff_trimmed
+        generated_questions=outcome.questions.lines if outcome.questions else (),
+        questions_diff_trimmed=(
+            outcome.questions.diff_trimmed if outcome.questions else False
         ),
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)

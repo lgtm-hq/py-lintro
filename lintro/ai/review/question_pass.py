@@ -33,16 +33,18 @@ from lintro.ai.review.models.coverage_degradation import (
     CoverageDegradation,
 )
 from lintro.ai.review.prompt_redaction import redact_prompt_text
+from lintro.ai.review.session import is_cost_cap_stop
+from lintro.ai.review.timings import ReviewPhase
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
     from lintro.ai.budget import CostBudget
-    from lintro.ai.review.run_planning import ReviewRunPlan
-    from lintro.ai.review.session import ReviewSessionOptions
     from lintro.ai.config import AIConfig
     from lintro.ai.providers.base import BaseAIProvider
     from lintro.ai.review.models.review_context import ReviewContext
+    from lintro.ai.review.run_planning import ReviewRunPlan
+    from lintro.ai.review.session import ReviewSessionOptions
 
 __all__ = [
     "MAX_RUN_QUESTIONS",
@@ -84,6 +86,11 @@ class RunQuestions:
         output_tokens=0,
         cost_estimate=0.0,
     )
+
+    @property
+    def lines(self) -> tuple[str, ...]:
+        """The rendered questions, one per line, for the run record."""
+        return tuple(self.text.splitlines())
 
 
 def fit_diff_to_budget(*, unified_diff: str, diff_budget: int) -> tuple[str, int, int]:
@@ -259,31 +266,48 @@ async def run_question_pass(
 
     Args:
         context: Collected review diff context.
-        options: Session options (provider, one-shot preference).
+        options: Session options (the provider to call).
         plan: The resolved run plan (config, budget, repo root, diff budget).
 
     Returns:
-        The shared questions; empty and ``failed`` when the pass is disabled
-        by configuration or did not produce a usable answer.
+        The shared questions: empty when the pass is disabled by
+        configuration, empty and ``failed`` when it did not produce a usable
+        answer.
+
+    Raises:
+        Exception: A cost-cap stop (``AICostBudgetExceededError``) raised by
+            the call is re-raised untouched so the orchestrator finalizes a
+            partial review; it is the run's graceful halt, not a failed pass.
     """
     if not plan.ai_config.review_generated_questions:
         return RunQuestions()
-    try:
-        return await generate_run_questions(
-            context=context,
-            provider=options.provider,
-            ai_config=plan.ai_config,
-            budget=plan.budget,
-            diff_budget=plan.synthesis_diff_budget,
-            repo_root=plan.repo_root,
-            use_one_shot=plan.use_one_shot,
-        )
-    except Exception as exc:  # noqa: BLE001 - one optional call must not end the run
-        logger.warning(
-            "Per-PR question pass failed ({}); reviewing with the rubric alone",
-            exc,
-        )
-        return RunQuestions(failed=True)
+    # The span is recorded only when the pass runs, so a disabled pass leaves
+    # no zero-length phase behind (#2148).
+    with plan.timings.phase(name=ReviewPhase.GENERATED_QUESTIONS):
+        try:
+            return await generate_run_questions(
+                context=context,
+                provider=options.provider,
+                ai_config=plan.ai_config,
+                budget=plan.budget,
+                diff_budget=plan.synthesis_diff_budget,
+                repo_root=plan.repo_root,
+                # Never reuse the built-in review's durable session: the pass
+                # is a standalone whole-PR question, not a chunk, and it runs
+                # first, so a durable session would carry its transcript into
+                # every chunk review.
+                use_one_shot=True,
+            )
+        except Exception as exc:
+            # A cost-cap stop is the run's graceful halt, not a failed pass:
+            # let it reach the orchestrator so the review ends as a partial.
+            if is_cost_cap_stop(exc=exc):
+                raise
+            logger.warning(
+                "Per-PR question pass failed ({}); reviewing with the rubric alone",
+                exc,
+            )
+            return RunQuestions(failed=True)
 
 
 def fold_question_pass(

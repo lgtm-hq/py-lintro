@@ -126,7 +126,10 @@ def render_review_terminal(
         ),
     )
 
-    if checklist_display is ChecklistDisplay.ALL and result.metadata.generated_questions:
+    if (
+        checklist_display is ChecklistDisplay.ALL
+        and result.metadata.generated_questions
+    ):
         output.print(
             Panel(
                 "\n".join(result.metadata.generated_questions),

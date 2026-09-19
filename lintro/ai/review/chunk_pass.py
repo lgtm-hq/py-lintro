@@ -1,21 +1,20 @@
 """The depth-controlled review of a single chunk (issue #2301).
 
-One chunk, up to three provider calls: the optional depth-2 question
-generator, the main review call (which
+One chunk, up to two provider calls: the main review call (which
 :mod:`lintro.ai.review.chunk_split_retry` splits in two when its answer
-exhausts the provider's output ceiling), and the optional depth-3 adversarial
-sweep.
+exhausts the provider's output ceiling) and the optional depth-3 adversarial
+sweep. The per-PR questions every chunk considers are generated once per run
+by :mod:`lintro.ai.review.question_pass` (#2720), not per chunk.
 :func:`review_chunk_with_progress` wraps that in the run's progress events and
 the #1101 error taxonomy, so the fan-out above only has to schedule.
 :func:`review_chunk` is the seam between the fan-out in
 :mod:`lintro.ai.review.chunk_runner`, which decides *when* a chunk runs, and
-the passes in :mod:`lintro.ai.review.chunk_split_retry`,
-:mod:`lintro.ai.review.checklist_pass` and
+the passes in :mod:`lintro.ai.review.chunk_split_retry` and
 :mod:`lintro.ai.review.adversarial_pass`, which decide what each call asks.
 
-Only the main call is load-bearing. The two optional passes run through
+Only the main call is load-bearing. The optional sweep runs through
 :func:`~lintro.ai.review.depth_degradation.run_degradable_depth_pass`, so an
-``AIError`` from either degrades the chunk to its main-pass result and records
+``AIError`` from it degrades the chunk to its main-pass result and records
 a coverage degradation instead of discarding findings the run already paid for
 (#2395). A cost-cap stop still aborts, as it does everywhere else.
 
@@ -55,10 +54,10 @@ async def review_chunk(
     chunk: ReviewChunk,
     chunk_index: int = 0,
     plan: ChunkRunPlan,
-) -> tuple[ChunkReviewPartial, int]:
+) -> ChunkReviewPartial:
     """Run depth-controlled review for a single chunk.
 
-    A failed depth-2 or depth-3 pass degrades the chunk rather than ending it:
+    A failed depth-3 pass degrades the chunk rather than ending it:
     the partial keeps the main pass's findings and carries the recorded
     :class:`~lintro.ai.review.models.coverage_degradation.CoverageDegradation`
     (#2395).
@@ -69,12 +68,11 @@ async def review_chunk(
         plan: Run-scope inputs, already specialised for this chunk.
 
     Returns:
-        The chunk partial and the next available generated checklist id.
+        The chunk partial.
     """
     recorder = plan.timings or ReviewTimingRecorder()
     tracker = plan.progress or NullReviewProgress()
     ai_config = plan.ai_config
-    next_generated_checklist_id = plan.next_generated_checklist_id
     interaction_paths = generate_interaction_paths(
         classifications=plan.classifications,
         changed_files=chunk.files,
@@ -142,7 +140,6 @@ async def review_chunk(
         ),
     )
 
-
     if plan.depth >= 3:
         tracker.on_step(chunk_index=chunk_index, step="adversarial sweep")
         with recorder.phase(name=ReviewPhase.ADVERSARIAL):
@@ -186,7 +183,7 @@ async def review_chunk(
                 ),
             )
 
-    return partial, next_generated_checklist_id
+    return partial
 
 
 def _add_usage(
@@ -236,7 +233,7 @@ async def review_chunk_with_progress(
     plan.budget.check()
     progress.on_chunk_start(chunk_index=chunk_index, files=list(chunk.files))
     try:
-        partial, _next_id = await review_chunk(
+        partial = await review_chunk(
             chunk=chunk,
             chunk_index=chunk_index,
             plan=plan,

@@ -19,7 +19,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lintro.ai.prompts.review import (
-    REVIEW_RUBRIC,
     REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND,
     REVIEW_GIT_NATIVE_DIFF_INLINE,
     REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND,
@@ -28,6 +27,7 @@ from lintro.ai.prompts.review import (
     REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
+    REVIEW_RUBRIC,
     REVIEW_SYSTEM,
     REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
@@ -55,6 +55,7 @@ __all__ = [
     "build_git_native_review_prompt",
     "build_review_prompt",
     "estimate_prompt_overhead",
+    "render_rubric_sections",
 ]
 
 _PROMPT_OVERHEAD_TOKENS = 12_000
@@ -94,24 +95,32 @@ class PromptInputs:
     repo_context: RepoContextSection | None = None
 
 
-def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str, int]:
+def render_rubric_sections(
+    *,
+    generated_questions: str,
+    checklist_text: str,
+    checklist_count: int,
+) -> tuple[str, str, int]:
     """Render the questions and the retained checklist for the prompt (#2720).
 
     Args:
-        inputs: Shared prompt material for the chunk being reviewed.
+        generated_questions: The run's per-PR questions, one per line.
+        checklist_text: The retained checklist items already formatted for
+            the prompt, empty when none were selected.
+        checklist_count: Number of items in ``checklist_text``.
 
     Returns:
         The generated-questions text (a placeholder line when the run has
         none), the "Additional checks" section for any retained checklist
         items (empty when there are none), and that section's item count.
     """
-    questions = inputs.extra_checklist.strip() or (
+    questions = generated_questions.strip() or (
         "(no questions were generated for this change; review against the rubric)"
     )
-    checklist = inputs.checklist_text.strip()
+    checklist = checklist_text.strip()
     if not checklist:
         return questions, "", 0
-    count = inputs.checklist_count
+    count = checklist_count
     additional = (
         f"\n### Additional checks ({count} retained checklist "
         f"{'item' if count == 1 else 'items'}; report a finding only where the "
@@ -119,6 +128,22 @@ def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str, int]:
         f"{checklist}\n"
     )
     return questions, additional, count
+
+
+def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str, int]:
+    """Render the rubric sections from the shared prompt inputs.
+
+    Args:
+        inputs: Shared prompt material for the chunk being reviewed.
+
+    Returns:
+        See :func:`render_rubric_sections`.
+    """
+    return render_rubric_sections(
+        generated_questions=inputs.extra_checklist,
+        checklist_text=inputs.checklist_text,
+        checklist_count=inputs.checklist_count,
+    )
 
 
 def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:

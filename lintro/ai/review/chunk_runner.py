@@ -32,7 +32,6 @@ from lintro.ai.exceptions import (
     AIError,
     AIProviderError,
 )
-from lintro.ai.review.checklist_pass import GENERATED_CHECKLIST_ID_STRIDE
 from lintro.ai.review.chunk_call_detail import call_detail, finished_partial
 from lintro.ai.review.chunk_pass import review_chunk_with_progress
 from lintro.ai.review.exceptions import ReviewExecutionError
@@ -244,14 +243,7 @@ async def _run_chunk(
     Returns:
         The chunk index paired with its partial or the exception raised.
     """
-    chunk_plan = replace(
-        plan,
-        progress=StepTrackingProgress(plan.progress),
-        next_generated_checklist_id=(
-            plan.next_generated_checklist_id
-            + chunk_index * GENERATED_CHECKLIST_ID_STRIDE
-        ),
-    )
+    chunk_plan = replace(plan, progress=StepTrackingProgress(plan.progress))
     # Queued time is measured from task creation to semaphore admission, so a
     # run bottlenecked by ``max_parallel_calls`` is distinguishable from one
     # bottlenecked by provider latency (#2148).

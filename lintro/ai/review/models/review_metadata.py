@@ -138,9 +138,9 @@ class ReviewMetadata:
     phase_timings: dict[str, float] = field(default_factory=dict)
     diff_gate: DiffGateCounts = field(default_factory=DiffGateCounts)
     timings: ReviewTimings | None = None
-    custom_agents_run: int = 0
     generated_questions: tuple[str, ...] = field(default_factory=tuple)
     questions_diff_trimmed: bool = False
+    custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)
     skipped_files: tuple[SkippedFile, ...] = field(default_factory=tuple)
