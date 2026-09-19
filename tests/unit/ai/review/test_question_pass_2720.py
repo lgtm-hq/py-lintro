@@ -372,6 +372,31 @@ async def test_each_question_is_one_bounded_line() -> None:
     )
 
 
+async def test_ten_maximal_questions_fit_the_reserved_ceiling() -> None:
+    """The ceiling covers ten full lines and their separators."""
+    questions = await _generate(
+        content=_questions_payload(*(["word " * 200] * MAX_RUN_QUESTIONS)),
+    )
+
+    assert_that(questions.lines).is_length(MAX_RUN_QUESTIONS)
+    for line in questions.lines:
+        assert_that(len(line)).is_less_than_or_equal_to(MAX_QUESTION_CHARS)
+    assert_that(estimate_tokens(questions.text)).is_less_than_or_equal_to(
+        MAX_RUN_QUESTIONS_TOKENS,
+    )
+
+
+async def test_an_unbroken_overlong_question_is_cut_hard() -> None:
+    """One token with no word boundary is cut, not reduced to the prefix."""
+    questions = await _generate(content=_questions_payload("x" * 2000))
+
+    line = questions.lines[0]
+    assert_that(len(line)).is_less_than_or_equal_to(MAX_QUESTION_CHARS)
+    assert_that(line).starts_with("G1. xxxx")
+    assert_that(line).ends_with("…")
+    assert_that(len(line)).is_greater_than(100)
+
+
 def test_the_questions_ceiling_is_reserved_in_the_prompt_overhead() -> None:
     """Chunking leaves room for the block every chunk prompt will carry."""
     from lintro.ai.review.prompts import estimate_prompt_overhead
@@ -383,7 +408,12 @@ def test_the_questions_ceiling_is_reserved_in_the_prompt_overhead() -> None:
         lint_results=None,
     )
 
-    assert_that(overhead).is_greater_than_or_equal_to(MAX_RUN_QUESTIONS_TOKENS)
+    from lintro.ai.review.prompts import _PROMPT_OVERHEAD_TOKENS
+
+    # Reserved on top of the floored estimate, never swallowed by the floor.
+    assert_that(overhead).is_equal_to(
+        _PROMPT_OVERHEAD_TOKENS + MAX_RUN_QUESTIONS_TOKENS,
+    )
 
 
 async def test_a_turn_limited_call_keeps_its_billed_usage(tmp_path: Path) -> None:

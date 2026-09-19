@@ -353,9 +353,11 @@ def estimate_prompt_overhead(
         ],
     )
     # The per-PR questions are generated after chunking and added to every
-    # chunk prompt, so their ceiling is reserved here rather than measured.
-    estimated = estimate_tokens(overhead_text) + MAX_RUN_QUESTIONS_TOKENS
-    return int(max(estimated, _PROMPT_OVERHEAD_TOKENS))
+    # chunk prompt, so their ceiling is reserved on top of the floored
+    # estimate rather than measured: adding it before the floor would let
+    # the floor swallow it whenever the measured overhead is small.
+    estimated = max(estimate_tokens(overhead_text), _PROMPT_OVERHEAD_TOKENS)
+    return int(estimated + MAX_RUN_QUESTIONS_TOKENS)
 
 
 def _tree_note_for(*, context: ReviewContext) -> str:

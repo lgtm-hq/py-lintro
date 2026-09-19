@@ -75,7 +75,9 @@ MAX_QUESTION_CHARS = 600
 #: chunk's prompt overhead before the diff budget is fixed: the questions are
 #: model output added to every chunk prompt after chunking, so without a
 #: ceiling a long answer could push each chunk past its context window.
-MAX_RUN_QUESTIONS_TOKENS = (MAX_RUN_QUESTIONS * MAX_QUESTION_CHARS + 3) // 4
+MAX_RUN_QUESTIONS_TOKENS = (
+    MAX_RUN_QUESTIONS * MAX_QUESTION_CHARS + (MAX_RUN_QUESTIONS - 1) + 3
+) // 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -354,10 +356,16 @@ def _question_line(*, index: int, question: str) -> str:
     Returns:
         ``G<index>. <text>``.
     """
-    line = f"G{index}. {' '.join(question.split())}"
+    prefix = f"G{index}. "
+    line = f"{prefix}{' '.join(question.split())}"
     if len(line) <= MAX_QUESTION_CHARS:
         return line
-    cut = line[: MAX_QUESTION_CHARS - 1].rsplit(" ", 1)[0]
+    head = line[: MAX_QUESTION_CHARS - 1]
+    # Cut at the last word boundary inside the question body; a body with
+    # no boundary (one unbroken token) is cut hard rather than reduced to
+    # the bare prefix.
+    boundary = head.rfind(" ", len(prefix))
+    cut = head[:boundary] if boundary > 0 else head
     return f"{cut}…"
 
 
