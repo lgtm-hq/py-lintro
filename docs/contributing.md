@@ -265,9 +265,9 @@ direct CLI behavior.
 
 The built-in review checklist corpus lives in `lintro/ai/review/checklist/corpus/` as
 YAML that the loader validates against the Python enums at import time (categories,
-domains, languages); there is no generated schema (#2720). Only evidence-backed core items
-(logic-bug, silent-failure, security, integration) are built in; user-defined items come
-from review agents.
+domains, languages); there is no generated schema (#2720). Only evidence-backed core
+items (logic-bug, silent-failure, security, integration) are built in; user-defined
+items come from review agents.
 
 ---
 

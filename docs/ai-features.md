@@ -715,6 +715,38 @@ the JSON output and as `context` on the run record (when non-zero), so the befor
 measurement can see what the section cost. Both transports get the same section; on the
 CLI transport it pre-loads what the agent would otherwise spend read turns on.
 
+### Review rubric and per-PR questions
+
+Every chunk prompt reviews against a short **rubric** rather than a standing checklist
+(#2720, lintro-ops milestone 0 step 0.9): severity defined by behaviour (P1 with a
+concrete failure scenario, P2 for verified incorrect behaviour or a false documented
+contract, P3 when only wording or a nit remains), ten bug classes to look in, and one
+rule — a finding needs `file:line` evidence in the chunk's diff, and a concern without a
+shown defect is not a finding. The rubric wording is stable across rounds so run-to-run
+comparisons measure the change, not the prompt.
+
+Beside the rubric the prompt carries **questions written for this change**: one extra
+provider call per run (not per chunk) reads the PR title, the description, the
+changed-file list and the redacted whole-PR diff, fitted whole-file-by-file to
+`ai.review_synthesis_diff_tokens`, and returns up to ten `G1.`… questions that every
+chunk then sees under "Questions for this change (consider each; do not answer them)".
+They are guidance, never a list to answer: the output rules forbid restating a question
+or a rubric item as a finding, and a confirmation that arrives as a finding is dropped
+at parse time (#2430). When the diff had to be trimmed to fit, the generator is told
+which files it saw and the run record carries `questions_diff_trimmed`. A failed call
+(provider error, unparseable answer) degrades the run to the rubric alone and is
+recorded once as `GENERATED_QUESTIONS_FAILED`; a cost-cap stop on that call ends the run
+as a partial like any other.
+
+`ai.review_generated_questions` (bool, default `true`) turns the pass off; the prompt
+then says so in the questions section. `--show-checklist all` prints the run's questions
+under a "Questions for this change" panel, and the JSON output lists them as
+`generated_questions`. The built-in checklist corpus is reduced to the evidence-backed
+core items (logic bugs, silent failures, security, integration); the items that survive
+selection render as "Additional checks" after the questions, and the corpus schema
+tooling that used to accompany it is gone — the loader's validation against the Python
+enums is the only authority.
+
 ### Review convergence (deterministic re-review stop)
 
 File-level resume already spares a long-lived PR from re-reading files it has covered at
@@ -864,7 +896,7 @@ error stickies). `--output-format json` carries the full breakdown in a top-leve
       { "name": "context_collection", "seconds": 22.0, "occurrences": 1 },
       { "name": "chunking", "seconds": 0.4, "occurrences": 1 },
       { "name": "resume_planning", "seconds": 1.2, "occurrences": 1 },
-      { "name": "generated_questions", "seconds": 30.2, "occurrences": 7 },
+      { "name": "generated_questions", "seconds": 30.2, "occurrences": 1 },
       { "name": "provider", "seconds": 250.0, "occurrences": 1 },
       { "name": "parse_merge", "seconds": 8.0, "occurrences": 1 },
       { "name": "synthesis", "seconds": 12.4, "occurrences": 1 },
@@ -890,14 +922,14 @@ Reading the block:
 
 - `phases` is in first-occurrence order, so it reads chronologically. `provider` is an
   envelope covering the whole chunk fan-out plus any custom-agent passes, matching the
-  `phase_timings.provider` key; phases that run once per chunk inside it
-  (`generated_questions` at depth ≥ 2, `adversarial` at depth ≥ 3) fold every occurrence
-  into one span, and `occurrences` says how many. Those nested spans are already counted
-  inside `provider`, and chunks run concurrently, so phase sums can exceed
-  `total_seconds` — the sum answers "how much provider work happened", `total_seconds`
-  answers "how long did the user wait". The summary line lists nested phases inside the
-  provider parenthetical for the same reason, e.g.
-  `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
+  `phase_timings.provider` key; the once-per-run question pass (`generated_questions`,
+  #2720) is one nested span, and a phase that runs once per chunk inside it
+  (`adversarial` at depth ≥ 3) folds every occurrence into one span, with `occurrences`
+  saying how many. Those nested spans are already counted inside `provider`, and chunks
+  run concurrently, so phase sums can exceed `total_seconds` — the sum answers "how much
+  provider work happened", `total_seconds` answers "how long did the user wait". The
+  summary line lists nested phases inside the provider parenthetical for the same
+  reason, e.g. `provider 4m10s (7 chunks, max parallel 5, questions 30.2s)`.
 - `synthesis` is the round's synthesis pass (see _The synthesis pass_ above). It is on
   by default and runs after every completed round with at least one chunk, so the phase
   is present on a normal run; it is absent only when `review.synthesis.enabled` is
@@ -918,10 +950,10 @@ Reading the block:
   `ai.max_parallel_calls` is set explicitly, because each CLI call is a whole agent
   process. It is reported as `max_parallel`.
 - Each chunk also carries `provider_seconds`, the main review call's own wall time
-  inside the in-flight span (the difference is prompt building, parsing and any
-  depth-2/3 pass), and `turns`, the agent turn count the transport reported for that
-  call. The Claude CLI envelope reports `num_turns`; other transports report none, and
-  the key is then `null` rather than absent.
+  inside the in-flight span (the difference is prompt building, parsing and any depth-3
+  pass), and `turns`, the agent turn count the transport reported for that call. The
+  Claude CLI envelope reports `num_turns`; other transports report none, and the key is
+  then `null` rather than absent.
 - GitHub posting happens after the result is rendered, so it is outside the measured
   window and has no phase. `metadata.phase_timings` keeps its flat three-key mapping for
   existing consumers.
@@ -1085,6 +1117,12 @@ ai:
   # context window leaves after the prompt overhead. Separate from the chunk
   # budget: the pass is one call over the whole PR. (int >= 1000, default: 24000)
   review_synthesis_diff_tokens: 24000
+
+  # Generate per-PR review questions once per run (#2720): one provider call
+  # over the redacted whole-PR diff (fitted to review_synthesis_diff_tokens),
+  # the PR title and description; every chunk shares the questions beside the
+  # rubric. false reviews with the rubric alone. (bool, default: true)
+  review_generated_questions: true
 
   # Diff-bounded finding gate (#2711): a finding whose line lies outside every
   # hunk of the chunk that produced it is dropped and counted; within this many
@@ -1527,8 +1565,8 @@ provider in its metadata.
 | `cursor`    | `--mode ask` (always)               | none: `agent` has no flag        |
 
 The limit comes from the call's kind: 12 turns for review-type calls (each chunk's main
-call and its schema-recovery retry, the depth-2 and depth-3 passes, the synthesis pass
-and custom review agents), 1 for the summary and fix calls.
+call and its schema-recovery retry, the per-PR question pass, the depth-3 pass, the
+synthesis pass and custom review agents), 1 for the summary and fix calls.
 `ai.transports.cli.max_turns` (int >= 1, default unset) overrides every kind. The two
 Claude flags differ in kind. `--tools` is a security bound and fails closed: it is a
 required contract flag sent on every call, and a binary whose `--help` does not

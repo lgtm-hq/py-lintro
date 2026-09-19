@@ -145,10 +145,11 @@ retry's usage in through `merge_response_usage`. `payload_to_partial` turns the 
 payload (findings and `flagged_files` only, lintro-ops milestone 0) into the
 `ChunkReviewPartial` the merge layer consumes.
 
-`lintro/ai/review/checklist_pass.py` owns the depth-2 generated checklist:
-`generate_extra_checklist` asks the model for domain-specific questions and truncates
-the answer at `GENERATED_CHECKLIST_ID_STRIDE`, which is what keeps parallel chunks on
-disjoint generated-id ranges so a finding's `checklist_ids` cannot collide.
+`lintro/ai/review/question_pass.py` owns the per-PR questions (#2720):
+`generate_run_questions` asks the model once per run, over the redacted whole-PR diff
+fitted to `review_synthesis_diff_tokens` plus the PR title and body, and every chunk
+shares the answer as "consider" items beside the rubric. A failed pass degrades the run
+to the rubric alone and is recorded once as `GENERATED_QUESTIONS_FAILED`.
 `lintro/ai/review/adversarial_pass.py` owns the depth-3 sweep: `run_adversarial_pass`
 returns findings and usage only, and degrades to usage alone when the answer is
 malformed.
