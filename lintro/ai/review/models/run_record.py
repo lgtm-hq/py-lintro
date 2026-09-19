@@ -127,6 +127,8 @@ class RunRecord:
             payload["dropped_outside_diff"] = outcome.dropped_outside_diff
         if usage.cost_basis:
             payload["cost_basis"] = usage.cost_basis
+        if usage.context:
+            payload["context"] = usage.context
         if outcome.resolved is not None:
             payload["resolved"] = outcome.resolved
         if outcome.open_after is not None:
@@ -247,6 +249,7 @@ def _usage_from_payload(*, payload: dict[str, Any]) -> RunUsage:
         cost=coerce_float(payload.get("cost")),
         estimated=estimated,
         cost_basis=cost_basis,
+        context=coerce_int(payload.get("context")),
     )
 
 

@@ -16,7 +16,10 @@ from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.patch_hash import normalized_patch_hash
 
 __all__ = [
+    "carry_converted_flags",
     "carry_unserved_flags",
+    "resolve_run_flags",
+    "unconsume_converted",
     "consume_served_flags",
     "hashes_for_diffs",
     "inherit_same_round_paths",
@@ -224,3 +227,110 @@ def hashes_for_diffs(*, diffs: Mapping[str, str]) -> dict[str, str]:
         Path to normalized patch hash.
     """
     return {path: normalized_patch_hash(text) for path, text in diffs.items()}
+
+
+def carry_converted_flags(
+    *,
+    carried: Sequence[FlaggedFile],
+    converted: Sequence[FlaggedFile],
+) -> tuple[FlaggedFile, ...]:
+    """Merge cross-chunk flags into the carried set, converted flags first.
+
+    A flag converted from a finding on another chunk's file (#2719) is kept
+    even when that file was reviewed this run: that review did not have the
+    concern, so the re-read it promises can only happen next run. A fresh
+    converted flag also displaces a carried prior flag on the same path, as
+    a current-run flag always did, so its reason is the one that survives.
+
+    Args:
+        carried: Flags :func:`carry_unserved_flags` kept for the next run.
+        converted: The run's converted cross-chunk flags, in chunk order.
+
+    Returns:
+        The converted flags (first occurrence per path) followed by the
+        carried flags on other paths.
+    """
+    kept: list[FlaggedFile] = []
+    seen: set[str] = set()
+    for flag in (*converted, *carried):
+        if flag.path not in seen:
+            seen.add(flag.path)
+            kept.append(flag)
+    return tuple(kept)
+
+
+def unconsume_converted(
+    *,
+    consumed: Sequence[tuple[str, str]],
+    converted: Sequence[FlaggedFile],
+    current_hashes: Mapping[str, str],
+) -> tuple[tuple[str, str], ...]:
+    """Drop the consumed key a fresh converted flag would otherwise hit.
+
+    A served prior flag records ``(path, hash)`` as consumed; if the same run
+    converted a new cross-chunk finding on that path into a flag (#2719), the
+    key for the flag's own hash would make the next run reject the fresh flag
+    as already served. Only that key is dropped: consumed keys at other
+    hashes are history and stay.
+
+    Args:
+        consumed: The consumed keys computed for this run.
+        converted: The run's converted cross-chunk flags.
+        current_hashes: Patch hashes of the current diff, per path.
+
+    Returns:
+        ``consumed`` without the converted flags' effective keys.
+    """
+    fresh = {
+        (flag.path, flag.patch_hash or current_hashes.get(flag.path, ""))
+        for flag in converted
+    }
+    return tuple(entry for entry in consumed if entry not in fresh)
+
+
+def resolve_run_flags(
+    *,
+    payload_flags: Sequence[FlaggedFile],
+    converted: Sequence[FlaggedFile],
+    prior_flags: Sequence[FlaggedFile],
+    prior_consumed: Sequence[tuple[str, str]],
+    covered_now: Iterable[str],
+    current_hashes: Mapping[str, str],
+) -> tuple[tuple[FlaggedFile, ...], tuple[tuple[str, str], ...]]:
+    """Return the flags to carry and the consumed keys for one run.
+
+    Model re-read requests and prior flags follow the served/unserved rule;
+    converted cross-chunk flags (#2719) are carried whether or not their file
+    was reviewed this run, and no consumed key is left on their paths.
+
+    Args:
+        payload_flags: Re-read requests the chunks reported this run.
+        converted: Flags converted from cross-chunk findings this run.
+        prior_flags: Flags carried in from the prior run.
+        prior_consumed: Consumed keys carried in from the prior run.
+        covered_now: Paths reviewed this run.
+        current_hashes: Patch hashes of the current diff, per path.
+
+    Returns:
+        ``(flagged_files, consumed_flags)`` for the run record.
+    """
+    covered = set(covered_now)
+    carried = carry_unserved_flags(
+        new_flags=payload_flags,
+        prior_flags=prior_flags,
+        covered_now=covered,
+    )
+    consumed = consume_served_flags(
+        prior_consumed=prior_consumed,
+        flags=(*payload_flags, *prior_flags),
+        covered_now=covered,
+        current_hashes=current_hashes,
+    )
+    return (
+        carry_converted_flags(carried=carried, converted=converted),
+        unconsume_converted(
+            consumed=consumed,
+            converted=converted,
+            current_hashes=current_hashes,
+        ),
+    )

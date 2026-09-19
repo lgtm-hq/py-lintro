@@ -21,6 +21,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.165.0] - 2026-09-17
+
+### Added
+
+### Changed
+
+- **deps**: pin lgtm-ci to v0.74.5 (#2718) (5961563)
+
 ## [0.164.0] - 2026-09-17
 
 ### Added
@@ -32,6 +40,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   `findings_dropped_by_reason.outside_diff`, `findings_reanchored` and
   `findings_unanchored` in the JSON output and `dropped_outside_diff` on the run record
   (#2711, lintro-ops milestone 0 step 0.7)
+
+- **ai/review**: the chunk prompt carries a read-only repository context section: the
+  post-change (head-side) content of the chunk's files, whole or as definition windows
+  around the hunks, plus one-hop importers and sibling tests among the PR's changed
+  files, fenced and redacted like the diff and preceded by an "understanding only,
+  findings only on changed lines" instruction; budget `ai.review_context_tokens`
+  (default 6000, 0 disables), tokens reported as `token_usage.context` and on the run
+  record (#2714, lintro-ops milestone 0 step 0.8)
 
 ### Changed
 

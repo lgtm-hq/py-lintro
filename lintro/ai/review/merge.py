@@ -58,6 +58,9 @@ class ChunkReviewPartial:
         files: Repository-relative paths the chunk reviewed. Coverage
             crediting and the synthesis digest key off this set.
         flagged_files: Reviewer re-read requests the chunk reported.
+        converted_flags: Findings on another chunk's file turned into re-read
+            flags at parse time (#2719); carried to the next run, since this
+            run's review of that file did not have the concern.
         coverage_degradations: Chunk-level limits that may have suppressed
             findings, such as an output-exhaustion split or a failed depth
             pass.
@@ -73,6 +76,8 @@ class ChunkReviewPartial:
             changes.
         diff_gate: What the diff-bounded gate did to this chunk's findings
             (#2711): outside drops, re-anchors, unanchored keeps.
+        context_tokens: Estimated tokens of the read-only repository context
+            the chunk's prompt carried (#2714).
     """
 
     findings: tuple[ReviewFinding, ...]
@@ -81,6 +86,7 @@ class ChunkReviewPartial:
     cost_estimate: float
     files: tuple[str, ...] = field(default_factory=tuple)
     flagged_files: tuple[FlaggedFile, ...] = field(default_factory=tuple)
+    converted_flags: tuple[FlaggedFile, ...] = field(default_factory=tuple)
     coverage_degradations: tuple[CoverageDegradation, ...] = field(
         default_factory=tuple,
     )
@@ -88,6 +94,7 @@ class ChunkReviewPartial:
     turns: int | None = None
     truncated: bool = False
     diff_gate: DiffGateCounts = field(default_factory=DiffGateCounts)
+    context_tokens: int = 0
 
 
 def truncated_paths(*, partials: Iterable[ChunkReviewPartial]) -> set[str]:

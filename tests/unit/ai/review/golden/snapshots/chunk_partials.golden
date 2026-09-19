@@ -61,6 +61,7 @@
     "cost_estimate": 0.021,
     "files": [],
     "flagged_files": [],
+    "converted_flags": [],
     "coverage_degradations": [],
     "provider_seconds": 0.0,
     "turns": null,
@@ -70,7 +71,8 @@
       "reanchored": 0,
       "unanchored": 0,
       "occurrences_dropped": 0
-    }
+    },
+    "context_tokens": 0
   },
   {
     "findings": [
@@ -134,6 +136,7 @@
     "cost_estimate": 0.017,
     "files": [],
     "flagged_files": [],
+    "converted_flags": [],
     "coverage_degradations": [],
     "provider_seconds": 0.0,
     "turns": null,
@@ -143,6 +146,7 @@
       "reanchored": 0,
       "unanchored": 0,
       "occurrences_dropped": 0
-    }
+    },
+    "context_tokens": 0
   }
 ]

@@ -162,6 +162,7 @@ def _usage(*, request: StickyRequest, auth_mode: str) -> RunUsage:
         prompt=int(tokens.get("prompt", 0)),
         completion=int(tokens.get("completion", 0)),
         total=int(tokens.get("total", 0)),
+        context=int(tokens.get("context", 0)),
         cost=metadata.cost_estimate_usd,
         estimated=bool(metadata.token_usage_estimated),
         cost_basis=_cost_basis(

@@ -60,6 +60,7 @@ class AIBudgetConfig:
     review_chunk_diff_tokens: int
     review_synthesis_diff_tokens: int
     review_diff_gate_lines: int
+    review_context_tokens: int
     cli_max_diff_bytes: int
 
 

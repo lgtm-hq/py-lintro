@@ -69,6 +69,10 @@ class ReviewRunPlan:
         synthesis_diff_budget: Input token budget of the cross-chunk
             synthesis pass (``ai.review_synthesis_diff_tokens`` clamped to
             the context-window remainder, #2702).
+        context_budget: Effective per-chunk budget of the read-only repository
+            context section, clamped to the window remainder (#2714).
+        diff_ceiling: The context-window remainder one chunk's diff may fill;
+            the context section takes only what a chunk's own diff leaves.
         chunks: The chunks the run will review, in plan order.
         chunk_skips: Per-file skips the chunker recorded.
         resume: Resume plan for the current diff.
@@ -90,6 +94,8 @@ class ReviewRunPlan:
     context_window: int
     diff_budget: int
     synthesis_diff_budget: int
+    context_budget: int = 0
+    diff_ceiling: int = 0
     chunks: list[ReviewChunk]
     chunk_skips: list[SkippedFile]
     resume: ResumePlan
@@ -237,6 +243,30 @@ def _resolve_diff_budgets(
     return target, max(diff_budget, target)
 
 
+def resolve_context_budget(
+    *,
+    review_context_tokens: int,
+    window_remainder: int,
+    diff_target: int,
+) -> int:
+    """Clamp the repository-context budget to what the window leaves (#2714).
+
+    The context section rides in the same prompt as the chunk diff, so it may
+    only take what the context window leaves after the prompt overhead and
+    the per-chunk diff target; otherwise a correctly chunked prompt could
+    overrun the provider's limit.
+
+    Args:
+        review_context_tokens: The configured per-chunk context budget.
+        window_remainder: Tokens the window leaves for diff plus context.
+        diff_target: The per-chunk diff target the chunker packs against.
+
+    Returns:
+        The effective context budget, ``0`` when nothing is left.
+    """
+    return max(min(review_context_tokens, window_remainder - diff_target), 0)
+
+
 #: Concurrency ceiling on the CLI transport when ``ai.max_parallel_calls`` is
 #: left at its default. A CLI call spawns a whole agent process, so five in
 #: flight thrash a laptop and trip provider rate limits where five API
@@ -306,6 +336,11 @@ def plan_run(
         options=options,
         context_window=context_window,
     )
+    context_budget = resolve_context_budget(
+        review_context_tokens=options.ai_config.review_context_tokens,
+        window_remainder=hard_diff_ceiling,
+        diff_target=diff_budget,
+    )
     synthesis_diff_budget = resolve_synthesis_diff_budget(
         context_window_budget=hard_diff_ceiling,
         review_synthesis_diff_tokens=options.ai_config.review_synthesis_diff_tokens,
@@ -359,6 +394,8 @@ def plan_run(
         context_window=context_window,
         diff_budget=diff_budget,
         synthesis_diff_budget=synthesis_diff_budget,
+        context_budget=context_budget,
+        diff_ceiling=hard_diff_ceiling,
         chunks=chunks,
         chunk_skips=chunk_skips,
         resume=resume,

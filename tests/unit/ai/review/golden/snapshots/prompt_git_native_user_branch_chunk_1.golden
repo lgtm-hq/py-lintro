@@ -38,6 +38,7 @@ base of the range is `0123456789abcdef0123456789abcdef01234567`). Unmarked files
 are not in this chunk's diff; read them only as context for this chunk, and never
 report their own changes here.
 
+
 ---
 
 ### Interaction paths (trace each explicitly)

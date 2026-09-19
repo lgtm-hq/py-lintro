@@ -53,6 +53,7 @@ _USER_PROMPT_KWARGS = {
     "lint_results_section": "",
     "strictness_section": "",
     "output_schema": REVIEW_OUTPUT_SCHEMA,
+    "repo_context_section": "",
 }
 
 _P2_ELIGIBILITY = (

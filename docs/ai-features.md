@@ -694,6 +694,27 @@ the numbers before it shows as a thread on an untouched line or an inline-post f
 Set `ai.review_diff_gate_lines: 0` to re-anchor nothing (near findings are then dropped
 too).
 
+### Repository context in the prompt
+
+Every chunk prompt carries, besides the diff, a **read-only repository context section**
+(#2714, lintro-ops milestone 0 step 0.8): the post-change content of each changed source
+file in the chunk, read from the head side (never the working tree, which in the dogfood
+workflow is the base commit), plus the chunk's one-hop importers and sibling test files
+among the PR's other changed files. A file that fits its share of the budget is shown
+whole; a larger one is cut to the enclosing function and class definitions around each
+hunk (`ast` for Python, a line window for other languages). The section is fenced by the
+prompt's boundary markers, redacted through the same choke point as the diff, and
+preceded by the instruction that it is for understanding only and that findings are
+reported only on lines changed in the chunk's diff. That instruction, the fence and the
+path gate (a finding on a context file becomes a re-read flag, never a posted finding)
+are one security bound and are tested verbatim.
+
+`ai.review_context_tokens` (int >= 0, default 6,000) is the per-chunk budget; `0`
+disables the section. The tokens spent on it are reported as `token_usage.context` in
+the JSON output and as `context` on the run record (when non-zero), so the before/after
+measurement can see what the section cost. Both transports get the same section; on the
+CLI transport it pre-loads what the agent would otherwise spend read turns on.
+
 ### Review convergence (deterministic re-review stop)
 
 File-level resume already spares a long-lived PR from re-reading files it has covered at
@@ -1070,6 +1091,12 @@ ai:
   # lines of a hunk it is re-anchored to the nearest changed line instead.
   # (int >= 0, default: 3; 0 re-anchors nothing)
   review_diff_gate_lines: 3
+
+  # Per-chunk token budget for the read-only repository context the review
+  # prompt carries besides the diff (post-change content of the chunk's files,
+  # their one-hop importers and sibling tests among the PR's changed files).
+  # 0 disables the section. (int >= 0, default: 6000)
+  review_context_tokens: 6000
 
   # Deprecated alias for review_chunk_diff_tokens: still read (and warned
   # about) when the new key is absent; removed not before 2026-10-15.
