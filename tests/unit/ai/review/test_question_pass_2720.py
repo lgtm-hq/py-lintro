@@ -11,6 +11,7 @@ rubric alone instead of ending it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,7 +27,6 @@ from lintro.ai.registry import AIProvider
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
-from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_degradation import (
     SYNTHESIS_CHUNK_INDEX,
@@ -40,8 +40,8 @@ from lintro.ai.review.question_pass import (
     MAX_RUN_QUESTIONS,
     RunQuestions,
     fit_diff_to_budget,
-    fold_question_pass,
     generate_run_questions,
+    question_pass_degradations,
 )
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.token_budget import estimate_tokens
@@ -345,6 +345,8 @@ async def test_fenced_json_is_accepted() -> None:
         json.dumps({"generated_questions": "none"}),
         json.dumps({"generated_questions": None}),
         json.dumps(["G1"]),
+        json.dumps({"generated_questions": []}),
+        json.dumps({"generated_questions": [{"question": " "}, "not an object"]}),
     ],
 )
 async def test_an_unusable_answer_is_a_failed_pass_that_keeps_its_usage(
@@ -364,59 +366,14 @@ async def test_an_unusable_answer_is_a_failed_pass_that_keeps_its_usage(
     assert_that(questions.usage.cost_estimate).is_equal_to(0.01)
 
 
-# --- folding -----------------------------------------------------------------
-
-
-def _partial(*, input_tokens: int = 100) -> ChunkReviewPartial:
-    """Build an empty chunk partial with known usage.
-
-    Args:
-        input_tokens: Prompt tokens the partial reports.
-
-    Returns:
-        The partial.
-    """
-    return ChunkReviewPartial(
-        findings=(),
-        input_tokens=input_tokens,
-        output_tokens=5,
-        cost_estimate=0.5,
-    )
-
-
-def test_usage_is_charged_to_the_first_partial_only() -> None:
-    """The pass's tokens land on one partial so run totals count them once."""
-    questions = RunQuestions(
-        text="G1. Q?",
-        count=1,
-        usage=ChunkReviewPartial(
-            findings=(),
-            input_tokens=10,
-            output_tokens=20,
-            cost_estimate=0.01,
-        ),
-    )
-
-    folded = fold_question_pass(
-        partials=[_partial(input_tokens=100), _partial(input_tokens=200)],
-        questions=questions,
-    )
-
-    assert_that([item.input_tokens for item in folded]).is_equal_to([110, 200])
-    assert_that(folded[0].output_tokens).is_equal_to(25)
-    assert_that(folded[0].cost_estimate).is_equal_to(0.51)
-    assert_that(folded[0].coverage_degradations).is_empty()
-    assert_that(folded[1]).is_equal_to(_partial(input_tokens=200))
+# --- degradation --------------------------------------------------------------
 
 
 def test_a_failed_pass_is_recorded_once_as_a_whole_run_degradation() -> None:
     """The degradation carries the synthesis sentinel, not a chunk index."""
-    folded = fold_question_pass(
-        partials=[_partial(), _partial()],
-        questions=RunQuestions(failed=True),
-    )
-
-    assert_that(folded[0].coverage_degradations).is_equal_to(
+    assert_that(
+        question_pass_degradations(questions=RunQuestions(failed=True)),
+    ).is_equal_to(
         (
             CoverageDegradation(
                 reason=CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
@@ -425,14 +382,22 @@ def test_a_failed_pass_is_recorded_once_as_a_whole_run_degradation() -> None:
             ),
         ),
     )
-    assert_that(folded[1].coverage_degradations).is_empty()
 
 
-def test_folding_into_no_partials_is_a_no_op() -> None:
-    """A run that reviewed nothing has nowhere to charge the pass."""
-    assert_that(
-        fold_question_pass(partials=[], questions=RunQuestions(failed=True)),
-    ).is_empty()
+@pytest.mark.parametrize(
+    "questions",
+    [None, RunQuestions(), RunQuestions(text="G1. Q?", count=1)],
+    ids=["not-run", "disabled", "generated"],
+)
+def test_a_pass_that_did_not_fail_records_nothing(
+    questions: RunQuestions | None,
+) -> None:
+    """Only a failed pass degrades the run.
+
+    Args:
+        questions: The pass result, or ``None`` when it did not run.
+    """
+    assert_that(question_pass_degradations(questions=questions)).is_empty()
 
 
 # --- run wiring --------------------------------------------------------------
@@ -560,9 +525,12 @@ async def test_the_pass_runs_once_per_run_and_every_chunk_shares_it(
     # The pass never reuses the review's durable session (#2720).
     assert_that(seam.call_args_list[0].kwargs["use_one_shot"]).is_true()
     for chunk_prompt in prompts[1:]:
+        # Model-produced text is fenced by the prompt's own boundary marker,
+        # with the trusted heading outside the fence.
+        marker = chunk_prompt.split("<")[1].split(">")[0]
         assert_that(chunk_prompt).contains(
-            "### Questions for this change",
-            "G1. Does b.py still call a?",
+            "### Questions for this change (consider each; do not answer them)\n\n"
+            f"<{marker}>\nG1. Does b.py still call a?\n</{marker}>\n",
         )
     assert_that(result.metadata.generated_questions).is_equal_to(
         ("G1. Does b.py still call a?",),
@@ -681,3 +649,90 @@ async def test_a_run_stopped_after_the_pass_still_reports_it(
     assert_that(
         [item.reason for item in stopped.metadata.coverage_degradations],
     ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])
+
+
+async def test_a_run_stopped_before_any_chunk_still_charges_the_pass(
+    tmp_path: Path,
+) -> None:
+    """With zero partials the pass is still charged and its failure recorded.
+
+    The usage and the degradation come from the run outcome, not from a chunk
+    partial, so a cost cap tripping on the first chunk call loses neither.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    seam = _scripted_seam(
+        _response(content=_questions_payload("Q?")),
+        AICostBudgetExceededError("cost cap reached"),
+    )
+
+    result = await _run(tmp_path=tmp_path, call_ai=seam)
+
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.chunks_reviewed).is_equal_to(0)
+    assert_that(result.metadata.generated_questions).is_equal_to(("G1. Q?",))
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(10)
+    assert_that(result.metadata.cost_estimate_usd).is_equal_to(0.01)
+
+    failed = _scripted_seam(
+        AIProviderError("question generator timed out"),
+        AICostBudgetExceededError("cost cap reached"),
+    )
+
+    stopped = await _run(tmp_path=tmp_path, call_ai=failed)
+
+    assert_that(stopped.metadata.chunks_reviewed).is_equal_to(0)
+    assert_that(
+        [item.reason for item in stopped.metadata.coverage_degradations],
+    ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])
+
+
+async def test_an_interrupt_during_the_question_call_stops_the_run() -> None:
+    """SIGTERM while the question call is in flight ends the run promptly.
+
+    The call is raced against the run's stop event like every other provider
+    call; the winner is the persistable SIGTERM timeout, so the orchestrator
+    takes its stopped-run path instead of waiting out the provider timeout.
+    """
+    stop = asyncio.Event()
+    entered = asyncio.Event()
+
+    async def _hang(**_kwargs: object) -> AIResponse:
+        """Signal entry, then block until cancelled.
+
+        Args:
+            **_kwargs: Provider-call keywords the seam ignores.
+
+        Returns:
+            Never; the call is cancelled by the race.
+        """
+        entered.set()
+        await asyncio.sleep(3600)
+        return _response(content="")
+
+    async def _fire_stop() -> None:
+        """Set the stop event once the provider call is in flight."""
+        await entered.wait()
+        stop.set()
+
+    with patch(
+        "lintro.ai.review.provider_call.call_ai",
+        new=AsyncMock(side_effect=_hang),
+    ):
+        firing = asyncio.ensure_future(_fire_stop())
+        try:
+            with pytest.raises(AIProviderError, match="SIGTERM"):
+                await asyncio.wait_for(
+                    generate_run_questions(
+                        context=_context(),
+                        provider=_provider(),
+                        ai_config=AIConfig(enabled=True, review=True),
+                        budget=CostBudget(max_cost_usd=None),
+                        diff_budget=10_000,
+                        stop=stop,
+                    ),
+                    timeout=5,
+                )
+        finally:
+            await firing

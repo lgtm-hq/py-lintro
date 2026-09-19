@@ -118,6 +118,7 @@ def test_retained_checklist_items_render_as_additional_checks() -> None:
         generated_questions="G1. Does it?",
         checklist_text="1. [logic-bug] Example question?",
         checklist_count=1,
+        boundary="CODE_BLOCK_test1234",
     )
     rendered = REVIEW_USER_PROMPT_TEMPLATE.format(
         **{
@@ -130,10 +131,11 @@ def test_retained_checklist_items_render_as_additional_checks() -> None:
 
     assert_that(rendered).contains(
         "### Questions for this change (consider each; do not answer them)\n\n"
-        "G1. Does it?\n\n"
+        "<CODE_BLOCK_test1234>\nG1. Does it?\n</CODE_BLOCK_test1234>\n\n"
         "### Additional checks (1 retained checklist item; report a finding only "
         "where the diff has a defect)\n\n"
-        "1. [logic-bug] Example question?\n",
+        "<CODE_BLOCK_test1234>\n1. [logic-bug] Example question?\n"
+        "</CODE_BLOCK_test1234>\n",
     )
 
 

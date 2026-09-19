@@ -424,8 +424,11 @@ async def test_main_pass_failure_still_aborts_the_chunk(
     assert_that(result.metadata.stopped_reason).contains("timeout")
     assert_that(result.findings).is_empty()
     assert_that(result.metadata.chunks_reviewed).is_equal_to(0)
-    # No partial was harvested, so there is nothing to carry the row on.
-    assert_that(result.metadata.coverage_degradations).is_empty()
+    # The pass is charged and recorded from the run outcome, so even a run
+    # that harvested no partial keeps the row (#2720).
+    assert_that(
+        [item.reason for item in result.metadata.coverage_degradations],
+    ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])
 
 
 async def test_cost_budget_exceeded_in_the_sweep_still_aborts(

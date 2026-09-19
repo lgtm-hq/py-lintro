@@ -62,12 +62,14 @@ def build_review_user_prompt(
     checklist_text, prompt_mapping = format_checklist_for_prompt(
         items=checklist_items,
     )
+    boundary = make_boundary_marker()
     # This builder renders one whole-diff prompt with no run-level question
     # pass behind it, so the questions section carries its placeholder line.
     questions, additional_checks = render_rubric_sections(
         generated_questions="",
         checklist_text=checklist_text,
         checklist_count=len(checklist_items),
+        boundary=boundary,
     )
     pr_title = (
         context.pr_metadata.title
@@ -76,7 +78,6 @@ def build_review_user_prompt(
     )
     pr_summary = context.pr_metadata.body if context.pr_metadata is not None else ""
     raw_diff = diff if diff is not None else context.unified_diff
-    boundary = make_boundary_marker()
     deferred_section = format_deferred_scope_section(text=deferred_scope)
     if deferred_section:
         # Deferred scope derives from the PR summary — untrusted; fence it

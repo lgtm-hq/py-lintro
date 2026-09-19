@@ -443,7 +443,8 @@ class AIConfig(BaseModel):
             "provider call over the redacted whole-PR diff (fitted to "
             "review_synthesis_diff_tokens), the PR title and description; "
             "every chunk shares the questions as 'consider' items beside the "
-            "rubric. False reviews with the rubric alone."
+            "rubric. Set to false to skip the pass and review with the rubric "
+            "alone."
         ),
     )
     review_diff_gate_lines: int = Field(

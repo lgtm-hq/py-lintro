@@ -27,15 +27,10 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.interrupt import install_review_interrupt
 from lintro.ai.review.merge import finalize_partials
-from lintro.ai.review.question_pass import (
-    RunQuestions,
-    fold_question_pass,
-    run_question_pass,
-)
+from lintro.ai.review.question_pass import RunQuestions, run_question_pass
 from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import (
     ReviewRunOutcome,
-    chunk_summaries,
 )
 from lintro.ai.review.session import (
     ChunkRunPlan,
@@ -50,6 +45,7 @@ from lintro.ai.review.synthesis import (
     run_synthesis_pass,
     should_run_synthesis,
 )
+from lintro.ai.review.synthesis_prompt import chunk_summaries
 from lintro.ai.review.timings import ReviewPhase
 
 if TYPE_CHECKING:
@@ -156,9 +152,15 @@ async def run_passes(
     """
     partials: list[ChunkReviewPartial] = []
     if plan.chunks:
-        questions = await run_question_pass(context=context, options=options, plan=plan)
+        questions = await run_question_pass(
+            context=context,
+            options=options,
+            plan=plan,
+            stop=interrupt,
+        )
         # Recorded before the fan-out so a run the fan-out stops (cost cap,
-        # timeout, SIGTERM) still reports the pass it already paid for.
+        # timeout, SIGTERM) still reports the pass it already paid for; the
+        # result assembly charges its usage and degradation from here.
         progress.questions = questions
         chunk_plan = replace(
             chunk_run_plan(
@@ -181,7 +183,6 @@ async def run_passes(
                 policy=plan.policy,
             ),
         )
-        partials = fold_question_pass(partials=partials, questions=questions)
     if plan.resume.queue:
         await run_custom_agent_passes(
             request=CustomAgentPassRequest(
@@ -367,10 +368,6 @@ def finalize_stopped_run(
         provider_seconds = time.monotonic() - provider_started
         plan.timings.add_phase(name=ReviewPhase.PROVIDER, seconds=provider_seconds)
     partials = list(progress.collected)
-    if progress.questions is not None:
-        # The completed path folds the pass into the fan-out's return value;
-        # a stopped run only has the harvested partials to charge it to.
-        partials = fold_question_pass(partials=partials, questions=progress.questions)
     merge_started = time.monotonic()
     outcome = merge_partials(plan=plan, progress=progress, partials=partials)
     parse_merge_seconds = time.monotonic() - merge_started

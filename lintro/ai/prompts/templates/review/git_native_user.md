@@ -46,7 +46,9 @@ Review this code change for actionable findings.
 
 ### Questions for this change (consider each; do not answer them)
 
+<{boundary}>
 {generated_questions}
+</{boundary}>
 {additional_checks}
 ---
 

@@ -85,12 +85,16 @@ a shown defect is not a finding; finding nothing is a normal result.
 
 ### Questions for this change (consider each; do not answer them)
 
+<CODE_BLOCK_0d15ea5e>
 (no questions were generated for this change; review against the rubric)
+</CODE_BLOCK_0d15ea5e>
 
 ### Additional checks (2 retained checklist items; report a finding only where the diff has a defect)
 
+<CODE_BLOCK_0d15ea5e>
 1. [security] Does the change fail closed on unknown input?
 2. [logic-bug] Is the renamed module's public signature still compatible?
+</CODE_BLOCK_0d15ea5e>
 
 ---
 

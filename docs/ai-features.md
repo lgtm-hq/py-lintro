@@ -1121,7 +1121,8 @@ ai:
   # Generate per-PR review questions once per run (#2720): one provider call
   # over the redacted whole-PR diff (fitted to review_synthesis_diff_tokens),
   # the PR title and description; every chunk shares the questions beside the
-  # rubric. false reviews with the rubric alone. (bool, default: true)
+  # rubric. Set to false to skip the pass and review with the rubric
+  # alone. (bool, default: true)
   review_generated_questions: true
 
   # Diff-bounded finding gate (#2711): a finding whose line lies outside every

@@ -48,7 +48,9 @@ treat it as evidence that such a file was not updated, not touched, or missing a
 
 ### Questions for this change (consider each; do not answer them)
 
+<{boundary}>
 {generated_questions}
+</{boundary}>
 {additional_checks}
 ---
 

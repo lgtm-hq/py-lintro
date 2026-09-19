@@ -100,8 +100,15 @@ def render_rubric_sections(
     generated_questions: str,
     checklist_text: str,
     checklist_count: int,
+    boundary: str,
 ) -> tuple[str, str]:
     """Render the questions and the retained checklist for the prompt (#2720).
+
+    Both bodies are untrusted for the prompt's purposes — the questions come
+    back from a model that read the PR, the checklist from configuration —
+    so each is fenced by the prompt's boundary marker and redacted, while
+    the headings that tell the model what the fenced text *is* stay outside
+    the fence.
 
     Args:
         generated_questions: The run's per-PR questions, one per line.
@@ -109,14 +116,20 @@ def render_rubric_sections(
             the prompt, empty when none were selected.
         checklist_count: Number of items in ``checklist_text``, named in the
             "Additional checks" heading.
+        boundary: The prompt's per-call boundary marker.
 
     Returns:
-        The generated-questions text (a placeholder line when the run has
-        none) and the "Additional checks" section for any retained checklist
-        items (empty when there are none).
+        The generated-questions body (a placeholder line when the run has
+        none; the template fences it) and the "Additional checks" section
+        for any retained checklist items (empty when there are none), whose
+        item body is fenced here.
     """
-    questions = generated_questions.strip() or (
-        "(no questions were generated for this change; review against the rubric)"
+    questions = (
+        redact_prompt_text(
+            text=generated_questions.strip(),
+            source="generated questions",
+        )
+        or "(no questions were generated for this change; review against the rubric)"
     )
     checklist = checklist_text.strip()
     if not checklist:
@@ -126,16 +139,19 @@ def render_rubric_sections(
         f"\n### Additional checks ({count} retained checklist "
         f"{'item' if count == 1 else 'items'}; report a finding only where the "
         "diff has a defect)\n\n"
-        f"{checklist}\n"
+        f"<{boundary}>\n"
+        f"{redact_prompt_text(text=checklist, source='checklist')}\n"
+        f"</{boundary}>\n"
     )
     return questions, additional
 
 
-def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str]:
+def _rubric_sections(*, inputs: PromptInputs, boundary: str) -> tuple[str, str]:
     """Render the rubric sections from the shared prompt inputs.
 
     Args:
         inputs: Shared prompt material for the chunk being reviewed.
+        boundary: The prompt's per-call boundary marker.
 
     Returns:
         See :func:`render_rubric_sections`.
@@ -144,6 +160,7 @@ def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str]:
         generated_questions=inputs.extra_checklist,
         checklist_text=inputs.checklist_text,
         checklist_count=inputs.checklist_count,
+        boundary=boundary,
     )
 
 
@@ -164,9 +181,9 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     redacted_diff = redact_prompt_text(text=chunk.diff, source="diff")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    questions, additional_checks = _rubric_sections(inputs=inputs)
-
     boundary = make_boundary_marker()
+    questions, additional_checks = _rubric_sections(inputs=inputs, boundary=boundary)
+
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
         base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
@@ -241,10 +258,10 @@ def build_git_native_review_prompt(
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    questions, additional_checks = _rubric_sections(inputs=inputs)
+    boundary = make_boundary_marker()
+    questions, additional_checks = _rubric_sections(inputs=inputs, boundary=boundary)
 
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
-    boundary = make_boundary_marker()
     if embed_diff:
         diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
             boundary=boundary,

@@ -36,7 +36,6 @@ from lintro.ai.review.file_selection import (
 )
 from lintro.ai.review.finding_parser import reject_context_findings
 from lintro.ai.review.merge import merge_review_results, truncated_paths
-from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.coverage_degradation import (
     CARRIED_CHUNK_INDEX,
@@ -44,6 +43,7 @@ from lintro.ai.review.models.coverage_degradation import (
 )
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.question_pass import question_pass_degradations
 from lintro.ai.review.resume import carried_truncated_paths, records_for_reviewed
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
@@ -52,7 +52,6 @@ from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 if TYPE_CHECKING:
     from lintro.ai.review.custom_agent_runner import CustomAgentPassResult
     from lintro.ai.review.merge import ChunkReviewPartial
-    from lintro.ai.review.models.review_chunk import ReviewChunk
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_finding import ReviewFinding
     from lintro.ai.review.question_pass import RunQuestions
@@ -63,7 +62,6 @@ if TYPE_CHECKING:
 __all__ = [
     "ReviewRunOutcome",
     "assemble_review_result",
-    "chunk_summaries",
     "custom_agents_only_summary",
     "empty_review_result",
 ]
@@ -114,6 +112,36 @@ class ReviewRunOutcome:
     validation_started: float = 0.0
 
 
+def _run_usage(*, outcome: ReviewRunOutcome) -> tuple[int, int, float]:
+    """Sum the tokens and cost of every provider call the run made.
+
+    Args:
+        outcome: The run's outcome.
+
+    Returns:
+        Input tokens, output tokens and estimated cost.
+    """
+    usages: list[tuple[int, int, float]] = [
+        (item.input_tokens, item.output_tokens, item.cost_estimate)
+        for item in outcome.partials
+    ]
+    usages.extend(
+        (result.input_tokens, result.output_tokens, result.cost_estimate)
+        for result in outcome.custom_results
+    )
+    if outcome.synthesis_pass is not None:
+        pass_ = outcome.synthesis_pass
+        usages.append((pass_.input_tokens, pass_.output_tokens, pass_.cost_estimate))
+    if outcome.questions is not None:
+        usage = outcome.questions.usage
+        usages.append((usage.input_tokens, usage.output_tokens, usage.cost_estimate))
+    return (
+        sum(item[0] for item in usages),
+        sum(item[1] for item in usages),
+        sum(item[2] for item in usages),
+    )
+
+
 def assemble_review_result(
     *,
     context: ReviewContext,
@@ -142,23 +170,11 @@ def assemble_review_result(
         "parse_merge": max(outcome.parse_merge_seconds, 0.0),
     }
 
-    # The synthesis pass is one more provider call against the same budget, so
-    # its usage joins the run totals rather than hiding outside them (#2269).
-    total_input = (
-        sum(item.input_tokens for item in outcome.partials)
-        + sum(result.input_tokens for result in outcome.custom_results)
-        + (synthesis.input_tokens if synthesis is not None else 0)
-    )
-    total_output = (
-        sum(item.output_tokens for item in outcome.partials)
-        + sum(result.output_tokens for result in outcome.custom_results)
-        + (synthesis.output_tokens if synthesis is not None else 0)
-    )
-    total_cost = (
-        sum(item.cost_estimate for item in outcome.partials)
-        + sum(result.cost_estimate for result in outcome.custom_results)
-        + (synthesis.cost_estimate if synthesis is not None else 0.0)
-    )
+    # Every provider call the run made — chunks, custom agents, the synthesis
+    # pass and the question pass — joins the run totals rather than hiding
+    # outside them (#2269, #2720). The passes are charged from the outcome, so
+    # a run that stopped before any chunk completed still reports their cost.
+    total_input, total_output, total_cost = _run_usage(outcome=outcome)
     chunks_reviewed = len(outcome.partials)
     # The round's narrative comes from the synthesis pass (lintro-ops
     # milestone 0, decision A); chunks report findings only. A failed or
@@ -237,6 +253,7 @@ def assemble_review_result(
                 for degradation in item.coverage_degradations
             ),
             *(synthesis.degradations if synthesis is not None else ()),
+            *question_pass_degradations(questions=outcome.questions),
             *(
                 CoverageDegradation(
                     reason=CoverageDegradationReason.DIFF_TRUNCATED,
@@ -377,34 +394,6 @@ def assemble_review_result(
             reviewed_now=covered_now,
         ),
         consumed_flags=consumed_flags,
-    )
-
-
-def chunk_summaries(
-    *,
-    chunks: list[ReviewChunk],
-    partials: list[ChunkReviewPartial],
-) -> tuple[ChunkSummary, ...]:
-    """Build the per-chunk digest the cross-chunk synthesis pass reads.
-
-    Args:
-        chunks: Chunks planned for this run, in plan order.
-        partials: Completed chunk partials, in completion order.
-
-    Returns:
-        One digest per completed chunk. The chunk id is recovered from the
-        plan by file set so the digest names the same chunk the reader sees
-        elsewhere; a partial that matches no planned chunk falls back to its
-        position, which keeps the digest readable rather than blank.
-    """
-    ids = {tuple(chunk.files): chunk.id for chunk in chunks}
-    return tuple(
-        ChunkSummary(
-            chunk_id=ids.get(tuple(item.files), position),
-            files=tuple(item.files),
-            findings=item.findings,
-        )
-        for position, item in enumerate(partials, start=1)
     )
 
 
