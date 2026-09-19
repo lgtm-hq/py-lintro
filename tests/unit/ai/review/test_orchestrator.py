@@ -999,13 +999,14 @@ def test_parallel_timeout_keeps_completed_sibling() -> None:
     assert_that({record.path for record in result.coverage_records}).contains("a.py")
 
 
+@pytest.mark.generated_questions
 def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
     """Cap tripping before any chunk completes returns an actionable partial.
 
-    A depth-2 chunk overspends the cap on its question-generation call, so the
-    main review budget check raises before the chunk produces a partial. The
-    result must be a clean, empty partial (``partial=True``, zero chunks
-    reviewed) rather than the generic abort error.
+    The once-per-run question pass overspends the cap, so the main review
+    budget check raises before any chunk produces a partial. The result must
+    be a clean, empty partial (``partial=True``, zero chunks reviewed) rather
+    than the generic abort error.
     """
     provider = _mock_provider(content=_sample_response_json())
 
@@ -1037,7 +1038,7 @@ def test_run_review_partial_when_cost_cap_before_any_chunk() -> None:
                     transport=AITransport.API,
                     max_cost_usd=0.005,
                 ),
-                depth=2,
+                depth=1,
                 checklist_items=[],
                 checklist_text="1. [logic-bug] Example?",
                 classifications=[],
@@ -1311,7 +1312,6 @@ def _chunk_run_plan(*, budget: CostBudget) -> ChunkRunPlan:
         repo_root="",
         use_one_shot=False,
         strictness_section="",
-        next_generated_checklist_id=100,
         diff_budget=0,
     )
 
@@ -1347,9 +1347,10 @@ async def test_review_chunk_checks_budget_before_each_provider_call() -> None:
             plan=_chunk_run_plan(budget=budget),
         )
 
-    # Three provider calls (extra checklist, main review, adversarial), each
-    # preceded by a budget check.
-    assert_that(events.count("call")).is_equal_to(3)
+    # Two provider calls (main review, adversarial), each preceded by a
+    # budget check; the per-PR questions are generated once per run, outside
+    # the chunk (#2720).
+    assert_that(events.count("call")).is_equal_to(2)
     for index, event in enumerate(events):
         if event == "call":
             assert_that(events[index - 1]).is_equal_to("check")
@@ -2366,62 +2367,3 @@ def test_run_review_records_files_no_custom_agent_covered() -> None:
     assert_that(result.metadata.skipped_files[0].reason).is_equal_to(
         FileSkipReason.AGENT_SCOPE,
     )
-
-
-async def test_generated_checklist_ids_capped_at_stride() -> None:
-    """Model-controlled question counts cannot cross the per-chunk id stride.
-
-    Parallel chunks get disjoint id ranges of ``GENERATED_CHECKLIST_ID_STRIDE``;
-    accepting more generated questions than the stride would collide with the
-    next chunk's range and corrupt the checklist merge (#1969).
-    """
-    from lintro.ai.budget import CostBudget
-    from lintro.ai.review.checklist_pass import (
-        GENERATED_CHECKLIST_ID_STRIDE,
-        generate_extra_checklist,
-    )
-
-    oversized = [
-        {"id": f"G{i}", "question": f"Question {i}?"}
-        for i in range(GENERATED_CHECKLIST_ID_STRIDE + 10)
-    ]
-    payload = json.dumps({"generated_questions": oversized})
-    context = ReviewContext(
-        base_ref="main",
-        head_ref="feature",
-        changed_files=[
-            ChangedFile(path="a.py", status="modified", additions=1, deletions=0),
-        ],
-        unified_diff="diff --git a/a.py b/a.py\n+x",
-        pr_metadata=None,
-    )
-    chunk = ReviewChunk(
-        id=1,
-        files=["a.py"],
-        diff="+x",
-        relationship=REL_SINGLE_FILE,
-    )
-    response = AIResponse(
-        content=payload,
-        model="m",
-        input_tokens=1,
-        output_tokens=1,
-        cost_estimate=0.0,
-        provider="anthropic",
-    )
-
-    with patch(
-        "lintro.ai.review.provider_call.call_ai",
-        return_value=response,
-    ):
-        text, next_id, _usage = await generate_extra_checklist(
-            chunk=chunk,
-            context=context,
-            provider=_mock_provider(content=payload),
-            ai_config=AIConfig(),
-            budget=CostBudget(max_cost_usd=None),
-            next_generated_checklist_id=100,
-        )
-
-    assert_that(next_id).is_equal_to(100 + GENERATED_CHECKLIST_ID_STRIDE)
-    assert_that(text.splitlines()).is_length(GENERATED_CHECKLIST_ID_STRIDE)

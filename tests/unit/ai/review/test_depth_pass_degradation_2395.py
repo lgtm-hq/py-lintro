@@ -1,12 +1,15 @@
-"""Depth >= 2 pass failures degrade the chunk instead of aborting it (#2395).
+"""Optional pass failures degrade the run instead of aborting it (#2395).
 
-The main (depth-1) review call is already paid for by the time the optional
-depth-2 question generator or the depth-3 adversarial sweep runs. An
-:class:`~lintro.ai.exceptions.AIError` from one of those extra calls used to
-propagate out of the chunk, so a sweep timeout discarded the main pass's
-findings for that chunk. These tests pin the degrade-and-record behaviour, and
-that the two failures which must still stop the run -- a depth-1 failure and a
-cost-cap stop -- are unchanged.
+The main (depth-1) review call is already paid for by the time the depth-3
+adversarial sweep runs, and the once-per-run question pass (#2720) is optional
+by construction. An :class:`~lintro.ai.exceptions.AIError` from one of those
+extra calls used to propagate out of the chunk, so a sweep timeout discarded
+the main pass's findings for that chunk. These tests pin the
+degrade-and-record behaviour, and that the two failures which must still stop
+the run -- a depth-1 failure and a cost-cap stop -- are unchanged.
+
+Every run here makes the real question call, so the scripted seams answer it
+first.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ from pathlib import Path
 from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from assertpy import assert_that
 
 from lintro.ai.config import AIConfig
@@ -35,7 +39,10 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.github_review_body import build_review_body
 from lintro.ai.review.models.changed_file import ChangedFile
-from lintro.ai.review.models.coverage_degradation import CoverageDegradation
+from lintro.ai.review.models.coverage_degradation import (
+    SYNTHESIS_CHUNK_INDEX,
+    CoverageDegradation,
+)
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -123,8 +130,11 @@ def _main_pass_response() -> AIResponse:
     )
 
 
+pytestmark = pytest.mark.generated_questions
+
+
 def _questions_response() -> AIResponse:
-    """Return a depth-2 generated-questions answer.
+    """Return a per-PR generated-questions answer.
 
     Returns:
         A parseable generated-questions response.
@@ -189,8 +199,8 @@ def _adversarial_timeout_seam() -> AsyncMock:
     """Script a depth-3 run whose adversarial sweep times out.
 
     Returns:
-        A ``call_ai`` double answering the depth-2 and main calls and failing
-        the third.
+        A ``call_ai`` double answering the question and main calls and
+        failing the third.
     """
     answers = [_questions_response(), _main_pass_response()]
 
@@ -280,11 +290,13 @@ async def test_degraded_sweep_warns_on_every_surface(
 async def test_both_depth_passes_failing_still_keeps_the_main_pass(
     tmp_path: Path,
 ) -> None:
-    """Losing depth 2 *and* depth 3 costs depth, never the chunk (#2395).
+    """Losing the question pass *and* depth 3 costs depth, never the chunk.
 
-    The two passes are guarded independently, so a chunk that loses both must
+    The two passes are guarded independently, so a run that loses both must
     still deliver its main-pass findings and record one degradation per lost
-    pass rather than collapsing them into a single "something failed" note.
+    pass rather than collapsing them into a single "something failed" note
+    (#2395). The question pass is a whole-run fact, so its row carries the
+    synthesis sentinel index rather than a chunk index (#2720).
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -292,7 +304,7 @@ async def test_both_depth_passes_failing_still_keeps_the_main_pass(
     calls: list[int] = []
 
     async def _call(**_kwargs: object) -> AIResponse:
-        """Answer only the main pass; fail the depth-2 and depth-3 calls.
+        """Answer only the main pass; fail the question and depth-3 calls.
 
         Args:
             **_kwargs: Provider-call keywords the seam ignores.
@@ -322,23 +334,32 @@ async def test_both_depth_passes_failing_still_keeps_the_main_pass(
         [item.reason for item in result.metadata.coverage_degradations],
     ).is_equal_to(
         [
-            CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
             CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED,
+            CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
         ],
     )
+    assert_that(
+        [item.chunk_index for item in result.metadata.coverage_degradations],
+    ).is_equal_to([0, SYNTHESIS_CHUNK_INDEX])
 
     note = describe_coverage_degradations(metadata=result.metadata)
 
-    assert_that(note).contains("the depth-2 generated-questions pass failed")
-    assert_that(note).contains("the depth-3 adversarial sweep failed")
-    # One chunk lost both passes: the clauses must not double-count it.
+    assert_that(note).contains(
+        "the per-PR question pass failed, so every chunk was reviewed against "
+        "the rubric alone",
+    )
+    assert_that(note).contains(
+        "1 chunk kept only the main pass after the depth-3 adversarial sweep failed",
+    )
+    # The whole-run row must not read as a second chunk.
     assert_that(note).does_not_contain("2 chunks")
+    assert_that(note).does_not_contain("of 2 chunk")
 
 
 async def test_generated_questions_failure_still_runs_the_main_pass(
     tmp_path: Path,
 ) -> None:
-    """A failed depth-2 pass reviews the chunk against the static checklist.
+    """A failed question pass reviews the chunks against the rubric alone.
 
     Args:
         tmp_path: Pytest temporary directory fixture.
@@ -346,7 +367,7 @@ async def test_generated_questions_failure_still_runs_the_main_pass(
     calls: list[int] = []
 
     async def _call(**_kwargs: object) -> AIResponse:
-        """Fail the first (depth-2) call, then answer the main pass.
+        """Fail the first (question) call, then answer the main pass.
 
         Args:
             **_kwargs: Provider-call keywords the seam ignores.
@@ -364,7 +385,7 @@ async def test_generated_questions_failure_still_runs_the_main_pass(
 
     result = await _run(
         tmp_path=tmp_path,
-        depth=2,
+        depth=1,
         call_ai=AsyncMock(side_effect=_call),
     )
 
@@ -374,6 +395,8 @@ async def test_generated_questions_failure_still_runs_the_main_pass(
     assert_that(
         [item.reason for item in result.metadata.coverage_degradations],
     ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])
+    assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.generated_questions).is_empty()
 
 
 async def test_main_pass_failure_still_aborts_the_chunk(

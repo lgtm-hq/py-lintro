@@ -16,6 +16,7 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.question_pass import RunQuestions
 from tests.unit.ai.review.review_fixtures import load_review_fixture
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -135,6 +136,35 @@ def queue_diff_snapshot(
     dispatcher.queue(
         [*_DIFF_SNAPSHOT_BASE_ARGV, "--numstat", "-z", *ref_args],
         stdout=numstat,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _rubric_only_review(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip the once-per-run question pass unless a test opts in (#2720).
+
+    The suite's scripted providers answer a fixed number of calls, and the
+    question pass is one more call per run. A test without the
+    ``generated_questions`` marker therefore reviews with the rubric alone,
+    exactly as ``ai.review_generated_questions = false`` does; tests of the
+    pass itself carry the marker.
+
+    Args:
+        request: The requesting test, checked for the marker.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    if request.node.get_closest_marker("generated_questions"):
+        return
+
+    async def _rubric_only(**_kwargs: object) -> RunQuestions:
+        return RunQuestions()
+
+    monkeypatch.setattr(
+        "lintro.ai.review.run_execution.run_question_pass",
+        _rubric_only,
     )
 
 

@@ -47,7 +47,7 @@ def test_select_checklist_items_always_includes_tier1() -> None:
     )
 
     tier1_ids = {item.id for item in selected if item.tier == 1}
-    assert_that(tier1_ids).is_equal_to(set([1, 4, 7, 8, 9, 14, 15]))
+    assert_that(tier1_ids).is_equal_to({1, 4, 7, 8, 9, 14, 15})
 
 
 def test_empty_changed_files_still_returns_tier1() -> None:

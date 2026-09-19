@@ -68,6 +68,8 @@ _ALWAYS_WRITTEN = (
 _OPTIONAL_KEYS = (
     "coverage_limited",
     "synthesis_degraded",
+    "generated_questions",
+    "questions_diff_trimmed",
     "cost_basis",
     "resolved",
     "open_after",
@@ -103,6 +105,8 @@ def _full_record() -> RunRecord:
             chunks_reviewed=2,
             chunks_total=3,
             synthesis_degraded=True,
+            generated_questions=5,
+            questions_diff_trimmed=True,
         ),
         usage=RunUsage(
             duration=12.34,

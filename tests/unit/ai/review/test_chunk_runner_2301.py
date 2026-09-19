@@ -17,8 +17,8 @@ from assertpy import assert_that
 
 from lintro.ai.review import (
     adversarial_pass,
-    checklist_pass,
     provider_call,
+    question_pass,
     response_pipeline,
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.resume import ResumePlan
 
 #: The modules whose provider calls must all resolve through one seam.
-_BUILT_IN_PASS_MODULES = (response_pipeline, checklist_pass, adversarial_pass)
+_BUILT_IN_PASS_MODULES = (response_pipeline, question_pass, adversarial_pass)
 
 
 def _context() -> ReviewContext:

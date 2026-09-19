@@ -962,6 +962,7 @@ markers = [
   "timeout: override default timeout for slow tests",
   "integration: mark test as integration test",
   "unit: mark test as unit test",
+  "generated_questions: run the once-per-run review question pass (#2720) instead of the review suite's default rubric-only opt-out",
   "cli: mark test as CLI test",
   "utils: mark test as utility test",
   "formatters: mark test as formatter test",

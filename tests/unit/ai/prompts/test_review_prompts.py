@@ -11,6 +11,7 @@ from lintro.ai.prompts.review import (
     REVIEW_GIT_NATIVE_DIFF_INLINE,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
+    REVIEW_RUBRIC,
     REVIEW_SYNTHESIS_SYSTEM_PROMPT,
     REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE,
     REVIEW_SYSTEM,
@@ -46,8 +47,9 @@ _USER_PROMPT_KWARGS = {
         "- `src/other.py` (modified, +2/-0)"
     ),
     "interaction_paths": "**Path A:** trace wiring",
-    "checklist_count": 1,
-    "checklist": "1. [logic-bug] Example question?",
+    "rubric": REVIEW_RUBRIC,
+    "generated_questions": "G1. Does the new default reach every caller?",
+    "additional_checks": "",
     "boundary": "CODE_BLOCK_test1234",
     "diff": "diff --git a/src/main.py",
     "lint_results_section": "",
@@ -171,10 +173,13 @@ def test_format_lint_results_section_wraps_digest() -> None:
 
 
 def test_depth_templates_render_without_key_error() -> None:
-    """Depth 2 and 3 templates render with required placeholders."""
+    """The question and depth-3 templates render with required placeholders."""
     questions = REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
         boundary="CODE_BLOCK_test1234",
+        pr_title="Test PR",
+        pr_summary="Summary text",
         diff="sample diff",
+        diff_note="",
         changed_files="- src/main.py",
     )
     adversarial = REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
@@ -227,7 +232,10 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
         ),
         REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
             boundary=boundary,
+            pr_title="Test PR",
+            pr_summary="Summary text",
             diff="diff body",
+            diff_note="",
             changed_files="- a.py",
         ),
         REVIEW_SYNTHESIS_USER_PROMPT_TEMPLATE.format(
@@ -598,8 +606,8 @@ def test_synthesis_prompt_pair_never_demands_a_checklist() -> None:
     user_prompt = _render_synthesis_user_prompt()
     pair = f"{REVIEW_SYNTHESIS_SYSTEM_PROMPT}\n{user_prompt}"
 
-    assert_that(REVIEW_SYSTEM).contains("Check every checklist item")
-    assert_that(pair).does_not_contain("Check every checklist item")
+    assert_that(REVIEW_SYSTEM).contains("Check the diff against the rubric")
+    assert_that(pair).does_not_contain("Check the diff against the rubric")
     assert_that(pair.lower()).does_not_contain("checklist item")
     assert_that(REVIEW_SYNTHESIS_SYSTEM_PROMPT).contains("empty `findings` array")
 
