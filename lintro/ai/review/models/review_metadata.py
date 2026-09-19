@@ -76,6 +76,10 @@ class ReviewMetadata:
         timings (ReviewTimings | None): Full per-phase timing breakdown
             (ordered spans plus per-chunk queued/in-flight detail, #2148).
             ``None`` on legacy records and merge-only placeholders.
+        generated_questions (tuple[str, ...]): The per-PR "consider" questions
+            every chunk prompt carried (#2720); empty when none were generated.
+        questions_diff_trimmed (bool): True when the question pass saw only a
+            prefix of the PR diff because the whole diff did not fit its budget.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -135,6 +139,8 @@ class ReviewMetadata:
     diff_gate: DiffGateCounts = field(default_factory=DiffGateCounts)
     timings: ReviewTimings | None = None
     custom_agents_run: int = 0
+    generated_questions: tuple[str, ...] = field(default_factory=tuple)
+    questions_diff_trimmed: bool = False
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)
     skipped_files: tuple[SkippedFile, ...] = field(default_factory=tuple)

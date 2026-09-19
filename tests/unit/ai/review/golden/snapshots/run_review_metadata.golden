@@ -9,11 +9,11 @@
   "files_total": 3,
   "checklist_items": 2,
   "token_usage": {
-    "prompt": 2100,
-    "completion": 600,
-    "total": 2700
+    "prompt": 3000,
+    "completion": 860,
+    "total": 3860
   },
-  "cost_estimate_usd": 0.038000000000000006,
+  "cost_estimate_usd": 0.05500000000000001,
   "base_ref": "main",
   "head_ref": "feature/session-gate",
   "timestamp": "<timestamp>",
@@ -44,6 +44,8 @@
   },
   "timings": null,
   "custom_agents_run": 0,
+  "generated_questions": [],
+  "questions_diff_trimmed": false,
   "custom_agents_skipped": 0,
   "reviewed_paths": [
     "assets/logo.png",
@@ -51,7 +53,14 @@
     "src/auth/tokens.py"
   ],
   "skipped_files": [],
-  "coverage_degradations": [],
+  "coverage_degradations": [
+    {
+      "reason": "generated_questions_failed",
+      "chunk_index": -1,
+      "split": false,
+      "limit": null
+    }
+  ],
   "synthesis": null,
   "lint_facts_note": ""
 }

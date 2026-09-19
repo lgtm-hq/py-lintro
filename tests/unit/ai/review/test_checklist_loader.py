@@ -59,12 +59,12 @@ def test_load_builtin_checklist_returns_populated_tuple() -> None:
 
 
 def test_load_builtin_checklist_preserves_tier_split() -> None:
-    """Loaded corpus keeps Tier 1 (1-15) and Tier 2 (100+) invariants."""
+    """Loaded corpus keeps Tier 1 (ids in 1-15) and Tier 2 (100+) invariants."""
     items = load_builtin_checklist()
     tier1 = [item for item in items if item.tier == 1]
     tier2 = [item for item in items if item.tier == 2]
-    assert_that(tier1).is_length(15)
-    assert_that([item.id for item in tier1]).is_equal_to(list(range(1, 16)))
+    assert_that(tier1).is_length(7)
+    assert_that([item.id for item in tier1]).is_equal_to([1, 4, 7, 8, 9, 14, 15])
     assert_that(all(item.id >= 100 for item in tier2)).is_true()
     assert_that(len(tier2)).is_greater_than_or_equal_to(40)
 

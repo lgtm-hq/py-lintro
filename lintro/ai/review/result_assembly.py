@@ -51,6 +51,7 @@ from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
 
 if TYPE_CHECKING:
+    from lintro.ai.review.question_pass import RunQuestions
     from lintro.ai.review.custom_agent_runner import CustomAgentPassResult
     from lintro.ai.review.merge import ChunkReviewPartial
     from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -81,6 +82,7 @@ class ReviewRunOutcome:
         partials: Completed chunk partials, in chunk order.
         custom_results: Completed custom-agent passes.
         custom_agents_failed: Names of selected agents that produced no pass.
+        questions: The once-per-run question pass result (#2720), when run.
         synthesis_pass: The cross-chunk synthesis pass, when one ran (#2269).
         merged: The merged chunk result the report's prose comes from.
         filtered_findings: Findings surviving the sensitivity policy, with the
@@ -98,6 +100,7 @@ class ReviewRunOutcome:
     partials: list[ChunkReviewPartial] = field(default_factory=list)
     custom_results: list[CustomAgentPassResult] = field(default_factory=list)
     custom_agents_failed: list[str] = field(default_factory=list)
+    questions: RunQuestions | None = None
     synthesis_pass: SynthesisPass | None = None
     merged: ReviewResult = field(
         default_factory=lambda: merge_review_results(partials=[]),
@@ -216,6 +219,12 @@ def assemble_review_result(
         diff_gate=sum(
             (item.diff_gate for item in outcome.partials),
             DiffGateCounts(),
+        ),
+        generated_questions=(
+            tuple(outcome.questions.text.splitlines()) if outcome.questions else ()
+        ),
+        questions_diff_trimmed=bool(
+            outcome.questions is not None and outcome.questions.diff_trimmed
         ),
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)

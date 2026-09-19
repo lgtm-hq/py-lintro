@@ -41,14 +41,14 @@ treat it as evidence that such a file was not updated, not touched, or missing a
 
 ---
 
-### Review checklist ({checklist_count} items to check the diff against)
+### Review rubric
 
-Check the diff against every item. Do not answer the items: report a finding, with
-file:line evidence, for each item where the diff has a defect, and nothing for items
-that hold. A concern is NOT a finding unless it also identifies a defect.
+{rubric}
 
-{checklist}
+### Questions for this change (consider each; do not answer them)
 
+{generated_questions}
+{additional_checks}
 ---
 
 <pull_request_diff>

@@ -238,6 +238,10 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
         },
         "findings_reanchored": result.metadata.diff_gate.reanchored,
         "findings_unanchored": result.metadata.diff_gate.unanchored,
+        # #2720: the per-PR questions the chunks reviewed against, and whether
+        # the pass that wrote them saw the whole diff.
+        "generated_questions": list(result.metadata.generated_questions),
+        "questions_diff_trimmed": result.metadata.questions_diff_trimmed,
     }
     if result.metadata.synthesis is not None:
         payload["synthesis"] = result.metadata.synthesis.to_dict()

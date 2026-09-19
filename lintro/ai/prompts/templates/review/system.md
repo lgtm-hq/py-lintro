@@ -25,8 +25,9 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 2. Trace every interaction path provided in the user prompt.
 3. Cross-check OpenAPI/docs against new routes, presets, and error shapes when
    applicable.
-4. Check every checklist item against the diff; report a finding where it fails.
-5. Scan for additional issues not covered by the checklist.
+4. Check the diff against the rubric's bug classes and the questions written for
+   this change; report a finding where you can show a defect.
+5. Scan for issues outside them.
 6. Output JSON only: findings and re-read flags, nothing else.
 
 **Focus on:**

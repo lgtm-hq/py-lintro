@@ -93,11 +93,9 @@ def format_strictness_prompt_section(*, policy: ReviewSensitivityPolicy) -> str:
         suppressed_text = "; ".join(suppressed) if suppressed else "doc-only P3 nits"
         return (
             "### Sensitivity (focused)\n\n"
-            "Complete every checklist item honestly. Prioritize merge blockers "
-            "and behavioral/CI integration issues.\n\n"
+            "Prioritize merge blockers and behavioral/CI integration issues.\n\n"
             f"Do **not** add findings for: {suppressed_text}.\n"
-            "Still record those checklist **yes** answers in `checklist`, but "
-            "omit them from `findings` unless they are P1/P2 or affect runtime, "
+            "Report such concerns only when they are P1/P2 or affect runtime, "
             "CI, or caller behavior outside documentation."
         )
 
@@ -121,18 +119,16 @@ def format_strictness_prompt_section(*, policy: ReviewSensitivityPolicy) -> str:
         return (
             "### Sensitivity (thorough)\n\n"
             f"Actively hunt for: {hunt_text}.\n"
-            "Record every checklist **yes** in `checklist`; report it as a "
-            "finding only when it identifies a defect, including P3 "
-            "documentation and migration nits when they would confuse "
-            "contributors or break runbooks."
+            "Report a concern as a finding only when it identifies a defect, "
+            "including P3 documentation and migration nits when they would "
+            "confuse contributors or break runbooks."
         )
 
     return (
         "### Sensitivity (balanced)\n\n"
-        "Record every checklist **yes** in `checklist`; report it as a finding "
-        "only when it identifies a defect. Prioritize cross-file integration "
-        "bugs over isolated nits, but do not drop legitimate P3 issues when "
-        "checklist items fire."
+        "Report a concern as a finding only when it identifies a defect you can "
+        "show. Prioritize cross-file integration bugs over isolated nits, but "
+        "do not drop legitimate P3 issues; finding nothing is a normal result."
     )
 
 

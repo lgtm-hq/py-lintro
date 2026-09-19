@@ -126,6 +126,14 @@ def render_review_terminal(
         ),
     )
 
+    if checklist_display is ChecklistDisplay.ALL and result.metadata.generated_questions:
+        output.print(
+            Panel(
+                "\n".join(result.metadata.generated_questions),
+                title="Questions for this change",
+                border_style="blue",
+            ),
+        )
     show_linked = checklist_display in {ChecklistDisplay.LINKED, ChecklistDisplay.ALL}
     _render_findings(
         result=result,

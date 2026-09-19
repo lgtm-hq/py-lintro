@@ -13,19 +13,19 @@ from lintro.ai.review.checklist_builtin import (
 from lintro.ai.review.enums.review_category import ReviewCategory
 
 
-def test_tier1_contains_fifteen_always_on_items() -> None:
-    """Tier 1 includes exactly 15 universal checklist items."""
-    assert_that(TIER1_CHECKLIST_ITEMS).is_length(15)
+def test_tier1_contains_the_core_always_on_items() -> None:
+    """Tier 1 holds the seven core items left after #2720 (ids in the 1-15 band)."""
+    assert_that(TIER1_CHECKLIST_ITEMS).is_length(7)
     assert_that(all(item.tier == 1 for item in TIER1_CHECKLIST_ITEMS)).is_true()
     assert_that(
         all(not item.domains and not item.languages for item in TIER1_CHECKLIST_ITEMS),
     ).is_true()
 
 
-def test_tier1_ids_are_one_through_fifteen() -> None:
-    """Tier 1 ids follow the locked 1-15 scheme."""
+def test_tier1_ids_keep_their_locked_numbers() -> None:
+    """Tier 1 ids keep the locked 1-15 numbering; retired ids are not reused."""
     assert_that([item.id for item in TIER1_CHECKLIST_ITEMS]).is_equal_to(
-        list(range(1, 16)),
+        [1, 4, 7, 8, 9, 14, 15],
     )
 
 

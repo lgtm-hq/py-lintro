@@ -37,6 +37,11 @@ from lintro.ai.review.result_assembly import (
     ReviewRunOutcome,
     chunk_summaries,
 )
+from lintro.ai.review.question_pass import (
+    RunQuestions,
+    fold_question_pass,
+    run_question_pass,
+)
 from lintro.ai.review.session import (
     ChunkRunPlan,
     cost_cap_reason,
@@ -124,11 +129,13 @@ class RunProgress:
         collected: Chunk partials completed so far, in completion order.
         custom_results: Custom-agent passes that completed.
         custom_agents_failed: Names of selected agents that produced no pass.
+        questions: The once-per-run question pass result (#2720), when run.
     """
 
     collected: list[ChunkReviewPartial] = field(default_factory=list)
     custom_results: list[CustomAgentPassResult] = field(default_factory=list)
     custom_agents_failed: list[str] = field(default_factory=list)
+    questions: RunQuestions | None = None
 
 
 async def run_passes(
@@ -155,14 +162,19 @@ async def run_passes(
     """
     partials: list[ChunkReviewPartial] = []
     if plan.chunks:
-        partials = await review_all_chunks(
-            chunks=plan.chunks,
-            plan=chunk_run_plan(
+        questions = await run_question_pass(context=context, options=options, plan=plan)
+        chunk_plan = replace(
+            chunk_run_plan(
                 context=context,
                 options=options,
                 plan=plan,
                 interrupt=interrupt,
             ),
+            generated_questions=questions.text,
+        )
+        partials = await review_all_chunks(
+            chunks=plan.chunks,
+            plan=chunk_plan,
             completed_sink=progress.collected,
             on_chunk_complete=checkpoint_writer(
                 resume=plan.resume,
@@ -172,6 +184,8 @@ async def run_passes(
                 policy=plan.policy,
             ),
         )
+        partials = fold_question_pass(partials=partials, questions=questions)
+        progress.questions = questions
     if plan.resume.queue:
         await run_custom_agent_passes(
             request=CustomAgentPassRequest(
@@ -229,6 +243,7 @@ def merge_partials(
         partials=partials,
         custom_results=progress.custom_results,
         custom_agents_failed=progress.custom_agents_failed,
+        questions=progress.questions,
         merged=merged,
         filtered_findings=filtered_findings,
         custom_findings=custom_findings,

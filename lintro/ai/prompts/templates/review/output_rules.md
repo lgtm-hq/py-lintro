@@ -9,8 +9,9 @@
   evidence, serious ones first. Collapse repeated occurrences of one root cause into a
   single finding with an `occurrences` list rather than one finding per site.
 - Finding nothing is a normal result; an empty findings array is valid.
-- Do not duplicate findings — merge related checklist items when they share a root
-  cause; the checklist is guidance for what to look for, not a list to answer.
+- Do not duplicate findings — merge related concerns when they share a root cause;
+  the rubric and the questions are guidance for what to look for, not a list to
+  answer, and never restate a question or a rubric item as a finding.
 - Prioritize cross-file integration bugs over isolated nits.
 - Every finding `title` must be a single line with no line breaks.
 - **P1 requires a concrete `failure_scenario`** — the inputs, the path taken, and the

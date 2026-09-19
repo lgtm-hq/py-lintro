@@ -28,6 +28,7 @@ __all__ = [
     "REVIEW_CUSTOM_AGENT_SYSTEM",
     "REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE",
     "REVIEW_GENERATE_QUESTIONS_TEMPLATE",
+    "REVIEW_RUBRIC",
     "REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND",
     "REVIEW_GIT_NATIVE_DIFF_INLINE",
     "REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND",
@@ -95,6 +96,11 @@ REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE = load_prompt_template(
     "review",
     "git_native_tree_unknown.md",
 )
+
+# The short rubric that replaces the standing checklist corpus in the chunk
+# prompt (#2720): severity by behaviour and ten bug classes. Its wording is a
+# contract later steps build on; change it deliberately.
+REVIEW_RUBRIC = load_prompt_template("review", "rubric.md")
 
 REVIEW_OUTPUT_SCHEMA = load_prompt_template("review", "output_schema.json")
 

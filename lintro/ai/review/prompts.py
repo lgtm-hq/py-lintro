@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from lintro.ai.prompts.review import (
+    REVIEW_RUBRIC,
     REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND,
     REVIEW_GIT_NATIVE_DIFF_INLINE,
     REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND,
@@ -71,7 +72,8 @@ class PromptInputs:
         checklist_count: Number of checklist items in the prompt.
         interaction_paths: Domain-triggered interaction path text.
         lint_results: Optional lint digest for prompt injection.
-        extra_checklist: Additional generated checklist rows for depth 2.
+        extra_checklist: The run's per-PR "consider" questions (#2720),
+            rendered under their own heading; empty when none.
         strictness_section: Sensitivity instructions for the review pass.
     """
 
@@ -85,24 +87,31 @@ class PromptInputs:
     strictness_section: str = ""
 
 
-def _combined_checklist(*, inputs: PromptInputs) -> tuple[str, int]:
-    """Fold any generated checklist rows into the selected checklist.
+def _rubric_sections(*, inputs: PromptInputs) -> tuple[str, str, int]:
+    """Render the questions and the retained checklist for the prompt (#2720).
 
     Args:
         inputs: Shared prompt material for the chunk being reviewed.
 
     Returns:
-        Tuple of (checklist text, checklist item count).
+        The generated-questions text (a placeholder line when the run has
+        none), the "Additional checks" section for any retained checklist
+        items (empty when there are none), and that section's item count.
     """
-    checklist_count = inputs.checklist_count
-    combined_checklist = inputs.checklist_text
-    extra_checklist = inputs.extra_checklist
-    if extra_checklist.strip():
-        combined_checklist = f"{inputs.checklist_text}\n\n{extra_checklist.strip()}"
-        checklist_count += extra_checklist.strip().count("\n") + (
-            1 if extra_checklist.strip() else 0
-        )
-    return combined_checklist, checklist_count
+    questions = inputs.extra_checklist.strip() or (
+        "(no questions were generated for this change; review against the rubric)"
+    )
+    checklist = inputs.checklist_text.strip()
+    if not checklist:
+        return questions, "", 0
+    count = inputs.checklist_count
+    additional = (
+        f"\n### Additional checks ({count} retained checklist "
+        f"{'item' if count == 1 else 'items'}; report a finding only where the "
+        "diff has a defect)\n\n"
+        f"{checklist}\n"
+    )
+    return questions, additional, count
 
 
 def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
@@ -122,7 +131,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     redacted_diff = redact_prompt_text(text=chunk.diff, source="diff")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    combined_checklist, checklist_count = _combined_checklist(inputs=inputs)
+    questions, additional_checks, checklist_count = _rubric_sections(inputs=inputs)
 
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
@@ -144,8 +153,9 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
             source="changed files",
         ),
         interaction_paths=inputs.interaction_paths,
-        checklist_count=checklist_count,
-        checklist=combined_checklist,
+        rubric=REVIEW_RUBRIC,
+        generated_questions=questions,
+        additional_checks=additional_checks,
         boundary=make_boundary_marker(),
         diff=redacted_diff,
         lint_results_section=redact_prompt_text(
@@ -196,7 +206,7 @@ def build_git_native_review_prompt(
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    combined_checklist, checklist_count = _combined_checklist(inputs=inputs)
+    questions, additional_checks, checklist_count = _rubric_sections(inputs=inputs)
 
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
     boundary = make_boundary_marker()
@@ -241,8 +251,9 @@ def build_git_native_review_prompt(
             source="changed files",
         ),
         interaction_paths=inputs.interaction_paths,
-        checklist_count=checklist_count,
-        checklist=combined_checklist,
+        rubric=REVIEW_RUBRIC,
+        generated_questions=questions,
+        additional_checks=additional_checks,
         boundary=boundary,
         diff_section=diff_section,
         lint_results_section=redact_prompt_text(

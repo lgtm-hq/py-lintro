@@ -29,7 +29,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.adversarial_pass import run_adversarial_pass
-from lintro.ai.review.checklist_pass import generate_extra_checklist
 from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
 from lintro.ai.review.depth_degradation import run_degradable_depth_pass
 from lintro.ai.review.enums.coverage_degradation_reason import (
@@ -79,34 +78,10 @@ async def review_chunk(
         classifications=plan.classifications,
         changed_files=chunk.files,
     )
-    extra_checklist = ""
-    extra_checklist_usage: ChunkReviewPartial | None = None
+    # The per-PR questions are generated once per run and shared (#2720);
+    # depth 2 no longer spends a call per chunk on them.
+    extra_checklist = plan.generated_questions
     depth_degradations: tuple[CoverageDegradation, ...] = ()
-    if plan.depth >= 2:
-        tracker.on_step(chunk_index=chunk_index, step="generating questions")
-        with recorder.phase(name=ReviewPhase.GENERATED_QUESTIONS):
-            generated, depth_degradations = await run_degradable_depth_pass(
-                call=generate_extra_checklist(
-                    chunk=chunk,
-                    context=plan.context,
-                    provider=plan.provider,
-                    ai_config=ai_config,
-                    budget=plan.budget,
-                    next_generated_checklist_id=next_generated_checklist_id,
-                    repo_root=plan.repo_root,
-                    use_one_shot=plan.use_one_shot,
-                ),
-                reason=CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
-                chunk_index=chunk_index,
-                label="depth-2 generated-questions pass",
-            )
-        if generated is not None:
-            (
-                extra_checklist,
-                next_generated_checklist_id,
-                extra_checklist_usage,
-            ) = generated
-
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
     # Gate before the main provider call so intra-chunk (depth-2/3) work
     # cannot overshoot the budget between the per-chunk checks.
@@ -163,8 +138,6 @@ async def review_chunk(
         ),
     )
 
-    if extra_checklist_usage is not None:
-        partial = _add_usage(partial=partial, extra=extra_checklist_usage)
 
     if plan.depth >= 3:
         tracker.on_step(chunk_index=chunk_index, step="adversarial sweep")

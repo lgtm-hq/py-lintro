@@ -284,6 +284,8 @@ class ChunkRunPlan:
         max_parallel_calls: Ceiling on concurrently in-flight chunk reviews.
         stop: Optional event set by a SIGTERM/SIGINT handler.
         timings: Optional recorder for per-phase and per-chunk spans (#2148).
+        generated_questions: The run's per-PR "consider" questions (#2720),
+            generated once and shared by every chunk; empty when none.
     """
 
     context: ReviewContext
@@ -304,6 +306,7 @@ class ChunkRunPlan:
     max_parallel_calls: int = 1
     stop: asyncio.Event | None = None
     timings: ReviewTimingRecorder | None = None
+    generated_questions: str = ""
 
 
 def aborted_before_completion(
