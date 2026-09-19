@@ -374,14 +374,16 @@ async def test_each_question_is_one_bounded_line() -> None:
 
 async def test_ten_maximal_questions_fit_the_reserved_ceiling() -> None:
     """The ceiling covers ten full lines and their separators."""
+    # Unbroken tokens force the hard cut, so every line is exactly maximal
+    # and the block sits at the ceiling itself, separators included.
     questions = await _generate(
-        content=_questions_payload(*(["word " * 200] * MAX_RUN_QUESTIONS)),
+        content=_questions_payload(*(["x" * 2000] * MAX_RUN_QUESTIONS)),
     )
 
     assert_that(questions.lines).is_length(MAX_RUN_QUESTIONS)
     for line in questions.lines:
-        assert_that(len(line)).is_less_than_or_equal_to(MAX_QUESTION_CHARS)
-    assert_that(estimate_tokens(questions.text)).is_less_than_or_equal_to(
+        assert_that(len(line)).is_equal_to(MAX_QUESTION_CHARS)
+    assert_that(estimate_tokens(questions.text)).is_equal_to(
         MAX_RUN_QUESTIONS_TOKENS,
     )
 
