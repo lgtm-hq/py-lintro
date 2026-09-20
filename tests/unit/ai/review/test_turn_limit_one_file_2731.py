@@ -68,6 +68,8 @@ _HEAD = "jobs:\n  homebrew-tap:\n    permissions:\n      contents: write\n      
         ("assets/logo.svg", False),
         ("tests/__snapshots__/out.yml", False),
         ("data/rows.csv", False),
+        ("tests/fixtures/test_data.csv", False),
+        ("tests/unit/test_gate.py", True),
     ],
 )
 def test_context_eligibility_is_every_text_file_but_media_and_data(

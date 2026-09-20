@@ -233,8 +233,7 @@ def build_repo_context(
     chunk_sources = [
         path
         for path in chunk.files
-        if path not in deleted
-        and (is_context_eligible_path(path) or is_test_path(path))
+        if path not in deleted and is_context_eligible_path(path)
     ]
     if not chunk_sources:
         return RepoContextSection()
