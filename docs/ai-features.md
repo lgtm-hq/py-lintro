@@ -864,6 +864,28 @@ posting"): a `low` confidence finding routed to notes, or an open question, neve
 the verdict. A P3 opens a record even though the posting tier renders it in the sticky
 instead of inline, so it still moves the verdict to `nits only`.
 
+Two mechanical evidence gates run at parse time so the verdict reads gated severities,
+never the model's unaided claim, and both record their rewrite on the finding
+(`severity_downgraded` plus a `severity_downgrade_reason`) so no surface presents a
+gate-lowered severity as the model's own:
+
+- **P1 gate** (#1925): a P1 without a concrete `failure_scenario` is moved to P2
+  (`p1_no_failure_scenario`). Counted as `downgraded` on the run record.
+- **P2 gate** (#2723, lintro-ops milestone 0 step 0.10): P2 means verified incorrect
+  behaviour on a reachable input, or a documented contract the change makes false. A
+  `test-gap`, `contract-drift` or `code-smell` P2 whose `evidence_style` is not
+  `diff_local` — a coverage or wording concern the model traced elsewhere or inferred —
+  is moved to P3 (`p2_unevidenced`), so a single unevidenced test-gap claim no longer
+  flips "nits only" to "changes requested". Categories that name incorrect behaviour
+  (logic bugs, silent failures, security, integration, breaking changes) are never gated
+  this way: a cross-file trace is a legitimate way to show them. Counted as
+  `downgraded_p2` on the run record (written only when non-zero). A test gap is P3
+  unless the PR claims to fix a bug it does not test.
+
+The terminal, the per-review body and the sticky all carry one line naming each gate
+that fired and how many findings it moved; verdict derivation itself is unchanged and
+there is no knob.
+
 A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
 Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).
