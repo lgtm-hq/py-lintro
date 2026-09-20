@@ -12,12 +12,17 @@ instead of being an invisible edit of the model's output. Nothing is dropped.
 * A P1 must carry a concrete ``failure_scenario``; one that does not is moved
   to P2 (#1925).
 * A P2 in a category that flips the verdict on inference alone — ``test-gap``,
-  ``contract-drift``, ``code-smell`` — must carry diff-local evidence; one whose
-  ``evidence_style`` is ``cross_file`` or ``speculative`` is moved to P3
-  (#2723), so "changes requested" means a shown defect. Categories that name
-  incorrect behaviour (logic bugs, silent failures, security, integration,
-  breaking changes) are never gated here: a cross-file trace is a legitimate
-  way to show those.
+  ``contract-drift``, ``code-smell`` — must claim diff-local evidence; one
+  whose ``evidence_style`` is ``cross_file``, ``speculative`` or unstated is
+  moved to P3 (#2723), so "changes requested" means a shown defect. The two
+  gates chain, so an inflated P1 in those categories ends at P3 like the
+  honest P2 would. Categories that name incorrect behaviour (logic bugs,
+  silent failures, security, integration, breaking changes) are never gated
+  here: a cross-file trace is a legitimate way to show those.
+
+A gate-lowered finding is never dropped downstream: the sensitivity filter
+keeps every downgraded finding reportable, so the downgrade note always has
+the finding it describes.
 
 The cross-chunk guard (#2265) is the third gate and shares that posture; it
 lives in :mod:`lintro.ai.review.cross_chunk_gate` and is re-exported here so
@@ -133,42 +138,66 @@ def apply_p1_evidence_gate(
     return tuple(gated)
 
 
-def _needs_p2_downgrade(*, finding: ReviewFinding) -> bool:
+def _needs_p2_downgrade(*, finding: ReviewFinding, evidenced: bool) -> bool:
     """Return True when a P2 in a gated category lacks diff-local evidence.
 
     Args:
         finding: Finding to test.
+        evidenced: Whether the model claimed ``diff_local`` evidence for it.
 
     Returns:
-        True when the P2 evidence gate applies. Questions are never gated,
-        and a P2 the P1 gate just produced is not gated again: its severity
-        was already the gate's choice, not the model's claim.
+        True when the P2 evidence gate applies. Questions are never gated. A
+        P2 the P1 gate just produced *is* gated: an unevidenced test-gap
+        claim inflated to P1 must land where the honest P2 lands, or the
+        over-claim the gates exist to correct would be its own bypass.
     """
-    if finding.is_question or finding.severity_downgraded:
+    if finding.is_question:
         return False
     return (
         finding.severity is Severity.P2
         and finding.category in P2_EVIDENCE_GATED_CATEGORIES
-        and finding.evidence_style is not EvidenceStyle.DIFF_LOCAL
+        and not evidenced
     )
 
 
 def apply_p2_evidence_gate(
     *,
     findings: Sequence[ReviewFinding],
+    claimed_styles: Sequence[EvidenceStyle | None] | None = None,
 ) -> tuple[ReviewFinding, ...]:
     """Downgrade unevidenced test-gap, contract-drift and code-smell P2s (#2723).
 
+    The gate fails closed: only an explicit ``diff_local`` claim counts as
+    evidence. The parser's normalizer turns an absent or unreadable
+    ``evidence_style`` into ``diff_local`` for display and the convergence
+    score, so the parser passes the labels as the model wrote them and a
+    finding that claimed nothing is gated like one that claimed
+    ``speculative``.
+
     Args:
         findings: Findings after the P1 gate, in payload order.
+        claimed_styles: The ``evidence_style`` each finding's payload
+            actually carried, ``None`` where it was absent or unreadable;
+            one entry per finding. When omitted (a replayed record whose
+            style was already normalized) the finding's own field is read.
 
     Returns:
         The same findings in the same order, with gated P2s rewritten to P3
         and marked via ``severity_downgraded`` and its reason.
+
+    Raises:
+        ValueError: When ``claimed_styles`` does not carry one entry per
+            finding.
     """
+    if claimed_styles is None:
+        claimed_styles = [finding.evidence_style for finding in findings]
+    if len(claimed_styles) != len(findings):
+        msg = "claimed_styles must carry one entry per finding"
+        raise ValueError(msg)
     gated: list[ReviewFinding] = []
-    for finding in findings:
-        if not _needs_p2_downgrade(finding=finding):
+    for finding, claimed in zip(findings, claimed_styles, strict=True):
+        evidenced = claimed is EvidenceStyle.DIFF_LOCAL
+        if not _needs_p2_downgrade(finding=finding, evidenced=evidenced):
             gated.append(finding)
             continue
         logger.info(
@@ -176,7 +205,7 @@ def apply_p2_evidence_gate(
             title=finding.title,
             reason=P2_DOWNGRADE_REASON,
             category=finding.category,
-            style=finding.evidence_style,
+            style="unstated" if claimed is None else str(claimed),
         )
         gated.append(
             replace(

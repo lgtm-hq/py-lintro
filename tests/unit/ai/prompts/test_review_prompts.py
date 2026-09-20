@@ -62,7 +62,7 @@ _P2_ELIGIBILITY = (
     "Assign P2 when you can show verified incorrect behavior on a reachable input, "
     "or a documented contract the change makes false."
 )
-_TEST_GAP_IS_P3 = "A test gap is P3 unless the PR claims to fix a bug it does not test."
+_TEST_GAP_IS_P3 = "A test gap is P3 unless the PR claims to fix a bug it does not test"
 _P2_WITHOUT_CONTRACT = (
     "A verified defect is P2 even when no caller assertion or documented contract "
     "exists yet."
@@ -334,8 +334,10 @@ def test_review_system_carries_p2_p3_boundary_rubric() -> None:
     assert_that(REVIEW_SYSTEM).contains("Torn between P2 and P3? Choose P3.")
     assert_that(REVIEW_SYSTEM).contains("P2 examples:")
     assert_that(REVIEW_SYSTEM).contains("P3 examples:")
+    # #2723: the P2 examples name what the diff itself shows, so the model
+    # is never held up an example the evidence gate would then correct.
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(
-        "config key is documented but never read",
+        "a config key this diff documents is never read by the code this diff adds",
     )
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(
         "README or comment wording is slightly stale",

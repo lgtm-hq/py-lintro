@@ -10,6 +10,7 @@ on the run record beside the P1 gate's count, and named on every surface.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -18,14 +19,21 @@ from assertpy import assert_that
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.github_notes import format_downgrade_note
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.sensitivity import (
+    filter_findings_by_policy,
+    resolve_sensitivity_policy,
+)
 from lintro.ai.review.severity_gate import (
     P1_DOWNGRADE_REASON,
     P2_DOWNGRADE_REASON,
@@ -35,6 +43,11 @@ from lintro.ai.review.severity_gate import (
     count_downgrades,
     count_downgrades_by_reason,
     describe_downgrades,
+)
+from lintro.ai.review.sticky import (
+    advance_review_state,
+    build_sticky_comment,
+    render_state_sticky,
 )
 from lintro.ai.review.verdict import derive_readiness_verdict
 from lintro.enums.review_category import ReviewCategory
@@ -153,7 +166,11 @@ def test_a_diff_local_p2_in_a_gated_category_is_kept(category: str) -> None:
 
 @pytest.mark.parametrize(
     "category",
-    ["logic-bug", "silent-failure", "security", "integration", "breaking-change"],
+    sorted(
+        str(item)
+        for item in ReviewCategory
+        if str(item) not in P2_EVIDENCE_GATED_CATEGORIES
+    ),
 )
 def test_behaviour_categories_are_never_gated(category: str) -> None:
     """A cross-file trace is a legitimate way to show incorrect behaviour.
@@ -184,6 +201,41 @@ def test_only_p2_findings_are_gated(severity: Severity) -> None:
     assert_that(kept.severity_downgraded).is_false()
 
 
+@pytest.mark.parametrize(
+    "raw",
+    ["", "unknown", None, 42],
+    ids=["absent", "bogus", "null", "int"],
+)
+def test_an_unstated_or_unreadable_style_is_not_evidence(raw: object) -> None:
+    """The gate fails closed: a claim the model did not make is no claim.
+
+    The normalizer maps such labels to ``diff_local`` for display and the
+    convergence score; the gate reads the label as written.
+
+    Args:
+        raw: The payload's ``evidence_style`` value.
+    """
+    payload = _raw()
+    if raw is None:
+        del payload["evidence_style"]
+    else:
+        payload["evidence_style"] = raw
+
+    (gated,) = parse_findings(raw_findings=[payload])
+
+    assert_that(gated.evidence_style).is_equal_to(EvidenceStyle.DIFF_LOCAL)
+    assert_that(gated.severity).is_equal_to(Severity.P3)
+    assert_that(gated.severity_downgrade_reason).is_equal_to(
+        SeverityDowngradeReason.P2_UNEVIDENCED,
+    )
+
+
+def test_the_gate_needs_one_claim_per_finding() -> None:
+    """A misaligned claims list is a programming error, not a silent skip."""
+    with pytest.raises(ValueError, match="one entry per finding"):
+        apply_p2_evidence_gate(findings=[_finding()], claimed_styles=[])
+
+
 def test_questions_are_never_gated() -> None:
     """A question carries no severity semantics to gate."""
     (kept,) = apply_p2_evidence_gate(
@@ -193,11 +245,31 @@ def test_questions_are_never_gated() -> None:
     assert_that(kept.severity_downgraded).is_false()
 
 
-def test_a_p2_the_p1_gate_produced_is_not_gated_twice() -> None:
-    """The P1 gate's choice is not the model's claim, so it stops at P2."""
+def test_an_inflated_p1_in_a_gated_category_ends_at_p3() -> None:
+    """The gates chain: over-claiming P1 lands where the honest P2 lands."""
     gated = apply_p2_evidence_gate(
         findings=apply_p1_evidence_gate(
             findings=[_finding(severity=Severity.P1, failure_scenario="")],
+        ),
+    )
+
+    assert_that(gated[0].severity).is_equal_to(Severity.P3)
+    assert_that(gated[0].severity_downgrade_reason).is_equal_to(
+        SeverityDowngradeReason.P2_UNEVIDENCED,
+    )
+
+
+def test_an_inflated_p1_outside_the_gated_categories_stops_at_p2() -> None:
+    """The P1 gate alone applies to a behaviour category."""
+    gated = apply_p2_evidence_gate(
+        findings=apply_p1_evidence_gate(
+            findings=[
+                _finding(
+                    severity=Severity.P1,
+                    category="security",
+                    failure_scenario="",
+                ),
+            ],
         ),
     )
 
@@ -205,6 +277,40 @@ def test_a_p2_the_p1_gate_produced_is_not_gated_twice() -> None:
     assert_that(gated[0].severity_downgrade_reason).is_equal_to(
         SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO,
     )
+
+
+@pytest.mark.parametrize(
+    "raw",
+    ["TEST-GAP", "test_gap", "  test gap ", "Contract_Drift", "code smell"],
+)
+def test_category_spelling_cannot_evade_the_gate(raw: str) -> None:
+    """A recognized category is canonicalized at parse time.
+
+    Args:
+        raw: A non-canonical spelling of a gated category.
+    """
+    (gated,) = parse_findings(raw_findings=[_raw(category=raw)])
+
+    assert_that(gated.category).is_in("test-gap", "contract-drift", "code-smell")
+    assert_that(gated.severity).is_equal_to(Severity.P3)
+
+
+def test_an_unrecognized_category_is_kept_and_never_gated() -> None:
+    """A custom agent's category survives as written and is outside the gate."""
+    (kept,) = parse_findings(raw_findings=[_raw(category="my-agent-rule")])
+
+    assert_that(kept.category).is_equal_to("my-agent-rule")
+    assert_that(kept.severity).is_equal_to(Severity.P2)
+
+
+def test_gate_lowered_findings_survive_the_focused_preset() -> None:
+    """A downgrade never turns into a drop: the note keeps its finding."""
+    policy = resolve_sensitivity_policy(strictness=ReviewStrictness.FOCUSED)
+    lowered = apply_p2_evidence_gate(findings=[_finding(category="contract-drift")])
+    own = (_finding(severity=Severity.P3, category="contract-drift"),)
+
+    assert_that(filter_findings_by_policy(findings=lowered, policy=policy)).is_length(1)
+    assert_that(filter_findings_by_policy(findings=own, policy=policy)).is_empty()
 
 
 def test_order_and_every_other_field_are_preserved() -> None:
@@ -228,7 +334,7 @@ def test_parse_findings_runs_the_p2_gate_after_the_p1_gate() -> None:
     findings = parse_findings(
         raw_findings=[
             _raw(),
-            _raw(severity="P1", category="test-gap", failure_scenario=""),
+            _raw(severity="P1", category="security", failure_scenario=""),
         ],
     )
 
@@ -382,3 +488,36 @@ def test_the_finding_record_round_trips_the_reason() -> None:
     )
     assert legacy is not None
     assert_that(legacy.severity_downgrade_reason).is_none()
+
+
+# --- sticky surfaces ---------------------------------------------------------
+
+
+def test_both_sticky_renders_carry_the_downgrade_note(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The round sticky and the state-derived re-render both name the gate.
+
+    A converged or errored round re-renders the sticky from the ledger with
+    no round result, so the note there comes from the persisted reasons.
+
+    Args:
+        sample_review_result: Shared review result fixture.
+    """
+    gated = apply_p2_evidence_gate(findings=[_finding()])
+    result = replace(
+        sample_review_result,
+        findings=(*sample_review_result.findings, *gated),
+    )
+    request = StickyRequest(
+        result=result,
+        head_sha="a" * 40,
+        transport="cli",
+        auth_mode="subscription",
+    )
+
+    round_body = build_sticky_comment(request=request)
+    state_body = render_state_sticky(state=advance_review_state(request=request))
+
+    for body in (round_body, state_body):
+        assert_that(body).contains("🎚️", P2_DOWNGRADE_REASON)

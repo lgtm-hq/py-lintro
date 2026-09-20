@@ -873,14 +873,21 @@ gate-lowered severity as the model's own:
   (`p1_no_failure_scenario`). Counted as `downgraded` on the run record.
 - **P2 gate** (#2723, lintro-ops milestone 0 step 0.10): P2 means verified incorrect
   behaviour on a reachable input, or a documented contract the change makes false. A
-  `test-gap`, `contract-drift` or `code-smell` P2 whose `evidence_style` is not
-  `diff_local` — a coverage or wording concern the model traced elsewhere or inferred —
-  is moved to P3 (`p2_unevidenced`), so a single unevidenced test-gap claim no longer
-  flips "nits only" to "changes requested". Categories that name incorrect behaviour
-  (logic bugs, silent failures, security, integration, breaking changes) are never gated
-  this way: a cross-file trace is a legitimate way to show them. Counted as
-  `downgraded_p2` on the run record (written only when non-zero). A test gap is P3
-  unless the PR claims to fix a bug it does not test.
+  `test-gap`, `contract-drift` or `code-smell` P2 that does not claim
+  `evidence_style: diff_local` — a coverage or wording concern the model traced
+  elsewhere, inferred, or left unlabelled (the gate fails closed: an absent or
+  unreadable label is not evidence, even though display and the convergence score
+  normalize it to `diff_local`) — is moved to P3 (`p2_unevidenced`), so a single
+  unevidenced test-gap claim no longer flips "nits only" to "changes requested".
+  Categories that name incorrect behaviour (logic bugs, silent failures, security,
+  integration, breaking changes) are never gated this way: a cross-file trace is a
+  legitimate way to show them. The two gates chain, so an inflated P1 in those
+  categories ends at P3 like the honest P2 would, and a gate-lowered finding is never
+  dropped by a sensitivity preset. Counted as `downgraded_p2` on the run record (written
+  only when non-zero). The prompt's "a test gap is P3 unless the PR claims to fix a bug
+  it does not test" is guidance for the model's own P2/P3 call; the gate has no
+  claimed-fix signal and applies the evidence rule alone, so that exception holds
+  exactly when the model labels the missing test `diff_local`.
 
 The terminal, the per-review body and the sticky all carry one line naming each gate
 that fired and how many findings it moved; verdict derivation itself is unchanged and

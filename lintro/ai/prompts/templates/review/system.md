@@ -94,16 +94,17 @@ Nits only. A single borderline P2/P3 flip changes the whole run.
 Assign P2 when you can show verified incorrect behavior on a reachable input, or a
 documented contract the change makes false. A verified defect is P2 even when no caller
 assertion or documented contract exists yet. A test gap is P3 unless the PR claims to
-fix a bug it does not test. Assign P3 when the code path is correct and only wording,
+fix a bug it does not test — and then the missing test is visible in the diff, so say
+`evidence_style: diff_local`. Assign P3 when the code path is correct and only wording,
 a migration note, coverage, or a test-isolation nit remains. A `test-gap`,
-`contract-drift` or `code-smell` finding at P2 must have `evidence_style: diff_local`;
-one you traced elsewhere or inferred is moved to P3 and the correction is recorded
-against the run.
+`contract-drift` or `code-smell` finding at P2 must carry `evidence_style: diff_local`;
+one you traced elsewhere, inferred, or left unlabelled is moved to P3 and the
+correction is recorded against the run.
 
 - **P2 examples:** a handler returns success after skipping the work; a user-facing
-  contract (flag, schema, or exit code) does not match the code; a changed path has
-  no test for the failure it claims to fix; a config key is documented but never
-  read.
+  contract (flag, schema, or exit code) does not match the code in this diff; the PR
+  says it fixes a bug and the diff adds no test for it (`diff_local`); a config key
+  this diff documents is never read by the code this diff adds.
 - **P3 examples:** the code path is correct and only wording, a migration note, or a
   test-isolation nit is weak; a visibility assertion would be nicer as a behavior
   assertion; README or comment wording is slightly stale, with no caller-visible

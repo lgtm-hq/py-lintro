@@ -74,7 +74,10 @@ class ReviewFinding:
             finding's reported severity. Surfaces render the downgrade rather
             than letting it happen silently.
         severity_downgrade_reason: Which gate downgraded it and why (#2723);
-            ``None`` when the severity is the model's own.
+            ``None`` when the severity is the model's own, and on a finding
+            replayed from a state written before reasons were recorded,
+            which the counts treat as the P1 gate (the only one that
+            existed then).
         evidence_style: Self-reported basis for the finding. A ``test-gap``,
             ``contract-drift`` or ``code-smell`` P2 that is not
             ``diff_local`` is moved to P3 by the P2 evidence gate (#2723);

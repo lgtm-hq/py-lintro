@@ -21,9 +21,11 @@ from lintro.ai.review.severity_gate import (
     apply_p1_evidence_gate,
     apply_p2_evidence_gate,
 )
+from lintro.enums.review_category import ReviewCategory
 
 __all__ = [
     "SEVERITY_SYNONYMS",
+    "normalize_category",
     "normalize_evidence_style",
     "normalize_finding_kind",
     "normalize_severity",
@@ -128,6 +130,32 @@ def normalize_finding_kind(*, raw: object) -> FindingKind:
         return FindingKind.FINDING
 
 
+def normalize_category(*, raw: object) -> str:
+    """Canonicalize a model-reported ``category`` label.
+
+    A recognized category is returned as its :class:`ReviewCategory` wire
+    value whatever its spelling (case, whitespace, underscores for hyphens),
+    so the gates and the sensitivity presets that compare on the wire value
+    cannot be evaded by ``TEST_GAP`` or ``test gap``; an unrecognized label
+    is kept as written (stripped) so a custom agent's category survives, and
+    an empty one falls back to ``logic-bug`` as before.
+
+    Args:
+        raw: Raw ``category`` value from a parsed model response.
+
+    Returns:
+        The canonical category string.
+    """
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return str(ReviewCategory.LOGIC_BUG)
+    candidate = "-".join(text.lower().replace("_", " ").replace("-", " ").split())
+    try:
+        return str(ReviewCategory(candidate))
+    except ValueError:
+        return text
+
+
 def normalize_evidence_style(*, raw: object) -> EvidenceStyle:
     """Normalize a model-reported ``evidence_style`` value to a member.
 
@@ -136,9 +164,10 @@ def normalize_evidence_style(*, raw: object) -> EvidenceStyle:
 
     Returns:
         The matching member, or :data:`EvidenceStyle.DIFF_LOCAL` when the
-        value is absent or unrecognized. The field drives display only, so an
-        unknown label falls back to the unchipped default rather than
-        asserting an evidence basis the model did not claim.
+        value is absent or unrecognized. That fallback serves display and the
+        convergence score; the P2 evidence gate reads the label as written
+        through :meth:`EvidenceStyle.parse`, so an unknown label never
+        asserts an evidence basis the model did not claim (#2723).
     """
     return EvidenceStyle.coerce(raw)
 
@@ -177,6 +206,7 @@ def parse_findings(
     if not isinstance(raw_findings, list):
         return ()
     findings: list[ReviewFinding] = []
+    claimed_styles: list[EvidenceStyle | None] = []
     for item in raw_findings:
         if not isinstance(item, dict):
             continue
@@ -204,10 +234,11 @@ def parse_findings(
         failure_scenario = item.get("failure_scenario", "")
         if not isinstance(failure_scenario, str):
             failure_scenario = ""
+        claimed_styles.append(EvidenceStyle.parse(item.get("evidence_style", "")))
         findings.append(
             ReviewFinding(
                 severity=severity,
-                category=str(item.get("category", "logic-bug")),
+                category=normalize_category(raw=item.get("category", "")),
                 file=str(item.get("file", "")),
                 line=line,
                 title=collapse_to_single_line(text=str(item.get("title", ""))),
@@ -239,8 +270,17 @@ def parse_findings(
         # output, so the calibration gate has nothing to correct: downgrading
         # it would silently override the agent's own front matter.
         return bounded
+    if diff_gate is not None:
+        # The diff gate may drop findings; realign the claimed labels by
+        # identity so each survivor keeps the label its own payload carried.
+        claimed_by_id = {
+            id(finding): claimed
+            for finding, claimed in zip(findings, claimed_styles, strict=True)
+        }
+        claimed_styles = [claimed_by_id.get(id(finding)) for finding in bounded]
     return apply_p2_evidence_gate(
         findings=apply_p1_evidence_gate(findings=list(bounded)),
+        claimed_styles=claimed_styles,
     )
 
 

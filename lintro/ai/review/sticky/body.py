@@ -38,6 +38,7 @@ from lintro.ai.review.sticky.sections import (
     _header,
     _incomplete_banner,
     _reasoning_section,
+    _state_downgrade_row,
     _suggestion_drops_row,
     _summary_section,
 )
@@ -116,6 +117,10 @@ def state_sections(
             ),
         ),
         Section(name="banner", text=banner),
+        Section(
+            name="downgrades",
+            text=_state_downgrade_row(records=plan.match.records),
+        ),
         Section(
             name="findings_round",
             text=_findings_round_section(plan=plan, limits=limits),

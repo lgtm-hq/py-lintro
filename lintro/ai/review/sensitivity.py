@@ -175,6 +175,11 @@ def _should_report_finding(
 ) -> bool:
     if finding.severity in {"P1", "P2"}:
         return True
+    if finding.severity_downgraded:
+        # A gate-lowered finding stays visible with its downgrade note; the
+        # preset's P3 drops are for the model's own low-priority claims
+        # (#2723).
+        return True
 
     category = finding.category
     if category == ReviewCategory.CONTRACT_DRIFT.value and not policy.report_doc_drift:
