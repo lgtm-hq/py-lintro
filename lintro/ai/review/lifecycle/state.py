@@ -86,7 +86,10 @@ def load_prior_review_state(
         repo=repo,
     )
     if not post:
-        return stored
+        # Same migration the posting path gets through resolve_prior_state,
+        # so a non-posting run cannot resolve and re-open a legacy finding
+        # and persist that (#2723).
+        return migrate_review_state(state=stored)
     return resolve_prior_state(
         prior_state=stored,
         sticky_state=_sticky_state(pr_number=pr_number, repo=repo),

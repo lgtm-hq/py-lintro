@@ -122,8 +122,9 @@ def migrate_legacy_fingerprints(
 
     Two legacy records that only differed by spelling (``TEST_GAP`` and
     ``test gap`` siblings) collapse onto one fingerprint; they keep distinct
-    identities by taking the next free ordinals under it, in their stored
-    order, so no key is duplicated and no match outcome overwritten.
+    identities by taking the lowest free ordinals under it, in their stored
+    order and never one a canonical record already holds whatever the order
+    of the records, so no key is duplicated and no match outcome overwritten.
 
     Args:
         records: Records as loaded from the persisted state.
@@ -132,7 +133,10 @@ def migrate_legacy_fingerprints(
         The records, with migrated fingerprints and ordinals where a legacy
         spelling would otherwise break identity.
     """
-    migrated: list[FindingRecord] = []
+    # Two passes so the result does not depend on record order: every key a
+    # non-legacy record already holds is reserved first, then each legacy
+    # record takes the lowest free ordinal under its canonical fingerprint.
+    plans: list[tuple[FindingRecord, str | None]] = []
     taken: set[str] = set()
     for record in records:
         canonical = normalize_category(raw=record.category)
@@ -144,12 +148,18 @@ def migrate_legacy_fingerprints(
         if canonical == record.category or record.fingerprint != legacy:
             # Canonical already, or a hash no round of ours produced (a
             # synthetic or hand-edited record): not a legacy record.
-            migrated.append(record)
+            plans.append((record, None))
             taken.add(record.key)
+        else:
+            plans.append((record, canonical))
+    migrated: list[FindingRecord] = []
+    for record, target in plans:
+        if target is None:
+            migrated.append(record)
             continue
         fingerprint = fingerprint_for(
             file=record.file,
-            category=canonical,
+            category=target,
             title=record.title,
         )
         ordinal = record.ordinal
@@ -159,7 +169,7 @@ def migrate_legacy_fingerprints(
             record,
             fingerprint=fingerprint,
             ordinal=ordinal,
-            category=canonical,
+            category=target,
         )
         migrated.append(moved)
         taken.add(moved.key)

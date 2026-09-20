@@ -711,14 +711,62 @@ def test_prior_state_is_migrated_once_where_a_round_resolves_it() -> None:
     assert_that(match.carried).is_length(1)
 
 
-def test_a_legacy_record_never_collides_with_a_canonical_sibling() -> None:
-    """A canonical record keeps its key; the migrated legacy one takes the next."""
+@pytest.mark.parametrize(
+    "legacy_first",
+    [False, True],
+    ids=["canonical-first", "legacy-first"],
+)
+def test_a_legacy_record_never_collides_with_a_canonical_sibling(
+    legacy_first: bool,
+) -> None:
+    """A canonical record keeps its key whatever the order; the legacy one moves.
+
+    Args:
+        legacy_first: Whether the legacy record precedes the canonical one.
+    """
     canonical = _legacy_record(spelling="test-gap", fingerprint="08e68cc1dff17647")
     legacy = _legacy_record(spelling="TEST_GAP", fingerprint="2f8a4dbaa87081f0")
+    records = [legacy, canonical] if legacy_first else [canonical, legacy]
 
-    kept, moved = migrate_legacy_fingerprints(records=[canonical, legacy])
+    migrated = migrate_legacy_fingerprints(records=records)
 
-    assert_that(kept).is_same_as(canonical)
+    by_category = {record.category: record for record in migrated}
+    kept = next(record for record in migrated if record is canonical)
+    moved = next(record for record in migrated if record is not canonical)
+    assert_that(by_category).is_length(1)
+    assert_that(kept.ordinal).is_equal_to(1)
     assert_that(moved.fingerprint).is_equal_to("08e68cc1dff17647")
     assert_that(moved.ordinal).is_equal_to(2)
-    assert_that({kept.key, moved.key}).is_length(2)
+    assert_that({record.key for record in migrated}).is_length(2)
+    # Stored order is preserved.
+    assert_that([record is canonical for record in migrated]).is_equal_to(
+        [not legacy_first, legacy_first],
+    )
+
+
+def test_a_non_posting_run_loads_migrated_state_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ledger-only loader migrates like the posting path does.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    from lintro.ai.review.lifecycle import state as lifecycle_state
+    from lintro.ai.review.models.review_state import ReviewState
+
+    legacy = _legacy_record(spelling="TEST_GAP", fingerprint="2f8a4dbaa87081f0")
+    monkeypatch.setattr(
+        lifecycle_state,
+        "_load_stored_state",
+        lambda **_kwargs: ReviewState(findings=(legacy,)),
+    )
+
+    state = lifecycle_state.load_prior_review_state(
+        pr_number=1,
+        head_ref="feature",
+        repo="lgtm-hq/py-lintro",
+        post=False,
+    )
+
+    assert_that(state.findings[0].fingerprint).is_equal_to("08e68cc1dff17647")
