@@ -211,9 +211,14 @@ async def _verify_and_gate(
     """
     # Custom-agent findings carry an author-declared severity policy, which
     # is configuration, not model output: neither the verifier nor the gates
-    # touch them, so they are set aside and re-appended unchanged.
-    custom = set(map(id, outcome.custom_findings))
-    builtin = tuple(f for f in outcome.filtered_findings if id(f) not in custom)
+    # touch them, so they are set aside and re-appended unchanged. They are
+    # told apart by ``source`` (the agent's name; empty for the built-in
+    # review), not by identity: the synthesis pass's duplicate merge may
+    # have dropped one or rewritten it with ``merged_duplicates`` by now, so
+    # the round's custom subset is whatever survived that, not the objects
+    # the agent pass produced.
+    custom = tuple(f for f in outcome.filtered_findings if f.source)
+    builtin = tuple(f for f in outcome.filtered_findings if not f.source)
     with plan.timings.phase(name=ReviewPhase.VERIFICATION):
         verification = await run_verification_pass(
             request=VerificationPassRequest(
@@ -233,11 +238,11 @@ async def _verify_and_gate(
                 stop=interrupt,
             ),
         )
-    findings = apply_severity_gates(findings=verification.findings)
-    findings = findings + tuple(outcome.custom_findings)
+    findings = apply_severity_gates(findings=verification.findings) + custom
     return replace(
         outcome,
         verification=verification.summary,
         filtered_findings=findings,
+        custom_findings=custom,
         total_findings=len(findings),
     )

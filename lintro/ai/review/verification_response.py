@@ -8,11 +8,15 @@ costs one finding its verdict, not the round its pass.
 from __future__ import annotations
 
 import json
+import re
 
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.review.enums.verification_outcome import VerificationOutcome
 
 __all__ = ["parse_verification_answer"]
+
+#: A ``path:line`` citation somewhere in the evidence text.
+_CITATION = re.compile(r"[\w./\\-]+\.\w+:\d+")
 
 
 def parse_verification_answer(
@@ -60,8 +64,11 @@ def parse_verification_answer(
         ):
             continue
         evidence = item.get("evidence")
-        verdicts.setdefault(
-            position,
-            (outcome, evidence.strip() if isinstance(evidence, str) else ""),
-        )
+        evidence = evidence.strip() if isinstance(evidence, str) else ""
+        if outcome is VerificationOutcome.REFUTED and not _CITATION.search(evidence):
+            # The prompt's first rule: a refutation without a ``file:line``
+            # citation is no refutation. Emptying the evidence makes the
+            # application keep the finding as confirmed.
+            evidence = ""
+        verdicts.setdefault(position, (outcome, evidence))
     return verdicts

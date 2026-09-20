@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import ExitStack
+from dataclasses import replace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -40,6 +41,7 @@ from lintro.ai.review.enums.verification_outcome import VerificationOutcome
 from lintro.ai.review.github_notes import format_verification_note_line
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.merged_duplicate import MergedDuplicate
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -351,6 +353,36 @@ def test_parse_rejects_answers_outside_the_schema(content: str) -> None:
     assert_that(parse_verification_answer(content=content, count=1)).is_none()
 
 
+@pytest.mark.parametrize(
+    "evidence",
+    ["not file evidence", "the retries kwarg is read on line 2", "pkg/api.py"],
+)
+def test_parse_drops_refutation_evidence_without_a_citation(evidence: str) -> None:
+    """A refutation that cites no ``file:line`` carries no evidence.
+
+    Args:
+        evidence: Refutation text with no citation in it.
+    """
+    verdicts = parse_verification_answer(
+        content=_answer((1, "refuted", evidence)),
+        count=1,
+    )
+
+    assert_that(verdicts).is_equal_to({1: (VerificationOutcome.REFUTED, "")})
+
+
+def test_parse_keeps_refutation_evidence_with_a_citation() -> None:
+    """A ``file:line`` anywhere in the evidence keeps it."""
+    verdicts = parse_verification_answer(
+        content=_answer((1, "refuted", "see pkg/api.py:2, retries is read")),
+        count=1,
+    )
+
+    assert_that(verdicts).is_equal_to(
+        {1: (VerificationOutcome.REFUTED, "see pkg/api.py:2, retries is read")},
+    )
+
+
 def test_parse_keeps_the_first_verdict_for_a_repeated_position() -> None:
     """A duplicated position does not let a later entry overturn the first."""
     verdicts = parse_verification_answer(
@@ -399,11 +431,16 @@ async def test_refuted_finding_is_dropped_and_recorded() -> None:
     )
 
 
-async def test_refutation_without_evidence_is_not_a_refutation() -> None:
-    """The verifier's word alone never drops a finding; it counts as confirmed."""
+@pytest.mark.parametrize("evidence", ["", "not file evidence"])
+async def test_refutation_without_evidence_is_not_a_refutation(evidence: str) -> None:
+    """The verifier's word alone never drops a finding; it counts as confirmed.
+
+    Args:
+        evidence: Empty, or prose with no ``file:line`` citation.
+    """
     result, _call = await _pass(
         findings=[_finding()],
-        content=_answer((1, "refuted", "")),
+        content=_answer((1, "refuted", evidence)),
     )
 
     assert_that(result.findings).is_length(1)
@@ -796,11 +833,30 @@ def test_failed_pass_degrades_the_narrative_not_the_coverage() -> None:
 
 
 def test_custom_agent_findings_are_exempt() -> None:
-    """An author-declared severity is configuration; the verifier never sees it."""
-    custom = _finding(title="Agent P1", failure_scenario="", source="agent")
+    """An author-declared severity is configuration; the verifier never sees it.
+
+    The exemption keys on ``source``, not identity: by the time the finalizer
+    runs, the synthesis pass's duplicate merge may have rewritten a custom
+    finding (here: one carrying ``merged_duplicates``) or dropped one (the
+    original ``custom_findings`` tuple still lists it). The round's custom
+    subset is what survived, untouched, and the dropped one stays dropped.
+    """
+    original = _finding(title="Agent P1", failure_scenario="", source="agent")
+    custom = replace(
+        original,
+        merged_duplicates=(
+            MergedDuplicate(
+                file="pkg/api.py",
+                category="logic-bug",
+                title="dup",
+                line=9,
+            ),
+        ),
+    )
+    dropped = _finding(title="Agent dup", source="agent")
     outcome = ReviewRunOutcome(
         filtered_findings=(_finding(title="Model P1"), custom),
-        custom_findings=(custom,),
+        custom_findings=(original, dropped),
     )
     plan = MagicMock()
     plan.ai_config = AIConfig(enabled=True, transport=AITransport.API)
@@ -835,6 +891,7 @@ def test_custom_agent_findings_are_exempt() -> None:
     assert_that(titles).is_equal_to(["Model P1", "Agent P1"])
     # Same object, not a gated copy: the P1 gate would have moved it to P2.
     assert_that(gated.filtered_findings[1]).is_same_as(custom)
+    assert_that(gated.custom_findings).is_equal_to((custom,))
     assert_that(gated.filtered_findings[0].verified).is_true()
     assert_that(gated.verification).is_equal_to(
         VerificationSummary(
