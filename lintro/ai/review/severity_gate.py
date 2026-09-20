@@ -184,11 +184,16 @@ def apply_p2_evidence_gate(
             gated.append(finding)
             continue
         logger.info(
-            "Downgrading P2 finding {title!r} to P3: {reason} ({category}, {style}).",
+            "Downgrading P2 finding {title!r} to P3: {reason} ({category}, "
+            "claimed {claimed}).",
             title=finding.title,
             reason=P2_DOWNGRADE_REASON,
             category=finding.category,
-            style=str(finding.evidence_style),
+            claimed=(
+                str(finding.evidence_style)
+                if finding.evidence_claimed is None
+                else ("diff_local" if finding.evidence_claimed else "no diff_local")
+            ),
         )
         chained = (
             finding.severity_downgrade_reason

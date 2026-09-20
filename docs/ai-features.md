@@ -720,8 +720,9 @@ What you see:
 - A `verification` block at the root of `--output json`, with `selected`, `confirmed`,
   `refuted`, `downgraded`, `failed`, the `refutations` (each with `file`, `line`,
   `severity`, `title`, `evidence`) and the call's tokens and cost, and
-  `"verified": true` on each confirmed finding. The run record carries `refuted` and
-  `verified` counts when non-zero, and the timings block a `verification` phase span.
+  `"verified": true` on each finding the pass accepted (confirmed at its severity, or a
+  P1 moved to P2). The run record carries `refuted` and `verified` counts when non-zero,
+  and the timings block a `verification` phase span.
 - With `ai.transcript_logging` on, the pass's prompt and answer are logged like every
   other call, so a refutation can be read back in full.
 

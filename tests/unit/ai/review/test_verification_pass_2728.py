@@ -578,6 +578,9 @@ async def test_an_interrupt_abandons_the_call() -> None:
     )
 
     assert_that(result.summary.failed).is_true()
+    assert_that(
+        [d.reason for d in verification_degradations(summary=result.summary)],
+    ).is_equal_to([CoverageDegradationReason.VERIFICATION_FAILED])
     assert_that(verification_degradations(summary=None)).is_empty()
 
 
@@ -750,7 +753,7 @@ def test_refuted_p1_leaves_the_round_and_every_surface() -> None:
     )
     assert_that("verification").is_not_in(payload["metadata"])
     assert_that(format_verification_note(metadata=result.metadata)).is_equal_to(
-        "Verification re-checked 1 finding: 0 confirmed, 1 refuted and dropped.",
+        "Verification re-checked 1 finding: 1 refuted and dropped.",
     )
     record = run_record_from_result(
         request=StickyRequest(result=result, head_sha="abc", transport="api"),

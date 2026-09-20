@@ -9,9 +9,11 @@ code. Decide, per finding:
   the finding describes cannot happen: the path is unreachable, the input is validated
   upstream, the "missing" handling exists, the contract the finding cites is not what the
   code promises. Say exactly what you found.
-- `weakened` — the defect is real but the finding's severity does not hold: its
-  `failure_scenario` does not survive the code you can see (the trigger needs a state the
-  PR cannot produce, the blast radius is smaller than claimed). Say what fails to hold.
+- `weakened` — **P1 findings only**: the defect is real but the P1 failure scenario
+  does not hold: its `failure_scenario` does not survive the code you can see (the
+  trigger needs a state the PR cannot produce, the blast radius is smaller than claimed).
+  Say what fails to hold. For a P2 or P3 whose severity seems overstated, answer
+  `unrefuted`; this pass never re-ranks below P2.
 - `unrefuted` — you tried the two above and the finding stands. This is the default only
   when the failure scenario holds up against the code, never because you ran out of
   things to check.

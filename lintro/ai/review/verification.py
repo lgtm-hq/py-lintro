@@ -287,19 +287,35 @@ def _apply(
                 evidence=evidence,
             )
             continue
-        if (
-            outcome is VerificationOutcome.DOWNGRADED
-            and finding.severity is Severity.P1
-        ):
-            rewritten[index] = replace(
-                finding,
-                severity=Severity.P2,
-                severity_downgraded=True,
-                severity_downgrade_reason=SeverityDowngradeReason.REFUTATION_WEAKENED,
-                verified=True,
+        if outcome is VerificationOutcome.DOWNGRADED:
+            if finding.severity is Severity.P1:
+                logger.info(
+                    "Verification weakened {title!r} at {file}:{line} to P2: {why}",
+                    title=finding.title,
+                    file=finding.file,
+                    line=finding.line,
+                    why=evidence or "no reason given",
+                )
+                rewritten[index] = replace(
+                    finding,
+                    severity=Severity.P2,
+                    severity_downgraded=True,
+                    severity_downgrade_reason=(
+                        SeverityDowngradeReason.REFUTATION_WEAKENED
+                    ),
+                    verified=True,
+                )
+                downgraded += 1
+                continue
+            # The prompt scopes ``weakened`` to P1; a lower band that came
+            # back weakened is kept at its severity and counts as confirmed,
+            # said out loud so the answer is not silently reinterpreted.
+            logger.info(
+                "Verification answered 'weakened' for {severity} {title!r}; "
+                "only a P1 is moved, kept as confirmed.",
+                severity=str(finding.severity),
+                title=finding.title,
             )
-            downgraded += 1
-            continue
         rewritten[index] = replace(finding, verified=True)
         confirmed += 1
     kept = tuple(item for index, item in enumerate(rewritten) if index not in drop)

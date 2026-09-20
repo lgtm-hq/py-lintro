@@ -39,9 +39,14 @@ def format_verification_note(*, metadata: ReviewMetadata) -> str:
         return (
             f"{VERIFICATION_NOTE_LABEL} did not complete; {checked} kept " "unverified."
         )
-    parts = [f"{summary.confirmed} confirmed"]
+    parts: list[str] = []
+    if summary.confirmed:
+        parts.append(f"{summary.confirmed} confirmed")
     if summary.refuted:
         parts.append(f"{summary.refuted} refuted and dropped")
     if summary.downgraded:
         parts.append(f"{summary.downgraded} moved to P2")
+    if not parts:
+        # Every selected finding came back without a verdict.
+        return f"{VERIFICATION_NOTE_LABEL} re-checked {checked}: none answered."
     return f"{VERIFICATION_NOTE_LABEL} re-checked {checked}: {', '.join(parts)}."
