@@ -59,7 +59,9 @@ def parse_synthesis_findings(*, content: str) -> tuple[ReviewFinding, ...] | Non
         # success" this pass promises never to confuse with a failure.
         logger.warning("The cross-chunk synthesis findings value was not a list.")
         return None
-    return parse_findings(raw_findings=raw)
+    # Gated once per round with the chunk findings, after verification
+    # (#2728); see finalize_completed_run.
+    return parse_findings(raw_findings=raw, gate_severity=False)
 
 
 def deduplicate_synthesis_findings(

@@ -72,7 +72,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.progress import ReviewProgressCallback
     from lintro.ai.review.sensitivity import ReviewSensitivityPolicy
     from lintro.config.lintro_config import LintroConfig
-    from lintro.config.review_config import ReviewSynthesisConfig
+    from lintro.config.review_config import ReviewSynthesisConfig, ReviewVerifyMode
 
 __all__ = [
     "DEFAULT_EXECUTION_POLICY",
@@ -170,6 +170,7 @@ class PreparedReview:
         custom_agents: Discovered user-defined review agents.
         run_builtin_checklist: Whether the built-in checklist passes run.
         synthesis: Cross-chunk synthesis configuration (#2269).
+        verify: Which findings the verification pass re-checks (#2728).
         workspace_root: Absolute workspace root the review is anchored to.
         lint_digest: ``--with-lint`` / ``--lint-report`` digest for the
             prompt, or None.
@@ -195,6 +196,7 @@ class PreparedReview:
     custom_agents: tuple[CustomAgentSpec, ...]
     run_builtin_checklist: bool
     synthesis: ReviewSynthesisConfig
+    verify: ReviewVerifyMode
     workspace_root: Path
     lint_digest: str | None = None
     lint_tool_count: int = 0
@@ -346,6 +348,7 @@ def prepare_review(
         ),
         run_builtin_checklist=custom_agent_mode != CustomAgentMode.ONLY,
         synthesis=review_config.synthesis,
+        verify=review_config.verify,
         workspace_root=request.workspace_root,
         lint_digest=lint_digest,
         lint_tool_count=lint_tool_count,
@@ -404,5 +407,6 @@ def execute_review(
             force_full=policy.force_full,
             enforce_cost_cap=policy.enforce_cost_cap,
             synthesis=prepared.synthesis,
+            verify=prepared.verify,
         ),
     )

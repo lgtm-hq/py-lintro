@@ -44,6 +44,7 @@
     "skipped_files": [],
     "coverage_degradations": [],
     "synthesis": null,
+    "verification": null,
     "lint_facts_note": ""
   },
   "summary": "No review output.",
