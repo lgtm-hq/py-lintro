@@ -128,6 +128,7 @@ def merge_pair(
         occurrences=current.occurrences or prior.occurrences,
         occurrences_total=max(prior.occurrence_total, current.occurrence_total),
         severity_downgraded=current.severity_downgraded,
+        severity_downgrade_reason=current.severity_downgrade_reason,
         cross_chunk_contradiction=current.cross_chunk_contradiction,
         description=current.description or prior.description,
         cause=current.cause or prior.cause,

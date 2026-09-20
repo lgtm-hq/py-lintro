@@ -17,7 +17,10 @@ from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.suggested_change import parse_suggested_change
 from lintro.ai.review.narrative_parser import collapse_to_single_line
-from lintro.ai.review.severity_gate import apply_p1_evidence_gate
+from lintro.ai.review.severity_gate import (
+    apply_p1_evidence_gate,
+    apply_p2_evidence_gate,
+)
 
 __all__ = [
     "SEVERITY_SYNONYMS",
@@ -236,7 +239,9 @@ def parse_findings(
         # output, so the calibration gate has nothing to correct: downgrading
         # it would silently override the agent's own front matter.
         return bounded
-    return apply_p1_evidence_gate(findings=list(bounded))
+    return apply_p2_evidence_gate(
+        findings=apply_p1_evidence_gate(findings=list(bounded)),
+    )
 
 
 def parse_flagged_files(*, raw_flags: object) -> tuple[FlaggedFile, ...]:

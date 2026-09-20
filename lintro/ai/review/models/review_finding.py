@@ -11,6 +11,7 @@ from lintro.ai.review.enums.cross_chunk_contradiction import (
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_origin import FindingOrigin
+from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
 from lintro.ai.review.enums.suggestion_drop_reason import SuggestionDropReason
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.merged_duplicate import MergedDuplicate
@@ -69,12 +70,15 @@ class ReviewFinding:
             production. Required for P1: a P1 reported without one is
             downgraded to P2 at parse time and flagged via
             ``severity_downgraded``.
-        severity_downgraded: True when the P1 evidence gate downgraded this
+        severity_downgraded: True when an evidence gate downgraded this
             finding's reported severity. Surfaces render the downgrade rather
             than letting it happen silently.
-        evidence_style: Self-reported basis for the finding. Never suppresses
-            or down-ranks anything; the sole behavioral effect is the
-            verify-first line prompts add for speculative findings.
+        severity_downgrade_reason: Which gate downgraded it and why (#2723);
+            ``None`` when the severity is the model's own.
+        evidence_style: Self-reported basis for the finding. A ``test-gap``,
+            ``contract-drift`` or ``code-smell`` P2 that is not
+            ``diff_local`` is moved to P3 by the P2 evidence gate (#2723);
+            speculative findings also get a verify-first line in prompts.
         occurrences: Every ``file:line`` at which this pattern occurs. Empty
             when the model reported none, in which case
             :attr:`all_occurrences` falls back to the finding's own location.
@@ -133,6 +137,7 @@ class ReviewFinding:
     kind: FindingKind = FindingKind.FINDING
     failure_scenario: str = ""
     severity_downgraded: bool = False
+    severity_downgrade_reason: SeverityDowngradeReason | None = None
     evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     suggested_change: SuggestedChange | None = None

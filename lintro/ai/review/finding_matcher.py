@@ -201,6 +201,7 @@ def review_finding_from_record(*, record: FindingRecord) -> ReviewFinding:
         kind=record.kind,
         occurrences=record.occurrences,
         severity_downgraded=record.severity_downgraded,
+        severity_downgrade_reason=record.severity_downgrade_reason,
         cross_chunk_contradiction=record.cross_chunk_contradiction,
         origin=record.origin,
         evidence_style=record.evidence_style,

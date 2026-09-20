@@ -14,6 +14,7 @@ from lintro.ai.review.github_constants import _SEVERITY_EMOJI
 from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
+    format_downgrade_note,
     format_inline_post_note,
 )
 from lintro.ai.review.github_render import sanitize_comment_text
@@ -379,6 +380,21 @@ def _coverage_limited_row(*, result: ReviewResult) -> str:
         A blockquote warning, or an empty string when coverage was complete.
     """
     return format_coverage_limited_warning(metadata=result.metadata)
+
+
+def _downgrade_row(*, result: ReviewResult) -> str:
+    """Render the note shown when an evidence gate lowered a severity.
+
+    Shares its text with the per-review body through
+    :func:`format_downgrade_note` (#1925, #2723).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        A blockquote note, or an empty string when no gate fired.
+    """
+    return format_downgrade_note(findings=result.findings)
 
 
 def _cross_chunk_row(*, result: ReviewResult) -> str:

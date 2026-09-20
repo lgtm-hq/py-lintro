@@ -22,11 +22,14 @@
   none at all on most. When you are torn between P1 and P2, choose P2. When you are torn
   between P2 and P3, choose P3 — a single borderline P2 flips the derived verdict from
   {label_nits_only} to {label_changes_requested}. Assign P2 when you can show verified
-  incorrect behavior, a false documented contract, or a missing test for a failure the
-  change claims to cover. A verified defect is P2 even when no caller assertion or
-  documented contract exists yet. Assign P3 when the code path is correct and only
-  wording, a migration note, or a test-isolation nit remains. Name that rubric boundary
-  in every finding `description`.
+  incorrect behavior on a reachable input, or a documented contract the change makes
+  false. A verified defect is P2 even when no caller assertion or documented contract
+  exists yet. A test gap is P3 unless the PR claims to fix a bug it does not test.
+  Assign P3 when the code path is correct and only wording, a migration note, coverage,
+  or a test-isolation nit remains. A `test-gap`, `contract-drift` or `code-smell`
+  finding at P2 must carry `evidence_style: diff_local`; one that does not is
+  automatically moved to P3 and the correction is recorded against the run.
+  Name that rubric boundary in every finding `description`.
 - Set `kind` to `question` when you suspect something but cannot show it — an
   assumption you want the author to confirm, context you lack. Questions carry no
   severity, never affect the verdict, and are capped at **3 per review**. Use them

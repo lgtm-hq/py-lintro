@@ -10,6 +10,7 @@ from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.finding_status import FindingStatus
+from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
 from lintro.ai.review.models._coerce import coerce_int
 from lintro.ai.review.models.finding_occurrence import (
     FindingOccurrence,
@@ -57,8 +58,11 @@ class FindingRecord:
         occurrences_total: High-water number of occurrences ever seen for this
             pattern. Held across rounds so partial progress reads as
             ``addressed / total`` even after some locations are fixed.
-        severity_downgraded: True when the P1 evidence gate downgraded the
+        severity_downgraded: True when an evidence gate downgraded the
             severity at the most recent sighting.
+        severity_downgrade_reason: Which gate did so (#2723); ``None`` on
+            states written before reasons were recorded, which can only
+            have come from the P1 gate.
         cross_chunk_contradiction: Why the cross-chunk guard tagged this
             finding at the most recent sighting, persisted so a replayed
             finding keeps its tag and is never guarded a second time (#2265).
@@ -98,6 +102,7 @@ class FindingRecord:
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     occurrences_total: int = 0
     severity_downgraded: bool = False
+    severity_downgrade_reason: SeverityDowngradeReason | None = None
     cross_chunk_contradiction: CrossChunkContradiction | None = None
     description: str = ""
     cause: str = ""
@@ -185,6 +190,8 @@ class FindingRecord:
             payload["occurrences_total"] = self.occurrence_total
         if self.severity_downgraded:
             payload["severity_downgraded"] = True
+        if self.severity_downgrade_reason is not None:
+            payload["severity_downgrade_reason"] = self.severity_downgrade_reason.value
         if self.cross_chunk_contradiction is not None:
             payload["cross_chunk_contradiction"] = self.cross_chunk_contradiction.value
         if self.description:
@@ -239,6 +246,9 @@ class FindingRecord:
             occurrences=parse_occurrences(payload.get("occurrences")),
             occurrences_total=coerce_int(payload.get("occurrences_total")),
             severity_downgraded=bool(payload.get("severity_downgraded", False)),
+            severity_downgrade_reason=_downgrade_reason_from_payload(
+                payload.get("severity_downgrade_reason"),
+            ),
             cross_chunk_contradiction=_contradiction_from_payload(
                 payload.get("cross_chunk_contradiction"),
             ),
@@ -344,6 +354,23 @@ def _parse_status(value: Any) -> FindingStatus:
         return FindingStatus(str(value).lower())
     except ValueError:
         return FindingStatus.OPEN
+
+
+def _downgrade_reason_from_payload(value: object) -> SeverityDowngradeReason | None:
+    """Parse a persisted downgrade reason, tolerating older states without one.
+
+    Args:
+        value: Raw payload value, ``None`` for states written before #2723.
+
+    Returns:
+        The reason, or ``None`` when absent or unrecognized.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return SeverityDowngradeReason(value)
+    except ValueError:
+        return None
 
 
 def _contradiction_from_payload(value: object) -> CrossChunkContradiction | None:

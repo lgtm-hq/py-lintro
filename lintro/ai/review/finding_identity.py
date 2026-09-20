@@ -171,6 +171,7 @@ def current_records(
             occurrences=_normalized_occurrences(finding=finding),
             occurrences_total=len(finding.occurrences),
             severity_downgraded=finding.severity_downgraded,
+            severity_downgrade_reason=finding.severity_downgrade_reason,
             cross_chunk_contradiction=finding.cross_chunk_contradiction,
             description=finding.description,
             cause=finding.cause,

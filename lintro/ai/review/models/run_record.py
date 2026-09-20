@@ -113,22 +113,20 @@ class RunRecord:
             "chunks_reviewed": coverage.chunks_reviewed,
             "chunks_total": coverage.chunks_total,
         }
-        if coverage.coverage_limited:
-            payload["coverage_limited"] = True
-        if coverage.synthesis_degraded:
-            payload["synthesis_degraded"] = True
-        if coverage.delegated_diff_embedded:
-            payload["delegated_diff_embedded"] = True
-        if coverage.generated_questions:
-            payload["generated_questions"] = coverage.generated_questions
-        if coverage.questions_diff_trimmed:
-            payload["questions_diff_trimmed"] = True
-        if outcome.dropped_outside_diff:
-            payload["dropped_outside_diff"] = outcome.dropped_outside_diff
-        if usage.cost_basis:
-            payload["cost_basis"] = usage.cost_basis
-        if usage.context:
-            payload["context"] = usage.context
+        # Written only when set (truthy), in this order, so a record that
+        # predates a key round-trips without it.
+        optional: tuple[tuple[str, Any], ...] = (
+            ("coverage_limited", coverage.coverage_limited),
+            ("synthesis_degraded", coverage.synthesis_degraded),
+            ("delegated_diff_embedded", coverage.delegated_diff_embedded),
+            ("generated_questions", coverage.generated_questions),
+            ("questions_diff_trimmed", coverage.questions_diff_trimmed),
+            ("downgraded_p2", outcome.downgraded_p2),
+            ("dropped_outside_diff", outcome.dropped_outside_diff),
+            ("cost_basis", usage.cost_basis),
+            ("context", usage.context),
+        )
+        payload.update({key: value for key, value in optional if value})
         if outcome.resolved is not None:
             payload["resolved"] = outcome.resolved
         if outcome.open_after is not None:
@@ -270,6 +268,7 @@ def _outcome_from_payload(*, payload: dict[str, Any]) -> RunOutcome:
         p3=coerce_int(payload.get("p3")),
         questions=coerce_int(payload.get("questions")),
         downgraded=coerce_int(payload.get("downgraded")),
+        downgraded_p2=coerce_int(payload.get("downgraded_p2")),
         dropped_outside_diff=coerce_int(payload.get("dropped_outside_diff")),
         resolved=_optional_count(payload.get("resolved")),
         open_after=_optional_count(payload.get("open_after")),
