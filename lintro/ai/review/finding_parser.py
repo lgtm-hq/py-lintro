@@ -12,6 +12,7 @@ from loguru import logger
 from lintro.ai.review.diff_gate import DiffGate
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.finding_identity import normalize_category
 from lintro.ai.review.models.finding_occurrence import parse_occurrences
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -21,11 +22,9 @@ from lintro.ai.review.severity_gate import (
     apply_p1_evidence_gate,
     apply_p2_evidence_gate,
 )
-from lintro.enums.review_category import ReviewCategory
 
 __all__ = [
     "SEVERITY_SYNONYMS",
-    "normalize_category",
     "normalize_evidence_style",
     "normalize_finding_kind",
     "normalize_severity",
@@ -128,32 +127,6 @@ def normalize_finding_kind(*, raw: object) -> FindingKind:
         return FindingKind(str(raw).strip().lower())
     except ValueError:
         return FindingKind.FINDING
-
-
-def normalize_category(*, raw: object) -> str:
-    """Canonicalize a model-reported ``category`` label.
-
-    A recognized category is returned as its :class:`ReviewCategory` wire
-    value whatever its spelling (case, whitespace, underscores for hyphens),
-    so the gates and the sensitivity presets that compare on the wire value
-    cannot be evaded by ``TEST_GAP`` or ``test gap``; an unrecognized label
-    is kept as written (stripped) so a custom agent's category survives, and
-    an empty one falls back to ``logic-bug`` as before.
-
-    Args:
-        raw: Raw ``category`` value from a parsed model response.
-
-    Returns:
-        The canonical category string.
-    """
-    text = str(raw).strip() if raw is not None else ""
-    if not text:
-        return str(ReviewCategory.LOGIC_BUG)
-    candidate = "-".join(text.lower().replace("_", " ").replace("-", " ").split())
-    try:
-        return str(ReviewCategory(candidate))
-    except ValueError:
-        return text
 
 
 def normalize_evidence_style(*, raw: object) -> EvidenceStyle:
@@ -260,27 +233,23 @@ def parse_findings(
                 ),
             ),
         )
-    bounded = (
+    if severity_override is None:
+        # The severity gates run while the findings are still positionally
+        # aligned with the labels their payloads carried; the diff gate
+        # below drops or re-anchors findings (rebuilding the objects) but
+        # never changes a severity, so gating first changes no outcome.
+        # An author-declared severity policy is configuration, not model
+        # output, so the gates have nothing to correct there: downgrading
+        # it would silently override the agent's own front matter.
+        gated = apply_p2_evidence_gate(
+            findings=apply_p1_evidence_gate(findings=findings),
+            claimed_styles=claimed_styles,
+        )
+        findings = list(gated)
+    return (
         diff_gate.apply(findings=tuple(findings))
         if diff_gate is not None
         else tuple(findings)
-    )
-    if severity_override is not None:
-        # An author-declared severity policy is configuration, not model
-        # output, so the calibration gate has nothing to correct: downgrading
-        # it would silently override the agent's own front matter.
-        return bounded
-    if diff_gate is not None:
-        # The diff gate may drop findings; realign the claimed labels by
-        # identity so each survivor keeps the label its own payload carried.
-        claimed_by_id = {
-            id(finding): claimed
-            for finding, claimed in zip(findings, claimed_styles, strict=True)
-        }
-        claimed_styles = [claimed_by_id.get(id(finding)) for finding in bounded]
-    return apply_p2_evidence_gate(
-        findings=apply_p1_evidence_gate(findings=list(bounded)),
-        claimed_styles=claimed_styles,
     )
 
 

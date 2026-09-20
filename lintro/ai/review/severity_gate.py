@@ -61,6 +61,7 @@ __all__ = [
     "count_cross_chunk_contradictions",
     "count_downgrades",
     "count_downgrades_by_reason",
+    "count_gate_firings",
     "cross_chunk_contradictions",
     "describe_cross_chunk_contradictions",
     "describe_downgrades",
@@ -207,12 +208,20 @@ def apply_p2_evidence_gate(
             category=finding.category,
             style="unstated" if claimed is None else str(claimed),
         )
+        chained = (
+            finding.severity_downgrade_reason
+            is SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO
+        )
         gated.append(
             replace(
                 finding,
                 severity=Severity.P3,
                 severity_downgraded=True,
-                severity_downgrade_reason=SeverityDowngradeReason.P2_UNEVIDENCED,
+                severity_downgrade_reason=(
+                    SeverityDowngradeReason.P1_THEN_P2_UNEVIDENCED
+                    if chained
+                    else SeverityDowngradeReason.P2_UNEVIDENCED
+                ),
             ),
         )
     return tuple(gated)
@@ -237,40 +246,56 @@ def count_downgrades(*, findings: Iterable[ReviewFinding]) -> int:
     """Count the findings the P1 evidence gate downgraded.
 
     Kept to the P1 gate so the run record's long-standing ``downgraded``
-    count keeps its meaning; the P2 gate has its own count (#2723).
+    count keeps its meaning; the P2 gate has its own count (#2723). A
+    finding both gates moved is counted here too.
 
     Args:
         findings: Findings to count over.
 
     Returns:
-        Number of findings moved from P1 to P2.
+        Number of findings the P1 gate moved, chained ones included.
     """
-    return count_downgrades_by_reason(findings=findings)[
-        SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO
-    ]
+    return count_gate_firings(findings=findings)[0]
 
 
 def count_downgrades_by_reason(
     *,
     findings: Iterable[ReviewFinding],
 ) -> dict[SeverityDowngradeReason, int]:
-    """Count the gate-driven downgrades per reason.
+    """Count the gate-driven downgrades per recorded reason.
 
     Args:
         findings: Findings to count over.
 
     Returns:
-        A count for every reason, zero included, in enum order.
+        A count for every reason, zero included, in enum order. A record
+        written before reasons existed (#2723) counts as the P1 gate, the
+        one that existed then.
     """
     counts = dict.fromkeys(SeverityDowngradeReason, 0)
     for finding in downgraded_findings(findings=findings):
         reason = finding.severity_downgrade_reason
         if reason is None:
-            # A record written before reasons existed (#2723) can only have
-            # come from the P1 gate, the one that existed then.
             reason = SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO
         counts[reason] += 1
     return counts
+
+
+def count_gate_firings(*, findings: Iterable[ReviewFinding]) -> tuple[int, int]:
+    """Count how many findings each gate moved, crediting a chain to both.
+
+    Args:
+        findings: Findings to count over.
+
+    Returns:
+        ``(p1_gate, p2_gate)``: findings the P1 gate moved (P1 → P2) and
+        findings the P2 gate moved (P2 → P3); a finding both gates moved is
+        counted in each.
+    """
+    by_reason = count_downgrades_by_reason(findings=findings)
+    p1 = sum(count for reason, count in by_reason.items() if reason.p1_gate_fired)
+    p2 = sum(count for reason, count in by_reason.items() if reason.p2_gate_fired)
+    return p1, p2
 
 
 def describe_downgrades(*, findings: Iterable[ReviewFinding]) -> str:
@@ -284,17 +309,12 @@ def describe_downgrades(*, findings: Iterable[ReviewFinding]) -> str:
         given; 2 findings downgraded to P3: no diff-local evidence …"``, or
         an empty string when nothing was downgraded.
     """
-    counts = count_downgrades_by_reason(findings=findings)
+    p1, p2 = count_gate_firings(findings=findings)
     clauses: list[str] = []
-    for reason, target, wording in (
-        (
-            SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO,
-            Severity.P2,
-            P1_DOWNGRADE_REASON,
-        ),
-        (SeverityDowngradeReason.P2_UNEVIDENCED, Severity.P3, P2_DOWNGRADE_REASON),
+    for count, target, wording in (
+        (p1, Severity.P2, P1_DOWNGRADE_REASON),
+        (p2, Severity.P3, P2_DOWNGRADE_REASON),
     ):
-        count = counts[reason]
         if not count:
             continue
         noun = "finding" if count == 1 else "findings"

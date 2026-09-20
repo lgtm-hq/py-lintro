@@ -15,7 +15,6 @@ from dataclasses import dataclass
 from loguru import logger
 
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
-from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
 from lintro.ai.review.github_badges import severity_counts
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -26,7 +25,7 @@ from lintro.ai.review.models.run_outcome import NARRATIVE_LIMIT, RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_request import StickyRequest
-from lintro.ai.review.severity_gate import count_downgrades_by_reason
+from lintro.ai.review.severity_gate import count_gate_firings
 from lintro.ai.transport import resolve_cost_basis
 
 __all__ = ["RoundTotals", "round_narrative", "run_record_from_result"]
@@ -223,15 +222,15 @@ def _outcome(*, result: ReviewResult, totals: RoundTotals) -> RunOutcome:
         The outcome group.
     """
     counts = severity_counts(findings=result.findings)
-    downgrades = count_downgrades_by_reason(findings=result.findings)
+    downgraded_p1, downgraded_p2 = count_gate_firings(findings=result.findings)
     return RunOutcome(
         verdict=totals.verdict,
         p1=counts[Severity.P1],
         p2=counts[Severity.P2],
         p3=counts[Severity.P3],
         questions=sum(1 for finding in result.findings if finding.is_question),
-        downgraded=downgrades[SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO],
-        downgraded_p2=downgrades[SeverityDowngradeReason.P2_UNEVIDENCED],
+        downgraded=downgraded_p1,
+        downgraded_p2=downgraded_p2,
         dropped_outside_diff=result.metadata.diff_gate.outside_diff,
         resolved=totals.resolved,
         open_after=totals.open_after,

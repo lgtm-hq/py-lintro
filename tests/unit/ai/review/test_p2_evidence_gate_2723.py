@@ -22,6 +22,7 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
+from lintro.ai.review.finding_identity import fingerprint_for
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.github_notes import format_downgrade_note
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -42,6 +43,7 @@ from lintro.ai.review.severity_gate import (
     apply_p2_evidence_gate,
     count_downgrades,
     count_downgrades_by_reason,
+    count_gate_firings,
     describe_downgrades,
 )
 from lintro.ai.review.sticky import (
@@ -201,22 +203,26 @@ def test_only_p2_findings_are_gated(severity: Severity) -> None:
     assert_that(kept.severity_downgraded).is_false()
 
 
+_OMITTED = object()
+
+
 @pytest.mark.parametrize(
     "raw",
-    ["", "unknown", None, 42],
-    ids=["absent", "bogus", "null", "int"],
+    ["", "unknown", None, 42, _OMITTED],
+    ids=["empty", "bogus", "json-null", "int", "omitted"],
 )
 def test_an_unstated_or_unreadable_style_is_not_evidence(raw: object) -> None:
     """The gate fails closed: a claim the model did not make is no claim.
 
     The normalizer maps such labels to ``diff_local`` for display and the
-    convergence score; the gate reads the label as written.
+    convergence score; the gate reads the label as written. An explicit
+    JSON ``null`` and an omitted key are separate cases.
 
     Args:
-        raw: The payload's ``evidence_style`` value.
+        raw: The payload's ``evidence_style`` value, or the omission sentinel.
     """
     payload = _raw()
-    if raw is None:
+    if raw is _OMITTED:
         del payload["evidence_style"]
     else:
         payload["evidence_style"] = raw
@@ -254,8 +260,15 @@ def test_an_inflated_p1_in_a_gated_category_ends_at_p3() -> None:
     )
 
     assert_that(gated[0].severity).is_equal_to(Severity.P3)
+    # Both gates fired, and both stay countable and named.
     assert_that(gated[0].severity_downgrade_reason).is_equal_to(
-        SeverityDowngradeReason.P2_UNEVIDENCED,
+        SeverityDowngradeReason.P1_THEN_P2_UNEVIDENCED,
+    )
+    assert_that(count_gate_firings(findings=gated)).is_equal_to((1, 1))
+    assert_that(count_downgrades(findings=gated)).is_equal_to(1)
+    assert_that(describe_downgrades(findings=gated)).is_equal_to(
+        f"1 finding downgraded to P2: {P1_DOWNGRADE_REASON}; "
+        f"1 finding downgraded to P3: {P2_DOWNGRADE_REASON}",
     )
 
 
@@ -292,6 +305,44 @@ def test_category_spelling_cannot_evade_the_gate(raw: str) -> None:
     (gated,) = parse_findings(raw_findings=[_raw(category=raw)])
 
     assert_that(gated.category).is_in("test-gap", "contract-drift", "code-smell")
+    assert_that(gated.severity).is_equal_to(Severity.P3)
+
+
+def test_a_recorded_spelling_and_the_canonical_one_share_a_fingerprint() -> None:
+    """A record persisted under ``TEST_GAP`` still matches the canonical finding."""
+    fingerprints = {
+        fingerprint_for(
+            file="src/app.py",
+            category=spelling,
+            title="New branch has no test",
+        )
+        for spelling in ("test-gap", "TEST_GAP", "test gap", "Test_Gap ")
+    }
+
+    assert_that(fingerprints).is_length(1)
+
+
+def test_the_gate_runs_before_the_diff_gate_re_anchors_a_finding() -> None:
+    """A diff-local claim survives the diff gate rebuilding the finding."""
+    from lintro.ai.review.diff_gate import DiffGate, hunks_from_diff
+
+    gate = DiffGate(
+        hunks=hunks_from_diff(
+            diff="diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n"
+            "+++ b/src/app.py\n@@ -10,3 +10,3 @@\n-a\n+b\n c\n d\n",
+        ),
+        near_lines=3,
+    )
+    # Line 13 is two lines past the hunk: re-anchored, which rebuilds the
+    # finding object; a diff_local claim must still count as evidence.
+    (kept,) = parse_findings(
+        raw_findings=[_raw(line=13, evidence_style="diff_local")],
+        diff_gate=gate,
+    )
+    (gated,) = parse_findings(raw_findings=[_raw(line=13)], diff_gate=gate)
+
+    assert_that(kept.severity).is_equal_to(Severity.P2)
+    assert_that(kept.severity_downgraded).is_false()
     assert_that(gated.severity).is_equal_to(Severity.P3)
 
 
@@ -403,8 +454,10 @@ def test_downgrades_are_counted_per_reason() -> None:
         {
             SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO: 1,
             SeverityDowngradeReason.P2_UNEVIDENCED: 1,
+            SeverityDowngradeReason.P1_THEN_P2_UNEVIDENCED: 0,
         },
     )
+    assert_that(count_gate_firings(findings=findings)).is_equal_to((1, 1))
     assert_that(count_downgrades(findings=findings)).is_equal_to(1)
 
 

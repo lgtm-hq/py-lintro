@@ -21,7 +21,28 @@ class SeverityDowngradeReason(StrEnum):
             was moved to P3 (#2723): a coverage or wording concern the model
             inferred rather than showed must not turn "nits only" into
             "changes requested".
+        P1_THEN_P2_UNEVIDENCED: Both gates fired on one finding: reported
+            P1 without a failure scenario in a gated category without
+            diff-local evidence, so it went P1 → P2 → P3. Kept as its own
+            member so the counts and the notice credit both gates.
     """
 
     P1_NO_FAILURE_SCENARIO = auto()
     P2_UNEVIDENCED = auto()
+    P1_THEN_P2_UNEVIDENCED = auto()
+
+    @property
+    def p1_gate_fired(self) -> bool:
+        """Whether the P1 failure-scenario gate contributed to this reason."""
+        return self in {
+            SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO,
+            SeverityDowngradeReason.P1_THEN_P2_UNEVIDENCED,
+        }
+
+    @property
+    def p2_gate_fired(self) -> bool:
+        """Whether the P2 evidence gate contributed to this reason."""
+        return self in {
+            SeverityDowngradeReason.P2_UNEVIDENCED,
+            SeverityDowngradeReason.P1_THEN_P2_UNEVIDENCED,
+        }
