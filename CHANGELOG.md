@@ -11,6 +11,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.166.0] - 2026-09-20
+
+### Added
+
+- **ai/review**: review rubric and once-per-run generated questions (step 0.9) (#2725)
+  (95e27b3)
 - **ai/review**: every chunk prompt now reviews against a short severity-by-behaviour
   rubric plus questions generated once per run for the PR under review (one extra
   provider call over the redacted whole-PR diff, title and body; shared by all chunks;
@@ -24,18 +40,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   answer questions; a question or rubric item restated as a finding is out of scope, and
   the depth-2 per-chunk question generator is replaced by the once-per-run pass (#2720)
 
-### Deprecated
-
 ### Removed
 
 - **ai/review**: the built-in checklist corpus is trimmed to its evidence-backed core
   (logic bugs, silent failures, security, integration; 26 items removed), and the
   generated corpus JSON Schema with its generator script and drift test are gone — the
   loader's validation against the Python enums is the only authority (#2720)
-
-### Fixed
-
-### Security
 
 ## [0.165.0] - 2026-09-17
 
