@@ -25,6 +25,7 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.ai.review.models.review_state import ReviewState
 from lintro.enums.review_category import ReviewCategory
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "fingerprint_for",
     "normalize_file_path",
     "migrate_legacy_fingerprints",
+    "migrate_review_state",
     "normalize_category",
     "normalize_title",
 ]
@@ -118,14 +120,20 @@ def migrate_legacy_fingerprints(
     its stored file, category and title; a synthetic or hand-edited hash is
     left alone.
 
+    Two legacy records that only differed by spelling (``TEST_GAP`` and
+    ``test gap`` siblings) collapse onto one fingerprint; they keep distinct
+    identities by taking the next free ordinals under it, in their stored
+    order, so no key is duplicated and no match outcome overwritten.
+
     Args:
         records: Records as loaded from the persisted state.
 
     Returns:
-        The records, with migrated fingerprints where a legacy spelling
-        would otherwise break identity.
+        The records, with migrated fingerprints and ordinals where a legacy
+        spelling would otherwise break identity.
     """
     migrated: list[FindingRecord] = []
+    taken: set[str] = set()
     for record in records:
         canonical = normalize_category(raw=record.category)
         legacy = _legacy_fingerprint(
@@ -137,19 +145,44 @@ def migrate_legacy_fingerprints(
             # Canonical already, or a hash no round of ours produced (a
             # synthetic or hand-edited record): not a legacy record.
             migrated.append(record)
+            taken.add(record.key)
             continue
-        migrated.append(
-            replace(
-                record,
-                fingerprint=fingerprint_for(
-                    file=record.file,
-                    category=canonical,
-                    title=record.title,
-                ),
-                category=canonical,
-            ),
+        fingerprint = fingerprint_for(
+            file=record.file,
+            category=canonical,
+            title=record.title,
         )
+        ordinal = record.ordinal
+        while f"{fingerprint}#{ordinal}" in taken:
+            ordinal += 1
+        moved = replace(
+            record,
+            fingerprint=fingerprint,
+            ordinal=ordinal,
+            category=canonical,
+        )
+        migrated.append(moved)
+        taken.add(moved.key)
     return tuple(migrated)
+
+
+def migrate_review_state(*, state: ReviewState) -> ReviewState:
+    """Return ``state`` with its finding records migrated (#2723).
+
+    Applied once where a round resolves the state it continues from, so
+    matching, lifecycle progress and every surface read the same keys.
+
+    Args:
+        state: The persisted state as loaded.
+
+    Returns:
+        The same state, or a copy with migrated finding records when any
+        legacy record needed one.
+    """
+    migrated = migrate_legacy_fingerprints(records=state.findings)
+    if migrated == state.findings:
+        return state
+    return replace(state, findings=migrated)
 
 
 def _legacy_fingerprint(*, file: str, category: str, title: str) -> str:

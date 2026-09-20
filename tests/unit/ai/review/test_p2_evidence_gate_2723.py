@@ -622,3 +622,103 @@ def test_a_legacy_record_is_re_fingerprinted_on_load() -> None:
     )
     assert_that(migrated.category).is_equal_to("test-gap")
     assert_that(kept).is_same_as(canonical)
+
+
+def _legacy_record(
+    *,
+    spelling: str,
+    fingerprint: str,
+    ordinal: int = 1,
+) -> FindingRecord:
+    """Build a record a pre-#2723 round persisted under ``spelling``.
+
+    Args:
+        spelling: The category as that round recorded it.
+        fingerprint: The hash that round stored.
+        ordinal: The record's ordinal.
+
+    Returns:
+        The record.
+    """
+    return FindingRecord(
+        fingerprint=fingerprint,
+        ordinal=ordinal,
+        severity=Severity.P2,
+        category=spelling,
+        title="New branch has no test",
+        file="src/app.py",
+        line=12,
+        status=FindingStatus.OPEN,
+        since_round=1,
+    )
+
+
+def test_legacy_siblings_that_collapse_keep_distinct_ordinals() -> None:
+    """``TEST_GAP`` and ``test gap`` siblings migrate to one fingerprint, two keys."""
+    from lintro.ai.review.finding_identity import _legacy_fingerprint
+
+    first = _legacy_record(
+        spelling="TEST_GAP",
+        fingerprint=_legacy_fingerprint(
+            file="src/app.py",
+            category="TEST_GAP",
+            title="New branch has no test",
+        ),
+    )
+    second = _legacy_record(
+        spelling="test gap",
+        fingerprint=_legacy_fingerprint(
+            file="src/app.py",
+            category="test gap",
+            title="New branch has no test",
+        ),
+    )
+
+    migrated = migrate_legacy_fingerprints(records=[first, second])
+
+    assert_that({record.fingerprint for record in migrated}).is_length(1)
+    assert_that([record.ordinal for record in migrated]).is_equal_to([1, 2])
+    assert_that({record.key for record in migrated}).is_length(2)
+
+
+def test_prior_state_is_migrated_once_where_a_round_resolves_it() -> None:
+    """Every consumer of the prior state sees migrated keys, not only the matcher."""
+    from lintro.ai.review.finding_matcher import match_findings
+    from lintro.ai.review.lifecycle.state import resolve_prior_state
+    from lintro.ai.review.models.review_state import ReviewState
+
+    legacy = _legacy_record(spelling="TEST_GAP", fingerprint="2f8a4dbaa87081f0")
+    state = resolve_prior_state(
+        prior_state=ReviewState(findings=(legacy,)),
+        sticky_state=ReviewState(),
+    )
+
+    assert_that(state.findings[0].fingerprint).is_equal_to("08e68cc1dff17647")
+    assert_that(state.findings[0].category).is_equal_to("test-gap")
+
+    # The canonical finding reported again this round carries the record on
+    # instead of resolving it and opening a duplicate.
+    match = match_findings(
+        previous=state,
+        findings=[
+            _finding(category="test-gap", evidence_style=EvidenceStyle.DIFF_LOCAL),
+        ],
+        round_number=2,
+    )
+
+    assert_that(match.new).is_empty()
+    assert_that(match.resolved).is_empty()
+    assert_that(match.carried).is_length(1)
+
+
+def test_a_legacy_record_never_collides_with_a_canonical_sibling() -> None:
+    """A canonical record keeps its key; the migrated legacy one takes the next."""
+    canonical = _legacy_record(spelling="test-gap", fingerprint="08e68cc1dff17647")
+    legacy = _legacy_record(spelling="TEST_GAP", fingerprint="2f8a4dbaa87081f0")
+
+    kept, moved = migrate_legacy_fingerprints(records=[canonical, legacy])
+
+    assert_that(kept).is_same_as(canonical)
+    assert_that(moved.fingerprint).is_equal_to("08e68cc1dff17647")
+    assert_that(moved.ordinal).is_equal_to(2)
+    assert_that({kept.key, moved.key}).is_length(2)

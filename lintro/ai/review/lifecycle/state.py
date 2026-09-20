@@ -30,6 +30,7 @@ from dataclasses import replace
 from loguru import logger
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
+from lintro.ai.review.finding_identity import migrate_review_state
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
@@ -186,11 +187,15 @@ def resolve_prior_state(
     Returns:
         ReviewState: The state to render and match against.
     """
-    if prior_state is None or not (
-        prior_state.coverage or prior_state.runs or prior_state.findings
-    ):
-        return sticky_state
-    return prior_state
+    chosen = (
+        sticky_state
+        if prior_state is None
+        or not (prior_state.coverage or prior_state.runs or prior_state.findings)
+        else prior_state
+    )
+    # Migrated once here so matching, lifecycle progress and every surface
+    # read the same finding keys (#2723).
+    return migrate_review_state(state=chosen)
 
 
 def persist_review_state(
