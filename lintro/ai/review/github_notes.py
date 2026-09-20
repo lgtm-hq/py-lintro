@@ -45,6 +45,7 @@ from lintro.ai.review.severity_gate import (
 )
 from lintro.ai.review.synthesis_note import format_synthesis_note
 from lintro.ai.review.timings import format_timing_summary
+from lintro.ai.review.verification_note import format_verification_note
 
 __all__ = [
     "format_convergence_banner",
@@ -58,6 +59,7 @@ __all__ = [
     "format_partial_review_label",
     "format_run_mechanics",
     "format_synthesis_note_line",
+    "format_verification_note_line",
     "format_timings_note",
     "sanitized_timing_summary",
 ]
@@ -121,6 +123,22 @@ def format_synthesis_note_line(*, metadata: ReviewMetadata) -> str:
     if not note:
         return ""
     return f"<sub>{sanitize_comment_text(note, limit=400)}</sub>"
+
+
+def format_verification_note_line(*, metadata: ReviewMetadata) -> str:
+    """Render the verification pass note as a fine-print line (#2728).
+
+    Args:
+        metadata: Review run metadata carrying ``verification``.
+
+    Returns:
+        The note wrapped in ``<sub>``, or an empty string when the pass did
+        not run or checked nothing.
+    """
+    note = format_verification_note(metadata=metadata)
+    if not note:
+        return ""
+    return f"<sub>{sanitize_comment_text(note, limit=300)}</sub>"
 
 
 def format_partial_review_label(*, metadata: ReviewMetadata) -> str:

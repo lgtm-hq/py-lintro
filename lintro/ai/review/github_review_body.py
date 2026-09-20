@@ -42,6 +42,7 @@ from lintro.ai.review.github_notes import (
     format_partial_review_label,
     format_synthesis_note_line,
     format_timings_note,
+    format_verification_note_line,
 )
 from lintro.ai.review.github_render import (
     Section,
@@ -355,6 +356,11 @@ def _run_stats_section(
         # Rendered only when the optional cross-chunk pass ran (#2269), so a
         # default round's run-stats block is byte-identical to before.
         lines.extend(["", synthesis_note])
+    verification_note = format_verification_note_line(metadata=metadata)
+    if verification_note:
+        # What the verifier confirmed, refuted or lowered (#2728); the
+        # refutations themselves live in the JSON output and the log.
+        lines.extend(["", verification_note])
     timings_note = format_timings_note(metadata=metadata)
     if timings_note:
         lines.extend(["", timings_note])
