@@ -29,6 +29,7 @@ from lintro.ai.review.finding_identity import (
     current_records,
     duplicate_records,
     fingerprint_for,
+    migrate_legacy_fingerprints,
     normalize_file_path,
     normalize_title,
 )
@@ -146,7 +147,7 @@ def review_findings_from_unposted(
         for finding in current
     }
     extra: list[ReviewFinding] = []
-    for record in prior.findings:
+    for record in migrate_legacy_fingerprints(records=prior.findings):
         if record.status is not FindingStatus.OPEN:
             continue
         if record.inline_comment_id is not None:
@@ -267,7 +268,11 @@ def match_findings(
     Returns:
         The per-round transitions plus the merged record set to persist.
     """
-    prior_records = list(previous.findings) if previous is not None else []
+    prior_records = (
+        list(migrate_legacy_fingerprints(records=previous.findings))
+        if previous is not None
+        else []
+    )
     inline_records = current_records(
         findings=[finding for finding in findings if finding.posted_inline],
         round_number=round_number,

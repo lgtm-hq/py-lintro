@@ -22,7 +22,10 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
-from lintro.ai.review.finding_identity import fingerprint_for
+from lintro.ai.review.finding_identity import (
+    fingerprint_for,
+    migrate_legacy_fingerprints,
+)
 from lintro.ai.review.finding_parser import parse_findings
 from lintro.ai.review.github_notes import format_downgrade_note
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -574,3 +577,48 @@ def test_both_sticky_renders_carry_the_downgrade_note(
 
     for body in (round_body, state_body):
         assert_that(body).contains("🎚️", P2_DOWNGRADE_REASON)
+
+
+def test_a_legacy_record_is_re_fingerprinted_on_load() -> None:
+    """A record persisted under ``TEST_GAP`` matches the canonical finding.
+
+    ``2f8a4dbaa87081f0`` is the hash a pre-#2723 round stored for this
+    finding (``normalize_title`` kept the underscore); today the same finding
+    hashes to ``08e68cc1dff17647``. Without the migration the record would
+    resolve and the finding re-open as new.
+    """
+    legacy = FindingRecord(
+        fingerprint="2f8a4dbaa87081f0",
+        ordinal=1,
+        severity=Severity.P2,
+        category="TEST_GAP",
+        title="New branch has no test",
+        file="src/app.py",
+        line=12,
+        status=FindingStatus.OPEN,
+        since_round=1,
+    )
+    canonical = FindingRecord(
+        fingerprint="untouched",
+        ordinal=1,
+        severity=Severity.P2,
+        category="test-gap",
+        title="T",
+        file="a.py",
+        line=1,
+        status=FindingStatus.OPEN,
+        since_round=1,
+    )
+
+    migrated, kept = migrate_legacy_fingerprints(records=[legacy, canonical])
+
+    assert_that(migrated.fingerprint).is_equal_to("08e68cc1dff17647")
+    assert_that(migrated.fingerprint).is_equal_to(
+        fingerprint_for(
+            file="src/app.py",
+            category="test-gap",
+            title="New branch has no test",
+        ),
+    )
+    assert_that(migrated.category).is_equal_to("test-gap")
+    assert_that(kept).is_same_as(canonical)

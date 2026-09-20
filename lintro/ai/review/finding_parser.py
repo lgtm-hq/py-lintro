@@ -166,7 +166,9 @@ def parse_findings(
             also exempts the pass from the P1 evidence gate.
         diff_gate: Optional diff-bounded gate (#2711). When given, findings
             outside the chunk's hunks are dropped and near ones re-anchored
-            before the P1 evidence gate; the gate records its counts.
+            after both severity gates have run (#2723: the gates read the
+            evidence labels as written, which the diff gate's rebuilt
+            findings would no longer carry); the gate records its counts.
 
     Returns:
         Parsed findings in payload order. Non-mapping entries are dropped.

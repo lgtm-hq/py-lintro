@@ -20,8 +20,8 @@ A finding on a file the chunk's diff does not cover is left alone: scope is
 the path gate's job, and the resume queue may legitimately widen it.
 Secondary occurrences are checked one by one (an outside occurrence is
 dropped from the tuple, a near one re-anchored); only the primary location
-decides whether the finding survives. The gate runs after parsing and before
-the P1 evidence gate, and its counts ride the chunk partial into the run's
+decides whether the finding survives. The gate runs after parsing and after
+both severity gates (#2723), and its counts ride the chunk partial into the run's
 metadata, the JSON output and the run record so a drop is never silent.
 """
 
