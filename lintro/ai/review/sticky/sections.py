@@ -330,6 +330,10 @@ def _tiles_section(*, records: tuple[FindingRecord, ...]) -> str:
         if record.status is FindingStatus.RESOLVED:
             fixed += 1
             continue
+        if record.status is not FindingStatus.OPEN:
+            # A re-baselined record (#2723) is archived, not an open
+            # blocker/warning/nit.
+            continue
         counts[record.severity] = counts.get(record.severity, 0) + 1
     return "\n".join(
         [

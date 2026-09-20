@@ -661,20 +661,42 @@ def test_both_decoders_rebaseline_a_v3_blob() -> None:
     assert_that(v4.findings[0].status).is_equal_to(FindingStatus.OPEN)
 
 
-def test_a_rebaselined_record_is_never_matched_open_or_fixed() -> None:
-    """The archived record is inert: the finding re-reported opens as new."""
+@pytest.mark.parametrize(
+    "same_fingerprint",
+    [False, True],
+    ids=["other-hash", "same-hash"],
+)
+def test_a_rebaselined_record_is_never_matched_open_or_fixed(
+    same_fingerprint: bool,
+) -> None:
+    """The archived record is inert: the finding re-reported opens as new.
+
+    Even when the archived record's fingerprint is one the canonical scheme
+    reproduces, it is not a pairing candidate, so it is neither reopened nor
+    resolved, and the tiles do not count it as open.
+
+    Args:
+        same_fingerprint: Whether the archived record carries the fingerprint
+            the current finding will get.
+    """
     from lintro.ai.review.finding_matcher import match_findings
     from lintro.ai.review.models.review_state import ReviewState
 
-    previous = ReviewState(findings=(_record(status=FindingStatus.REBASELINED),))
-
-    match = match_findings(
-        previous=previous,
-        findings=[
-            _finding(category="test-gap", evidence_style=EvidenceStyle.DIFF_LOCAL),
-        ],
-        round_number=2,
+    current = _finding(category="test-gap", evidence_style=EvidenceStyle.DIFF_LOCAL)
+    fingerprint = (
+        fingerprint_for(
+            file=current.file,
+            category=current.category,
+            title=current.title,
+        )
+        if same_fingerprint
+        else "fp"
     )
+    previous = ReviewState(
+        findings=(_record(status=FindingStatus.REBASELINED, fingerprint=fingerprint),),
+    )
+
+    match = match_findings(previous=previous, findings=[current], round_number=2)
 
     assert_that(match.new).is_length(1)
     assert_that(match.resolved).is_empty()
@@ -683,6 +705,21 @@ def test_a_rebaselined_record_is_never_matched_open_or_fixed() -> None:
     statuses = [record.status for record in match.records]
     assert_that(statuses).contains(FindingStatus.REBASELINED, FindingStatus.OPEN)
     assert_that(previous.open_findings).is_empty()
+    assert_that({record.key for record in match.records}).is_length(2)
+
+
+def test_a_coercible_string_version_is_rebaselined_like_the_store_reads_it() -> None:
+    """The artifact store accepts ``"3"``; the decoder must not read it as v0."""
+    from lintro.ai.review.models.review_state import ReviewState
+
+    payload = {**ReviewState(findings=(_record(),)).to_artifact_dict()}
+    payload["schema_version"] = "3"
+    payload["version"] = "3"
+
+    decoded = ReviewState.from_artifact_dict(payload)
+
+    assert_that(decoded.findings[0].status).is_equal_to(FindingStatus.REBASELINED)
+    assert_that(ReviewState().version).is_equal_to(STATE_VERSION)
 
 
 def test_the_history_fine_print_counts_rebaselined_records_once(

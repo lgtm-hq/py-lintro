@@ -46,7 +46,7 @@ class ReviewState:
         truncated: True when older runs or resolved findings were pruned.
     """
 
-    version: int = 3
+    version: int = STATE_VERSION
     runs: tuple[RunRecord, ...] = field(default_factory=tuple)
     findings: tuple[FindingRecord, ...] = field(default_factory=tuple)
     coverage: tuple[CoverageRecord, ...] = field(default_factory=tuple)
@@ -245,6 +245,11 @@ def _payload_version(payload: dict[str, Any]) -> int:
         re-baseline rule matches.
     """
     raw = payload.get("schema_version", payload.get("version"))
-    if isinstance(raw, bool) or not isinstance(raw, int):
+    if raw is None or isinstance(raw, bool):
         return 0
-    return raw
+    try:
+        # The artifact store accepts a coercible version ("3"); read it the
+        # same way so an accepted pre-v4 artifact is re-baselined.
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0
