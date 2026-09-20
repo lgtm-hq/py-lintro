@@ -50,6 +50,8 @@ class RunOutcome:
             this round (#1925). Recorded per run so severity inflation, and
             how much of it the gate absorbed, stays visible over time rather
             than being an invisible parse-time edit.
+        downgraded_p2: Count of P2 findings the P2 evidence gate downgraded
+            to P3 in this round (#2723); serialized only when non-zero.
         resolved: Number of findings this round resolved. ``None`` on a record
             persisted before the field existed — history renders that as ``—``
             rather than as a fabricated zero, which would read as "this round
@@ -76,6 +78,7 @@ class RunOutcome:
     p3: int = 0
     questions: int = 0
     downgraded: int = 0
+    downgraded_p2: int = 0
     resolved: int | None = None
     open_after: int | None = None
     narrative: str = ""

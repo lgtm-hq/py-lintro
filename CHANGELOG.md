@@ -11,7 +11,29 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai/review**: a P2 evidence gate beside the P1 gate: a `test-gap`, `contract-drift`
+  or `code-smell` finding reported at P2 without diff-local evidence (`evidence_style`
+  other than `diff_local`) is moved to P3 at parse time, recorded on the finding as
+  `severity_downgrade_reason: p2_unevidenced`, counted as `downgraded_p2` on the run
+  record, and named on the terminal, the review body and the sticky beside the existing
+  P1 downgrade notice (#2723)
+
 ### Changed
+
+- **ai/review**: the severity prose in the system prompt and the output rules defines P2
+  as verified incorrect behaviour on a reachable input or a documented contract the
+  change makes false; "incomplete test coverage" and "contract drift" are no longer P2
+  criteria, and a test gap is P3 unless the PR claims to fix a bug it does not test
+  (#2723). The P1 gate's rewrite now also carries
+  `severity_downgrade_reason: p1_no_failure_scenario`
+- **ai/review**: review-state schema v4. Category labels are canonicalized at parse time
+  (`TEST_GAP`, `test gap` → `test-gap`) and finding fingerprints are computed over the
+  canonical label, so a finding record persisted by a v2/v3 state may carry a hash the
+  current parser cannot reproduce; instead of migrating, every open record read from a
+  pre-v4 blob is archived as `rebaselined` — kept for history, never matched, never
+  counted as open or fixed — and the first round after the upgrade reports the
+  still-present findings as new once, with the count named in the sticky's findings
+  heading (#2723)
 
 ### Deprecated
 

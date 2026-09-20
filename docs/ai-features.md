@@ -864,6 +864,44 @@ posting"): a `low` confidence finding routed to notes, or an open question, neve
 the verdict. A P3 opens a record even though the posting tier renders it in the sticky
 instead of inline, so it still moves the verdict to `nits only`.
 
+Two mechanical evidence gates run at parse time so the verdict reads gated severities,
+never the model's unaided claim, and both record their rewrite on the finding
+(`severity_downgraded` plus a `severity_downgrade_reason`) so no surface presents a
+gate-lowered severity as the model's own:
+
+- **P1 gate** (#1925): a P1 without a concrete `failure_scenario` is moved to P2
+  (`p1_no_failure_scenario`). Counted as `downgraded` on the run record.
+- **P2 gate** (#2723, lintro-ops milestone 0 step 0.10): P2 means verified incorrect
+  behaviour on a reachable input, or a documented contract the change makes false. A
+  `test-gap`, `contract-drift` or `code-smell` P2 that does not claim
+  `evidence_style: diff_local` — a coverage or wording concern the model traced
+  elsewhere, inferred, or left unlabelled (the gate fails closed: an absent or
+  unreadable label is not evidence, even though display and the convergence score
+  normalize it to `diff_local`) — is moved to P3 (`p2_unevidenced`), so a single
+  unevidenced test-gap claim no longer flips "nits only" to "changes requested".
+  Categories that name incorrect behaviour (logic bugs, silent failures, security,
+  integration, breaking changes) are never gated this way: a cross-file trace is a
+  legitimate way to show them. The two gates chain, so an inflated P1 in those
+  categories ends at P3 like the honest P2 would, and a gate-lowered finding is never
+  dropped by a sensitivity preset. Counted as `downgraded_p2` on the run record (written
+  only when non-zero). The prompt's "a test gap is P3 unless the PR claims to fix a bug
+  it does not test" is guidance for the model's own P2/P3 call; the gate has no
+  claimed-fix signal and applies the evidence rule alone, so that exception holds
+  exactly when the model labels the missing test `diff_local`.
+
+The terminal, the per-review body and the sticky all carry one line naming each gate
+that fired and how many findings it moved; verdict derivation itself is unchanged and
+there is no knob.
+
+Category labels are canonicalized at parse time so the gate and the sensitivity presets
+compare on one spelling, and finding fingerprints are computed over that canonical
+label. That is a review-state schema change (v4): a finding record persisted by a v2/v3
+state may carry a hash the current parser cannot reproduce, so rather than migrate those
+hashes every open record read from a pre-v4 blob is archived as `rebaselined` — kept for
+history, never matched, never counted as open or fixed. The first round after the
+upgrade reports the still-present findings as new once (their old inline threads are not
+re-linked) and the findings heading names how many records were re-baselined.
+
 A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
 Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).

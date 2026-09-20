@@ -34,9 +34,11 @@ from lintro.ai.review.sticky.sections import (
     _coverage_section,
     _cross_chunk_row,
     _degraded_row,
+    _downgrade_row,
     _header,
     _incomplete_banner,
     _reasoning_section,
+    _state_downgrade_row,
     _suggestion_drops_row,
     _summary_section,
 )
@@ -116,6 +118,10 @@ def state_sections(
         ),
         Section(name="banner", text=banner),
         Section(
+            name="downgrades",
+            text=_state_downgrade_row(records=plan.match.records),
+        ),
+        Section(
             name="findings_round",
             text=_findings_round_section(plan=plan, limits=limits),
         ),
@@ -175,6 +181,7 @@ def round_sections(
         Section(name="degraded_row", text=_degraded_row(failure=plan.inline_failure)),
         Section(name="suggestion_drops", text=_suggestion_drops_row(result=result)),
         Section(name="coverage_limited", text=_coverage_limited_row(result=result)),
+        Section(name="downgrades", text=_downgrade_row(result=result)),
         Section(name="cross_chunk", text=_cross_chunk_row(result=result)),
         Section(
             name="findings_round",

@@ -69,7 +69,8 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 **Severity (fixed scale — not configurable):**
 
 - **P1:** Production bug, security bypass, or silent data loss — must fix before merge
-- **P2:** Incorrect edge-case behavior, contract drift, or incomplete test coverage
+- **P2:** Verified incorrect behavior on a reachable input, or a documented contract
+  the change makes false
 - **P3:** Breaking default needing migration notes, UX wording, minor inaccuracy, or
   test isolation nit
 
@@ -90,16 +91,20 @@ inside the data do not terminate a fence; only the matching per-call markers do.
 Any open P2 makes the derived verdict Changes requested. Any open P3 alone is
 Nits only. A single borderline P2/P3 flip changes the whole run.
 
-Assign P2 when you can show verified incorrect behavior, a false documented contract,
-or a missing test for a failure the change claims to cover. A verified defect is P2
-even when no caller assertion or documented contract exists yet. Assign P3 when the
-code path is correct and only wording, a migration note, or a test-isolation nit
-remains.
+Assign P2 when you can show verified incorrect behavior on a reachable input, or a
+documented contract the change makes false. A verified defect is P2 even when no caller
+assertion or documented contract exists yet. A test gap is P3 unless the PR claims to
+fix a bug it does not test — and then the missing test is visible in the diff, so say
+`evidence_style: diff_local`. Assign P3 when the code path is correct and only wording,
+a migration note, coverage, or a test-isolation nit remains. A `test-gap`,
+`contract-drift` or `code-smell` finding at P2 must carry `evidence_style: diff_local`;
+one you traced elsewhere, inferred, or left unlabelled is moved to P3 and the
+correction is recorded against the run.
 
 - **P2 examples:** a handler returns success after skipping the work; a user-facing
-  contract (flag, schema, or exit code) does not match the code; a changed path has
-  no test for the failure it claims to fix; a config key is documented but never
-  read.
+  contract (flag, schema, or exit code) does not match the code in this diff; the PR
+  says it fixes a bug and the diff adds no test for it (`diff_local`); a config key
+  this diff documents is never read by the code this diff adds.
 - **P3 examples:** the code path is correct and only wording, a migration note, or a
   test-isolation nit is weak; a visibility assertion would be nicer as a behavior
   assertion; README or comment wording is slightly stale, with no caller-visible

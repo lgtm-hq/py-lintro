@@ -12,12 +12,16 @@ from loguru import logger
 from lintro.ai.review.diff_gate import DiffGate
 from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.finding_kind import FindingKind
+from lintro.ai.review.finding_identity import normalize_category
 from lintro.ai.review.models.finding_occurrence import parse_occurrences
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.suggested_change import parse_suggested_change
 from lintro.ai.review.narrative_parser import collapse_to_single_line
-from lintro.ai.review.severity_gate import apply_p1_evidence_gate
+from lintro.ai.review.severity_gate import (
+    apply_p1_evidence_gate,
+    apply_p2_evidence_gate,
+)
 
 __all__ = [
     "SEVERITY_SYNONYMS",
@@ -133,9 +137,10 @@ def normalize_evidence_style(*, raw: object) -> EvidenceStyle:
 
     Returns:
         The matching member, or :data:`EvidenceStyle.DIFF_LOCAL` when the
-        value is absent or unrecognized. The field drives display only, so an
-        unknown label falls back to the unchipped default rather than
-        asserting an evidence basis the model did not claim.
+        value is absent or unrecognized. That fallback serves display and the
+        convergence score; the P2 evidence gate reads the label as written
+        through :meth:`EvidenceStyle.parse`, so an unknown label never
+        asserts an evidence basis the model did not claim (#2723).
     """
     return EvidenceStyle.coerce(raw)
 
@@ -161,7 +166,9 @@ def parse_findings(
             also exempts the pass from the P1 evidence gate.
         diff_gate: Optional diff-bounded gate (#2711). When given, findings
             outside the chunk's hunks are dropped and near ones re-anchored
-            before the P1 evidence gate; the gate records its counts.
+            after both severity gates have run (#2723: the gates read the
+            evidence labels as written, which the diff gate's rebuilt
+            findings would no longer carry); the gate records its counts.
 
     Returns:
         Parsed findings in payload order. Non-mapping entries are dropped.
@@ -174,6 +181,7 @@ def parse_findings(
     if not isinstance(raw_findings, list):
         return ()
     findings: list[ReviewFinding] = []
+    claimed_styles: list[EvidenceStyle | None] = []
     for item in raw_findings:
         if not isinstance(item, dict):
             continue
@@ -201,10 +209,11 @@ def parse_findings(
         failure_scenario = item.get("failure_scenario", "")
         if not isinstance(failure_scenario, str):
             failure_scenario = ""
+        claimed_styles.append(EvidenceStyle.parse(item.get("evidence_style", "")))
         findings.append(
             ReviewFinding(
                 severity=severity,
-                category=str(item.get("category", "logic-bug")),
+                category=normalize_category(raw=item.get("category", "")),
                 file=str(item.get("file", "")),
                 line=line,
                 title=collapse_to_single_line(text=str(item.get("title", ""))),
@@ -226,17 +235,24 @@ def parse_findings(
                 ),
             ),
         )
-    bounded = (
+    if severity_override is None:
+        # The severity gates run while the findings are still positionally
+        # aligned with the labels their payloads carried; the diff gate
+        # below drops or re-anchors findings (rebuilding the objects) but
+        # never changes a severity, so gating first changes no outcome.
+        # An author-declared severity policy is configuration, not model
+        # output, so the gates have nothing to correct there: downgrading
+        # it would silently override the agent's own front matter.
+        gated = apply_p2_evidence_gate(
+            findings=apply_p1_evidence_gate(findings=findings),
+            claimed_styles=claimed_styles,
+        )
+        findings = list(gated)
+    return (
         diff_gate.apply(findings=tuple(findings))
         if diff_gate is not None
         else tuple(findings)
     )
-    if severity_override is not None:
-        # An author-declared severity policy is configuration, not model
-        # output, so the calibration gate has nothing to correct: downgrading
-        # it would silently override the agent's own front matter.
-        return bounded
-    return apply_p1_evidence_gate(findings=list(bounded))
 
 
 def parse_flagged_files(*, raw_flags: object) -> tuple[FlaggedFile, ...]:

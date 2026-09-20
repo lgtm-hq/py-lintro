@@ -36,8 +36,9 @@ from lintro.ai.review.github_constants import (
     STATE_MARKER_SUFFIX,
     STATE_VERSION,
     STATE_VERSION_V2,
+    STATE_VERSION_V3,
 )
-from lintro.ai.review.models.finding_record import FindingRecord
+from lintro.ai.review.models.finding_record import FindingRecord, rebaseline_records
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
 
@@ -199,7 +200,7 @@ def decode_state(*, body: str) -> ReviewState:
     if isinstance(version, bool) or not isinstance(version, int):
         return ReviewState()
 
-    if version not in (STATE_VERSION_V2, STATE_VERSION):
+    if version not in (STATE_VERSION_V2, STATE_VERSION_V3, STATE_VERSION):
         # Two cases, one answer. A v1 or unversioned blob predates round
         # numbers and finding identity, and #2305 retired its migration, so it
         # is read as absent. A blob written by a newer lintro is
@@ -208,11 +209,15 @@ def decode_state(*, body: str) -> ReviewState:
         return ReviewState()
 
     # v2 -> v3 needs no field rewriting: the record parsers default the two
-    # v3 additions, so a v2 blob decodes as unscored v3 history.
+    # v3 additions, so a v2 blob decodes as unscored v3 history. v3 -> v4
+    # archives the open finding records instead of matching them (#2723).
     return ReviewState(
         version=STATE_VERSION,
         runs=tuple(_parse_runs(payload=payload)),
-        findings=tuple(_parse_findings(payload=payload)),
+        findings=rebaseline_records(
+            records=_parse_findings(payload=payload),
+            version=version,
+        ),
         truncated=bool(payload.get("truncated", False)),
     )
 

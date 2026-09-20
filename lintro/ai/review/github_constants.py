@@ -16,11 +16,17 @@ STATE_MARKER_SUFFIX = "-->"
 # per-finding identity records on top of v1's run aggregates (issue #1906);
 # v3 adds the per-round convergence score and the per-finding evidence style
 # it is computed from (issue #2099). Both v3 additions are written only when
-# present, so a v2 blob re-encodes with only the version restamped. v1 is no
+# present, so a v2 blob re-encodes with only the version restamped. v4 (#2723)
+# changes no field: it marks the point after which finding fingerprints are
+# computed over the canonical category, so every open finding record read from
+# a v2/v3 blob is archived as re-baselined rather than matched. v1 is no
 # longer a readable version: #2305 retired its migration, so a v1 blob decodes
 # as no state at all and the round starts fresh.
-STATE_VERSION = 3
+STATE_VERSION = 4
 STATE_VERSION_V2 = 2
+STATE_VERSION_V3 = 3
+#: Versions whose open finding records are re-baselined on load (#2723).
+REBASELINED_STATE_VERSIONS = frozenset({STATE_VERSION_V2, STATE_VERSION_V3})
 
 # GitHub rejects comment bodies over 65,536 characters.
 GITHUB_COMMENT_HARD_LIMIT = 65_536

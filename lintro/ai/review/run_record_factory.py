@@ -25,7 +25,7 @@ from lintro.ai.review.models.run_outcome import NARRATIVE_LIMIT, RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_request import StickyRequest
-from lintro.ai.review.severity_gate import count_downgrades
+from lintro.ai.review.severity_gate import count_gate_firings
 from lintro.ai.transport import resolve_cost_basis
 
 __all__ = ["RoundTotals", "round_narrative", "run_record_from_result"]
@@ -222,13 +222,15 @@ def _outcome(*, result: ReviewResult, totals: RoundTotals) -> RunOutcome:
         The outcome group.
     """
     counts = severity_counts(findings=result.findings)
+    downgraded_p1, downgraded_p2 = count_gate_firings(findings=result.findings)
     return RunOutcome(
         verdict=totals.verdict,
         p1=counts[Severity.P1],
         p2=counts[Severity.P2],
         p3=counts[Severity.P3],
         questions=sum(1 for finding in result.findings if finding.is_question),
-        downgraded=count_downgrades(findings=result.findings),
+        downgraded=downgraded_p1,
+        downgraded_p2=downgraded_p2,
         dropped_outside_diff=result.metadata.diff_gate.outside_diff,
         resolved=totals.resolved,
         open_after=totals.open_after,

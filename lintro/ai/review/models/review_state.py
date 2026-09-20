@@ -8,7 +8,7 @@ from typing import Any
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_constants import STATE_VERSION
 from lintro.ai.review.models.coverage_record import CoverageRecord
-from lintro.ai.review.models.finding_record import FindingRecord
+from lintro.ai.review.models.finding_record import FindingRecord, rebaseline_records
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.run_record import RunRecord
 
@@ -46,7 +46,7 @@ class ReviewState:
         truncated: True when older runs or resolved findings were pruned.
     """
 
-    version: int = 3
+    version: int = STATE_VERSION
     runs: tuple[RunRecord, ...] = field(default_factory=tuple)
     findings: tuple[FindingRecord, ...] = field(default_factory=tuple)
     coverage: tuple[CoverageRecord, ...] = field(default_factory=tuple)
@@ -109,7 +109,7 @@ class ReviewState:
             JSON-serializable mapping with identity metadata and coverage.
         """
         payload: dict[str, Any] = {
-            "schema_version": 3,
+            "schema_version": STATE_VERSION,
             "version": STATE_VERSION,
             "repo": self.repo,
             "pr_number": self.pr_number,
@@ -171,12 +171,15 @@ class ReviewState:
                 for item in payload.get("runs") or []
                 if isinstance(item, dict)
             ),
-            findings=tuple(
-                record
-                for item in payload.get("findings") or []
-                if isinstance(item, dict)
-                for record in (FindingRecord.from_dict(item),)
-                if record is not None
+            findings=rebaseline_records(
+                records=[
+                    record
+                    for item in payload.get("findings") or []
+                    if isinstance(item, dict)
+                    for record in (FindingRecord.from_dict(item),)
+                    if record is not None
+                ],
+                version=_payload_version(payload),
             ),
             coverage=tuple(coverage),
             flagged_files=tuple(flagged),
@@ -229,3 +232,24 @@ def _consumed_from_payload(
         if path and patch_hash:
             parsed.append((path, patch_hash))
     return tuple(parsed)
+
+
+def _payload_version(payload: dict[str, Any]) -> int:
+    """Return the schema version a persisted payload was written under.
+
+    Args:
+        payload: The decoded artifact or sticky payload.
+
+    Returns:
+        The integer version, or ``0`` when absent or unreadable, which no
+        re-baseline rule matches.
+    """
+    raw = payload.get("schema_version", payload.get("version"))
+    if raw is None or isinstance(raw, bool):
+        return 0
+    try:
+        # The artifact store accepts a coercible version ("3"); read it the
+        # same way so an accepted pre-v4 artifact is re-baselined.
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0

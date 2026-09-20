@@ -24,6 +24,7 @@ from lintro.ai.resolved_ai_config import (
     format_max_cost_label,
     format_sourced_value,
 )
+from lintro.ai.review.agent_prompt_text import plural
 from lintro.ai.review.agent_prompts import (
     prompt_findings,
     render_agent_prompt_panel,
@@ -36,6 +37,7 @@ from lintro.ai.review.github_badges import (
 from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
+    format_downgrade_note,
     format_lint_facts_note,
     format_partial_review_label,
     format_synthesis_note_line,
@@ -155,19 +157,6 @@ def _short(sha: str) -> str:
     return sanitize_comment_text(sha, limit=64)[:_SHORT_SHA]
 
 
-def _plural(*, count: int, noun: str) -> str:
-    """Format a count with a naively pluralized noun.
-
-    Args:
-        count: Number of items.
-        noun: Singular noun to pluralize with a trailing ``s``.
-
-    Returns:
-        The count and noun, e.g. ``"1 finding"``.
-    """
-    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
-
-
 def _prior_sha(*, prior_state: ReviewState) -> str:
     """Return the head sha of the most recent prior round, if any."""
     return prior_state.runs[-1].identity.sha if prior_state.runs else ""
@@ -218,7 +207,7 @@ def _header(
     # and neither is a P3 nit, which the severity tier keeps in the sticky.
     posted = len(inline_tier_findings(findings=result.findings))
     parts = [
-        f"{lead} — {_plural(count=posted, noun='finding')} posted**",
+        f"{lead} — {plural(count=posted, noun='finding')} posted**",
     ]
     if round_number > 1:
         parts.append(
@@ -352,10 +341,14 @@ def _run_stats_section(
     # mechanics. It now renders under the header line instead (#2395), where
     # a scanning reader meets it; repeating it here would put the same
     # sentence in one comment twice.
+    downgrade_note = format_downgrade_note(findings=result.findings)
+    if downgrade_note:
+        # A gate-driven downgrade is run mechanics: the reader needs to know a
+        # severity below was set here rather than by the model (#1925, #2723).
+        lines.extend(["", downgrade_note])
     cross_chunk_note = format_cross_chunk_note(findings=result.findings)
     if cross_chunk_note:
-        # A guard-driven downgrade is run mechanics too: the reader needs to
-        # know a severity below was set here rather than by the model (#2265).
+        # The cross-chunk guard's downgrades, same posture (#2265).
         lines.extend(["", cross_chunk_note])
     synthesis_note = format_synthesis_note_line(metadata=metadata)
     if synthesis_note:
@@ -399,7 +392,7 @@ def _commits_section(
 
     if prior and prior != head:
         commits = (
-            _plural(count=new_commits, noun="new commit")
+            plural(count=new_commits, noun="new commit")
             if new_commits is not None
             else "new commits"
         )

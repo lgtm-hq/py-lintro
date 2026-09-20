@@ -24,6 +24,7 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding
+from lintro.enums.review_category import ReviewCategory
 
 __all__ = [
     "FINGERPRINT_LENGTH",
@@ -31,6 +32,7 @@ __all__ = [
     "duplicate_records",
     "fingerprint_for",
     "normalize_file_path",
+    "normalize_category",
     "normalize_title",
 ]
 
@@ -72,6 +74,33 @@ def normalize_file_path(path: str) -> str:
     return path.strip().replace("\\", "/").removeprefix("./")
 
 
+def normalize_category(*, raw: object) -> str:
+    """Canonicalize a model-reported ``category`` label.
+
+    A recognized category is returned as its :class:`ReviewCategory` wire
+    value whatever its spelling (case, whitespace, underscores for hyphens),
+    so the gates and the sensitivity presets that compare on the wire value
+    cannot be evaded by ``TEST_GAP`` or ``test gap``; and so a finding's
+    fingerprint is the same whichever spelling a round recorded it under
+    (#2723); an unrecognized label is kept as written (stripped) so a custom
+    agent's category survives, and an empty one falls back to ``logic-bug``.
+
+    Args:
+        raw: Raw ``category`` value from a parsed model response.
+
+    Returns:
+        The canonical category string.
+    """
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        return str(ReviewCategory.LOGIC_BUG)
+    candidate = "-".join(text.lower().replace("_", " ").replace("-", " ").split())
+    try:
+        return str(ReviewCategory(candidate))
+    except ValueError:
+        return text
+
+
 def fingerprint_for(*, file: str, category: str, title: str) -> str:
     """Compute the stable fingerprint for a finding.
 
@@ -87,7 +116,7 @@ def fingerprint_for(*, file: str, category: str, title: str) -> str:
     payload = "\x00".join(
         (
             normalize_file_path(file),
-            normalize_title(category),
+            normalize_title(normalize_category(raw=category)),
             normalize_title(title),
         ),
     )
@@ -171,6 +200,7 @@ def current_records(
             occurrences=_normalized_occurrences(finding=finding),
             occurrences_total=len(finding.occurrences),
             severity_downgraded=finding.severity_downgraded,
+            severity_downgrade_reason=finding.severity_downgrade_reason,
             cross_chunk_contradiction=finding.cross_chunk_contradiction,
             description=finding.description,
             cause=finding.cause,

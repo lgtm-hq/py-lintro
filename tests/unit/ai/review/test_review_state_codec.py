@@ -229,7 +229,7 @@ def test_a_decoded_v2_state_is_rewritten_at_the_current_version() -> None:
 
     payload = json.loads(encode_state(state=decoded))
 
-    assert_that(payload["version"]).is_equal_to(3)
+    assert_that(payload["version"]).is_equal_to(STATE_VERSION)
     assert_that(payload).contains_key("findings")
 
 
@@ -304,7 +304,9 @@ def test_corrupt_finding_entries_are_dropped_not_fatal() -> None:
     # Fails closed to P1 (maximally blocking), not P3 — see
     # test_unrecognized_severity_fails_closed_to_p1_not_p3 for why.
     assert_that(decoded.findings[0].severity).is_equal_to(Severity.P1)
-    assert_that(decoded.findings[0].status).is_equal_to(FindingStatus.OPEN)
+    # The unknown status parses as open, and a v3 blob's open records are
+    # then archived as re-baselined on load (#2723).
+    assert_that(decoded.findings[0].status).is_equal_to(FindingStatus.REBASELINED)
     assert_that(decoded.findings[0].checklist_ids).is_empty()
     assert_that(decoded.findings[0].resolved_sha).is_empty()
 

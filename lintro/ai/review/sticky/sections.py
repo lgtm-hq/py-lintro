@@ -8,19 +8,22 @@ decides the order they appear in.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_constants import _SEVERITY_EMOJI
 from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
     format_cross_chunk_note,
+    format_downgrade_note,
     format_inline_post_note,
 )
 from lintro.ai.review.github_render import sanitize_comment_text
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
-from lintro.ai.review.models.review_finding import Severity
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.patch_validation import describe_suggestion_drops
 from lintro.ai.review.sticky.cells import _plural
@@ -327,6 +330,10 @@ def _tiles_section(*, records: tuple[FindingRecord, ...]) -> str:
         if record.status is FindingStatus.RESOLVED:
             fixed += 1
             continue
+        if record.status is not FindingStatus.OPEN:
+            # A re-baselined record (#2723) is archived, not an open
+            # blocker/warning/nit.
+            continue
         counts[record.severity] = counts.get(record.severity, 0) + 1
     return "\n".join(
         [
@@ -379,6 +386,55 @@ def _coverage_limited_row(*, result: ReviewResult) -> str:
         A blockquote warning, or an empty string when coverage was complete.
     """
     return format_coverage_limited_warning(metadata=result.metadata)
+
+
+def _downgrade_row(*, result: ReviewResult) -> str:
+    """Render the note shown when an evidence gate lowered a severity.
+
+    Shares its text with the per-review body through
+    :func:`format_downgrade_note` (#1925, #2723).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        A blockquote note, or an empty string when no gate fired.
+    """
+    return format_downgrade_note(findings=result.findings)
+
+
+def _state_downgrade_row(*, records: Sequence[FindingRecord]) -> str:
+    """Render the downgrade note for a state-derived board.
+
+    A converged or errored round re-renders the sticky from the ledger with
+    no round result; the open records still carry each gate's reason, so the
+    board says the same thing the last real round's comment did (#2723).
+
+    Args:
+        records: The ledger's finding records.
+
+    Returns:
+        A blockquote note, or an empty string when no open record was gated.
+    """
+    return format_downgrade_note(
+        findings=tuple(
+            ReviewFinding(
+                severity=record.severity,
+                category=record.category,
+                file=record.file,
+                line=record.line,
+                title=record.title,
+                description="",
+                cause="",
+                fix="",
+                confidence="",
+                severity_downgraded=record.severity_downgraded,
+                severity_downgrade_reason=record.severity_downgrade_reason,
+            )
+            for record in records
+            if record.status is FindingStatus.OPEN and record.severity_downgraded
+        ),
+    )
 
 
 def _cross_chunk_row(*, result: ReviewResult) -> str:

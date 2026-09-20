@@ -17,6 +17,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from lintro.ai.review.github_constants import STATE_VERSION
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
@@ -36,7 +37,7 @@ __all__ = [
     "write_state_part",
 ]
 
-ARTIFACT_STATE_VERSION = 3
+ARTIFACT_STATE_VERSION = STATE_VERSION
 CI_STATE_DIRNAME = "ai-review-state"
 LOCAL_STATE_DIR = Path(".lintro-cache/ai/review-state")
 LOCAL_STATE_LRU = 32

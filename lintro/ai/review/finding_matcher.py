@@ -201,10 +201,40 @@ def review_finding_from_record(*, record: FindingRecord) -> ReviewFinding:
         kind=record.kind,
         occurrences=record.occurrences,
         severity_downgraded=record.severity_downgraded,
+        severity_downgrade_reason=record.severity_downgrade_reason,
         cross_chunk_contradiction=record.cross_chunk_contradiction,
         origin=record.origin,
         evidence_style=record.evidence_style,
     )
+
+
+def _index_prior_records(
+    *,
+    records: Sequence[FindingRecord],
+) -> tuple[dict[str, list[int]], dict[str, set[int]]]:
+    """Index the prior records that may pair, and the ordinals they all hold.
+
+    A record archived by the v4 schema change (#2723) is never a pairing
+    candidate, even when its fingerprint happens to match a current finding,
+    so it can neither be reopened nor resolved; it passes through the match
+    untouched. Its ordinal stays taken so a new record under the same
+    fingerprint never takes its key.
+
+    Args:
+        records: The prior state's finding records, in stored order.
+
+    Returns:
+        Pairing candidates by fingerprint (indices into ``records``), and the
+        ordinals archived records hold, by fingerprint.
+    """
+    by_fingerprint: dict[str, list[int]] = defaultdict(list)
+    archived: dict[str, set[int]] = defaultdict(set)
+    for index, record in enumerate(records):
+        if record.status is FindingStatus.REBASELINED:
+            archived[record.fingerprint].add(record.ordinal)
+            continue
+        by_fingerprint[record.fingerprint].append(index)
+    return by_fingerprint, archived
 
 
 def match_findings(
@@ -276,9 +306,9 @@ def match_findings(
         round_number=round_number,
     )
 
-    prior_by_fingerprint: dict[str, list[int]] = defaultdict(list)
-    for index, record in enumerate(prior_records):
-        prior_by_fingerprint[record.fingerprint].append(index)
+    prior_by_fingerprint, archived_ordinals = _index_prior_records(
+        records=prior_records,
+    )
     current_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
     for record in inline_records:
         current_by_fingerprint[record.fingerprint].append(record)
@@ -295,9 +325,11 @@ def match_findings(
         prior_indices = prior_by_fingerprint.get(fingerprint, [])
         prior_group = [prior_records[index] for index in prior_indices]
         pairs = pair_group(prior=prior_group, current=group)
-        # Every prior record of this fingerprint stays in state (matched, or
-        # carried as resolved), so their ordinals remain taken.
-        taken = {record.ordinal for record in prior_group}
+        # Every prior record of this fingerprint stays in state (matched,
+        # carried as resolved, or archived), so their ordinals remain taken.
+        taken = {record.ordinal for record in prior_group} | archived_ordinals[
+            fingerprint
+        ]
         assigned: dict[int, FindingRecord] = {}
 
         for current_index, record in enumerate(group):
@@ -346,7 +378,9 @@ def match_findings(
     for index, record in enumerate(prior_records):
         if index in matched_prior:
             continue
-        if record.status is FindingStatus.RESOLVED:
+        if record.status is not FindingStatus.OPEN:
+            # Resolved history is kept as is; a re-baselined record (#2723,
+            # pre-v4 state) is archived and never resolved or regressed.
             merged.append(record)
             continue
         path = record.file

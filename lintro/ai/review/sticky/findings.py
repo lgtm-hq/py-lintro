@@ -100,9 +100,18 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
     open_count = sum(
         1 for record in match.records if record.status is FindingStatus.OPEN
     )
+    # Fine print for a state carried over the v4 schema change (#2723): the
+    # archived records are named once so a reader knows why still-present
+    # findings re-opened as new after the upgrade.
+    rebaselined = sum(
+        1 for record in match.records if record.status is FindingStatus.REBASELINED
+    )
+    rebaselined_bit = (
+        f" · {rebaselined} re-baselined (pre-v4 state)" if rebaselined else ""
+    )
     heading = (
         f"### Findings · Round {round_number}{sha_bit} · {coverage_label} · "
-        f"{open_count} open · {fixed_total} fixed this round"
+        f"{open_count} open · {fixed_total} fixed this round{rebaselined_bit}"
     )
     note = format_convergence_note(trajectory=score_trajectory(runs=tuple(runs)))
     markers = _pruning_markers(

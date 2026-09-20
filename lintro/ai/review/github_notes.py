@@ -39,7 +39,10 @@ from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.sanitize import sanitize_comment_text
-from lintro.ai.review.severity_gate import describe_cross_chunk_contradictions
+from lintro.ai.review.severity_gate import (
+    describe_cross_chunk_contradictions,
+    describe_downgrades,
+)
 from lintro.ai.review.synthesis_note import format_synthesis_note
 from lintro.ai.review.timings import format_timing_summary
 
@@ -48,6 +51,7 @@ __all__ = [
     "format_convergence_note",
     "format_coverage_limited_warning",
     "format_cross_chunk_note",
+    "format_downgrade_note",
     "format_inline_post_cause",
     "format_inline_post_note",
     "format_lint_facts_note",
@@ -259,6 +263,29 @@ def _cross_chunk_band_clause(*, findings: Sequence[ReviewFinding]) -> str:
         for finding in findings
     )
     return ", one band lower" if lowered else ""
+
+
+def format_downgrade_note(*, findings: Sequence[ReviewFinding]) -> str:
+    """Render the note shown when an evidence gate lowered a severity.
+
+    The single builder for the line, shared by the per-review body, the
+    sticky and the terminal, so a gate-lowered severity is never presented
+    as the model's own on any surface (#1925, #2723).
+
+    Args:
+        findings: Findings for the current round.
+
+    Returns:
+        A blockquote note naming the counts and reasons, or an empty string
+        when no gate fired.
+    """
+    notice = describe_downgrades(findings=findings)
+    if not notice:
+        return ""
+    return (
+        f"> 🎚️ **{sanitize_comment_text(notice, limit=300)}** — severity set "
+        "by the evidence gate, not the model; the finding is kept."
+    )
 
 
 def format_cross_chunk_note(*, findings: Sequence[ReviewFinding]) -> str:
