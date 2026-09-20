@@ -20,13 +20,16 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.review.merge import merge_review_results
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.orchestrator import (
     run_review,
 )
+from lintro.ai.review.response_pipeline import payload_to_partial
 from lintro.ai.review.run_planning import resolve_review_chunks
 from lintro.ai.review.session import ReviewSessionOptions
+from lintro.ai.review.severity_gate import apply_severity_gates
 from lintro.ai.review.timings import ReviewTimings
 from tests.unit.ai.review.golden.golden_fixtures import (
     GOLDEN_BOUNDARY,
@@ -249,5 +252,27 @@ def test_run_review_findings_match_the_merge_golden() -> None:
     merged = json.loads(
         (SNAPSHOT_DIR / "merged_review_result.golden").read_text(encoding="utf-8"),
     )
+    # The merge golden is the pre-gate shape: since #2728 the built-in chunk
+    # pass parses ungated and the round finalizer gates once, after the
+    # verification pass. Gate the merged findings the same way so the two
+    # modules still describe one run without the merge golden re-pinning a
+    # severity the finalizer owns.
+    partials = [
+        payload_to_partial(
+            response=AIResponse(
+                content="",
+                model="golden-model",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_estimate=cost,
+                provider="golden-provider",
+            ),
+            payload=load_payload(name=name),
+        )
+        for name, input_tokens, output_tokens, cost in GOLDEN_RESPONSES
+    ]
+    direct = merge_review_results(partials=partials)
+    gated = to_jsonable(apply_severity_gates(findings=direct.findings))
 
-    assert_that(to_jsonable(result.findings)).is_equal_to(merged["findings"])
+    assert_that(to_jsonable(direct.findings)).is_equal_to(merged["findings"])
+    assert_that(to_jsonable(result.findings)).is_equal_to(gated)
