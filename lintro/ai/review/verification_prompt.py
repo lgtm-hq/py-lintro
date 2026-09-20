@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.context_windows import fit_content
+from lintro.ai.review.finding_identity import normalize_file_path
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 
 if TYPE_CHECKING:
@@ -26,12 +27,15 @@ _CITED_CODE_TOKENS = 1_200
 
 def _cited_code(
     *,
+    path: str,
     finding: ReviewFinding,
     source: RepoContextSource | None,
 ) -> str:
     """Return the post-change code around the finding's cited line.
 
     Args:
+        path: The finding's path, normalized (the spelling the reader and
+            the allow-list use).
         finding: The finding whose ``file:line`` to show.
         source: Head-side reader, or ``None``.
 
@@ -39,14 +43,14 @@ def _cited_code(
         A definition-aware window around the line (``fit_content`` over a
         one-line hunk), or an empty string when the file cannot be read.
     """
-    if source is None or not finding.file:
+    if source is None or not path:
         return ""
-    content = source.read(finding.file)
+    content = source.read(path)
     if not content:
         return ""
     line = max(finding.line, 1)
     text, _cut = fit_content(
-        path=finding.file,
+        path=path,
         content=content,
         hunks=((line, line),),
         allowance=_CITED_CODE_TOKENS,
@@ -78,6 +82,7 @@ def render_verification_findings(
     Returns:
         The rendered block; every untrusted byte sits inside the fence.
     """
+    allowed = {normalize_file_path(item) for item in allowed_paths}
     blocks: list[str] = []
     for position, index in enumerate(indices, start=1):
         finding = findings[index]
@@ -93,9 +98,12 @@ def render_verification_findings(
                 f"failure_scenario: {finding.failure_scenario}",
             ],
         )
+        # The model may spell a path ``./pkg/api.py`` or with backslashes;
+        # compare and read in the same normalized form the path gates use.
+        path = normalize_file_path(finding.file)
         cited = (
-            _cited_code(finding=finding, source=source)
-            if finding.file in allowed_paths
+            _cited_code(path=path, finding=finding, source=source)
+            if path in allowed
             else ""
         )
         code = (

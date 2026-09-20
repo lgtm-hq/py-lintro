@@ -340,6 +340,32 @@ def test_cited_code_is_read_only_for_the_rounds_eligible_paths() -> None:
     assert_that(rendered).contains("file: config/secrets.py:1")
 
 
+@pytest.mark.parametrize("spelling", ["./pkg/api.py", "pkg\\api.py", " pkg/api.py "])
+def test_cited_code_matches_equivalent_path_spellings(spelling: str) -> None:
+    """``./``, backslashes and stray whitespace still find the allowed path.
+
+    Args:
+        spelling: The model's spelling of ``pkg/api.py``.
+    """
+    reads: list[str] = []
+
+    def _reader(path: str) -> str:
+        reads.append(path)
+        return "def send(payload, *, retries):\n    return retries\n"
+
+    rendered = render_verification_findings(
+        findings=[_finding(file=spelling)],
+        indices=(0,),
+        source=RepoContextSource(reader=_reader),
+        boundary="FENCE_1",
+        allowed_paths=frozenset({"pkg/api.py"}),
+    )
+
+    assert_that(reads).is_equal_to(["pkg/api.py"])
+    assert_that(rendered).contains("post-change, around line 2")
+    assert_that(rendered).contains("return retries")
+
+
 # --- parsing ------------------------------------------------------------------
 
 
