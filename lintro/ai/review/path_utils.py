@@ -79,6 +79,42 @@ def _meaningful_source_identify_tags(*, name: str) -> set[str]:
     return tags - _GENERIC_IDENTIFY_TAGS - _NON_SOURCE_IDENTIFY_TAGS
 
 
+#: identify tags for files whose head content is never worth a context read:
+#: binary, media and bulk data. Everything else that identify calls text —
+#: source, config, workflows, docs — can carry the change a reviewer needs to
+#: see in full (#2731: a workflow-only PR had no context section at all).
+_NON_CONTEXT_IDENTIFY_TAGS: frozenset[str] = frozenset(
+    {"audio", "binary", "csv", "gif", "image", "jpeg", "png", "svg", "webp"},
+)
+
+
+def is_context_eligible_path(path: str) -> bool:
+    """Return True when a changed file's head content belongs in the prompt.
+
+    Wider than :func:`is_source_code_path`, which answers "can this file own
+    a test": the repository-context section (#2714) wants every readable
+    text file the PR changed — a workflow, a config, a doc — since the
+    reviewer otherwise has only the hunk and reads the rest with tools
+    (#2731). Snapshot fixtures and binary or media files stay out.
+
+    Args:
+        path: Repository-relative path.
+
+    Returns:
+        True when the file is text (by identify tag, or by the shell
+        heuristic for extensionless scripts) and not a fixture artifact.
+    """
+    pure_path = PurePosixPath(path.replace("\\", "/"))
+    if _is_non_test_artifact(pure_path=pure_path):
+        return False
+    tags = identify.tags_from_filename(pure_path.name)
+    if tags & _NON_CONTEXT_IDENTIFY_TAGS:
+        return False
+    if "text" in tags:
+        return True
+    return "shell" in languages_for_path(path=path)
+
+
 def is_source_code_path(path: str) -> bool:
     """Return True when a path names source code rather than docs, config, or data.
 
