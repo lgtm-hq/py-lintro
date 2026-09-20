@@ -22,11 +22,9 @@ from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
-from lintro.ai.review.finding_identity import (
-    fingerprint_for,
-    migrate_legacy_fingerprints,
-)
+from lintro.ai.review.finding_identity import fingerprint_for
 from lintro.ai.review.finding_parser import parse_findings
+from lintro.ai.review.github_constants import STATE_VERSION
 from lintro.ai.review.github_notes import format_downgrade_note
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
@@ -579,194 +577,140 @@ def test_both_sticky_renders_carry_the_downgrade_note(
         assert_that(body).contains("🎚️", P2_DOWNGRADE_REASON)
 
 
-def test_a_legacy_record_is_re_fingerprinted_on_load() -> None:
-    """A record persisted under ``TEST_GAP`` matches the canonical finding.
-
-    ``2f8a4dbaa87081f0`` is the hash a pre-#2723 round stored for this
-    finding (``normalize_title`` kept the underscore); today the same finding
-    hashes to ``08e68cc1dff17647``. Without the migration the record would
-    resolve and the finding re-open as new.
-    """
-    legacy = FindingRecord(
-        fingerprint="2f8a4dbaa87081f0",
-        ordinal=1,
-        severity=Severity.P2,
-        category="TEST_GAP",
-        title="New branch has no test",
-        file="src/app.py",
-        line=12,
-        status=FindingStatus.OPEN,
-        since_round=1,
-    )
-    canonical = FindingRecord(
-        fingerprint="untouched",
-        ordinal=1,
-        severity=Severity.P2,
-        category="test-gap",
-        title="T",
-        file="a.py",
-        line=1,
-        status=FindingStatus.OPEN,
-        since_round=1,
-    )
-
-    migrated, kept = migrate_legacy_fingerprints(records=[legacy, canonical])
-
-    assert_that(migrated.fingerprint).is_equal_to("08e68cc1dff17647")
-    assert_that(migrated.fingerprint).is_equal_to(
-        fingerprint_for(
-            file="src/app.py",
-            category="test-gap",
-            title="New branch has no test",
-        ),
-    )
-    assert_that(migrated.category).is_equal_to("test-gap")
-    assert_that(kept).is_same_as(canonical)
+# --- state re-baseline (ruling B on #2729) --------------------------------------
 
 
-def _legacy_record(
+def _record(
     *,
-    spelling: str,
-    fingerprint: str,
-    ordinal: int = 1,
+    status: FindingStatus = FindingStatus.OPEN,
+    fingerprint: str = "fp",
 ) -> FindingRecord:
-    """Build a record a pre-#2723 round persisted under ``spelling``.
+    """Build a minimal finding record.
 
     Args:
-        spelling: The category as that round recorded it.
-        fingerprint: The hash that round stored.
-        ordinal: The record's ordinal.
+        status: The record's status.
+        fingerprint: The record's fingerprint.
 
     Returns:
         The record.
     """
     return FindingRecord(
         fingerprint=fingerprint,
-        ordinal=ordinal,
+        ordinal=1,
         severity=Severity.P2,
-        category=spelling,
+        category="TEST_GAP",
         title="New branch has no test",
         file="src/app.py",
         line=12,
-        status=FindingStatus.OPEN,
+        status=status,
         since_round=1,
     )
 
 
-def test_legacy_siblings_that_collapse_keep_distinct_ordinals() -> None:
-    """``TEST_GAP`` and ``test gap`` siblings migrate to one fingerprint, two keys."""
-    from lintro.ai.review.finding_identity import _legacy_fingerprint
+@pytest.mark.parametrize("version", [2, 3], ids=["v2", "v3"])
+def test_open_records_of_a_pre_v4_state_are_rebaselined(version: int) -> None:
+    """A pre-v4 blob's open records are archived, its resolved ones kept.
 
-    first = _legacy_record(
-        spelling="TEST_GAP",
-        fingerprint=_legacy_fingerprint(
-            file="src/app.py",
-            category="TEST_GAP",
-            title="New branch has no test",
-        ),
-    )
-    second = _legacy_record(
-        spelling="test gap",
-        fingerprint=_legacy_fingerprint(
-            file="src/app.py",
-            category="test gap",
-            title="New branch has no test",
-        ),
+    Args:
+        version: The blob's schema version.
+    """
+    from lintro.ai.review.models.finding_record import rebaseline_records
+
+    records = rebaseline_records(
+        records=[_record(), _record(status=FindingStatus.RESOLVED, fingerprint="r")],
+        version=version,
     )
 
-    migrated = migrate_legacy_fingerprints(records=[first, second])
+    assert_that([record.status for record in records]).is_equal_to(
+        [FindingStatus.REBASELINED, FindingStatus.RESOLVED],
+    )
+    assert_that(records[0].fingerprint).is_equal_to("fp")
 
-    assert_that({record.fingerprint for record in migrated}).is_length(1)
-    assert_that([record.ordinal for record in migrated]).is_equal_to([1, 2])
-    assert_that({record.key for record in migrated}).is_length(2)
+
+def test_v4_records_are_never_rebaselined() -> None:
+    """The current schema's records match as usual."""
+    from lintro.ai.review.models.finding_record import rebaseline_records
+
+    (record,) = rebaseline_records(records=[_record()], version=STATE_VERSION)
+
+    assert_that(record.status).is_equal_to(FindingStatus.OPEN)
 
 
-def test_prior_state_is_migrated_once_where_a_round_resolves_it() -> None:
-    """Every consumer of the prior state sees migrated keys, not only the matcher."""
+def test_both_decoders_rebaseline_a_v3_blob() -> None:
+    """The sticky codec and the artifact decoder apply the same rule."""
+    from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.review_state_codec import decode_state, leftover_state_block
+
+    state = ReviewState(findings=(_record(),))
+    v3_state = replace(state, version=3)
+    v3_body = leftover_state_block(state=v3_state).replace(
+        f'"version":{STATE_VERSION}',
+        '"version":3',
+    )
+    v3_artifact = {**state.to_artifact_dict(), "schema_version": 3, "version": 3}
+
+    from_sticky = decode_state(body=v3_body)
+    from_artifact = ReviewState.from_artifact_dict(v3_artifact)
+
+    assert_that(from_sticky.findings).is_length(1)
+    assert_that(from_sticky.findings[0].status).is_equal_to(FindingStatus.REBASELINED)
+    assert_that(from_artifact.findings[0].status).is_equal_to(FindingStatus.REBASELINED)
+    assert_that(from_sticky.version).is_equal_to(STATE_VERSION)
+    # A v4 blob round-trips untouched.
+    v4 = decode_state(body=leftover_state_block(state=state))
+    assert_that(v4.findings[0].status).is_equal_to(FindingStatus.OPEN)
+
+
+def test_a_rebaselined_record_is_never_matched_open_or_fixed() -> None:
+    """The archived record is inert: the finding re-reported opens as new."""
     from lintro.ai.review.finding_matcher import match_findings
-    from lintro.ai.review.lifecycle.state import resolve_prior_state
     from lintro.ai.review.models.review_state import ReviewState
 
-    legacy = _legacy_record(spelling="TEST_GAP", fingerprint="2f8a4dbaa87081f0")
-    state = resolve_prior_state(
-        prior_state=ReviewState(findings=(legacy,)),
-        sticky_state=ReviewState(),
-    )
+    previous = ReviewState(findings=(_record(status=FindingStatus.REBASELINED),))
 
-    assert_that(state.findings[0].fingerprint).is_equal_to("08e68cc1dff17647")
-    assert_that(state.findings[0].category).is_equal_to("test-gap")
-
-    # The canonical finding reported again this round carries the record on
-    # instead of resolving it and opening a duplicate.
     match = match_findings(
-        previous=state,
+        previous=previous,
         findings=[
             _finding(category="test-gap", evidence_style=EvidenceStyle.DIFF_LOCAL),
         ],
         round_number=2,
     )
 
-    assert_that(match.new).is_empty()
+    assert_that(match.new).is_length(1)
     assert_that(match.resolved).is_empty()
-    assert_that(match.carried).is_length(1)
+    assert_that(match.carried).is_empty()
+    assert_that(match.regressed).is_empty()
+    statuses = [record.status for record in match.records]
+    assert_that(statuses).contains(FindingStatus.REBASELINED, FindingStatus.OPEN)
+    assert_that(previous.open_findings).is_empty()
 
 
-@pytest.mark.parametrize(
-    "legacy_first",
-    [False, True],
-    ids=["canonical-first", "legacy-first"],
-)
-def test_a_legacy_record_never_collides_with_a_canonical_sibling(
-    legacy_first: bool,
+def test_the_history_fine_print_counts_rebaselined_records_once(
+    sample_review_result: ReviewResult,
 ) -> None:
-    """A canonical record keeps its key whatever the order; the legacy one moves.
+    """The sticky says how many records were re-baselined, only when any were.
 
     Args:
-        legacy_first: Whether the legacy record precedes the canonical one.
+        sample_review_result: Shared review result fixture.
     """
-    canonical = _legacy_record(spelling="test-gap", fingerprint="08e68cc1dff17647")
-    legacy = _legacy_record(spelling="TEST_GAP", fingerprint="2f8a4dbaa87081f0")
-    records = [legacy, canonical] if legacy_first else [canonical, legacy]
-
-    migrated = migrate_legacy_fingerprints(records=records)
-
-    by_category = {record.category: record for record in migrated}
-    kept = next(record for record in migrated if record is canonical)
-    moved = next(record for record in migrated if record is not canonical)
-    assert_that(by_category).is_length(1)
-    assert_that(kept.ordinal).is_equal_to(1)
-    assert_that(moved.fingerprint).is_equal_to("08e68cc1dff17647")
-    assert_that(moved.ordinal).is_equal_to(2)
-    assert_that({record.key for record in migrated}).is_length(2)
-    # Stored order is preserved.
-    assert_that([record is canonical for record in migrated]).is_equal_to(
-        [not legacy_first, legacy_first],
-    )
-
-
-def test_a_non_posting_run_loads_migrated_state_too(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The ledger-only loader migrates like the posting path does.
-
-    Args:
-        monkeypatch: Pytest monkeypatch fixture.
-    """
-    from lintro.ai.review.lifecycle import state as lifecycle_state
     from lintro.ai.review.models.review_state import ReviewState
 
-    legacy = _legacy_record(spelling="TEST_GAP", fingerprint="2f8a4dbaa87081f0")
-    monkeypatch.setattr(
-        lifecycle_state,
-        "_load_stored_state",
-        lambda **_kwargs: ReviewState(findings=(legacy,)),
+    request = StickyRequest(
+        result=sample_review_result,
+        head_sha="a" * 40,
+        transport="cli",
+        auth_mode="subscription",
+        prior_state=ReviewState(
+            findings=(
+                _record(status=FindingStatus.REBASELINED, fingerprint="one"),
+                _record(status=FindingStatus.REBASELINED, fingerprint="two"),
+            ),
+        ),
     )
 
-    state = lifecycle_state.load_prior_review_state(
-        pr_number=1,
-        head_ref="feature",
-        repo="lgtm-hq/py-lintro",
-        post=False,
-    )
+    body = build_sticky_comment(request=request)
 
-    assert_that(state.findings[0].fingerprint).is_equal_to("08e68cc1dff17647")
+    assert_that(body).contains("2 re-baselined (pre-v4 state)")
+    assert_that(
+        build_sticky_comment(request=replace(request, prior_state=None)),
+    ).does_not_contain("re-baselined")

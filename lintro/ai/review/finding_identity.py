@@ -19,13 +19,11 @@ import re
 import unicodedata
 from collections import defaultdict
 from collections.abc import Sequence
-from dataclasses import replace
 
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.models.finding_occurrence import FindingOccurrence
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_finding import ReviewFinding
-from lintro.ai.review.models.review_state import ReviewState
 from lintro.enums.review_category import ReviewCategory
 
 __all__ = [
@@ -34,8 +32,6 @@ __all__ = [
     "duplicate_records",
     "fingerprint_for",
     "normalize_file_path",
-    "migrate_legacy_fingerprints",
-    "migrate_review_state",
     "normalize_category",
     "normalize_title",
 ]
@@ -103,117 +99,6 @@ def normalize_category(*, raw: object) -> str:
         return str(ReviewCategory(candidate))
     except ValueError:
         return text
-
-
-def migrate_legacy_fingerprints(
-    *,
-    records: Sequence[FindingRecord],
-) -> tuple[FindingRecord, ...]:
-    """Re-fingerprint records persisted under a non-canonical category.
-
-    Fingerprints are computed over the canonical category since #2723, so a
-    record a pre-#2723 round stored under ``TEST_GAP`` carries a hash the
-    current finding will never reproduce and would resolve and re-open as
-    new. The record keeps its file, category and title, so the hash it would
-    get today is recomputable. Only a genuine legacy record is touched: one
-    whose stored hash is exactly what the pre-#2723 algorithm produced for
-    its stored file, category and title; a synthetic or hand-edited hash is
-    left alone.
-
-    Two legacy records that only differed by spelling (``TEST_GAP`` and
-    ``test gap`` siblings) collapse onto one fingerprint; they keep distinct
-    identities by taking the lowest free ordinals under it, in their stored
-    order and never one a canonical record already holds whatever the order
-    of the records, so no key is duplicated and no match outcome overwritten.
-
-    Args:
-        records: Records as loaded from the persisted state.
-
-    Returns:
-        The records, with migrated fingerprints and ordinals where a legacy
-        spelling would otherwise break identity.
-    """
-    # Two passes so the result does not depend on record order: every key a
-    # non-legacy record already holds is reserved first, then each legacy
-    # record takes the lowest free ordinal under its canonical fingerprint.
-    plans: list[tuple[FindingRecord, str | None]] = []
-    taken: set[str] = set()
-    for record in records:
-        canonical = normalize_category(raw=record.category)
-        legacy = _legacy_fingerprint(
-            file=record.file,
-            category=record.category,
-            title=record.title,
-        )
-        if canonical == record.category or record.fingerprint != legacy:
-            # Canonical already, or a hash no round of ours produced (a
-            # synthetic or hand-edited record): not a legacy record.
-            plans.append((record, None))
-            taken.add(record.key)
-        else:
-            plans.append((record, canonical))
-    migrated: list[FindingRecord] = []
-    for record, target in plans:
-        if target is None:
-            migrated.append(record)
-            continue
-        fingerprint = fingerprint_for(
-            file=record.file,
-            category=target,
-            title=record.title,
-        )
-        ordinal = record.ordinal
-        while f"{fingerprint}#{ordinal}" in taken:
-            ordinal += 1
-        moved = replace(
-            record,
-            fingerprint=fingerprint,
-            ordinal=ordinal,
-            category=target,
-        )
-        migrated.append(moved)
-        taken.add(moved.key)
-    return tuple(migrated)
-
-
-def migrate_review_state(*, state: ReviewState) -> ReviewState:
-    """Return ``state`` with its finding records migrated (#2723).
-
-    Applied once where a round resolves the state it continues from, so
-    matching, lifecycle progress and every surface read the same keys.
-
-    Args:
-        state: The persisted state as loaded.
-
-    Returns:
-        The same state, or a copy with migrated finding records when any
-        legacy record needed one.
-    """
-    migrated = migrate_legacy_fingerprints(records=state.findings)
-    if migrated == state.findings:
-        return state
-    return replace(state, findings=migrated)
-
-
-def _legacy_fingerprint(*, file: str, category: str, title: str) -> str:
-    """Compute the fingerprint a pre-#2723 round stored for a finding.
-
-    Identical to :func:`fingerprint_for` except that the category is not
-    canonicalized first, which is how ``TEST_GAP`` and ``test-gap`` came to
-    hash differently.
-
-    Args:
-        file: Repository-relative file path.
-        category: Finding category label as the round recorded it.
-        title: Raw finding title.
-
-    Returns:
-        The legacy digest.
-    """
-    payload = "\x00".join(
-        (normalize_file_path(file), normalize_title(category), normalize_title(title)),
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:FINGERPRINT_LENGTH]
 
 
 def fingerprint_for(*, file: str, category: str, title: str) -> str:

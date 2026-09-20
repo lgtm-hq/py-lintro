@@ -30,7 +30,6 @@ from dataclasses import replace
 from loguru import logger
 
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
-from lintro.ai.review.finding_identity import migrate_review_state
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.sticky_request import StickyRequest
@@ -86,10 +85,7 @@ def load_prior_review_state(
         repo=repo,
     )
     if not post:
-        # Same migration the posting path gets through resolve_prior_state,
-        # so a non-posting run cannot resolve and re-open a legacy finding
-        # and persist that (#2723).
-        return migrate_review_state(state=stored)
+        return stored
     return resolve_prior_state(
         prior_state=stored,
         sticky_state=_sticky_state(pr_number=pr_number, repo=repo),
@@ -190,15 +186,11 @@ def resolve_prior_state(
     Returns:
         ReviewState: The state to render and match against.
     """
-    chosen = (
-        sticky_state
-        if prior_state is None
-        or not (prior_state.coverage or prior_state.runs or prior_state.findings)
-        else prior_state
-    )
-    # Migrated once here so matching, lifecycle progress and every surface
-    # read the same finding keys (#2723).
-    return migrate_review_state(state=chosen)
+    if prior_state is None or not (
+        prior_state.coverage or prior_state.runs or prior_state.findings
+    ):
+        return sticky_state
+    return prior_state
 
 
 def persist_review_state(

@@ -347,7 +347,9 @@ def match_findings(
     for index, record in enumerate(prior_records):
         if index in matched_prior:
             continue
-        if record.status is FindingStatus.RESOLVED:
+        if record.status is not FindingStatus.OPEN:
+            # Resolved history is kept as is; a re-baselined record (#2723,
+            # pre-v4 state) is archived and never resolved or regressed.
             merged.append(record)
             continue
         path = record.file

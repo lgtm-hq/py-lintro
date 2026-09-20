@@ -893,6 +893,15 @@ The terminal, the per-review body and the sticky all carry one line naming each 
 that fired and how many findings it moved; verdict derivation itself is unchanged and
 there is no knob.
 
+Category labels are canonicalized at parse time so the gate and the sensitivity presets
+compare on one spelling, and finding fingerprints are computed over that canonical
+label. That is a review-state schema change (v4): a finding record persisted by a v2/v3
+state may carry a hash the current parser cannot reproduce, so rather than migrate those
+hashes every open record read from a pre-v4 blob is archived as `rebaselined` — kept for
+history, never matched, never counted as open or fixed. The first round after the
+upgrade reports the still-present findings as new once (their old inline threads are not
+re-linked) and the findings heading names how many records were re-baselined.
+
 A P2 "changes requested" review still exits 0. An open P1 fails the process (`exit 1`).
 `--fail-on-findings` is an additional exit-1 gate when advisory tools report findings.
 Exit 2 means no review was produced at all (credential, quota, or lintro-side failure).

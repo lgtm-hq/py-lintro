@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
@@ -11,6 +12,7 @@ from lintro.ai.review.enums.finding_kind import FindingKind
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
+from lintro.ai.review.github_constants import REBASELINED_STATE_VERSIONS
 from lintro.ai.review.models._coerce import coerce_int
 from lintro.ai.review.models.finding_occurrence import (
     FindingOccurrence,
@@ -346,6 +348,39 @@ def _parse_evidence_style(value: Any) -> EvidenceStyle:
         cannot drift apart on whitespace, case, or the unknown-label default.
     """
     return EvidenceStyle.coerce(value)
+
+
+def rebaseline_records(
+    *,
+    records: Sequence[FindingRecord],
+    version: int,
+) -> tuple[FindingRecord, ...]:
+    """Archive every open record of a pre-v4 state (#2723).
+
+    Fingerprints are computed over the canonical category since schema v4,
+    so an open record from an older blob may carry a hash the current parser
+    can never reproduce; matching it would resolve it and re-open the finding
+    as a duplicate. Instead the record is kept for history with status
+    ``REBASELINED`` — never matched, never counted as open or fixed — and the
+    round after the upgrade reports the still-present findings as new once.
+
+    Args:
+        records: Records decoded from the blob.
+        version: The blob's schema version.
+
+    Returns:
+        The records, with open ones archived when ``version`` predates v4.
+    """
+    if version not in REBASELINED_STATE_VERSIONS:
+        return tuple(records)
+    return tuple(
+        (
+            replace(record, status=FindingStatus.REBASELINED)
+            if record.status is FindingStatus.OPEN
+            else record
+        )
+        for record in records
+    )
 
 
 def _parse_status(value: Any) -> FindingStatus:

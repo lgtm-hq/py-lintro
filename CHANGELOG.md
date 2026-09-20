@@ -26,6 +26,14 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   criteria, and a test gap is P3 unless the PR claims to fix a bug it does not test
   (#2723). The P1 gate's rewrite now also carries
   `severity_downgrade_reason: p1_no_failure_scenario`
+- **ai/review**: review-state schema v4. Category labels are canonicalized at parse time
+  (`TEST_GAP`, `test gap` → `test-gap`) and finding fingerprints are computed over the
+  canonical label, so a finding record persisted by a v2/v3 state may carry a hash the
+  current parser cannot reproduce; instead of migrating, every open record read from a
+  pre-v4 blob is archived as `rebaselined` — kept for history, never matched, never
+  counted as open or fixed — and the first round after the upgrade reports the
+  still-present findings as new once, with the count named in the sticky's findings
+  heading (#2723)
 
 ### Deprecated
 
