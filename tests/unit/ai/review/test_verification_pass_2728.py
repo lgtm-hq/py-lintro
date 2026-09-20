@@ -54,7 +54,7 @@ from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.repo_context import RepoContextSource
 from lintro.ai.review.result_assembly import ReviewRunOutcome
-from lintro.ai.review.run_finalize import _verify_and_gate
+from lintro.ai.review.run_finalize import _verify_and_gate, gate_built_in_findings
 from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.timings import ReviewPhase
@@ -67,7 +67,10 @@ from lintro.ai.review.verification import (
 )
 from lintro.ai.review.verification_note import format_verification_note
 from lintro.ai.review.verification_prompt import render_verification_findings
-from lintro.ai.review.verification_response import parse_verification_answer
+from lintro.ai.review.verification_response import (
+    cites_finding,
+    parse_verification_answer,
+)
 from lintro.config.review_config import ReviewConfig, ReviewVerifyMode
 
 pytestmark = pytest.mark.verification
@@ -288,6 +291,7 @@ def test_rendered_findings_are_fenced_and_redacted() -> None:
         indices=(0,),
         source=source,
         boundary="FENCE_1",
+        allowed_paths=frozenset({"pkg/api.py"}),
     )
 
     assert_that(rendered).starts_with("Finding 1:\n<FENCE_1>\n")
@@ -304,10 +308,36 @@ def test_rendered_findings_omit_cited_code_without_a_source() -> None:
         indices=(0,),
         source=None,
         boundary="FENCE_1",
+        allowed_paths=frozenset({"pkg/api.py"}),
     )
 
     assert_that(rendered).does_not_contain("post-change")
     assert_that(rendered).contains("failure_scenario: Every call runs once.")
+
+
+def test_cited_code_is_read_only_for_the_rounds_eligible_paths() -> None:
+    """A finding on an unchanged file is sent without its code (#2734 review).
+
+    Synthesis findings are not diff-gated before the pass, so a model-named
+    path must not put an unchanged file's content in front of the provider.
+    """
+    reads: list[str] = []
+
+    def _reader(path: str) -> str:
+        reads.append(path)
+        return "SECRET = 'do not send'\n"
+
+    rendered = render_verification_findings(
+        findings=[_finding(file="config/secrets.py", line=1)],
+        indices=(0,),
+        source=RepoContextSource(reader=_reader),
+        boundary="FENCE_1",
+        allowed_paths=frozenset({"pkg/api.py"}),
+    )
+
+    assert_that(reads).is_empty()
+    assert_that(rendered).does_not_contain("do not send")
+    assert_that(rendered).contains("file: config/secrets.py:1")
 
 
 # --- parsing ------------------------------------------------------------------
@@ -449,6 +479,44 @@ async def test_refutation_without_evidence_is_not_a_refutation(evidence: str) ->
     assert_that(result.summary.confirmed).is_equal_to(1)
 
 
+async def test_refutation_citing_another_file_is_not_a_refutation() -> None:
+    """A ``file:line`` into a file the verifier was not shown proves nothing."""
+    result, _call = await _pass(
+        findings=[_finding()],
+        content=_answer((1, "refuted", "nonexistent.py:999 handles it")),
+    )
+
+    assert_that(result.findings).is_length(1)
+    assert_that(result.findings[0].verified).is_true()
+    assert_that(result.summary.refuted).is_equal_to(0)
+
+
+@pytest.mark.parametrize(
+    ("evidence", "expected"),
+    [
+        ("pkg/api.py:2 retries is read", True),
+        ("see api.py:2", True),
+        ("src/pkg/api.py:2", False),
+        ("other/api.py:2", False),
+        ("nonexistent.py:999", False),
+        ("pkg/api.py is fine", False),
+    ],
+)
+def test_cites_finding_matches_the_findings_path_or_its_tail(
+    evidence: str,
+    expected: bool,
+) -> None:
+    """Only the finding's path, or a trailing part of it, counts as a citation.
+
+    Args:
+        evidence: Refutation text.
+        expected: Whether it cites ``pkg/api.py``.
+    """
+    assert_that(cites_finding(evidence=evidence, file="pkg/api.py")).is_equal_to(
+        expected,
+    )
+
+
 async def test_weakened_p1_becomes_p2_with_its_own_reason() -> None:
     """A weakened P1 moves to P2 tagged ``REFUTATION_WEAKENED`` and verified."""
     result, _call = await _pass(
@@ -565,6 +633,18 @@ async def test_off_schema_answer_is_a_failed_pass() -> None:
     assert_that(result.summary.failed).is_true()
     assert_that(result.summary.input_tokens).is_equal_to(100)
     assert_that(result.findings[0].verified).is_false()
+
+
+async def test_an_answer_with_no_verdict_is_a_failed_pass() -> None:
+    """``{"verifications": []}`` verifies nothing and must not read as success."""
+    result, _call = await _pass(findings=[_finding()], content=_answer())
+
+    assert_that(result.summary.failed).is_true()
+    assert_that(result.summary.selected).is_equal_to(1)
+    assert_that(result.findings[0].verified).is_false()
+    assert_that(
+        [d.reason for d in verification_degradations(summary=result.summary)],
+    ).is_equal_to([CoverageDegradationReason.VERIFICATION_FAILED])
 
 
 async def test_an_interrupt_abandons_the_call() -> None:
@@ -906,6 +986,40 @@ def test_custom_agent_findings_are_exempt() -> None:
             cost_estimate=0.01,
         ),
     )
+
+
+def test_a_stopped_run_still_gates_its_built_in_findings() -> None:
+    """The gates run on a stopped run too; only the verifier is skipped.
+
+    Since #2728 the chunk pass parses ungated, so a run that stops at a cost
+    cap after one chunk must gate that chunk's findings itself or an
+    inflated P1 would reach the partial result and the posting tier.
+    """
+    custom = _finding(title="Agent P1", failure_scenario="", source="agent")
+    outcome = ReviewRunOutcome(
+        filtered_findings=(
+            _finding(title="Unevidenced P1", failure_scenario=""),
+            _finding(
+                title="Unevidenced test gap",
+                severity=Severity.P2,
+                category="test-gap",
+                evidence_claimed=False,
+            ),
+            custom,
+        ),
+        custom_findings=(custom,),
+    )
+
+    gated = gate_built_in_findings(outcome=outcome)
+
+    by_title = {f.title: f for f in gated.filtered_findings}
+    assert_that(by_title["Unevidenced P1"].severity).is_equal_to(Severity.P2)
+    assert_that(by_title["Unevidenced P1"].severity_downgrade_reason).is_equal_to(
+        SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO,
+    )
+    assert_that(by_title["Unevidenced test gap"].severity).is_equal_to(Severity.P3)
+    assert_that(by_title["Agent P1"]).is_same_as(custom)
+    assert_that(gated.total_findings).is_equal_to(3)
 
 
 # --- config -------------------------------------------------------------------

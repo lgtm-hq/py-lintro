@@ -13,10 +13,33 @@ import re
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.review.enums.verification_outcome import VerificationOutcome
 
-__all__ = ["parse_verification_answer"]
+__all__ = ["cites_finding", "parse_verification_answer"]
 
 #: A ``path:line`` citation somewhere in the evidence text.
-_CITATION = re.compile(r"[\w./\\-]+\.\w+:\d+")
+_CITATION = re.compile(r"([\w./\\-]+\.\w+):\d+")
+
+
+def cites_finding(*, evidence: str, file: str) -> bool:
+    """Return whether the evidence cites a ``file:line`` in the finding's file.
+
+    The verifier was shown one finding's cited code; a citation into any
+    other path is not evidence from the material it was given, so it
+    cannot refute the finding (#2734 review).
+
+    Args:
+        evidence: The verifier's evidence text.
+        file: The finding's repository-relative path.
+
+    Returns:
+        True when some citation names ``file`` — the whole path, or a
+        trailing part of it down to the bare file name.
+    """
+    target = file.replace("\\", "/")
+    for match in _CITATION.finditer(evidence):
+        cited = match.group(1).replace("\\", "/")
+        if target == cited or target.endswith("/" + cited):
+            return True
+    return False
 
 
 def parse_verification_answer(

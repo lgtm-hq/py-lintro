@@ -60,6 +60,7 @@ def render_verification_findings(
     indices: Sequence[int],
     source: RepoContextSource | None,
     boundary: str,
+    allowed_paths: frozenset[str],
 ) -> str:
     """Render the selected findings, each fenced, for the user prompt.
 
@@ -68,6 +69,11 @@ def render_verification_findings(
         indices: Which of them to render, in prompt order.
         source: Head-side reader for the cited code.
         boundary: The prompt's per-call boundary marker.
+        allowed_paths: The only paths whose head content may be read. A
+            finding is model output and may name any file; the synthesis
+            pass's findings are not diff-gated before this point, so
+            without the check a finding could put an unchanged file's
+            content in front of the provider (#2734 review).
 
     Returns:
         The rendered block; every untrusted byte sits inside the fence.
@@ -87,7 +93,11 @@ def render_verification_findings(
                 f"failure_scenario: {finding.failure_scenario}",
             ],
         )
-        cited = _cited_code(finding=finding, source=source)
+        cited = (
+            _cited_code(finding=finding, source=source)
+            if finding.file in allowed_paths
+            else ""
+        )
         code = (
             f"\n{finding.file} (post-change, around line {finding.line}):\n{cited}"
             if cited

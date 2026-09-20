@@ -54,7 +54,10 @@ from lintro.ai.review.models.verification_outcome import (
 )
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.review.verification_prompt import render_verification_findings
-from lintro.ai.review.verification_response import parse_verification_answer
+from lintro.ai.review.verification_response import (
+    cites_finding,
+    parse_verification_answer,
+)
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 from lintro.config.review_config import ReviewVerifyMode
@@ -103,6 +106,9 @@ class VerificationPassRequest:
         repo_source: Head-side reader for the cited code; ``None`` sends the
             findings without surrounding code.
         repo_root: Absolute path to the repository under review.
+        allowed_paths: Paths whose head content may be shown to the
+            verifier; a finding on any other path is sent without its
+            cited code. ``None`` allows the changed files in ``context``.
         use_one_shot: When True, avoid durable provider sessions.
         stop: Event set by the run's interrupt handler; when it fires while
             the call is in flight the call is abandoned and the pass fails
@@ -117,6 +123,7 @@ class VerificationPassRequest:
     budget: CostBudget
     repo_source: RepoContextSource | None = None
     repo_root: str = ""
+    allowed_paths: frozenset[str] | None = None
     use_one_shot: bool = True
     stop: asyncio.Event | None = None
 
@@ -267,6 +274,18 @@ def _apply(
             continue
         outcome, evidence = verdict
         finding = findings[index]
+        if outcome is VerificationOutcome.REFUTED and not cites_finding(
+            evidence=evidence,
+            file=finding.file,
+        ):
+            # A citation into some other file is not evidence from the
+            # material the verifier was shown; the finding stands.
+            logger.info(
+                "Verification refuted {title!r} without citing {file}; kept.",
+                title=finding.title,
+                file=finding.file,
+            )
+            evidence = ""
         if outcome is VerificationOutcome.REFUTED and evidence:
             drop.add(index)
             refuted += 1
@@ -391,6 +410,11 @@ async def run_verification_pass(
             indices=indices,
             source=request.repo_source,
             boundary=boundary,
+            allowed_paths=(
+                request.allowed_paths
+                if request.allowed_paths is not None
+                else frozenset(f.path for f in request.context.changed_files)
+            ),
         ),
     )
     logger.info(
@@ -440,7 +464,10 @@ async def run_verification_pass(
 
     usage = (response.input_tokens, response.output_tokens, response.cost_estimate)
     verdicts = parse_verification_answer(content=response.content, count=len(indices))
-    if verdicts is None:
+    if not verdicts:
+        # ``None`` is an off-schema answer; an empty mapping is an answer
+        # with no usable verdict for any selected finding. Both leave every
+        # selected finding unverified, so both are the failed pass.
         logger.warning("The verification pass answered outside its schema.")
         return _failed(findings=findings, selected=len(indices), usage=usage)
     kept, confirmed, refuted, downgraded, refutations = _apply(

@@ -31,7 +31,11 @@ from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import (
     ReviewRunOutcome,
 )
-from lintro.ai.review.run_finalize import finalize_completed_run, merge_partials
+from lintro.ai.review.run_finalize import (
+    finalize_completed_run,
+    gate_built_in_findings,
+    merge_partials,
+)
 from lintro.ai.review.session import (
     ChunkRunPlan,
     cost_cap_reason,
@@ -232,6 +236,9 @@ def finalize_stopped_run(
     partials = list(progress.collected)
     merge_started = time.monotonic()
     outcome = merge_partials(plan=plan, progress=progress, partials=partials)
+    # No verification on a stopped run (the round is not complete), but the
+    # gates still apply: the chunk pass parses ungated since #2728.
+    outcome = gate_built_in_findings(outcome=outcome)
     parse_merge_seconds = time.monotonic() - merge_started
     plan.timings.add_phase(
         name=ReviewPhase.PARSE_MERGE,

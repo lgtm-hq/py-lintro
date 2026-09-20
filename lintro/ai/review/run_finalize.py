@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.run_planning import ReviewRunPlan
     from lintro.ai.review.session import ReviewSessionOptions
 
-__all__ = ["finalize_completed_run", "merge_partials"]
+__all__ = ["finalize_completed_run", "gate_built_in_findings", "merge_partials"]
 
 
 def merge_partials(
@@ -183,6 +183,32 @@ async def finalize_completed_run(
     )
 
 
+def gate_built_in_findings(*, outcome: ReviewRunOutcome) -> ReviewRunOutcome:
+    """Run the severity gates on a run that ends without the verification pass.
+
+    A gracefully stopped run (cost cap, timeout, interrupt) never reaches
+    :func:`_verify_and_gate`, and since #2728 the built-in passes parse
+    ungated, so the gates have to run here or an inflated severity would
+    reach the partial result, the run record and the posting tier.
+    Custom-agent findings are exempt, as in the completed path.
+
+    Args:
+        outcome: The merged outcome of the stopped run.
+
+    Returns:
+        The outcome with the built-in findings gated.
+    """
+    custom = tuple(f for f in outcome.filtered_findings if f.source)
+    builtin = tuple(f for f in outcome.filtered_findings if not f.source)
+    findings = apply_severity_gates(findings=builtin) + custom
+    return replace(
+        outcome,
+        filtered_findings=findings,
+        custom_findings=custom,
+        total_findings=len(findings),
+    )
+
+
 async def _verify_and_gate(
     *,
     context: ReviewContext,
@@ -233,6 +259,7 @@ async def _verify_and_gate(
                     ai_config=plan.ai_config,
                 ),
                 repo_root=plan.repo_root,
+                allowed_paths=frozenset(plan.resume.eligible),
                 # A standalone question over the round, not a chunk.
                 use_one_shot=True,
                 stop=interrupt,
