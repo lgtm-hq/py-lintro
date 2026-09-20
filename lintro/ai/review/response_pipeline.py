@@ -121,6 +121,10 @@ class ChunkReviewRequest:
         diff_ceiling: The window remainder this chunk's diff may fill; when
             given, the section takes only what the chunk's own diff leaves,
             so a single-file chunk near the ceiling cannot overrun the window.
+        single_shot: When True the call is the retry after a turn limit
+            (#2731): the generated questions are left out of the prompt and
+            the agent gets no tools, so it answers from the diff, the context
+            section and the rubric in one turn.
     """
 
     chunk: ReviewChunk
@@ -141,6 +145,7 @@ class ChunkReviewRequest:
     repo_context: RepoContextSource | None = None
     context_budget: int | None = None
     diff_ceiling: int | None = None
+    single_shot: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -213,7 +218,9 @@ async def invoke_chunk_review(
         checklist_count=request.checklist_count,
         interaction_paths=request.interaction_paths,
         lint_results=request.lint_results,
-        extra_checklist=request.extra_checklist,
+        # The single-shot retry drops the per-PR questions: on a turn-limited
+        # call they are what sent the agent reading the files they name.
+        extra_checklist="" if request.single_shot else request.extra_checklist,
         strictness_section=request.strictness_section,
         repo_context=(
             build_repo_context(
@@ -279,6 +286,7 @@ async def invoke_chunk_review(
         repo_root=request.repo_root or None,
         use_one_shot=request.use_one_shot,
         cli_schema=cli_schema_for_review(transport=ai_config.transport),
+        no_tools=request.single_shot,
     )
     return ChunkCallResult(
         response=response,

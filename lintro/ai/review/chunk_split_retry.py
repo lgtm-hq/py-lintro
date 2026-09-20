@@ -335,12 +335,16 @@ async def _retry_after_turn_limit(
     request: ChunkReviewRequest,
     first: AITurnLimitError,
 ) -> ChunkReviewPartial:
-    """Retry a turn-limited call once; degrade the chunk if it hits it again.
+    """Retry a turn-limited call once, single-shot; degrade if it fails again.
 
-    The agent spent its whole turn budget without answering. One unchanged
-    retry covers a run that merely wandered; a second limit means the chunk
-    does not answer under this bound, so its files are left unreviewed for a
-    later round and the run records a ``TURN_LIMIT_REACHED`` degradation
+    The agent spent its whole turn budget without answering. The retry is
+    not the same call again (#2731: on a one-file PR the same prompt did
+    the same reading and hit the same limit): it keeps the turn limit but
+    drops the generated questions from the prompt and takes the agent's
+    tools away, so the second attempt answers from the diff, the context
+    section and the rubric in one turn. A second limit means the chunk
+    does not answer under this bound, so its files are left unreviewed for
+    a later round and the run records a ``TURN_LIMIT_REACHED`` degradation
     instead of failing (#2685).
 
     Args:
@@ -356,12 +360,13 @@ async def _retry_after_turn_limit(
     """
     logger.warning(
         "CLI review hit its per-call turn limit on chunk {index} ({error}); "
-        "retrying the call once unchanged.",
+        "retrying once single-shot (no questions, no tools).",
         index=request.chunk_index,
         error=first,
     )
+    retry = replace(request, single_shot=True)
     try:
-        call = await invoke_chunk_review(request=request)
+        call = await invoke_chunk_review(request=retry)
     except AICostBudgetExceededError:
         raise
     except AITurnLimitError as again:

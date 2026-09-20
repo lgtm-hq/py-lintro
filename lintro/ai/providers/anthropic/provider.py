@@ -537,6 +537,7 @@ class AnthropicProvider(ApiStreamingProvider):
         # Prompt rides on stdin (#1967): a single argv element on Linux is
         # capped at MAX_ARG_STRLEN (128 KiB), so large review diffs must not
         # be passed as the ``-p``/``--print`` value.
+        bounds = current_cli_call_options()
         cmd = [
             self._cli._binary_path,
             *(("--bare",) if bare else ()),
@@ -546,7 +547,9 @@ class AnthropicProvider(ApiStreamingProvider):
             "--permission-mode",
             "dontAsk",
             "--tools",
-            _READ_ONLY_TOOLS,
+            # A single-shot call (#2731) keeps the flag and empties the list:
+            # the read-only bound is a required contract flag either way.
+            "" if bounds is not None and bounds.tools_disabled else _READ_ONLY_TOOLS,
             "--model",
             effective_model,
         ]
@@ -577,7 +580,6 @@ class AnthropicProvider(ApiStreamingProvider):
         # and only the reactive unknown-option backstop drops it. ``call_ai``
         # sets the turn limit for every call kind; a caller that reaches
         # ``complete()`` without bounds is read-only but turn-unlimited.
-        bounds = current_cli_call_options()
         max_turns = bounds.max_turns if bounds is not None else None
         if max_turns is not None:
             candidates.append(
