@@ -33,6 +33,7 @@ from lintro.ai.review.result_assembly import (
     ReviewRunOutcome,
 )
 from lintro.ai.review.session import (
+    NOTHING_REVIEWED_REASON,
     ChunkRunPlan,
     cost_cap_reason,
     is_cost_cap_stop,
@@ -291,9 +292,15 @@ async def finalize_completed_run(
         provider_seconds=provider_seconds,
         parse_merge_seconds=parse_merge_seconds,
     )
+    if not any(partial.files for partial in partials):
+        # Every chunk hit its turn limit twice and reviewed nothing (#2731):
+        # no narrative over a diff nobody read; a stopped run, exit 1.
+        return replace(outcome, stopped_reason=NOTHING_REVIEWED_REASON, partial=True)
     if not should_run_synthesis(
         config=options.synthesis,
-        chunks_reviewed=len(partials),
+        # A turn-limited chunk still yields a partial, with no files: count
+        # the chunks that reviewed something, not the ones that answered.
+        chunks_reviewed=sum(1 for partial in partials if partial.files),
     ):
         return outcome
     # ``should_run_synthesis`` already rejected a None config; bind for mypy.

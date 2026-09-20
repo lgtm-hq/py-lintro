@@ -53,6 +53,20 @@ class ReviewResult:
     consumed_flags: tuple[tuple[str, str], ...] = field(default_factory=tuple)
 
     @property
+    def reviewed_nothing(self) -> bool:
+        """Return True when the run ended without reviewing a single file.
+
+        A run whose every chunk hit its per-call turn limit (#2731) has no
+        findings and no coverage; it must not exit like a clean pass.
+
+        Returns:
+            True when the run was stopped for reviewing nothing.
+        """
+        from lintro.ai.review.session import NOTHING_REVIEWED_REASON
+
+        return self.metadata.stopped_reason == NOTHING_REVIEWED_REASON
+
+    @property
     def has_p1_findings(self) -> bool:
         """Return True when any P1 defect finding exists.
 

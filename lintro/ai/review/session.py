@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from lintro.config.review_config import ReviewSynthesisConfig
 
 __all__ = [
+    "NOTHING_REVIEWED_REASON",
     "ChunkRunPlan",
     "ReviewSession",
     "ReviewSessionOptions",
@@ -445,6 +446,13 @@ def timeout_reason(*, exc: BaseException) -> str:
     if cause:
         return f"timeout ({cause})"
     return "timeout"
+
+
+#: ``stopped_reason`` for a run whose every chunk hit its per-call turn limit
+#: and reviewed nothing (#2731). Rendered by the partial-review warning and
+#: written to the run record; the process exits 1 on it like it does on a P1,
+#: because a review that reviewed nothing is a delivery failure, not a pass.
+NOTHING_REVIEWED_REASON = "no file reviewed: every chunk hit its per-call turn limit"
 
 
 def stop_hint(*, stopped_reason: str, ai_config: AIConfig) -> str:

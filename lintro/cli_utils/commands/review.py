@@ -1345,7 +1345,9 @@ def _render_post_and_exit(
             render=render,
         )
 
-    exit_code = 1 if result.has_p1_findings else 0
+    # A run that reviewed nothing (#2731) is a delivery failure, exit 1 like a
+    # P1; ``incomplete`` in general still exits 0 (that policy is separate).
+    exit_code = 1 if result.has_p1_findings or result.reviewed_nothing else 0
     if options.fail_on_findings and advisory_findings_count(advisory_results):
         exit_code = 1
     raise SystemExit(exit_code)
