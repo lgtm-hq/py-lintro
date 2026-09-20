@@ -12,8 +12,8 @@ class AICallKind(HyphenatedStrEnum):
 
     Attributes:
         REVIEW: A review-type call: the per-chunk main call and its
-            schema-recovery retry, the depth-2 and depth-3 passes, the
-            cross-chunk synthesis pass and custom review agents.
+            schema-recovery retry, the per-PR question pass, the depth-3
+            pass, the cross-chunk synthesis pass and custom review agents.
         SUMMARY: The one-shot summary call.
         FIX: The one-shot fix call.
     """

@@ -1,13 +1,10 @@
 # yamllint disable rule:line-length
-# yaml-language-server: $schema=../corpus.schema.json
-# $schema: ../corpus.schema.json
 ---
 # Tier 2 built-in review checklist corpus.
 # Domain/language-triggered items (IDs 100+).
 # One row per ChecklistItem; loaded by lintro.ai.review.checklist.loader.
-# Valid category/domains/languages values come from ../corpus.schema.json, a
-# GENERATED artifact; regenerate it with
-# `uv run python scripts/generate-checklist-corpus-schema.py` after enum changes.
+# Valid category/domains/languages values are the Python enums the loader
+# validates against (#2720: no generated schema; core categories only).
 - id: 100
   tier: 2
   category: logic-bug
@@ -212,78 +209,6 @@
   domains: [source]
   languages: [javascript, jsx, ts, tsx, python, rust]
   question: 'Does new or changed production code lack corresponding test updates in the same diff?'
-- id: 134
-  tier: 2
-  category: test-gap
-  domains: [source]
-  languages: [javascript, jsx, ts, tsx, python, rust]
-  question: 'Does new or changed logic lack tests covering the modified paths?'
-- id: 135
-  tier: 2
-  category: test-gap
-  domains: []
-  languages: []
-  question: 'Are edge cases and failure modes (empty input, invalid input, missing files) untested?'
-- id: 136
-  tier: 2
-  category: test-gap
-  domains: [test]
-  languages: [javascript, jsx, ts, tsx]
-  question: 'Are error-response tests missing or only checking one field per assertion (hiding partial regressions)?'
-- id: 137
-  tier: 2
-  category: test-gap
-  domains: [test, api]
-  languages: [javascript, jsx, ts, tsx, python]
-  question: 'Are security edge cases untested (injection payloads, malformed input, oversized payloads)?'
-- id: 138
-  tier: 2
-  category: test-gap
-  domains: [test]
-  languages: [javascript, jsx, ts, tsx, bats, python]
-  question: 'Are parameterized cases missing where multiple inputs share the same behavior rule?'
-- id: 139
-  tier: 2
-  category: test-gap
-  domains: [test]
-  languages: [bats]
-  question: 'Are tests non-deterministic (timing, network, shared state, random without seed)?'
-- id: 140
-  tier: 2
-  category: test-gap
-  domains: [test]
-  languages: [javascript, jsx, ts, tsx]
-  question: 'Does the test name describe something different from what is actually asserted?'
-- id: 141
-  tier: 2
-  category: test-gap
-  domains: [test]
-  languages: [rust]
-  question: 'Are expected panics/failures tested with #[should_panic] or equivalent where invalid input must fail?'
-- id: 142
-  tier: 2
-  category: test-gap
-  domains: [shell]
-  languages: [bats]
-  question: 'Do exit-code paths in shell scripts lack assert_failure / status checks?'
-- id: 143
-  tier: 2
-  category: contract-drift
-  domains: [test]
-  languages: [python]
-  question: 'Do parametrize/test IDs embed mutable version or data values that will churn on every bump?'
-- id: 144
-  tier: 2
-  category: contract-drift
-  domains: [e2e]
-  languages: [javascript, jsx, ts, tsx]
-  question: 'Are E2E/UI tests hard-coding labels, error strings, or IDs that should come from shared constants/enums?'
-- id: 145
-  tier: 2
-  category: contract-drift
-  domains: []
-  languages: []
-  question: 'Does a public interface change lack updates to callers, schemas, or contract tests?'
 - id: 146
   tier: 2
   category: security
@@ -320,39 +245,3 @@
   domains: []
   languages: [python]
   question: 'Does a # nosec / security suppression lack an inline justification on the flagged line?'
-- id: 152
-  tier: 2
-  category: breaking-change
-  domains: []
-  languages: [javascript, jsx, ts, tsx, python, rust]
-  question: 'Does removing or renaming exported/public symbols lack migration or caller updates?'
-- id: 153
-  tier: 2
-  category: breaking-change
-  domains: [api]
-  languages: []
-  question: 'Does a schema or API response change break strict contract tests or downstream parsers?'
-- id: 154
-  tier: 2
-  category: code-smell
-  domains: []
-  languages: [javascript, jsx, ts, tsx, python, rust]
-  question: 'Is type safety bypassed with any, unchecked casts, or broad suppressions on changed lines?'
-- id: 155
-  tier: 2
-  category: code-smell
-  domains: [e2e]
-  languages: [javascript, jsx, ts, tsx]
-  question: 'Do E2E tests rely on fragile CSS selectors (#id, deep div > button) likely to break on unrelated UI changes?'
-- id: 156
-  tier: 2
-  category: architecture
-  domains: []
-  languages: []
-  question: 'Is the module interface nearly as complex as its implementation (shallow module)?'
-- id: 157
-  tier: 2
-  category: architecture
-  domains: [test]
-  languages: []
-  question: 'Are tests written against implementation steps rather than user-/caller-visible behavior?'

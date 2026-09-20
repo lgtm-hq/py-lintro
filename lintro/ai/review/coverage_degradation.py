@@ -37,13 +37,10 @@ COVERAGE_LIMITED_HEADLINE = "Coverage limited — not a guaranteed full finding 
 #: and so it matches the ``degraded`` outcome the CI check reports.
 PARTIAL_REVIEW_LABEL = "Partial review"
 
-#: How each depth >= 2 pass failure is named in the sentence (#2395). These
-#: are per-chunk reasons that carry no per-call ceiling, so they get their own
+#: How a depth-3 pass failure is named in the sentence (#2395). It is a
+#: per-chunk reason that carries no per-call ceiling, so it gets its own
 #: clause rather than joining the cap wording.
 _DEPTH_PASS_CLAUSES: dict[CoverageDegradationReason, str] = {
-    CoverageDegradationReason.GENERATED_QUESTIONS_FAILED: (
-        "the depth-2 generated-questions pass failed"
-    ),
     CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED: (
         "the depth-3 adversarial sweep failed"
     ),
@@ -122,6 +119,17 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
             "unchanged",
         )
 
+    # The question pass runs once per run, so its failure is a whole-run
+    # fact carried on the synthesis sentinel, not a count of chunks (#2720).
+    if any(
+        item.reason is CoverageDegradationReason.GENERATED_QUESTIONS_FAILED
+        for item in degradations
+    ):
+        clauses.append(
+            "the per-PR question pass failed, so every chunk was reviewed "
+            "against the rubric alone",
+        )
+
     for reason, wording in _DEPTH_PASS_CLAUSES.items():
         chunks = {item.chunk_index for item in degradations if item.reason is reason}
         if chunks:
@@ -186,6 +194,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
         CoverageDegradationReason.DIFF_TRUNCATED,
         CoverageDegradationReason.SPLIT_HALF_FAILED,
         CoverageDegradationReason.TURN_LIMIT_REACHED,
+        CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
         *_DEPTH_PASS_CLAUSES,
     }
     other = sorted(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -149,9 +149,9 @@ def _run(
     depth: int = 1,
     max_parallel_calls: int | None = None,
     call_delay: float = 0.0,
-    stop_on_first_call: bool = False,
-    stop_during_first_call: bool = False,
+    stop: Literal["cost_cap", "sigterm"] | None = None,
     max_cost_usd: float | None = None,
+    generated_questions: bool = True,
 ) -> ReviewResult:
     """Run a review with the provider call stubbed out.
 
@@ -162,22 +162,25 @@ def _run(
         max_parallel_calls: Concurrency ceiling for chunk calls; ``None``
             keeps the production ``AIConfig`` default.
         call_delay: Seconds each stubbed provider call sleeps.
-        stop_on_first_call: When True, the first provider call raises a
-            cost-cap stop so the remaining queued chunks are cancelled.
-        stop_during_first_call: When True, the injected SIGTERM stop event
-            is set while the first provider call is sleeping.
+        stop: ``"cost_cap"`` makes the first provider call raise a cost-cap
+            stop so the remaining queued chunks are cancelled; ``"sigterm"``
+            sets the injected stop event while the first call is sleeping.
         max_cost_usd: Optional spend cap; the orchestrator serializes chunk
             calls whenever one is set.
+        generated_questions: The ``review_generated_questions`` knob; the
+            pass itself only runs for tests carrying the
+            ``generated_questions`` marker.
 
     Returns:
         The completed review result.
     """
     provider = _provider()
-    stop = asyncio.Event()
+    stop_event = asyncio.Event()
     ai_config = AIConfig(
         enabled=True,
         transport=AITransport.API,
         max_cost_usd=max_cost_usd,
+        review_generated_questions=generated_questions,
     )
     if max_parallel_calls is not None:
         ai_config = ai_config.model_copy(
@@ -195,14 +198,14 @@ def _run(
             The provider's canned response.
 
         Raises:
-            AICostBudgetExceededError: When ``stop_on_first_call`` is set.
+            AICostBudgetExceededError: When ``stop`` is ``"cost_cap"``.
         """
         del kwargs
-        if stop_during_first_call:
-            stop.set()
+        if stop == "sigterm":
+            stop_event.set()
         if call_delay:
             await asyncio.sleep(call_delay)
-        if stop_on_first_call:
+        if stop == "cost_cap":
             raise AICostBudgetExceededError("cost cap reached")
         response: AIResponse = provider.complete("prompt")
         return response
@@ -224,7 +227,7 @@ def _run(
                 checklist_text="1. [logic-bug] Example?",
                 classifications=[],
                 context_collection_seconds=0.5,
-                stop=stop,
+                stop=stop_event,
             ),
         )
 
@@ -567,7 +570,7 @@ def test_chunks_cancelled_while_queued_still_report_their_wait(
         chunk_count=3,
         max_parallel_calls=1,
         call_delay=0.01,
-        stop_on_first_call=True,
+        stop="cost_cap",
     )
 
     timings = _timings_of(result=result)
@@ -607,7 +610,7 @@ def test_sigterm_during_single_chunk_records_the_chunk_as_failed(
         tmp_path=tmp_path,
         chunk_count=1,
         call_delay=0.05,
-        stop_during_first_call=True,
+        stop="sigterm",
     )
 
     timings = _timings_of(result=result)
@@ -633,37 +636,42 @@ def test_resume_planning_has_its_own_span(tmp_path: Path) -> None:
     )
 
 
-def test_depth_two_adds_a_distinct_generated_questions_span(tmp_path: Path) -> None:
-    """Depth 2 question generation is a separate span from the chunk call.
+@pytest.mark.generated_questions
+def test_the_question_pass_is_one_span_per_run(tmp_path: Path) -> None:
+    """The per-PR question pass is a separate span recorded once per run.
+
+    The pass runs once over the whole PR (#2720), so a two-chunk run at
+    depth 1 records one occurrence, not one per chunk; disabling the knob
+    records no span at all.
 
     Args:
         tmp_path: Temporary repository root.
     """
-    shallow = _run(tmp_path=tmp_path, chunk_count=2, depth=1)
-    deep = _run(tmp_path=tmp_path, chunk_count=2, depth=2)
+    disabled = _run(tmp_path=tmp_path, chunk_count=2, generated_questions=False)
+    enabled = _run(tmp_path=tmp_path, chunk_count=2)
 
-    shallow_names = [span.name for span in _timings_of(result=shallow).phases]
-    deep_spans = {span.name: span for span in _timings_of(result=deep).phases}
+    disabled_names = [span.name for span in _timings_of(result=disabled).phases]
+    spans = {span.name: span for span in _timings_of(result=enabled).phases}
 
-    assert_that(shallow_names).does_not_contain("generated_questions")
-    assert_that(deep_spans).contains_key("generated_questions", "provider")
-    # One occurrence per chunk, folded into a single span.
-    assert_that(deep_spans["generated_questions"].occurrences).is_equal_to(2)
+    assert_that(disabled_names).does_not_contain("generated_questions")
+    assert_that(spans).contains_key("generated_questions", "provider")
+    assert_that(spans["generated_questions"].occurrences).is_equal_to(1)
 
 
+@pytest.mark.generated_questions
 def test_generated_questions_span_is_a_strict_part_of_provider(
     tmp_path: Path,
 ) -> None:
     """The question span covers one call, the provider envelope covers both.
 
-    With a single chunk at depth 2 the provider envelope spans the question
-    call and the main review call back to back, so the nested span must be
-    at least one stubbed call long and strictly shorter than the envelope.
+    With a single chunk the provider envelope spans the question call and the
+    main review call back to back, so the nested span must be at least one
+    stubbed call long and strictly shorter than the envelope.
 
     Args:
         tmp_path: Temporary repository root.
     """
-    result = _run(tmp_path=tmp_path, chunk_count=1, depth=2, call_delay=0.02)
+    result = _run(tmp_path=tmp_path, chunk_count=1, call_delay=0.02)
 
     timings = _timings_of(result=result)
     questions = timings.phase_seconds(name="generated_questions")
@@ -696,6 +704,7 @@ def test_cost_cap_serializes_chunks_and_reports_it(tmp_path: Path) -> None:
     ).is_greater_than_or_equal_to(0.02)
 
 
+@pytest.mark.generated_questions
 def test_depth_three_adds_a_distinct_adversarial_span(tmp_path: Path) -> None:
     """Depth 3 records the adversarial sweep separately from question generation.
 

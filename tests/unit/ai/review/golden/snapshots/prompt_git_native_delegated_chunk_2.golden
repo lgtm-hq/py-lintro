@@ -46,14 +46,56 @@ file was not updated, not touched, or missing a change.
 
 ---
 
-### Review checklist (2 items to check the diff against)
+### Review rubric
 
-Check the diff against every item. Do not answer the items: report a finding, with
-file:line evidence, for each item where the diff has a defect, and nothing for items
-that hold. A concern is NOT a finding unless it also identifies a defect.
+**Severity is defined by behaviour, not by category:**
 
+- **P1** — a merge-blocking defect with a concrete failure scenario: the inputs, the path
+  taken, and the observable wrong result. Expect 0–2 on a typical PR and none on most.
+- **P2** — verified incorrect behaviour on a reachable input, or a documented contract
+  the change makes false. A verified defect is P2 even when no caller or test asserts
+  the behaviour yet.
+- **P3** — the code path is correct and only wording, a migration note, or a
+  test-isolation nit remains.
+
+**Bug classes to look for** (guidance for where defects hide, not a list to answer):
+
+1. Logic: wrong condition, off-by-one, inverted branch, unreachable or duplicated path.
+2. Silent failure: a swallowed exception, a default that masks an error, a fallback
+   that hides a broken input.
+3. Security: injection, secret exposure, missing authorisation, unsafe deserialisation,
+   path traversal.
+4. Integration and contract breakage: a caller, CLI flag, config key, schema or
+   documented promise the change no longer honours.
+5. Resource and concurrency: leaks, unclosed handles, races, lost cancellation.
+6. Data loss or corruption: partial writes, non-atomic updates, wrong merge or
+   ordering.
+7. Error handling: the wrong exception type caught, an error path that skips cleanup
+   or reporting.
+8. Configuration drift: defaults, environment handling or CI wiring that differ
+   between places that must agree.
+9. Dependency misuse: an API used against its contract, a version-specific behaviour
+   assumed.
+10. Migration safety: a rename, removal or default change without the compatibility
+    path or note it needs.
+
+Report a finding only when you can show the defect with file:line evidence — in this
+chunk's diff, or in code you traced from it (mark those `cross_file`). A concern without
+a shown defect is not a finding; finding nothing is a normal result.
+
+
+### Questions for this change (consider each; do not answer them)
+
+<CODE_BLOCK_0d15ea5e>
+(no questions were generated for this change; review against the rubric)
+</CODE_BLOCK_0d15ea5e>
+
+### Additional checks (2 retained checklist items; report a finding only where the diff has a defect)
+
+<CODE_BLOCK_0d15ea5e>
 1. [security] Does the change fail closed on unknown input?
 2. [logic-bug] Is the renamed module's public signature still compatible?
+</CODE_BLOCK_0d15ea5e>
 
 ---
 
@@ -122,8 +164,9 @@ Report only defects you can trace to a concrete failure.
   evidence, serious ones first. Collapse repeated occurrences of one root cause into a
   single finding with an `occurrences` list rather than one finding per site.
 - Finding nothing is a normal result; an empty findings array is valid.
-- Do not duplicate findings — merge related checklist items when they share a root
-  cause; the checklist is guidance for what to look for, not a list to answer.
+- Do not duplicate findings — merge related concerns when they share a root cause;
+  the rubric and the questions are guidance for what to look for, not a list to
+  answer, and never restate a question or a rubric item as a finding.
 - Prioritize cross-file integration bugs over isolated nits.
 - Every finding `title` must be a single line with no line breaks.
 - **P1 requires a concrete `failure_scenario`** — the inputs, the path taken, and the

@@ -47,7 +47,7 @@ def test_select_checklist_items_always_includes_tier1() -> None:
     )
 
     tier1_ids = {item.id for item in selected if item.tier == 1}
-    assert_that(tier1_ids).is_equal_to(set(range(1, 16)))
+    assert_that(tier1_ids).is_equal_to({1, 4, 7, 8, 9, 14, 15})
 
 
 def test_empty_changed_files_still_returns_tier1() -> None:
@@ -58,7 +58,7 @@ def test_empty_changed_files_still_returns_tier1() -> None:
     )
 
     assert_that([item.id for item in selected if item.tier == 1]).is_equal_to(
-        list(range(1, 16)),
+        [1, 4, 7, 8, 9, 14, 15],
     )
     assert_that(all(item.tier == 1 for item in selected)).is_true()
 
@@ -293,16 +293,6 @@ def test_dual_axis_shell_python_item_does_not_match_plain_python() -> None:
     )
 
     assert_that({item.id for item in selected}).does_not_contain(148)
-
-
-def test_modified_path_test_gap_item_matches_python_source() -> None:
-    """Item 134 targets source files in supported languages, not shell only."""
-    selected = select_checklist_items(
-        classifications=_classify(["src/main.py"]),
-        items=list(BUILTIN_CHECKLIST_ITEMS),
-    )
-
-    assert_that({item.id for item in selected}).contains(134)
 
 
 def test_production_test_update_item_skips_test_only_diffs() -> None:

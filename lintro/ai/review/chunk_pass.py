@@ -1,21 +1,20 @@
 """The depth-controlled review of a single chunk (issue #2301).
 
-One chunk, up to three provider calls: the optional depth-2 question
-generator, the main review call (which
+One chunk, up to two provider calls: the main review call (which
 :mod:`lintro.ai.review.chunk_split_retry` splits in two when its answer
-exhausts the provider's output ceiling), and the optional depth-3 adversarial
-sweep.
+exhausts the provider's output ceiling) and the optional depth-3 adversarial
+sweep. The per-PR questions every chunk considers are generated once per run
+by :mod:`lintro.ai.review.question_pass` (#2720), not per chunk.
 :func:`review_chunk_with_progress` wraps that in the run's progress events and
 the #1101 error taxonomy, so the fan-out above only has to schedule.
 :func:`review_chunk` is the seam between the fan-out in
 :mod:`lintro.ai.review.chunk_runner`, which decides *when* a chunk runs, and
-the passes in :mod:`lintro.ai.review.chunk_split_retry`,
-:mod:`lintro.ai.review.checklist_pass` and
+the passes in :mod:`lintro.ai.review.chunk_split_retry` and
 :mod:`lintro.ai.review.adversarial_pass`, which decide what each call asks.
 
-Only the main call is load-bearing. The two optional passes run through
+Only the main call is load-bearing. The optional sweep runs through
 :func:`~lintro.ai.review.depth_degradation.run_degradable_depth_pass`, so an
-``AIError`` from either degrades the chunk to its main-pass result and records
+``AIError`` from it degrades the chunk to its main-pass result and records
 a coverage degradation instead of discarding findings the run already paid for
 (#2395). A cost-cap stop still aborts, as it does everywhere else.
 
@@ -29,7 +28,6 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from lintro.ai.review.adversarial_pass import run_adversarial_pass
-from lintro.ai.review.checklist_pass import generate_extra_checklist
 from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
 from lintro.ai.review.coverage import review_eligible_paths
 from lintro.ai.review.depth_degradation import run_degradable_depth_pass
@@ -56,10 +54,10 @@ async def review_chunk(
     chunk: ReviewChunk,
     chunk_index: int = 0,
     plan: ChunkRunPlan,
-) -> tuple[ChunkReviewPartial, int]:
+) -> ChunkReviewPartial:
     """Run depth-controlled review for a single chunk.
 
-    A failed depth-2 or depth-3 pass degrades the chunk rather than ending it:
+    A failed depth-3 pass degrades the chunk rather than ending it:
     the partial keeps the main pass's findings and carries the recorded
     :class:`~lintro.ai.review.models.coverage_degradation.CoverageDegradation`
     (#2395).
@@ -70,46 +68,20 @@ async def review_chunk(
         plan: Run-scope inputs, already specialised for this chunk.
 
     Returns:
-        The chunk partial and the next available generated checklist id.
+        The chunk partial.
     """
     recorder = plan.timings or ReviewTimingRecorder()
     tracker = plan.progress or NullReviewProgress()
     ai_config = plan.ai_config
-    next_generated_checklist_id = plan.next_generated_checklist_id
     interaction_paths = generate_interaction_paths(
         classifications=plan.classifications,
         changed_files=chunk.files,
     )
-    extra_checklist = ""
-    extra_checklist_usage: ChunkReviewPartial | None = None
-    depth_degradations: tuple[CoverageDegradation, ...] = ()
-    if plan.depth >= 2:
-        tracker.on_step(chunk_index=chunk_index, step="generating questions")
-        with recorder.phase(name=ReviewPhase.GENERATED_QUESTIONS):
-            generated, depth_degradations = await run_degradable_depth_pass(
-                call=generate_extra_checklist(
-                    chunk=chunk,
-                    context=plan.context,
-                    provider=plan.provider,
-                    ai_config=ai_config,
-                    budget=plan.budget,
-                    next_generated_checklist_id=next_generated_checklist_id,
-                    repo_root=plan.repo_root,
-                    use_one_shot=plan.use_one_shot,
-                ),
-                reason=CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
-                chunk_index=chunk_index,
-                label="depth-2 generated-questions pass",
-            )
-        if generated is not None:
-            (
-                extra_checklist,
-                next_generated_checklist_id,
-                extra_checklist_usage,
-            ) = generated
-
+    # The per-PR questions are generated once per run and shared (#2720);
+    # depth 2 no longer spends a call per chunk on them.
+    extra_checklist = plan.generated_questions
     tracker.on_step(chunk_index=chunk_index, step="reviewing")
-    # Gate before the main provider call so intra-chunk (depth-2/3) work
+    # Gate before the main provider call so intra-chunk (depth-3) work
     # cannot overshoot the budget between the per-chunk checks.
     plan.budget.check()
     main_pass = await review_chunk_main_pass(
@@ -161,14 +133,10 @@ async def review_chunk(
         ),
         truncated=chunk.truncated,
         coverage_degradations=(
-            *depth_degradations,
             *truncation_degradations,
             *main_pass.coverage_degradations,
         ),
     )
-
-    if extra_checklist_usage is not None:
-        partial = _add_usage(partial=partial, extra=extra_checklist_usage)
 
     if plan.depth >= 3:
         tracker.on_step(chunk_index=chunk_index, step="adversarial sweep")
@@ -213,7 +181,7 @@ async def review_chunk(
                 ),
             )
 
-    return partial, next_generated_checklist_id
+    return partial
 
 
 def _add_usage(
@@ -263,7 +231,7 @@ async def review_chunk_with_progress(
     plan.budget.check()
     progress.on_chunk_start(chunk_index=chunk_index, files=list(chunk.files))
     try:
-        partial, _next_id = await review_chunk(
+        partial = await review_chunk(
             chunk=chunk,
             chunk_index=chunk_index,
             plan=plan,

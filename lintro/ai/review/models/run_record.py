@@ -119,6 +119,10 @@ class RunRecord:
             payload["synthesis_degraded"] = True
         if coverage.delegated_diff_embedded:
             payload["delegated_diff_embedded"] = True
+        if coverage.generated_questions:
+            payload["generated_questions"] = coverage.generated_questions
+        if coverage.questions_diff_trimmed:
+            payload["questions_diff_trimmed"] = True
         if outcome.dropped_outside_diff:
             payload["dropped_outside_diff"] = outcome.dropped_outside_diff
         if usage.cost_basis:
@@ -209,6 +213,8 @@ def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
         delegated_diff_embedded=_strict_bool(
             payload.get("delegated_diff_embedded"),
         ),
+        generated_questions=coerce_int(payload.get("generated_questions")),
+        questions_diff_trimmed=_strict_bool(payload.get("questions_diff_trimmed")),
     )
 
 

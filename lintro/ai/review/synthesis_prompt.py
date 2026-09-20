@@ -28,17 +28,20 @@ from lintro.ai.prompts.review import (
     format_chunk_summaries_for_prompt,
 )
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
+from lintro.ai.review.models.chunk_summary import ChunkSummary
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens, truncate_to_budget
 
 if TYPE_CHECKING:
-    from lintro.ai.review.models.chunk_summary import ChunkSummary
+    from lintro.ai.review.merge import ChunkReviewPartial
+    from lintro.ai.review.models.review_chunk import ReviewChunk
     from lintro.ai.review.models.review_context import ReviewContext
 
 __all__ = [
     "SynthesisPromptPlan",
     "build_synthesis_prompt",
+    "chunk_summaries",
     "cross_chunk_paths",
     "guarded_changed_paths",
     "plan_synthesis_prompt",
@@ -393,3 +396,31 @@ def build_synthesis_prompt(
         max_findings=max_findings,
     )
     return REVIEW_SYNTHESIS_SYSTEM_PROMPT, user_prompt
+
+
+def chunk_summaries(
+    *,
+    chunks: list[ReviewChunk],
+    partials: list[ChunkReviewPartial],
+) -> tuple[ChunkSummary, ...]:
+    """Build the per-chunk digest the cross-chunk synthesis pass reads.
+
+    Args:
+        chunks: Chunks planned for this run, in plan order.
+        partials: Completed chunk partials, in completion order.
+
+    Returns:
+        One digest per completed chunk. The chunk id is recovered from the
+        plan by file set so the digest names the same chunk the reader sees
+        elsewhere; a partial that matches no planned chunk falls back to its
+        position, which keeps the digest readable rather than blank.
+    """
+    ids = {tuple(chunk.files): chunk.id for chunk in chunks}
+    return tuple(
+        ChunkSummary(
+            chunk_id=ids.get(tuple(item.files), position),
+            files=tuple(item.files),
+            findings=item.findings,
+        )
+        for position, item in enumerate(partials, start=1)
+    )

@@ -11,11 +11,27 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai/review**: every chunk prompt now reviews against a short severity-by-behaviour
+  rubric plus questions generated once per run for the PR under review (one extra
+  provider call over the redacted whole-PR diff, title and body; shared by all chunks;
+  `ai.review_generated_questions` turns it off). The questions are surfaced in the JSON
+  output, the run record and `--show-checklist all`; a failed pass degrades the run to
+  the rubric alone and is recorded as `GENERATED_QUESTIONS_FAILED` (#2720)
+
 ### Changed
+
+- **ai/review**: the output rules no longer ask the model to echo the checklist or to
+  answer questions; a question or rubric item restated as a finding is out of scope, and
+  the depth-2 per-chunk question generator is replaced by the once-per-run pass (#2720)
 
 ### Deprecated
 
 ### Removed
+
+- **ai/review**: the built-in checklist corpus is trimmed to its evidence-backed core
+  (logic bugs, silent failures, security, integration; 26 items removed), and the
+  generated corpus JSON Schema with its generator script and drift test are gone — the
+  loader's validation against the Python enums is the only authority (#2720)
 
 ### Fixed
 

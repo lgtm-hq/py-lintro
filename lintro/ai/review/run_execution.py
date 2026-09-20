@@ -17,9 +17,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AIError
-from lintro.ai.review.checklist_pass import max_checklist_id
 from lintro.ai.review.chunk_runner import review_all_chunks
 from lintro.ai.review.custom_agent_runner import (
     CustomAgentPassRequest,
@@ -29,16 +27,17 @@ from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.interrupt import install_review_interrupt
 from lintro.ai.review.merge import finalize_partials
+from lintro.ai.review.question_pass import RunQuestions, run_question_pass
 from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import (
     ReviewRunOutcome,
-    chunk_summaries,
 )
 from lintro.ai.review.session import (
     ChunkRunPlan,
     cost_cap_reason,
     is_cost_cap_stop,
     is_timeout_stop,
+    stop_hint,
     timeout_reason,
 )
 from lintro.ai.review.synthesis import (
@@ -46,10 +45,10 @@ from lintro.ai.review.synthesis import (
     run_synthesis_pass,
     should_run_synthesis,
 )
+from lintro.ai.review.synthesis_prompt import chunk_summaries
 from lintro.ai.review.timings import ReviewPhase
 
 if TYPE_CHECKING:
-    from lintro.ai.config import AIConfig
     from lintro.ai.review.custom_agent_runner import CustomAgentPassResult
     from lintro.ai.review.merge import ChunkReviewPartial
     from lintro.ai.review.models.review_context import ReviewContext
@@ -64,7 +63,6 @@ __all__ = [
     "finalize_stopped_run",
     "merge_partials",
     "run_passes",
-    "stop_hint",
 ]
 
 
@@ -100,9 +98,6 @@ def chunk_run_plan(
         repo_root=plan.repo_root,
         use_one_shot=plan.use_one_shot,
         strictness_section=plan.strictness_section,
-        next_generated_checklist_id=(
-            max_checklist_id(checklist_items=options.checklist_items) + 1
-        ),
         diff_budget=plan.diff_budget,
         max_parallel_calls=plan.max_parallel_calls,
         stop=interrupt,
@@ -124,11 +119,13 @@ class RunProgress:
         collected: Chunk partials completed so far, in completion order.
         custom_results: Custom-agent passes that completed.
         custom_agents_failed: Names of selected agents that produced no pass.
+        questions: The once-per-run question pass result (#2720), when run.
     """
 
     collected: list[ChunkReviewPartial] = field(default_factory=list)
     custom_results: list[CustomAgentPassResult] = field(default_factory=list)
     custom_agents_failed: list[str] = field(default_factory=list)
+    questions: RunQuestions | None = None
 
 
 async def run_passes(
@@ -155,14 +152,28 @@ async def run_passes(
     """
     partials: list[ChunkReviewPartial] = []
     if plan.chunks:
-        partials = await review_all_chunks(
-            chunks=plan.chunks,
-            plan=chunk_run_plan(
+        questions = await run_question_pass(
+            context=context,
+            options=options,
+            plan=plan,
+            stop=interrupt,
+        )
+        # Recorded before the fan-out so a run the fan-out stops (cost cap,
+        # timeout, SIGTERM) still reports the pass it already paid for; the
+        # result assembly charges its usage and degradation from here.
+        progress.questions = questions
+        chunk_plan = replace(
+            chunk_run_plan(
                 context=context,
                 options=options,
                 plan=plan,
                 interrupt=interrupt,
             ),
+            generated_questions=questions.text,
+        )
+        partials = await review_all_chunks(
+            chunks=plan.chunks,
+            plan=chunk_plan,
             completed_sink=progress.collected,
             on_chunk_complete=checkpoint_writer(
                 resume=plan.resume,
@@ -229,6 +240,7 @@ def merge_partials(
         partials=partials,
         custom_results=progress.custom_results,
         custom_agents_failed=progress.custom_agents_failed,
+        questions=progress.questions,
         merged=merged,
         filtered_findings=filtered_findings,
         custom_findings=custom_findings,
@@ -323,31 +335,6 @@ async def finalize_completed_run(
         filtered_findings=findings,
         total_findings=len(findings),
     )
-
-
-def stop_hint(*, stopped_reason: str, ai_config: AIConfig) -> str:
-    """Describe how to get the rest of a stopped review reviewed.
-
-    Args:
-        stopped_reason: The graceful stop that ended the run.
-        ai_config: AI configuration the run used.
-
-    Returns:
-        A one-sentence operator hint.
-    """
-    if "SIGTERM" in stopped_reason:
-        return (
-            "The runner sent SIGTERM; coverage was persisted. "
-            "Re-run to resume remaining files."
-        )
-    if stopped_reason.startswith("timeout"):
-        timeout_setting = (
-            "ai.transports.cli.timeout"
-            if ai_config.transport is AITransport.CLI
-            else "ai.transports.api.timeout"
-        )
-        return f"Raise {timeout_setting} or narrow --path to review the rest."
-    return "Raise ai.max_cost_usd or narrow --path to review the rest."
 
 
 def finalize_stopped_run(

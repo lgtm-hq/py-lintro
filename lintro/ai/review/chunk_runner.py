@@ -10,8 +10,8 @@ The orchestrator decides *what* to review; this module runs it:
 
 The run-scope inputs travel as one frozen
 :class:`~lintro.ai.review.session.ChunkRunPlan` rather than the ~18 keywords
-each layer used to forward by hand; the per-chunk differences (progress
-tracker, generated-checklist id) are applied with :func:`dataclasses.replace`.
+each layer used to forward by hand; the one per-chunk difference (the
+progress tracker) is applied with :func:`dataclasses.replace`.
 
 Every provider call below goes through
 :mod:`lintro.ai.review.provider_call`, the single seam tests replace.
@@ -32,7 +32,6 @@ from lintro.ai.exceptions import (
     AIError,
     AIProviderError,
 )
-from lintro.ai.review.checklist_pass import GENERATED_CHECKLIST_ID_STRIDE
 from lintro.ai.review.chunk_call_detail import call_detail, finished_partial
 from lintro.ai.review.chunk_pass import review_chunk_with_progress
 from lintro.ai.review.exceptions import ReviewExecutionError
@@ -244,14 +243,7 @@ async def _run_chunk(
     Returns:
         The chunk index paired with its partial or the exception raised.
     """
-    chunk_plan = replace(
-        plan,
-        progress=StepTrackingProgress(plan.progress),
-        next_generated_checklist_id=(
-            plan.next_generated_checklist_id
-            + chunk_index * GENERATED_CHECKLIST_ID_STRIDE
-        ),
-    )
+    chunk_plan = replace(plan, progress=StepTrackingProgress(plan.progress))
     # Queued time is measured from task creation to semaphore admission, so a
     # run bottlenecked by ``max_parallel_calls`` is distinguishable from one
     # bottlenecked by provider latency (#2148).
@@ -434,8 +426,8 @@ async def review_all_chunks(
     ``plan.max_parallel_calls``. Callers that enforce a cost cap pass ``1`` so
     the resume queue cannot invert (issue #2154). A ``ReviewExecutionError`` or
     a cost-cap stop cancels the remaining work and propagates to
-    ``run_review_async``. Depth >= 2 assigns each chunk a disjoint
-    generated-checklist id range so merge stays deterministic under fan-out.
+    ``run_review_async``. Every chunk shares the run's per-PR questions
+    (#2720); nothing chunk-specific is generated during the fan-out.
     ``plan.stop`` is set by a SIGTERM/SIGINT handler so an in-flight chunk can
     be cancelled and completed siblings persisted (#2156). ``plan.timings``
     records each chunk's semaphore-queued and in-flight split (#2148).

@@ -42,9 +42,9 @@ class CoverageDegradationReason(StrEnum):
             attempted but did not produce a usable answer. The chunk findings
             are unaffected and the run stays complete for them; only the
             cross-file sweep is missing.
-        GENERATED_QUESTIONS_FAILED: The depth-2 generated-questions call for
-            one chunk failed, so that chunk was reviewed against the static
-            checklist alone (#2395).
+        GENERATED_QUESTIONS_FAILED: The once-per-run per-PR question pass
+            failed, so every chunk was reviewed against the rubric alone
+            (#2720). Recorded once with the synthesis sentinel index.
         ADVERSARIAL_SWEEP_FAILED: The depth-3 adversarial sweep for one chunk
             failed, so the chunk keeps its main-pass findings and whatever the
             sweep would have added is missing (#2395).

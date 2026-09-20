@@ -104,14 +104,14 @@ The second slice moves the two chunk prompt builders — `build_review_prompt` f
 transport and `build_git_native_review_prompt` for CLI-backed providers — and the
 non-diff token estimate `estimate_prompt_overhead` out of the orchestrator. The shared
 render inputs (chunk, context, checklist text and count, interaction paths, lint digest,
-generated checklist rows, strictness section) travel as one frozen `PromptInputs`; only
-the git-native diff-delivery flags stay as separate keywords, since they are the one
-thing the two builders do not share. `redact_prompt_text` and `make_boundary_marker` now
-fire inside this module, which makes it the redaction choke point for prompt bytes: the
-git-native builder still embeds the redacted diff unless the caller explicitly opts out.
-That slice left the emitted bytes unchanged and the #2298 prompt goldens passed without
-regeneration; the milestone 0.5 findings-only prompts have since changed those bytes, so
-the prompt goldens are regenerated here.
+the run's per-PR questions, strictness section) travel as one frozen `PromptInputs`;
+only the git-native diff-delivery flags stay as separate keywords, since they are the
+one thing the two builders do not share. `redact_prompt_text` and `make_boundary_marker`
+now fire inside this module, which makes it the redaction choke point for prompt bytes:
+the git-native builder still embeds the redacted diff unless the caller explicitly opts
+out. That slice left the emitted bytes unchanged and the #2298 prompt goldens passed
+without regeneration; the milestone 0.5 findings-only prompts have since changed those
+bytes, so the prompt goldens are regenerated here.
 
 ### Cross-chunk merge (`lintro/ai/review/merge.py`, #2301)
 
@@ -145,10 +145,11 @@ retry's usage in through `merge_response_usage`. `payload_to_partial` turns the 
 payload (findings and `flagged_files` only, lintro-ops milestone 0) into the
 `ChunkReviewPartial` the merge layer consumes.
 
-`lintro/ai/review/checklist_pass.py` owns the depth-2 generated checklist:
-`generate_extra_checklist` asks the model for domain-specific questions and truncates
-the answer at `GENERATED_CHECKLIST_ID_STRIDE`, which is what keeps parallel chunks on
-disjoint generated-id ranges so a finding's `checklist_ids` cannot collide.
+`lintro/ai/review/question_pass.py` owns the per-PR questions (#2720):
+`generate_run_questions` asks the model once per run, over the redacted whole-PR diff
+fitted to `review_synthesis_diff_tokens` plus the PR title and body, and every chunk
+shares the answer as "consider" items beside the rubric. A failed pass degrades the run
+to the rubric alone and is recorded once as `GENERATED_QUESTIONS_FAILED`.
 `lintro/ai/review/adversarial_pass.py` owns the depth-3 sweep: `run_adversarial_pass`
 returns findings and usage only, and degrades to usage alone when the answer is
 malformed.

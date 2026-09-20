@@ -339,9 +339,9 @@ def test_both_prompt_builders_render_the_section_inside_their_own_boundary() -> 
         assert_that(prompt).contains(
             f"# file: src/pkg/core.py — changed\n{_CORE}\n</{marker}>",
         )
-        # The context precedes the diff and the checklist.
+        # The context precedes the diff and the rubric.
         assert_that(prompt.index(CONTEXT_INSTRUCTION)).is_less_than(
-            prompt.index("### Review checklist"),
+            prompt.index("### Review rubric"),
         )
         _, without = build(inputs=_inputs(repo_context=None))
         assert_that(without).does_not_contain(CONTEXT_INSTRUCTION)

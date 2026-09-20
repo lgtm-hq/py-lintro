@@ -18,7 +18,7 @@ class ChunkTiming:
 
     ``provider_seconds`` is the main review call's own wall time, inside the
     in-flight span: the gap between the two is prompt building, parsing and
-    any depth-2/3 pass. ``turns`` is the agent turn count the transport
+    any depth-3 pass. ``turns`` is the agent turn count the transport
     reported for that call, or ``None`` when the transport reports none
     (lintro-ops #37).
 

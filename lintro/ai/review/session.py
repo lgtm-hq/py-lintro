@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError
 from lintro.ai.review.errors_taxonomy import (
     ReviewErrorKind,
@@ -67,6 +68,7 @@ __all__ = [
     "cost_cap_reason",
     "is_cost_cap_stop",
     "is_timeout_stop",
+    "stop_hint",
     "timeout_reason",
 ]
 
@@ -262,9 +264,9 @@ class ChunkRunPlan:
     """Run-scope inputs shared by every chunk of one review.
 
     One object instead of the ~18 keywords each layer used to forward by hand.
-    It is frozen: the two values that legitimately differ per chunk — the
-    progress tracker and the first generated-checklist id — are applied with
-    :func:`dataclasses.replace`, so a chunk can never mutate the run's plan.
+    It is frozen: the one value that legitimately differs per chunk — the
+    progress tracker — is applied with :func:`dataclasses.replace`, so a
+    chunk can never mutate the run's plan.
 
     Attributes:
         context: Collected review diff context.
@@ -280,11 +282,12 @@ class ChunkRunPlan:
         repo_root: Absolute path to the repository under review.
         use_one_shot: When True, avoid durable provider sessions.
         strictness_section: Pre-formatted strictness prompt section.
-        next_generated_checklist_id: First id available to generated items.
         diff_budget: Token budget available for embedded diffs.
         max_parallel_calls: Ceiling on concurrently in-flight chunk reviews.
         stop: Optional event set by a SIGTERM/SIGINT handler.
         timings: Optional recorder for per-phase and per-chunk spans (#2148).
+        generated_questions: The run's per-PR "consider" questions (#2720),
+            generated once and shared by every chunk; empty when none.
         repo_context: Cached head-side reader for the read-only repository
             context section (#2714); ``None`` renders no section.
         context_budget: Effective per-chunk token budget of that section,
@@ -306,11 +309,11 @@ class ChunkRunPlan:
     repo_root: str
     use_one_shot: bool
     strictness_section: str
-    next_generated_checklist_id: int
     diff_budget: int
     max_parallel_calls: int = 1
     stop: asyncio.Event | None = None
     timings: ReviewTimingRecorder | None = None
+    generated_questions: str = ""
     repo_context: RepoContextSource | None = None
     context_budget: int = 0
     diff_ceiling: int = 0
@@ -442,3 +445,28 @@ def timeout_reason(*, exc: BaseException) -> str:
     if cause:
         return f"timeout ({cause})"
     return "timeout"
+
+
+def stop_hint(*, stopped_reason: str, ai_config: AIConfig) -> str:
+    """Describe how to get the rest of a stopped review reviewed.
+
+    Args:
+        stopped_reason: The graceful stop that ended the run.
+        ai_config: AI configuration the run used.
+
+    Returns:
+        A one-sentence operator hint.
+    """
+    if "SIGTERM" in stopped_reason:
+        return (
+            "The runner sent SIGTERM; coverage was persisted. "
+            "Re-run to resume remaining files."
+        )
+    if stopped_reason.startswith("timeout"):
+        timeout_setting = (
+            "ai.transports.cli.timeout"
+            if ai_config.transport is AITransport.CLI
+            else "ai.transports.api.timeout"
+        )
+        return f"Raise {timeout_setting} or narrow --path to review the rest."
+    return "Raise ai.max_cost_usd or narrow --path to review the rest."

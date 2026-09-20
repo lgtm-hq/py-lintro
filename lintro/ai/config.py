@@ -436,6 +436,17 @@ class AIConfig(BaseModel):
             "over it by construction (#2702)."
         ),
     )
+    review_generated_questions: bool = Field(
+        default=True,
+        description=(
+            "Generate per-PR review questions once per run (#2720): one "
+            "provider call over the redacted whole-PR diff (fitted to "
+            "review_synthesis_diff_tokens), the PR title and description; "
+            "every chunk shares the questions as 'consider' items beside the "
+            "rubric. Set to false to skip the pass and review with the rubric "
+            "alone."
+        ),
+    )
     review_diff_gate_lines: int = Field(
         default=3,
         ge=0,

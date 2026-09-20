@@ -42,6 +42,11 @@ class RunCoverage:
             was ignored for at least one chunk because the provider's bounded
             read-only tools cannot run it, so the redacted diff was embedded
             instead (#2685). Not a coverage gap. Serialized only when True.
+        generated_questions: Number of per-PR questions the chunk prompts
+            carried (#2720); serialized only when non-zero. Distinct from the
+            outcome's ``questions``, which counts question-kind findings.
+        questions_diff_trimmed: True when the question pass saw only a prefix
+            of the PR diff; serialized only when True.
     """
 
     files_reviewed: int = 0
@@ -53,3 +58,5 @@ class RunCoverage:
     chunks_total: int = 0
     synthesis_degraded: bool = False
     delegated_diff_embedded: bool = False
+    generated_questions: int = 0
+    questions_diff_trimmed: bool = False

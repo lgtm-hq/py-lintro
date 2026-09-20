@@ -1,8 +1,8 @@
 """The one provider-call seam for the built-in review passes.
 
 Every built-in review pass — the per-chunk review in
-:mod:`lintro.ai.review.response_pipeline`, the depth-2 question generator in
-:mod:`lintro.ai.review.checklist_pass`, and the depth-3 sweep in
+:mod:`lintro.ai.review.response_pipeline`, the once-per-run question generator
+in :mod:`lintro.ai.review.question_pass`, and the depth-3 sweep in
 :mod:`lintro.ai.review.adversarial_pass` — issues its provider call through
 this module rather than binding :func:`lintro.ai.invoke.call_ai` in its own
 namespace. Because the name is resolved on this module at call time, a test

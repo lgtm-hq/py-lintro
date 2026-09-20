@@ -27,6 +27,7 @@ from lintro.ai.prompts.review import (
     REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE,
     REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE,
     REVIEW_OUTPUT_SCHEMA,
+    REVIEW_RUBRIC,
     REVIEW_SYSTEM,
     REVIEW_USER_PROMPT_TEMPLATE,
     format_changed_files_for_prompt,
@@ -37,6 +38,7 @@ from lintro.ai.prompts.review import (
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.prompt_redaction import redact_prompt_text
+from lintro.ai.review.question_pass import MAX_RUN_QUESTIONS_TOKENS
 from lintro.ai.review.repo_context import (
     RepoContextSection,
     format_repo_context_section,
@@ -54,6 +56,7 @@ __all__ = [
     "build_git_native_review_prompt",
     "build_review_prompt",
     "estimate_prompt_overhead",
+    "render_rubric_sections",
 ]
 
 _PROMPT_OVERHEAD_TOKENS = 12_000
@@ -75,7 +78,8 @@ class PromptInputs:
         checklist_count: Number of checklist items in the prompt.
         interaction_paths: Domain-triggered interaction path text.
         lint_results: Optional lint digest for prompt injection.
-        extra_checklist: Additional generated checklist rows for depth 2.
+        extra_checklist: The run's per-PR "consider" questions (#2720),
+            rendered under their own heading; empty when none.
         strictness_section: Sensitivity instructions for the review pass.
         repo_context: Post-change file content and one-hop neighbours for the
             chunk (#2714), rendered read-only; ``None`` renders nothing.
@@ -92,24 +96,73 @@ class PromptInputs:
     repo_context: RepoContextSection | None = None
 
 
-def _combined_checklist(*, inputs: PromptInputs) -> tuple[str, int]:
-    """Fold any generated checklist rows into the selected checklist.
+def render_rubric_sections(
+    *,
+    generated_questions: str,
+    checklist_text: str,
+    checklist_count: int,
+    boundary: str,
+) -> tuple[str, str]:
+    """Render the questions and the retained checklist for the prompt (#2720).
+
+    Both bodies are untrusted for the prompt's purposes — the questions come
+    back from a model that read the PR, the checklist from configuration —
+    so each is fenced by the prompt's boundary marker and redacted, while
+    the headings that tell the model what the fenced text *is* stay outside
+    the fence.
+
+    Args:
+        generated_questions: The run's per-PR questions, one per line.
+        checklist_text: The retained checklist items already formatted for
+            the prompt, empty when none were selected.
+        checklist_count: Number of items in ``checklist_text``, named in the
+            "Additional checks" heading.
+        boundary: The prompt's per-call boundary marker.
+
+    Returns:
+        The generated-questions body (a placeholder line when the run has
+        none; the template fences it) and the "Additional checks" section
+        for any retained checklist items (empty when there are none), whose
+        item body is fenced here.
+    """
+    questions = (
+        redact_prompt_text(
+            text=generated_questions.strip(),
+            source="generated questions",
+        )
+        or "(no questions were generated for this change; review against the rubric)"
+    )
+    checklist = checklist_text.strip()
+    if not checklist:
+        return questions, ""
+    count = checklist_count
+    additional = (
+        f"\n### Additional checks ({count} retained checklist "
+        f"{'item' if count == 1 else 'items'}; report a finding only where the "
+        "diff has a defect)\n\n"
+        f"<{boundary}>\n"
+        f"{redact_prompt_text(text=checklist, source='checklist')}\n"
+        f"</{boundary}>\n"
+    )
+    return questions, additional
+
+
+def _rubric_sections(*, inputs: PromptInputs, boundary: str) -> tuple[str, str]:
+    """Render the rubric sections from the shared prompt inputs.
 
     Args:
         inputs: Shared prompt material for the chunk being reviewed.
+        boundary: The prompt's per-call boundary marker.
 
     Returns:
-        Tuple of (checklist text, checklist item count).
+        See :func:`render_rubric_sections`.
     """
-    checklist_count = inputs.checklist_count
-    combined_checklist = inputs.checklist_text
-    extra_checklist = inputs.extra_checklist
-    if extra_checklist.strip():
-        combined_checklist = f"{inputs.checklist_text}\n\n{extra_checklist.strip()}"
-        checklist_count += extra_checklist.strip().count("\n") + (
-            1 if extra_checklist.strip() else 0
-        )
-    return combined_checklist, checklist_count
+    return render_rubric_sections(
+        generated_questions=inputs.extra_checklist,
+        checklist_text=inputs.checklist_text,
+        checklist_count=inputs.checklist_count,
+        boundary=boundary,
+    )
 
 
 def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
@@ -129,9 +182,9 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     redacted_diff = redact_prompt_text(text=chunk.diff, source="diff")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    combined_checklist, checklist_count = _combined_checklist(inputs=inputs)
-
     boundary = make_boundary_marker()
+    questions, additional_checks = _rubric_sections(inputs=inputs, boundary=boundary)
+
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
         base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
@@ -153,8 +206,9 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
             source="changed files",
         ),
         interaction_paths=inputs.interaction_paths,
-        checklist_count=checklist_count,
-        checklist=combined_checklist,
+        rubric=REVIEW_RUBRIC,
+        generated_questions=questions,
+        additional_checks=additional_checks,
         boundary=boundary,
         diff=redacted_diff,
         lint_results_section=redact_prompt_text(
@@ -163,7 +217,7 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
         ),
         strictness_section=inputs.strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=checklist_count),
+        output_rules=format_output_rules(),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -205,10 +259,10 @@ def build_git_native_review_prompt(
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
-    combined_checklist, checklist_count = _combined_checklist(inputs=inputs)
+    boundary = make_boundary_marker()
+    questions, additional_checks = _rubric_sections(inputs=inputs, boundary=boundary)
 
     git_diff_paths = " ".join(shlex.quote(path) for path in chunk.files)
-    boundary = make_boundary_marker()
     if embed_diff:
         diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
             boundary=boundary,
@@ -251,8 +305,9 @@ def build_git_native_review_prompt(
             source="changed files",
         ),
         interaction_paths=inputs.interaction_paths,
-        checklist_count=checklist_count,
-        checklist=combined_checklist,
+        rubric=REVIEW_RUBRIC,
+        generated_questions=questions,
+        additional_checks=additional_checks,
         boundary=boundary,
         diff_section=diff_section,
         lint_results_section=redact_prompt_text(
@@ -261,7 +316,7 @@ def build_git_native_review_prompt(
         ),
         strictness_section=inputs.strictness_section,
         output_schema=REVIEW_OUTPUT_SCHEMA,
-        output_rules=format_output_rules(checklist_count=checklist_count),
+        output_rules=format_output_rules(),
     )
     return REVIEW_SYSTEM, user_prompt
 
@@ -297,8 +352,12 @@ def estimate_prompt_overhead(
             lint_results or "",
         ],
     )
-    estimated = estimate_tokens(overhead_text)
-    return int(max(estimated, _PROMPT_OVERHEAD_TOKENS))
+    # The per-PR questions are generated after chunking and added to every
+    # chunk prompt, so their ceiling is reserved on top of the floored
+    # estimate rather than measured: adding it before the floor would let
+    # the floor swallow it whenever the measured overhead is small.
+    estimated = max(estimate_tokens(overhead_text), _PROMPT_OVERHEAD_TOKENS)
+    return int(estimated + MAX_RUN_QUESTIONS_TOKENS)
 
 
 def _tree_note_for(*, context: ReviewContext) -> str:
