@@ -11,6 +11,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.167.0] - 2026-09-20
+
+### Added
+
+- **ai/review**: gate unevidenced test-gap and contract-drift P2s to P3 (0.10) (#2729)
+  (6043b5e)
 - **ai/review**: a P2 evidence gate beside the P1 gate: a `test-gap`, `contract-drift`
   or `code-smell` finding reported at P2 without diff-local evidence (`evidence_style`
   other than `diff_local`) is moved to P3 at parse time, recorded on the finding as
@@ -34,14 +50,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   counted as open or fixed — and the first round after the upgrade reports the
   still-present findings as new once, with the count named in the sticky's findings
   heading (#2723)
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.166.0] - 2026-09-20
 
