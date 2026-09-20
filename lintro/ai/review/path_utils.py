@@ -84,28 +84,28 @@ def _meaningful_source_identify_tags(*, name: str) -> set[str]:
 #: source, config, workflows, docs — can carry the change a reviewer needs to
 #: see in full (#2731: a workflow-only PR had no context section at all).
 _NON_CONTEXT_IDENTIFY_TAGS: frozenset[str] = frozenset(
-    {"audio", "binary", "csv", "gif", "image", "jpeg", "png", "svg", "webp"},
+    {"audio", "binary", "csv", "dotenv", "gif", "image", "jpeg", "png", "svg", "webp"},
 )
 
 
 def is_context_eligible_path(path: str) -> bool:
     """Return True when a changed file's head content belongs in the prompt.
 
-    Wider than :func:`is_source_code_path`, which answers "can this file own
-    a test": the repository-context section (#2714) wants every readable
-    text file the PR changed — a workflow, a config, a doc — since the
-    reviewer otherwise has only the hunk and reads the rest with tools
-    (#2731). Snapshot fixtures and binary or media files stay out.
+    Wider than :func:`is_source_code_path` ("can this file own a test"): the
+    context section (#2714) wants every text file the PR changed — workflow,
+    config, doc — else the reviewer reads them with tools (#2731).
 
     Args:
         path: Repository-relative path.
 
     Returns:
         True when the file is text (by identify tag, or by the shell
-        heuristic for extensionless scripts) and not a fixture artifact.
+        heuristic for extensionless scripts) and not under a snapshot or
+        fixture directory. An extensionless ``README`` qualifies (it is
+        text a change may turn on); a ``.env`` file does not (its tag).
     """
     pure_path = PurePosixPath(path.replace("\\", "/"))
-    if _is_non_test_artifact(pure_path=pure_path):
+    if any(part.lower() in _ARTIFACT_DIR_PARTS for part in pure_path.parts[:-1]):
         return False
     tags = identify.tags_from_filename(pure_path.name)
     if tags & _NON_CONTEXT_IDENTIFY_TAGS:

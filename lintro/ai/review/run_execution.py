@@ -40,6 +40,7 @@ from lintro.ai.review.session import (
     is_timeout_stop,
     stop_hint,
     timeout_reason,
+    warn_nothing_reviewed,
 )
 from lintro.ai.review.synthesis import (
     SynthesisPassRequest,
@@ -292,9 +293,10 @@ async def finalize_completed_run(
         provider_seconds=provider_seconds,
         parse_merge_seconds=parse_merge_seconds,
     )
-    if not any(partial.files for partial in partials):
-        # Every chunk hit its turn limit twice and reviewed nothing (#2731):
-        # no narrative over a diff nobody read; a stopped run, exit 1.
+    if partials and not any(partial.files for partial in partials):
+        # Every chunk hit its turn limit twice (#2731): no narrative over a
+        # diff nobody read; a stopped run, exit 1. No chunk at all is not this.
+        warn_nothing_reviewed(ai_config=plan.ai_config)
         return replace(outcome, stopped_reason=NOTHING_REVIEWED_REASON, partial=True)
     if not should_run_synthesis(
         config=options.synthesis,

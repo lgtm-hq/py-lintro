@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "NOTHING_REVIEWED_REASON",
+    "warn_nothing_reviewed",
     "ChunkRunPlan",
     "ReviewSession",
     "ReviewSessionOptions",
@@ -465,6 +466,11 @@ def stop_hint(*, stopped_reason: str, ai_config: AIConfig) -> str:
     Returns:
         A one-sentence operator hint.
     """
+    if stopped_reason == NOTHING_REVIEWED_REASON:
+        return (
+            "Raise ai.transports.cli.max_turns, narrow --path, or review on the "
+            "api transport."
+        )
     if "SIGTERM" in stopped_reason:
         return (
             "The runner sent SIGTERM; coverage was persisted. "
@@ -478,3 +484,16 @@ def stop_hint(*, stopped_reason: str, ai_config: AIConfig) -> str:
         )
         return f"Raise {timeout_setting} or narrow --path to review the rest."
     return "Raise ai.max_cost_usd or narrow --path to review the rest."
+
+
+def warn_nothing_reviewed(*, ai_config: AIConfig) -> None:
+    """Log that the run reviewed no file, with the hint for the reason (#2731).
+
+    Args:
+        ai_config: Effective AI configuration, for the transport-specific hint.
+    """
+    logger.warning(
+        "Review reviewed no file — {reason}. {hint}",
+        reason=NOTHING_REVIEWED_REASON,
+        hint=stop_hint(stopped_reason=NOTHING_REVIEWED_REASON, ai_config=ai_config),
+    )

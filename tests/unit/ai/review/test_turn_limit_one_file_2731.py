@@ -11,9 +11,10 @@ non-zero exit.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from assertpy import assert_that
@@ -60,6 +61,8 @@ _HEAD = "jobs:\n  homebrew-tap:\n    permissions:\n      contents: write\n      
         ("docs/ai-features.md", True),
         ("renovate.json", True),
         ("scripts/ci/run", True),
+        ("README", True),
+        (".env", False),
         ("lintro/ai/review/severity_gate.py", True),
         ("assets/logo.png", False),
         ("assets/logo.svg", False),
@@ -274,17 +277,81 @@ def _partial(*, files: tuple[str, ...]) -> ChunkReviewPartial:
     )
 
 
+async def _finalize(*, partials: list[ChunkReviewPartial]) -> Any:
+    """Run the production finalizer over ``partials`` with synthesis stubbed.
+
+    Args:
+        partials: The chunk partials the run collected.
+
+    Returns:
+        ``(outcome, synthesis_calls)``.
+    """
+    from lintro.ai.review import run_execution
+    from lintro.ai.review.session import ReviewSessionOptions
+
+    calls: list[Any] = []
+
+    async def _synthesis(*, request: Any) -> Any:
+        calls.append(request)
+        raise AssertionError("synthesis must not run")
+
+    plan = MagicMock()
+    plan.ai_config = AIConfig(enabled=True, transport=AITransport.CLI)
+    plan.policy = MagicMock()
+    plan.timings = MagicMock()
+    progress = run_execution.RunProgress()
+    options = ReviewSessionOptions(
+        provider=MagicMock(),
+        ai_config=plan.ai_config,
+        depth=1,
+        checklist_items=[],
+        checklist_text="",
+        classifications=[],
+        synthesis=ReviewSynthesisConfig(enabled=True),
+    )
+    merged = MagicMock()
+    with (
+        patch.object(run_execution, "run_synthesis_pass", _synthesis),
+        patch.object(
+            run_execution,
+            "finalize_partials",
+            return_value=(merged, (), 0),
+        ),
+    ):
+        outcome = await run_execution.finalize_completed_run(
+            context=_request().context,
+            options=options,
+            plan=plan,
+            progress=progress,
+            partials=partials,
+            provider_seconds=1.0,
+            interrupt=asyncio.Event(),
+        )
+    return outcome, calls
+
+
+async def test_a_run_whose_chunks_reviewed_nothing_skips_synthesis() -> None:
+    """Through the finalizer: no narrative, stopped, the reason on the outcome."""
+    outcome, calls = await _finalize(partials=[_partial(files=()), _partial(files=())])
+
+    assert_that(calls).is_empty()
+    assert_that(outcome.partial).is_true()
+    assert_that(outcome.stopped_reason).is_equal_to(NOTHING_REVIEWED_REASON)
+
+
+async def test_a_run_with_no_chunk_at_all_is_not_the_nothing_reviewed_case() -> None:
+    """Zero partials (custom agents only, nothing to review) stay a completed run."""
+    outcome, _calls = await _finalize(partials=[])
+
+    assert_that(outcome.partial).is_false()
+    assert_that(outcome.stopped_reason).is_equal_to("")
+
+
 def test_synthesis_counts_chunks_that_reviewed_something() -> None:
-    """A turn-limited chunk answers with no files; it is not a reviewed chunk."""
+    """The gate itself: one reviewed chunk runs the pass, none does not."""
     config = ReviewSynthesisConfig(enabled=True)
-    partials = [_partial(files=()), _partial(files=())]
 
-    reviewed = sum(1 for p in partials if p.files)
-
-    assert_that(reviewed).is_equal_to(0)
-    assert_that(
-        should_run_synthesis(config=config, chunks_reviewed=reviewed),
-    ).is_false()
+    assert_that(should_run_synthesis(config=config, chunks_reviewed=0)).is_false()
     assert_that(should_run_synthesis(config=config, chunks_reviewed=1)).is_true()
 
 
@@ -301,7 +368,6 @@ def _result(*, stopped_reason: str) -> ReviewResult:
             files_total=1,
             checklist_items=0,
             stopped_reason=stopped_reason,
-            partial=bool(stopped_reason),
         ),
         summary="",
         findings=(),
@@ -313,7 +379,6 @@ def test_a_run_that_reviewed_nothing_is_a_stopped_run_and_exits_non_zero() -> No
     result = _result(stopped_reason=NOTHING_REVIEWED_REASON)
 
     assert_that(result.reviewed_nothing).is_true()
-    assert_that(result.metadata.partial).is_true()
     assert_that(result.has_p1_findings).is_false()
     assert_that(_result(stopped_reason="").reviewed_nothing).is_false()
     assert_that(_result(stopped_reason="timeout").reviewed_nothing).is_false()
