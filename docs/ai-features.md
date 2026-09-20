@@ -674,6 +674,57 @@ What it adds to the surfaces:
   _Review coverage completeness_ above) when the input was cut or the pass did not
   complete.
 
+### The verification pass (refute before you block)
+
+Every round makes **one more provider call after the synthesis pass and before the
+severity gates** (#2728, lintro-ops milestone 0 step 0.11) that asks the model to
+_refute_ the findings that decide the verdict. The reviewer prompt asks "what is
+wrong?"; this pass asks "is this finding real?", with each finding's cited hunk and the
+post-change code around it in front of the model, and only counts a refutation that
+cites `file:line` evidence from that material. It runs on the run's own model — the
+escalation-model knob belongs to the cascade issue, not this step.
+
+```yaml
+review:
+  verify: p1+low-confidence # default; also `p1` or `off`
+```
+
+- `p1+low-confidence` (default) re-checks every P1 and every finding the reviewer marked
+  `confidence: low`, P1s first, then low-confidence P2s, then P3s, at most 12 per round.
+  `p1` re-checks the P1s only. `off` skips the call. Questions are never re-checked:
+  they carry no severity and never move the verdict.
+- Three outcomes per finding. **Confirmed** (`unrefuted`): kept, marked `verified`.
+  **Refuted**: dropped from the round; the finding's location, title, severity and the
+  verifier's evidence are recorded so a dropped finding is never silent. **Weakened**:
+  the defect is real but the failure scenario did not hold at P1, so a P1 is moved to P2
+  with the downgrade reason `refutation_weakened`; a weakened P2 or P3 keeps its
+  severity and counts as confirmed. A refutation **without** evidence is not a
+  refutation: the finding is kept as confirmed rather than dropped on the verifier's
+  word alone.
+- **Order matters.** The built-in chunk and synthesis passes no longer gate severities
+  at parse time; the round's findings are gated once, after this pass, so the P1 and P2
+  evidence gates read the verified severities. Custom-agent findings carry an
+  author-declared severity policy and are never sent to the verifier or gated.
+- **A failure is never fatal.** A provider error, a budget stop, an interrupt, a turn
+  limit or an off-schema answer keeps the selected findings unverified and records a
+  `verification_failed` degradation — narrative, like the synthesis reasons, so
+  `findings_coverage_complete` is unaffected. With nothing selected the pass makes no
+  call.
+
+What you see:
+
+- `Verification re-checked 3 findings: 2 confirmed, 1 refuted and dropped.` under the
+  run stats on every surface (terminal, review body, sticky fine print);
+  `… did not complete; N findings kept unverified.` on a failed pass; nothing when the
+  pass had nothing to check, so a clean round reads exactly as before.
+- A `verification` block at the root of `--output json`, with `selected`, `confirmed`,
+  `refuted`, `downgraded`, `failed`, the `refutations` (each with `file`, `line`,
+  `severity`, `title`, `evidence`) and the call's tokens and cost, and
+  `"verified": true` on each confirmed finding. The run record carries `refuted` and
+  `verified` counts when non-zero, and the timings block a `verification` phase span.
+- With `ai.transcript_logging` on, the pass's prompt and answer are logged like every
+  other call, so a refutation can be read back in full.
+
 ### Diff-bounded findings
 
 Every chunk's findings are bounded to that chunk's diff before the P1 evidence gate
