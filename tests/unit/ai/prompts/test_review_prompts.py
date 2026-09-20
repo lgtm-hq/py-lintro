@@ -59,9 +59,10 @@ _USER_PROMPT_KWARGS = {
 }
 
 _P2_ELIGIBILITY = (
-    "Assign P2 when you can show verified incorrect behavior, a false documented "
-    "contract, or a missing test for a failure the change claims to cover."
+    "Assign P2 when you can show verified incorrect behavior on a reachable input, "
+    "or a documented contract the change makes false."
 )
+_TEST_GAP_IS_P3 = "A test gap is P3 unless the PR claims to fix a bug it does not test."
 _P2_WITHOUT_CONTRACT = (
     "A verified defect is P2 even when no caller assertion or documented contract "
     "exists yet."
@@ -395,6 +396,15 @@ def test_p2_eligibility_wording_is_shared_across_prompt_layers() -> None:
     assert_that(_collapsed(rules)).contains(_P2_ELIGIBILITY)
     assert_that(_collapsed(REVIEW_SYSTEM)).contains(_P2_WITHOUT_CONTRACT)
     assert_that(_collapsed(rules)).contains(_P2_WITHOUT_CONTRACT)
+    # #2723: coverage is a P3 concern on both layers, and neither names
+    # "incomplete test coverage" or "contract drift" as a P2 criterion.
+    assert_that(_collapsed(REVIEW_SYSTEM)).contains(_TEST_GAP_IS_P3)
+    assert_that(_collapsed(rules)).contains(_TEST_GAP_IS_P3)
+    for text in (REVIEW_SYSTEM, rules):
+        assert_that(_collapsed(text)).does_not_contain("incomplete test coverage")
+        assert_that(_collapsed(text)).does_not_contain(
+            "a missing test for a failure the change claims to cover",
+        )
 
 
 def _digest_finding(
