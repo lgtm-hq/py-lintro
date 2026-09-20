@@ -82,6 +82,16 @@ class ReviewFinding:
             ``contract-drift`` or ``code-smell`` P2 that is not
             ``diff_local`` is moved to P3 by the P2 evidence gate (#2723);
             speculative findings also get a verify-first line in prompts.
+        evidence_claimed: Whether the model claimed ``diff_local`` evidence
+            for this finding (#2723). The parser sets it from the label as
+            written, so an absent or unreadable label is ``False`` even
+            though ``evidence_style`` falls back to ``diff_local`` for display
+            and the convergence score. ``None`` (the default for a finding
+            built without a payload, such as a record replayed from state)
+            means "what ``evidence_style`` says"; read :attr:`is_evidenced`.
+        verified: True when the verification pass (#2728) tried to refute
+            this finding and could not. Surfaces render it as a mark; it
+            never changes severity or the verdict on its own.
         occurrences: Every ``file:line`` at which this pattern occurs. Empty
             when the model reported none, in which case
             :attr:`all_occurrences` falls back to the finding's own location.
@@ -142,6 +152,8 @@ class ReviewFinding:
     severity_downgraded: bool = False
     severity_downgrade_reason: SeverityDowngradeReason | None = None
     evidence_style: EvidenceStyle = EvidenceStyle.DIFF_LOCAL
+    evidence_claimed: bool | None = None
+    verified: bool = False
     occurrences: tuple[FindingOccurrence, ...] = field(default_factory=tuple)
     suggested_change: SuggestedChange | None = None
     suggestion_dropped: SuggestionDropReason | None = None
@@ -163,6 +175,18 @@ class ReviewFinding:
             finding's own file and line.
         """
         return self.occurrences or (FindingOccurrence(file=self.file, line=self.line),)
+
+    @property
+    def is_evidenced(self) -> bool:
+        """Whether the finding carries a diff-local evidence claim (#2723).
+
+        Returns:
+            ``evidence_claimed`` when the parser recorded one, else whether
+            ``evidence_style`` is ``diff_local``.
+        """
+        if self.evidence_claimed is not None:
+            return self.evidence_claimed
+        return self.evidence_style is EvidenceStyle.DIFF_LOCAL
 
     @property
     def is_question(self) -> bool:

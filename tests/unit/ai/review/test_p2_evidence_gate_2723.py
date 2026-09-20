@@ -237,12 +237,6 @@ def test_an_unstated_or_unreadable_style_is_not_evidence(raw: object) -> None:
     )
 
 
-def test_the_gate_needs_one_claim_per_finding() -> None:
-    """A misaligned claims list is a programming error, not a silent skip."""
-    with pytest.raises(ValueError, match="one entry per finding"):
-        apply_p2_evidence_gate(findings=[_finding()], claimed_styles=[])
-
-
 def test_questions_are_never_gated() -> None:
     """A question carries no severity semantics to gate."""
     (kept,) = apply_p2_evidence_gate(
@@ -456,6 +450,7 @@ def test_downgrades_are_counted_per_reason() -> None:
             SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO: 1,
             SeverityDowngradeReason.P2_UNEVIDENCED: 1,
             SeverityDowngradeReason.P1_THEN_P2_UNEVIDENCED: 0,
+            SeverityDowngradeReason.REFUTATION_WEAKENED: 0,
         },
     )
     assert_that(count_gate_firings(findings=findings)).is_equal_to((1, 1))

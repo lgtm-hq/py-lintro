@@ -67,6 +67,7 @@ class ReviewPhase(StrEnum):
     ADVERSARIAL = "adversarial"
     PARSE_MERGE = "parse_merge"
     SYNTHESIS = "synthesis"
+    VERIFICATION = "verification"
     VALIDATION = "validation"
 
 

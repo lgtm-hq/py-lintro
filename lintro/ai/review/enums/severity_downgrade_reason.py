@@ -25,11 +25,15 @@ class SeverityDowngradeReason(StrEnum):
             P1 without a failure scenario in a gated category without
             diff-local evidence, so it went P1 → P2 → P3. Kept as its own
             member so the counts and the notice credit both gates.
+        REFUTATION_WEAKENED: The verification pass (#2728) found the defect
+            real but its failure scenario not holding at P1, so the finding
+            was moved to P2 before the mechanical gates ran.
     """
 
     P1_NO_FAILURE_SCENARIO = auto()
     P2_UNEVIDENCED = auto()
     P1_THEN_P2_UNEVIDENCED = auto()
+    REFUTATION_WEAKENED = auto()
 
     @property
     def p1_gate_fired(self) -> bool:
