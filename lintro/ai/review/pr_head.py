@@ -11,6 +11,16 @@ for every provider call of the run and is removed when the run ends,
 whichever way it ends. When no repository is available the run is told so
 and every call goes out without tools (:attr:`ReviewCheckout.NONE`), never
 against the ambient tree.
+
+Ownership of the tree, from creation to removal, is split four ways:
+:class:`~lintro.ai.review.pr_head_guard.RemoveOnError` covers preparation
+(collection's filters and validation, then everything ``prepare_review`` does
+after collection); ``PreparedReview.discard()`` covers the adapter window
+between ``prepare_review`` and ``execute_review`` (a converged round, a
+provider that fails to construct); the run's own ``finally`` in
+``run_review_async`` covers execution; and the ``atexit`` registry here is the
+backstop for whatever none of them reached. A SIGKILL escapes all four and is
+swept by the next run.
 """
 
 from __future__ import annotations

@@ -357,3 +357,45 @@ def test_the_post_tail_hands_the_poster_a_marked_result_and_re_persists(
     )
     assert_that(persisted["inline_comment_ids"]).is_empty()
     assert_that(persisted["result"]).is_same_as(posted["result"])
+
+
+def test_a_provider_that_fails_to_build_discards_the_prepared_tree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The PR head tree (#2733) does not outlive a provider construction error."""
+    from lintro.ai.exceptions import AIError
+
+    def _boom(*args: Any, **kwargs: Any) -> Any:
+        raise AIError("no provider")
+
+    monkeypatch.setattr(review_command, "get_provider", _boom)
+    discarded: list[bool] = []
+    failed: list[Exception] = []
+
+    def _fail(exc: Exception, **kwargs: Any) -> None:
+        failed.append(exc)
+        raise SystemExit(1)  # what the real tail does
+
+    monkeypatch.setattr(review_command, "_fail_review_command", _fail)
+    options = SimpleNamespace(post=False, force_full=False, output_format="terminal")
+    prepared = SimpleNamespace(
+        ai_config=AIConfig(),
+        context=SimpleNamespace(changed_files=(), head_ref="deadbeef", base_ref="main"),
+        workspace_root=".",
+        discard=lambda: discarded.append(True),
+    )
+    with pytest.raises(SystemExit):
+        review_command._run_round(
+            options=cast(Any, options),
+            prepared=cast(Any, prepared),
+            policy=cast(Any, SimpleNamespace(prior_state=None)),
+            stamp=cast(Any, SimpleNamespace()),
+            targets=cast(
+                Any,
+                SimpleNamespace(state_pr=7, effective_repo="o/r", resolved_pr=None),
+            ),
+            console=cast(Any, SimpleNamespace()),
+        )
+
+    assert_that(discarded).is_equal_to([True])
+    assert_that(failed).is_length(1)

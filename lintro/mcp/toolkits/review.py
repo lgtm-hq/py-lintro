@@ -763,6 +763,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             transcript_command="review",
         )
     except (AIProviderRequiredError, ValueError) as exc:
+        prepared.discard()  # the review will not run (#2733)
         raise McpError(
             code=McpErrorCode.TOOL_UNAVAILABLE,
             message=str(exc),

@@ -41,6 +41,7 @@ from lintro.ai.review import (
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.orchestrator import run_review
+from lintro.ai.review.pr_head import remove_pr_head
 from lintro.ai.review.pr_head_guard import RemoveOnError
 from lintro.ai.review.preparation_resolvers import (
     apply_timeout,
@@ -204,6 +205,16 @@ class PreparedReview:
     lint_issue_count: int = 0
     lint_note: str = ""
     context_collection_seconds: float = field(default=0.0, compare=False)
+
+    def discard(self) -> None:
+        """Release the PR head tree of a review that will not run (#2733).
+
+        The adapters call it when they leave between :func:`prepare_review`
+        and :func:`execute_review` — a converged round they skip, a provider
+        that fails to construct. Idempotent; a review that ran removed its
+        tree already.
+        """
+        remove_pr_head(self.context.head_worktree)
 
     def with_max_cost_usd(self, *, max_cost_usd: float | None) -> PreparedReview:
         """Return a copy whose effective spend ceiling is ``max_cost_usd``.

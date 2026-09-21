@@ -997,12 +997,18 @@ def _finish_review(
         post=options.post,
     )
     if not options.force_full:
-        _check_convergence(
-            options=options,
-            lintro_config=lintro_config,
-            prior_state=prior_state,
-            targets=targets,
-        )
+        must_run = False
+        try:
+            _check_convergence(
+                options=options,
+                lintro_config=lintro_config,
+                prior_state=prior_state,
+                targets=targets,
+            )
+            must_run = True
+        finally:
+            if not must_run:
+                prepared.discard()  # a converged round never runs (#2733)
 
     cap, cap_source = resolve_max_cost_with_source(resolved_ai)
     result = _run_round(
@@ -1164,6 +1170,7 @@ def _run_round(
                 "Could not persist review-resume state; next round re-reviews",
             )
     except (AIError, ValueError) as exc:
+        prepared.discard()  # no-op after a run; the provider may have failed to build
         _fail_review_command(
             exc,
             output_format=options.output_format,

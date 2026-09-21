@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import subprocess  # nosec B404 - subprocess runs fixed git argv in a temp repo
 from collections.abc import Awaitable, Callable
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -1135,3 +1135,46 @@ def test_review_payload_reports_an_empty_successful_synthesis_pass(
     assert_that(payload["synthesis"]["findings_added"]).is_equal_to(0)
     for finding in payload["findings"]:
         assert_that(finding).does_not_contain_key("origin")
+
+
+def test_a_provider_that_fails_to_build_releases_the_prepared_tree(
+    repo: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The PR head tree (#2733) does not outlive a provider construction error."""
+    import lintro.ai.availability as availability
+    import lintro.ai.providers as providers
+    import lintro.ai.review.preparation as preparation
+    from lintro.ai.review.pr_head import PrHeadWorktree
+
+    monkeypatch.setattr(availability, "is_ai_available", lambda: True)
+    tree = tmp_path / "head-tree"
+    tree.mkdir()
+    real_prepare = preparation.prepare_review
+
+    def _prepare_with_tree(request: Any, *, resolved: Any) -> Any:
+        prepared = real_prepare(request, resolved=resolved)
+        return replace(
+            prepared,
+            context=replace(
+                prepared.context,
+                head_worktree=PrHeadWorktree(
+                    path=str(tree),
+                    repo_root="",
+                    head_oid="",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(preparation, "prepare_review", _prepare_with_tree)
+
+    def _boom(config: Any, **_kwargs: Any) -> Any:
+        raise ValueError("no provider")
+
+    monkeypatch.setattr(providers, "get_provider", _boom)
+
+    result, _payload_body = _call(workspace=repo, arguments={"base": "main"})
+
+    assert_that(result.is_error).is_true()
+    assert_that(tree.exists()).is_false()
