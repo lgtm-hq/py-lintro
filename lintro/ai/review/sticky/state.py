@@ -8,7 +8,7 @@ behind on an older sticky comment. Building the run record itself lives in
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
 from lintro.ai.review.finding_matcher import match_findings
@@ -53,10 +53,26 @@ def matcher_reviewed_ranges(
         ``{path: ((start, end), ...)}`` for the files the round narrowed, or
         ``None`` on a full round so the matcher resolves as before.
     """
-    if not result.metadata.reviewed_ranges:
+    return ranges_by_path(reviewed_ranges=result.metadata.reviewed_ranges)
+
+
+def ranges_by_path(
+    *,
+    reviewed_ranges: Sequence[tuple[str, int, int]],
+) -> dict[str, tuple[tuple[int, int], ...]] | None:
+    """Group ``(path, start, end)`` triples into the matcher's mapping.
+
+    Args:
+        reviewed_ranges: The triples a delta round recorded.
+
+    Returns:
+        ``{path: ((start, end), ...)}``, or ``None`` when there are none (a
+        full round), so the matcher resolves as before.
+    """
+    if not reviewed_ranges:
         return None
     ranges: dict[str, list[tuple[int, int]]] = {}
-    for path, start, end in result.metadata.reviewed_ranges:
+    for path, start, end in reviewed_ranges:
         ranges.setdefault(path, []).append((start, end))
     return {path: tuple(items) for path, items in ranges.items()}
 

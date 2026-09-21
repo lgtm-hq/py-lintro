@@ -12,7 +12,7 @@ re-derived.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -422,6 +422,8 @@ def plan_run(
             applied = apply_delta_hunks(chunks=chunks, hunks=hunks)
             chunks = applied.chunks
             reviewed_ranges = applied.reviewed_ranges
+            # The checkpoints match on the same ranges as the final round.
+            resume = replace(resume, reviewed_ranges=reviewed_ranges)
     recorded_merge_base = (
         merge_base(
             repo_root=repo_root,

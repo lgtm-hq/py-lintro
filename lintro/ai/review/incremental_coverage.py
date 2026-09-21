@@ -25,6 +25,7 @@ from lintro.ai.review.resume import records_for_reviewed
 from lintro.ai.review.sensitivity import filter_findings_by_policy
 from lintro.ai.review.severity_gate import apply_severity_gates
 from lintro.ai.review.state_store import state_dir, write_state_part
+from lintro.ai.review.sticky.state import ranges_by_path
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -109,6 +110,8 @@ def write_incremental_coverage_part(
         round_number=seed.next_round,
         head_sha=context.head_ref,
         reviewed_paths=actually_reviewed,
+        # A delta round (#2627) resolves only what it re-read, mid-run too.
+        reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
     )
     write_state_part(
         state=replace(

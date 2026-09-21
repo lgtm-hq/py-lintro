@@ -46,12 +46,18 @@ class ResumePlan:
         queue: Paths that need a provider read, in cap-safe order.
         hashes: Current normalized patch hash per path.
         eligible: Review-eligible paths.
+        reviewed_ranges: ``(path, start, end)`` new-file line ranges a delta
+            round (#2627) reads for the files it narrowed; set by the run
+            planner after the delta is applied so the mid-run checkpoints
+            and the final round match on the same inputs. Empty on a full
+            round.
     """
 
     classified: tuple[ClassifiedFile, ...]
     queue: tuple[str, ...]
     hashes: dict[str, str]
     eligible: tuple[str, ...]
+    reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
 
     def counts(self, *, reviewed_now: Sequence[str]) -> CoverageCounts:
         """Return counters after the provider finished *reviewed_now*."""
