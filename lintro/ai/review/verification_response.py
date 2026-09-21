@@ -55,7 +55,10 @@ def cites_finding(*, evidence: str, file: str) -> bool:
     # Look for the path itself rather than tokenizing the evidence: a path
     # with a space in it would otherwise be cut at the space.
     haystack = evidence.replace("\\", "/")
-    pattern = r"(?:^|[^\w/])(?:\./)?" + re.escape(target) + r":\d+(?!\d)"
+    # Left boundary: nothing that could be part of a longer path — no word
+    # character, slash, dot or dash — so ``foo-pkg/api.py:2``, ``x.pkg/…``
+    # and ``../pkg/…`` cannot cite ``pkg/api.py``; a leading ``./`` may.
+    pattern = r"(?:^|[^\w/.-])(?:\./)?" + re.escape(target) + r":\d+(?!\d)"
     return re.search(pattern, haystack) is not None
 
 
