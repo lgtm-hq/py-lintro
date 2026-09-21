@@ -63,6 +63,7 @@
       "confirmed": 0,
       "refuted": 0,
       "downgraded": 0,
+      "unanswered": 0,
       "failed": false,
       "refutations": [],
       "input_tokens": 0,

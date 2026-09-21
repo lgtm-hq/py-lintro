@@ -15,6 +15,7 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from lintro.ai.review.finding_identity import normalize_file_path
 from lintro.ai.review.merge import finalize_partials
 from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import ReviewRunOutcome
@@ -244,7 +245,21 @@ async def _verify_and_gate(
     # the round's custom subset is whatever survived that, not the objects
     # the agent pass produced.
     custom = tuple(f for f in outcome.filtered_findings if f.source)
-    builtin = tuple(f for f in outcome.filtered_findings if not f.source)
+    # A built-in finding on a path this round did not queue is converted to
+    # a re-read flag by ``reject_context_findings`` later; it must neither
+    # take one of the verifier's slots nor be refuted out of existence
+    # before that conversion, so it is carried past the pass and the gates.
+    queued = {normalize_file_path(path) for path in plan.resume.queue}
+    builtin = tuple(
+        f
+        for f in outcome.filtered_findings
+        if not f.source and normalize_file_path(f.file) in queued
+    )
+    carried = tuple(
+        f
+        for f in outcome.filtered_findings
+        if not f.source and normalize_file_path(f.file) not in queued
+    )
     with plan.timings.phase(name=ReviewPhase.VERIFICATION):
         verification = await run_verification_pass(
             request=VerificationPassRequest(
@@ -265,7 +280,7 @@ async def _verify_and_gate(
                 stop=interrupt,
             ),
         )
-    findings = apply_severity_gates(findings=verification.findings) + custom
+    findings = apply_severity_gates(findings=verification.findings) + carried + custom
     return replace(
         outcome,
         verification=verification.summary,

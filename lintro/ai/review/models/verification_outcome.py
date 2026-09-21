@@ -55,6 +55,8 @@ class VerificationSummary:
         confirmed: Findings the verifier could not refute.
         refuted: Findings the verifier refuted, dropped from the round.
         downgraded: P1s whose failure scenario did not hold, moved to P2.
+        unanswered: Selected findings the answer gave no usable verdict for;
+            they are kept unverified while the rest of the answer counts.
         failed: True when the pass ran but produced no usable answer; the
             selected findings are kept unverified.
         refutations: The refuted findings, for the fine print and the log.
@@ -68,6 +70,7 @@ class VerificationSummary:
     confirmed: int = 0
     refuted: int = 0
     downgraded: int = 0
+    unanswered: int = 0
     failed: bool = False
     refutations: tuple[RefutedFinding, ...] = field(default_factory=tuple)
     input_tokens: int = 0
@@ -86,6 +89,7 @@ class VerificationSummary:
             "confirmed": self.confirmed,
             "refuted": self.refuted,
             "downgraded": self.downgraded,
+            "unanswered": self.unanswered,
             "failed": self.failed,
             "refutations": [item.to_dict() for item in self.refutations],
             "input_tokens": self.input_tokens,

@@ -573,6 +573,41 @@ async def test_weakened_applies_only_to_a_p1() -> None:
     assert_that(result.summary.confirmed).is_equal_to(1)
 
 
+async def test_weakened_without_a_citation_is_confirmed() -> None:
+    """Lowering a blocker takes the same ``file:line`` evidence as dropping one."""
+    result, _call = await _pass(
+        findings=[_finding()],
+        content=_answer((1, "weakened", "")),
+    )
+
+    assert_that(result.findings[0].severity).is_equal_to(Severity.P1)
+    assert_that(result.findings[0].verified).is_true()
+    assert_that(result.summary.downgraded).is_equal_to(0)
+    assert_that(result.summary.confirmed).is_equal_to(1)
+
+
+async def test_unanswered_findings_are_counted_and_shown() -> None:
+    """A partial answer is not a failure, but what it skipped is on the record."""
+    result, _call = await _pass(
+        findings=[_finding(), _finding(title="Second")],
+        content=_answer((2, "unrefuted", "")),
+    )
+
+    assert_that(result.summary.failed).is_false()
+    assert_that(result.summary.unanswered).is_equal_to(1)
+    assert_that(result.summary.to_dict()["unanswered"]).is_equal_to(1)
+
+
+async def test_a_stop_already_set_never_starts_the_call() -> None:
+    """The provider coroutine is closed unstarted when the run is stopping."""
+    stop = asyncio.Event()
+    stop.set()
+    result, call = await _pass(findings=[_finding()], stop=stop)
+
+    call.assert_not_awaited()
+    assert_that(result.summary.failed).is_true()
+
+
 async def test_a_finding_without_a_verdict_stays_unverified() -> None:
     """A selected finding the answer skipped is kept, unmarked."""
     result, _call = await _pass(
@@ -971,6 +1006,8 @@ def test_custom_agent_findings_are_exempt() -> None:
     plan.ai_config = AIConfig(enabled=True, transport=AITransport.API)
     plan.budget = CostBudget(max_cost_usd=None)
     plan.repo_root = ""
+    plan.resume.queue = ("pkg/api.py",)
+    plan.resume.eligible = ("pkg/api.py",)
     prompts: list[str] = []
 
     async def _call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
@@ -1046,6 +1083,100 @@ def test_a_stopped_run_still_gates_its_built_in_findings() -> None:
     assert_that(by_title["Unevidenced test gap"].severity).is_equal_to(Severity.P3)
     assert_that(by_title["Agent P1"]).is_same_as(custom)
     assert_that(gated.total_findings).is_equal_to(3)
+
+
+def test_findings_off_the_queue_are_carried_past_the_verifier() -> None:
+    """A finding on an unqueued path is neither sent nor gated (#2734 Codex).
+
+    ``reject_context_findings`` converts it to a re-read flag later; it must
+    not take a verifier slot or be refuted away before that.
+    """
+    off_queue = _finding(title="Elsewhere", file="other/mod.py", failure_scenario="")
+    outcome = ReviewRunOutcome(
+        filtered_findings=(_finding(title="Model P1"), off_queue),
+        custom_findings=(),
+    )
+    plan = MagicMock()
+    plan.ai_config = AIConfig(enabled=True, transport=AITransport.API)
+    plan.budget = CostBudget(max_cost_usd=None)
+    plan.repo_root = ""
+    plan.resume.queue = ("pkg/api.py",)
+    plan.resume.eligible = ("pkg/api.py", "other/mod.py")
+    prompts: list[str] = []
+
+    async def _call(*, user_prompt: str, **_kwargs: Any) -> AIResponse:
+        prompts.append(user_prompt)
+        return _response(content=_answer((1, "unrefuted", "")))
+
+    with patch("lintro.ai.review.provider_call.call_ai", side_effect=_call):
+        gated = asyncio.run(
+            _verify_and_gate(
+                context=_context(),
+                options=ReviewSessionOptions(
+                    provider=MagicMock(),
+                    ai_config=plan.ai_config,
+                    depth=1,
+                    checklist_items=[],
+                    checklist_text="",
+                    classifications=[],
+                ),
+                plan=plan,
+                outcome=outcome,
+                interrupt=asyncio.Event(),
+            ),
+        )
+
+    assert_that(prompts[0]).does_not_contain("Elsewhere")
+    assert_that(prompts[0]).contains("Verify the 1 findings")
+    by_title = {f.title: f for f in gated.filtered_findings}
+    assert_that(by_title["Elsewhere"]).is_same_as(off_queue)
+    assert_that(by_title["Model P1"].verified).is_true()
+
+
+async def test_the_depth_3_sweep_parses_ungated_like_the_chunk_pass() -> None:
+    """A sweep P1 without a failure scenario reaches the round as a P1.
+
+    The gates run once per round after the verification pass; a P1 the
+    adversarial sweep reported must not be lowered before the verifier sees
+    it (#2734 Codex).
+    """
+    from lintro.ai.review.adversarial_pass import run_adversarial_pass
+
+    response = _response(
+        content=json.dumps(
+            {
+                "findings": [
+                    {
+                        **_raw_p1(failure_scenario=""),
+                        "title": "Sweep P1",
+                    },
+                ],
+            },
+        ),
+    )
+    provider = MagicMock()
+    provider.name = "anthropic"
+    with patch(
+        "lintro.ai.review.provider_call.call_ai",
+        new=AsyncMock(return_value=response),
+    ):
+        sweep = await run_adversarial_pass(
+            chunk=ReviewChunk(
+                id=1,
+                files=["pkg/api.py"],
+                diff=_DIFF,
+                relationship=REL_SINGLE_FILE,
+            ),
+            provider=provider,
+            ai_config=AIConfig(enabled=True, transport=AITransport.API),
+            prior_findings=(),
+            budget=CostBudget(max_cost_usd=None),
+            eligible_paths=frozenset({"pkg/api.py"}),
+        )
+
+    assert_that([f.title for f in sweep.findings]).is_equal_to(["Sweep P1"])
+    assert_that(sweep.findings[0].severity).is_equal_to(Severity.P1)
+    assert_that(sweep.findings[0].severity_downgraded).is_false()
 
 
 # --- config -------------------------------------------------------------------

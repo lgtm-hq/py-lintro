@@ -698,9 +698,9 @@ review:
   verifier's evidence are recorded so a dropped finding is never silent. **Weakened**:
   the defect is real but the failure scenario did not hold at P1, so a P1 is moved to P2
   with the downgrade reason `refutation_weakened`; a weakened P2 or P3 keeps its
-  severity and counts as confirmed. A refutation **without** evidence is not a
-  refutation: the finding is kept as confirmed rather than dropped on the verifier's
-  word alone.
+  severity and counts as confirmed. A refutation or a weakening **without** a
+  `file:line` citation into the finding's own file is no evidence: the finding is kept
+  as confirmed rather than dropped or lowered on the verifier's word alone.
 - **Order matters.** The built-in chunk and synthesis passes no longer gate severities
   at parse time; the round's findings are gated once, after this pass, so the P1 and P2
   evidence gates read the verified severities. Custom-agent findings carry an
@@ -718,11 +718,12 @@ What you see:
   `… did not complete; N findings kept unverified.` on a failed pass; nothing when the
   pass had nothing to check, so a clean round reads exactly as before.
 - A `verification` block at the root of `--output json`, with `selected`, `confirmed`,
-  `refuted`, `downgraded`, `failed`, the `refutations` (each with `file`, `line`,
-  `severity`, `title`, `evidence`) and the call's tokens and cost, and
-  `"verified": true` on each finding the pass accepted (confirmed at its severity, or a
-  P1 moved to P2). The run record carries `refuted` and `verified` counts when non-zero,
-  and the timings block a `verification` phase span.
+  `refuted`, `downgraded`, `unanswered` (selected findings the answer skipped; kept
+  unverified), `failed`, the `refutations` (each with `file`, `line`, `severity`,
+  `title`, `evidence`) and the call's tokens and cost, and `"verified": true` on each
+  finding the pass accepted (confirmed at its severity, or a P1 moved to P2). The run
+  record carries `refuted` and `verified` counts when non-zero, and the timings block a
+  `verification` phase span.
 - With `ai.transcript_logging` on, the pass's prompt and answer are logged like every
   other call, so a refutation can be read back in full.
 

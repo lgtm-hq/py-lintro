@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -41,21 +41,18 @@ from lintro.ai.review import provider_call
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
-from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
-from lintro.ai.review.enums.verification_outcome import VerificationOutcome
 from lintro.ai.review.models.coverage_degradation import (
     SYNTHESIS_CHUNK_INDEX,
     CoverageDegradation,
 )
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.verification_outcome import (
-    RefutedFinding,
     VerificationSummary,
 )
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 from lintro.ai.review.verification_prompt import render_verification_findings
 from lintro.ai.review.verification_response import (
-    cites_finding,
+    apply_verification_verdicts,
     parse_verification_answer,
 )
 from lintro.ai.sanitize import make_boundary_marker
@@ -225,6 +222,10 @@ async def _await_call_until_stop(
     """
     if stop is None:
         return await call
+    if stop.is_set():
+        # Already stopping: do not start provider-side work only to cancel it.
+        call.close()
+        raise _VerificationInterruptedError
     call_task = asyncio.ensure_future(call)
     stop_task = asyncio.ensure_future(stop.wait())
     try:
@@ -241,104 +242,6 @@ async def _await_call_until_stop(
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
-
-
-def _apply(
-    *,
-    findings: Sequence[ReviewFinding],
-    indices: Sequence[int],
-    verdicts: dict[int, tuple[VerificationOutcome, str]],
-) -> tuple[tuple[ReviewFinding, ...], int, int, int, tuple[RefutedFinding, ...]]:
-    """Rewrite the round's findings with the verifier's verdicts.
-
-    A refutation without evidence is not a refutation (the prompt's first
-    rule), so it is kept as confirmed rather than dropping a finding on the
-    verifier's word alone; a downgrade only applies to a P1.
-
-    Args:
-        findings: The round's findings.
-        indices: Which of them were verified, in prompt order.
-        verdicts: The parsed verdicts by 1-based position.
-
-    Returns:
-        The rewritten findings, the confirmed / refuted / downgraded counts,
-        and the refutation records.
-    """
-    rewritten = list(findings)
-    drop: set[int] = set()
-    confirmed = refuted = downgraded = 0
-    refutations: list[RefutedFinding] = []
-    for position, index in enumerate(indices, start=1):
-        verdict = verdicts.get(position)
-        if verdict is None:
-            continue
-        outcome, evidence = verdict
-        finding = findings[index]
-        if outcome is VerificationOutcome.REFUTED and not cites_finding(
-            evidence=evidence,
-            file=finding.file,
-        ):
-            # A citation into some other file is not evidence from the
-            # material the verifier was shown; the finding stands.
-            logger.info(
-                "Verification refuted {title!r} without citing {file}; kept.",
-                title=finding.title,
-                file=finding.file,
-            )
-            evidence = ""
-        if outcome is VerificationOutcome.REFUTED and evidence:
-            drop.add(index)
-            refuted += 1
-            refutations.append(
-                RefutedFinding(
-                    file=finding.file,
-                    line=finding.line,
-                    severity=str(finding.severity),
-                    title=finding.title,
-                    evidence=evidence,
-                ),
-            )
-            logger.info(
-                "Verification refuted {title!r} at {file}:{line}: {evidence}",
-                title=finding.title,
-                file=finding.file,
-                line=finding.line,
-                evidence=evidence,
-            )
-            continue
-        if outcome is VerificationOutcome.DOWNGRADED:
-            if finding.severity is Severity.P1:
-                logger.info(
-                    "Verification weakened {title!r} at {file}:{line} to P2: {why}",
-                    title=finding.title,
-                    file=finding.file,
-                    line=finding.line,
-                    why=evidence or "no reason given",
-                )
-                rewritten[index] = replace(
-                    finding,
-                    severity=Severity.P2,
-                    severity_downgraded=True,
-                    severity_downgrade_reason=(
-                        SeverityDowngradeReason.REFUTATION_WEAKENED
-                    ),
-                    verified=True,
-                )
-                downgraded += 1
-                continue
-            # The prompt scopes ``weakened`` to P1; a lower band that came
-            # back weakened is kept at its severity and counts as confirmed,
-            # said out loud so the answer is not silently reinterpreted.
-            logger.info(
-                "Verification answered 'weakened' for {severity} {title!r}; "
-                "only a P1 is moved, kept as confirmed.",
-                severity=str(finding.severity),
-                title=finding.title,
-            )
-        rewritten[index] = replace(finding, verified=True)
-        confirmed += 1
-    kept = tuple(item for index, item in enumerate(rewritten) if index not in drop)
-    return kept, confirmed, refuted, downgraded, tuple(refutations)
 
 
 def _failed(
@@ -470,11 +373,18 @@ async def run_verification_pass(
         # selected finding unverified, so both are the failed pass.
         logger.warning("The verification pass answered outside its schema.")
         return _failed(findings=findings, selected=len(indices), usage=usage)
-    kept, confirmed, refuted, downgraded, refutations = _apply(
+    kept, confirmed, refuted, downgraded, refutations = apply_verification_verdicts(
         findings=findings,
         indices=indices,
         verdicts=verdicts,
     )
+    unanswered = len(indices) - confirmed - refuted - downgraded
+    if unanswered:
+        logger.warning(
+            "The verification pass left {} of {} selected findings unanswered.",
+            unanswered,
+            len(indices),
+        )
     return VerificationPass(
         findings=kept,
         summary=VerificationSummary(
@@ -483,6 +393,7 @@ async def run_verification_pass(
             confirmed=confirmed,
             refuted=refuted,
             downgraded=downgraded,
+            unanswered=unanswered,
             refutations=refutations,
             input_tokens=usage[0],
             output_tokens=usage[1],
