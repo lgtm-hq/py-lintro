@@ -6994,6 +6994,68 @@ def _api_smoke_matrix() -> list[dict[str, str]]:
     return cast(list[dict[str, str]], module.build_matrix(rows=rows)["include"])
 
 
+# The hosts ``scripts/utils/install-uv.sh`` downloads the uv release asset
+# from. GitHub moved release assets from objects.githubusercontent.com to
+# release-assets.githubusercontent.com; a job that bootstraps uv under an egress
+# block needs both, and the smoke lost every provider row to the missing one
+# before any smoke ran (#2741).
+_UV_RELEASE_ASSET_HOSTS = frozenset(
+    {
+        "objects.githubusercontent.com:443",
+        "release-assets.githubusercontent.com:443",
+    },
+)
+_SETUP_ENV_ACTION = "./.github/actions/setup-env"
+
+
+def _blocked_jobs_that_bootstrap_uv() -> dict[str, dict[str, Any]]:
+    """Return every egress-blocked job that installs uv through ``setup-env``.
+
+    Returns:
+        ``{"<workflow file>:<job id>": job}`` for each job whose steps use the
+        local ``setup-env`` action under a harden-runner ``block`` policy.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for path in _workflow_paths():
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        for job_id, job in (data.get("jobs") or {}).items():
+            steps = job.get("steps") or []
+            if not any(step.get("uses") == _SETUP_ENV_ACTION for step in steps):
+                continue
+            harden = next(
+                (
+                    step
+                    for step in steps
+                    if str(step.get("uses", "")).startswith("step-security/")
+                ),
+                None,
+            )
+            if harden is None or harden["with"].get("egress-policy") != "block":
+                continue
+            found[f"{path.name}:{job_id}"] = job
+    return found
+
+
+def test_every_blocked_job_that_bootstraps_uv_allows_both_release_asset_hosts() -> None:
+    """Every egress-blocked uv bootstrap must allow both release-asset hosts.
+
+    Pinned across all workflows rather than on the smoke alone so the next
+    host move is caught wherever the bootstrap runs (#2741).
+    """
+    jobs = _blocked_jobs_that_bootstrap_uv()
+    assert_that(jobs).described_as("blocked jobs using setup-env").contains_key(
+        f"{_API_SMOKE_WORKFLOW}:{_API_SMOKE_JOB}",
+    )
+    missing = {
+        where: sorted(_UV_RELEASE_ASSET_HOSTS - _harden_runner_endpoints(job=job))
+        for where, job in jobs.items()
+        if not _harden_runner_endpoints(job=job) >= _UV_RELEASE_ASSET_HOSTS
+    }
+    assert_that(missing).described_as(
+        "uv release-asset hosts missing from a blocked bootstrap job",
+    ).is_empty()
+
+
 def test_provider_api_smoke_runs_weekly_and_on_demand() -> None:
     """The live provider signal must be scheduled, since nothing else is.
 

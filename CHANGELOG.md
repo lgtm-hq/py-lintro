@@ -28,6 +28,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.168.2] - 2026-09-21
+
+### Fixed
+
+- **ci**: let the provider smoke download uv under the egress block (#2745) (5851348)
+
 ## [0.168.1] - 2026-09-21
 
 ### Changed
