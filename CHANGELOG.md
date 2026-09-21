@@ -11,6 +11,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.168.0] - 2026-09-21
+
+### Added
+
 - **ai/review**: a per-round verification pass (#2728, lintro-ops milestone 0 step
   0.11): one provider call after the synthesis pass and before the severity gates asks
   the run's own model to refute every P1 and every low-confidence finding against its
@@ -27,14 +41,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   evidence gates at parse time; the round's findings are gated once in the finalizer,
   after the verification pass, so the gates read the verified severities (#2728).
   Custom-agent findings are exempt from both the verifier and the round-level gates.
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.167.0] - 2026-09-20
 
