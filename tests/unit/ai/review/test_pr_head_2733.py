@@ -671,6 +671,78 @@ def test_a_base_checkout_with_a_fetchable_head_still_reads_the_head(
     remove_pr_head(context.head_worktree)
 
 
+def test_an_interrupt_while_finishing_the_context_removes_the_tree(
+    scratch: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Any exception after allocation removes the tree, not only review errors."""
+    from lintro.ai.review import pr_head
+
+    monkeypatch.chdir(scratch["work"])
+    with (
+        patch(
+            "lintro.ai.review.context.collection._collect_pr_context",
+            return_value=_pr_context(scratch),
+        ),
+        patch(
+            "lintro.ai.review.context.collection._populate_post_image_files",
+            side_effect=KeyboardInterrupt,
+        ),
+        pytest.raises(KeyboardInterrupt),
+    ):
+        collect_review_context(pr_number=1, repo="o/r")
+
+    assert_that(pr_head._LIVE).is_empty()
+    assert_that(_git(scratch["work"], "worktree", "list").count("pr-heads")).is_zero()
+
+
+def test_a_preparation_step_that_raises_removes_the_tree(
+    scratch: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure between collection and the run does not leak the tree."""
+    from lintro.ai.resolved_ai_config import ResolvedAIConfig
+    from lintro.ai.review import pr_head
+    from lintro.ai.review.preparation import ReviewRunRequest, prepare_review
+    from lintro.config.lintro_config import LintroConfig
+
+    monkeypatch.chdir(scratch["work"])
+    request = ReviewRunRequest(
+        workspace_root=scratch["work"],
+        lintro_config=LintroConfig(),
+        pr_number=1,
+        repo="o/r",
+    )
+    resolved = ResolvedAIConfig(
+        config=AIConfig(enabled=True, transport=AITransport.CLI),
+        sources={},
+    )
+    with (
+        patch(
+            "lintro.ai.review.context.collection._collect_pr_context",
+            return_value=_pr_context(scratch),
+        ),
+        patch(
+            "lintro.ai.review.preparation.classify_changed_files",
+            side_effect=RuntimeError("boom"),
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        prepare_review(request, resolved=resolved)
+
+    assert_that(pr_head._LIVE).is_empty()
+    assert_that(_git(scratch["work"], "worktree", "list").count("pr-heads")).is_zero()
+
+
+def test_an_unreadable_cache_is_skipped_by_the_sweep(
+    scratch: dict[str, Any],
+) -> None:
+    """A sweep that cannot list the cache returns instead of raising."""
+    root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
+    with patch("lintro.ai.review.pr_head.Path.iterdir", side_effect=OSError("nope")):
+        prune_stale_pr_worktrees(repo_root=str(root))
+
+
 def test_a_filter_that_leaves_nothing_removes_the_tree(
     scratch: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,

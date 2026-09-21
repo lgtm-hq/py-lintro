@@ -423,7 +423,14 @@ def prune_stale_pr_worktrees(*, repo_root: str) -> None:
         return
     with contextlib.suppress(ReviewContextError):
         _run_git(args=["-C", repo_root, "worktree", "prune"], check=False)
-    for stale in base.iterdir():
+    try:
+        entries = list(base.iterdir())
+    except OSError as exc:
+        # A sweep that cannot read the cache is skipped, never a failure of
+        # the checkout that asked for it.
+        logger.warning("Cannot sweep the PR head cache ({}); skipping.", exc)
+        return
+    for stale in entries:
         # Only what this module wrote, and never through a symlink.
         if stale.is_symlink() or not stale.is_dir():
             continue
