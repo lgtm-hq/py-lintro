@@ -52,10 +52,11 @@ def cites_finding(*, evidence: str, file: str) -> bool:
     target = normalize_file_path(file)
     if not target:
         return False
-    return any(
-        normalize_file_path(match.group(1)) == target
-        for match in _CITATION.finditer(evidence)
-    )
+    # Look for the path itself rather than tokenizing the evidence: a path
+    # with a space in it would otherwise be cut at the space.
+    haystack = evidence.replace("\\", "/")
+    pattern = r"(?:^|[^\w/])(?:\./)?" + re.escape(target) + r":\d+(?!\d)"
+    return re.search(pattern, haystack) is not None
 
 
 def parse_verification_answer(

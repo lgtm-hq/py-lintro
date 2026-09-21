@@ -528,6 +528,7 @@ async def test_refutation_citing_another_file_is_not_a_refutation() -> None:
         ("other/api.py:2", False),
         ("nonexistent.py:999", False),
         ("pkg/api.py is fine", False),
+        ("xpkg/api.py:2", False),
     ],
 )
 def test_cites_finding_needs_the_findings_exact_path(
@@ -549,6 +550,10 @@ def test_cites_finding_normalizes_the_findings_own_spelling() -> None:
     """A finding path with whitespace or ``./`` still matches its citation."""
     assert_that(cites_finding(evidence="pkg/api.py:2", file=" ./pkg/api.py ")).is_true()
     assert_that(cites_finding(evidence="pkg/api.py:2", file="")).is_false()
+    # A path with a space is cited whole, not cut at the space.
+    assert_that(
+        cites_finding(evidence="see dir name/api.py:2 here", file="dir name/api.py"),
+    ).is_true()
 
 
 async def test_weakened_with_a_citation_applies_to_a_padded_path() -> None:
