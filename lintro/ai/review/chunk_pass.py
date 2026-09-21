@@ -138,7 +138,11 @@ async def review_chunk(
         ),
     )
 
-    if plan.depth >= 3:
+    if plan.depth >= 3 and partial.files:
+        # A chunk the main pass left unreviewed (both turn-limited attempts,
+        # #2731) gets no sweep: a third tool-enabled call over the same
+        # input would repeat the failure, and its findings would bypass the
+        # round's verification and gates on the stopped path.
         tracker.on_step(chunk_index=chunk_index, step="adversarial sweep")
         with recorder.phase(name=ReviewPhase.ADVERSARIAL):
             adversarial, sweep_degradations = await run_degradable_depth_pass(

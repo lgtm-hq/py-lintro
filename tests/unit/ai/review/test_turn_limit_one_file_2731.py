@@ -19,16 +19,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.cli_bounds import CliCallOptions, current_cli_call_options
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AITurnLimitError
+from lintro.ai.exceptions import AIProviderError, AITurnLimitError
 from lintro.ai.invoke import call_ai
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review import chunk_split_retry, provider_call, response_pipeline
+from lintro.ai.review.enums.coverage_degradation_reason import (
+    CoverageDegradationReason,
+)
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -234,6 +239,170 @@ async def test_a_single_shot_call_drops_the_questions_and_the_tools() -> None:
 
     assert_that(captured["no_tools"]).is_false()
     assert_that(captured["user_prompt"]).contains("publish-binaries.yml declare")
+
+
+async def test_output_exhaustion_on_the_single_shot_retry_splits_single_shot() -> None:
+    """A turn limit then output exhaustion: the split halves stay single-shot."""
+    seen: list[ChunkReviewRequest] = []
+    two_files = replace(
+        _request(),
+        chunk=ReviewChunk(
+            id=1,
+            files=[_WORKFLOW, "docs/other.md"],
+            diff=_DIFF,
+            relationship=REL_SINGLE_FILE,
+        ),
+    )
+
+    async def _invoke(*, request: ChunkReviewRequest) -> Any:
+        seen.append(request)
+        if len(seen) == 1:
+            raise AITurnLimitError("a", input_tokens=1, output_tokens=1, turns=13)
+        if len(seen) == 2:
+            raise AIProviderError('stop_reason":"max_tokens')
+        return "call"
+
+    parsed = ChunkReviewPartial(
+        findings=(),
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        files=(_WORKFLOW,),
+        turns=1,
+    )
+    with (
+        patch.object(chunk_split_retry, "invoke_chunk_review", _invoke),
+        patch.object(chunk_split_retry, "_parse_call", AsyncMock(return_value=parsed)),
+    ):
+        result = await chunk_split_retry.review_chunk_main_pass(request=two_files)
+
+    # First attempt, the single-shot retry, then one call per half.
+    assert_that([r.single_shot for r in seen]).is_equal_to([False, True, True, True])
+    assert_that([len(r.chunk.files) for r in seen]).is_equal_to([2, 2, 1, 1])
+    assert_that(result.files).is_not_empty()
+
+
+async def test_a_split_half_gets_its_own_single_shot_retry() -> None:
+    """Output exhaustion then a turn limit on one half: that half retries."""
+    seen: list[ChunkReviewRequest] = []
+    two_files = replace(
+        _request(),
+        chunk=ReviewChunk(
+            id=1,
+            files=[_WORKFLOW, "docs/other.md"],
+            diff=_DIFF,
+            relationship=REL_SINGLE_FILE,
+        ),
+    )
+
+    async def _invoke(*, request: ChunkReviewRequest) -> Any:
+        seen.append(request)
+        if len(seen) == 1:
+            raise AIProviderError('stop_reason":"max_tokens')
+        if len(seen) == 2:
+            raise AITurnLimitError("a", input_tokens=1, output_tokens=1, turns=13)
+        return "call"
+
+    parsed = ChunkReviewPartial(
+        findings=(),
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        files=(_WORKFLOW,),
+        turns=1,
+    )
+    with (
+        patch.object(chunk_split_retry, "invoke_chunk_review", _invoke),
+        patch.object(chunk_split_retry, "_parse_call", AsyncMock(return_value=parsed)),
+    ):
+        await chunk_split_retry.review_chunk_main_pass(request=two_files)
+
+    # Whole chunk, first half (limit), first half single-shot, second half.
+    assert_that([r.single_shot for r in seen]).is_equal_to([False, False, True, False])
+
+
+async def test_the_schema_reminder_after_a_single_shot_retry_stays_single_shot() -> (
+    None
+):
+    """A malformed single-shot answer is re-asked without tools too."""
+    captured: list[dict[str, Any]] = []
+
+    async def _call_ai(**kwargs: Any) -> AIResponse:
+        captured.append(kwargs)
+        return AIResponse(content="{}", model="m", provider="anthropic")
+
+    with patch.object(provider_call, "call_ai", _call_ai):
+        await response_pipeline.parse_review_payload_with_recovery(
+            response=AIResponse(content="not json at all", model="m", provider="a"),
+            request=_request(single_shot=True),
+            elapsed=0.1,
+        )
+
+    assert_that(captured).is_length(1)
+    assert_that(captured[0]["no_tools"]).is_true()
+
+
+async def test_no_depth_3_sweep_over_a_chunk_the_main_pass_never_reviewed() -> None:
+    """Two turn-limited attempts end the chunk; no third, tool-enabled call."""
+    from lintro.ai.review import chunk_pass
+
+    calls: list[str] = []
+    limited = ChunkReviewPartial(
+        findings=(),
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        files=(),
+        turns=26,
+        coverage_degradations=(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.TURN_LIMIT_REACHED,
+                chunk_index=0,
+                limit=12,
+            ),
+        ),
+    )
+
+    async def _main(**_kwargs: Any) -> ChunkReviewPartial:
+        calls.append("main")
+        return limited
+
+    async def _sweep(**_kwargs: Any) -> Any:
+        calls.append("sweep")
+        raise AssertionError("the sweep must not run")
+
+    base = _request()
+    plan = MagicMock()
+    plan.depth = 3
+    plan.timings = None
+    plan.progress = None
+    plan.ai_config = base.ai_config
+    plan.classifications = []
+    plan.generated_questions = ""
+    plan.context = base.context
+    plan.provider = MagicMock()
+    plan.checklist_text = ""
+    plan.checklist_items = []
+    plan.lint_results = None
+    plan.strictness_section = ""
+    plan.budget = CostBudget(max_cost_usd=None)
+    plan.repo_root = ""
+    plan.use_one_shot = True
+    plan.diff_budget = 100_000
+    plan.repo_context = None
+    plan.context_budget = None
+    with (
+        patch.object(chunk_pass, "review_chunk_main_pass", _main),
+        patch.object(chunk_pass, "run_adversarial_pass", _sweep),
+    ):
+        partial = await chunk_pass.review_chunk(
+            chunk=base.chunk,
+            chunk_index=0,
+            plan=plan,
+        )
+
+    assert_that(calls).is_equal_to(["main"])
+    assert_that(partial.files).is_empty()
 
 
 class _Recorder:

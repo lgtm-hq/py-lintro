@@ -303,12 +303,7 @@ async def invoke_chunk_review(
 async def parse_review_payload_with_recovery(
     *,
     response: AIResponse,
-    chunk: ReviewChunk,
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    budget: CostBudget,
-    repo_root: str,
-    use_one_shot: bool,
+    request: ChunkReviewRequest,
     elapsed: float,
 ) -> tuple[AIResponse, dict[str, Any]]:
     """Parse a chunk response, recovering non-JSON answers instead of failing.
@@ -321,12 +316,11 @@ async def parse_review_payload_with_recovery(
 
     Args:
         response: The response from the main chunk call.
-        chunk: The chunk under review, used to locate the fallback finding.
-        provider: Configured AI provider instance.
-        ai_config: AI configuration for retries, budget, and timeouts.
-        budget: Session cost budget tracker.
-        repo_root: Absolute path to the repository under review.
-        use_one_shot: When True, avoid durable provider sessions.
+        request: The chunk request the call was made for: its chunk locates
+            the fallback finding, and its provider, configuration, budget
+            and call shape (durable session, single-shot) are reused for the
+            schema-reminder retry so a single-shot retry stays single-shot
+            (#2731).
         elapsed: Wall-clock seconds the main chunk call consumed.
 
     Returns:
@@ -338,6 +332,9 @@ async def parse_review_payload_with_recovery(
             ceiling. That is a graceful stop the caller finalizes a partial
             review on, so it is never recovered as prose.
     """
+    chunk, provider, ai_config = request.chunk, request.provider, request.ai_config
+    budget, repo_root = request.budget, request.repo_root
+    use_one_shot, no_tools = request.use_one_shot, request.single_shot
     try:
         return response, parse_review_response(content=response.content)
     except ValueError as exc:
@@ -389,6 +386,8 @@ async def parse_review_payload_with_recovery(
             use_one_shot=use_one_shot,
             cli_schema=cli_schema_for_review(transport=ai_config.transport),
             timeout=retry_timeout,
+            # A single-shot retry's schema reminder stays single-shot (#2731).
+            no_tools=no_tools,
         )
     except AICostBudgetExceededError:
         # The cost cap is a graceful stop the caller finalizes a partial review

@@ -169,12 +169,7 @@ async def _parse_call(
     """
     response, payload = await parse_review_payload_with_recovery(
         response=call.response,
-        chunk=request.chunk,
-        provider=request.provider,
-        ai_config=request.ai_config,
-        budget=request.budget,
-        repo_root=request.repo_root,
-        use_one_shot=request.use_one_shot,
+        request=request,
         elapsed=call.elapsed,
     )
     partial = payload_to_partial(
@@ -256,7 +251,15 @@ async def _retry_after_exhaustion(
     for position, half in enumerate(halves):
         half_request = replace(request, chunk=half)
         try:
-            call = await invoke_chunk_review(request=half_request)
+            try:
+                call = await invoke_chunk_review(request=half_request)
+            except AITurnLimitError as limit:
+                # A half gets the same one single-shot retry a whole chunk
+                # does; a second limit degrades the half, not the chunk.
+                partials.append(
+                    await _retry_after_turn_limit(request=half_request, first=limit),
+                )
+                continue
             partials.append(await _parse_call(request=half_request, call=call))
         except AICostBudgetExceededError:
             raise
@@ -357,6 +360,8 @@ async def _retry_after_turn_limit(
 
     Raises:
         AICostBudgetExceededError: When the retry hits the session cost cap.
+        AIError: When the retry fails for a reason that is neither a turn
+            limit nor output exhaustion.
     """
     logger.warning(
         "CLI review hit its per-call turn limit on chunk {index} ({error}); "
@@ -369,7 +374,21 @@ async def _retry_after_turn_limit(
         call = await invoke_chunk_review(request=retry)
     except AICostBudgetExceededError:
         raise
-    except AITurnLimitError as again:
+    except AIError as exc:
+        if not isinstance(exc, AITurnLimitError):
+            if not is_cli_output_exhaustion(exc):
+                raise
+            # The single-shot answer overran the output ceiling: split as the
+            # first attempt would have, keeping the single-shot shape.
+            partial = await _retry_after_exhaustion(request=retry)
+            return replace(
+                partial,
+                input_tokens=partial.input_tokens + first.input_tokens,
+                output_tokens=partial.output_tokens + first.output_tokens,
+                cost_estimate=partial.cost_estimate + first.cost_estimate,
+                turns=_add_turns(partial.turns, first.turns),
+            )
+        again = exc
         logger.warning(
             "CLI review hit its per-call turn limit again on chunk {index}; "
             "leaving its files unreviewed for a later round: {error}",
@@ -394,7 +413,7 @@ async def _retry_after_turn_limit(
                 ),
             ),
         )
-    partial = await _parse_call(request=request, call=call)
+    partial = await _parse_call(request=retry, call=call)
     # The stopped first attempt was billed too; the chunk reports both.
     return replace(
         partial,

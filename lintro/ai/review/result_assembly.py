@@ -184,7 +184,7 @@ def assemble_review_result(
     # are charged from the outcome, so a run that stopped before any chunk
     # completed still reports their cost.
     total_input, total_output, total_cost = _run_usage(outcome=outcome)
-    chunks_reviewed = len(outcome.partials)
+    chunks_reviewed = sum(1 for item in outcome.partials if item.files)  # #2731
     # The round's narrative comes from the synthesis pass (lintro-ops
     # milestone 0, decision A); chunks report findings only. A failed or
     # disabled pass leaves both ``None`` and the surfaces render their
