@@ -13,9 +13,9 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **ai/review**: the repository-context section admits every changed text file (a
-  workflow, a config, a doc), not only source code, so a one-file workflow PR no longer
-  reviews from the hunk alone (#2731).
+- **ai/review**: the repository-context section admits every eligible changed text file
+  (a workflow, a config, a doc), not only source code, so a one-file workflow PR no
+  longer reviews from the hunk alone (#2731).
 
 ### Deprecated
 

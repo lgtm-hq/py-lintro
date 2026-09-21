@@ -123,8 +123,14 @@ async def review_chunk(
         # unreviewed instead of claiming them. A truncated chunk keeps its
         # file here and says so: the file is credited at its hash so the
         # round converges, and its coverage record carries the truncation.
+        # The partial's own file list is authoritative once any turn-limit
+        # degradation is present: a whole-chunk limit reports no files and a
+        # limited half reports none of its own, while the surviving half's
+        # files stay so its coverage — and its depth-3 sweep — is kept
+        # (#2731). Only a partial with no such degradation falls back to the
+        # chunk's files.
         files=(
-            ()
+            main_pass.files
             if any(
                 item.reason is CoverageDegradationReason.TURN_LIMIT_REACHED
                 for item in main_pass.coverage_degradations

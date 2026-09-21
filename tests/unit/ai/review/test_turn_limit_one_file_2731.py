@@ -405,6 +405,177 @@ async def test_no_depth_3_sweep_over_a_chunk_the_main_pass_never_reviewed() -> N
     assert_that(partial.files).is_empty()
 
 
+def _parsed(*files: str) -> ChunkReviewPartial:
+    """A parsed partial covering ``files``.
+
+    Args:
+        *files: The files it reviewed.
+
+    Returns:
+        The partial.
+    """
+    return ChunkReviewPartial(
+        findings=(),
+        input_tokens=1,
+        output_tokens=1,
+        cost_estimate=0.0,
+        files=tuple(files),
+        turns=1,
+    )
+
+
+async def _drive(
+    request: ChunkReviewRequest,
+    script: list[Exception | str],
+) -> tuple[ChunkReviewPartial, list[ChunkReviewRequest]]:
+    """Run the main pass with the provider answering from ``script``.
+
+    Args:
+        request: The chunk request.
+        script: Per call: an exception to raise, or ``"ok"`` to answer.
+
+    Returns:
+        The partial and every request the provider saw, in order.
+    """
+    seen: list[ChunkReviewRequest] = []
+
+    async def _invoke(*, request: ChunkReviewRequest) -> Any:
+        seen.append(request)
+        step = script[len(seen) - 1]
+        if isinstance(step, Exception):
+            raise step
+        return "call"
+
+    async def _parse(*, request: ChunkReviewRequest, call: Any) -> ChunkReviewPartial:
+        return _parsed(*request.chunk.files)
+
+    with (
+        patch.object(chunk_split_retry, "invoke_chunk_review", _invoke),
+        patch.object(chunk_split_retry, "_parse_call", _parse),
+    ):
+        partial = await chunk_split_retry.review_chunk_main_pass(request=request)
+    return partial, seen
+
+
+def _limit(turns: int = 13) -> AITurnLimitError:
+    return AITurnLimitError(
+        "limit",
+        input_tokens=10,
+        output_tokens=1,
+        cost_estimate=0.1,
+        turns=turns,
+    )
+
+
+def _exhausted() -> AIProviderError:
+    return AIProviderError('stop_reason":"max_tokens')
+
+
+async def test_row_5_single_file_unchanged_retry_then_limit_goes_single_shot() -> None:
+    """Exhaustion on one file, then a turn limit on the unchanged retry."""
+    partial, seen = await _drive(_request(), [_exhausted(), _limit(), "ok"])
+
+    assert_that([r.single_shot for r in seen]).is_equal_to([False, False, True])
+    assert_that(partial.files).is_equal_to((_WORKFLOW,))
+    reasons = [d.reason for d in partial.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED)
+    assert_that(reasons).does_not_contain(CoverageDegradationReason.TURN_LIMIT_REACHED)
+
+
+async def test_row_6_single_file_single_shot_exhaustion_then_limit_is_terminal() -> (
+    None
+):
+    """Turn limit → single-shot exhaustion → unchanged retry → turn limit: done.
+
+    The path the two reviewers named: it records ``TURN_LIMIT_REACHED`` and
+    returns, rather than raising.
+    """
+    partial, seen = await _drive(_request(), [_limit(), _exhausted(), _limit()])
+
+    assert_that([r.single_shot for r in seen]).is_equal_to([False, True, True])
+    assert_that(partial.files).is_empty()
+    reasons = [d.reason for d in partial.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.TURN_LIMIT_REACHED)
+    # Both limited attempts are billed once each.
+    assert_that(partial.input_tokens).is_equal_to(20)
+
+
+def _two_file_request() -> ChunkReviewRequest:
+    return replace(
+        _request(),
+        chunk=ReviewChunk(
+            id=1,
+            files=[_WORKFLOW, "docs/other.md"],
+            diff=_DIFF,
+            relationship=REL_SINGLE_FILE,
+        ),
+    )
+
+
+async def test_a_limited_half_keeps_the_surviving_halves_files() -> None:
+    """One half limited twice, the other reviewed: its files (and sweep) stay."""
+    from lintro.ai.review import chunk_pass
+
+    partial, seen = await _drive(
+        _two_file_request(),
+        [_exhausted(), _limit(), _limit(), "ok"],
+    )
+
+    assert_that([r.single_shot for r in seen]).is_equal_to([False, False, True, False])
+    assert_that(partial.files).is_equal_to(("docs/other.md",))
+    reasons = [d.reason for d in partial.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.TURN_LIMIT_REACHED)
+    assert_that(partial.input_tokens).is_equal_to(21)
+
+    # chunk_pass treats the partial's files as authoritative once a turn
+    # limit is on record, so the surviving half is not erased.
+    with patch.object(
+        chunk_pass,
+        "review_chunk_main_pass",
+        AsyncMock(return_value=partial),
+    ):
+        base = _request()
+        plan = MagicMock()
+        plan.depth = 1
+        plan.timings = None
+        plan.progress = None
+        plan.ai_config = base.ai_config
+        plan.classifications = []
+        plan.generated_questions = ""
+        plan.context = base.context
+        plan.provider = MagicMock()
+        plan.checklist_text = ""
+        plan.checklist_items = []
+        plan.lint_results = None
+        plan.strictness_section = ""
+        plan.budget = CostBudget(max_cost_usd=None)
+        plan.repo_root = ""
+        plan.use_one_shot = True
+        plan.diff_budget = 100_000
+        plan.repo_context = None
+        plan.context_budget = None
+        scoped = await chunk_pass.review_chunk(
+            chunk=_two_file_request().chunk,
+            chunk_index=0,
+            plan=plan,
+        )
+    assert_that(scoped.files).is_equal_to(("docs/other.md",))
+
+
+async def test_a_halves_failed_single_shot_retry_keeps_its_billed_usage() -> None:
+    """Half limited, then its single-shot retry fails outright: usage kept."""
+    partial, seen = await _drive(
+        _two_file_request(),
+        [_exhausted(), _limit(), AIProviderError("boom"), "ok"],
+    )
+
+    assert_that(partial.files).is_equal_to(("docs/other.md",))
+    # The limited first attempt (10) plus the surviving half (1).
+    assert_that(partial.input_tokens).is_equal_to(11)
+    reasons = [d.reason for d in partial.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.SPLIT_HALF_FAILED)
+
+
 class _Recorder:
     """A provider double that records the bounds in force when called."""
 

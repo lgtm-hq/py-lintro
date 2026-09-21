@@ -131,7 +131,11 @@ async def finalize_completed_run(
         # Every chunk hit its turn limit twice (#2731): no narrative over a
         # diff nobody read; a stopped run, exit 1. No chunk at all is not this.
         warn_nothing_reviewed(ai_config=plan.ai_config)
-        return replace(outcome, stopped_reason=NOTHING_REVIEWED_REASON, partial=True)
+        return replace(
+            gate_built_in_findings(outcome=outcome),
+            stopped_reason=NOTHING_REVIEWED_REASON,
+            partial=True,
+        )
     if not should_run_synthesis(
         config=options.synthesis,
         # A turn-limited chunk still yields a partial, with no files: count
