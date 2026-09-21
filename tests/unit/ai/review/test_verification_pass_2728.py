@@ -612,6 +612,14 @@ def test_cites_finding_normalizes_the_findings_own_spelling() -> None:
             file="target.py",
         ),
     ).is_false()
+    # A bare token glued to a quoted citation (either side) is not a citation:
+    # masking the quoted span must not create a token boundary.
+    assert_that(
+        cites_finding(evidence='target.py:7"dir name/other.py:2"', file="target.py"),
+    ).is_false()
+    assert_that(
+        cites_finding(evidence='"dir name/other.py:2"target.py:7', file="target.py"),
+    ).is_false()
     # A lone trailing ``)`` belongs to the path; only a matching pair is a wrapper.
     assert_that(cites_finding(evidence="see pkg/(x).py:3", file="pkg/(x).py")).is_true()
     # A path with a space must be quoted; unquoted it is cut at the space.

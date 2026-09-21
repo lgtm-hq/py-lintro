@@ -50,6 +50,8 @@ _BARE_CITATION = re.compile(r"^(.+?):(\d+(?:-\d+)?)$")
 #: a matching pair (``"…"``, ``` `…` ```, ``(…)``, ``[…]``), never a lone
 #: trailing ``)`` that may belong to the path.
 _TRAILING = ",;."
+#: Stands in for a consumed quoted citation; never part of a valid token.
+_MASK = "\x00"
 _PAIRS = (('"', '"'), ("`", "`"), ("(", ")"), ("[", "]"), ("'", "'"))
 
 
@@ -90,8 +92,11 @@ def cited_paths(*, evidence: str) -> tuple[str, ...]:
         for m in _QUOTED_CITATION.finditer(text)
     ]
     # The bare scan runs over what is left once the quoted citations are
-    # blanked out, so a span nested inside one is never seen again on its own.
-    for token in _QUOTED_CITATION.sub(" ", text).split():
+    # masked, so a span nested inside one is never seen again on its own.
+    # The mask is a non-whitespace sentinel, not a space: a bare token glued
+    # to a quoted citation stays glued and fails closed rather than gaining a
+    # token boundary it did not have.
+    for token in _QUOTED_CITATION.sub(_MASK, text).split():
         match = _BARE_CITATION.match(_unwrap(token.rstrip(_TRAILING)))
         if match:
             paths.append(normalize_file_path(match.group(1)))
