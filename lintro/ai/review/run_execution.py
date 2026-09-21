@@ -93,6 +93,7 @@ def chunk_run_plan(
         progress=plan.tracker,
         repo_root=plan.repo_root,
         use_one_shot=plan.use_one_shot,
+        tools_disabled=plan.tools_disabled,
         strictness_section=plan.strictness_section,
         diff_budget=plan.diff_budget,
         max_parallel_calls=plan.max_parallel_calls,

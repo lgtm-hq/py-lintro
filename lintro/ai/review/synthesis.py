@@ -266,6 +266,7 @@ class SynthesisPassRequest:
         budget: Session cost budget tracker.
         repo_root: Absolute path to the repository under review.
         use_one_shot: When True, avoid durable provider sessions.
+        no_tools: Tools off (#2733).
         diff_budget: Token budget the whole prompt must fit — the digest,
             the changed-file list, and the diff together.
         stop: Event set by the run's interrupt handler. When it fires while
@@ -284,6 +285,7 @@ class SynthesisPassRequest:
     budget: CostBudget
     repo_root: str = ""
     use_one_shot: bool = True
+    no_tools: bool = False
     diff_budget: int = 1
     stop: asyncio.Event | None = None
 
@@ -303,8 +305,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
     - the **cross-chunk contradiction guard** (#2265), so a phantom that does
       name a failure mechanism but claims a file the PR changed was never
       touched is tagged ``cross_chunk_contradiction`` and moved down one band
-      — the pass sees the whole PR, so a claim like that is wrong here for
-      the same reason it is wrong in a chunk;
+      (the pass sees the whole PR, so such a claim is wrong here too);
     - deduplication against the chunk findings, then the configured
       ``max_findings`` cap. Both run on the guarded severity, so a tagged
       finding cannot survive a dedupe drop under a different fingerprint, and
@@ -375,6 +376,7 @@ async def run_synthesis_pass(*, request: SynthesisPassRequest) -> SynthesisPass:
                 budget=budget,
                 repo_root=repo_root or None,
                 use_one_shot=use_one_shot,
+                no_tools=request.no_tools,
                 cli_schema=cli_schema_for_synthesis(transport=ai_config.transport),
             ),
             stop=stop,

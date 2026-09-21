@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.cli_bounds import CallShape
 from lintro.ai.exceptions import AIProviderError, AITurnLimitError
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.prompts.review import (
@@ -63,6 +64,9 @@ __all__ = [
     "question_pass_degradations",
     "run_question_pass",
 ]
+
+#: A plain call: durable session allowed, tools on.
+_DEFAULT_SHAPE = CallShape()
 
 #: Upper bound on questions kept from the model's answer.
 MAX_RUN_QUESTIONS = 10
@@ -160,7 +164,7 @@ async def generate_run_questions(
     budget: CostBudget,
     diff_budget: int,
     repo_root: str = "",
-    use_one_shot: bool = False,
+    shape: CallShape = _DEFAULT_SHAPE,
     stop: asyncio.Event | None = None,
 ) -> RunQuestions:
     """Generate the run's per-PR questions with one provider call.
@@ -172,7 +176,7 @@ async def generate_run_questions(
         budget: Session cost budget tracker.
         diff_budget: Token budget for the embedded whole-PR diff.
         repo_root: Absolute path to the repository under review.
-        use_one_shot: When True, avoid durable provider sessions.
+        shape: Session reuse and tool availability for the call.
         stop: Event set by the run's SIGTERM/SIGINT handler; when it fires
             during the call the call is abandoned and the run stops.
 
@@ -231,7 +235,8 @@ async def generate_run_questions(
             # cut-off answer would fail the whole pass after paying for it.
             max_tokens=2048,
             repo_root=repo_root or None,
-            use_one_shot=use_one_shot,
+            use_one_shot=shape.use_one_shot,
+            no_tools=shape.no_tools,
         ),
         stop=stop,
     )
@@ -423,7 +428,7 @@ async def run_question_pass(
                 # is a standalone whole-PR question, not a chunk, and it runs
                 # first, so a durable session would carry its transcript into
                 # every chunk review.
-                use_one_shot=True,
+                shape=CallShape(use_one_shot=True, no_tools=plan.tools_disabled),
                 stop=stop,
             )
         except Exception as exc:

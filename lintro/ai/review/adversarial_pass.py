@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.cli_bounds import CallShape
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.prompts.review import (
     REVIEW_ADVERSARIAL_SWEEP_TEMPLATE,
@@ -38,6 +39,9 @@ if TYPE_CHECKING:
 
 __all__ = ["run_adversarial_pass"]
 
+#: A plain call: durable session allowed, tools on.
+_DEFAULT_SHAPE = CallShape()
+
 
 async def run_adversarial_pass(
     *,
@@ -47,7 +51,7 @@ async def run_adversarial_pass(
     prior_findings: tuple[ReviewFinding, ...],
     budget: CostBudget,
     repo_root: str = "",
-    use_one_shot: bool = False,
+    shape: CallShape = _DEFAULT_SHAPE,
     eligible_paths: frozenset[str] = frozenset(),
 ) -> ChunkReviewPartial:
     """Run depth-3 adversarial sweep for missed findings.
@@ -59,7 +63,7 @@ async def run_adversarial_pass(
         prior_findings: Findings already reported for this chunk.
         budget: Session cost budget tracker.
         repo_root: Absolute path to the repository under review.
-        use_one_shot: When True, avoid durable provider sessions.
+        shape: Session reuse and tool availability for the call.
         eligible_paths: Review-eligible paths of the run; a finding on one
             of them outside the chunk becomes a re-read flag (#2719).
 
@@ -90,7 +94,8 @@ async def run_adversarial_pass(
         user_prompt=prompt,
         budget=budget,
         repo_root=repo_root or None,
-        use_one_shot=use_one_shot,
+        use_one_shot=shape.use_one_shot,
+        no_tools=shape.no_tools,
     )
     try:
         payload = json.loads(strip_json_fences(content=response.content))

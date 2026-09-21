@@ -74,6 +74,10 @@ class CoverageDegradationReason(StrEnum):
             redacted diff instead (#2685). Not a coverage loss: the embedded
             path is the default one and records its own truncation; kept so
             the run shows the opt-in was not honoured.
+        NO_TREE_FOR_AGENT: A ``--pr`` review had no repository to check the
+            PR head out in (#2733), so every CLI call went out without tools
+            and the agent reviewed from the diff and the context section
+            alone. A narrative degradation: every file was still reviewed.
     """
 
     OUTPUT_EXHAUSTION_RETRIED = auto()
@@ -86,6 +90,7 @@ class CoverageDegradationReason(StrEnum):
     SPLIT_HALF_FAILED = auto()
     TURN_LIMIT_REACHED = auto()
     DELEGATED_DIFF_EMBEDDED = auto()
+    NO_TREE_FOR_AGENT = auto()
 
 
 #: Degradations of the whole-PR synthesis pass (#2702, #2704).
@@ -105,5 +110,6 @@ NARRATIVE_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
         *SYNTHESIS_DEGRADATION_REASONS,
         CoverageDegradationReason.VERIFICATION_FAILED,
         CoverageDegradationReason.DELEGATED_DIFF_EMBEDDED,
+        CoverageDegradationReason.NO_TREE_FOR_AGENT,
     },
 )

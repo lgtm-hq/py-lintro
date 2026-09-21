@@ -36,6 +36,7 @@ __all__ = [
     "CliCallOptions",
     "bound_cli_call",
     "current_cli_call_options",
+    "CallShape",
     "resolve_max_turns",
 ]
 
@@ -53,6 +54,21 @@ DEFAULT_MAX_TURNS = MappingProxyType(
         AICallKind.FIX: 1,
     },
 )
+
+
+@dataclass(frozen=True, slots=True)
+class CallShape:
+    """How a pass's provider call is made, beyond its prompt (#2733).
+
+    Attributes:
+        use_one_shot: When True, avoid durable provider sessions.
+        no_tools: When True the CLI agent gets no tools and answers from the
+            prompt alone — the whole run's shape when it has no tree to read
+            (``ReviewCheckout.NONE``), a single call's after a turn limit.
+    """
+
+    use_one_shot: bool = False
+    no_tools: bool = False
 
 
 @dataclass(frozen=True, slots=True)

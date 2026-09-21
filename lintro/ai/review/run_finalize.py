@@ -167,6 +167,7 @@ async def finalize_completed_run(
                 # Never reuse the built-in review's durable session: the pass
                 # is a standalone whole-PR question, not a chunk.
                 use_one_shot=True,
+                no_tools=plan.tools_disabled,
                 diff_budget=plan.synthesis_diff_budget,
                 # The chunk fan-out already raced this event so a SIGTERM can
                 # persist coverage inside the runner's shutdown window; the
@@ -289,6 +290,7 @@ async def _verify_and_gate(
                 allowed_paths=frozenset(plan.resume.eligible),
                 # A standalone question over the round, not a chunk.
                 use_one_shot=True,
+                no_tools=plan.tools_disabled,
                 stop=interrupt,
             ),
         )
