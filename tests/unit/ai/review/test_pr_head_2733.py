@@ -117,6 +117,18 @@ def scratch(tmp_path: Path) -> dict[str, Any]:
     }
 
 
+def _cache(root: Path) -> Path:
+    """The worktree cache of a repository: under its git directory.
+
+    Args:
+        root: The repository's top level.
+
+    Returns:
+        ``<root>/.git/lintro/pr-heads``.
+    """
+    return root / ".git" / "lintro" / "pr-heads"
+
+
 def _pr_context(scratch: dict[str, Any]) -> ReviewContext:
     """The context ``gh`` would have collected for PR 1.
 
@@ -268,7 +280,7 @@ def test_a_stale_worktree_from_a_killed_run_is_pruned(
     # A run of another process (pid 99999) was killed: its worktree and lock
     # file are still on disk, but nothing holds the lock.
     root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
-    stale = root / ".lintro-cache" / "ai" / "pr-heads" / "1-deadbeef0000-99999"
+    stale = _cache(root) / "1-deadbeef0000-99999"
     stale.parent.mkdir(parents=True, exist_ok=True)
     _git(
         scratch["work"],
@@ -346,7 +358,10 @@ def test_without_a_repository_the_run_has_no_tree_and_no_tools(
     assert_that(Path(context.repo_root).resolve()).is_not_equal_to(
         elsewhere.resolve(),
     )
-    assert_that(list(Path(context.repo_root).iterdir())).is_empty()
+    # An empty repository: nothing but its own ``.git``.
+    assert_that([p.name for p in Path(context.repo_root).iterdir()]).is_equal_to(
+        [".git"],
+    )
     assert_that(context.checkout).is_equal_to(ReviewCheckout.NONE)
     assert_that(_tree_note_for(context=context)).contains("no tool is available")
     remove_pr_head(context.head_worktree)
@@ -541,10 +556,10 @@ def test_a_symlinked_cache_path_is_never_used_or_swept(
     scratch: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A ``pr-heads`` symlink at the repository root must not be followed."""
+    """A ``pr-heads`` symlink under the git directory must not be followed."""
     monkeypatch.chdir(scratch["work"])
     root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
-    cache = root / ".lintro-cache" / "ai"
+    cache = _cache(root).parent
     cache.mkdir(parents=True)
     (cache / "pr-heads").symlink_to(root, target_is_directory=True)
     # A bystander that a sweep through the symlink would reach.
@@ -564,7 +579,7 @@ def test_the_sweep_leaves_directories_it_did_not_write(
 ) -> None:
     """Only ``<pr>-<oid12>-<pid>`` entries are ever removed."""
     root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
-    base = root / ".lintro-cache" / "ai" / "pr-heads"
+    base = _cache(root)
     base.mkdir(parents=True)
     (base / "notes").mkdir()
     (base / "notes" / "keep.txt").write_text("mine\n")
@@ -572,18 +587,19 @@ def test_the_sweep_leaves_directories_it_did_not_write(
     assert_that((base / "notes" / "keep.txt").exists()).is_true()
 
 
-# --- scenario 3: the dogfood base checkout is unchanged ------------------------
+# --- scenario 3: the ambient checkout is never the fallback -------------------
 
 
-def test_a_base_checkout_keeps_its_honest_label_when_the_head_cannot_be_fetched(
+def test_a_dirty_base_checkout_with_no_fetchable_head_yields_no_tree(
     scratch: dict[str, Any],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Tree at the base and no fetchable head: checkout BASE, ambient root, tools on."""
+    """A matching commit with local edits must not become the agent's tree."""
     _git(scratch["work"], "checkout", "-q", scratch["base"])
+    (scratch["work"] / "api.py").write_text("def send(payload):\n    leak()\n")
+    (scratch["work"] / "secrets.txt").write_text("hunter2\n")
     monkeypatch.chdir(scratch["work"])
-    # ``gh`` collection probes the checkout itself; the stub returns what the
-    # probe would have found for a tree at the base.
+    # The probe found the base commit; the head cannot be fetched.
     with (
         patch(
             "lintro.ai.review.context.collection._collect_pr_context",
@@ -596,9 +612,42 @@ def test_a_base_checkout_keeps_its_honest_label_when_the_head_cannot_be_fetched(
     ):
         context = collect_review_context(pr_number=1, repo="o/r")
 
-    assert_that(context.checkout).is_equal_to(ReviewCheckout.BASE)
-    assert_that(context.head_worktree).is_none()
-    assert_that(_tree_note_for(context=context)).contains("pre-change")
+    assert context.head_worktree is not None
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.NONE)
+    assert_that(Path(context.repo_root).resolve()).is_not_equal_to(
+        scratch["work"].resolve(),
+    )
+    # An empty repository: nothing but its own ``.git``.
+    assert_that([p.name for p in Path(context.repo_root).iterdir()]).is_equal_to(
+        [".git"],
+    )
+    assert_that(_tree_note_for(context=context)).contains("no tool is available")
+    remove_pr_head(context.head_worktree)
+
+
+def test_a_planted_lock_symlink_is_refused(
+    scratch: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``<worktree>.lock`` symlink is never written through."""
+    monkeypatch.chdir(scratch["work"])
+    root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
+    base = _cache(root)
+    base.mkdir(parents=True)
+    target = root / "victim.txt"
+    target.write_text("keep me\n")
+    name = f"1-{scratch['head'][:12]}-{os.getpid()}"
+    (base / f"{name}.lock").symlink_to(target)
+
+    worktree = checkout_pr_head(pr_number=1, head_oid=scratch["head"])
+
+    assert_that(worktree).is_none()
+    assert_that(target.read_text()).is_equal_to("keep me\n")
+    assert_that((base / f"{name}.lock").is_symlink()).is_true()
+    # The sweep does not follow it either.
+    (base / name).mkdir()
+    prune_stale_pr_worktrees(repo_root=str(root))
+    assert_that(target.read_text()).is_equal_to("keep me\n")
 
 
 def test_a_base_checkout_with_a_fetchable_head_still_reads_the_head(

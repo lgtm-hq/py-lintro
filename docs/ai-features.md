@@ -1708,13 +1708,14 @@ So a corpus replay of a merged PR from a moved-on `main` no longer lets the agen
 today's code and cite lines the PR never had (#2732), and the "working tree side not
 determined" instruction is gone for `--pr`. When the command does not run inside a clone
 of the repository (or the head cannot be fetched and the checkout is neither end of the
-range), the run has **no tree**: every CLI call runs in an empty temporary directory and
-without tools (the diff is always embedded, never delegated to `git diff`), the prompt
-says so, and the run records a `no_tree_for_agent` narrative degradation. The worktree
-cache path is never followed through a symlink, and the prune only removes the
-`<pr>-<oid>-<pid>` entries lintro wrote whose owning process no longer holds its lock,
-so concurrent reviews on one clone keep their trees. A checkout that honestly holds the
-base or the head keeps that label when the head cannot be fetched.
+range), the run has **no tree**: every CLI call runs in an empty temporary repository
+and without tools (the diff is always embedded, never delegated to `git diff`), the
+prompt says so, and the run records a `no_tree_for_agent` narrative degradation. The
+ambient checkout is never the fallback, whatever commit it is at: a matching commit says
+nothing about uncommitted edits. The worktree cache lives under the git directory, where
+no tracked file can plant a symlink, and is never followed through one anyway; the prune
+only removes the `<pr>-<oid>-<pid>` entries lintro wrote whose owning process no longer
+holds its lock, so concurrent reviews on one clone keep their trees.
 
 ```yaml
 ai:

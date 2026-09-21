@@ -83,19 +83,17 @@ def collect_review_context(
             pr_number=pr_number,
             repo=repo,
         )
-        # The agent reads the PR's head, never the ambient tree (#2733).
+        # The agent reads the PR's head, never the ambient tree (#2733): the
+        # one decision is a verified head worktree or no tree at all. The
+        # ambient checkout is never the fallback, whatever commit it is at
+        # — a matching commit says nothing about uncommitted edits.
         worktree = checkout_pr_head(pr_number=pr_number, head_oid=context.head_ref)
         checkout = ReviewCheckout.HEAD
-        if worktree is None and context.checkout is ReviewCheckout.UNKNOWN:
-            # No head to pin and the tree is neither end of the range: the
-            # agent gets an empty directory rather than an unrelated tree.
+        if worktree is None:
             worktree = empty_workspace()
             checkout = ReviewCheckout.NONE
-        if worktree is not None:
-            repo_root = worktree.path
-            context = replace(context, checkout=checkout, head_worktree=worktree)
-        # A probed BASE or HEAD checkout stays what it honestly is (the
-        # dogfood workflow's base checkout, a developer on the branch).
+        repo_root = worktree.path
+        context = replace(context, checkout=checkout, head_worktree=worktree)
     elif uncommitted:
         context = _collect_uncommitted_context()
     else:
