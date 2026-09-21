@@ -119,7 +119,13 @@ async def run_adversarial_pass(
         hunks=hunks_from_diff(diff=chunk.diff),
         near_lines=ai_config.review_diff_gate_lines,
     )
-    findings = parse_findings(raw_findings=findings_raw, diff_gate=gate)
+    # Gated once per round with the chunk findings, after the verification
+    # pass (#2728); see finalize_completed_run.
+    findings = parse_findings(
+        raw_findings=findings_raw,
+        diff_gate=gate,
+        gate_severity=False,
+    )
     # Same chunk scope as the main pass (#2719): a sweep finding on another
     # queued chunk's file becomes a re-read flag, never a posted finding.
     kept, flags = reject_context_findings(

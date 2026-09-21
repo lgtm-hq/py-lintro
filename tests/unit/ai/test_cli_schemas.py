@@ -14,9 +14,11 @@ from lintro.ai.cli_schemas import (
     FIX_BATCH_KEY,
     REVIEW_CLI_SCHEMA,
     SUMMARY_CLI_SCHEMA,
+    VERIFICATION_CLI_SCHEMA,
     cli_schema_for_fix,
     cli_schema_for_review,
     cli_schema_for_summary,
+    cli_schema_for_verification,
 )
 from lintro.ai.enums import AITransport
 from lintro.ai.json_response import (
@@ -33,6 +35,15 @@ def test_cli_schema_for_review_only_when_cli_transport() -> None:
     assert_that(request).is_not_none()
     assert request is not None  # narrow type for mypy
     assert_that(request.schema).is_equal_to(REVIEW_CLI_SCHEMA)
+
+
+def test_cli_schema_for_verification_only_when_cli_transport() -> None:
+    """The verification pass gets a schema on the CLI transport only (#2728)."""
+    assert_that(cli_schema_for_verification(transport=AITransport.API)).is_none()
+    request = cli_schema_for_verification(transport=AITransport.CLI)
+    assert_that(request).is_not_none()
+    assert request is not None
+    assert_that(request.schema).is_equal_to(VERIFICATION_CLI_SCHEMA)
 
 
 def test_cli_schema_for_summary_only_when_cli_transport() -> None:
@@ -82,6 +93,7 @@ def test_the_cli_schema_registry_is_derived_and_complete() -> None:
             "REVIEW_CLI_SCHEMA",
             "SUMMARY_CLI_SCHEMA",
             "SYNTHESIS_CLI_SCHEMA",
+            "VERIFICATION_CLI_SCHEMA",
         ],
     )
 

@@ -36,7 +36,7 @@ def _isolated_bin(*, tmp_path: Path) -> Path:
         tmp_path: Temporary directory for the isolated bin.
 
     Returns:
-        Directory containing copied ``bash`` and ``sh`` binaries.
+        Directory linking the shell and coreutils binaries the script needs.
     """
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
@@ -44,7 +44,12 @@ def _isolated_bin(*, tmp_path: Path) -> Path:
         source = shutil.which(name)
         assert_that(source).is_not_none()
         assert source is not None
-        shutil.copy2(source, fake_bin / name)
+        # Link rather than copy: on macOS a copied system binary is either
+        # un-chmod-able (``copy2`` carries the provenance attribute over) or
+        # killed at exec by its launch constraints, which require it to run
+        # from the system volume. A symlink resolves to the real path and
+        # still keeps the real ``uv`` off this PATH.
+        (fake_bin / name).symlink_to(source)
     return fake_bin
 
 

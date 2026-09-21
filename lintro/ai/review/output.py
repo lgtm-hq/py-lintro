@@ -152,6 +152,13 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     cannot tell a pass that found nothing from one that could not answer. The
     block is absent entirely when the pass did not run, which is the default.
 
+    The top-level ``verification`` block reports the per-round verification
+    pass (#2728): ``selected``, ``confirmed``, ``refuted``, ``downgraded``,
+    ``failed`` and the ``refutations`` it dropped, each with the verifier's
+    evidence. Absent when the run never reached the pass (a stopped run).
+    Each finding carries ``verified``: true when the pass tried to refute it
+    and could not.
+
     The top-level ``findings_coverage_complete`` / ``coverage_degradations`` /
     ``output_exhaustion_retried`` keys report whether the run's finding depth
     was limited (#2003). An output-exhaustion split or a failed depth pass is
@@ -193,6 +200,8 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     # (disabled) run's payload is byte-identical to one from before the pass
     # existed.
     metadata.pop("synthesis", None)
+    # #2728: and for the verification block, emitted only when the pass ran.
+    metadata.pop("verification", None)
     # #2003: ``asdict`` renders the degradations as raw dataclass dicts with a
     # StrEnum reason; normalize them through the model's own serializer so the
     # reason is a plain string on every consumer.
@@ -245,6 +254,8 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
     }
     if result.metadata.synthesis is not None:
         payload["synthesis"] = result.metadata.synthesis.to_dict()
+    if result.metadata.verification is not None:
+        payload["verification"] = result.metadata.verification.to_dict()
     if result.coverage is not None:
         payload["coverage"] = result.coverage.to_dict()
         payload["partial"] = result.metadata.partial

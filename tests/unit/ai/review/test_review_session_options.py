@@ -36,7 +36,7 @@ from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.session import ReviewSessionOptions
-from lintro.config.review_config import ReviewSynthesisConfig
+from lintro.config.review_config import ReviewSynthesisConfig, ReviewVerifyMode
 from tests.unit.ai.conftest import MockAIProvider
 
 if TYPE_CHECKING:
@@ -65,6 +65,7 @@ EXPECTED_SESSION_DEFAULTS: dict[str, object] = {
     "enforce_cost_cap": True,
     "stop": None,
     "synthesis": None,
+    "verify": ReviewVerifyMode.P1_AND_LOW_CONFIDENCE,
 }
 
 #: Fields a caller must supply. Every other field is in
@@ -258,6 +259,7 @@ def test_run_review_forwards_the_options_object_unchanged(
         enforce_cost_cap=False,
         stop=stop,
         synthesis=synthesis,
+        verify=ReviewVerifyMode.P1,
     )
 
     orchestrator.run_review(
@@ -293,6 +295,7 @@ def test_run_review_forwards_the_options_object_unchanged(
         "enforce_cost_cap": False,
         "stop": stop,
         "synthesis": synthesis,
+        "verify": ReviewVerifyMode.P1,
     }
     assert_that(captured).is_length(1)
     received = captured[0]

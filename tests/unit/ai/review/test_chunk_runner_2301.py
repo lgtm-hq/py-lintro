@@ -170,6 +170,55 @@ def test_checkpoint_writer_marks_a_truncated_chunk_on_its_record(
     assert_that(records["src/app.py"].truncated).is_true()
 
 
+def test_checkpoint_writer_gates_severities_before_persisting(
+    tmp_path: Path,
+) -> None:
+    """A checkpoint never persists a P1 the round would have gated (#2734).
+
+    The chunk passes parse ungated since #2728 and an interrupted run never
+    reaches the round-level gates, so the checkpoint gates what it writes.
+
+    Args:
+        tmp_path: Pytest temporary directory used as the state directory.
+    """
+    from lintro.ai.review.enums.severity_downgrade_reason import (
+        SeverityDowngradeReason,
+    )
+    from lintro.ai.review.models.review_finding import ReviewFinding, Severity
+
+    context = _context()
+    checkpoint = _writer(context)
+    states: list[Any] = []
+    inflated = ReviewFinding(
+        severity=Severity.P1,
+        category="logic-bug",
+        file="src/app.py",
+        line=1,
+        title="No scenario",
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+        failure_scenario="",
+    )
+
+    with (
+        patch.dict("os.environ", {"LINTRO_REVIEW_STATE_DIR": str(tmp_path)}),
+        patch(
+            "lintro.ai.review.incremental_coverage.write_state_part",
+            side_effect=lambda **kwargs: states.append(kwargs["state"]),
+        ),
+    ):
+        checkpoint([replace(_partial(), findings=(inflated,))])
+
+    records = [r for r in states[-1].findings if r.title == "No scenario"]
+    assert_that(records).is_length(1)
+    assert_that(records[0].severity).is_equal_to(Severity.P2)
+    assert_that(records[0].severity_downgrade_reason).is_equal_to(
+        SeverityDowngradeReason.P1_NO_FAILURE_SCENARIO,
+    )
+
+
 def test_checkpoint_writer_survives_a_failed_part(tmp_path: Path) -> None:
     """A part that cannot be written is logged, not raised, and not counted.
 

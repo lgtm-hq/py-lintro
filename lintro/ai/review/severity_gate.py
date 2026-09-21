@@ -44,7 +44,6 @@ from lintro.ai.review.cross_chunk_gate import (
     cross_chunk_contradictions,
     describe_cross_chunk_contradictions,
 )
-from lintro.ai.review.enums.evidence_style import EvidenceStyle
 from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.enums.review_category import ReviewCategory
@@ -58,6 +57,7 @@ __all__ = [
     "apply_cross_chunk_guard",
     "apply_p1_evidence_gate",
     "apply_p2_evidence_gate",
+    "apply_severity_gates",
     "count_cross_chunk_contradictions",
     "count_downgrades",
     "count_downgrades_by_reason",
@@ -139,12 +139,11 @@ def apply_p1_evidence_gate(
     return tuple(gated)
 
 
-def _needs_p2_downgrade(*, finding: ReviewFinding, evidenced: bool) -> bool:
+def _needs_p2_downgrade(*, finding: ReviewFinding) -> bool:
     """Return True when a P2 in a gated category lacks diff-local evidence.
 
     Args:
         finding: Finding to test.
-        evidenced: Whether the model claimed ``diff_local`` evidence for it.
 
     Returns:
         True when the P2 evidence gate applies. Questions are never gated. A
@@ -157,56 +156,44 @@ def _needs_p2_downgrade(*, finding: ReviewFinding, evidenced: bool) -> bool:
     return (
         finding.severity is Severity.P2
         and finding.category in P2_EVIDENCE_GATED_CATEGORIES
-        and not evidenced
+        and not finding.is_evidenced
     )
 
 
 def apply_p2_evidence_gate(
     *,
     findings: Sequence[ReviewFinding],
-    claimed_styles: Sequence[EvidenceStyle | None] | None = None,
 ) -> tuple[ReviewFinding, ...]:
     """Downgrade unevidenced test-gap, contract-drift and code-smell P2s (#2723).
 
     The gate fails closed: only an explicit ``diff_local`` claim counts as
-    evidence. The parser's normalizer turns an absent or unreadable
-    ``evidence_style`` into ``diff_local`` for display and the convergence
-    score, so the parser passes the labels as the model wrote them and a
-    finding that claimed nothing is gated like one that claimed
-    ``speculative``.
+    evidence, read through ``ReviewFinding.is_evidenced`` (the parser records
+    the label as the model wrote it; the ``evidence_style`` fallback to
+    ``diff_local`` serves display and the convergence score only).
 
     Args:
         findings: Findings after the P1 gate, in payload order.
-        claimed_styles: The ``evidence_style`` each finding's payload
-            actually carried, ``None`` where it was absent or unreadable;
-            one entry per finding. When omitted (a replayed record whose
-            style was already normalized) the finding's own field is read.
 
     Returns:
         The same findings in the same order, with gated P2s rewritten to P3
         and marked via ``severity_downgraded`` and its reason.
-
-    Raises:
-        ValueError: When ``claimed_styles`` does not carry one entry per
-            finding.
     """
-    if claimed_styles is None:
-        claimed_styles = [finding.evidence_style for finding in findings]
-    if len(claimed_styles) != len(findings):
-        msg = "claimed_styles must carry one entry per finding"
-        raise ValueError(msg)
     gated: list[ReviewFinding] = []
-    for finding, claimed in zip(findings, claimed_styles, strict=True):
-        evidenced = claimed is EvidenceStyle.DIFF_LOCAL
-        if not _needs_p2_downgrade(finding=finding, evidenced=evidenced):
+    for finding in findings:
+        if not _needs_p2_downgrade(finding=finding):
             gated.append(finding)
             continue
         logger.info(
-            "Downgrading P2 finding {title!r} to P3: {reason} ({category}, {style}).",
+            "Downgrading P2 finding {title!r} to P3: {reason} ({category}, "
+            "claimed {claimed}).",
             title=finding.title,
             reason=P2_DOWNGRADE_REASON,
             category=finding.category,
-            style="unstated" if claimed is None else str(claimed),
+            claimed=(
+                str(finding.evidence_style)
+                if finding.evidence_claimed is None
+                else ("diff_local" if finding.evidence_claimed else "no diff_local")
+            ),
         )
         chained = (
             finding.severity_downgrade_reason
@@ -225,6 +212,26 @@ def apply_p2_evidence_gate(
             ),
         )
     return tuple(gated)
+
+
+def apply_severity_gates(
+    *,
+    findings: Sequence[ReviewFinding],
+) -> tuple[ReviewFinding, ...]:
+    """Run the P1 gate then the P2 gate, in that order.
+
+    One entry point so every caller — the per-chunk parser for custom
+    agents and the depth-3 sweep, and the round-level finalizer for the
+    built-in review after the verification pass (#2728) — chains the gates
+    the same way.
+
+    Args:
+        findings: Findings to gate, in order.
+
+    Returns:
+        The gated findings in the same order.
+    """
+    return apply_p2_evidence_gate(findings=apply_p1_evidence_gate(findings=findings))
 
 
 def downgraded_findings(

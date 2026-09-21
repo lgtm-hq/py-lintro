@@ -11,11 +11,25 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai/review**: a per-round verification pass (#2728, lintro-ops milestone 0 step
+  0.11): one provider call after the synthesis pass and before the severity gates asks
+  the run's own model to refute every P1 and every low-confidence finding against its
+  cited code. A refuted finding is dropped and recorded with the verifier's evidence; a
+  weakened P1 moves to P2 with the new `refutation_weakened` reason; a confirmed finding
+  is marked `verified`. New `review.verify` mode (`off` / `p1` / `p1+low-confidence`,
+  default `p1+low-confidence`), a `verification` block in the JSON output, `refuted` /
+  `verified` run-record counts, a `verification` timing phase, a `verification_failed`
+  narrative degradation and a shared note on every surface.
+
 ### Changed
 
 - **ai/review**: the repository-context section admits every changed text file (a
   workflow, a config, a doc), not only source code, so a one-file workflow PR no longer
   reviews from the hunk alone (#2731).
+- **ai/review**: the built-in chunk and synthesis passes no longer apply the P1 and P2
+  evidence gates at parse time; the round's findings are gated once in the finalizer,
+  after the verification pass, so the gates read the verified severities (#2728).
+  Custom-agent findings are exempt from both the verifier and the round-level gates.
 
 ### Deprecated
 

@@ -18,10 +18,7 @@ from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.suggested_change import parse_suggested_change
 from lintro.ai.review.narrative_parser import collapse_to_single_line
-from lintro.ai.review.severity_gate import (
-    apply_p1_evidence_gate,
-    apply_p2_evidence_gate,
-)
+from lintro.ai.review.severity_gate import apply_severity_gates
 
 __all__ = [
     "SEVERITY_SYNONYMS",
@@ -151,6 +148,7 @@ def parse_findings(
     source: str = "",
     severity_override: Severity | None = None,
     diff_gate: DiffGate | None = None,
+    gate_severity: bool = True,
 ) -> tuple[ReviewFinding, ...]:
     """Parse findings from AI JSON.
 
@@ -165,10 +163,12 @@ def parse_findings(
             wins over whatever the model labels an individual finding — it
             also exempts the pass from the P1 evidence gate.
         diff_gate: Optional diff-bounded gate (#2711). When given, findings
-            outside the chunk's hunks are dropped and near ones re-anchored
-            after both severity gates have run (#2723: the gates read the
-            evidence labels as written, which the diff gate's rebuilt
-            findings would no longer carry); the gate records its counts.
+            outside the chunk's hunks are dropped and near ones re-anchored;
+            the gate records its counts.
+        gate_severity: Whether to run the P1 and P2 severity gates here.
+            The built-in review passes ``False`` and gates once per round
+            after the verification pass (#2728); every other caller keeps
+            the parse-time default.
 
     Returns:
         Parsed findings in payload order. Non-mapping entries are dropped.
@@ -181,7 +181,6 @@ def parse_findings(
     if not isinstance(raw_findings, list):
         return ()
     findings: list[ReviewFinding] = []
-    claimed_styles: list[EvidenceStyle | None] = []
     for item in raw_findings:
         if not isinstance(item, dict):
             continue
@@ -209,7 +208,7 @@ def parse_findings(
         failure_scenario = item.get("failure_scenario", "")
         if not isinstance(failure_scenario, str):
             failure_scenario = ""
-        claimed_styles.append(EvidenceStyle.parse(item.get("evidence_style", "")))
+        claimed = EvidenceStyle.parse(item.get("evidence_style", ""))
         findings.append(
             ReviewFinding(
                 severity=severity,
@@ -229,25 +228,23 @@ def parse_findings(
                 evidence_style=normalize_evidence_style(
                     raw=item.get("evidence_style", ""),
                 ),
+                # The gate reads the label as written (#2723); an absent or
+                # unreadable one is no claim.
+                evidence_claimed=claimed is EvidenceStyle.DIFF_LOCAL,
                 occurrences=parse_occurrences(item.get("occurrences")),
                 suggested_change=parse_suggested_change(
                     item.get("suggested_change"),
                 ),
             ),
         )
-    if severity_override is None:
-        # The severity gates run while the findings are still positionally
-        # aligned with the labels their payloads carried; the diff gate
-        # below drops or re-anchors findings (rebuilding the objects) but
-        # never changes a severity, so gating first changes no outcome.
+    if severity_override is None and gate_severity:
         # An author-declared severity policy is configuration, not model
         # output, so the gates have nothing to correct there: downgrading
-        # it would silently override the agent's own front matter.
-        gated = apply_p2_evidence_gate(
-            findings=apply_p1_evidence_gate(findings=findings),
-            claimed_styles=claimed_styles,
-        )
-        findings = list(gated)
+        # it would silently override the agent's own front matter. The
+        # built-in review passes ``gate_severity=False`` and runs the gates
+        # once per round in ``finalize_completed_run`` after the
+        # verification pass (#2728); the other callers gate here.
+        findings = list(apply_severity_gates(findings=findings))
     return (
         diff_gate.apply(findings=tuple(findings))
         if diff_gate is not None

@@ -506,6 +506,7 @@ SESSION_OPTION_SOURCES: dict[str, tuple[str, str]] = {
     "workspace_root": ("prepared", "workspace_root"),
     "context_collection_seconds": ("prepared", "context_collection_seconds"),
     "synthesis": ("prepared", "synthesis"),
+    "verify": ("prepared", "verify"),
     "context_window_override": ("policy", "context_window_override"),
     "progress": ("policy", "progress"),
     "prior_state": ("policy", "prior_state"),

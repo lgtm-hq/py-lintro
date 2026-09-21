@@ -479,6 +479,9 @@ def payload_to_partial(
     )
     findings = drop_confirmation_findings(
         findings=parse_findings(
+            # The built-in review gates once per round, after the
+            # verification pass (#2728); see finalize_completed_run.
+            gate_severity=False,
             raw_findings=payload.get("findings", []),
             diff_gate=gate,
         ),

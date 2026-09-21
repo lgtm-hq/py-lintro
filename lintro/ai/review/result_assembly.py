@@ -48,12 +48,14 @@ from lintro.ai.review.resume import carried_truncated_paths, records_for_reviewe
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
+from lintro.ai.review.verification import verification_degradations
 
 if TYPE_CHECKING:
     from lintro.ai.review.custom_agent_runner import CustomAgentPassResult
     from lintro.ai.review.merge import ChunkReviewPartial
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_finding import ReviewFinding
+    from lintro.ai.review.models.verification_outcome import VerificationSummary
     from lintro.ai.review.question_pass import RunQuestions
     from lintro.ai.review.run_planning import ReviewRunPlan
     from lintro.ai.review.session import ReviewSessionOptions
@@ -81,6 +83,8 @@ class ReviewRunOutcome:
         custom_agents_failed: Names of selected agents that produced no pass.
         questions: The once-per-run question pass result (#2720), when run.
         synthesis_pass: The cross-chunk synthesis pass, when one ran (#2269).
+        verification: The verification pass's summary, when the run reached
+            the completed path (#2728); ``None`` on a stopped run.
         merged: The merged chunk result the report's prose comes from.
         filtered_findings: Findings surviving the sensitivity policy, with the
             custom-agent and synthesis findings already appended.
@@ -99,6 +103,7 @@ class ReviewRunOutcome:
     custom_agents_failed: list[str] = field(default_factory=list)
     questions: RunQuestions | None = None
     synthesis_pass: SynthesisPass | None = None
+    verification: VerificationSummary | None = None
     merged: ReviewResult = field(
         default_factory=lambda: merge_review_results(partials=[]),
     )
@@ -135,6 +140,9 @@ def _run_usage(*, outcome: ReviewRunOutcome) -> tuple[int, int, float]:
     if outcome.questions is not None:
         usage = outcome.questions.usage
         usages.append((usage.input_tokens, usage.output_tokens, usage.cost_estimate))
+    if outcome.verification is not None:
+        check = outcome.verification
+        usages.append((check.input_tokens, check.output_tokens, check.cost_estimate))
     return (
         sum(item[0] for item in usages),
         sum(item[1] for item in usages),
@@ -171,9 +179,10 @@ def assemble_review_result(
     }
 
     # Every provider call the run made — chunks, custom agents, the synthesis
-    # pass and the question pass — joins the run totals rather than hiding
-    # outside them (#2269, #2720). The passes are charged from the outcome, so
-    # a run that stopped before any chunk completed still reports their cost.
+    # pass, the question pass and the verification pass — joins the run
+    # totals rather than hiding outside them (#2269, #2720, #2728). The passes
+    # are charged from the outcome, so a run that stopped before any chunk
+    # completed still reports their cost.
     total_input, total_output, total_cost = _run_usage(outcome=outcome)
     chunks_reviewed = len(outcome.partials)
     # The round's narrative comes from the synthesis pass (lintro-ops
@@ -254,6 +263,7 @@ def assemble_review_result(
             ),
             *(synthesis.degradations if synthesis is not None else ()),
             *question_pass_degradations(questions=outcome.questions),
+            *verification_degradations(summary=outcome.verification),
             *(
                 CoverageDegradation(
                     reason=CoverageDegradationReason.DIFF_TRUNCATED,
@@ -266,6 +276,7 @@ def assemble_review_result(
             ),
         ),
         synthesis=synthesis.outcome if synthesis is not None else None,
+        verification=outcome.verification,
         lint_facts_note=options.lint_note,
     )
 

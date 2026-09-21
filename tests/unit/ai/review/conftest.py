@@ -16,7 +16,9 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.models.verification_outcome import VerificationSummary
 from lintro.ai.review.question_pass import RunQuestions
+from lintro.ai.review.verification import VerificationPass
 from tests.unit.ai.review.review_fixtures import load_review_fixture
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -165,6 +167,37 @@ def _rubric_only_review(
     monkeypatch.setattr(
         "lintro.ai.review.run_execution.run_question_pass",
         _rubric_only,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _unverified_review(
+    request: pytest.FixtureRequest,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip the verification pass unless a test opts in (#2728).
+
+    The suite's scripted providers answer a fixed number of calls, and the
+    verification pass is one more call per round when anything is selected.
+    A test without the ``verification`` marker therefore runs the round with
+    ``review.verify: off`` exactly as configuration does; tests of the pass
+    itself carry the marker.
+
+    Args:
+        request: The requesting test, checked for the marker.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    if request.node.get_closest_marker("verification"):
+        return
+
+    async def _unverified(**kwargs: object) -> VerificationPass:
+        req = kwargs["request"]
+        findings = tuple(req.findings)  # type: ignore[attr-defined]
+        return VerificationPass(findings=findings, summary=VerificationSummary())
+
+    monkeypatch.setattr(
+        "lintro.ai.review.run_finalize.run_verification_pass",
+        _unverified,
     )
 
 

@@ -19,6 +19,7 @@ from lintro.ai.review.github_constants import (
 from lintro.ai.review.github_notes import (
     format_synthesis_note_line,
     format_timings_note,
+    format_verification_note_line,
 )
 from lintro.ai.review.github_render import Section, assemble, sanitize_comment_text
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -91,6 +92,15 @@ def _this_run_section(
             *(
                 ["", synthesis_note]
                 if (synthesis_note := format_synthesis_note_line(metadata=metadata))
+                else []
+            ),
+            *(
+                ["", verification_note]
+                if (
+                    verification_note := format_verification_note_line(
+                        metadata=metadata,
+                    )
+                )
                 else []
             ),
             *(

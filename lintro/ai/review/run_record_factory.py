@@ -231,6 +231,12 @@ def _outcome(*, result: ReviewResult, totals: RoundTotals) -> RunOutcome:
         questions=sum(1 for finding in result.findings if finding.is_question),
         downgraded=downgraded_p1,
         downgraded_p2=downgraded_p2,
+        refuted=(
+            result.metadata.verification.refuted
+            if result.metadata.verification is not None
+            else 0
+        ),
+        verified=sum(1 for finding in result.findings if finding.verified),
         dropped_outside_diff=result.metadata.diff_gate.outside_diff,
         resolved=totals.resolved,
         open_after=totals.open_after,

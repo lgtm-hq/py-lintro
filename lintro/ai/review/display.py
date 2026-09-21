@@ -30,6 +30,7 @@ from lintro.ai.review.severity_gate import (
 )
 from lintro.ai.review.synthesis_note import format_synthesis_note
 from lintro.ai.review.timings import format_timing_summary
+from lintro.ai.review.verification_note import format_verification_note
 
 __all__ = ["render_review_terminal"]
 
@@ -114,6 +115,9 @@ def render_review_terminal(
         # Only rendered when the optional cross-chunk pass actually ran, so a
         # default run's terminal output is unchanged (#2269).
         output.print(f"[dim]{synthesis_note}[/dim]")
+    verification_note = format_verification_note(metadata=metadata)
+    if verification_note:
+        output.print(f"[dim]{verification_note}[/dim]")
 
     if metadata.timings is not None:
         # One line, always on: which phase dominated the wait (#2148).

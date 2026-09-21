@@ -288,7 +288,7 @@ async def _finalize(*, partials: list[ChunkReviewPartial]) -> Any:
     Returns:
         ``(outcome, synthesis_calls)``.
     """
-    from lintro.ai.review import run_execution
+    from lintro.ai.review import run_execution, run_finalize
     from lintro.ai.review.session import ReviewSessionOptions
 
     calls: list[Any] = []
@@ -313,14 +313,14 @@ async def _finalize(*, partials: list[ChunkReviewPartial]) -> Any:
     )
     merged = MagicMock()
     with (
-        patch.object(run_execution, "run_synthesis_pass", _synthesis),
+        patch.object(run_finalize, "run_synthesis_pass", _synthesis),
         patch.object(
-            run_execution,
+            run_finalize,
             "finalize_partials",
             return_value=(merged, (), 0),
         ),
     ):
-        outcome = await run_execution.finalize_completed_run(
+        outcome = await run_finalize.finalize_completed_run(
             context=_request().context,
             options=options,
             plan=plan,

@@ -56,5 +56,18 @@
   "skipped_files": [],
   "coverage_degradations": [],
   "synthesis": null,
+  "verification": {
+    "enabled": false,
+    "selected": 0,
+    "confirmed": 0,
+    "refuted": 0,
+    "downgraded": 0,
+    "unanswered": 0,
+    "failed": false,
+    "refutations": [],
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_estimate": 0.0
+  },
   "lint_facts_note": ""
 }
