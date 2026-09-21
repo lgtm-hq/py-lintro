@@ -25,8 +25,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **ai/review**: a per-round verification pass before the gates (step 0.11) (#2734)
-  (965394d)
 - **ai/review**: a per-round verification pass (#2728, lintro-ops milestone 0 step
   0.11): one provider call after the synthesis pass and before the severity gates asks
   the run's own model to refute every P1 and every low-confidence finding against its
