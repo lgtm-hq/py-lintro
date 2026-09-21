@@ -17,11 +17,15 @@ class ReviewCheckout(StrEnum):
         BASE: Disk holds the base ref; every changed file reads pre-change.
         HEAD: Disk holds the head commit; changed files read post-change.
         WORKTREE: Disk holds the uncommitted change itself; post-change.
-        UNKNOWN: Not determined (no local repository, or the checkout is
-            neither end of the range); the prompt tells the agent to check.
+        UNKNOWN: Not determined (the checkout is neither end of the range);
+            the prompt tells the agent to check.
+        NONE: There is no tree the agent may read (#2733): a ``--pr`` review
+            with no local repository, or one whose head could not be checked
+            out. Every provider call goes out without tools.
     """
 
     BASE = auto()
     HEAD = auto()
     WORKTREE = auto()
     UNKNOWN = auto()
+    NONE = auto()

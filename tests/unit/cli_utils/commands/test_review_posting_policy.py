@@ -10,6 +10,7 @@ the apply point is asserted to run ahead of ``_emit_output``.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -357,3 +358,45 @@ def test_the_post_tail_hands_the_poster_a_marked_result_and_re_persists(
     )
     assert_that(persisted["inline_comment_ids"]).is_empty()
     assert_that(persisted["result"]).is_same_as(posted["result"])
+
+
+def test_a_state_load_that_raises_removes_the_prepared_tree(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Any exit of the adapter window before the run removes the tree (#2733)."""
+    from lintro.ai.review.pr_head import PrHeadWorktree
+
+    tree = tmp_path / "head-tree"
+    tree.mkdir()
+
+    def _boom(**kwargs: Any) -> Any:
+        raise RuntimeError("state store down")
+
+    monkeypatch.setattr(review_command, "load_prior_review_state", _boom)
+    prepared = SimpleNamespace(
+        ai_config=AIConfig(),
+        context=SimpleNamespace(
+            changed_files=(),
+            head_ref="deadbeef",
+            base_ref="main",
+            head_worktree=PrHeadWorktree(path=str(tree), repo_root="", head_oid=""),
+        ),
+        workspace_root=".",
+    )
+    with pytest.raises(RuntimeError):
+        review_command._finish_review(
+            options=cast(
+                Any,
+                SimpleNamespace(post=False, force_full=False, output_format="json"),
+            ),
+            lintro_config=cast(Any, SimpleNamespace()),
+            resolved_ai=cast(Any, SimpleNamespace(config=AIConfig())),
+            prepared=cast(Any, prepared),
+            targets=cast(
+                Any,
+                SimpleNamespace(state_pr=7, effective_repo="o/r", resolved_pr=None),
+            ),
+        )
+
+    assert_that(tree.exists()).is_false()

@@ -41,6 +41,7 @@ from lintro.ai.review import (
 from lintro.ai.review.enums.custom_agent_mode import CustomAgentMode
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.orchestrator import run_review
+from lintro.ai.review.pr_head_guard import RemoveOnError
 from lintro.ai.review.preparation_resolvers import (
     apply_timeout,
     build_lint_digest,
@@ -282,7 +283,6 @@ def prepare_review(
     Returns:
         PreparedReview: The prepared review, ready for :func:`execute_review`.
     """
-    review_config = request.lintro_config.review
     ai_config = apply_resolved_transport(
         apply_timeout(resolved.config, timeout=request.timeout),
     )
@@ -297,7 +297,36 @@ def prepare_review(
         exclude_globs=list(ai_config.exclude_paths),
     )
     context_collection_seconds = time.monotonic() - context_started
+    # The PR head tree (#2733) is live from here; a preparation step that
+    # raises removes it rather than leaving it to the next sweep.
+    with RemoveOnError(context.head_worktree):
+        return _prepare_from_context(
+            request=request,
+            context=context,
+            ai_config=ai_config,
+            context_collection_seconds=context_collection_seconds,
+        )
 
+
+def _prepare_from_context(
+    *,
+    request: ReviewRunRequest,
+    context: ReviewContext,
+    ai_config: AIConfig,
+    context_collection_seconds: float,
+) -> PreparedReview:
+    """Build the prepared review from a collected context.
+
+    Args:
+        request: The run request.
+        context: The collected review context.
+        ai_config: The effective AI configuration.
+        context_collection_seconds: Wall-clock seconds collection took.
+
+    Returns:
+        PreparedReview: The prepared review, ready for :func:`execute_review`.
+    """
+    review_config = request.lintro_config.review
     classifications = classify_changed_files(context.changed_files)
     selected_items = select_checklist_items(
         classifications=classifications,

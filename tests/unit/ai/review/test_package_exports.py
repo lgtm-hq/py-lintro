@@ -44,6 +44,19 @@ def _restore_review_package() -> Iterator[None]:
                 sys.modules[name] = original_modules[name]
             else:
                 sys.modules.pop(name, None)
+            # A re-import also rebinds the module as an attribute of its
+            # parent package, and a dotted ``monkeypatch.setattr`` target
+            # resolves through that attribute: left pointing at the
+            # re-imported copy, a later test patches a module nobody calls
+            # (#2744, six scripted tests ran the real PR head checkout).
+            parent_name, _, child = name.rpartition(".")
+            parent = sys.modules.get(parent_name)
+            if parent is None:
+                continue
+            if name in original_modules:
+                setattr(parent, child, original_modules[name])
+            elif hasattr(parent, child):
+                delattr(parent, child)
 
 
 @pytest.mark.parametrize("export_name", review_pkg.__all__)

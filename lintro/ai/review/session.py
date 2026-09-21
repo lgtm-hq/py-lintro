@@ -7,9 +7,8 @@ every layer below reads the object instead of re-threading the same twenty
 keywords by hand (issue #2301). A new run setting is a new field here.
 
 :class:`ChunkRunPlan` is the same idea one level down: the run-scope inputs the
-chunk fan-out and the per-chunk passes share. It is derived from the session
-options once per run, and the two values that legitimately vary per chunk are
-applied with :func:`dataclasses.replace`.
+chunk fan-out and the per-chunk passes share, derived from the session options
+once per run; the two per-chunk values are applied with :func:`dataclasses.replace`.
 
 :class:`ReviewSession` is the run's provider owner (issue #2302). A review may
 build more providers than the one it was handed — every custom agent with a
@@ -286,6 +285,7 @@ class ChunkRunPlan:
         progress: Progress callback for live status updates.
         repo_root: Absolute path to the repository under review.
         use_one_shot: When True, avoid durable provider sessions.
+        tools_disabled: No tree for the agent (#2733); tools off.
         strictness_section: Pre-formatted strictness prompt section.
         diff_budget: Token budget available for embedded diffs.
         max_parallel_calls: Ceiling on concurrently in-flight chunk reviews.
@@ -313,6 +313,7 @@ class ChunkRunPlan:
     progress: ReviewProgressCallback
     repo_root: str
     use_one_shot: bool
+    tools_disabled: bool = False
     strictness_section: str
     diff_budget: int
     max_parallel_calls: int = 1
@@ -452,8 +453,7 @@ def timeout_reason(*, exc: BaseException) -> str:
     return "timeout"
 
 
-#: ``stopped_reason`` for a run whose every chunk hit its turn limit (#2731):
-#: on the record and the partial warning, and the process exits 1 like on a P1.
+#: ``stopped_reason`` when every chunk hit its turn limit (#2731); exit 1 like a P1.
 NOTHING_REVIEWED_REASON = "no file reviewed: every chunk hit its per-call turn limit"
 
 
@@ -491,7 +491,7 @@ def warn_nothing_reviewed(*, ai_config: AIConfig) -> None:
     """Log that the run reviewed no file, with the hint for the reason (#2731).
 
     Args:
-        ai_config: Effective AI configuration, for the transport-specific hint.
+        ai_config: Effective AI configuration, for the hint.
     """
     logger.warning(
         "Review reviewed no file — {reason}. {hint}",

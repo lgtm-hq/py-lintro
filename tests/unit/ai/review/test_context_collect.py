@@ -13,6 +13,7 @@ from assertpy import assert_that
 
 from lintro.ai.review.context import (
     collect_review_context,
+    collection,
     resolve_default_base_branch,
 )
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
@@ -21,6 +22,7 @@ from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_context_error_code import ReviewContextErrorCode
 from lintro.ai.review.exceptions import ReviewContextError
 from lintro.ai.review.models.changed_file import ChangedFile
+from lintro.ai.review.pr_head import PrHeadWorktree, remove_pr_head
 from tests.unit.ai.review.conftest import (
     SubprocessMock,
     queue_diff_snapshot,
@@ -213,6 +215,33 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
         assert_that(diff_call).contains("head456")
 
 
+@pytest.fixture(autouse=True)
+def _no_pr_head_worktree(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Keep these scripted-subprocess tests off the PR head checkout (#2733).
+
+    The checkout is covered by ``test_pr_head_2733.py`` against a scratch
+    repository; here it would consume the scripted ``subprocess.run`` answers
+    the gh/git probes expect.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path: Where the stubbed empty workspace lives.
+    """
+    # Patched on the module object ``collect_review_context`` was bound
+    # from, not through a dotted path: a dotted target resolves via the
+    # parent package's attribute, which a reload elsewhere can leave
+    # pointing at a different copy of the module.
+    monkeypatch.setattr(collection, "checkout_pr_head", lambda **_kwargs: None)
+    # And off the empty workspace's ``git init`` for the same reason.
+    empty = tmp_path / "no-tree"
+    empty.mkdir()
+    monkeypatch.setattr(
+        collection,
+        "empty_workspace",
+        lambda: PrHeadWorktree(path=str(empty), repo_root="", head_oid=""),
+    )
+
+
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
 @patch(
     "lintro.ai.review.context.git_ops.shutil.which",
@@ -262,7 +291,11 @@ def test_collect_pr_context_uses_gh(
     assert_that(metadata.repo).is_equal_to("lgtm-hq/py-lintro")
     assert_that(context.base_ref).is_equal_to("abc123")
     assert_that(context.head_ref).is_equal_to("deadbeef")
-    assert_that(context.checkout).is_equal_to(ReviewCheckout.BASE)
+    # The probe found the base, but the stubbed head checkout failed: the
+    # ambient tree is never the fallback (#2733), so the run has no tree.
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.NONE)
+    assert context.head_worktree is not None
+    remove_pr_head(context.head_worktree)
     assert_that(context.changed_files).extracting("path").contains("a.py")
 
 
@@ -380,7 +413,8 @@ def test_collect_pr_context_works_without_local_git_repo(
 
     assert_that(context.pr_metadata).is_not_none()
     assert_that(context.unified_diff).contains("a.py")
-    assert_that(context.checkout).is_equal_to(ReviewCheckout.UNKNOWN)
+    # No repository at all: no tree for the agent, never the ambient one (#2733).
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.NONE)
     assert_that(context.changed_files).extracting("path").contains("a.py")
 
 

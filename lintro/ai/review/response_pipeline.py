@@ -125,6 +125,7 @@ class ChunkReviewRequest:
             (#2731): the generated questions are left out of the prompt and
             the agent gets no tools, so it answers from the diff, the context
             section and the rubric in one turn.
+        tools_disabled: No tree for the agent (#2733): the call runs without tools.
     """
 
     chunk: ReviewChunk
@@ -146,6 +147,7 @@ class ChunkReviewRequest:
     context_budget: int | None = None
     diff_ceiling: int | None = None
     single_shot: bool = False
+    tools_disabled: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -240,10 +242,10 @@ async def invoke_chunk_review(
     )
     degradations: tuple[CoverageDegradation, ...] = ()
     if use_git_native:
-        embed_diff = estimate_tokens(request.chunk.diff) <= max(
-            request.diff_budget,
-            1,
-        )
+        # No tools (#2733) means no ``git diff``: embed whatever the size.
+        embed_diff = request.tools_disabled or estimate_tokens(
+            request.chunk.diff,
+        ) <= max(request.diff_budget, 1)
         if (
             not embed_diff
             and ai_config.review_allow_unredacted_git_native
@@ -286,7 +288,7 @@ async def invoke_chunk_review(
         repo_root=request.repo_root or None,
         use_one_shot=request.use_one_shot,
         cli_schema=cli_schema_for_review(transport=ai_config.transport),
-        no_tools=request.single_shot,
+        no_tools=request.single_shot or request.tools_disabled,
     )
     return ChunkCallResult(
         response=response,
@@ -334,7 +336,8 @@ async def parse_review_payload_with_recovery(
     """
     chunk, provider, ai_config = request.chunk, request.provider, request.ai_config
     budget, repo_root = request.budget, request.repo_root
-    use_one_shot, no_tools = request.use_one_shot, request.single_shot
+    use_one_shot = request.use_one_shot
+    no_tools = request.single_shot or request.tools_disabled
     try:
         return response, parse_review_response(content=response.content)
     except ValueError as exc:

@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
+from lintro.ai.cli_bounds import CallShape
 from lintro.ai.review.adversarial_pass import run_adversarial_pass
 from lintro.ai.review.chunk_split_retry import review_chunk_main_pass
 from lintro.ai.review.coverage import review_eligible_paths
@@ -99,6 +100,7 @@ async def review_chunk(
             budget=plan.budget,
             repo_root=plan.repo_root,
             use_one_shot=plan.use_one_shot,
+            tools_disabled=plan.tools_disabled,
             diff_budget=plan.diff_budget,
             chunk_index=chunk_index,
             repo_context=plan.repo_context,
@@ -159,7 +161,10 @@ async def review_chunk(
                     prior_findings=partial.findings,
                     budget=plan.budget,
                     repo_root=plan.repo_root,
-                    use_one_shot=plan.use_one_shot,
+                    shape=CallShape(
+                        use_one_shot=plan.use_one_shot,
+                        no_tools=plan.tools_disabled,
+                    ),
                     eligible_paths=frozenset(
                         review_eligible_paths(
                             changed_files=plan.context.changed_files,

@@ -30,6 +30,7 @@ from lintro.ai.review.cli_limits import (
     resolve_synthesis_diff_budget,
 )
 from lintro.ai.review.custom_agents import select_custom_agents
+from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -86,6 +87,9 @@ class ReviewRunPlan:
         use_durable_session: Whether the provider opens a durable session.
         repo_root: Absolute path to the repository under review.
         use_one_shot: When True, chunk calls avoid durable provider sessions.
+        tools_disabled: True when the run has no tree the agent may read
+            (#2733, ``checkout`` is ``NONE``): every CLI call goes out
+            without tools rather than against the ambient working tree.
         timings: Recorder for the run's phase and per-chunk spans (#2148).
     """
 
@@ -108,6 +112,7 @@ class ReviewRunPlan:
     use_durable_session: bool
     repo_root: str
     use_one_shot: bool
+    tools_disabled: bool = False
     timings: ReviewTimingRecorder
 
 
@@ -423,5 +428,6 @@ def plan_run(
         ),
         repo_root=context.repo_root or os.getcwd(),
         use_one_shot=len(chunks) > 1,
+        tools_disabled=context.checkout is ReviewCheckout.NONE,
         timings=timings,
     )

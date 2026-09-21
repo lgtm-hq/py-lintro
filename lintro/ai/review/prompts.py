@@ -22,6 +22,7 @@ from lintro.ai.prompts.review import (
     REVIEW_GIT_NATIVE_DIFF_GIT_COMMAND,
     REVIEW_GIT_NATIVE_DIFF_INLINE,
     REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND,
+    REVIEW_GIT_NATIVE_TREE_NONE_NOTE,
     REVIEW_GIT_NATIVE_TREE_POST_CHANGE_NOTE,
     REVIEW_GIT_NATIVE_TREE_PRE_CHANGE_NOTE,
     REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE,
@@ -371,6 +372,8 @@ def _tree_note_for(*, context: ReviewContext) -> str:
         The note template for that checkout.
     """
     checkout = context.checkout
+    if checkout is ReviewCheckout.NONE:
+        return REVIEW_GIT_NATIVE_TREE_NONE_NOTE
     if checkout is ReviewCheckout.BASE:
         return REVIEW_GIT_NATIVE_TREE_PRE_CHANGE_NOTE
     if checkout in (ReviewCheckout.HEAD, ReviewCheckout.WORKTREE) or (

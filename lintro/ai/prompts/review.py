@@ -32,6 +32,7 @@ __all__ = [
     "REVIEW_GIT_NATIVE_DIFF_INLINE",
     "REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND",
     "REVIEW_GIT_NATIVE_TREE_POST_CHANGE_NOTE",
+    "REVIEW_GIT_NATIVE_TREE_NONE_NOTE",
     "REVIEW_GIT_NATIVE_TREE_PRE_CHANGE_NOTE",
     "REVIEW_GIT_NATIVE_TREE_UNKNOWN_NOTE",
     "REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE",
@@ -84,6 +85,10 @@ REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND = load_prompt_template(
 # (disk is pre-change), a branch or uncommitted review runs on the change
 # itself (disk is post-change), and an undetermined checkout tells the agent
 # to check before trusting a disk read either way.
+REVIEW_GIT_NATIVE_TREE_NONE_NOTE = load_prompt_template(
+    "review",
+    "git_native_tree_none.md",
+)
 REVIEW_GIT_NATIVE_TREE_PRE_CHANGE_NOTE = load_prompt_template(
     "review",
     "git_native_tree_pre_change.md",

@@ -32,6 +32,8 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.skipped_file import SkippedFile
+from lintro.ai.review.pr_head import checkout_pr_head, empty_workspace
+from lintro.ai.review.pr_head_guard import RemoveOnError
 
 _WORKFLOW_PATH_PREFIX = ".github/workflows/"
 
@@ -82,12 +84,56 @@ def collect_review_context(
             pr_number=pr_number,
             repo=repo,
         )
+        # The agent reads the PR's head, never the ambient tree (#2733): the
+        # one decision is a verified head worktree or no tree at all. The
+        # ambient checkout is never the fallback, whatever commit it is at
+        # — a matching commit says nothing about uncommitted edits.
+        worktree = checkout_pr_head(pr_number=pr_number, head_oid=context.head_ref)
+        checkout = ReviewCheckout.HEAD
+        if worktree is None:
+            worktree = empty_workspace()
+            checkout = ReviewCheckout.NONE
+        repo_root = worktree.path
+        context = replace(context, checkout=checkout, head_worktree=worktree)
     elif uncommitted:
         context = _collect_uncommitted_context()
     else:
         resolved_base = base if base is not None else resolve_default_base_branch()
         context = _collect_branch_context(base=resolved_base)
 
+    # The tree exists from here on (#2733): whatever raises before the run
+    # owns it — a filter, the validation, an interrupt — removes it.
+    with RemoveOnError(context.head_worktree):
+        context = _finish_context(
+            context=context,
+            paths=paths,
+            exclude_globs=exclude_globs,
+        )
+        if not context.changed_files and not context.unified_diff.strip():
+            raise ReviewContextError(
+                "No changes found for review. Verify the diff range or path filters.",
+                code=ReviewContextErrorCode.NO_CHANGES,
+            )
+        validate_review_context_diff(context=context)
+    return replace(context, repo_root=repo_root)
+
+
+def _finish_context(
+    *,
+    context: ReviewContext,
+    paths: list[str] | None,
+    exclude_globs: list[str] | None,
+) -> ReviewContext:
+    """Apply the path filters and read the post-images.
+
+    Args:
+        context: The collected context.
+        paths: Optional path prefixes to keep.
+        exclude_globs: Optional globs to drop.
+
+    Returns:
+        The filtered context with its post-image files.
+    """
     if paths:
         context = _filter_context_by_paths(context=context, paths=paths)
     if exclude_globs:
@@ -96,17 +142,7 @@ def collect_review_context(
             exclude_globs=exclude_globs,
         )
 
-    context = _populate_post_image_files(context=context)
-
-    if not context.changed_files and not context.unified_diff.strip():
-        raise ReviewContextError(
-            "No changes found for review. Verify the diff range or path filters.",
-            code=ReviewContextErrorCode.NO_CHANGES,
-        )
-
-    validate_review_context_diff(context=context)
-
-    return replace(context, repo_root=repo_root)
+    return _populate_post_image_files(context=context)
 
 
 def validate_review_context_diff(*, context: ReviewContext) -> None:
@@ -441,16 +477,7 @@ def _populate_post_image_files(*, context: ReviewContext) -> ReviewContext:
     if not post_image_files:
         return context
 
-    return ReviewContext(
-        base_ref=context.base_ref,
-        head_ref=context.head_ref,
-        changed_files=context.changed_files,
-        unified_diff=context.unified_diff,
-        pr_metadata=context.pr_metadata,
-        checkout=context.checkout,
-        post_image_files=post_image_files,
-        skipped_files=context.skipped_files,
-    )
+    return replace(context, post_image_files=post_image_files)
 
 
 def make_head_file_reader(
@@ -710,13 +737,10 @@ def _restrict_context(
             if changed_file.path not in retained_paths
         ),
     ]
-    return ReviewContext(
-        base_ref=context.base_ref,
-        head_ref=context.head_ref,
+    return replace(
+        context,
         changed_files=retained,
         unified_diff=unified_diff,
-        pr_metadata=context.pr_metadata,
-        checkout=context.checkout,
         post_image_files=retained_post_image,
         skipped_files=skipped,
     )

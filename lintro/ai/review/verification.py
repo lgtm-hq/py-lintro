@@ -107,6 +107,7 @@ class VerificationPassRequest:
             verifier; a finding on any other path is sent without its
             cited code. ``None`` allows the changed files in ``context``.
         use_one_shot: When True, avoid durable provider sessions.
+        no_tools: When True the call goes out without tools (#2733).
         stop: Event set by the run's interrupt handler; when it fires while
             the call is in flight the call is abandoned and the pass fails
             soft.
@@ -122,6 +123,7 @@ class VerificationPassRequest:
     repo_root: str = ""
     allowed_paths: frozenset[str] | None = None
     use_one_shot: bool = True
+    no_tools: bool = False
     stop: asyncio.Event | None = None
 
 
@@ -338,6 +340,7 @@ async def run_verification_pass(
                 max_tokens=_MAX_TOKENS,
                 repo_root=request.repo_root or None,
                 use_one_shot=request.use_one_shot,
+                no_tools=request.no_tools,
                 cli_schema=cli_schema_for_verification(
                     transport=request.ai_config.transport,
                 ),

@@ -33,6 +33,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+from lintro.ai.review.pr_head import remove_pr_head
 from lintro.ai.review.result_assembly import (
     assemble_review_result,
     empty_review_result,
@@ -134,8 +135,18 @@ async def run_review_async(
     Returns:
         Complete review result with metadata, checklist, and findings.
     """
-    async with ReviewSession(provider=options.provider) as session:
-        return await _run_review_steps(context, options=options, session=session)
+    try:
+        async with ReviewSession(provider=options.provider) as session:
+            return await _run_review_steps(
+                context,
+                options=options,
+                session=session,
+            )
+    finally:
+        # The PR head worktree (#2733) outlives nothing: a completed run, an
+        # early return, a graceful stop (the SIGTERM handler ends the run
+        # through this path too) and an exception all remove it here.
+        remove_pr_head(context.head_worktree)
 
 
 async def _run_review_steps(

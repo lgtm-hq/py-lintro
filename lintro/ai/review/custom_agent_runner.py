@@ -251,6 +251,7 @@ class CustomAgentPassRequest:
         repo_root: Absolute path to the repository under review.
         workspace_root: Optional workspace root for per-agent providers.
         use_one_shot: When True, avoid durable CLI provider sessions.
+        tools_disabled: No tree for the agent (#2733): call without tools.
         provider_cache: The owning
             :class:`~lintro.ai.review.session.ReviewSession`'s cache of
             providers built for ``model`` overrides, keyed by model name.
@@ -273,6 +274,7 @@ class CustomAgentPassRequest:
     repo_root: str = ""
     workspace_root: Path | None = None
     use_one_shot: bool = True
+    tools_disabled: bool = False
     provider_cache: dict[str, BaseAIProvider]
     on_pass_complete: Callable[[CustomAgentPassResult], None] | None = None
     on_agent_failed: Callable[[str], None] | None = None
@@ -345,6 +347,7 @@ async def run_custom_agent_passes(
                 budget=budget,
                 repo_root=repo_root or None,
                 use_one_shot=use_one_shot,
+                no_tools=request.tools_disabled,
             )
         except AICostBudgetExceededError:
             raise

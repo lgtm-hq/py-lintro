@@ -43,6 +43,7 @@ from lintro.ai.review.models.coverage_degradation import (
 )
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
+from lintro.ai.review.pr_head import no_tree_degradations
 from lintro.ai.review.question_pass import question_pass_degradations
 from lintro.ai.review.resume import carried_truncated_paths, records_for_reviewed
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
@@ -178,11 +179,9 @@ def assemble_review_result(
         "parse_merge": max(outcome.parse_merge_seconds, 0.0),
     }
 
-    # Every provider call the run made — chunks, custom agents, the synthesis
-    # pass, the question pass and the verification pass — joins the run
-    # totals rather than hiding outside them (#2269, #2720, #2728). The passes
-    # are charged from the outcome, so a run that stopped before any chunk
-    # completed still reports their cost.
+    # Every provider call the run made — chunks, custom agents, synthesis,
+    # questions, verification — joins the run totals (#2269, #2720, #2728);
+    # charged from the outcome, so a stopped run still reports their cost.
     total_input, total_output, total_cost = _run_usage(outcome=outcome)
     chunks_reviewed = sum(1 for item in outcome.partials if item.files)  # #2731
     # The round's narrative comes from the synthesis pass (lintro-ops
@@ -264,6 +263,7 @@ def assemble_review_result(
             *(synthesis.degradations if synthesis is not None else ()),
             *question_pass_degradations(questions=outcome.questions),
             *verification_degradations(summary=outcome.verification),
+            *no_tree_degradations(plan=plan, ai_config=options.ai_config),
             *(
                 CoverageDegradation(
                     reason=CoverageDegradationReason.DIFF_TRUNCATED,
