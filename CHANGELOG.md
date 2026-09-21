@@ -19,13 +19,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   clone the run has no tree and every call goes out without tools, recorded as a
   `no_tree_for_agent` degradation (#2733).
 
-- **ai/review**: the repository-context section admits every eligible changed text file
-  (a workflow, a config, a doc), not only source code, so a one-file workflow PR no
-  longer reviews from the hunk alone (#2731).
-
 ### Deprecated
 
 ### Removed
+
+### Fixed
+
+### Security
+
+## [0.168.1] - 2026-09-21
+
+### Changed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.152.3 (minor) (#2502)
+  (d458a1e)
+- **ai/review**: the repository-context section admits every eligible changed text file
+  (a workflow, a config, a doc), not only source code, so a one-file workflow PR no
+  longer reviews from the hunk alone (#2731).
 
 ### Fixed
 
@@ -33,8 +43,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   single-shot (no generated questions, no tools) instead of repeating the same call, and
   a run whose every chunk reviewed nothing skips the synthesis narrative, is reported as
   a stopped run and exits 1 (#2731).
-
-### Security
 
 ## [0.168.0] - 2026-09-21
 
