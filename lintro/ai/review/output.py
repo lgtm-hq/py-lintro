@@ -118,10 +118,11 @@ def findings_to_dicts(*, findings: Sequence[ReviewFinding]) -> list[dict[str, An
     """Serialize a round's findings, each carrying its stable ``finding_id``.
 
     The id is the record key the state store and the inline-thread marker
-    already use — ``<fingerprint>#<ordinal>``, the fingerprint over path,
-    category and normalized title, the ordinal by first-seen line order —
-    so a consumer (the corpus scorer, a delta round) can match a finding on
-    one head to the same finding on the next (#2627).
+    already use — ``<fingerprint>#<ordinal>``. When the adapter stamped it
+    from the match against prior state it is used as is; a finding never
+    matched (no prior state, a fixture) gets the key a first round would
+    assign. Either way a consumer (the corpus scorer, a delta round) can
+    match a finding on one head to the same finding on the next (#2627).
 
     Args:
         findings: The round's findings, in reported order.
@@ -129,11 +130,13 @@ def findings_to_dicts(*, findings: Sequence[ReviewFinding]) -> list[dict[str, An
     Returns:
         One payload per finding, in the same order.
     """
-    records = current_records(findings=findings, round_number=1)
-    return [
-        {"finding_id": record.key, **finding_to_dict(finding=finding)}
-        for finding, record in zip(findings, records, strict=True)
-    ]
+    fallback = current_records(findings=findings, round_number=1)
+    payloads: list[dict[str, Any]] = []
+    for finding, record in zip(findings, fallback, strict=True):
+        payload = finding_to_dict(finding=finding)
+        payload["finding_id"] = finding.finding_id or record.key
+        payloads.append(payload)
+    return payloads
 
 
 def finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:

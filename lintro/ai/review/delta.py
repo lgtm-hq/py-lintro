@@ -1,42 +1,49 @@
 """Delta rounds: read what changed since the last posted round (#2627).
 
+A delta round narrows what the model reads and what it may resolve; it never
+narrows what it may report.
+
 Every round of a ``--pr`` review used to embed the whole pull-request diff in
 its chunk calls, so round five of a large PR re-read files that had not
 changed since round one. Coverage resume (ADR-0007) already keeps the
 provider off files whose whole-PR patch hash is unchanged; this module
 narrows what the remaining calls *read*:
 
-- :func:`plan_delta` decides the round's scope from the prior round's head:
-  round one, an unknown head, a rewritten branch (the prior head is not an
-  ancestor of this one), a run without a tree, or ``--full`` all read the
-  whole diff, each with its own :class:`DeltaReason` for the sticky comment.
+- :func:`plan_delta` decides the round's scope from the prior round's head.
+  Round one, a non-PR run, an unknown head, the same head again, a rewritten
+  branch (the prior head is not an ancestor of this one), a base that was
+  merged in since the prior round, a run without a tree, or ``--full`` all
+  read the whole diff, each with its own :class:`DeltaReason` for the sticky.
 - :func:`delta_hunks` computes ``since..head`` per file in the PR head
   worktree #2744 provides, restricted to files the pull request itself
-  changes — a file that only a merge from ``main`` brought in is not the
-  PR's change and is never embedded.
-- :func:`apply_delta_hunks` swaps each queued file's embedded text for its
-  delta hunk. A queued file with no delta hunk (re-queued by an open thread
-  or an invalidation, not by a change) keeps its whole-PR hunk: the reviewer
-  needs the code the thread is about.
+  changes.
+- :func:`apply_delta_hunks` gives each queued file's chunk a ``read_diff``
+  — the text the prompt embeds — while ``ReviewChunk.diff`` keeps the
+  whole-PR hunk the diff gate, the cross-chunk guard and the budgets see. A
+  delta hunk that is not smaller than the whole hunk (a large change then a
+  large revert) is not used; a file re-queued by an open thread with no
+  change since keeps its whole hunk: the reviewer needs the code the thread
+  is about. The application also returns the new-file line ranges the round
+  read, which the matcher uses to carry — not resolve — a prior finding on a
+  line the round never re-read.
 - :func:`open_thread_paths` names the files with an open finding so the
   resume queue re-reads them every delta round.
 
-What the round *reports* is not narrowed: a causal finding on a file the
-agent read in the worktree is posted exactly as on a full round. The
-coverage identity of a file — its whole-PR patch hash — is never replaced by
-a delta hash, so ADR-0007's rule that coverage below 100% at HEAD forces
-``INCOMPLETE`` holds on a delta round unchanged.
+The coverage identity of a file — its whole-PR patch hash — is never
+replaced by a delta hash, so ADR-0007's rule that coverage below 100% at
+HEAD forces ``INCOMPLETE`` holds on a delta round unchanged.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.context.git_ops import _run_git
+from lintro.ai.review.diff_gate import hunks_from_diff
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
@@ -47,11 +54,14 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping
 
     from lintro.ai.review.models.review_chunk import ReviewChunk
+    from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_state import ReviewState
 
 __all__ = [
+    "DeltaApplication",
     "apply_delta_hunks",
     "delta_hunks",
+    "merge_base",
     "open_thread_paths",
     "plan_delta",
 ]
@@ -60,39 +70,38 @@ __all__ = [
 def plan_delta(
     *,
     prior: ReviewState | None,
-    head_sha: str,
+    context: ReviewContext,
     repo_root: str,
-    checkout: ReviewCheckout,
     force_full: bool,
 ) -> DeltaPlan:
     """Decide whether this round reads the whole diff or the delta.
 
     Args:
         prior: State of the previous rounds, or ``None`` on round one.
-        head_sha: The head commit under review.
+        context: The collected context: head, base, PR metadata, checkout.
         repo_root: The repository the range is resolved in (the PR head
             worktree on a ``--pr`` run).
-        checkout: What tree the run has; :attr:`ReviewCheckout.NONE` has no
-            repository to resolve a range in.
         force_full: ``--full``.
 
     Returns:
         The plan; :attr:`DeltaPlan.is_delta` is True only when the prior head
-        is a known ancestor of ``head_sha``.
+        is a known ancestor of the head and the base was not merged in since.
     """
+    head_sha = context.head_ref
     if force_full:
         return DeltaPlan.full(reason=DeltaReason.EXPLICIT_FULL)
+    if context.pr_metadata is None:
+        return DeltaPlan.full(reason=DeltaReason.NOT_PR)
     if prior is None or not prior.runs:
         return DeltaPlan.full(reason=DeltaReason.FIRST_ROUND)
-    since = prior.runs[-1].identity.sha
+    last = prior.runs[-1].identity
+    since = last.sha
     if not since:
         return DeltaPlan.full(reason=DeltaReason.NO_PRIOR_HEAD)
-    if checkout is ReviewCheckout.NONE:
+    if context.checkout is ReviewCheckout.NONE:
         return DeltaPlan.full(reason=DeltaReason.NO_TREE)
     if since == head_sha:
-        # Nothing moved: a re-run of the same head is a full read; resume
-        # keeps the provider off what is already covered.
-        return DeltaPlan.full(reason=DeltaReason.NOT_ANCESTOR)
+        return DeltaPlan.full(reason=DeltaReason.SAME_HEAD)
     if not _is_ancestor(repo_root=repo_root, ancestor=since, descendant=head_sha):
         logger.info(
             "Prior round head {} is not an ancestor of {}; reading the whole diff.",
@@ -100,6 +109,14 @@ def plan_delta(
             head_sha[:12],
         )
         return DeltaPlan.full(reason=DeltaReason.NOT_ANCESTOR)
+    if _base_moved(
+        repo_root=repo_root,
+        base_sha=context.base_ref,
+        since=since,
+        head_sha=head_sha,
+        prior_merge_base=last.merge_base,
+    ):
+        return DeltaPlan.full(reason=DeltaReason.BASE_MOVED)
     return DeltaPlan(reason=DeltaReason.DELTA, since_sha=since)
 
 
@@ -128,13 +145,78 @@ def _is_ancestor(*, repo_root: str, ancestor: str, descendant: str) -> bool:
     return result.returncode == 0
 
 
+def merge_base(*, repo_root: str, base_sha: str, head_sha: str) -> str:
+    """Return ``merge-base(base, head)``, or ``""`` when git cannot say.
+
+    Recorded on every round so the next one can tell whether the base was
+    merged into the branch in between.
+
+    Args:
+        repo_root: The repository to ask.
+        base_sha: The base branch tip ``gh`` reported.
+        head_sha: The head under review.
+
+    Returns:
+        The merge-base commit, or an empty string.
+    """
+    if not base_sha or not head_sha:
+        return ""
+    try:
+        result = _run_git(
+            args=["-C", repo_root, "merge-base", base_sha, head_sha],
+            check=False,
+        )
+    except ReviewContextError:
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _base_moved(
+    *,
+    repo_root: str,
+    base_sha: str,
+    since: str,
+    head_sha: str,
+    prior_merge_base: str,
+) -> bool:
+    """Tell whether the base branch entered ``since..head``.
+
+    A merge from the base brings its commits into the two-dot range, and
+    for a file both sides touch the delta hunk would carry the base's lines
+    as if the PR had written them. The recorded merge-base moving is the
+    direct signal; a prior record without one (written before this field)
+    falls back to looking for merge commits in the range.
+
+    Args:
+        repo_root: The repository to ask.
+        base_sha: The base branch tip.
+        since: The prior round's head.
+        head_sha: This round's head.
+        prior_merge_base: The merge-base the prior round recorded, or ``""``.
+
+    Returns:
+        True when the delta could carry base-authored lines.
+    """
+    if prior_merge_base:
+        current = merge_base(repo_root=repo_root, base_sha=base_sha, head_sha=head_sha)
+        return current != prior_merge_base
+    try:
+        result = _run_git(
+            args=["-C", repo_root, "rev-list", "--merges", f"{since}..{head_sha}"],
+            check=False,
+        )
+    except ReviewContextError:
+        return True
+    return result.returncode != 0 or bool(result.stdout.strip())
+
+
 def delta_hunks(
     *,
     repo_root: str,
     since_sha: str,
     head_sha: str,
     pr_paths: Iterable[str],
-) -> dict[str, str]:
+) -> dict[str, str] | None:
     """Return the ``since..head`` diff per file, for the PR's own files only.
 
     Args:
@@ -145,9 +227,9 @@ def delta_hunks(
             outside this set (brought in by a merge from ``main``) is dropped.
 
     Returns:
-        ``{path: unified diff}`` for the PR files that changed in the range;
-        empty when the range cannot be computed, which callers treat as "no
-        delta text" (the whole-PR hunks stay).
+        ``{path: unified diff}`` for the PR files that changed in the range,
+        or ``None`` when git could not compute the range — the caller then
+        records a full read rather than a delta it never got.
     """
     allowed = set(pr_paths)
     if not allowed:
@@ -167,19 +249,16 @@ def delta_hunks(
             check=False,
         )
     except ReviewContextError as exc:
-        logger.warning(
-            "Could not compute the delta diff ({}); reading the whole diff.",
-            exc,
-        )
-        return {}
+        logger.warning("Could not compute the delta diff ({}).", exc)
+        return None
     if result.returncode != 0:
         logger.warning(
-            "git diff {}..{} failed ({}); reading the whole diff.",
+            "git diff {}..{} failed ({}).",
             since_sha[:12],
             head_sha[:12],
             result.stderr.strip()[:200],
         )
-        return {}
+        return None
     return {
         path: hunk
         for path, hunk in split_unified_diff_by_file(unified_diff=result.stdout).items()
@@ -187,34 +266,68 @@ def delta_hunks(
     }
 
 
+@dataclass(frozen=True, slots=True)
+class DeltaApplication:
+    """What :func:`apply_delta_hunks` did to a round's chunks.
+
+    Attributes:
+        chunks: The chunks, each queued file carrying its ``read_diff``
+            where a smaller delta hunk existed.
+        reviewed_ranges: ``(path, start, end)`` new-file line ranges the
+            round reads for the files whose text was narrowed; a prior
+            finding on such a file outside these ranges is carried, not
+            resolved. Files read whole are absent: every line counts.
+        larger: Files whose delta hunk was not smaller than the whole hunk
+            and were read whole.
+    """
+
+    chunks: list[ReviewChunk]
+    reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
+    larger: tuple[str, ...] = ()
+
+
 def apply_delta_hunks(
     *,
     chunks: list[ReviewChunk],
     hunks: Mapping[str, str],
-) -> list[ReviewChunk]:
-    """Embed each chunk file's delta hunk in place of its whole-PR hunk.
+) -> DeltaApplication:
+    """Give each chunk file a ``read_diff`` where its delta hunk is smaller.
 
     Args:
         chunks: The round's chunks after resume filtering.
         hunks: Output of :func:`delta_hunks`.
 
     Returns:
-        The chunks with their ``diff`` rebuilt; a chunk none of whose files
-        has a delta hunk is returned as is.
+        The application; chunks none of whose files narrowed are unchanged.
     """
     if not hunks:
-        return chunks
+        return DeltaApplication(chunks=chunks)
     rebuilt: list[ReviewChunk] = []
+    ranges: list[tuple[str, int, int]] = []
+    larger: list[str] = []
     for chunk in chunks:
         per_file = split_unified_diff_by_file(unified_diff=chunk.diff)
-        if not any(path in hunks for path in per_file):
-            rebuilt.append(chunk)
-            continue
-        # Keep the chunk's own file order; a file with no delta hunk keeps
-        # its whole-PR text.
-        parts = [hunks.get(path, text) for path, text in per_file.items()]
-        rebuilt.append(replace(chunk, diff="".join(parts)))
-    return rebuilt
+        parts: list[str] = []
+        narrowed = False
+        for path, whole in per_file.items():
+            delta = hunks.get(path)
+            if delta is None:
+                parts.append(whole)
+                continue
+            if len(delta) >= len(whole):
+                larger.append(path)
+                parts.append(whole)
+                continue
+            narrowed = True
+            parts.append(delta)
+            for file_hunks in hunks_from_diff(diff=delta).values():
+                ranges.extend((path, hunk.start, hunk.end) for hunk in file_hunks.hunks)
+        rebuilt.append(replace(chunk, read_diff="".join(parts)) if narrowed else chunk)
+    return DeltaApplication(
+        chunks=rebuilt,
+        reviewed_ranges=tuple(ranges),
+        larger=tuple(larger),
+    )
 
 
 def open_thread_paths(*, prior: ReviewState | None) -> tuple[str, ...]:

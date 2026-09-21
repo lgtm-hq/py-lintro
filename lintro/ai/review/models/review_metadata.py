@@ -85,6 +85,12 @@ class ReviewMetadata:
             delta from (#2627); empty on a full round.
         delta_reason (str): :class:`~lintro.ai.review.enums.delta_reason.DeltaReason`
             value naming why the round was a delta or a full read.
+        merge_base (str): ``merge-base(base, head)`` at review time, recorded
+            so the next round can detect a merge from the base (#2627).
+        reviewed_ranges (tuple[tuple[str, int, int], ...]): ``(path, start,
+            end)`` new-file line ranges a delta round read for the files it
+            narrowed; a prior finding on such a file outside them is carried,
+            never resolved. Empty on a full round.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -153,6 +159,8 @@ class ReviewMetadata:
     questions_diff_trimmed: bool = False
     delta_since: str = ""
     delta_reason: str = ""
+    merge_base: str = ""
+    reviewed_ranges: tuple[tuple[str, int, int], ...] = field(default_factory=tuple)
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)

@@ -117,6 +117,7 @@ def _identity(
         auth_mode=auth_mode,
         depth=metadata.depth,
         strictness=metadata.strictness,
+        merge_base=metadata.merge_base,
     )
 
 

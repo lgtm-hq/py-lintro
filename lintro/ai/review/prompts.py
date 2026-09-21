@@ -181,7 +181,10 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
     pr_title = redact_prompt_text(text=pr_title, source="PR title")
     pr_summary = context.pr_metadata.body if context.pr_metadata else "(no PR summary)"
     pr_summary = redact_prompt_text(text=pr_summary, source="PR metadata")
-    redacted_diff = redact_prompt_text(text=chunk.diff, source="diff")
+    redacted_diff = redact_prompt_text(
+        text=chunk.read_diff or chunk.diff,
+        source="diff",
+    )
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     boundary = make_boundary_marker()
     questions, additional_checks = _rubric_sections(inputs=inputs, boundary=boundary)
@@ -267,7 +270,7 @@ def build_git_native_review_prompt(
     if embed_diff:
         diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
             boundary=boundary,
-            diff=redact_prompt_text(text=chunk.diff, source="diff"),
+            diff=redact_prompt_text(text=chunk.read_diff or chunk.diff, source="diff"),
         )
     elif context.head_ref == "WORKTREE":
         diff_section = REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND.format(

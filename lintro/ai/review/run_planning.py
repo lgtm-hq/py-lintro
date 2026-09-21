@@ -30,7 +30,12 @@ from lintro.ai.review.cli_limits import (
     resolve_synthesis_diff_budget,
 )
 from lintro.ai.review.custom_agents import select_custom_agents
-from lintro.ai.review.delta import apply_delta_hunks, delta_hunks, plan_delta
+from lintro.ai.review.delta import (
+    apply_delta_hunks,
+    delta_hunks,
+    merge_base,
+    plan_delta,
+)
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
@@ -95,6 +100,11 @@ class ReviewRunPlan:
             without tools rather than against the ambient working tree.
         delta: What the chunk calls read this round (#2627): the delta
             since the prior round's head, or the whole diff and why.
+        reviewed_ranges: The new-file line ranges a delta round read for
+            the files it narrowed; the matcher carries a prior finding on
+            such a file outside them rather than resolving it.
+        merge_base: ``merge-base(base, head)`` recorded for the next round's
+            base-moved check; empty off ``--pr``.
         timings: Recorder for the run's phase and per-chunk spans (#2148).
     """
 
@@ -121,6 +131,8 @@ class ReviewRunPlan:
     delta: DeltaPlan = field(
         default_factory=lambda: DeltaPlan.full(reason=DeltaReason.FIRST_ROUND),
     )
+    reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
+    merge_base: str = ""
     timings: ReviewTimingRecorder
 
 
@@ -392,21 +404,34 @@ def plan_run(
     repo_root = context.repo_root or os.getcwd()
     delta = plan_delta(
         prior=options.prior_state,
-        head_sha=context.head_ref,
+        context=context,
         repo_root=repo_root,
-        checkout=context.checkout,
         force_full=options.force_full,
     )
+    reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
     if delta.is_delta and chunks:
-        chunks = apply_delta_hunks(
-            chunks=chunks,
-            hunks=delta_hunks(
-                repo_root=repo_root,
-                since_sha=delta.since_sha or "",
-                head_sha=context.head_ref,
-                pr_paths=(file.path for file in context.changed_files),
-            ),
+        hunks = delta_hunks(
+            repo_root=repo_root,
+            since_sha=delta.since_sha or "",
+            head_sha=context.head_ref,
+            pr_paths=(file.path for file in context.changed_files),
         )
+        if hunks is None:
+            delta = DeltaPlan.full(reason=DeltaReason.DELTA_FAILED)
+        else:
+            applied = apply_delta_hunks(chunks=chunks, hunks=hunks)
+            chunks = applied.chunks
+            reviewed_ranges = applied.reviewed_ranges
+    recorded_merge_base = (
+        merge_base(
+            repo_root=repo_root,
+            base_sha=context.base_ref,
+            head_sha=context.head_ref,
+        )
+        if context.pr_metadata is not None
+        and context.checkout is not ReviewCheckout.NONE
+        else ""
+    )
     agent_selection = select_custom_agents(
         agents=options.custom_agents,
         changed_paths=tuple(file.path for file in context.changed_files),
@@ -458,5 +483,7 @@ def plan_run(
         use_one_shot=len(chunks) > 1,
         tools_disabled=context.checkout is ReviewCheckout.NONE,
         delta=delta,
+        reviewed_ranges=reviewed_ranges,
+        merge_base=recorded_merge_base,
         timings=timings,
     )

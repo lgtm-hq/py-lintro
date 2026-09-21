@@ -129,6 +129,7 @@ class RunRecord:
             ("dropped_outside_diff", outcome.dropped_outside_diff),
             ("cost_basis", usage.cost_basis),
             ("context", usage.context),
+            ("merge_base", identity.merge_base),
         )
         payload.update({key: value for key, value in optional if value})
         if outcome.resolved is not None:
@@ -191,6 +192,7 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         auth_mode=str(payload.get("auth_mode", "")),
         depth=coerce_int(payload.get("depth")),
         strictness=str(payload.get("strictness", "")),
+        merge_base=str(payload.get("merge_base", "") or ""),
     )
 
 

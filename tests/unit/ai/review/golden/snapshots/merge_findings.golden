@@ -27,7 +27,8 @@
     "cross_chunk_contradiction": null,
     "origin": null,
     "posted_inline": true,
-    "merged_duplicates": []
+    "merged_duplicates": [],
+    "finding_id": ""
   },
   {
     "severity": "P1",
@@ -57,7 +58,8 @@
     "cross_chunk_contradiction": null,
     "origin": null,
     "posted_inline": true,
-    "merged_duplicates": []
+    "merged_duplicates": [],
+    "finding_id": ""
   },
   {
     "severity": "P2",
@@ -87,6 +89,7 @@
     "cross_chunk_contradiction": null,
     "origin": null,
     "posted_inline": true,
-    "merged_duplicates": []
+    "merged_duplicates": [],
+    "finding_id": ""
   }
 ]

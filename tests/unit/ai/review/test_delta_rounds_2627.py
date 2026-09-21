@@ -28,14 +28,21 @@ from lintro.ai.review.delta import (
 )
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
+from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.finding_identity import fingerprint_for
+from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.group_labels import REL_SINGLE_FILE
+from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_record import CoverageRecord
+from lintro.ai.review.models.delta_plan import DeltaPlan
 from lintro.ai.review.models.finding_record import FindingRecord
+from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_chunk import ReviewChunk
-from lintro.ai.review.models.review_finding import Severity
+from lintro.ai.review.models.review_context import ReviewContext
+from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_coverage import RunCoverage
@@ -44,6 +51,7 @@ from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.sticky.assembly import render_state_sticky
 from lintro.ai.review.sticky.scope import _scope_line
+from lintro.ai.review.sticky.state import matcher_reviewed_ranges, stamp_finding_ids
 from lintro.ai.review.verdict import apply_coverage_gate, derive_readiness_verdict
 
 pytestmark = pytest.mark.verification
@@ -136,50 +144,94 @@ def _state(*, sha: str, **coverage: Any) -> ReviewState:
 # --- the decision -------------------------------------------------------------
 
 
+def _ctx(
+    *,
+    head: str,
+    base: str,
+    pr: bool = True,
+    checkout: ReviewCheckout = ReviewCheckout.HEAD,
+) -> ReviewContext:
+    """A collected context for the scratch PR.
+
+    Args:
+        head: The head under review.
+        base: The base branch tip ``gh`` would report.
+        pr: Whether this is a ``--pr`` run (carries PR metadata).
+        checkout: What tree the run has.
+
+    Returns:
+        The context.
+    """
+    return ReviewContext(
+        base_ref=base,
+        head_ref=head,
+        changed_files=[
+            ChangedFile(path="api.py", status="modified", additions=1, deletions=1),
+            ChangedFile(path="new.py", status="added", additions=1, deletions=0),
+        ],
+        unified_diff="",
+        pr_metadata=(
+            PRMetadata(title="t", body="b", number=1, repo="o/r", head_repo="o/r")
+            if pr
+            else None
+        ),
+        checkout=checkout,
+    )
+
+
+def _plan(
+    scratch: dict[str, Any],
+    *,
+    prior: ReviewState | None,
+    head: str,
+    **kw: Any,
+) -> DeltaPlan:
+    """Plan a round on the scratch repository.
+
+    Args:
+        scratch: The fixture.
+        prior: Prior state.
+        head: The head under review.
+        **kw: Overrides for :func:`_ctx` and ``force_full``.
+
+    Returns:
+        The plan.
+    """
+    force_full = kw.pop("force_full", False)
+    return plan_delta(
+        prior=prior,
+        context=_ctx(head=head, base=kw.pop("base", scratch["a"]), **kw),
+        repo_root=str(scratch["repo"]),
+        force_full=force_full,
+    )
+
+
 def test_round_one_and_missing_heads_read_the_whole_diff(
     scratch: dict[str, Any],
 ) -> None:
     """No prior round, or a prior round without a head, is a full read."""
-    root = str(scratch["repo"])
-    kwargs: dict[str, Any] = {
-        "head_sha": scratch["c"],
-        "repo_root": root,
-        "checkout": ReviewCheckout.HEAD,
-        "force_full": False,
-    }
-    assert_that(plan_delta(prior=None, **kwargs).reason).is_equal_to(
+    c = scratch["c"]
+    assert_that(_plan(scratch, prior=None, head=c).reason).is_equal_to(
         DeltaReason.FIRST_ROUND,
     )
-    assert_that(plan_delta(prior=ReviewState(), **kwargs).reason).is_equal_to(
+    assert_that(_plan(scratch, prior=ReviewState(), head=c).reason).is_equal_to(
         DeltaReason.FIRST_ROUND,
     )
-    assert_that(plan_delta(prior=_state(sha=""), **kwargs).reason).is_equal_to(
+    assert_that(_plan(scratch, prior=_state(sha=""), head=c).reason).is_equal_to(
         DeltaReason.NO_PRIOR_HEAD,
     )
 
 
 def test_an_ancestor_prior_head_anchors_a_delta(scratch: dict[str, Any]) -> None:
-    """B is an ancestor of C: round two reads ``B..C``."""
-    plan = plan_delta(
-        prior=_state(sha=scratch["b"]),
-        head_sha=scratch["c"],
-        repo_root=str(scratch["repo"]),
-        checkout=ReviewCheckout.HEAD,
-        force_full=False,
-    )
+    """B is an ancestor of C and main did not move: round two reads ``B..C``."""
+    plan = _plan(scratch, prior=_state(sha=scratch["b"]), head=scratch["c"])
     assert_that(plan.is_delta).is_true()
     assert_that(plan.since_sha).is_equal_to(scratch["b"])
 
 
 def test_a_force_push_falls_back_to_a_full_read(scratch: dict[str, Any]) -> None:
     """B is not an ancestor of B': the rewritten branch is read whole."""
-    plan = plan_delta(
-        prior=_state(sha=scratch["b"]),
-        head_sha=scratch["b_prime"],
-        repo_root=str(scratch["repo"]),
-        checkout=ReviewCheckout.HEAD,
-        force_full=False,
-    )
+    plan = _plan(scratch, prior=_state(sha=scratch["b"]), head=scratch["b_prime"])
     assert_that(plan.is_delta).is_false()
     assert_that(plan.reason).is_equal_to(DeltaReason.NOT_ANCESTOR)
 
@@ -188,38 +240,62 @@ def test_a_prior_head_the_repository_no_longer_holds_is_not_an_ancestor(
     scratch: dict[str, Any],
 ) -> None:
     """A commit git cannot find (garbage-collected old head) is a full read."""
-    plan = plan_delta(
-        prior=_state(sha="0" * 40),
-        head_sha=scratch["c"],
-        repo_root=str(scratch["repo"]),
-        checkout=ReviewCheckout.HEAD,
-        force_full=False,
-    )
+    plan = _plan(scratch, prior=_state(sha="0" * 40), head=scratch["c"])
     assert_that(plan.reason).is_equal_to(DeltaReason.NOT_ANCESTOR)
 
 
-def test_full_and_no_tree_win_over_an_ancestor(scratch: dict[str, Any]) -> None:
-    """``--full`` and a treeless run never compute a delta."""
+def test_full_no_tree_same_head_and_non_pr_never_compute_a_delta(
+    scratch: dict[str, Any],
+) -> None:
+    """Each fallback carries its own reason for the sticky."""
     prior = _state(sha=scratch["b"])
-    root = str(scratch["repo"])
+    c = scratch["c"]
     assert_that(
-        plan_delta(
-            prior=prior,
-            head_sha=scratch["c"],
-            repo_root=root,
-            checkout=ReviewCheckout.HEAD,
-            force_full=True,
-        ).reason,
-    ).is_equal_to(DeltaReason.EXPLICIT_FULL)
+        _plan(scratch, prior=prior, head=c, force_full=True).reason,
+    ).is_equal_to(
+        DeltaReason.EXPLICIT_FULL,
+    )
     assert_that(
-        plan_delta(
-            prior=prior,
-            head_sha=scratch["c"],
-            repo_root=root,
-            checkout=ReviewCheckout.NONE,
-            force_full=False,
-        ).reason,
+        _plan(scratch, prior=prior, head=c, checkout=ReviewCheckout.NONE).reason,
     ).is_equal_to(DeltaReason.NO_TREE)
+    assert_that(_plan(scratch, prior=prior, head=scratch["b"]).reason).is_equal_to(
+        DeltaReason.SAME_HEAD,
+    )
+    assert_that(_plan(scratch, prior=prior, head=c, pr=False).reason).is_equal_to(
+        DeltaReason.NOT_PR,
+    )
+
+
+def test_a_merge_from_main_since_the_prior_round_is_a_full_read(
+    scratch: dict[str, Any],
+) -> None:
+    """The base entered ``B..head``: its lines must not pass as the PR's delta."""
+    repo = scratch["repo"]
+    _git(repo, "checkout", "-q", "pr")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    merged_head = _git(repo, "rev-parse", "HEAD")
+    # Prior record with the merge-base it saw at B (main was at A then).
+    prior = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(
+                    round=1,
+                    sha=scratch["b"],
+                    merge_base=scratch["a"],
+                ),
+            ),
+        ),
+    )
+    plan = _plan(scratch, prior=prior, head=merged_head, base=scratch["m"])
+    assert_that(plan.reason).is_equal_to(DeltaReason.BASE_MOVED)
+    # A prior record without a merge-base (written before the field): the
+    # merge commit in the range is the signal.
+    legacy = _state(sha=scratch["b"])
+    plan = _plan(scratch, prior=legacy, head=merged_head, base=scratch["m"])
+    assert_that(plan.reason).is_equal_to(DeltaReason.BASE_MOVED)
+    # And main moving WITHOUT being merged in is still a delta.
+    plan = _plan(scratch, prior=prior, head=scratch["c"], base=scratch["m"])
+    assert_that(plan.is_delta).is_true()
 
 
 # --- what a delta round reads -------------------------------------------------
@@ -235,6 +311,7 @@ def test_delta_hunks_are_the_change_since_the_prior_head_for_pr_files_only(
         head_sha=scratch["c"],
         pr_paths=["api.py", "new.py"],
     )
+    assert hunks is not None
     assert_that(sorted(hunks)).is_equal_to(["api.py", "new.py"])
     assert_that(hunks["api.py"]).contains("+    return retries")
     # B's change is context now, not a changed line.
@@ -256,15 +333,29 @@ def test_a_file_main_changed_under_the_pr_is_never_a_delta_hunk(
         repo_root=str(repo),
         since_sha=scratch["b"],
         head_sha=head,
-        # The PR's whole diff (three-dot, against main) names api.py and
-        # new.py; other.py is main's change, not the PR's.
         pr_paths=["api.py", "new.py"],
     )
+    assert hunks is not None
     assert_that(sorted(hunks)).is_equal_to(["api.py", "new.py"])
 
 
-def test_apply_swaps_only_files_with_a_delta_hunk(scratch: dict[str, Any]) -> None:
-    """A queued file without a delta hunk keeps its whole-PR text."""
+def test_a_range_git_cannot_compute_is_reported_as_none(
+    scratch: dict[str, Any],
+) -> None:
+    """A failed diff is not an empty delta: the caller records a full read."""
+    hunks = delta_hunks(
+        repo_root=str(scratch["repo"]),
+        since_sha="0" * 40,
+        head_sha=scratch["c"],
+        pr_paths=["api.py"],
+    )
+    assert_that(hunks).is_none()
+
+
+def test_apply_narrows_only_files_with_a_smaller_delta_hunk(
+    scratch: dict[str, Any],
+) -> None:
+    """The whole-PR hunk stays in ``diff``; ``read_diff`` carries the delta."""
     whole = _git(scratch["repo"], "diff", f"{scratch['a']}..{scratch['c']}")
     per_file = split_unified_diff_by_file(unified_diff=whole)
     chunk = ReviewChunk(
@@ -279,12 +370,26 @@ def test_apply_swaps_only_files_with_a_delta_hunk(scratch: dict[str, Any]) -> No
         head_sha=scratch["c"],
         pr_paths=["api.py"],
     )
-    (rebuilt,) = apply_delta_hunks(chunks=[chunk], hunks=hunks)
-    parts = split_unified_diff_by_file(unified_diff=rebuilt.diff)
+    assert hunks is not None
+    applied = apply_delta_hunks(chunks=[chunk], hunks=hunks)
+    (rebuilt,) = applied.chunks
+    assert_that(rebuilt.diff).is_equal_to(chunk.diff)  # the gate's view: untouched
+    assert rebuilt.read_diff is not None
+    parts = split_unified_diff_by_file(unified_diff=rebuilt.read_diff)
     assert_that(list(parts)).is_equal_to(["api.py", "new.py"])
     assert_that(parts["api.py"]).is_equal_to(hunks["api.py"])
     assert_that(parts["new.py"]).is_equal_to(per_file["new.py"])
-    assert_that(apply_delta_hunks(chunks=[chunk], hunks={})).is_equal_to([chunk])
+    # The lines the round read, for the matcher: api.py's hunk only.
+    assert_that({path for path, _, _ in applied.reviewed_ranges}).is_equal_to(
+        {"api.py"},
+    )
+    assert_that(applied.larger).is_empty()
+    # Nothing to apply: chunks pass through unchanged.
+    assert_that(apply_delta_hunks(chunks=[chunk], hunks={}).chunks).is_equal_to([chunk])
+    # A delta that is not smaller than the whole hunk is not used.
+    bigger = apply_delta_hunks(chunks=[chunk], hunks={"api.py": hunks["api.py"] * 40})
+    assert_that(bigger.chunks[0].read_diff).is_none()
+    assert_that(bigger.larger).is_equal_to(("api.py",))
 
 
 # --- the queue: open threads, and the INCOMPLETE rule -------------------------
@@ -452,3 +557,114 @@ def test_finding_ids_are_stable_across_rounds_and_match_the_record_key(
         assert_that(fingerprint).is_length(16)
         assert_that(int(ordinal)).is_greater_than_or_equal_to(1)
     json.dumps(first)  # serializable
+
+
+# --- resolution is line-scoped on a delta round; ids come from the match ------
+
+
+def _finding(*, file: str, line: int, title: str = "Leak") -> ReviewFinding:
+    """A P2 finding.
+
+    Args:
+        file: The file.
+        line: The line.
+        title: The title (part of the fingerprint).
+
+    Returns:
+        The finding.
+    """
+    return ReviewFinding(
+        severity=Severity.P2,
+        category="logic-bug",
+        file=file,
+        line=line,
+        title=title,
+        description="d",
+        cause="c",
+        fix="f",
+        confidence="high",
+    )
+
+
+def test_a_prior_finding_outside_the_read_range_is_carried_not_resolved() -> None:
+    """A delta round narrows what it may resolve: unread lines stay open."""
+    prior = ReviewState(
+        findings=(
+            replace(_open("api.py"), line=5),  # in the read range
+            replace(_open("api.py"), fingerprint="fp-2", line=80, title="Other"),  # not
+            replace(_open("quiet.py"), line=3),  # file read whole
+        ),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="b" * 40)),),
+    )
+    match = match_findings(
+        previous=prior,
+        findings=[],  # the round re-reported nothing
+        round_number=2,
+        head_sha="c" * 40,
+        reviewed_paths=frozenset({"api.py", "quiet.py"}),
+        reviewed_ranges={"api.py": ((1, 10),)},
+    )
+    outcomes = dict(match.outcomes.items())
+    assert_that(outcomes["fp-api.py#1"]).is_equal_to(FindingMatchOutcome.RESOLVED)
+    assert_that(outcomes["fp-2#1"]).is_equal_to(FindingMatchOutcome.CARRIED)
+    assert_that(match.range_carries).is_equal_to(frozenset({"fp-2#1"}))
+    assert_that(outcomes["fp-quiet.py#1"]).is_equal_to(FindingMatchOutcome.RESOLVED)
+    # A full round (no ranges) resolves as before.
+    full = match_findings(
+        previous=prior,
+        findings=[],
+        round_number=2,
+        head_sha="c" * 40,
+        reviewed_paths=frozenset({"api.py", "quiet.py"}),
+    )
+    assert_that(full.range_carries).is_empty()
+    assert_that(full.outcomes["fp-2#1"]).is_equal_to(FindingMatchOutcome.RESOLVED)
+
+
+def test_reviewed_ranges_ride_on_the_result_for_every_match_site(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The three match sites derive the same ranges from the metadata."""
+    assert_that(matcher_reviewed_ranges(result=sample_review_result)).is_none()
+    narrowed = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            reviewed_ranges=(("a.py", 1, 5), ("a.py", 20, 30), ("b.py", 7, 7)),
+        ),
+    )
+    assert_that(matcher_reviewed_ranges(result=narrowed)).is_equal_to(
+        {"a.py": ((1, 5), (20, 30)), "b.py": ((7, 7),)},
+    )
+
+
+def test_finding_ids_come_from_the_match_when_siblings_swap_lines(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Two same-fingerprint findings that swapped lines keep their prior keys."""
+    fp = fingerprint_for(file="api.py", category="logic-bug", title="Leak")
+    prior = ReviewState(
+        findings=(
+            # Ordinals out of line order: #2 was found later, lower in the file.
+            replace(_open("api.py"), fingerprint=fp, ordinal=1, line=100),
+            replace(_open("api.py"), fingerprint=fp, ordinal=2, line=10),
+        ),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="b" * 40)),),
+    )
+    # Current sightings, reported high line first.
+    result = replace(
+        sample_review_result,
+        findings=(_finding(file="api.py", line=95), _finding(file="api.py", line=12)),
+    )
+    stamped = stamp_finding_ids(result=result, prior_state=prior, head_sha="c" * 40)
+    ids = [finding.finding_id for finding in stamped.findings]
+    # Nearest-line pairing: 95 → #1 (was 100), 12 → #2 (was 10).
+    assert_that(ids).is_equal_to([f"{fp}#1", f"{fp}#2"])
+    # The JSON surface uses the stamped id, not the line-order recomputation.
+    payload = review_result_to_dict(result=stamped)
+    assert_that([item["finding_id"] for item in payload["findings"]]).is_equal_to(ids)
+    # Recomputed from line order the ids would be the other way round.
+    naive = review_result_to_dict(result=result)
+    assert_that([item["finding_id"] for item in naive["findings"]]).is_equal_to(
+        [f"{fp}#2", f"{fp}#1"],
+    )

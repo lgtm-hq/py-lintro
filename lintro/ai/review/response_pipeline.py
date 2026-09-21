@@ -242,20 +242,20 @@ async def invoke_chunk_review(
     )
     degradations: tuple[CoverageDegradation, ...] = ()
     if use_git_native:
-        # No tools (#2733) means no ``git diff``: embed whatever the size.
-        embed_diff = request.tools_disabled or estimate_tokens(
-            request.chunk.diff,
-        ) <= max(request.diff_budget, 1)
+        # No tools (#2733) or a delta round (#2627) embed whatever the size.
+        embed_diff = (
+            request.tools_disabled
+            or request.chunk.read_diff is not None
+            or estimate_tokens(request.chunk.diff) <= max(request.diff_budget, 1)
+        )
         if (
             not embed_diff
             and ai_config.review_allow_unredacted_git_native
             and not provider_can_run_commands(request.provider)
         ):
             # The opt-in asks the agent to run `git diff` itself, but the
-            # bounded read-only tool surface has no shell (#2685), so the
-            # prompt would be unexecutable and the call would only burn its
-            # turn limit. Take the embedded (redacted) path instead and
-            # record that the opt-in was not honoured.
+            # bounded read-only tool surface has no shell (#2685): embed the
+            # redacted diff instead and record the opt-in was not honoured.
             logger.warning(
                 "Chunk {} exceeds the diff budget but the {} CLI's read-only "
                 "tools cannot run git diff; embedding the redacted diff "

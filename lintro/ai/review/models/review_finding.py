@@ -133,6 +133,10 @@ class ReviewFinding:
             finding's prior record forward open instead of resolving it on
             absence. Empty for a finding no merge touched, which is every
             finding on a run without the pass.
+        finding_id: The stable record key ``<fingerprint>#<ordinal>`` the
+            match against prior state assigned (#2627), set by the adapter
+            after matching; empty until then, in which case the JSON
+            surface derives it as a first round would.
     """
 
     severity: Severity
@@ -161,6 +165,7 @@ class ReviewFinding:
     origin: FindingOrigin | None = None
     posted_inline: bool = True
     merged_duplicates: tuple[MergedDuplicate, ...] = field(default_factory=tuple)
+    finding_id: str = ""
 
     @property
     def all_occurrences(self) -> tuple[FindingOccurrence, ...]:

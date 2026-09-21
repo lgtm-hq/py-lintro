@@ -27,6 +27,9 @@ class RunIdentity:
             ``api_key`` or ``subscription``).
         depth: Review depth level.
         strictness: Sensitivity preset applied.
+        merge_base: ``merge-base(base, head)`` at review time (#2627), so
+            the next round can tell whether the base was merged in since;
+            empty on a record written before it was recorded.
     """
 
     round: int = 1
@@ -38,3 +41,4 @@ class RunIdentity:
     auth_mode: str = ""
     depth: int = 0
     strictness: str = ""
+    merge_base: str = ""

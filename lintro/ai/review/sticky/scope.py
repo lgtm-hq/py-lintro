@@ -19,6 +19,9 @@ _FULL_REASONS: dict[str, str] = {
     str(DeltaReason.NOT_ANCESTOR): "the branch was rewritten since the prior round",
     str(DeltaReason.NO_TREE): "the run had no repository to compute the range in",
     str(DeltaReason.EXPLICIT_FULL): "`--full` asked for the whole diff",
+    str(DeltaReason.SAME_HEAD): "no new head commit since the prior round",
+    str(DeltaReason.BASE_MOVED): "the base branch was merged in since the prior round",
+    str(DeltaReason.DELTA_FAILED): "the delta range could not be computed",
 }
 
 

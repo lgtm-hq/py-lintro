@@ -18,12 +18,16 @@ lesser failure than a false "Addressed" banner.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import replace
 
 from lintro.ai.review.enums.finding_match_outcome import FindingMatchOutcome
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
+from lintro.ai.review.finding_carry import (
+    _carry_absent,
+    _finding_positions,
+)
 from lintro.ai.review.finding_identity import (
     FINGERPRINT_LENGTH,
     current_records,
@@ -245,6 +249,7 @@ def match_findings(
     head_sha: str = "",
     reviewed_paths: frozenset[str] | None = None,
     departed_paths: frozenset[str] | None = None,
+    reviewed_ranges: Mapping[str, tuple[tuple[int, int], ...]] | None = None,
 ) -> FindingMatchResult:
     """Match this round's findings against the previously persisted state.
 
@@ -292,6 +297,10 @@ def match_findings(
             behavior.
         departed_paths: Paths that left the diff (deletes and rename sources)
             and may resolve even when they were not re-reviewed.
+        reviewed_ranges: On a delta round (#2627), the new-file line ranges
+            read per narrowed file. A prior open finding on such a file whose
+            line falls outside every range was not re-read: it is carried,
+            not resolved. Files absent from the mapping were read whole.
 
     Returns:
         The per-round transitions plus the merged record set to persist.
@@ -312,6 +321,11 @@ def match_findings(
     current_by_fingerprint: dict[str, list[FindingRecord]] = defaultdict(list)
     for record in inline_records:
         current_by_fingerprint[record.fingerprint].append(record)
+    positions_by_fingerprint, finding_ids = _finding_positions(
+        findings=findings,
+        inline_records=inline_records,
+        note_records=note_records,
+    )
 
     merged: list[FindingRecord] = []
     new: list[FindingRecord] = []
@@ -320,6 +334,7 @@ def match_findings(
     resolved: list[FindingRecord] = []
     outcomes: dict[str, FindingMatchOutcome] = {}
     matched_prior: set[int] = set()
+    range_carries: set[str] = set()
 
     for fingerprint, group in current_by_fingerprint.items():
         prior_indices = prior_by_fingerprint.get(fingerprint, [])
@@ -359,6 +374,13 @@ def match_findings(
             outcomes[record.key] = FindingMatchOutcome.NEW
 
         merged.extend(assigned[index] for index in range(len(group)))
+        finding_ids.update(
+            zip(
+                positions_by_fingerprint[fingerprint],
+                (assigned[index].key for index in range(len(group))),
+                strict=True,
+            ),
+        )
 
     note_held, note_carries = notes_holding_prior_records(
         prior_records=prior_records,
@@ -383,11 +405,14 @@ def match_findings(
             # pre-v4 state) is archived and never resolved or regressed.
             merged.append(record)
             continue
-        path = record.file
-        left_diff = departed_paths is not None and path in departed_paths
-        unread = reviewed_paths is not None and path not in reviewed_paths
-        held = index in note_held or index in duplicate_held
-        if (unread and not left_diff) or held:
+        if _carry_absent(
+            record=record,
+            held=index in note_held or index in duplicate_held,
+            reviewed_paths=reviewed_paths,
+            departed_paths=departed_paths,
+            reviewed_ranges=reviewed_ranges,
+            range_carries=range_carries,
+        ):
             merged.append(record)
             carried.append(record)
             outcomes[record.key] = FindingMatchOutcome.CARRIED
@@ -410,4 +435,6 @@ def match_findings(
         regressed=tuple(regressed),
         outcomes=outcomes,
         note_carries=note_carries,
+        range_carries=frozenset(range_carries),
+        finding_ids=tuple(finding_ids[i] for i in range(len(findings))),
     )

@@ -243,14 +243,13 @@ def assemble_review_result(
         stopped_reason=outcome.stopped_reason,
         phase_timings=phase_timings,
         custom_agents_run=len(outcome.custom_results),
-        diff_gate=sum(
-            (item.diff_gate for item in outcome.partials),
-            DiffGateCounts(),
-        ),
+        diff_gate=sum((item.diff_gate for item in outcome.partials), DiffGateCounts()),
         generated_questions=questions.lines if questions else (),
         questions_diff_trimmed=questions.diff_trimmed if questions else False,
         delta_since=plan.delta.since_sha or "",
         delta_reason=str(plan.delta.reason),
+        merge_base=plan.merge_base,
+        reviewed_ranges=plan.reviewed_ranges,
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)
         ),
