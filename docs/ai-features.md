@@ -1700,8 +1700,8 @@ authoritative.
 **A `--pr` review reads the pull request's head, never the tree the command runs in**
 (#2733). Before the first provider call lintro fetches `refs/pull/<n>/head` into a
 private ref, verifies it is the head `gh` reported, and checks it out in a temporary
-worktree under `.lintro-cache/ai/pr-heads/`; that worktree is the working directory of
-every CLI call of the run (the question pass, each chunk, the synthesis and verification
+worktree under `.git/lintro/pr-heads/`; that worktree is the working directory of every
+CLI call of the run (the question pass, each chunk, the synthesis and verification
 passes) and is removed when the run ends — completed, stopped by a cost cap or a
 `SIGTERM`, or failed. A worktree a killed process left behind is pruned by the next run.
 So a corpus replay of a merged PR from a moved-on `main` no longer lets the agent read

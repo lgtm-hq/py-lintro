@@ -32,7 +32,11 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.skipped_file import SkippedFile
-from lintro.ai.review.pr_head import checkout_pr_head, empty_workspace
+from lintro.ai.review.pr_head import (
+    checkout_pr_head,
+    empty_workspace,
+    remove_pr_head,
+)
 
 _WORKFLOW_PATH_PREFIX = ".github/workflows/"
 
@@ -100,6 +104,39 @@ def collect_review_context(
         resolved_base = base if base is not None else resolve_default_base_branch()
         context = _collect_branch_context(base=resolved_base)
 
+    try:
+        context = _finish_context(
+            context=context,
+            paths=paths,
+            exclude_globs=exclude_globs,
+        )
+    except ReviewContextError:
+        # The tree exists from here on (#2733); a filter or validation that
+        # raises must not leave it to the next sweep.
+        remove_pr_head(context.head_worktree)
+        raise
+    return replace(context, repo_root=repo_root)
+
+
+def _finish_context(
+    *,
+    context: ReviewContext,
+    paths: list[str] | None,
+    exclude_globs: list[str] | None,
+) -> ReviewContext:
+    """Apply the path filters, read the post-images and validate the diff.
+
+    Args:
+        context: The collected context.
+        paths: Optional path prefixes to keep.
+        exclude_globs: Optional globs to drop.
+
+    Returns:
+        The filtered, validated context.
+
+    Raises:
+        ReviewContextError: If nothing is left to review.
+    """
     if paths:
         context = _filter_context_by_paths(context=context, paths=paths)
     if exclude_globs:
@@ -117,8 +154,7 @@ def collect_review_context(
         )
 
     validate_review_context_diff(context=context)
-
-    return replace(context, repo_root=repo_root)
+    return context
 
 
 def validate_review_context_diff(*, context: ReviewContext) -> None:

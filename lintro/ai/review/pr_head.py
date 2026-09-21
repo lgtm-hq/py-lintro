@@ -72,22 +72,31 @@ def _cache_dir(repo_root: str) -> Path | None:
         The cache directory, created when missing; ``None`` when the git
         directory cannot be resolved or any component is a symlink.
     """
-    common = _run_git(args=["-C", repo_root, "rev-parse", "--git-common-dir"])
-    if common.returncode != 0:
-        return None
-    git_dir = Path(common.stdout.strip())
-    if not git_dir.is_absolute():
-        git_dir = Path(repo_root) / git_dir
-    current = git_dir
-    for part in _WORKTREE_DIR.parts:
-        current = current / part
-        if current.is_symlink():
-            logger.warning(
-                "{} is a symlink; refusing to use it for PR head worktrees.",
-                current,
-            )
+    try:
+        common = _run_git(
+            args=["-C", repo_root, "rev-parse", "--git-common-dir"],
+            check=False,
+        )
+        if common.returncode != 0 or not common.stdout.strip():
             return None
-    current.mkdir(parents=True, exist_ok=True)
+        git_dir = Path(common.stdout.strip())
+        if not git_dir.is_absolute():
+            git_dir = Path(repo_root) / git_dir
+        current = git_dir
+        for part in _WORKTREE_DIR.parts:
+            current = current / part
+            if current.is_symlink():
+                logger.warning(
+                    "{} is a symlink; refusing to use it for PR head worktrees.",
+                    current,
+                )
+                return None
+        current.mkdir(parents=True, exist_ok=True)
+    except (ReviewContextError, OSError) as exc:
+        # An unwritable or unreadable git directory is no reason to fail the
+        # review: the run degrades to no tree like any other checkout failure.
+        logger.warning("Cannot use the PR head cache ({}); no tree for the run.", exc)
+        return None
     return current
 
 
@@ -283,7 +292,8 @@ def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
                 added.stderr.strip()[:200],
             )
             _release(lock)
-            Path(f"{path}.lock").unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                Path(f"{path}.lock").unlink(missing_ok=True)
             return None
     except ReviewContextError as exc:
         logger.warning(
@@ -307,15 +317,27 @@ def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
     )
 
 
+_LIVE: dict[str, PrHeadWorktree] = {}
+
+
+def _remove_live_at_exit() -> None:
+    """Remove every tree still registered when the interpreter exits."""
+    for worktree in list(_LIVE.values()):
+        remove_pr_head(worktree)
+
+
+atexit.register(_remove_live_at_exit)
+
+
 def _owned(worktree: PrHeadWorktree) -> PrHeadWorktree:
-    """Register the removal of a tree at its creation.
+    """Register a tree for removal at its creation.
 
     The run removes the tree itself when it ends, but the tree exists from
     context collection on, before the run is entered: a provider that fails
     to construct or a command that exits early ("already converged") would
-    otherwise leave it until a later sweep. Interpreter exit removes it on
-    those paths; :func:`remove_pr_head` is idempotent, so the run's own
-    removal and this one do not conflict.
+    otherwise leave it until a later sweep. One module-level registry backs
+    one ``atexit`` hook, and :func:`remove_pr_head` drops the entry, so a
+    long-lived process (the MCP server) accumulates nothing across runs.
 
     Args:
         worktree: The tree just created.
@@ -323,7 +345,7 @@ def _owned(worktree: PrHeadWorktree) -> PrHeadWorktree:
     Returns:
         The same tree.
     """
-    atexit.register(remove_pr_head, worktree)
+    _LIVE[worktree.path] = worktree
     return worktree
 
 
@@ -360,6 +382,7 @@ def remove_pr_head(worktree: PrHeadWorktree | None) -> None:
     """
     if worktree is None:
         return
+    _LIVE.pop(worktree.path, None)
     if worktree.repo_root:
         try:
             _run_git(

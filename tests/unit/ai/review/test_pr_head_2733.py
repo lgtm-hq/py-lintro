@@ -671,6 +671,40 @@ def test_a_base_checkout_with_a_fetchable_head_still_reads_the_head(
     remove_pr_head(context.head_worktree)
 
 
+def test_a_filter_that_leaves_nothing_removes_the_tree(
+    scratch: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A path filter that empties the diff raises, and the tree goes with it."""
+    from lintro.ai.review import pr_head
+    from lintro.ai.review.exceptions import ReviewContextError
+
+    monkeypatch.chdir(scratch["work"])
+    with (
+        patch(
+            "lintro.ai.review.context.collection._collect_pr_context",
+            return_value=_pr_context(scratch),
+        ),
+        pytest.raises(ReviewContextError),
+    ):
+        collect_review_context(pr_number=1, repo="o/r", paths=["nowhere/"])
+
+    assert_that(pr_head._LIVE).is_empty()
+    assert_that(_git(scratch["work"], "worktree", "list").count("pr-heads")).is_zero()
+
+
+def test_an_unusable_git_directory_degrades_to_no_tree(
+    scratch: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cache that cannot be created is a no-tree run, not an error."""
+    monkeypatch.chdir(scratch["work"])
+    root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
+    (root / ".git" / "lintro").write_text("in the way\n")  # a file, not a dir
+
+    assert_that(checkout_pr_head(pr_number=1, head_oid=scratch["head"])).is_none()
+
+
 def test_remove_is_idempotent_and_tolerates_a_missing_tree(tmp_path: Path) -> None:
     """Removing twice, or a path that never existed, is a no-op."""
     remove_pr_head(None)
