@@ -8,7 +8,6 @@ costs one finding its verdict, not the round its pass.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -25,82 +24,130 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
+    "CITATION_UNPARSED",
     "apply_verification_verdicts",
+    "citation_unparsed",
     "cited_paths",
     "cites_finding",
     "parse_verification_answer",
 ]
 
-#: A quoted citation: ``"path:line"``, ``` `path:line` ``` or ``(path:line)``.
-#: The only way to cite a path that contains a space.
-#: One left-to-right alternation over the delimiter pairs, each branch
-#: excluding only its own closing character, consumed by a single scan so an
-#: outer quoted citation swallows anything nested inside it and a path may
-#: contain the other delimiters: ``"dir (legacy)/api.py:12"``. A path that
-#: contains a double quote and a space is not citable (frozen for milestone 0).
-_QUOTED_CITATION = re.compile(
-    r'"([^"]+?):(\d+(?:-\d+)?)"'
-    r"|`([^`]+?):(\d+(?:-\d+)?)`"
-    r"|\(([^()]+?):(\d+(?:-\d+)?)\)",
-)
-#: A bare citation token, after wrapping punctuation is stripped. Both
-#: forms take a line or a ``start-end`` range.
-_BARE_CITATION = re.compile(r"^(.+?):(\d+(?:-\d+)?)$")
-#: Sentence punctuation a bare token may trail; wrappers are stripped only as
-#: a matching pair (``"…"``, ``` `…` ```, ``(…)``, ``[…]``), never a lone
-#: trailing ``)`` that may belong to the path.
+#: Openers that start a quoted token, each with its closer. Closed set: a
+#: quoted token is the only way to cite a path that contains a space, and
+#: only these three open one. ``[]`` and ``''`` are wrappers stripped from a
+#: bare token, never openers.
+_OPENERS = {'"': '"', "`": "`", "(": ")"}
+#: Wrapper pairs a bare token may carry once around it.
+_WRAPPERS = (("[", "]"), ("'", "'"))
+#: Sentence punctuation a bare token may trail.
 _TRAILING = ",;."
-#: Stands in for a consumed quoted citation; never part of a valid token.
-_MASK = "\x00"
-_PAIRS = (('"', '"'), ("`", "`"), ("(", ")"), ("[", "]"), ("'", "'"))
+#: Prefix put on the evidence when a quoted citation was never closed, so
+#: the record shows the verifier's citation could not be read.
+CITATION_UNPARSED = "citation_unparsed:"
 
 
-def _unwrap(token: str) -> str:
-    """Strip one matching wrapper pair from a token, if it has one.
+def _tokens(evidence: str) -> tuple[tuple[str, ...], bool]:
+    """Split the evidence into citation candidates in one left-to-right pass.
+
+    A token opened by ``"``, a backtick or ``(`` runs to its own closer and
+    may contain anything else, spaces included; it must then be followed by
+    whitespace, the end or sentence punctuation, or it and whatever is glued
+    to it are one malformed token — a deliberate rule of the frozen grammar
+    (#2734 ruling), the one that keeps ``"…"target.py:7`` from citing
+    anything. A bare token runs to the next whitespace.
+    Quoted and bare tokens come from the same walk over the same characters
+    exactly once, so nothing is matched twice or rescanned, and a delimiter
+    in the middle of a bare token is just one
+    of its characters.
 
     Args:
-        token: A whitespace-delimited token of the evidence.
+        evidence: The verifier's evidence text, separators normalized.
 
     Returns:
-        The token without its wrapper when it both starts and ends with a
-        matching pair; otherwise unchanged.
+        The tokens, and whether an opener was left unterminated (the rest
+        of the text is then prose and yields no token).
     """
-    for opening, closing in _PAIRS:
-        if len(token) > 2 and token.startswith(opening) and token.endswith(closing):
-            return token[1:-1]
-    return token
+    tokens: list[str] = []
+    i = 0
+    length = len(evidence)
+    while i < length:
+        char = evidence[i]
+        if char.isspace():
+            i += 1
+            continue
+        closer = _OPENERS.get(char)
+        if closer is not None:
+            end = evidence.find(closer, i + 1)
+            if end == -1:
+                return tuple(tokens), True
+            after = end + 1
+            while after < length and evidence[after] in _TRAILING:
+                after += 1
+            if after < length and not evidence[after].isspace():
+                # Glued to what follows: one malformed token, no citation.
+                while after < length and not evidence[after].isspace():
+                    after += 1
+            else:
+                tokens.append(evidence[i + 1 : end])
+            i = after
+            continue
+        end = i
+        while end < length and not evidence[end].isspace():
+            end += 1
+        token = evidence[i:end].rstrip(_TRAILING)
+        for opening, closing in _WRAPPERS:
+            if len(token) > 2 and token[0] == opening and token[-1] == closing:
+                token = token[1:-1]
+                break
+        tokens.append(token)
+        i = end
+    return tuple(tokens), False
+
+
+def _citation_path(token: str) -> str:
+    """Return the normalized path a ``path:line`` token cites, or ``""``.
+
+    Args:
+        token: One token from :func:`_tokens`.
+
+    Returns:
+        The path when the token splits at its last ``:`` into a non-empty
+        path and a line or ``start-end`` range; otherwise an empty string.
+    """
+    path, sep, line = token.rpartition(":")
+    if not sep:
+        return ""
+    first, dash, last = line.partition("-")
+    if not first.isdigit() or (dash and not last.isdigit()):
+        return ""
+    return normalize_file_path(path)
 
 
 def cited_paths(*, evidence: str) -> tuple[str, ...]:
     """Return the normalized paths the evidence cites as ``path:line``.
 
-    Citations are whitespace-delimited tokens (the prompt's ``file:line —
-    what you found`` shape) with trailing sentence punctuation and one
-    matching wrapper pair stripped, or a quoted ``"path:line"`` when the
-    path contains a space. No pattern is built from the path, so nothing
-    model-authored reaches a regex.
+    Args:
+        evidence: The verifier's evidence text.
+
+    Returns:
+        The cited paths, normalized, in order of appearance. An
+        unterminated quoted citation ends the scan; see
+        :func:`citation_unparsed`.
+    """
+    tokens, _unterminated = _tokens(evidence.replace("\\", "/"))
+    return tuple(path for path in map(_citation_path, tokens) if path)
+
+
+def citation_unparsed(*, evidence: str) -> bool:
+    """Return whether the evidence opened a quoted citation it never closed.
 
     Args:
         evidence: The verifier's evidence text.
 
     Returns:
-        The cited paths, normalized, in order of appearance.
+        True when a ``"``, backtick or ``(`` opener has no closer.
     """
-    text = evidence.replace("\\", "/")
-    paths = [
-        normalize_file_path(m.group(1) or m.group(3) or m.group(5) or "")
-        for m in _QUOTED_CITATION.finditer(text)
-    ]
-    # The bare scan runs over what is left once the quoted citations are
-    # masked, so a span nested inside one is never seen again on its own.
-    # The mask is a non-whitespace sentinel, not a space: a bare token glued
-    # to a quoted citation stays glued and fails closed rather than gaining a
-    # token boundary it did not have.
-    for token in _QUOTED_CITATION.sub(_MASK, text).split():
-        match = _BARE_CITATION.match(_unwrap(token.rstrip(_TRAILING)))
-        if match:
-            paths.append(normalize_file_path(match.group(1)))
-    return tuple(path for path in paths if path)
+    return _tokens(evidence.replace("\\", "/"))[1]
 
 
 def cites_finding(*, evidence: str, file: str) -> bool:
@@ -171,7 +218,15 @@ def parse_verification_answer(
             continue
         evidence = item.get("evidence")
         evidence = evidence.strip() if isinstance(evidence, str) else ""
-        if outcome is not VerificationOutcome.CONFIRMED and not cited_paths(
+        if evidence and citation_unparsed(evidence=evidence):
+            # The record keeps the verifier's words, marked: the citation
+            # could not be read, so it cannot count as evidence below.
+            logger.warning(
+                "Verification answer {} left a quoted citation unterminated.",
+                position,
+            )
+            evidence = f"{CITATION_UNPARSED} {evidence}"
+        elif outcome is not VerificationOutcome.CONFIRMED and not cited_paths(
             evidence=evidence,
         ):
             # The prompt's first rule: a refutation — or a weakening, which

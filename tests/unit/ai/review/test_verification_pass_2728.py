@@ -68,6 +68,8 @@ from lintro.ai.review.verification import (
 from lintro.ai.review.verification_note import format_verification_note
 from lintro.ai.review.verification_prompt import render_verification_findings
 from lintro.ai.review.verification_response import (
+    CITATION_UNPARSED,
+    citation_unparsed,
     cites_finding,
     parse_verification_answer,
 )
@@ -517,118 +519,103 @@ async def test_refutation_citing_another_file_is_not_a_refutation() -> None:
     assert_that(result.summary.refuted).is_equal_to(0)
 
 
-@pytest.mark.parametrize(
-    ("evidence", "expected"),
-    [
-        ("pkg/api.py:2 retries is read", True),
-        ("see ./pkg/api.py:2", True),
-        ("pkg\\api.py:2", True),
-        ("see api.py:2", False),
-        ("src/pkg/api.py:2", False),
-        ("other/api.py:2", False),
-        ("nonexistent.py:999", False),
-        ("pkg/api.py is fine", False),
-        ("xpkg/api.py:2", False),
-        ("foo-pkg/api.py:2", False),
-        ("foo.pkg/api.py:2", False),
-        ("../pkg/api.py:2", False),
-        ("foo:pkg/api.py:2", False),
-        ("@pkg/api.py:2", False),
-        ("(pkg/api.py:2)", True),
-        ("`pkg/api.py:2`, retries is read", True),
-        ("pkg/api.py:2.", True),
-        ("pkg/api.py:2-4 both branches", True),
-        ('"pkg/api.py:2-4"', True),
-    ],
-)
-def test_cites_finding_needs_the_findings_exact_path(
-    evidence: str,
-    expected: bool,
-) -> None:
-    """Only the finding's own path, normalized, counts as a citation.
+# The citation grammar, frozen for milestone 0 (#2734 ruling): one case per
+# line, ``(evidence, finding path, cites?)``. Every case a review round
+# raised is here, so the tokenizer is specified by this table.
+_CITATION_SPEC = [
+    # bare tokens
+    ("pkg/api.py:2 retries is read", "pkg/api.py", True),
+    ("see ./pkg/api.py:2", "pkg/api.py", True),
+    ("pkg\\api.py:2", "pkg/api.py", True),
+    ("pkg/api.py:2.", "pkg/api.py", True),
+    ("pkg/api.py:2-4 both branches", "pkg/api.py", True),
+    ("see a+b/(c).py:3", "a+b/(c).py", True),
+    ("see pkg/(x).py:3", "pkg/(x).py", True),
+    ("[pkg/api.py:2]", "pkg/api.py", True),
+    ("'pkg/api.py:2'", "pkg/api.py", True),
+    # quoted tokens: the only way to cite a path with a space
+    ("(pkg/api.py:2)", "pkg/api.py", True),
+    ("`pkg/api.py:2`, retries is read", "pkg/api.py", True),
+    ('"pkg/api.py:2-4"', "pkg/api.py", True),
+    ('see "dir (legacy)/api.py:12"', "dir (legacy)/api.py", True),
+    ("see `it's (v2)/api.py:3`", "it's (v2)/api.py", True),
+    ('fixed in "docs/a (b).md:3"', "docs/a (b).md", True),
+    ('see "dir name/api.py:2" here', "dir name/api.py", True),
+    ('"a b.py:1" then `c.py:2`', "c.py", True),
+    # the exact path, nothing looser
+    ("see api.py:2", "pkg/api.py", False),
+    ("src/pkg/api.py:2", "pkg/api.py", False),
+    ("other/api.py:2", "pkg/api.py", False),
+    ("nonexistent.py:999", "pkg/api.py", False),
+    ("pkg/api.py is fine", "pkg/api.py", False),
+    ("xpkg/api.py:2", "pkg/api.py", False),
+    ("foo-pkg/api.py:2", "pkg/api.py", False),
+    ("foo.pkg/api.py:2", "pkg/api.py", False),
+    ("../pkg/api.py:2", "pkg/api.py", False),
+    ("foo:pkg/api.py:2", "pkg/api.py", False),
+    ("@pkg/api.py:2", "pkg/api.py", False),
+    ("pkg/api.py:2", "", False),
+    # an unquoted spaced path is cut at the space
+    ("fixed in docs/a (b).md:3", "docs/a (b).md", False),
+    ("see dir name/api.py:2 here", "dir name/api.py", False),
+    # a nested span is part of the outer token, never a citation of its own
+    ('"dir/`target.py:7`/other.py:2"', "target.py", False),
+    ('"dir name/ `target.py:7` /other.py:2"', "target.py", False),
+    ('`dir name/ "target.py:7" /other.py:2`', "target.py", False),
+    ('(dir name/ "target.py:7" /other.py:2)', "target.py", False),
+    # a bare token glued to a quoted one is one token, and not a citation
+    ('target.py:7"dir name/other.py:2"', "target.py", False),
+    ('"dir name/other.py:2"target.py:7', "target.py", False),
+    # new with the one-pass tokenizer
+    ('"dir name/api.py:2', "dir name/api.py", False),
+    ("(line 3)", "line", False),
+    ('"" () pkg/api.py:2', "pkg/api.py", True),
+    ("pkg/api.py:2\x00", "pkg/api.py", False),
+    ("pkg/api.py:2 \x00", "pkg/api.py", True),
+]
+
+
+@pytest.mark.parametrize(("evidence", "file", "expected"), _CITATION_SPEC)
+def test_the_citation_grammar(evidence: str, file: str, expected: bool) -> None:
+    """Each row of the frozen grammar holds.
 
     Args:
-        evidence: Refutation text.
-        expected: Whether it cites ``pkg/api.py``.
+        evidence: The verifier's evidence text.
+        file: The finding's path.
+        expected: Whether the evidence cites it.
     """
-    assert_that(cites_finding(evidence=evidence, file="pkg/api.py")).is_equal_to(
-        expected,
-    )
+    assert_that(cites_finding(evidence=evidence, file=file)).is_equal_to(expected)
 
 
 def test_cites_finding_normalizes_the_findings_own_spelling() -> None:
     """A finding path with whitespace or ``./`` still matches its citation."""
     assert_that(cites_finding(evidence="pkg/api.py:2", file=" ./pkg/api.py ")).is_true()
-    assert_that(cites_finding(evidence="pkg/api.py:2", file="")).is_false()
-    # Regex metacharacters in the path are matched literally.
+
+
+def test_an_unterminated_citation_is_marked_on_the_record() -> None:
+    """A never-closed opener yields no citation and marks the evidence."""
+    assert_that(citation_unparsed(evidence='see "dir name/api.py:2')).is_true()
+    assert_that(citation_unparsed(evidence='see "dir name/api.py:2"')).is_false()
+    verdicts = parse_verification_answer(
+        content=_answer((1, "refuted", 'see "dir name/api.py:2')),
+        count=1,
+    )
+
+    assert_that(verdicts).is_not_none()
+    assert verdicts is not None
+    # The mark is on the verdict record; the citation does not count as
+    # evidence, so the application keeps the finding as confirmed.
+    assert_that(verdicts[1][1]).starts_with(CITATION_UNPARSED)
     assert_that(
-        cites_finding(evidence="see a+b/(c).py:3", file="a+b/(c).py"),
-    ).is_true()
-    # Quoting excludes only the active delimiter: parentheses, backticks and
-    # the other quote are ordinary path characters inside it.
-    assert_that(
-        cites_finding(
-            evidence='see "dir (legacy)/api.py:12"',
-            file="dir (legacy)/api.py",
-        ),
-    ).is_true()
-    assert_that(
-        cites_finding(evidence="see `it's (v2)/api.py:3`", file="it's (v2)/api.py"),
-    ).is_true()
-    # The ruled shape: a spaced path with parentheses, wrapped whole in double
-    # quotes; unquoted it is cut at the space.
-    assert_that(
-        cites_finding(evidence='fixed in "docs/a (b).md:3"', file="docs/a (b).md"),
-    ).is_true()
-    assert_that(
-        cites_finding(evidence="fixed in docs/a (b).md:3", file="docs/a (b).md"),
+        cites_finding(evidence=verdicts[1][1], file="dir name/api.py"),
     ).is_false()
-    # An outer quoted citation swallows a nested one: the nested file is not
-    # cited, so a finding on it cannot be refuted by this evidence.
-    assert_that(
-        cites_finding(evidence='"dir/`target.py:7`/other.py:2"', file="target.py"),
-    ).is_false()
-    assert_that(
-        cites_finding(evidence='"a b.py:1" then `c.py:2`', file="c.py"),
-    ).is_true()
-    # Nor when the nested span is whitespace-isolated, in either nesting
-    # order or with mixed delimiters: the outer citation is blanked before
-    # the bare scan.
-    assert_that(
-        cites_finding(
-            evidence='"dir name/ `target.py:7` /other.py:2"',
-            file="target.py",
-        ),
-    ).is_false()
-    assert_that(
-        cites_finding(
-            evidence='`dir name/ "target.py:7" /other.py:2`',
-            file="target.py",
-        ),
-    ).is_false()
-    assert_that(
-        cites_finding(
-            evidence='(dir name/ "target.py:7" /other.py:2)',
-            file="target.py",
-        ),
-    ).is_false()
-    # A bare token glued to a quoted citation (either side) is not a citation:
-    # masking the quoted span must not create a token boundary.
-    assert_that(
-        cites_finding(evidence='target.py:7"dir name/other.py:2"', file="target.py"),
-    ).is_false()
-    assert_that(
-        cites_finding(evidence='"dir name/other.py:2"target.py:7', file="target.py"),
-    ).is_false()
-    # A lone trailing ``)`` belongs to the path; only a matching pair is a wrapper.
-    assert_that(cites_finding(evidence="see pkg/(x).py:3", file="pkg/(x).py")).is_true()
-    # A path with a space must be quoted; unquoted it is cut at the space.
-    assert_that(
-        cites_finding(evidence='see "dir name/api.py:2" here', file="dir name/api.py"),
-    ).is_true()
-    assert_that(
-        cites_finding(evidence="see dir name/api.py:2 here", file="dir name/api.py"),
-    ).is_false()
+
+
+def test_the_citation_parser_builds_no_pattern() -> None:
+    """The grammar is a walk over the text: no regex module in the parser."""
+    import lintro.ai.review.verification_response as module
+
+    assert_that(hasattr(module, "re")).is_false()
 
 
 async def test_weakened_with_a_citation_applies_to_a_padded_path() -> None:
