@@ -33,12 +33,15 @@ __all__ = [
 
 #: A quoted citation: ``"path:line"``, ``` `path:line` ``` or ``(path:line)``.
 #: The only way to cite a path that contains a space.
-#: One pattern per delimiter pair, each excluding only its own closing
-#: character, so a path may contain any other: ``"dir (legacy)/api.py:12"``.
-_QUOTED_CITATIONS = (
-    re.compile(r'"([^"]+?):(\d+(?:-\d+)?)"'),
-    re.compile(r"`([^`]+?):(\d+(?:-\d+)?)`"),
-    re.compile(r"\(([^()]+?):(\d+(?:-\d+)?)\)"),
+#: One left-to-right alternation over the delimiter pairs, each branch
+#: excluding only its own closing character, consumed by a single scan so an
+#: outer quoted citation swallows anything nested inside it and a path may
+#: contain the other delimiters: ``"dir (legacy)/api.py:12"``. A path that
+#: contains a double quote and a space is not citable (frozen for milestone 0).
+_QUOTED_CITATION = re.compile(
+    r'"([^"]+?):(\d+(?:-\d+)?)"'
+    r"|`([^`]+?):(\d+(?:-\d+)?)`"
+    r"|\(([^()]+?):(\d+(?:-\d+)?)\)",
 )
 #: A bare citation token, after wrapping punctuation is stripped. Both
 #: forms take a line or a ``start-end`` range.
@@ -83,9 +86,8 @@ def cited_paths(*, evidence: str) -> tuple[str, ...]:
     """
     text = evidence.replace("\\", "/")
     paths = [
-        normalize_file_path(m.group(1))
-        for pattern in _QUOTED_CITATIONS
-        for m in pattern.finditer(text)
+        normalize_file_path(m.group(1) or m.group(3) or m.group(5) or "")
+        for m in _QUOTED_CITATION.finditer(text)
     ]
     for token in text.split():
         match = _BARE_CITATION.match(_unwrap(token.rstrip(_TRAILING)))

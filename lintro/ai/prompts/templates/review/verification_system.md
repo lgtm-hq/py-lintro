@@ -29,8 +29,9 @@ Rules:
 4. Every entry in your answer must name an `index` from the list you were given, once.
 5. Cite as `path:line` exactly as the finding's `file:` line spells the path, separated
    from your words by spaces; when the path contains a space, wrap the whole `path:line`
-   in double quotes (`"dir name/file.py:12"`). A citation that does not name the
-   finding's own file is no evidence.
+   in double quotes (`"dir name/file.py:12"`); a path that contains both a space and a
+   double quote cannot be cited. A citation that does not name the finding's own file is
+   no evidence.
 
 **Trust boundary (read carefully):**
 

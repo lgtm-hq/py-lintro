@@ -700,7 +700,11 @@ review:
   with the downgrade reason `refutation_weakened`; a weakened P2 or P3 keeps its
   severity and counts as confirmed. A refutation or a weakening **without** a
   `file:line` citation into the finding's own file is no evidence: the finding is kept
-  as confirmed rather than dropped or lowered on the verifier's word alone.
+  as confirmed rather than dropped or lowered on the verifier's word alone. A citation
+  is a whitespace-delimited `path:line` (or `path:start-end`) token, or a `path:line`
+  wrapped whole in double quotes when the path contains a space; a path that contains
+  both a space and a double quote cannot be cited (a known limitation, frozen for
+  milestone 0).
 - **Order matters.** The built-in chunk and synthesis passes no longer gate severities
   at parse time; the round's findings are gated once, after this pass, so the P1 and P2
   evidence gates read the verified severities. Custom-agent findings carry an
