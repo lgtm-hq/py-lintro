@@ -34,9 +34,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: on --pr, read the PR head in a temporary worktree, never the ambient
-  tree (#2744) (c2ada7b)
-
 ## [0.168.2] - 2026-09-21
 
 ### Fixed
