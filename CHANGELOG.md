@@ -13,6 +13,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **ai/review**: a `--pr` review reads the pull request's head — fetched into a private
+  ref and checked out in a temporary worktree that is the working directory of every CLI
+  call and is removed when the run ends — never the tree the command runs in; without a
+  clone the run has no tree and every call goes out without tools, recorded as a
+  `no_tree_for_agent` degradation (#2733).
+
 - **ai/review**: the repository-context section admits every eligible changed text file
   (a workflow, a config, a doc), not only source code, so a one-file workflow PR no
   longer reviews from the hunk alone (#2731).

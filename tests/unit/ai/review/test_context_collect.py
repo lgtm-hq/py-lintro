@@ -213,6 +213,23 @@ def test_collect_uncommitted_context_merges_staged_and_unstaged(
         assert_that(diff_call).contains("head456")
 
 
+@pytest.fixture(autouse=True)
+def _no_pr_head_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep these scripted-subprocess tests off the PR head checkout (#2733).
+
+    The checkout is covered by ``test_pr_head_2733.py`` against a scratch
+    repository; here it would consume the scripted ``subprocess.run`` answers
+    the gh/git probes expect.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setattr(
+        "lintro.ai.review.context.collection.checkout_pr_head",
+        lambda **_kwargs: None,
+    )
+
+
 @patch("lintro.ai.review.context.git_ops.subprocess.run")
 @patch(
     "lintro.ai.review.context.git_ops.shutil.which",
@@ -380,7 +397,8 @@ def test_collect_pr_context_works_without_local_git_repo(
 
     assert_that(context.pr_metadata).is_not_none()
     assert_that(context.unified_diff).contains("a.py")
-    assert_that(context.checkout).is_equal_to(ReviewCheckout.UNKNOWN)
+    # No repository at all: no tree for the agent, never the ambient one (#2733).
+    assert_that(context.checkout).is_equal_to(ReviewCheckout.NONE)
     assert_that(context.changed_files).extracting("path").contains("a.py")
 
 

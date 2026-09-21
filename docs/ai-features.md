@@ -1692,9 +1692,25 @@ it skips the synthesis narrative (there is no diff anyone read to summarise), is
 reported as a stopped run with the reason
 `no file reviewed: every chunk hit its per-call turn limit`, and exits 1 like a P1 does.
 The review prompt also states what the working tree the agent can read holds, from the
-context's `checkout`: the base ref for a CI pull-request review (disk is pre-change),
-the change itself for a branch or uncommitted review (disk is post-change), or a request
-to check when it is not known; the diff is always authoritative.
+context's `checkout`: the change itself for a branch or uncommitted review (disk is
+post-change), the base ref when that is honestly what a checkout holds (disk is
+pre-change), or a request to check when it is not known; the diff is always
+authoritative.
+
+**A `--pr` review reads the pull request's head, never the tree the command runs in**
+(#2733). Before the first provider call lintro fetches `refs/pull/<n>/head` into a
+private ref, verifies it is the head `gh` reported, and checks it out in a temporary
+worktree under `.lintro-cache/ai/pr-heads/`; that worktree is the working directory of
+every CLI call of the run (the question pass, each chunk, the synthesis and verification
+passes) and is removed when the run ends — completed, stopped by a cost cap or a
+`SIGTERM`, or failed. A worktree a killed process left behind is pruned by the next run.
+So a corpus replay of a merged PR from a moved-on `main` no longer lets the agent read
+today's code and cite lines the PR never had (#2732), and the "working tree side not
+determined" instruction is gone for `--pr`. When the command does not run inside a clone
+of the repository (or the head cannot be fetched and the checkout is neither end of the
+range), the run has **no tree**: every CLI call goes out without tools, the prompt says
+so, and the run records a `no_tree_for_agent` narrative degradation. A checkout that
+honestly holds the base or the head keeps that label when the head cannot be fetched.
 
 ```yaml
 ai:
