@@ -45,6 +45,10 @@ class CoverageDegradationReason(StrEnum):
         GENERATED_QUESTIONS_FAILED: The once-per-run per-PR question pass
             failed, so every chunk was reviewed against the rubric alone
             (#2720). Recorded once with the synthesis sentinel index.
+        VERIFICATION_FAILED: The verification pass (#2728) was enabled and
+            had findings to check but did not produce a usable answer; the
+            selected findings are kept unverified. A narrative degradation:
+            the finding set is unchanged.
         ADVERSARIAL_SWEEP_FAILED: The depth-3 adversarial sweep for one chunk
             failed, so the chunk keeps its main-pass findings and whatever the
             sweep would have added is missing (#2395).
@@ -76,6 +80,7 @@ class CoverageDegradationReason(StrEnum):
     SYNTHESIS_TRUNCATED = auto()
     SYNTHESIS_FAILED = auto()
     GENERATED_QUESTIONS_FAILED = auto()
+    VERIFICATION_FAILED = auto()
     ADVERSARIAL_SWEEP_FAILED = auto()
     DIFF_TRUNCATED = auto()
     SPLIT_HALF_FAILED = auto()
@@ -98,6 +103,7 @@ SYNTHESIS_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
 NARRATIVE_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
     {
         *SYNTHESIS_DEGRADATION_REASONS,
+        CoverageDegradationReason.VERIFICATION_FAILED,
         CoverageDegradationReason.DELEGATED_DIFF_EMBEDDED,
     },
 )

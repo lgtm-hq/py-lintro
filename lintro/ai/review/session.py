@@ -40,6 +40,7 @@ from lintro.ai.review.errors_taxonomy import (
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.repo_context import RepoContextSource
+from lintro.config.review_config import ReviewVerifyMode
 
 if TYPE_CHECKING:
     import asyncio
@@ -233,6 +234,7 @@ class ReviewSessionOptions:
             production uses SIGTERM/SIGINT via ``install_review_interrupt``).
         synthesis: Cross-chunk synthesis configuration (#2269). ``None`` or a
             disabled config means no extra pass runs.
+        verify: Which findings the verification pass re-checks (#2728).
     """
 
     provider: BaseAIProvider
@@ -257,6 +259,7 @@ class ReviewSessionOptions:
     enforce_cost_cap: bool = True
     stop: asyncio.Event | None = None
     synthesis: ReviewSynthesisConfig | None = None
+    verify: ReviewVerifyMode = ReviewVerifyMode.P1_AND_LOW_CONFIDENCE
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

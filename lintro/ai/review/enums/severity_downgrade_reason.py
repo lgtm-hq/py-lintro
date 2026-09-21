@@ -1,4 +1,4 @@
-"""Why a mechanical severity gate lowered a finding's reported severity."""
+"""Why a severity gate or the verification pass lowered a finding's severity."""
 
 from __future__ import annotations
 
@@ -6,11 +6,12 @@ from enum import StrEnum, auto
 
 
 class SeverityDowngradeReason(StrEnum):
-    """Which evidence gate rewrote a finding's severity, and why (#1925, #2723).
+    """What rewrote a finding's severity, and why (#1925, #2723, #2728).
 
-    Both gates are mechanical rather than judgement calls, and both record
-    the rewrite on the finding so every surface renders it instead of
-    presenting the gated severity as the model's own.
+    The two evidence gates are mechanical; the verification pass's reason
+    is the model's own judgement on re-reading the code. Every one of them
+    records the rewrite on the finding so each surface renders it instead
+    of presenting the lowered severity as the reviewer's own.
 
     Attributes:
         P1_NO_FAILURE_SCENARIO: A P1 reported without a concrete
@@ -25,11 +26,15 @@ class SeverityDowngradeReason(StrEnum):
             P1 without a failure scenario in a gated category without
             diff-local evidence, so it went P1 → P2 → P3. Kept as its own
             member so the counts and the notice credit both gates.
+        REFUTATION_WEAKENED: The verification pass (#2728) found the defect
+            real but its failure scenario not holding at P1, so the finding
+            was moved to P2 before the mechanical gates ran.
     """
 
     P1_NO_FAILURE_SCENARIO = auto()
     P2_UNEVIDENCED = auto()
     P1_THEN_P2_UNEVIDENCED = auto()
+    REFUTATION_WEAKENED = auto()
 
     @property
     def p1_gate_fired(self) -> bool:

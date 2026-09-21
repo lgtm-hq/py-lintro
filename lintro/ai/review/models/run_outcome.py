@@ -52,6 +52,11 @@ class RunOutcome:
             than being an invisible parse-time edit.
         downgraded_p2: Count of P2 findings the P2 evidence gate downgraded
             to P3 in this round (#2723); serialized only when non-zero.
+        refuted: Findings the verification pass refuted and dropped in this
+            round (#2728); serialized only when non-zero.
+        verified: Findings the verification pass tried to refute and could
+            not (#2728), the confirmed ones and the P1s it moved to P2;
+            serialized only when non-zero.
         resolved: Number of findings this round resolved. ``None`` on a record
             persisted before the field existed — history renders that as ``—``
             rather than as a fabricated zero, which would read as "this round
@@ -79,6 +84,8 @@ class RunOutcome:
     questions: int = 0
     downgraded: int = 0
     downgraded_p2: int = 0
+    refuted: int = 0
+    verified: int = 0
     resolved: int | None = None
     open_after: int | None = None
     narrative: str = ""

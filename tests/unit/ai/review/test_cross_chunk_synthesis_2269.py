@@ -1824,7 +1824,7 @@ def test_the_synthesis_pass_is_planned_against_its_own_budget() -> None:
         return await real_pass(request=request)
 
     with patch(
-        "lintro.ai.review.run_execution.run_synthesis_pass",
+        "lintro.ai.review.run_finalize.run_synthesis_pass",
         side_effect=_spy,
     ):
         result = _run(synthesis=ReviewSynthesisConfig(enabled=True))
@@ -1945,7 +1945,7 @@ def test_the_synthesis_budget_is_clamped_by_a_small_context_window() -> None:
             return_value=small_window,
         ),
         patch(
-            "lintro.ai.review.run_execution.run_synthesis_pass",
+            "lintro.ai.review.run_finalize.run_synthesis_pass",
             side_effect=_spy,
         ),
     ):

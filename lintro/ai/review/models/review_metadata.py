@@ -14,6 +14,7 @@ from lintro.ai.review.models.coverage_degradation import CoverageDegradation
 from lintro.ai.review.models.review_timings import ReviewTimings
 from lintro.ai.review.models.skipped_file import SkippedFile
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
+from lintro.ai.review.models.verification_outcome import VerificationSummary
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,12 @@ class ReviewMetadata:
             synthesis pass did (#2269), or ``None`` when the pass did not
             run — which is the default, and every run before the pass
             existed. Surfaces render nothing at all for ``None``.
+        verification (VerificationSummary | None): What the verification
+            pass did (#2728): how many findings it put to the verifier and
+            how many it confirmed, refuted or downgraded. ``None`` when the
+            run never reached the completed path (a stopped run) or the
+            result predates the pass. Surfaces render nothing for ``None``
+            and nothing for a pass that selected no finding.
         lint_facts_note (str): Why the run had no linter facts to cite when
             a saved report was requested with ``--lint-report`` but could
             not be used — missing, oversized, or malformed (#2571). Rendered
@@ -148,6 +155,7 @@ class ReviewMetadata:
         default_factory=tuple,
     )
     synthesis: SynthesisOutcome | None = None
+    verification: VerificationSummary | None = None
     lint_facts_note: str = ""
 
     @property

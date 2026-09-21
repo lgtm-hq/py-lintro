@@ -17,10 +17,12 @@ __all__ = [
     "REVIEW_CLI_SCHEMA",
     "SUMMARY_CLI_SCHEMA",
     "SYNTHESIS_CLI_SCHEMA",
+    "VERIFICATION_CLI_SCHEMA",
     "cli_schema_for_fix",
     "cli_schema_for_review",
     "cli_schema_for_summary",
     "cli_schema_for_synthesis",
+    "cli_schema_for_verification",
 ]
 
 REVIEW_CLI_SCHEMA: dict[str, object] = {
@@ -127,6 +129,30 @@ REVIEW_CLI_SCHEMA: dict[str, object] = {
                 "properties": {
                     "path": {"type": "string"},
                     "reason": {"type": "string"},
+                },
+            },
+        },
+    },
+}
+
+VERIFICATION_CLI_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "required": ["verifications"],
+    "additionalProperties": False,
+    "properties": {
+        "verifications": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["index", "outcome", "evidence"],
+                "additionalProperties": False,
+                "properties": {
+                    "index": {"type": "integer"},
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["refuted", "weakened", "unrefuted"],
+                    },
+                    "evidence": {"type": "string"},
                 },
             },
         },
@@ -333,6 +359,19 @@ def cli_schema_for_synthesis(
     if transport != AITransport.CLI:
         return None
     return CliSchemaRequest(schema=SYNTHESIS_CLI_SCHEMA, schema_name="lintro_synthesis")
+
+
+def cli_schema_for_verification(
+    *,
+    transport: AITransport | None,
+) -> CliSchemaRequest | None:
+    """Return native verification schema args for CLI transport (#2728)."""
+    if transport != AITransport.CLI:
+        return None
+    return CliSchemaRequest(
+        schema=VERIFICATION_CLI_SCHEMA,
+        schema_name="lintro_verification",
+    )
 
 
 def cli_schema_for_summary(*, transport: AITransport | None) -> CliSchemaRequest | None:

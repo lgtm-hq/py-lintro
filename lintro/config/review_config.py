@@ -17,6 +17,8 @@ Custom checklist items activate on ``domains`` (role labels such as ``api``,
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from identify.identify import ALL_TAGS
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -115,6 +117,21 @@ class ReviewSensitivityOverrides(BaseModel):
         default=None,
         description="Report P3 test-coverage and wiring gaps.",
     )
+
+
+class ReviewVerifyMode(StrEnum):
+    """Which findings the verification pass re-checks (#2728).
+
+    Attributes:
+        OFF: No verification call.
+        P1: Every P1 finding.
+        P1_AND_LOW_CONFIDENCE: Every P1 and every finding the reviewer
+            marked ``confidence: low``.
+    """
+
+    OFF = "off"
+    P1 = "p1"
+    P1_AND_LOW_CONFIDENCE = "p1+low-confidence"
 
 
 class ReviewSynthesisConfig(BaseModel):
@@ -286,6 +303,18 @@ class ReviewConfig(BaseModel):
             "way; set false to keep resolving threads a manual ceremony. A "
             "partially addressed pattern is never resolved, and a regression "
             "never reopens a resolved thread."
+        ),
+    )
+    verify: ReviewVerifyMode = Field(
+        default=ReviewVerifyMode.P1_AND_LOW_CONFIDENCE,
+        description=(
+            "The verification pass (#2728): one provider call per round, after "
+            "the synthesis pass and before the severity gates, that asks the "
+            "model to refute the selected findings against their cited code. "
+            "'off' skips it; 'p1' verifies every P1; 'p1+low-confidence' also "
+            "verifies every finding the reviewer marked low confidence. A "
+            "refuted finding is dropped and recorded; a P1 whose failure "
+            "scenario does not hold is moved to P2."
         ),
     )
     synthesis: ReviewSynthesisConfig = Field(

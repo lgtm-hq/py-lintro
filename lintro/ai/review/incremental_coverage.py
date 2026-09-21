@@ -23,6 +23,7 @@ from lintro.ai.review.merge import truncated_paths
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.resume import records_for_reviewed
 from lintro.ai.review.sensitivity import filter_findings_by_policy
+from lintro.ai.review.severity_gate import apply_severity_gates
 from lintro.ai.review.state_store import state_dir, write_state_part
 
 if TYPE_CHECKING:
@@ -85,9 +86,15 @@ def write_incremental_coverage_part(
     )
     pr_raw = os.environ.get("PR_NUMBER", "").strip()
     seed = ReviewState() if force_full or prior_state is None else prior_state
+    # The chunk passes parse ungated since #2728 (the round gates once, after
+    # the verification pass). A checkpoint written on an interrupt never
+    # reaches that round, so it gates here or an inflated P1 would be
+    # persisted at the model's severity and replayed on resume.
     findings = filter_findings_by_policy(
-        findings=tuple(
-            finding for partial in collected for finding in partial.findings
+        findings=apply_severity_gates(
+            findings=tuple(
+                finding for partial in collected for finding in partial.findings
+            ),
         ),
         policy=policy,
     )
