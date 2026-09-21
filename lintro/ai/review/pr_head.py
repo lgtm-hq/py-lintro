@@ -12,14 +12,14 @@ whichever way it ends. When no repository is available the run is told so
 and every call goes out without tools (:attr:`ReviewCheckout.NONE`), never
 against the ambient tree.
 
-Ownership of the tree, from creation to removal, is split four ways:
-:class:`~lintro.ai.review.pr_head_guard.RemoveOnError` covers preparation
-(collection's filters and validation, then everything ``prepare_review`` does
-after collection); ``PreparedReview.discard()`` covers the adapter window
-between ``prepare_review`` and ``execute_review`` (a converged round, a
-provider that fails to construct); the run's own ``finally`` in
-``run_review_async`` covers execution; and the ``atexit`` registry here is the
-backstop for whatever none of them reached. A SIGKILL escapes all four and is
+Ownership of the tree, from creation to removal, is split three ways:
+:class:`~lintro.ai.review.pr_head_guard.RemoveOnError` covers everything
+before the run — collection's filters and validation, what ``prepare_review``
+does after collection, and each adapter's whole window between
+``prepare_review`` and ``execute_review`` (one scope each in the CLI command
+and the MCP toolkit, not an enumeration of exits); the run's own ``finally``
+in ``run_review_async`` covers execution; and the ``atexit`` registry here is
+the backstop for whatever neither reached. A SIGKILL escapes all three and is
 swept by the next run.
 """
 

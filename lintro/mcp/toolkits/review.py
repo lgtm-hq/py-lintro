@@ -708,6 +708,7 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     from lintro.ai.review.exceptions import ReviewPreparationError
     from lintro.ai.review.patch_validation import validate_result_suggested_patches
     from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
+    from lintro.ai.review.pr_head_guard import RemoveOnError
     from lintro.ai.review.preparation import (
         execute_review,
         prepare_review,
@@ -755,32 +756,35 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
     # only lower the operator's ceiling, so it is applied to the prepared review
     # rather than folded into the shared resolution.
     prepared = prepared.with_max_cost_usd(max_cost_usd=budget.effective_usd)
+    # One ownership scope for the PR head tree (#2733) until the run owns
+    # it: a provider that fails to build, or any other exit before
+    # execute_review, removes the tree; after a run the guard is a no-op.
+    with RemoveOnError(prepared.context.head_worktree):
 
-    try:
-        provider = get_provider(
-            prepared.ai_config,
-            workspace_root=workspace,
-            transcript_command="review",
-        )
-    except (AIProviderRequiredError, ValueError) as exc:
-        prepared.discard()  # the review will not run (#2733)
-        raise McpError(
-            code=McpErrorCode.TOOL_UNAVAILABLE,
-            message=str(exc),
-            detail={"tool": "lintro_review", "reason": "provider_unavailable"},
-        ) from exc
+        try:
+            provider = get_provider(
+                prepared.ai_config,
+                workspace_root=workspace,
+                transcript_command="review",
+            )
+        except (AIProviderRequiredError, ValueError) as exc:
+            raise McpError(
+                code=McpErrorCode.TOOL_UNAVAILABLE,
+                message=str(exc),
+                detail={"tool": "lintro_review", "reason": "provider_unavailable"},
+            ) from exc
 
-    try:
-        result = execute_review(prepared, provider=provider)
-    except ReviewContextError as exc:
-        _raise_context_error(exc=exc)
-    except (AIError, ValueError) as exc:
-        failure = _review_failure(provider_name=str(provider.name), error=exc)
-        raise McpError(
-            code=failure.code,
-            message=failure.message,
-            detail=failure.detail,
-        ) from exc
+        try:
+            result = execute_review(prepared, provider=provider)
+        except ReviewContextError as exc:
+            _raise_context_error(exc=exc)
+        except (AIError, ValueError) as exc:
+            failure = _review_failure(provider_name=str(provider.name), error=exc)
+            raise McpError(
+                code=failure.code,
+                message=failure.message,
+                detail=failure.detail,
+            ) from exc
     # #2101: the MCP payload carries suggested_code, so it goes through the
     # same head-content validation as the CLI's terminal, JSON, and --post
     # surfaces rather than handing an agent a patch that no longer applies.
