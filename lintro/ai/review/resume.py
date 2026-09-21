@@ -46,8 +46,9 @@ class ResumePlan:
         queue: Paths that need a provider read, in cap-safe order.
         hashes: Current normalized patch hash per path.
         eligible: Review-eligible paths.
-        reviewed_ranges: ``(path, start, end)`` new-file line ranges a delta
-            round (#2627) reads for the files it narrowed; set by the run
+        reviewed_ranges: ``(path, start, end)`` old-side line ranges (the prior
+            head's coordinates) a delta round (#2627) showed for the files it
+            narrowed; set by the run
             planner after the delta is applied so the mid-run checkpoints
             and the final round match on the same inputs. Empty on a full
             round.

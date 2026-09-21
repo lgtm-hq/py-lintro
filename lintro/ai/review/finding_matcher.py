@@ -297,8 +297,9 @@ def match_findings(
             behavior.
         departed_paths: Paths that left the diff (deletes and rename sources)
             and may resolve even when they were not re-reviewed.
-        reviewed_ranges: On a delta round (#2627), the new-file line ranges
-            read per narrowed file. A prior open finding on such a file whose
+        reviewed_ranges: On a delta round (#2627), the old-side line ranges
+            (the prior head's coordinates) shown per narrowed file. A prior
+            open finding on such a file whose
             line falls outside every range was not re-read: it is carried,
             not resolved. Files absent from the mapping were read whole.
 

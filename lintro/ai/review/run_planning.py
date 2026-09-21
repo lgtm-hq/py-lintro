@@ -100,9 +100,10 @@ class ReviewRunPlan:
             without tools rather than against the ambient working tree.
         delta: What the chunk calls read this round (#2627): the delta
             since the prior round's head, or the whole diff and why.
-        reviewed_ranges: The new-file line ranges a delta round read for
-            the files it narrowed; the matcher carries a prior finding on
-            such a file outside them rather than resolving it.
+        reviewed_ranges: The old-side line ranges (the prior head's
+            coordinates) a delta round showed for the files it narrowed; the
+            matcher carries a prior finding on such a file outside them
+            rather than resolving it.
         merge_base: ``merge-base(base, head)`` recorded for the next round's
             base-moved check; empty off ``--pr``.
         timings: Recorder for the run's phase and per-chunk spans (#2148).

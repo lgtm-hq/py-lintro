@@ -58,8 +58,10 @@ def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None
             diff="".join(per_file.get(path, "") for path in files),
             relationship=chunk.relationship,
             metadata_note=chunk.metadata_note,
+            # A half none of whose files was narrowed is a whole-diff chunk:
+            # ``""`` would fire the scope note while the prompt embeds ``diff``.
             read_diff=(
-                "".join(per_file_read.get(path, "") for path in files)
+                ("".join(per_file_read.get(path, "") for path in files) or None)
                 if per_file_read is not None
                 else None
             ),

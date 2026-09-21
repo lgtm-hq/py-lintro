@@ -51,7 +51,11 @@ from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.output import review_result_to_dict
 from lintro.ai.review.sticky.assembly import render_state_sticky
 from lintro.ai.review.sticky.scope import _scope_line
-from lintro.ai.review.sticky.state import matcher_reviewed_ranges, stamp_finding_ids
+from lintro.ai.review.sticky.state import (
+    matcher_reviewed_ranges,
+    ranges_by_path,
+    stamp_finding_ids,
+)
 from lintro.ai.review.verdict import apply_coverage_gate, derive_readiness_verdict
 
 pytestmark = pytest.mark.verification
@@ -740,9 +744,30 @@ def test_read_ranges_are_the_old_side_so_shifted_lines_do_not_fool_the_matcher()
     # one at line 50 was not.
     deleted = _delta_text(old_start=1, old_len=13, new_start=1, new_len=3)
     assert_that(_old_side_ranges(deleted)).is_equal_to([(1, 13)])
-    # A pure insertion shows no old line at all.
+    # A pure insertion shows no old line at all — and the file still counts
+    # as narrowed: the sentinel keeps it in the mapping so nothing resolves.
     pure = _delta_text(old_start=7, old_len=0, new_start=8, new_len=2)
     assert_that(_old_side_ranges(pure)).is_empty()
+    only_pure = apply_delta_hunks(
+        chunks=[replace(chunk, diff=pure * 2)],
+        hunks={"api.py": pure},
+        since_sha="b" * 40,
+    )
+    assert_that(only_pure.reviewed_ranges).is_equal_to((("api.py", 0, 0),))
+    assert_that(ranges_by_path(reviewed_ranges=only_pure.reviewed_ranges)).is_equal_to(
+        {"api.py": ((0, 0),)},
+    )
+    nothing = match_findings(
+        previous=prior,
+        findings=[],
+        round_number=2,
+        head_sha="c" * 40,
+        reviewed_paths=frozenset({"api.py"}),
+        reviewed_ranges=ranges_by_path(reviewed_ranges=only_pure.reviewed_ranges),
+    )
+    assert_that(set(nothing.outcomes.values())).is_equal_to(
+        {FindingMatchOutcome.CARRIED},
+    )
 
 
 def test_the_adversarial_sweep_and_split_halves_read_the_delta(
@@ -785,6 +810,16 @@ def test_the_adversarial_sweep_and_split_halves_read_the_delta(
     left, right = halves
     assert_that(left.read_diff).is_equal_to(hunks["api.py"])
     assert_that(right.read_diff).is_equal_to(per_file["new.py"])
+    # A half none of whose files was narrowed is a whole-diff chunk again:
+    # no scope note, nothing to mislead the prompt.
+    whole_half = replace(
+        narrowed,
+        read_diff=hunks["api.py"],
+        files=["api.py", "new.py"],
+    )
+    _, unnarrowed = split_chunk(chunk=whole_half) or (None, None)
+    assert unnarrowed is not None
+    assert_that(unnarrowed.read_diff).is_none()
     assert_that(left.read_since).is_equal_to(scratch["b"])
     assert_that(left.diff).is_equal_to(
         per_file["api.py"],

@@ -359,7 +359,14 @@ def apply_delta_hunks(
                 continue
             narrowed = True
             parts.append(delta)
-            ranges.extend((path, start, end) for start, end in _old_side_ranges(delta))
+            shown = _old_side_ranges(delta)
+            # A delta of pure insertions shows no prior line: the file is still
+            # narrowed, and the sentinel (no line is 0) keeps it in the mapping
+            # so nothing on it resolves, rather than reading as "read whole".
+            if shown:
+                ranges.extend((path, start, end) for start, end in shown)
+            else:
+                ranges.append((path, 0, 0))
         rebuilt.append(
             (
                 replace(chunk, read_diff="".join(parts), read_since=since_sha)
@@ -385,7 +392,9 @@ def delta_scope_note(*, chunk: ReviewChunk) -> str:
     """
     if chunk.read_diff is None:
         return ""
-    return REVIEW_DELTA_SCOPE_NOTE.format(since=chunk.read_since[:12], head="HEAD")
+    return (
+        REVIEW_DELTA_SCOPE_NOTE.format(since=chunk.read_since[:12], head="HEAD") + "\n"
+    )
 
 
 def open_thread_paths(*, prior: ReviewState | None) -> tuple[str, ...]:
