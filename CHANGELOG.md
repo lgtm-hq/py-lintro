@@ -13,13 +13,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
-- **ai/review**: a `--pr` review reads the pull request's head — fetched into a private
-  ref and checked out in a temporary worktree that is the working directory of every CLI
-  call and is removed when the run ends — never the tree the command runs in; without a
-  clone, or when the head cannot be fetched, the run has no tree: every call runs in an
-  empty temporary repository and without tools, recorded as a `no_tree_for_agent`
-  degradation; the ambient checkout is never the fallback (#2733).
-
 ### Deprecated
 
 ### Removed
@@ -27,6 +20,22 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ### Fixed
 
 ### Security
+
+## [0.168.3] - 2026-09-21
+
+### Changed
+
+- **ai/review**: a `--pr` review reads the pull request's head — fetched into a private
+  ref and checked out in a temporary worktree that is the working directory of every CLI
+  call and is removed when the run ends — never the tree the command runs in; without a
+  clone, or when the head cannot be fetched, the run has no tree: every call runs in an
+  empty temporary repository and without tools, recorded as a `no_tree_for_agent`
+  degradation; the ambient checkout is never the fallback (#2733).
+
+### Fixed
+
+- **ai/review**: on --pr, read the PR head in a temporary worktree, never the ambient
+  tree (#2744) (c2ada7b)
 
 ## [0.168.2] - 2026-09-21
 
