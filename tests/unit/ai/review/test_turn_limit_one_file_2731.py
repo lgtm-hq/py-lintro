@@ -576,6 +576,40 @@ async def test_a_halves_failed_single_shot_retry_keeps_its_billed_usage() -> Non
     assert_that(reasons).contains(CoverageDegradationReason.SPLIT_HALF_FAILED)
 
 
+async def test_row_3_on_a_half_makes_no_further_call() -> None:
+    """Whole limit → single-shot exhaustion → halves: a limited half is done."""
+    partial, seen = await _drive(
+        _two_file_request(),
+        [_limit(), _exhausted(), _limit(), "ok"],
+    )
+
+    # Whole (tools), whole (single-shot), half 1 (single-shot, limited),
+    # half 2 (single-shot): no extra call for the limited half.
+    assert_that([r.single_shot for r in seen]).is_equal_to([False, True, True, True])
+    assert_that(seen).is_length(4)
+    assert_that(partial.files).is_equal_to(("docs/other.md",))
+    reasons = [d.reason for d in partial.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.TURN_LIMIT_REACHED)
+
+
+async def test_row_8_on_a_half_is_lost_not_split_again() -> None:
+    """Whole exhaustion → half limit → half single-shot exhaustion: lost half."""
+    partial, seen = await _drive(
+        _two_file_request(),
+        [_exhausted(), _limit(), _exhausted(), "ok"],
+    )
+
+    # Whole, half 1 (tools, limited), half 1 (single-shot, exhausted), half
+    # 2: no unchanged retry and no second split for half 1.
+    assert_that(seen).is_length(4)
+    assert_that([len(r.chunk.files) for r in seen]).is_equal_to([2, 1, 1, 1])
+    assert_that(partial.files).is_equal_to(("docs/other.md",))
+    reasons = [d.reason for d in partial.coverage_degradations]
+    assert_that(reasons).contains(CoverageDegradationReason.SPLIT_HALF_FAILED)
+    # The limited first attempt on the lost half stays billed.
+    assert_that(partial.input_tokens).is_equal_to(11)
+
+
 class _Recorder:
     """A provider double that records the bounds in force when called."""
 

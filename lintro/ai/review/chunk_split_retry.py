@@ -140,13 +140,12 @@ async def _retry_after_exhaustion(
         try:
             call = await invoke_chunk_review(request=request)
         except AITurnLimitError as limit:
-            # Row 5 / 6 of the recovery table: the unchanged retry hit the
-            # turn limit. Not yet single-shot: take the single-shot retry;
-            # already single-shot: the chunk is done, record it.
-            partial = (
-                _turn_limited_partial(request=request, first=limit, again=None)
-                if request.single_shot
-                else await _retry_after_turn_limit(request=request, first=limit)
+            # Rows 5 / 6: the unchanged retry hit the turn limit; the one
+            # retry function decides whether a single-shot retry remains.
+            partial = await _retry_after_turn_limit(
+                request=request,
+                first=limit,
+                may_split=True,
             )
         else:
             partial = await _parse_call(request=request, call=call)
@@ -176,11 +175,15 @@ async def _retry_after_exhaustion(
             try:
                 call = await invoke_chunk_review(request=half_request)
             except AITurnLimitError as limit:
-                # Row 7: a half gets the same one single-shot retry a whole
-                # chunk does; a second limit degrades the half, not the chunk.
+                # Row 7: the half takes the one retry function at half level;
+                # rows 3 and 8 are decided inside it, not here.
                 billed = limit
                 partials.append(
-                    await _retry_after_turn_limit(request=half_request, first=limit),
+                    await _retry_after_turn_limit(
+                        request=half_request,
+                        first=limit,
+                        may_split=False,
+                    ),
                 )
                 continue
             partials.append(await _parse_call(request=half_request, call=call))
@@ -259,7 +262,7 @@ async def review_chunk_main_pass(
     except AICostBudgetExceededError:
         raise
     except AITurnLimitError as exc:
-        return await _retry_after_turn_limit(request=request, first=exc)
+        return await _retry_after_turn_limit(request=request, first=exc, may_split=True)
     except AIError as exc:
         if not is_cli_output_exhaustion(exc):
             raise
@@ -315,6 +318,7 @@ async def _retry_after_turn_limit(
     *,
     request: ChunkReviewRequest,
     first: AITurnLimitError,
+    may_split: bool,
 ) -> ChunkReviewPartial:
     """Retry a turn-limited call once, single-shot; degrade if it fails again.
 
@@ -358,6 +362,10 @@ async def _retry_after_turn_limit(
     Args:
         request: The chunk, prompt material, provider handles and limits.
         first: The error the first call raised.
+        may_split: True at the whole-chunk level, where an exhausted retry
+            splits (row 4); False for a half, where it is the half's loss
+            (row 8) and the error is re-raised to the half-loss handler.
+            This is the one place rows 3 and 8 are decided for both levels.
 
     Returns:
         The retry's parsed partial, or an empty partial carrying the
@@ -374,6 +382,10 @@ async def _retry_after_turn_limit(
         index=request.chunk_index,
         error=first,
     )
+    if request.single_shot:
+        # Row 3 (and 6): the limit hit an attempt that was already
+        # single-shot; there is no narrower retry, the chunk is done.
+        return _turn_limited_partial(request=request, first=first, again=None)
     retry = replace(request, single_shot=True)
     try:
         call = await invoke_chunk_review(request=retry)
@@ -381,10 +393,12 @@ async def _retry_after_turn_limit(
         raise
     except AIError as exc:
         if not isinstance(exc, AITurnLimitError):
-            if not is_cli_output_exhaustion(exc):
+            if not is_cli_output_exhaustion(exc) or not may_split:
+                # Row 8 on a half (or any other error): the caller's loss
+                # handler takes it, with the first attempt's usage.
                 raise
-            # The single-shot answer overran the output ceiling: split as the
-            # first attempt would have, keeping the single-shot shape.
+            # Row 4: the single-shot answer overran the output ceiling; split
+            # as the first attempt would have, keeping the single-shot shape.
             partial = await _retry_after_exhaustion(request=retry)
             return replace(
                 partial,
