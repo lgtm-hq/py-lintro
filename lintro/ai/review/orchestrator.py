@@ -33,6 +33,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+from lintro.ai.review.pr_head import remove_pr_head
 from lintro.ai.review.result_assembly import (
     assemble_review_result,
     empty_review_result,
@@ -169,6 +170,7 @@ async def _run_review_steps(
         raise ValueError(f"depth must be between 1 and 3, got {options.depth}")
 
     if not context.changed_files and not context.unified_diff.strip():
+        remove_pr_head(context.head_worktree)
         return empty_review_result(context=context, options=options)
 
     # One monotonic clock for the whole run: the recorder is back-dated by the
@@ -183,16 +185,22 @@ async def _run_review_steps(
         seconds=options.context_collection_seconds,
     )
 
-    plan = plan_run(context=context, options=options, timings=timings)
-    outcome = await execute_run(
-        context=context,
-        options=options,
-        plan=plan,
-        session=session,
-    )
-    return assemble_review_result(
-        context=context,
-        options=options,
-        plan=plan,
-        outcome=outcome,
-    )
+    try:
+        plan = plan_run(context=context, options=options, timings=timings)
+        outcome = await execute_run(
+            context=context,
+            options=options,
+            plan=plan,
+            session=session,
+        )
+        return assemble_review_result(
+            context=context,
+            options=options,
+            plan=plan,
+            outcome=outcome,
+        )
+    finally:
+        # The PR head worktree (#2733) outlives nothing: a completed run, a
+        # graceful stop (the SIGTERM handler ends the run through this
+        # path too) and an exception all remove it here.
+        remove_pr_head(context.head_worktree)

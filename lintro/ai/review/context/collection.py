@@ -32,6 +32,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.skipped_file import SkippedFile
+from lintro.ai.review.pr_head import checkout_pr_head
 
 _WORKFLOW_PATH_PREFIX = ".github/workflows/"
 
@@ -82,6 +83,21 @@ def collect_review_context(
             pr_number=pr_number,
             repo=repo,
         )
+        # The agent reads the PR's head, never the ambient tree (#2733).
+        worktree = checkout_pr_head(pr_number=pr_number, head_oid=context.head_ref)
+        if worktree is not None:
+            repo_root = worktree.path
+            context = replace(
+                context,
+                checkout=ReviewCheckout.HEAD,
+                head_worktree=worktree,
+            )
+        elif context.checkout is ReviewCheckout.UNKNOWN:
+            # No head to pin and the tree is neither end of the range: the
+            # agent gets no tree at all rather than an unrelated one.
+            context = replace(context, checkout=ReviewCheckout.NONE)
+        # A probed BASE or HEAD checkout stays what it honestly is (the
+        # dogfood workflow's base checkout, a developer on the branch).
     elif uncommitted:
         context = _collect_uncommitted_context()
     else:
