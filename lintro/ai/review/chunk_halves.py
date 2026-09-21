@@ -26,6 +26,30 @@ if TYPE_CHECKING:
 __all__ = ["merge_half_partials", "scope_partial_to_chunk", "split_chunk"]
 
 
+def _half_read_diff(
+    *,
+    files: list[str],
+    per_file: dict[str, str],
+    per_file_read: dict[str, str] | None,
+) -> str | None:
+    """The delta text of one half, or ``None`` when the half was read whole.
+
+    Args:
+        files: The half's files.
+        per_file: The parent's whole-PR text per file.
+        per_file_read: The parent's read text per file, or ``None`` on a
+            full round.
+
+    Returns:
+        The half's ``read_diff``; ``None`` when nothing in it was narrowed.
+    """
+    if per_file_read is None:
+        return None
+    read = "".join(per_file_read.get(path, "") for path in files)
+    whole = "".join(per_file.get(path, "") for path in files)
+    return read if read and read != whole else None
+
+
 def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None:
     """Bisect a chunk by file count into two chunks that keep its identity.
 
@@ -59,11 +83,11 @@ def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None
             relationship=chunk.relationship,
             metadata_note=chunk.metadata_note,
             # A half none of whose files was narrowed is a whole-diff chunk:
-            # ``""`` would fire the scope note while the prompt embeds ``diff``.
-            read_diff=(
-                ("".join(per_file_read.get(path, "") for path in files) or None)
-                if per_file_read is not None
-                else None
+            # its read text equals its whole text, and a scope note would lie.
+            read_diff=_half_read_diff(
+                files=files,
+                per_file=per_file,
+                per_file_read=per_file_read,
             ),
             read_since=chunk.read_since,
         )

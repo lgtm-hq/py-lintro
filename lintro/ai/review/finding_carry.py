@@ -110,4 +110,6 @@ def _line_unread(
     ranges = reviewed_ranges.get(path)
     if ranges is None:
         return False
-    return not any(start <= line <= end for start, end in ranges)
+    # A non-positive range is the "nothing shown" sentinel: it holds no line,
+    # findings at line 0 included.
+    return not any(start <= line <= end for start, end in ranges if start > 0)

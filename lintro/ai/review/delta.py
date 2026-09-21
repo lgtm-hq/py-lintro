@@ -58,6 +58,10 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_state import ReviewState
 
+#: The range recorded for a narrowed file whose delta showed no prior line:
+#: no line is negative, so nothing on the file can match it and resolve.
+_NO_LINE = (-1, -1)
+
 __all__ = [
     "DeltaApplication",
     "apply_delta_hunks",
@@ -361,12 +365,12 @@ def apply_delta_hunks(
             parts.append(delta)
             shown = _old_side_ranges(delta)
             # A delta of pure insertions shows no prior line: the file is still
-            # narrowed, and the sentinel (no line is 0) keeps it in the mapping
-            # so nothing on it resolves, rather than reading as "read whole".
+            # narrowed, and the sentinel keeps it in the mapping so nothing on
+            # it resolves, rather than reading as "read whole".
             if shown:
                 ranges.extend((path, start, end) for start, end in shown)
             else:
-                ranges.append((path, 0, 0))
+                ranges.append((path, *_NO_LINE))
         rebuilt.append(
             (
                 replace(chunk, read_diff="".join(parts), read_since=since_sha)
