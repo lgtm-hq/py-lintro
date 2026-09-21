@@ -942,19 +942,22 @@ def _prepare(
         raise click.ClickException(str(exc)) from exc
     except ReviewPreparationError as exc:
         raise click.UsageError(str(exc)) from exc
-    if prepared.lint_digest and options.output_format == "terminal":
-        # A saved report was read, not produced: say which (#2571).
-        logger.info(
-            (
-                "Loaded lint report: {} tools, {} issues on changed files"
-                if options.lint_report is not None
-                else "Ran lint on changed files: {} tools, {} issues"
-            ),
-            prepared.lint_tool_count,
-            prepared.lint_issue_count,
-        )
-    if prepared.lint_note and options.output_format == "terminal":
-        logger.warning(prepared.lint_note)
+    # The PR head tree's scope (#2733) opens at the first statement after
+    # preparation; ``_finish_review`` opens its own for the rest of the run.
+    with RemoveOnError(prepared.context.head_worktree):
+        if prepared.lint_digest and options.output_format == "terminal":
+            # A saved report was read, not produced: say which (#2571).
+            logger.info(
+                (
+                    "Loaded lint report: {} tools, {} issues on changed files"
+                    if options.lint_report is not None
+                    else "Ran lint on changed files: {} tools, {} issues"
+                ),
+                prepared.lint_tool_count,
+                prepared.lint_issue_count,
+            )
+        if prepared.lint_note and options.output_format == "terminal":
+            logger.warning(prepared.lint_note)
     return prepared
 
 
@@ -979,11 +982,11 @@ def _finish_review(
         prepared: The prepared review.
         targets: Resolved GitHub target for this run.
     """
-    # One ownership scope for the PR head tree (#2733): every exit of this
-    # NoReturn function is a SystemExit, so the guard fires on all of them —
-    # a no-op after a run (the run removed its tree), the removal itself
-    # when the round never ran (a converged skip, a state-load or provider
-    # error).
+    # The PR head tree's scope (#2733) for the rest of the run, opened at the
+    # first statement: every exit of this NoReturn function is a SystemExit,
+    # so the guard fires on all of them — a no-op after a run (the run removed
+    # its tree), the removal itself when the round never ran (a converged
+    # skip, a state-load or provider error).
     with RemoveOnError(prepared.context.head_worktree):
         resolved_profile = resolve_transport_settings(prepared.ai_config)
         logger.info(

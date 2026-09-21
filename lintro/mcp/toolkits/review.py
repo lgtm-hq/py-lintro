@@ -752,15 +752,14 @@ def _execute_review(*, arguments: dict[str, Any], workspace: Path) -> dict[str, 
             budget=budget,
             context_collection_seconds=time.monotonic() - prepare_started,
         )
-    # The clamp is MCP's alone (ADR-0008 invariant 6): the per-call argument may
-    # only lower the operator's ceiling, so it is applied to the prepared review
-    # rather than folded into the shared resolution.
-    prepared = prepared.with_max_cost_usd(max_cost_usd=budget.effective_usd)
-    # One ownership scope for the PR head tree (#2733) until the run owns
-    # it: a provider that fails to build, or any other exit before
-    # execute_review, removes the tree; after a run the guard is a no-op.
+    # One ownership scope for the PR head tree (#2733), opened at the first
+    # statement after preparation and held until the run owns the tree: any
+    # exit before execute_review removes it; after a run the guard is a no-op.
     with RemoveOnError(prepared.context.head_worktree):
-
+        # The clamp is MCP's alone (ADR-0008 invariant 6): the per-call
+        # argument may only lower the operator's ceiling, so it is applied to
+        # the prepared review rather than folded into the shared resolution.
+        prepared = prepared.with_max_cost_usd(max_cost_usd=budget.effective_usd)
         try:
             provider = get_provider(
                 prepared.ai_config,

@@ -17,7 +17,8 @@ Ownership of the tree, from creation to removal, is split three ways:
 before the run — collection's filters and validation, what ``prepare_review``
 does after collection, and each adapter's whole window between
 ``prepare_review`` and ``execute_review`` (one scope each in the CLI command
-and the MCP toolkit, not an enumeration of exits); the run's own ``finally``
+and the MCP toolkit, not an enumeration of exits — the rule is that the scope
+opens at the first statement after preparation); the run's own ``finally``
 in ``run_review_async`` covers execution; and the ``atexit`` registry here is
 the backstop for whatever neither reached. A SIGKILL escapes all three and is
 swept by the next run.
