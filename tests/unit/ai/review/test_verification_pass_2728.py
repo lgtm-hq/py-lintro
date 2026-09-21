@@ -537,6 +537,8 @@ async def test_refutation_citing_another_file_is_not_a_refutation() -> None:
         ("(pkg/api.py:2)", True),
         ("`pkg/api.py:2`, retries is read", True),
         ("pkg/api.py:2.", True),
+        ("pkg/api.py:2-4 both branches", True),
+        ('"pkg/api.py:2-4"', True),
     ],
 )
 def test_cites_finding_needs_the_findings_exact_path(

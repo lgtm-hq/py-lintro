@@ -33,9 +33,10 @@ __all__ = [
 
 #: A quoted citation: ``"path:line"``, ``` `path:line` ``` or ``(path:line)``.
 #: The only way to cite a path that contains a space.
-_QUOTED_CITATION = re.compile(r'["`(]([^"`()]+?):(\d+)["`)]')
-#: A bare citation token, after wrapping punctuation is stripped.
-_BARE_CITATION = re.compile(r"^(.+?):(\d+)$")
+_QUOTED_CITATION = re.compile(r'["`(]([^"`()]+?):(\d+(?:-\d+)?)["`)]')
+#: A bare citation token, after wrapping punctuation is stripped. Both
+#: forms take a line or a ``start-end`` range.
+_BARE_CITATION = re.compile(r"^(.+?):(\d+(?:-\d+)?)$")
 #: Wrapping punctuation a bare token may carry: opening before, closing after.
 _OPENING = "\"`(['"
 _CLOSING = "\"`)],;.'"
