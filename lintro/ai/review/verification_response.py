@@ -17,6 +17,7 @@ from loguru import logger
 from lintro.ai.json_response import strip_json_fences
 from lintro.ai.review.enums.severity_downgrade_reason import SeverityDowngradeReason
 from lintro.ai.review.enums.verification_outcome import VerificationOutcome
+from lintro.ai.review.finding_identity import normalize_file_path
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.verification_outcome import RefutedFinding
 
@@ -41,15 +42,20 @@ def cites_finding(*, evidence: str, file: str) -> bool:
         file: The finding's repository-relative path.
 
     Returns:
-        True when some citation names ``file`` — the whole path, or a
-        trailing part of it down to the bare file name.
+        True when some citation names exactly ``file`` (both sides
+        normalized: separators, a leading ``./``, stray whitespace). The
+        prompt shows the verifier the full path, so a bare file name or a
+        trailing fragment is not accepted: with two findings on files of
+        the same name it could not tell them apart. An empty ``file`` never
+        matches.
     """
-    target = file.replace("\\", "/")
-    for match in _CITATION.finditer(evidence):
-        cited = match.group(1).replace("\\", "/")
-        if target == cited or target.endswith("/" + cited):
-            return True
-    return False
+    target = normalize_file_path(file)
+    if not target:
+        return False
+    return any(
+        normalize_file_path(match.group(1)) == target
+        for match in _CITATION.finditer(evidence)
+    )
 
 
 def parse_verification_answer(

@@ -521,18 +521,20 @@ async def test_refutation_citing_another_file_is_not_a_refutation() -> None:
     ("evidence", "expected"),
     [
         ("pkg/api.py:2 retries is read", True),
-        ("see api.py:2", True),
+        ("see ./pkg/api.py:2", True),
+        ("pkg\\api.py:2", True),
+        ("see api.py:2", False),
         ("src/pkg/api.py:2", False),
         ("other/api.py:2", False),
         ("nonexistent.py:999", False),
         ("pkg/api.py is fine", False),
     ],
 )
-def test_cites_finding_matches_the_findings_path_or_its_tail(
+def test_cites_finding_needs_the_findings_exact_path(
     evidence: str,
     expected: bool,
 ) -> None:
-    """Only the finding's path, or a trailing part of it, counts as a citation.
+    """Only the finding's own path, normalized, counts as a citation.
 
     Args:
         evidence: Refutation text.
@@ -541,6 +543,23 @@ def test_cites_finding_matches_the_findings_path_or_its_tail(
     assert_that(cites_finding(evidence=evidence, file="pkg/api.py")).is_equal_to(
         expected,
     )
+
+
+def test_cites_finding_normalizes_the_findings_own_spelling() -> None:
+    """A finding path with whitespace or ``./`` still matches its citation."""
+    assert_that(cites_finding(evidence="pkg/api.py:2", file=" ./pkg/api.py ")).is_true()
+    assert_that(cites_finding(evidence="pkg/api.py:2", file="")).is_false()
+
+
+async def test_weakened_with_a_citation_applies_to_a_padded_path() -> None:
+    """The weakened check normalizes the finding's path like the queue does."""
+    result, _call = await _pass(
+        findings=[_finding(file=" pkg/api.py ")],
+        content=_answer((1, "weakened", "pkg/api.py:2 only on retry")),
+    )
+
+    assert_that(result.findings[0].severity).is_equal_to(Severity.P2)
+    assert_that(result.summary.downgraded).is_equal_to(1)
 
 
 async def test_weakened_p1_becomes_p2_with_its_own_reason() -> None:
