@@ -201,7 +201,7 @@ def _nits_block(
         lines.append(
             f"| {_delta_cell(record=record, match=match)} "
             f"| {_nit_cell(record=record)} "
-            f"| `{_location(record=record)}` |",
+            f"| `{_location(record=record)}` {finding_marker(key=record.key)}|",
         )
     lines.extend(["", "</details>"])
     return lines

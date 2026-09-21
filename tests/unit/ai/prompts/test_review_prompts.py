@@ -52,6 +52,7 @@ _USER_PROMPT_KWARGS = {
     "additional_checks": "",
     "boundary": "CODE_BLOCK_test1234",
     "diff": "diff --git a/src/main.py",
+    "diff_scope": "",
     "lint_results_section": "",
     "strictness_section": "",
     "output_schema": REVIEW_OUTPUT_SCHEMA,
@@ -216,6 +217,7 @@ def test_depth_templates_render_without_key_error() -> None:
         prior_findings_json="[]",
         boundary="CODE_BLOCK_test1234",
         diff="sample diff",
+        diff_scope="",
     )
 
     assert_that(questions).contains("<CODE_BLOCK_test1234>")
@@ -243,7 +245,11 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
             },
             output_rules=format_output_rules(),
         ),
-        REVIEW_GIT_NATIVE_DIFF_INLINE.format(boundary=boundary, diff="diff body"),
+        REVIEW_GIT_NATIVE_DIFF_INLINE.format(
+            boundary=boundary,
+            diff="diff body",
+            diff_scope="",
+        ),
         REVIEW_CUSTOM_AGENT_USER_PROMPT_TEMPLATE.format(
             agent_name="agent",
             agent_description="desc",
@@ -259,6 +265,7 @@ def test_all_review_templates_accept_standard_boundary_kwargs() -> None:
             prior_findings_json="[]",
             boundary=boundary,
             diff="diff body",
+            diff_scope="",
         ),
         REVIEW_GENERATE_QUESTIONS_TEMPLATE.format(
             boundary=boundary,

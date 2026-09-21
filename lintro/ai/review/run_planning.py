@@ -419,7 +419,11 @@ def plan_run(
         if hunks is None:
             delta = DeltaPlan.full(reason=DeltaReason.DELTA_FAILED)
         else:
-            applied = apply_delta_hunks(chunks=chunks, hunks=hunks)
+            applied = apply_delta_hunks(
+                chunks=chunks,
+                hunks=hunks,
+                since_sha=delta.since_sha or "",
+            )
             chunks = applied.chunks
             reviewed_ranges = applied.reviewed_ranges
             # The checkpoints match on the same ranges as the final round.

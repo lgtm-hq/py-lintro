@@ -43,6 +43,12 @@ def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None
     if len(chunk.files) < 2:
         return None
     per_file = split_unified_diff_by_file(unified_diff=chunk.diff)
+    # A delta round's read text (#2627) splits along the same files.
+    per_file_read = (
+        split_unified_diff_by_file(unified_diff=chunk.read_diff)
+        if chunk.read_diff is not None
+        else None
+    )
     midpoint = len(chunk.files) // 2
     halves = (list(chunk.files[:midpoint]), list(chunk.files[midpoint:]))
     left, right = (
@@ -52,6 +58,12 @@ def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None
             diff="".join(per_file.get(path, "") for path in files),
             relationship=chunk.relationship,
             metadata_note=chunk.metadata_note,
+            read_diff=(
+                "".join(per_file_read.get(path, "") for path in files)
+                if per_file_read is not None
+                else None
+            ),
+            read_since=chunk.read_since,
         )
         for files in halves
     )

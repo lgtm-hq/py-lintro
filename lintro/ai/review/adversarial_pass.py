@@ -24,6 +24,7 @@ from lintro.ai.prompts.review import (
     REVIEW_SYSTEM,
 )
 from lintro.ai.review import provider_call
+from lintro.ai.review.delta import delta_scope_note
 from lintro.ai.review.diff_gate import DiffGate, hunks_from_diff
 from lintro.ai.review.finding_parser import parse_findings, reject_context_findings
 from lintro.ai.review.merge import ChunkReviewPartial
@@ -84,7 +85,8 @@ async def run_adversarial_pass(
     prompt = REVIEW_ADVERSARIAL_SWEEP_TEMPLATE.format(
         prior_findings_json=prior_json,
         boundary=make_boundary_marker(),
-        diff=redact_prompt_text(text=chunk.diff, source="diff"),
+        diff=redact_prompt_text(text=chunk.read_diff or chunk.diff, source="diff"),
+        diff_scope=delta_scope_note(chunk=chunk),
     )
     budget.check()
     response = await provider_call.call_ai(

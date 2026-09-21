@@ -65,6 +65,8 @@ REVIEW_GIT_NATIVE_USER_PROMPT_TEMPLATE = load_prompt_template(
     "git_native_user.md",
 )
 
+REVIEW_DELTA_SCOPE_NOTE = load_prompt_template("review", "delta_scope.md")
+
 REVIEW_GIT_NATIVE_DIFF_INLINE = load_prompt_template(
     "review",
     "git_native_diff_inline.md",

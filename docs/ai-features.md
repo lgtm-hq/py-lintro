@@ -826,9 +826,15 @@ resolve; it never narrows what it may report.**
   that is not smaller than the whole hunk (a large change followed by a large revert) is
   not used. A delta round never delegates `git diff` to the agent.
 - **What may be resolved.** A prior open finding on a file the round read is resolved
-  only if its line lies inside a hunk the round actually read; outside those lines it is
-  carried, not resolved (`FindingMatchResult.range_carries`). Full rounds resolve as
-  before.
+  only if its line lies inside a hunk the round actually read — measured on the hunks'
+  old side, the prior head's coordinates a prior finding's line is in, so an insertion
+  or deletion above the finding cannot shift it in or out of range; outside those lines
+  it is carried, not resolved (`FindingMatchResult.range_carries`). The mid-run
+  checkpoints match on the same ranges as the final round. Full rounds resolve as
+  before. The prompt says what range the embedded text is ("the change since the
+  previous review round … unchanged context lines may still be earlier changes of this
+  pull request"), and the depth-3 adversarial sweep and an output-exhaustion split read
+  the same delta text.
 - **What is reported and counted.** Findings are never filtered by delta location, and
   coverage identity stays the whole-PR patch hash, so a changed file the round did not
   read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call

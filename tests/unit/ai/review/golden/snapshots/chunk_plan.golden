@@ -11,7 +11,8 @@
       "relationship": "directory-prefix",
       "metadata_note": null,
       "truncated": false,
-      "read_diff": null
+      "read_diff": null,
+      "read_since": ""
     }
   ],
   "forced_semantic": [
@@ -25,7 +26,8 @@
       "relationship": "directory-prefix",
       "metadata_note": null,
       "truncated": false,
-      "read_diff": null
+      "read_diff": null,
+      "read_since": ""
     },
     {
       "id": 2,
@@ -36,7 +38,8 @@
       "relationship": "single-file",
       "metadata_note": null,
       "truncated": false,
-      "read_diff": null
+      "read_diff": null,
+      "read_since": ""
     }
   ]
 }

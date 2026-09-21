@@ -54,7 +54,7 @@ treat it as evidence that such a file was not updated, not touched, or missing a
 {additional_checks}
 ---
 
-<pull_request_diff>
+{diff_scope}<pull_request_diff>
 <{boundary}>
 {diff}
 </{boundary}>

@@ -36,6 +36,7 @@ from lintro.ai.prompts.review import (
     format_output_rules,
     format_pr_changed_files_for_prompt,
 )
+from lintro.ai.review.delta import delta_scope_note
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
 from lintro.ai.review.paths_registry import generate_interaction_paths
 from lintro.ai.review.prompt_redaction import redact_prompt_text
@@ -185,12 +186,14 @@ def build_review_prompt(*, inputs: PromptInputs) -> tuple[str, str]:
         text=chunk.read_diff or chunk.diff,
         source="diff",
     )
+    diff_scope = delta_scope_note(chunk=chunk)
     changed_files = [file for file in context.changed_files if file.path in chunk.files]
     boundary = make_boundary_marker()
     questions, additional_checks = _rubric_sections(inputs=inputs, boundary=boundary)
 
     user_prompt = REVIEW_USER_PROMPT_TEMPLATE.format(
         pr_title=pr_title,
+        diff_scope=diff_scope,
         base_ref=redact_prompt_text(text=context.base_ref, source="git refs"),
         head_ref=redact_prompt_text(text=context.head_ref, source="git refs"),
         pr_summary=pr_summary,
@@ -271,6 +274,7 @@ def build_git_native_review_prompt(
         diff_section = REVIEW_GIT_NATIVE_DIFF_INLINE.format(
             boundary=boundary,
             diff=redact_prompt_text(text=chunk.read_diff or chunk.diff, source="diff"),
+            diff_scope=delta_scope_note(chunk=chunk),
         )
     elif context.head_ref == "WORKTREE":
         diff_section = REVIEW_GIT_NATIVE_DIFF_WORKTREE_COMMAND.format(

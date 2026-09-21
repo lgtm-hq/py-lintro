@@ -23,6 +23,8 @@ class ReviewChunk:
             each queued file's change since the prior round's head — where
             ``diff`` stays the whole-PR hunk the diff gate, the cross-chunk
             guard and the budgets see. ``None`` on a full round.
+        read_since: The prior round's head ``read_diff`` is the change since;
+            empty on a full round.
     """
 
     id: int
@@ -32,3 +34,4 @@ class ReviewChunk:
     metadata_note: str | None = None
     truncated: bool = False
     read_diff: str | None = None
+    read_since: str = ""

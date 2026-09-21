@@ -23,9 +23,10 @@ narrows what the remaining calls *read*:
   delta hunk that is not smaller than the whole hunk (a large change then a
   large revert) is not used; a file re-queued by an open thread with no
   change since keeps its whole hunk: the reviewer needs the code the thread
-  is about. The application also returns the new-file line ranges the round
-  read, which the matcher uses to carry — not resolve — a prior finding on a
-  line the round never re-read.
+  is about. The application also returns the old-side line ranges the delta
+  showed — the prior head's coordinates, which is what a prior finding's
+  line is in — so the matcher carries, never resolves, a prior finding on a
+  line the round did not re-read.
 - :func:`open_thread_paths` names the files with an open finding so the
   resume queue re-reads them every delta round.
 
@@ -41,9 +42,9 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.prompts.review import REVIEW_DELTA_SCOPE_NOTE
 from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.context.git_ops import _run_git
-from lintro.ai.review.diff_gate import hunks_from_diff
 from lintro.ai.review.enums.delta_reason import DeltaReason
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.enums.review_checkout import ReviewCheckout
@@ -61,6 +62,7 @@ __all__ = [
     "DeltaApplication",
     "apply_delta_hunks",
     "delta_hunks",
+    "delta_scope_note",
     "merge_base",
     "open_thread_paths",
     "plan_delta",
@@ -273,10 +275,11 @@ class DeltaApplication:
     Attributes:
         chunks: The chunks, each queued file carrying its ``read_diff``
             where a smaller delta hunk existed.
-        reviewed_ranges: ``(path, start, end)`` new-file line ranges the
-            round reads for the files whose text was narrowed; a prior
-            finding on such a file outside these ranges is carried, not
-            resolved. Files read whole are absent: every line counts.
+        reviewed_ranges: ``(path, start, end)`` OLD-side line ranges (the
+            prior head's coordinates) the round's delta hunks show for the
+            files whose text was narrowed; a prior finding on such a file
+            outside these ranges is carried, not resolved. Files read whole
+            are absent: every line counts.
         larger: Files whose delta hunk was not smaller than the whole hunk
             and were read whole.
     """
@@ -286,16 +289,52 @@ class DeltaApplication:
     larger: tuple[str, ...] = ()
 
 
+def _old_side_ranges(delta: str) -> list[tuple[int, int]]:
+    """Return the OLD-side line ranges of a delta hunk's ``@@`` headers.
+
+    A prior round's finding carries a line in the prior head's coordinates,
+    and the old side of ``since..head`` is exactly that coordinate system:
+    a prior line was re-read iff the delta showed it, context included. The
+    new side would compare a prior line against current-head numbers, which
+    an insertion or deletion above the finding shifts (#2627).
+
+    Args:
+        delta: One file's ``since..head`` unified diff.
+
+    Returns:
+        ``(start, end)`` pairs, inclusive, in hunk order; a pure insertion
+        (old length 0) shows no old line and contributes nothing.
+    """
+    ranges: list[tuple[int, int]] = []
+    for line in delta.splitlines():
+        if not line.startswith("@@ "):
+            continue
+        parts = line.split()
+        if len(parts) < 3 or not parts[1].startswith("-"):
+            continue
+        start_text, _, length_text = parts[1][1:].partition(",")
+        if not start_text.isdigit() or (length_text and not length_text.isdigit()):
+            continue
+        start = int(start_text)
+        length = int(length_text) if length_text else 1
+        if length > 0:
+            ranges.append((start, start + length - 1))
+    return ranges
+
+
 def apply_delta_hunks(
     *,
     chunks: list[ReviewChunk],
     hunks: Mapping[str, str],
+    since_sha: str = "",
 ) -> DeltaApplication:
     """Give each chunk file a ``read_diff`` where its delta hunk is smaller.
 
     Args:
         chunks: The round's chunks after resume filtering.
         hunks: Output of :func:`delta_hunks`.
+        since_sha: The prior round's head, stamped on narrowed chunks so the
+            prompt can say what range the text is.
 
     Returns:
         The application; chunks none of whose files narrowed are unchanged.
@@ -320,14 +359,33 @@ def apply_delta_hunks(
                 continue
             narrowed = True
             parts.append(delta)
-            for file_hunks in hunks_from_diff(diff=delta).values():
-                ranges.extend((path, hunk.start, hunk.end) for hunk in file_hunks.hunks)
-        rebuilt.append(replace(chunk, read_diff="".join(parts)) if narrowed else chunk)
+            ranges.extend((path, start, end) for start, end in _old_side_ranges(delta))
+        rebuilt.append(
+            (
+                replace(chunk, read_diff="".join(parts), read_since=since_sha)
+                if narrowed
+                else chunk
+            ),
+        )
     return DeltaApplication(
         chunks=rebuilt,
         reviewed_ranges=tuple(ranges),
         larger=tuple(larger),
     )
+
+
+def delta_scope_note(*, chunk: ReviewChunk) -> str:
+    """The prompt line saying a chunk's text is a delta, or nothing.
+
+    Args:
+        chunk: The chunk being prompted.
+
+    Returns:
+        The rendered note on a delta round; ``""`` on a full round.
+    """
+    if chunk.read_diff is None:
+        return ""
+    return REVIEW_DELTA_SCOPE_NOTE.format(since=chunk.read_since[:12], head="HEAD")
 
 
 def open_thread_paths(*, prior: ReviewState | None) -> tuple[str, ...]:

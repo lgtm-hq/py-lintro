@@ -668,3 +668,159 @@ def test_finding_ids_come_from_the_match_when_siblings_swap_lines(
     assert_that([item["finding_id"] for item in naive["findings"]]).is_equal_to(
         [f"{fp}#2", f"{fp}#1"],
     )
+
+
+# --- coordinates: a prior line is re-read iff the delta showed it -------------
+
+
+def _delta_text(*, old_start: int, old_len: int, new_start: int, new_len: int) -> str:
+    """A one-hunk delta for api.py with the given header.
+
+    Args:
+        old_start: Old-side start line.
+        old_len: Old-side length.
+        new_start: New-side start line.
+        new_len: New-side length.
+
+    Returns:
+        The diff text (the body is irrelevant to the range check).
+    """
+    return (
+        "diff --git a/api.py b/api.py\n--- a/api.py\n+++ b/api.py\n"
+        f"@@ -{old_start},{old_len} +{new_start},{new_len} @@\n+x\n"
+    )
+
+
+def test_read_ranges_are_the_old_side_so_shifted_lines_do_not_fool_the_matcher() -> (
+    None
+):
+    """An insertion above a finding shifts its new line, not its prior line."""
+    from lintro.ai.review.delta import _old_side_ranges
+
+    # Ten lines inserted at the top: old lines 1-3 shown as context, new 1-13.
+    inserted = _delta_text(old_start=1, old_len=3, new_start=1, new_len=13)
+    assert_that(_old_side_ranges(inserted)).is_equal_to([(1, 3)])
+    # A prior finding at (prior) line 50 is outside; the new side would have
+    # said "1-13", also outside — but for the wrong reason, and a finding at
+    # prior line 5 with a 10-line insertion above it would sit at new line
+    # 15, which a new-side check of "1-13" would call unread while the old
+    # side rightly says line 5 was not shown either.
+    prior = ReviewState(
+        findings=(
+            replace(_open("api.py"), fingerprint="fifty", line=50),
+            replace(_open("api.py"), fingerprint="two", line=2),
+        ),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="b" * 40)),),
+    )
+    chunk = ReviewChunk(
+        id=1,
+        files=["api.py"],
+        diff=inserted * 2,  # any whole-PR text larger than the delta
+        relationship=REL_SINGLE_FILE,
+    )
+    applied = apply_delta_hunks(
+        chunks=[chunk],
+        hunks={"api.py": inserted},
+        since_sha="b" * 40,
+    )
+    assert_that(applied.reviewed_ranges).is_equal_to((("api.py", 1, 3),))
+    ranges = {"api.py": ((1, 3),)}
+    match = match_findings(
+        previous=prior,
+        findings=[],
+        round_number=2,
+        head_sha="c" * 40,
+        reviewed_paths=frozenset({"api.py"}),
+        reviewed_ranges=ranges,
+    )
+    assert_that(match.outcomes["two#1"]).is_equal_to(FindingMatchOutcome.RESOLVED)
+    assert_that(match.outcomes["fifty#1"]).is_equal_to(FindingMatchOutcome.CARRIED)
+    # The mirror: ten lines deleted above — old 1-13 shown, new 1-3. A prior
+    # finding at line 12 was shown (deleted, or context) and may resolve;
+    # one at line 50 was not.
+    deleted = _delta_text(old_start=1, old_len=13, new_start=1, new_len=3)
+    assert_that(_old_side_ranges(deleted)).is_equal_to([(1, 13)])
+    # A pure insertion shows no old line at all.
+    pure = _delta_text(old_start=7, old_len=0, new_start=8, new_len=2)
+    assert_that(_old_side_ranges(pure)).is_empty()
+
+
+def test_the_adversarial_sweep_and_split_halves_read_the_delta(
+    scratch: dict[str, Any],
+) -> None:
+    """Every call that embeds a chunk embeds ``read_diff`` on a delta round."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from lintro.ai.config import AIConfig
+    from lintro.ai.enums import AITransport
+    from lintro.ai.providers.response import AIResponse
+    from lintro.ai.review import adversarial_pass
+    from lintro.ai.review.chunk_halves import split_chunk
+
+    whole = _git(scratch["repo"], "diff", f"{scratch['a']}..{scratch['c']}")
+    per_file = split_unified_diff_by_file(unified_diff=whole)
+    chunk = ReviewChunk(
+        id=1,
+        files=["api.py", "new.py"],
+        diff=per_file["api.py"] + per_file["new.py"],
+        relationship=REL_SINGLE_FILE,
+    )
+    hunks = delta_hunks(
+        repo_root=str(scratch["repo"]),
+        since_sha=scratch["b"],
+        head_sha=scratch["c"],
+        pr_paths=["api.py"],
+    )
+    assert hunks is not None
+    (narrowed,) = apply_delta_hunks(
+        chunks=[chunk],
+        hunks=hunks,
+        since_sha=scratch["b"],
+    ).chunks
+    assert narrowed.read_diff is not None
+
+    halves = split_chunk(chunk=narrowed)
+    assert halves is not None
+    left, right = halves
+    assert_that(left.read_diff).is_equal_to(hunks["api.py"])
+    assert_that(right.read_diff).is_equal_to(per_file["new.py"])
+    assert_that(left.read_since).is_equal_to(scratch["b"])
+    assert_that(left.diff).is_equal_to(
+        per_file["api.py"],
+    )  # the gate's view stays whole
+
+    captured: list[dict[str, Any]] = []
+
+    async def _call_ai(**kwargs: Any) -> AIResponse:
+        captured.append(kwargs)
+        return AIResponse(content="[]", model="m", provider="anthropic")
+
+    with patch("lintro.ai.review.provider_call.call_ai", _call_ai):
+        asyncio.run(
+            adversarial_pass.run_adversarial_pass(
+                chunk=narrowed,
+                provider=MagicMock(name="anthropic"),
+                ai_config=AIConfig(enabled=True, transport=AITransport.CLI),
+                prior_findings=(),
+                budget=MagicMock(),
+            ),
+        )
+    prompt = captured[0]["user_prompt"]
+    assert_that(prompt).contains("+    return retries")
+    assert_that(prompt).does_not_contain(
+        "-def send(payload):",
+    )  # B's line is not embedded
+    assert_that(prompt).contains("Scope of this diff")
+    assert_that(prompt).contains(scratch["b"][:12])
+
+
+def test_the_scope_note_is_absent_on_a_full_round() -> None:
+    """A whole-diff chunk carries no scope note."""
+    from lintro.ai.review.delta import delta_scope_note
+
+    chunk = ReviewChunk(id=1, files=["a.py"], diff="", relationship=REL_SINGLE_FILE)
+    assert_that(delta_scope_note(chunk=chunk)).is_empty()
+    assert_that(
+        delta_scope_note(chunk=replace(chunk, read_diff="x", read_since="b" * 40)),
+    ).contains("`bbbbbbbbbbbb`")
