@@ -591,6 +591,27 @@ def test_cites_finding_normalizes_the_findings_own_spelling() -> None:
     assert_that(
         cites_finding(evidence='"a b.py:1" then `c.py:2`', file="c.py"),
     ).is_true()
+    # Nor when the nested span is whitespace-isolated, in either nesting
+    # order or with mixed delimiters: the outer citation is blanked before
+    # the bare scan.
+    assert_that(
+        cites_finding(
+            evidence='"dir name/ `target.py:7` /other.py:2"',
+            file="target.py",
+        ),
+    ).is_false()
+    assert_that(
+        cites_finding(
+            evidence='`dir name/ "target.py:7" /other.py:2`',
+            file="target.py",
+        ),
+    ).is_false()
+    assert_that(
+        cites_finding(
+            evidence='(dir name/ "target.py:7" /other.py:2)',
+            file="target.py",
+        ),
+    ).is_false()
     # A lone trailing ``)`` belongs to the path; only a matching pair is a wrapper.
     assert_that(cites_finding(evidence="see pkg/(x).py:3", file="pkg/(x).py")).is_true()
     # A path with a space must be quoted; unquoted it is cut at the space.

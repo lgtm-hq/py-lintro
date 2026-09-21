@@ -89,7 +89,9 @@ def cited_paths(*, evidence: str) -> tuple[str, ...]:
         normalize_file_path(m.group(1) or m.group(3) or m.group(5) or "")
         for m in _QUOTED_CITATION.finditer(text)
     ]
-    for token in text.split():
+    # The bare scan runs over what is left once the quoted citations are
+    # blanked out, so a span nested inside one is never seen again on its own.
+    for token in _QUOTED_CITATION.sub(" ", text).split():
         match = _BARE_CITATION.match(_unwrap(token.rstrip(_TRAILING)))
         if match:
             paths.append(normalize_file_path(match.group(1)))
