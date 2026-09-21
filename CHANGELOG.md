@@ -33,8 +33,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
-- **ai/review**: context for every changed file, single-shot turn-limit retry (#2735)
-  (d5d3130)
 - **ai/review**: a chunk that hits the CLI transport's per-call turn limit now retries
   single-shot (no generated questions, no tools) instead of repeating the same call, and
   a run whose every chunk reviewed nothing skips the synthesis narrative, is reported as
