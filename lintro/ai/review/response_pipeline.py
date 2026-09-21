@@ -242,10 +242,10 @@ async def invoke_chunk_review(
     )
     degradations: tuple[CoverageDegradation, ...] = ()
     if use_git_native:
-        embed_diff = estimate_tokens(request.chunk.diff) <= max(
-            request.diff_budget,
-            1,
-        )
+        # No tools (#2733) means no ``git diff``: embed whatever the size.
+        embed_diff = request.tools_disabled or estimate_tokens(
+            request.chunk.diff,
+        ) <= max(request.diff_budget, 1)
         if (
             not embed_diff
             and ai_config.review_allow_unredacted_git_native

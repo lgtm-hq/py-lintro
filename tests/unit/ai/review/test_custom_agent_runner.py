@@ -6,6 +6,7 @@ import asyncio
 import json
 from contextlib import AbstractContextManager
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from assertpy import assert_that
@@ -284,6 +285,42 @@ def test_run_custom_agent_passes_attributes_findings(tmp_path: Path) -> None:
     finding = results[0].findings[0]
     assert_that(finding.source).is_equal_to("no-raw-sql")
     assert_that(results[0].cost_estimate).is_equal_to(0.01)
+
+
+def test_run_custom_agent_passes_sends_no_tools_when_the_run_has_no_tree(
+    tmp_path: Path,
+) -> None:
+    """A no-tree run (#2733) reaches the custom agent's call as ``no_tools``."""
+    agent = _agent(tmp_path=tmp_path)
+    provider = _mock_provider(content=_agent_response(findings=[]))
+
+    captured: list[dict[str, Any]] = []
+
+    async def _call_ai(**kwargs: Any) -> AIResponse:
+        captured.append(kwargs)
+        return AIResponse(
+            content=_agent_response(findings=[]),
+            model="m",
+            provider="anthropic",
+        )
+
+    with patch("lintro.ai.review.custom_agent_runner.call_ai", _call_ai):
+        results = asyncio.run(
+            run_custom_agent_passes(
+                request=CustomAgentPassRequest(
+                    selected=(SelectedCustomAgent(agent=agent, files=("src/app.py",)),),
+                    context=_context(),
+                    provider=provider,
+                    ai_config=_ai_config(),
+                    provider_cache={},
+                    budget=CostBudget(),
+                    tools_disabled=True,
+                ),
+            ),
+        )
+
+    assert_that(results).is_length(1)
+    assert_that([call["no_tools"] for call in captured]).is_equal_to([True])
 
 
 def test_run_custom_agent_passes_applies_declared_severity(tmp_path: Path) -> None:

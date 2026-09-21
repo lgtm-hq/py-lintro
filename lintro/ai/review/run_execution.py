@@ -194,6 +194,7 @@ async def run_passes(
                 # agent is an independent, narrowly scoped pass with its own
                 # instructions.
                 use_one_shot=True,
+                tools_disabled=plan.tools_disabled,
                 on_pass_complete=progress.custom_results.append,
                 on_agent_failed=progress.custom_agents_failed.append,
                 # Model-override providers land in the session's cache, so

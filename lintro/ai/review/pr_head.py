@@ -16,10 +16,13 @@ against the ambient tree.
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
-from dataclasses import dataclass
+import sys
+import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import IO, TYPE_CHECKING
 
 from loguru import logger
 
@@ -48,21 +51,135 @@ __all__ = [
 
 #: Where the head worktrees live, relative to the repository root.
 _WORKTREE_DIR = Path(".lintro-cache") / "ai" / "pr-heads"
+_OID_PREFIX_LEN = 12
+
+
+def _cache_dir(repo_root: str) -> Path | None:
+    """Resolve the worktree cache directory, refusing a symlinked path.
+
+    The sweep removes whole directories under this path, so no component of
+    it may be a symlink: a tracked ``.lintro-cache/ai/pr-heads -> ../..``
+    would otherwise point the sweep at the repository itself.
+
+    Args:
+        repo_root: The repository the cache belongs to.
+
+    Returns:
+        The cache directory, created when missing; ``None`` when any
+        component is a symlink.
+    """
+    current = Path(repo_root)
+    for part in _WORKTREE_DIR.parts:
+        current = current / part
+        if current.is_symlink():
+            logger.warning(
+                "{} is a symlink; refusing to use it for PR head worktrees.",
+                current,
+            )
+            return None
+    current.mkdir(parents=True, exist_ok=True)
+    return current
+
+
+def _is_owned_name(name: str) -> bool:
+    """Tell whether a cache entry name is one :func:`checkout_pr_head` writes.
+
+    Args:
+        name: The directory name, expected as ``<pr>-<oid12>-<pid>``.
+
+    Returns:
+        True for a name of that shape; anything else is not ours to remove.
+    """
+    parts = name.split("-")
+    if len(parts) != 3:
+        return False
+    number, oid, pid = parts
+    return (
+        number.isdigit()
+        and len(oid) == _OID_PREFIX_LEN
+        and all(char in "0123456789abcdef" for char in oid)
+        and pid.isdigit()
+    )
 
 
 @dataclass(frozen=True, slots=True)
 class PrHeadWorktree:
     """A checked-out PR head the run may read.
 
+    The path is unique to the run (the PR, the head and this process), and
+    the run holds an exclusive lock on ``<path>.lock`` for its whole life:
+    another run's startup sweep removes a worktree only after winning that
+    lock, so a live run's tree is never pulled from under it.
+
     Attributes:
         path: Absolute path of the worktree; the run's ``repo_root``.
         repo_root: The repository the worktree belongs to (for removal).
         head_oid: The commit checked out, verified against the PR's head.
+        lock: The held lock file, released on removal.
     """
 
     path: str
     repo_root: str
     head_oid: str
+    lock: IO[str] | None = field(default=None, compare=False, repr=False)
+
+
+def _open_lock(worktree_path: Path) -> IO[str]:
+    """Open the lock file beside a worktree, kept open for as long as it is held.
+
+    Args:
+        worktree_path: The worktree the lock guards.
+
+    Returns:
+        The open lock file; :func:`_release` closes it.
+    """
+    return Path(f"{worktree_path}.lock").open("a+", encoding="utf-8")
+
+
+def _try_lock(fh: IO[str]) -> bool:
+    """Take an exclusive, non-blocking lock on ``fh``.
+
+    Args:
+        fh: An open lock file.
+
+    Returns:
+        True when the lock was taken; False when another process holds it.
+    """
+    try:
+        if sys.platform == "win32":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _release(fh: IO[str] | None) -> None:
+    """Release and close a lock file, tolerating one already closed.
+
+    Args:
+        fh: The lock file, or ``None``.
+    """
+    if fh is None or fh.closed:
+        return
+    with contextlib.suppress(OSError):
+        if sys.platform == "win32":
+            import msvcrt
+
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+    with contextlib.suppress(OSError):
+        fh.close()
 
 
 def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
@@ -109,8 +226,24 @@ def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
                 head_oid[:12],
             )
             return None
-        path = Path(repo_root) / _WORKTREE_DIR / f"{pr_number}-{head_oid[:12]}"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        base = _cache_dir(repo_root)
+        if base is None:
+            return None
+        path = base / f"{pr_number}-{head_oid[:_OID_PREFIX_LEN]}-{os.getpid()}"
+        lock = _open_lock(path)
+        if not _try_lock(lock):
+            # Only this process can hold a lock at this pid-unique path; a
+            # held one is a prior incarnation still winding down. Do not race.
+            lock.close()
+            logger.warning(
+                "PR head worktree {} is locked; the review runs without a tree.",
+                path,
+            )
+            return None
+        lock.seek(0)
+        lock.truncate()
+        lock.write(f"{os.getpid()}\n")
+        lock.flush()
         added = _run_git(
             args=["worktree", "add", "--detach", str(path), head_oid],
             check=False,
@@ -121,6 +254,8 @@ def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
                 "runs without a tree.",
                 added.stderr.strip()[:200],
             )
+            _release(lock)
+            Path(f"{path}.lock").unlink(missing_ok=True)
             return None
     except ReviewContextError as exc:
         logger.warning(
@@ -134,36 +269,63 @@ def checkout_pr_head(*, pr_number: int, head_oid: str) -> PrHeadWorktree | None:
         head_oid[:12],
         path,
     )
-    return PrHeadWorktree(path=str(path), repo_root=repo_root, head_oid=head_oid)
+    return PrHeadWorktree(
+        path=str(path),
+        repo_root=repo_root,
+        head_oid=head_oid,
+        lock=lock,
+    )
+
+
+def empty_workspace() -> PrHeadWorktree:
+    """Create an empty directory for a run that has no tree to offer.
+
+    Every CLI transport runs its agent in ``repo_root``, and only some can
+    have their tools switched off, so a run without a tree confines the
+    agent to an empty directory rather than whatever ``cwd`` happens to be.
+    :func:`remove_pr_head` removes it like a head worktree.
+
+    Returns:
+        The workspace handle; ``repo_root`` and ``head_oid`` are empty.
+    """
+    path = tempfile.mkdtemp(prefix="lintro-review-no-tree-")
+    return PrHeadWorktree(path=path, repo_root="", head_oid="")
 
 
 def remove_pr_head(worktree: PrHeadWorktree | None) -> None:
-    """Remove a head worktree; a no-op for ``None``.
+    """Remove a head worktree or empty workspace; a no-op for ``None``.
 
     Safe to call more than once and on every exit path: a worktree already
     gone is not an error, and a failure to remove is logged, not raised,
-    since the review's result is already in hand.
+    since the review's result is already in hand. A symlink at the path is
+    never followed into.
 
     Args:
         worktree: The worktree to remove.
     """
     if worktree is None:
         return
-    try:
-        _run_git(
-            args=[
-                "-C",
-                worktree.repo_root,
-                "worktree",
-                "remove",
-                "--force",
-                worktree.path,
-            ],
-            check=False,
-        )
-    except ReviewContextError as exc:
-        logger.debug("git worktree remove failed: {}", exc)
-    shutil.rmtree(worktree.path, ignore_errors=True)
+    if worktree.repo_root:
+        try:
+            _run_git(
+                args=[
+                    "-C",
+                    worktree.repo_root,
+                    "worktree",
+                    "remove",
+                    "--force",
+                    worktree.path,
+                ],
+                check=False,
+            )
+        except ReviewContextError as exc:
+            logger.debug("git worktree remove failed: {}", exc)
+    if Path(worktree.path).is_symlink():
+        logger.warning("{} is a symlink; not removing it.", worktree.path)
+    else:
+        shutil.rmtree(worktree.path, ignore_errors=True)
+    _release(worktree.lock)
+    Path(f"{worktree.path}.lock").unlink(missing_ok=True)
 
 
 def prune_stale_pr_worktrees(*, repo_root: str) -> None:
@@ -171,21 +333,35 @@ def prune_stale_pr_worktrees(*, repo_root: str) -> None:
 
     A SIGKILL cannot run the cleanup, so every run starts by pruning what
     an earlier one could not remove: git's own record first, then any
-    directory still under the cache path.
+    directory under the cache path whose lock nobody holds. A directory
+    whose lock is held belongs to a live run and is left alone.
 
     Args:
         repo_root: The repository whose cache directory to sweep.
     """
-    base = Path(repo_root) / _WORKTREE_DIR
-    if not base.is_dir():
+    base = _cache_dir(repo_root)
+    if base is None:
         return
     with contextlib.suppress(ReviewContextError):
         _run_git(args=["-C", repo_root, "worktree", "prune"], check=False)
     for stale in base.iterdir():
-        if stale.is_dir():
-            remove_pr_head(
-                PrHeadWorktree(path=str(stale), repo_root=repo_root, head_oid=""),
-            )
+        # Only what this module wrote, and never through a symlink.
+        if stale.is_symlink() or not stale.is_dir():
+            continue
+        if not _is_owned_name(stale.name):
+            continue
+        probe = _open_lock(stale)
+        if not _try_lock(probe):
+            probe.close()
+            continue  # a live run owns it
+        remove_pr_head(
+            PrHeadWorktree(
+                path=str(stale),
+                repo_root=repo_root,
+                head_oid="",
+                lock=probe,
+            ),
+        )
 
 
 def no_tree_degradations(

@@ -135,8 +135,18 @@ async def run_review_async(
     Returns:
         Complete review result with metadata, checklist, and findings.
     """
-    async with ReviewSession(provider=options.provider) as session:
-        return await _run_review_steps(context, options=options, session=session)
+    try:
+        async with ReviewSession(provider=options.provider) as session:
+            return await _run_review_steps(
+                context,
+                options=options,
+                session=session,
+            )
+    finally:
+        # The PR head worktree (#2733) outlives nothing: a completed run, an
+        # early return, a graceful stop (the SIGTERM handler ends the run
+        # through this path too) and an exception all remove it here.
+        remove_pr_head(context.head_worktree)
 
 
 async def _run_review_steps(
@@ -170,7 +180,6 @@ async def _run_review_steps(
         raise ValueError(f"depth must be between 1 and 3, got {options.depth}")
 
     if not context.changed_files and not context.unified_diff.strip():
-        remove_pr_head(context.head_worktree)
         return empty_review_result(context=context, options=options)
 
     # One monotonic clock for the whole run: the recorder is back-dated by the
@@ -185,22 +194,16 @@ async def _run_review_steps(
         seconds=options.context_collection_seconds,
     )
 
-    try:
-        plan = plan_run(context=context, options=options, timings=timings)
-        outcome = await execute_run(
-            context=context,
-            options=options,
-            plan=plan,
-            session=session,
-        )
-        return assemble_review_result(
-            context=context,
-            options=options,
-            plan=plan,
-            outcome=outcome,
-        )
-    finally:
-        # The PR head worktree (#2733) outlives nothing: a completed run, a
-        # graceful stop (the SIGTERM handler ends the run through this
-        # path too) and an exception all remove it here.
-        remove_pr_head(context.head_worktree)
+    plan = plan_run(context=context, options=options, timings=timings)
+    outcome = await execute_run(
+        context=context,
+        options=options,
+        plan=plan,
+        session=session,
+    )
+    return assemble_review_result(
+        context=context,
+        options=options,
+        plan=plan,
+        outcome=outcome,
+    )

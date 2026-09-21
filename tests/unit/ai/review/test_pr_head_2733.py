@@ -25,7 +25,11 @@ from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
-from lintro.ai.review.context.collection import collect_review_context
+from lintro.ai.review.context.collection import (
+    _filter_context_by_paths,
+    _populate_post_image_files,
+    collect_review_context,
+)
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
@@ -261,19 +265,48 @@ def test_a_stale_worktree_from_a_killed_run_is_pruned(
 ) -> None:
     """What a SIGKILL left behind is swept, and the same head can be reused."""
     monkeypatch.chdir(scratch["work"])
-    first = checkout_pr_head(pr_number=1, head_oid=scratch["head"])
-    assert first is not None
-    # "Killed": nothing removed it. The next checkout sweeps it first.
+    # A run of another process (pid 99999) was killed: its worktree and lock
+    # file are still on disk, but nothing holds the lock.
+    root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
+    stale = root / ".lintro-cache" / "ai" / "pr-heads" / "1-deadbeef0000-99999"
+    stale.parent.mkdir(parents=True, exist_ok=True)
+    _git(
+        scratch["work"],
+        "worktree",
+        "add",
+        "-q",
+        "--detach",
+        str(stale),
+        scratch["head"],
+    )
+    Path(f"{stale}.lock").write_text("99999\n")
+    # The next checkout sweeps it first, then takes its own run-unique path.
     again = checkout_pr_head(pr_number=1, head_oid=scratch["head"])
     assert again is not None
+    assert_that(stale.exists()).is_false()
+    assert_that(Path(f"{stale}.lock").exists()).is_false()
     assert_that(Path(again.path).is_dir()).is_true()
     assert_that(
         _git(scratch["work"], "worktree", "list").count("pr-heads"),
     ).is_equal_to(1)
     remove_pr_head(again)
-    # And the explicit sweep is a no-op on an empty cache.
-    prune_stale_pr_worktrees(repo_root=str(scratch["work"]))
     assert_that(Path(again.path).exists()).is_false()
+    assert_that(Path(f"{again.path}.lock").exists()).is_false()
+
+
+def test_a_live_runs_worktree_survives_another_runs_sweep(
+    scratch: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A held lock keeps a worktree out of a concurrent startup sweep."""
+    monkeypatch.chdir(scratch["work"])
+    live = checkout_pr_head(pr_number=1, head_oid=scratch["head"])
+    assert live is not None
+    # A concurrent run's sweep sees the held lock and leaves the tree alone.
+    prune_stale_pr_worktrees(repo_root=str(scratch["work"]))
+    assert_that(Path(live.path).is_dir()).is_true()
+    remove_pr_head(live)
+    assert_that(Path(live.path).exists()).is_false()
 
 
 def test_a_head_gh_did_not_report_is_refused(
@@ -304,9 +337,20 @@ def test_without_a_repository_the_run_has_no_tree_and_no_tools(
     ):
         context = collect_review_context(pr_number=1, repo="o/r")
 
-    assert_that(context.head_worktree).is_none()
+    # Every CLI transport runs its agent in ``repo_root``, and not all of
+    # them can drop their tools, so the run gets an empty directory: not
+    # ``elsewhere``, and nothing in it.
+    assert context.head_worktree is not None
+    assert_that(context.repo_root).is_equal_to(context.head_worktree.path)
+    assert_that(Path(context.repo_root).is_dir()).is_true()
+    assert_that(Path(context.repo_root).resolve()).is_not_equal_to(
+        elsewhere.resolve(),
+    )
+    assert_that(list(Path(context.repo_root).iterdir())).is_empty()
     assert_that(context.checkout).is_equal_to(ReviewCheckout.NONE)
     assert_that(_tree_note_for(context=context)).contains("no tool is available")
+    remove_pr_head(context.head_worktree)
+    assert_that(Path(context.repo_root).exists()).is_false()
 
     provider = MagicMock()
     provider.model_name = "m"
@@ -406,6 +450,126 @@ async def test_every_pass_sends_no_tools_when_the_run_has_no_tree() -> None:
 
     assert_that(captured).is_length(3)
     assert_that([c["no_tools"] for c in captured]).is_equal_to([True, True, True])
+
+
+def test_a_no_tree_chunk_always_embeds_its_diff() -> None:
+    """Without tools the agent cannot run ``git diff``, whatever the budget."""
+    from lintro.ai.review import response_pipeline
+    from lintro.ai.review.group_labels import REL_SINGLE_FILE
+    from lintro.ai.review.models.review_chunk import ReviewChunk
+    from lintro.ai.review.response_pipeline import ChunkReviewRequest
+
+    captured: list[dict[str, Any]] = []
+
+    async def _call_ai(**kwargs: Any) -> AIResponse:
+        captured.append(kwargs)
+        return AIResponse(content="{}", model="m", provider="anthropic")
+
+    diff = "diff --git a/api.py b/api.py\n--- a/api.py\n+++ b/api.py\n@@ -1 +1 @@\n-x\n+y\n"
+    context = ReviewContext(
+        base_ref="a",
+        head_ref="b",
+        changed_files=[
+            ChangedFile(path="api.py", status="modified", additions=1, deletions=0),
+        ],
+        unified_diff=diff,
+        checkout=ReviewCheckout.NONE,
+    )
+    request = ChunkReviewRequest(
+        chunk=ReviewChunk(
+            id=1,
+            files=["api.py"],
+            diff=diff,
+            relationship=REL_SINGLE_FILE,
+        ),
+        context=context,
+        provider=MagicMock(),
+        ai_config=AIConfig(
+            enabled=True,
+            transport=AITransport.CLI,
+            review_allow_unredacted_git_native=True,
+        ),
+        checklist_text="",
+        checklist_count=0,
+        interaction_paths="",
+        lint_results=None,
+        extra_checklist="",
+        strictness_section="",
+        budget=MagicMock(),
+        repo_root="",
+        use_one_shot=True,
+        diff_budget=1,  # far below the diff: the delegated path would be taken
+        chunk_index=0,
+        tools_disabled=True,
+    )
+    with patch("lintro.ai.review.provider_call.call_ai", _call_ai):
+        asyncio.run(response_pipeline.invoke_chunk_review(request=request))
+
+    assert_that(captured).is_length(1)
+    assert_that(captured[0]["user_prompt"]).contains("+y")
+
+
+def test_context_rebuilds_keep_the_cleanup_handle(scratch: dict[str, Any]) -> None:
+    """Path filters and post-image reads must not drop the worktree handle."""
+    worktree = PrHeadWorktree(path="/tmp/x", repo_root="/tmp", head_oid="h")
+    context = replace(
+        _pr_context(scratch),
+        head_worktree=worktree,
+        changed_files=[
+            ChangedFile(path="api.py", status="modified", additions=1, deletions=1),
+            ChangedFile(
+                path=".github/workflows/ci.yml",
+                status="modified",
+                additions=1,
+                deletions=1,
+            ),
+        ],
+    )
+    filtered = _filter_context_by_paths(context=context, paths=["api.py"])
+    assert_that(filtered.head_worktree).is_same_as(worktree)
+    assert_that([f.path for f in filtered.changed_files]).is_equal_to(["api.py"])
+    with patch(
+        "lintro.ai.review.context.collection.read_file_at_head",
+        return_value="on: push\n",
+    ):
+        populated = _populate_post_image_files(context=context)
+    assert_that(populated.head_worktree).is_same_as(worktree)
+    assert_that(populated.post_image_files).contains_key(".github/workflows/ci.yml")
+
+
+def test_a_symlinked_cache_path_is_never_used_or_swept(
+    scratch: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``pr-heads`` symlink at the repository root must not be followed."""
+    monkeypatch.chdir(scratch["work"])
+    root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
+    cache = root / ".lintro-cache" / "ai"
+    cache.mkdir(parents=True)
+    (cache / "pr-heads").symlink_to(root, target_is_directory=True)
+    # A bystander that a sweep through the symlink would reach.
+    (root / "1-000000000000-1").mkdir()
+
+    prune_stale_pr_worktrees(repo_root=str(root))
+    assert_that((root / "1-000000000000-1").is_dir()).is_true()
+    assert_that((root / "api.py").exists()).is_true()
+
+    worktree = checkout_pr_head(pr_number=1, head_oid=scratch["head"])
+    assert_that(worktree).is_none()
+    assert_that((root / "api.py").exists()).is_true()
+
+
+def test_the_sweep_leaves_directories_it_did_not_write(
+    scratch: dict[str, Any],
+) -> None:
+    """Only ``<pr>-<oid12>-<pid>`` entries are ever removed."""
+    root = Path(_git(scratch["work"], "rev-parse", "--show-toplevel"))
+    base = root / ".lintro-cache" / "ai" / "pr-heads"
+    base.mkdir(parents=True)
+    (base / "notes").mkdir()
+    (base / "notes" / "keep.txt").write_text("mine\n")
+    prune_stale_pr_worktrees(repo_root=str(root))
+    assert_that((base / "notes" / "keep.txt").exists()).is_true()
 
 
 # --- scenario 3: the dogfood base checkout is unchanged ------------------------

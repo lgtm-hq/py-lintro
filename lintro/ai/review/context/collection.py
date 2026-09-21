@@ -32,7 +32,7 @@ from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.pr_metadata import PRMetadata
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.skipped_file import SkippedFile
-from lintro.ai.review.pr_head import checkout_pr_head
+from lintro.ai.review.pr_head import checkout_pr_head, empty_workspace
 
 _WORKFLOW_PATH_PREFIX = ".github/workflows/"
 
@@ -85,17 +85,15 @@ def collect_review_context(
         )
         # The agent reads the PR's head, never the ambient tree (#2733).
         worktree = checkout_pr_head(pr_number=pr_number, head_oid=context.head_ref)
+        checkout = ReviewCheckout.HEAD
+        if worktree is None and context.checkout is ReviewCheckout.UNKNOWN:
+            # No head to pin and the tree is neither end of the range: the
+            # agent gets an empty directory rather than an unrelated tree.
+            worktree = empty_workspace()
+            checkout = ReviewCheckout.NONE
         if worktree is not None:
             repo_root = worktree.path
-            context = replace(
-                context,
-                checkout=ReviewCheckout.HEAD,
-                head_worktree=worktree,
-            )
-        elif context.checkout is ReviewCheckout.UNKNOWN:
-            # No head to pin and the tree is neither end of the range: the
-            # agent gets no tree at all rather than an unrelated one.
-            context = replace(context, checkout=ReviewCheckout.NONE)
+            context = replace(context, checkout=checkout, head_worktree=worktree)
         # A probed BASE or HEAD checkout stays what it honestly is (the
         # dogfood workflow's base checkout, a developer on the branch).
     elif uncommitted:
@@ -457,16 +455,7 @@ def _populate_post_image_files(*, context: ReviewContext) -> ReviewContext:
     if not post_image_files:
         return context
 
-    return ReviewContext(
-        base_ref=context.base_ref,
-        head_ref=context.head_ref,
-        changed_files=context.changed_files,
-        unified_diff=context.unified_diff,
-        pr_metadata=context.pr_metadata,
-        checkout=context.checkout,
-        post_image_files=post_image_files,
-        skipped_files=context.skipped_files,
-    )
+    return replace(context, post_image_files=post_image_files)
 
 
 def make_head_file_reader(
@@ -726,13 +715,10 @@ def _restrict_context(
             if changed_file.path not in retained_paths
         ),
     ]
-    return ReviewContext(
-        base_ref=context.base_ref,
-        head_ref=context.head_ref,
+    return replace(
+        context,
         changed_files=retained,
         unified_diff=unified_diff,
-        pr_metadata=context.pr_metadata,
-        checkout=context.checkout,
         post_image_files=retained_post_image,
         skipped_files=skipped,
     )
