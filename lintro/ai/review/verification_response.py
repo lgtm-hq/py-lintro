@@ -33,21 +33,45 @@ __all__ = [
 
 #: A quoted citation: ``"path:line"``, ``` `path:line` ``` or ``(path:line)``.
 #: The only way to cite a path that contains a space.
-_QUOTED_CITATION = re.compile(r'["`(]([^"`()]+?):(\d+(?:-\d+)?)["`)]')
+#: One pattern per delimiter pair, each excluding only its own closing
+#: character, so a path may contain any other: ``"dir (legacy)/api.py:12"``.
+_QUOTED_CITATIONS = (
+    re.compile(r'"([^"]+?):(\d+(?:-\d+)?)"'),
+    re.compile(r"`([^`]+?):(\d+(?:-\d+)?)`"),
+    re.compile(r"\(([^()]+?):(\d+(?:-\d+)?)\)"),
+)
 #: A bare citation token, after wrapping punctuation is stripped. Both
 #: forms take a line or a ``start-end`` range.
 _BARE_CITATION = re.compile(r"^(.+?):(\d+(?:-\d+)?)$")
-#: Wrapping punctuation a bare token may carry: opening before, closing after.
-_OPENING = "\"`(['"
-_CLOSING = "\"`)],;.'"
+#: Sentence punctuation a bare token may trail; wrappers are stripped only as
+#: a matching pair (``"…"``, ``` `…` ```, ``(…)``, ``[…]``), never a lone
+#: trailing ``)`` that may belong to the path.
+_TRAILING = ",;."
+_PAIRS = (('"', '"'), ("`", "`"), ("(", ")"), ("[", "]"), ("'", "'"))
+
+
+def _unwrap(token: str) -> str:
+    """Strip one matching wrapper pair from a token, if it has one.
+
+    Args:
+        token: A whitespace-delimited token of the evidence.
+
+    Returns:
+        The token without its wrapper when it both starts and ends with a
+        matching pair; otherwise unchanged.
+    """
+    for opening, closing in _PAIRS:
+        if len(token) > 2 and token.startswith(opening) and token.endswith(closing):
+            return token[1:-1]
+    return token
 
 
 def cited_paths(*, evidence: str) -> tuple[str, ...]:
     """Return the normalized paths the evidence cites as ``path:line``.
 
     Citations are whitespace-delimited tokens (the prompt's ``file:line —
-    what you found`` shape) with wrapping quotes, backticks, brackets and
-    trailing punctuation stripped, or a quoted ``"path:line"`` when the
+    what you found`` shape) with trailing sentence punctuation and one
+    matching wrapper pair stripped, or a quoted ``"path:line"`` when the
     path contains a space. No pattern is built from the path, so nothing
     model-authored reaches a regex.
 
@@ -58,9 +82,13 @@ def cited_paths(*, evidence: str) -> tuple[str, ...]:
         The cited paths, normalized, in order of appearance.
     """
     text = evidence.replace("\\", "/")
-    paths = [normalize_file_path(m.group(1)) for m in _QUOTED_CITATION.finditer(text)]
+    paths = [
+        normalize_file_path(m.group(1))
+        for pattern in _QUOTED_CITATIONS
+        for m in pattern.finditer(text)
+    ]
     for token in text.split():
-        match = _BARE_CITATION.match(token.lstrip(_OPENING).rstrip(_CLOSING))
+        match = _BARE_CITATION.match(_unwrap(token.rstrip(_TRAILING)))
         if match:
             paths.append(normalize_file_path(match.group(1)))
     return tuple(path for path in paths if path)

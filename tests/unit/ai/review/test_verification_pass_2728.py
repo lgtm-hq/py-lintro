@@ -564,6 +564,27 @@ def test_cites_finding_normalizes_the_findings_own_spelling() -> None:
     assert_that(
         cites_finding(evidence="see a+b/(c).py:3", file="a+b/(c).py"),
     ).is_true()
+    # Quoting excludes only the active delimiter: parentheses, backticks and
+    # the other quote are ordinary path characters inside it.
+    assert_that(
+        cites_finding(
+            evidence='see "dir (legacy)/api.py:12"',
+            file="dir (legacy)/api.py",
+        ),
+    ).is_true()
+    assert_that(
+        cites_finding(evidence="see `it's (v2)/api.py:3`", file="it's (v2)/api.py"),
+    ).is_true()
+    # The ruled shape: a spaced path with parentheses, wrapped whole in double
+    # quotes; unquoted it is cut at the space.
+    assert_that(
+        cites_finding(evidence='fixed in "docs/a (b).md:3"', file="docs/a (b).md"),
+    ).is_true()
+    assert_that(
+        cites_finding(evidence="fixed in docs/a (b).md:3", file="docs/a (b).md"),
+    ).is_false()
+    # A lone trailing ``)`` belongs to the path; only a matching pair is a wrapper.
+    assert_that(cites_finding(evidence="see pkg/(x).py:3", file="pkg/(x).py")).is_true()
     # A path with a space must be quoted; unquoted it is cut at the space.
     assert_that(
         cites_finding(evidence='see "dir name/api.py:2" here', file="dir name/api.py"),
