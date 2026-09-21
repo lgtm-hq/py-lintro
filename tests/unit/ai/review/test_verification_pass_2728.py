@@ -532,7 +532,11 @@ async def test_refutation_citing_another_file_is_not_a_refutation() -> None:
         ("foo-pkg/api.py:2", False),
         ("foo.pkg/api.py:2", False),
         ("../pkg/api.py:2", False),
+        ("foo:pkg/api.py:2", False),
+        ("@pkg/api.py:2", False),
         ("(pkg/api.py:2)", True),
+        ("`pkg/api.py:2`, retries is read", True),
+        ("pkg/api.py:2.", True),
     ],
 )
 def test_cites_finding_needs_the_findings_exact_path(
@@ -558,10 +562,13 @@ def test_cites_finding_normalizes_the_findings_own_spelling() -> None:
     assert_that(
         cites_finding(evidence="see a+b/(c).py:3", file="a+b/(c).py"),
     ).is_true()
-    # A path with a space is cited whole, not cut at the space.
+    # A path with a space must be quoted; unquoted it is cut at the space.
+    assert_that(
+        cites_finding(evidence='see "dir name/api.py:2" here', file="dir name/api.py"),
+    ).is_true()
     assert_that(
         cites_finding(evidence="see dir name/api.py:2 here", file="dir name/api.py"),
-    ).is_true()
+    ).is_false()
 
 
 async def test_weakened_with_a_citation_applies_to_a_padded_path() -> None:

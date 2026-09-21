@@ -24,10 +24,45 @@ from lintro.ai.review.models.verification_outcome import RefutedFinding
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-__all__ = ["apply_verification_verdicts", "cites_finding", "parse_verification_answer"]
+__all__ = [
+    "apply_verification_verdicts",
+    "cited_paths",
+    "cites_finding",
+    "parse_verification_answer",
+]
 
-#: A ``path:line`` citation somewhere in the evidence text.
-_CITATION = re.compile(r"([\w./\\-]+\.\w+):\d+")
+#: A quoted citation: ``"path:line"``, ``` `path:line` ``` or ``(path:line)``.
+#: The only way to cite a path that contains a space.
+_QUOTED_CITATION = re.compile(r'["`(]([^"`()]+?):(\d+)["`)]')
+#: A bare citation token, after wrapping punctuation is stripped.
+_BARE_CITATION = re.compile(r"^(.+?):(\d+)$")
+#: Wrapping punctuation a bare token may carry: opening before, closing after.
+_OPENING = "\"`(['"
+_CLOSING = "\"`)],;.'"
+
+
+def cited_paths(*, evidence: str) -> tuple[str, ...]:
+    """Return the normalized paths the evidence cites as ``path:line``.
+
+    Citations are whitespace-delimited tokens (the prompt's ``file:line —
+    what you found`` shape) with wrapping quotes, backticks, brackets and
+    trailing punctuation stripped, or a quoted ``"path:line"`` when the
+    path contains a space. No pattern is built from the path, so nothing
+    model-authored reaches a regex.
+
+    Args:
+        evidence: The verifier's evidence text.
+
+    Returns:
+        The cited paths, normalized, in order of appearance.
+    """
+    text = evidence.replace("\\", "/")
+    paths = [normalize_file_path(m.group(1)) for m in _QUOTED_CITATION.finditer(text)]
+    for token in text.split():
+        match = _BARE_CITATION.match(token.lstrip(_OPENING).rstrip(_CLOSING))
+        if match:
+            paths.append(normalize_file_path(match.group(1)))
+    return tuple(path for path in paths if path)
 
 
 def cites_finding(*, evidence: str, file: str) -> bool:
@@ -42,24 +77,14 @@ def cites_finding(*, evidence: str, file: str) -> bool:
         file: The finding's repository-relative path.
 
     Returns:
-        True when some citation names exactly ``file`` (both sides
-        normalized: separators, a leading ``./``, stray whitespace). The
-        prompt shows the verifier the full path, so a bare file name or a
-        trailing fragment is not accepted: with two findings on files of
-        the same name it could not tell them apart. An empty ``file`` never
-        matches.
+        True when a cited path equals ``file`` exactly, both normalized
+        (separators, a leading ``./``, stray whitespace). The prompt shows
+        the verifier the full path, so a bare file name, a trailing
+        fragment or a longer path (``foo:pkg/api.py``, ``../pkg/api.py``)
+        never counts. An empty ``file`` never matches.
     """
     target = normalize_file_path(file)
-    if not target:
-        return False
-    # Look for the path itself rather than tokenizing the evidence: a path
-    # with a space in it would otherwise be cut at the space.
-    haystack = evidence.replace("\\", "/")
-    # Left boundary: nothing that could be part of a longer path — no word
-    # character, slash, dot or dash — so ``foo-pkg/api.py:2``, ``x.pkg/…``
-    # and ``../pkg/…`` cannot cite ``pkg/api.py``; a leading ``./`` may.
-    pattern = r"(?:^|[^\w/.-])(?:\./)?" + re.escape(target) + r":\d+(?!\d)"
-    return re.search(pattern, haystack) is not None
+    return bool(target) and target in cited_paths(evidence=evidence)
 
 
 def parse_verification_answer(
@@ -108,8 +133,8 @@ def parse_verification_answer(
             continue
         evidence = item.get("evidence")
         evidence = evidence.strip() if isinstance(evidence, str) else ""
-        if outcome is not VerificationOutcome.CONFIRMED and not _CITATION.search(
-            evidence,
+        if outcome is not VerificationOutcome.CONFIRMED and not cited_paths(
+            evidence=evidence,
         ):
             # The prompt's first rule: a refutation — or a weakening, which
             # lowers a blocker — without a ``file:line`` citation is no

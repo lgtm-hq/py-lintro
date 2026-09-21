@@ -27,6 +27,9 @@ Rules:
    `unrefuted`.
 3. Never add findings, re-rank the ones you were not given, or rewrite a finding's text.
 4. Every entry in your answer must name an `index` from the list you were given, once.
+5. Cite as `path:line` exactly as the finding's `file:` line spells the path, separated
+   from your words by spaces; quote the citation (`"dir name/file.py:12"`) when the path
+   contains a space. A citation that does not name the finding's own file is no evidence.
 
 **Trust boundary (read carefully):**
 
