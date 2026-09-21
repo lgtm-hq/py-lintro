@@ -372,10 +372,10 @@ def test_open_table_marks_new_and_carries_since_round(
     )
 
     assert_that(second).contains(
-        "| — | 🔴 P1 | Leak | `src/example.py:10` | round 1 |",
+        "| — | 🔴 P1 | Leak | `src/example.py:10` | round 1 <!-- lintro-finding:",
     )
     assert_that(second).contains(
-        "| **new** | 🟠 P2 | Unguarded divide | `src/example.py:8` | round 2 |",
+        "| **new** | 🟠 P2 | Unguarded divide | `src/example.py:8` | round 2 <!-- lintro-finding:",
     )
 
 
@@ -409,7 +409,7 @@ def test_open_table_marks_a_regressed_finding(
 
     assert_that(regressed).contains("| ↩ regressed | 🔴 P1 | Leak |")
     # Its provenance survives the round trip through resolved and back.
-    assert_that(regressed).contains("round 1 |")
+    assert_that(regressed).contains("round 1 <!-- lintro-finding:")
 
 
 def test_resolved_questions_do_not_inflate_the_fixed_tile(

@@ -11,6 +11,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **ai/review**: delta rounds — from round two a `--pr` review's chunk calls embed the
+  change since the last recorded round's head (restricted to the pull request's own
+  files) instead of the whole diff, files with an open finding are re-read every round,
+  a rewritten branch or a missing prior head falls back to a full read and the sticky
+  says which, and every finding on the JSON surface carries a stable `finding_id`
+  (#2627).
+
 ### Changed
 
 - **ai/review**: a `--pr` review reads the pull request's head — fetched into a private

@@ -8,8 +8,8 @@
 
 | Δ | Sev | Finding | Where | Since |
 |:-:|:-:|---|---|---|
-| — | 🔴 P1 | Unknown session status grants access | `src/auth/session.py:31` | round 1 |
-| ✔ fixed | 🟠 P2 | ~~Token refresh drops the expiry~~ | `src/auth/tokens.py:44` | round 1 |
+| — | 🔴 P1 | Unknown session status grants access | `src/auth/session.py:31` | round 1 <!-- lintro-finding:e66dd39178de645e#1 -->|
+| ✔ fixed | 🟠 P2 | ~~Token refresh drops the expiry~~ | `src/auth/tokens.py:44` | round 1 <!-- lintro-finding:cfaf05625d782c6f#1 -->|
 
 ---
 

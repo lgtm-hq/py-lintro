@@ -121,6 +121,8 @@ class RunRecord:
             ("delegated_diff_embedded", coverage.delegated_diff_embedded),
             ("generated_questions", coverage.generated_questions),
             ("questions_diff_trimmed", coverage.questions_diff_trimmed),
+            ("delta_since", coverage.delta_since),
+            ("delta_reason", coverage.delta_reason),
             ("downgraded_p2", outcome.downgraded_p2),
             ("refuted", outcome.refuted),
             ("verified", outcome.verified),
@@ -215,6 +217,8 @@ def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
         ),
         generated_questions=coerce_int(payload.get("generated_questions")),
         questions_diff_trimmed=_strict_bool(payload.get("questions_diff_trimmed")),
+        delta_since=str(payload.get("delta_since", "") or ""),
+        delta_reason=str(payload.get("delta_reason", "") or ""),
     )
 
 

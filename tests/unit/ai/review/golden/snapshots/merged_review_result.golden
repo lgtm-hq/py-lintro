@@ -38,6 +38,8 @@
     "timings": null,
     "generated_questions": [],
     "questions_diff_trimmed": false,
+    "delta_since": "",
+    "delta_reason": "",
     "custom_agents_run": 0,
     "custom_agents_skipped": 0,
     "reviewed_paths": [],

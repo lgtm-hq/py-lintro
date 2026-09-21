@@ -14,8 +14,8 @@ Two blocking issues remain; the session fix landed.
 
 | Δ | Sev | Finding | Where | Since |
 |:-:|:-:|---|---|---|
-| — | 🔴 P1 | Unknown session status grants access | `src/auth/session.py:31` | round 1 |
-| **new** | 🟠 P2 | No test covers the expired branch | `tests/test_session.py:12` | round 3 |
+| — | 🔴 P1 | Unknown session status grants access | `src/auth/session.py:31` | round 1 <!-- lintro-finding:e66dd39178de645e#1 -->|
+| **new** | 🟠 P2 | No test covers the expired branch | `tests/test_session.py:12` | round 3 <!-- lintro-finding:25f04bcbc5549873#1 -->|
 
 <details><summary>💬 Notes and questions (1)</summary>
 

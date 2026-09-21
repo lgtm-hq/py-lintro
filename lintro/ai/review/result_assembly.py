@@ -210,7 +210,7 @@ def assemble_review_result(
             ),
         ],
     )
-
+    questions = outcome.questions
     metadata = ReviewMetadata(
         model=options.provider.model_name,
         provider=options.provider.name,
@@ -247,10 +247,10 @@ def assemble_review_result(
             (item.diff_gate for item in outcome.partials),
             DiffGateCounts(),
         ),
-        generated_questions=outcome.questions.lines if outcome.questions else (),
-        questions_diff_trimmed=(
-            outcome.questions.diff_trimmed if outcome.questions else False
-        ),
+        generated_questions=questions.lines if questions else (),
+        questions_diff_trimmed=questions.diff_trimmed if questions else False,
+        delta_since=plan.delta.since_sha or "",
+        delta_reason=str(plan.delta.reason),
         custom_agents_skipped=(
             len(plan.agent_selection.skipped) + len(outcome.custom_agents_failed)
         ),

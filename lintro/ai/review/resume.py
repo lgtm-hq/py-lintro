@@ -18,6 +18,7 @@ from lintro.ai.review.coverage import (
     queue_paths,
     review_eligible_paths,
 )
+from lintro.ai.review.delta import open_thread_paths
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.import_graph import importers_of
 from lintro.ai.review.models.coverage_counts import CoverageCounts
@@ -108,6 +109,9 @@ def plan_resume(
             flags=flags,
             pending_invalidations=pending,
             consumed_flags=consumed,
+            open_thread_paths=(
+                () if prior is None or force_full else open_thread_paths(prior=prior)
+            ),
             force_full=force_full,
         ),
     )

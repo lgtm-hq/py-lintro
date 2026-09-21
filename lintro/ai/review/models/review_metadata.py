@@ -81,6 +81,10 @@ class ReviewMetadata:
             every chunk prompt carried (#2720); empty when none were generated.
         questions_diff_trimmed (bool): True when the question pass saw only a
             prefix of the PR diff because the whole diff did not fit its budget.
+        delta_since (str): The prior round's head the chunk calls read the
+            delta from (#2627); empty on a full round.
+        delta_reason (str): :class:`~lintro.ai.review.enums.delta_reason.DeltaReason`
+            value naming why the round was a delta or a full read.
         custom_agents_run (int): Number of user-defined review agents that
             completed a pass in this run (issue #1245).
         custom_agents_skipped (int): Number of discovered agents that did not
@@ -147,6 +151,8 @@ class ReviewMetadata:
     timings: ReviewTimings | None = None
     generated_questions: tuple[str, ...] = field(default_factory=tuple)
     questions_diff_trimmed: bool = False
+    delta_since: str = ""
+    delta_reason: str = ""
     custom_agents_run: int = 0
     custom_agents_skipped: int = 0
     reviewed_paths: tuple[str, ...] = field(default_factory=tuple)

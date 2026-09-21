@@ -806,6 +806,40 @@ selection render as "Additional checks" after the questions, and the corpus sche
 tooling that used to accompany it is gone — the loader's validation against the Python
 enums is the only authority.
 
+### Delta rounds (what round two reads)
+
+From round two on, a `--pr` review reads the **delta since the last recorded round**
+(#2627). File-level resume already keeps the provider off every file whose whole-PR
+patch hash is unchanged; a delta round narrows what the remaining chunk calls _embed_:
+for a queued file, the text is `git diff <prior head>..<head>` for that file, computed
+in the PR head worktree, rather than the whole pull-request change to it. Two rules keep
+the review honest:
+
+- **The delta is the pull request's own change.** The range is restricted to files the
+  PR's whole diff names, so a file that only a merge from `main` brought into
+  `prior..head` is never embedded as if the PR had changed it.
+- **A delta narrows what is read, never what is reported or counted.** Coverage identity
+  stays the whole-PR patch hash, so a changed file the round did not read still forces
+  `INCOMPLETE` (ADR-0007), and a causal finding on a file the agent read in the worktree
+  is posted as on a full round. The question pass and the synthesis call keep the
+  whole-PR changed-file list (ADR-0010, layer 2).
+
+Files that carry an **open finding** from a prior round are queued every delta round
+(`FileReviewNeed.OPEN_THREAD`, behind changed files) so a thread is re-litigated against
+its own code; a file re-queued that way but unchanged since the prior head keeps its
+whole-PR hunk. Round one, a prior round without a recorded head, a rewritten branch (the
+prior head is no longer an ancestor of this one — a force-push), a run without a tree,
+and `--full` all read the whole diff; the sticky comment says which under the Findings
+heading ("Round N read the delta since `abc1234`" / "Round N read the whole diff: the
+branch was rewritten since the prior round"), and the run record carries `delta_since`
+and `delta_reason`.
+
+Every finding on the JSON surface carries a stable **`finding_id`** — the same
+`<fingerprint>#<ordinal>` key the review state, the sticky's Δ-table rows (a hidden
+`<!-- lintro-finding:… -->` marker) and the inline-thread marker use: a sha256 prefix
+over path, category and normalized title, deliberately line-free, so a finding on head N
+and the same finding on head N+1 match by id.
+
 ### Review convergence (deterministic re-review stop)
 
 File-level resume already spares a long-lived PR from re-reading files it has covered at
