@@ -62,9 +62,14 @@ class CliCallOptions:
     Attributes:
         max_turns: Agent turn limit for this call. Providers whose bounds do
             not support a turn limit ignore it.
+        tools_disabled: When True the agent gets no tools at all and has to
+            answer from the prompt in one turn (#2731): the shape of the
+            retry after a turn-limited call. Providers whose read-only bound
+            is a sandbox rather than a tool list ignore it.
     """
 
     max_turns: int | None = None
+    tools_disabled: bool = False
 
 
 def resolve_max_turns(*, call_kind: AICallKind, configured: int | None) -> int:

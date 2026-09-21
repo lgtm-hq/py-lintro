@@ -19,6 +19,7 @@ from lintro.ai.review.finding_identity import normalize_file_path
 from lintro.ai.review.merge import finalize_partials
 from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import ReviewRunOutcome
+from lintro.ai.review.session import NOTHING_REVIEWED_REASON, warn_nothing_reviewed
 from lintro.ai.review.severity_gate import apply_severity_gates
 from lintro.ai.review.synthesis import (
     SynthesisPassRequest,
@@ -126,9 +127,20 @@ async def finalize_completed_run(
         provider_seconds=provider_seconds,
         parse_merge_seconds=parse_merge_seconds,
     )
+    if partials and not any(partial.files for partial in partials):
+        # Every chunk hit its turn limit twice (#2731): no narrative over a
+        # diff nobody read; a stopped run, exit 1. No chunk at all is not this.
+        warn_nothing_reviewed(ai_config=plan.ai_config)
+        return replace(
+            gate_built_in_findings(outcome=outcome),
+            stopped_reason=NOTHING_REVIEWED_REASON,
+            partial=True,
+        )
     if not should_run_synthesis(
         config=options.synthesis,
-        chunks_reviewed=len(partials),
+        # A turn-limited chunk still yields a partial, with no files: count
+        # the chunks that reviewed something, not the ones that answered.
+        chunks_reviewed=sum(1 for partial in partials if partial.files),
     ):
         return await _verify_and_gate(
             context=context,

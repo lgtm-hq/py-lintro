@@ -46,6 +46,7 @@ async def call_ai(
     cli_schema: CliSchemaRequest | None = None,
     timeout: float | None = None,
     call_kind: AICallKind = AICallKind.REVIEW,
+    no_tools: bool = False,
 ) -> AIResponse:
     """Retry, fallback, and budget tracking for all AI products.
 
@@ -65,6 +66,8 @@ async def call_ai(
             extra call cannot double the budgeted wall time.
         call_kind: What the call is for; sets the CLI turn limit unless
             ``ai.transports.cli.max_turns`` overrides it (#2685).
+        no_tools: When True the CLI agent gets no tools and answers from the
+            prompt alone (#2731). No effect on the API transport.
 
     Returns:
         The provider response with usage metadata.
@@ -78,6 +81,7 @@ async def call_ai(
                 call_kind=call_kind,
                 configured=ai_config.transports.cli.max_turns,
             ),
+            tools_disabled=no_tools,
         )
         if ai_config.transport == AITransport.CLI
         else None

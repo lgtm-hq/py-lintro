@@ -6,7 +6,8 @@ see a caller that breaks, a default that changed elsewhere or the test that
 already covers the path it flags. This module assembles, per chunk, a
 budgeted **read-only context section**:
 
-* the post-change content of each changed source file in the chunk, read
+* the post-change content of each changed text file in the chunk (source,
+  config, workflow or doc; #2731 widened it from source only), read
   from the *head* side (never the working tree, which is the base commit in
   the dogfood workflow): the whole file when it fits the per-file share of
   the budget, otherwise the enclosing definitions around each hunk (``ast``
@@ -39,7 +40,7 @@ from lintro.ai.review.context_windows import fit_content, hunk_ranges
 from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.import_graph import importers_of
 from lintro.ai.review.path_utils import (
-    is_source_code_path,
+    is_context_eligible_path,
     is_test_path,
     matches_test_for_source,
 )
@@ -232,7 +233,7 @@ def build_repo_context(
     chunk_sources = [
         path
         for path in chunk.files
-        if path not in deleted and (is_source_code_path(path) or is_test_path(path))
+        if path not in deleted and is_context_eligible_path(path)
     ]
     if not chunk_sources:
         return RepoContextSection()

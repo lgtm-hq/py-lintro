@@ -583,6 +583,37 @@ _CLAUDE_TURN_LIMITED = json.dumps(
 )
 
 
+async def test_claude_empties_the_tool_list_on_a_single_shot_call(
+    _claude_on_path: None,
+) -> None:
+    """A call bound with ``tools_disabled`` keeps ``--tools`` and sends it empty (#2731).
+
+    The read-only bound stays a required contract flag; only its value
+    changes, so the agent has no tool to spend a turn on.
+    """
+    token = cli_bounds._CURRENT_CALL.set(
+        CliCallOptions(max_turns=12, tools_disabled=True),
+    )
+    try:
+        calls: list[list[str]] = []
+        runner = _runner(
+            help_text="  --tools <list>\n  --max-turns <n>\n  --json-schema <schema>\n  --json-schema-name <name>\n",
+            completion=_CLAUDE_COMPLETION,
+            version="2.1.218 (Claude Code)",
+            calls=calls,
+        )
+        provider = AnthropicProvider(transport=AITransport.CLI)
+        with patch_cli_exec(side_effect=runner):
+            await provider.complete("Review this diff", cli_schema=_SCHEMA)
+
+        cmd = _completion_calls(calls)[-1]
+        assert_that(cmd[cmd.index("--tools") + 1]).is_equal_to("")
+        assert_that(cmd).does_not_contain("Read,Grep,Glob")
+        assert_that(cmd).contains("--max-turns", "12")
+    finally:
+        cli_bounds._CURRENT_CALL.reset(token)
+
+
 async def test_claude_bounds_the_call_when_help_advertises_the_flags(
     _claude_on_path: None,
 ) -> None:

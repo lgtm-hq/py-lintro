@@ -33,20 +33,17 @@ from lintro.ai.exceptions import (
     AIError,
     AITurnLimitError,
 )
+from lintro.ai.review.chunk_halves import (
+    merge_half_partials,
+    scope_partial_to_chunk,
+    split_chunk,
+)
 from lintro.ai.review.cli_limits import is_cli_output_exhaustion
-from lintro.ai.review.context import split_unified_diff_by_file
-from lintro.ai.review.coverage import review_eligible_paths
-from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
-from lintro.ai.review.finding_parser import reject_context_findings
-from lintro.ai.review.merge import (
-    ChunkReviewPartial,
-    merge_findings,
-)
+from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.coverage_degradation import CoverageDegradation
-from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.response_pipeline import (
     ChunkCallResult,
     ChunkReviewRequest,
@@ -56,7 +53,7 @@ from lintro.ai.review.response_pipeline import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    pass
 
 __all__ = [
     "merge_half_partials",
@@ -64,93 +61,6 @@ __all__ = [
     "scope_partial_to_chunk",
     "split_chunk",
 ]
-
-
-def split_chunk(*, chunk: ReviewChunk) -> tuple[ReviewChunk, ReviewChunk] | None:
-    """Bisect a chunk by file count into two chunks that keep its identity.
-
-    Each half carries the per-file diff sections of its own files, in the
-    chunk's file order, and the parent's id, relationship and metadata note,
-    so prompts and progress events keep naming the chunk the run planned.
-
-    Args:
-        chunk: The chunk to split.
-
-    Returns:
-        The two halves, or ``None`` when the chunk has fewer than two files
-        and cannot be split.
-    """
-    if len(chunk.files) < 2:
-        return None
-    per_file = split_unified_diff_by_file(unified_diff=chunk.diff)
-    midpoint = len(chunk.files) // 2
-    halves = (list(chunk.files[:midpoint]), list(chunk.files[midpoint:]))
-    left, right = (
-        ReviewChunk(
-            id=chunk.id,
-            files=files,
-            diff="".join(per_file.get(path, "") for path in files),
-            relationship=chunk.relationship,
-            metadata_note=chunk.metadata_note,
-        )
-        for files in halves
-    )
-    return left, right
-
-
-def _sum_turns(*, partials: list[ChunkReviewPartial]) -> int | None:
-    """Sum the halves' transport-reported turns, or ``None`` if any is unknown.
-
-    Args:
-        partials: The halves' partials.
-
-    Returns:
-        The total turn count, or ``None`` when a half reported none.
-    """
-    turns = [partial.turns for partial in partials]
-    if any(value is None for value in turns):
-        return None
-    return sum(value for value in turns if value is not None)
-
-
-def merge_half_partials(
-    *,
-    partials: Sequence[ChunkReviewPartial],
-) -> ChunkReviewPartial:
-    """Fold the partials of a split chunk back into one chunk partial.
-
-    Findings are deduplicated by location; re-read flags, token, cost and
-    timing usage are combined.
-
-    Args:
-        partials: The halves' partials, in file order.
-
-    Returns:
-        One partial standing for the whole chunk.
-    """
-    ordered = list(partials)
-    return ChunkReviewPartial(
-        findings=merge_findings(
-            findings_groups=[partial.findings for partial in ordered],
-        ),
-        input_tokens=sum(partial.input_tokens for partial in ordered),
-        output_tokens=sum(partial.output_tokens for partial in ordered),
-        cost_estimate=sum(partial.cost_estimate for partial in ordered),
-        provider_seconds=sum(partial.provider_seconds for partial in ordered),
-        context_tokens=sum(partial.context_tokens for partial in ordered),
-        turns=_sum_turns(partials=ordered),
-        files=tuple(path for partial in ordered for path in partial.files),
-        flagged_files=tuple(
-            flag for partial in ordered for flag in partial.flagged_files
-        ),
-        converted_flags=tuple(
-            flag for partial in ordered for flag in partial.converted_flags
-        ),
-        coverage_degradations=tuple(
-            item for partial in ordered for item in partial.coverage_degradations
-        ),
-        diff_gate=sum((partial.diff_gate for partial in ordered), DiffGateCounts()),
-    )
 
 
 async def _parse_call(
@@ -169,12 +79,7 @@ async def _parse_call(
     """
     response, payload = await parse_review_payload_with_recovery(
         response=call.response,
-        chunk=request.chunk,
-        provider=request.provider,
-        ai_config=request.ai_config,
-        budget=request.budget,
-        repo_root=request.repo_root,
-        use_one_shot=request.use_one_shot,
+        request=request,
         elapsed=call.elapsed,
     )
     partial = payload_to_partial(
@@ -232,8 +137,18 @@ async def _retry_after_exhaustion(
             f"({request.chunk.files[0] if request.chunk.files else '?'}); "
             "retrying the call once unchanged.",
         )
-        call = await invoke_chunk_review(request=request)
-        partial = await _parse_call(request=request, call=call)
+        try:
+            call = await invoke_chunk_review(request=request)
+        except AITurnLimitError as limit:
+            # Rows 5 / 6: the unchanged retry hit the turn limit; the one
+            # retry function decides whether a single-shot retry remains.
+            partial = await _retry_after_turn_limit(
+                request=request,
+                first=limit,
+                may_split=True,
+            )
+        else:
+            partial = await _parse_call(request=request, call=call)
         return replace(
             partial,
             coverage_degradations=(
@@ -255,13 +170,38 @@ async def _retry_after_exhaustion(
     lost_half = False
     for position, half in enumerate(halves):
         half_request = replace(request, chunk=half)
+        billed: AITurnLimitError | None = None
         try:
-            call = await invoke_chunk_review(request=half_request)
+            try:
+                call = await invoke_chunk_review(request=half_request)
+            except AITurnLimitError as limit:
+                # Row 7: the half takes the one retry function at half level;
+                # rows 3 and 8 are decided inside it, not here.
+                billed = limit
+                partials.append(
+                    await _retry_after_turn_limit(
+                        request=half_request,
+                        first=limit,
+                        may_split=False,
+                    ),
+                )
+                continue
             partials.append(await _parse_call(request=half_request, call=call))
         except AICostBudgetExceededError:
             raise
         except AIError as exc:
-            if position == len(halves) - 1 and not partials:
+            if billed is not None:
+                # The limited first attempt was charged to the budget; keep
+                # its usage on an accounting-only half so the chunk's totals
+                # match what was spent (it reviews no file).
+                partials.append(
+                    _turn_limited_partial(
+                        request=half_request,
+                        first=billed,
+                        again=None,
+                    ),
+                )
+            if position == len(halves) - 1 and not any(p.files for p in partials):
                 # Nothing survived: there is no coverage to keep.
                 raise
             # The other half's findings are paid for and complete; losing
@@ -322,7 +262,7 @@ async def review_chunk_main_pass(
     except AICostBudgetExceededError:
         raise
     except AITurnLimitError as exc:
-        return await _retry_after_turn_limit(request=request, first=exc)
+        return await _retry_after_turn_limit(request=request, first=exc, may_split=True)
     except AIError as exc:
         if not is_cli_output_exhaustion(exc):
             raise
@@ -330,22 +270,102 @@ async def review_chunk_main_pass(
     return await _parse_call(request=request, call=call)
 
 
+def _turn_limited_partial(
+    *,
+    request: ChunkReviewRequest,
+    first: AITurnLimitError,
+    again: AITurnLimitError | None,
+) -> ChunkReviewPartial:
+    """Build the partial for a chunk left unreviewed by the turn limit.
+
+    Args:
+        request: The chunk's request.
+        first: The limit the first attempt hit.
+        again: The limit the retry hit, or ``None`` when the limit ended a
+            path that had no retry left.
+
+    Returns:
+        An empty partial with no files, carrying both attempts' usage and
+        one ``TURN_LIMIT_REACHED`` degradation.
+    """
+    logger.warning(
+        "CLI review hit its per-call turn limit again on chunk {index}; "
+        "leaving its files unreviewed for a later round.",
+        index=request.chunk_index,
+    )
+    extra = again if again is not None else AITurnLimitError("")
+    return ChunkReviewPartial(
+        findings=(),
+        input_tokens=first.input_tokens + extra.input_tokens,
+        output_tokens=first.output_tokens + extra.output_tokens,
+        cost_estimate=first.cost_estimate + extra.cost_estimate,
+        turns=_add_turns(first.turns, extra.turns),
+        files=(),
+        coverage_degradations=(
+            CoverageDegradation(
+                reason=CoverageDegradationReason.TURN_LIMIT_REACHED,
+                chunk_index=request.chunk_index,
+                limit=resolve_max_turns(
+                    call_kind=AICallKind.REVIEW,
+                    configured=request.ai_config.transports.cli.max_turns,
+                ),
+            ),
+        ),
+    )
+
+
 async def _retry_after_turn_limit(
     *,
     request: ChunkReviewRequest,
     first: AITurnLimitError,
+    may_split: bool,
 ) -> ChunkReviewPartial:
-    """Retry a turn-limited call once; degrade the chunk if it hits it again.
+    """Retry a turn-limited call once, single-shot; degrade if it fails again.
 
-    The agent spent its whole turn budget without answering. One unchanged
-    retry covers a run that merely wandered; a second limit means the chunk
-    does not answer under this bound, so its files are left unreviewed for a
-    later round and the run records a ``TURN_LIMIT_REACHED`` degradation
+    The bounded-recovery table (#2731; every row narrows the state — the
+    attempt becomes single-shot or the chunk halves — so it terminates):
+
+    ==== ========================= ============ ==================================
+    row  attempt                   outcome      next / recorded
+    ==== ========================= ============ ==================================
+    1    whole chunk, tools        turn limit   single-shot retry (row 3/4)
+    2    whole chunk, tools        exhaustion   split in halves (rows 7+), or a
+                                                single file: unchanged retry
+                                                (row 5); ``OUTPUT_EXHAUSTION_RETRIED``
+    3    whole chunk, single-shot  turn limit   done: ``TURN_LIMIT_REACHED``, no files
+    4    whole chunk, single-shot  exhaustion   split in halves, halves stay
+                                                single-shot (rows 7+)
+    5    single file, unchanged    turn limit   single-shot retry if not yet
+                                                single-shot (row 3/4), else done
+                                                as row 3
+    6    single file, single-shot  turn limit   done as row 3
+    7    half, tools               turn limit   that half: single-shot retry
+                                                (rows 3/4 on the half)
+    8    half, any                 exhaustion   that half is lost:
+                                                ``SPLIT_HALF_FAILED``; the other
+                                                half's files are kept
+    9    any                       cost cap     raised, the run stops
+    10   any                       other error  whole chunk: raised; a half: lost
+                                                as row 8
+    ==== ========================= ============ ==================================
+
+    The agent spent its whole turn budget without answering. The retry is
+    not the same call again (#2731: on a one-file PR the same prompt did
+    the same reading and hit the same limit): it keeps the turn limit but
+    drops the generated questions from the prompt and takes the agent's
+    tools away, so the second attempt answers from the diff, the context
+    section and the rubric in one turn. A second limit means the chunk
+    does not answer under this bound, so its files are left unreviewed for
+    a later round and the run records a ``TURN_LIMIT_REACHED`` degradation
     instead of failing (#2685).
 
     Args:
         request: The chunk, prompt material, provider handles and limits.
         first: The error the first call raised.
+        may_split: True at the whole-chunk level, where an exhausted retry
+            splits (row 4); False for a half, where it is the half's loss
+            (row 8) and the error is re-raised to the half-loss handler.
+            This is the one place rows 3 and 8 are decided for both levels.
 
     Returns:
         The retry's parsed partial, or an empty partial carrying the
@@ -353,43 +373,42 @@ async def _retry_after_turn_limit(
 
     Raises:
         AICostBudgetExceededError: When the retry hits the session cost cap.
+        AIError: When the retry fails for a reason that is neither a turn
+            limit nor output exhaustion.
     """
     logger.warning(
         "CLI review hit its per-call turn limit on chunk {index} ({error}); "
-        "retrying the call once unchanged.",
+        "retrying once single-shot (no questions, no tools).",
         index=request.chunk_index,
         error=first,
     )
+    if request.single_shot:
+        # Row 3 (and 6): the limit hit an attempt that was already
+        # single-shot; there is no narrower retry, the chunk is done.
+        return _turn_limited_partial(request=request, first=first, again=None)
+    retry = replace(request, single_shot=True)
     try:
-        call = await invoke_chunk_review(request=request)
+        call = await invoke_chunk_review(request=retry)
     except AICostBudgetExceededError:
         raise
-    except AITurnLimitError as again:
-        logger.warning(
-            "CLI review hit its per-call turn limit again on chunk {index}; "
-            "leaving its files unreviewed for a later round: {error}",
-            index=request.chunk_index,
-            error=again,
-        )
-        return ChunkReviewPartial(
-            findings=(),
-            input_tokens=first.input_tokens + again.input_tokens,
-            output_tokens=first.output_tokens + again.output_tokens,
-            cost_estimate=first.cost_estimate + again.cost_estimate,
-            turns=_add_turns(first.turns, again.turns),
-            files=(),
-            coverage_degradations=(
-                CoverageDegradation(
-                    reason=CoverageDegradationReason.TURN_LIMIT_REACHED,
-                    chunk_index=request.chunk_index,
-                    limit=resolve_max_turns(
-                        call_kind=AICallKind.REVIEW,
-                        configured=request.ai_config.transports.cli.max_turns,
-                    ),
-                ),
-            ),
-        )
-    partial = await _parse_call(request=request, call=call)
+    except AIError as exc:
+        if not isinstance(exc, AITurnLimitError):
+            if not is_cli_output_exhaustion(exc) or not may_split:
+                # Row 8 on a half (or any other error): the caller's loss
+                # handler takes it, with the first attempt's usage.
+                raise
+            # Row 4: the single-shot answer overran the output ceiling; split
+            # as the first attempt would have, keeping the single-shot shape.
+            partial = await _retry_after_exhaustion(request=retry)
+            return replace(
+                partial,
+                input_tokens=partial.input_tokens + first.input_tokens,
+                output_tokens=partial.output_tokens + first.output_tokens,
+                cost_estimate=partial.cost_estimate + first.cost_estimate,
+                turns=_add_turns(partial.turns, first.turns),
+            )
+        return _turn_limited_partial(request=request, first=first, again=exc)
+    partial = await _parse_call(request=retry, call=call)
     # The stopped first attempt was billed too; the chunk reports both.
     return replace(
         partial,
@@ -411,43 +430,3 @@ def _add_turns(*counts: int | None) -> int | None:
     """
     known = [count for count in counts if count is not None]
     return sum(known) if known else None
-
-
-def scope_partial_to_chunk(
-    *,
-    partial: ChunkReviewPartial,
-    request: ChunkReviewRequest,
-) -> ChunkReviewPartial:
-    """Keep only findings on the chunk's own files; the rest become flags.
-
-    The run-level path gate allows any file in the resume queue, so a chunk
-    answering about another queued chunk's file (which the repository context
-    section may have shown it, #2714) would otherwise post a finding the
-    chunk never had the diff for. Findings on other review-eligible files
-    become re-read flags, everything else is dropped, exactly as the run-level
-    gate does but with the chunk's file set as the allowed set (#2719).
-
-    Args:
-        partial: The parsed chunk partial.
-        request: The request that produced it (chunk files, run context).
-
-    Returns:
-        The partial with out-of-chunk findings converted or dropped.
-    """
-    kept, flags = reject_context_findings(
-        findings=partial.findings,
-        allowed_paths=set(request.chunk.files),
-        eligible_paths=set(
-            review_eligible_paths(
-                changed_files=request.context.changed_files,
-                skipped=request.context.skipped_files,
-            ),
-        ),
-    )
-    if len(kept) == len(partial.findings) and not flags:
-        return partial
-    return replace(
-        partial,
-        findings=kept,
-        converted_flags=(*partial.converted_flags, *flags),
-    )

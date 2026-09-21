@@ -121,6 +121,10 @@ class ChunkReviewRequest:
         diff_ceiling: The window remainder this chunk's diff may fill; when
             given, the section takes only what the chunk's own diff leaves,
             so a single-file chunk near the ceiling cannot overrun the window.
+        single_shot: When True the call is the retry after a turn limit
+            (#2731): the generated questions are left out of the prompt and
+            the agent gets no tools, so it answers from the diff, the context
+            section and the rubric in one turn.
     """
 
     chunk: ReviewChunk
@@ -141,6 +145,7 @@ class ChunkReviewRequest:
     repo_context: RepoContextSource | None = None
     context_budget: int | None = None
     diff_ceiling: int | None = None
+    single_shot: bool = False
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -213,7 +218,9 @@ async def invoke_chunk_review(
         checklist_count=request.checklist_count,
         interaction_paths=request.interaction_paths,
         lint_results=request.lint_results,
-        extra_checklist=request.extra_checklist,
+        # The single-shot retry drops the per-PR questions: on a turn-limited
+        # call they are what sent the agent reading the files they name.
+        extra_checklist="" if request.single_shot else request.extra_checklist,
         strictness_section=request.strictness_section,
         repo_context=(
             build_repo_context(
@@ -279,6 +286,7 @@ async def invoke_chunk_review(
         repo_root=request.repo_root or None,
         use_one_shot=request.use_one_shot,
         cli_schema=cli_schema_for_review(transport=ai_config.transport),
+        no_tools=request.single_shot,
     )
     return ChunkCallResult(
         response=response,
@@ -295,12 +303,7 @@ async def invoke_chunk_review(
 async def parse_review_payload_with_recovery(
     *,
     response: AIResponse,
-    chunk: ReviewChunk,
-    provider: BaseAIProvider,
-    ai_config: AIConfig,
-    budget: CostBudget,
-    repo_root: str,
-    use_one_shot: bool,
+    request: ChunkReviewRequest,
     elapsed: float,
 ) -> tuple[AIResponse, dict[str, Any]]:
     """Parse a chunk response, recovering non-JSON answers instead of failing.
@@ -313,12 +316,11 @@ async def parse_review_payload_with_recovery(
 
     Args:
         response: The response from the main chunk call.
-        chunk: The chunk under review, used to locate the fallback finding.
-        provider: Configured AI provider instance.
-        ai_config: AI configuration for retries, budget, and timeouts.
-        budget: Session cost budget tracker.
-        repo_root: Absolute path to the repository under review.
-        use_one_shot: When True, avoid durable provider sessions.
+        request: The chunk request the call was made for: its chunk locates
+            the fallback finding, and its provider, configuration, budget
+            and call shape (durable session, single-shot) are reused for the
+            schema-reminder retry so a single-shot retry stays single-shot
+            (#2731).
         elapsed: Wall-clock seconds the main chunk call consumed.
 
     Returns:
@@ -330,6 +332,9 @@ async def parse_review_payload_with_recovery(
             ceiling. That is a graceful stop the caller finalizes a partial
             review on, so it is never recovered as prose.
     """
+    chunk, provider, ai_config = request.chunk, request.provider, request.ai_config
+    budget, repo_root = request.budget, request.repo_root
+    use_one_shot, no_tools = request.use_one_shot, request.single_shot
     try:
         return response, parse_review_response(content=response.content)
     except ValueError as exc:
@@ -381,6 +386,8 @@ async def parse_review_payload_with_recovery(
             use_one_shot=use_one_shot,
             cli_schema=cli_schema_for_review(transport=ai_config.transport),
             timeout=retry_timeout,
+            # A single-shot retry's schema reminder stays single-shot (#2731).
+            no_tools=no_tools,
         )
     except AICostBudgetExceededError:
         # The cost cap is a graceful stop the caller finalizes a partial review

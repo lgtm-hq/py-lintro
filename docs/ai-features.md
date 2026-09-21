@@ -754,17 +754,19 @@ too).
 ### Repository context in the prompt
 
 Every chunk prompt carries, besides the diff, a **read-only repository context section**
-(#2714, lintro-ops milestone 0 step 0.8): the post-change content of each changed source
-file in the chunk, read from the head side (never the working tree, which in the dogfood
-workflow is the base commit), plus the chunk's one-hop importers and sibling test files
-among the PR's other changed files. A file that fits its share of the budget is shown
-whole; a larger one is cut to the enclosing function and class definitions around each
-hunk (`ast` for Python, a line window for other languages). The section is fenced by the
-prompt's boundary markers, redacted through the same choke point as the diff, and
-preceded by the instruction that it is for understanding only and that findings are
-reported only on lines changed in the chunk's diff. That instruction, the fence and the
-path gate (a finding on a context file becomes a re-read flag, never a posted finding)
-are one security bound and are tested verbatim.
+(#2714, lintro-ops milestone 0 step 0.8): the post-change content of each changed text
+file in the chunk — source, config, workflow or doc; binaries, media and snapshot
+fixtures stay out (#2731 widened this from source code only) — read from the head side
+(never the working tree, which in the dogfood workflow is the base commit), plus the
+chunk's one-hop importers and sibling test files among the PR's other changed files. A
+file that fits its share of the budget is shown whole; a larger one is cut to the
+enclosing function and class definitions around each hunk (`ast` for Python, a line
+window for other languages). The section is fenced by the prompt's boundary markers,
+redacted through the same choke point as the diff, and preceded by the instruction that
+it is for understanding only and that findings are reported only on lines changed in the
+chunk's diff. That instruction, the fence and the path gate (a finding on a context file
+becomes a re-read flag, never a posted finding) are one security bound and are tested
+verbatim.
 
 `ai.review_context_tokens` (int >= 0, default 6,000) is the per-chunk budget; `0`
 disables the section. The tokens spent on it are reported as `token_usage.context` in
@@ -1680,13 +1682,19 @@ directly without it gets a read-only but turn-unlimited call.
 A Claude call that spends its whole turn budget without answering (envelope subtype
 `error_max_turns`, or an error envelope whose `num_turns` reached the limit sent) raises
 a turn-limit error that the retry loop never repeats. The chunk pass retries it once
-unchanged; a second limit records a `turn_limit_reached` coverage degradation, the
-chunk's files are left unreviewed for a later round, and the run is reported as a
-partial finding set with the reason in run details. The review prompt also states what
-the working tree the agent can read holds, from the context's `checkout`: the base ref
-for a CI pull-request review (disk is pre-change), the change itself for a branch or
-uncommitted review (disk is post-change), or a request to check when it is not known;
-the diff is always authoritative.
+**single-shot** (#2731): the same turn limit, but the generated questions are left out
+of the prompt and the agent gets no tools, so it answers from the diff, the context
+section and the rubric in one turn instead of re-reading the files the questions name. A
+second limit records a `turn_limit_reached` coverage degradation, the chunk's files are
+left unreviewed for a later round, and the run is reported as a partial finding set with
+the reason in run details. A run whose **every** chunk ends that way reviewed nothing:
+it skips the synthesis narrative (there is no diff anyone read to summarise), is
+reported as a stopped run with the reason
+`no file reviewed: every chunk hit its per-call turn limit`, and exits 1 like a P1 does.
+The review prompt also states what the working tree the agent can read holds, from the
+context's `checkout`: the base ref for a CI pull-request review (disk is pre-change),
+the change itself for a branch or uncommitted review (disk is post-change), or a request
+to check when it is not known; the diff is always authoritative.
 
 ```yaml
 ai:

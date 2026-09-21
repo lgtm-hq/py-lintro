@@ -13,11 +13,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- **ai/review**: the repository-context section admits every eligible changed text file
+  (a workflow, a config, a doc), not only source code, so a one-file workflow PR no
+  longer reviews from the hunk alone (#2731).
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **ai/review**: a chunk that hits the CLI transport's per-call turn limit now retries
+  single-shot (no generated questions, no tools) instead of repeating the same call, and
+  a run whose every chunk reviewed nothing skips the synthesis narrative, is reported as
+  a stopped run and exits 1 (#2731).
 
 ### Security
 
