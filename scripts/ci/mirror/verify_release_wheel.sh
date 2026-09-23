@@ -28,7 +28,8 @@ Usage:
 
 Environment:
   VERSION                 lintro version without a leading v (required)
-  ATTESTATION_REPO        Repository whose attestations are consulted,
+  ATTESTATION_REPO        Repository whose release carries the SHA256SUMS
+                          manifest and whose attestations are consulted;
                           passed as `--repo` (required)
   DIST_SIGNER_WORKFLOW    Signer workflow the wheel attestation must carry,
                           passed as `--signer-workflow` (required)
@@ -38,8 +39,6 @@ Environment:
                           on exit)
   GH_CMD                  gh binary name (overridable in tests; default gh)
   CURL_CMD                curl binary name (overridable in tests; default curl)
-  SOURCE_REPO             owner/repo the SHA256SUMS release is fetched from
-                          (default: lgtm-hq/py-lintro)
   GITHUB_STEP_SUMMARY     When set, one line per check is appended
 EOF
 	exit 0
@@ -49,7 +48,6 @@ fi
 attestation_repo="${ATTESTATION_REPO:-}"
 dist_signer="${DIST_SIGNER_WORKFLOW:-}"
 release_tag="${RELEASE_TAG:-v${VERSION}}"
-source_repo="${SOURCE_REPO:-lgtm-hq/py-lintro}"
 gh_cmd="${GH_CMD:-gh}"
 curl_cmd="${CURL_CMD:-curl}"
 
@@ -96,8 +94,10 @@ if [[ -z "$work_dir" ]]; then
 fi
 
 # --- fetch the release's SHA256SUMS ------------------------------------------
+# The manifest and the attestations come from the same repository, so one
+# variable names it for both.
 checksums_file="${work_dir}/SHA256SUMS"
-"$gh_cmd" release download "$release_tag" --repo "$source_repo" \
+"$gh_cmd" release download "$release_tag" --repo "$attestation_repo" \
 	--pattern SHA256SUMS --dir "$work_dir" --clobber >/dev/null
 [[ -s "$checksums_file" ]] || die "release ${release_tag} has no SHA256SUMS asset; refusing to pin an unverifiable wheel"
 
@@ -133,17 +133,20 @@ while IFS=$'\t' read -r wheel_name wheel_url pypi_digest; do
 	# --- 2. provenance attestation on the downloaded bytes --------------------
 	# The bytes hashed and attested are the ones curl fetches from PyPI's own
 	# file URL — not a same-named copy from the GitHub Release.
+	# </dev/null: curl and gh must not read the loop's stdin (the
+	# here-string feeding `read`); a command that consumes it would swallow
+	# the next wheel row.
 	"$curl_cmd" -sf --connect-timeout 10 --max-time 300 -o "$work_dir/$wheel_name" \
-		"$wheel_url" ||
+		"$wheel_url" </dev/null ||
 		die "download of ${wheel_url} failed"
 	wheel_file="${work_dir}/${wheel_name}"
 	[[ -s "$wheel_file" ]] || die "downloaded wheel ${wheel_file} is missing or empty"
-	actual="$("${sha_cmd[@]}" "$wheel_file" | awk '{print $1}')"
+	actual="$("${sha_cmd[@]}" "$wheel_file" </dev/null | awk '{print $1}')"
 	[[ "$actual" == "$expected_digest" ]] ||
 		die "sha256 mismatch for the downloaded ${wheel_name}: manifest ${expected_digest}, downloaded ${actual}"
 	if ! "$gh_cmd" attestation verify "$wheel_file" \
 		--repo "$attestation_repo" \
-		--signer-workflow "$dist_signer"; then
+		--signer-workflow "$dist_signer" </dev/null; then
 		die "attestation verification failed for ${wheel_name} (expected ${attestation_repo} / ${dist_signer})"
 	fi
 
@@ -152,8 +155,10 @@ while IFS=$'\t' read -r wheel_name wheel_url pypi_digest; do
 done <<<"$wheel_rows"
 
 # --- 3. set equality: PyPI wheels must all be in the manifest, and vice versa
+# LC_ALL=C on both sides: the same collation must order both lists or diff
+# reports false differences.
 manifest_wheels="$(
-	awk '$2 ~ /\.whl$/ { print $2 }' "$checksums_file" | sort
+	awk '$2 ~ /\.whl$/ { print $2 }' "$checksums_file" | LC_ALL=C sort
 )"
 pypi_wheels="$(
 	jq -r '[.urls[] | select(.packagetype == "bdist_wheel") | .filename] | sort | .[]' <<<"$metadata"

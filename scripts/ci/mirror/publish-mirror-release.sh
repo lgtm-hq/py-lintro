@@ -92,40 +92,74 @@ push_tag() {
 
 require_auto_merge_enabled() {
 	# `gh pr merge --auto` is refused by the API unless the repo setting is
-	# on; fail fast naming the setting and where to flip it (#2742).
-	if [[ "$(gh api "repos/${MIRROR_REPO}" --jq .allow_auto_merge)" != "true" ]]; then
+	# on; fail fast naming the setting and where to flip it (#2742). The
+	# API output is captured first so a failed call dies with its own
+	# message instead of an empty result reading as "disabled".
+	local setting
+	if ! setting="$(gh api "repos/${MIRROR_REPO}" --jq .allow_auto_merge)"; then
+		log_error "Could not read the auto-merge setting on ${MIRROR_REPO}; refusing to continue without knowing it (#2742)"
+		exit 1
+	fi
+	if [[ "$setting" != "true" ]]; then
 		log_error "Auto-merge is disabled on ${MIRROR_REPO}; enable \"Allow auto-merge\" in the repo settings (owners) before the mirror bump can merge"
 		exit 1
 	fi
 }
 
-merge_mirror_pr() {
-	require_auto_merge_enabled
-	log_info "Enabling auto-merge (squash) for mirror PR #${pr_number}"
-	# No --delete-branch: with --auto gh cannot delete the branch at the
-	# later auto-merge moment, and the mirror keeps branches; the ref is
-	# removed explicitly after MERGED is confirmed.
-	gh pr merge "$pr_number" --squash --auto
+arm_auto_merge() {
+	# On the reuse path the earlier run may already have armed auto-merge;
+	# `gh pr merge --auto` on an armed PR errors, so only arm when unset.
+	local armed
+	armed="$(gh pr view "$pr_number" --json autoMergeRequest \
+		--jq '.autoMergeRequest != null')"
+	if [[ "$armed" == "true" ]]; then
+		log_info "Auto-merge already armed for mirror PR #${pr_number}"
+	else
+		log_info "Enabling auto-merge (squash) for mirror PR #${pr_number}"
+		# No --delete-branch: with --auto gh cannot delete the branch at the
+		# later auto-merge moment, and the mirror keeps branches; the ref is
+		# removed explicitly after MERGED is confirmed.
+		gh pr merge "$pr_number" --squash --auto
+	fi
+}
 
+poll_until_merged() {
 	deadline=$((SECONDS + MERGE_TIMEOUT_SECONDS))
-	while ((SECONDS < deadline)); do
-		state="$(gh pr view "$pr_number" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
+	while :; do
+		# Poll both fields: a CLOSED PR can never merge, and a DIRTY merge
+		# state means the queued auto-merge would fail — stop early with
+		# the PR URL instead of burning the bound on either.
+		read -r state merge_state <<<"$(gh pr view "$pr_number" \
+			--json state,mergeStateStatus \
+			--jq '.state + " " + (.mergeStateStatus // "UNKNOWN")' \
+			2>/dev/null || echo "UNKNOWN UNKNOWN")"
 		if [[ "$state" == "MERGED" ]]; then
 			log_success "Mirror PR #${pr_number} merged"
 			return 0
 		fi
-		# A closed PR can never merge; stop early instead of burning the
-		# whole bound on it.
 		if [[ "$state" == "CLOSED" ]]; then
 			log_error "Mirror PR #${pr_number} was closed without merging: https://github.com/${MIRROR_REPO}/pull/${pr_number}"
 			exit 1
 		fi
-		log_info "Mirror PR #${pr_number} state ${state}; waiting for the required checks"
-		sleep "$((MERGE_POLL_SECONDS < deadline - SECONDS ? MERGE_POLL_SECONDS : deadline - SECONDS))"
+		if [[ "$merge_state" == "DIRTY" ]]; then
+			log_error "Mirror PR #${pr_number} is DIRTY (merge conflict): https://github.com/${MIRROR_REPO}/pull/${pr_number}"
+			exit 1
+		fi
+		log_info "Mirror PR #${pr_number} state ${state}/${merge_state}; waiting for the required checks"
+		remaining=$((deadline - SECONDS))
+		if ((remaining <= 0)); then
+			break
+		fi
+		sleep "$((MERGE_POLL_SECONDS < remaining ? MERGE_POLL_SECONDS : remaining))"
 	done
 
 	log_error "Mirror PR #${pr_number} did not merge within ${MERGE_TIMEOUT_SECONDS}s; finish it by hand: https://github.com/${MIRROR_REPO}/pull/${pr_number}"
 	exit 1
+}
+
+merge_mirror_pr() {
+	arm_auto_merge
+	poll_until_merged
 }
 
 finish_after_merge() {
@@ -164,32 +198,45 @@ if git diff --quiet -- pyproject.toml; then
 	exit 0
 fi
 
+# A disabled auto-merge setting fails the run here — after "a bump is
+# needed" is known, but BEFORE any mirror mutation (branch heal, ref POST,
+# signed commit, PR): nothing is written for a run that cannot merge
+# (#2742).
+require_auto_merge_enabled
+
 # --- create the bump branch on current main (API-created commit) ------------
 
 base_oid="$(git rev-parse origin/main)"
 
 # Reuse-or-heal (#2742 review): a branch left over from an earlier run is
-# only thrown away when its PR cannot merge. An open, clean PR (auto-merge
-# still pending from a cancelled or timed-out run) is reused as-is; a dirty
-# one would replay the same conflict every rerun and is healed by
-# recreation from the mirror's current main, which cannot conflict. Its
-# stale PR closes with the deleted branch.
+# only thrown away when its PR cannot merge. An open PR against main
+# (auto-merge still pending from a cancelled or timed-out run) is reused
+# as-is unless its merge state is DIRTY: a dirty PR would replay the same
+# conflict every rerun and is healed by recreation from the mirror's
+# current main, which cannot conflict. Its stale PR closes with the deleted
+# branch. A failed `pr list` fails the run — guessing "no PR" and deleting
+# the branch would destroy the very PR that needs reusing or healing.
 existing_pr=""
 if git ls-remote --heads origin "$BRANCH" | grep -q .; then
-	existing_pr="$(gh pr list --head "$BRANCH" --state open --json number \
-		--jq '.[0].number' || true)"
+	existing_pr="$(gh pr list --head "$BRANCH" --base main --state open --json number \
+		--jq '.[0].number // ""')"
 	if [[ -n "$existing_pr" ]]; then
-		pr_state="$(gh pr view "$existing_pr" --json state,mergeStateStatus \
-			--jq '.state + " " + .mergeStateStatus')"
-		if [[ "$pr_state" == "OPEN CLEAN" || "$pr_state" == "OPEN BLOCKED" ]]; then
-			log_info "Reusing open PR #${existing_pr} for ${BRANCH} (clean; re-arming auto-merge)"
+		pr_info="$(gh pr view "$existing_pr" --json state,mergeStateStatus,baseRefName \
+			--jq '.state + " " + (.mergeStateStatus // "UNKNOWN") + " " + .baseRefName')"
+		read -r pr_state pr_merge_state pr_base <<<"$pr_info"
+		# Any open PR against main whose merge state is not DIRTY (CLEAN,
+		# BLOCKED, UNKNOWN, UNSTABLE, BEHIND, HAS_HOOKS) is
+		# mergeable-in-waiting; only a dirty PR — or one targeting another
+		# base, which merging would not update main — heals.
+		if [[ "$pr_state" == "OPEN" && "$pr_merge_state" != "DIRTY" && "$pr_base" == "main" ]]; then
+			log_info "Reusing open PR #${existing_pr} for ${BRANCH} (${pr_state} ${pr_merge_state})"
 			pr_number="$existing_pr"
 			pr_url="https://github.com/${MIRROR_REPO}/pull/${pr_number}"
 			merge_mirror_pr
 			finish_after_merge
 			exit 0
 		fi
-		log_warning "PR #${existing_pr} for ${BRANCH} is not mergeable (${pr_state}); healing the branch"
+		log_warning "PR #${existing_pr} for ${BRANCH} is not mergeable (${pr_info}); healing the branch"
 	else
 		log_warning "Bump branch ${BRANCH} exists with no open PR; recreating it from origin/main"
 	fi
@@ -256,13 +303,6 @@ PR_BODY="Automated version bump: pins the published \`lintro==${VERSION}\` wheel
 
 # Always open a fresh PR: the branch was just created (fresh run) or its old
 # PR closed when the heal deleted the branch — no open PR can exist for it.
-log_info "Opening mirror version-bump PR"
-pr_url="$(
-	gh pr create --base main --head "$BRANCH" \
-		--title "$PR_TITLE" --body "$PR_BODY"
-)"
-pr_number="${pr_url##*/}"
-
 log_info "Opening mirror version-bump PR"
 pr_url="$(
 	gh pr create --base main --head "$BRANCH" \

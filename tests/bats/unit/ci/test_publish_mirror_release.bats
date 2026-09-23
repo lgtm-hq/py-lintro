@@ -5,9 +5,10 @@
 # The script drives git, gh and the GraphQL API against a real mirror
 # checkout, so these tests pin its control flow with stubbed gh/git
 # behaviour: the bump commit is created via createCommitOnBranch with a
-# correctly wrapped GraphQL payload, auto-merge is guarded by the repo
-# setting, the merge poll handles OPEN → MERGED and fails fast on closed
-# PRs, a healthy open PR is reused instead of healed, and a stale branch is
+# correctly wrapped GraphQL payload, the auto-merge precondition runs
+# before any mirror write, `pr create` fires exactly once per fresh run,
+# the merge poll handles OPEN → MERGED and fails fast on closed/dirty PRs,
+# a healthy open PR is reused instead of healed, and a stale branch is
 # deleted and recreated — never plain git commit or rebase.
 
 load "../../helpers/common"
@@ -22,8 +23,8 @@ setup() {
 
 	# Stub gh: records every invocation, answers the PR state poll from
 	# GH_STATES (one state per poll, last one repeats), fakes `pr list` /
-	# `pr view --json state,mergeStateStatus` / `pr create`, and CAPTURES
-	# the GraphQL payload to graphql.json instead of dropping stdin.
+	# `pr view` / `pr create` / `pr merge`, and CAPTURES the GraphQL payload
+	# to graphql.json instead of dropping stdin.
 	GH_LOG="${BATS_TEST_TMPDIR}/gh.log"
 	GRAPHQL_JSON="${BATS_TEST_TMPDIR}/graphql.json"
 	: >"${GH_LOG}"
@@ -39,11 +40,19 @@ if [[ "\$1" == "pr" && "\$2" == "list" ]]; then
 	exit 0
 fi
 if [[ "\$1" == "pr" && "\$2" == "view" ]]; then
-	if [[ "\$*" == *mergeStateStatus* ]]; then
-		echo "\${GH_PR_VIEW:-MERGED MERGED}"
-	else
-		# One GH_STATES entry per poll, last one repeats; the poll index
-		# lives in a file because each gh call is a fresh process.
+	case "\$*" in
+	*autoMergeRequest*)
+		echo "\${GH_AUTO_ARMED:-false}"
+		;;
+	*baseRefName*)
+		# Reuse-path guard: "state mergeState base" ("UNKNOWN" fills an
+		# empty mergeStateStatus, as the script's jq fallback does).
+		printf '%s\n' "\${GH_PR_VIEW:-OPEN CLEAN main}"
+		;;
+	*)
+		# Merge poll: "state mergeState" per poll from GH_STATES, last one
+		# repeats; the poll index lives in a file because each gh call is a
+		# fresh process.
 		POLL_N="${BATS_TEST_TMPDIR}/poll.n"
 		touch "\${POLL_N}"
 		poll=\$(cat "\${POLL_N}")
@@ -53,10 +62,21 @@ if [[ "\$1" == "pr" && "\$2" == "view" ]]; then
 			echo "\$poll" >"\${POLL_N}"
 		fi
 		printf '%s\n' "\$GH_STATES" | tr ',' '\\n' | sed -n "\${poll}p"
-	fi
+		;;
+	esac
 	exit 0
 fi
 if [[ "\$1" == "pr" && "\$2" == "create" ]]; then
+	# Stateful: a second create for the same head fails like GitHub does
+	# ("a pull request for branch ... already exists") — the fresh-path
+	# double-create of the 8afbdd2f regression dies here under set -e.
+	# argv: pr create --base main --head <branch> --title ... --body ...
+	CREATED="${BATS_TEST_TMPDIR}/created.heads"
+	if [[ -f "\${CREATED}" ]] && grep -qxF "\$6" "\${CREATED}"; then
+		echo "creating pull request failed: a pull request for branch \$6 already exists" >&2
+		exit 1
+	fi
+	echo "\$6" >>"\${CREATED}"
 	echo "https://github.com/lgtm-hq/lintro-pre-commit/pull/22"
 	exit 0
 fi
@@ -121,9 +141,10 @@ STUB
 run_script() {
 	env PATH="${STUB_BIN}:${PATH}" \
 		GH_TOKEN=stub \
-		GH_STATES="${GH_STATES:-MERGED}" \
+		GH_STATES="${GH_STATES:-MERGED MERGED}" \
 		GH_OPEN_PR="${GH_OPEN_PR:-0}" \
-		GH_PR_VIEW="${GH_PR_VIEW:-MERGED MERGED}" \
+		GH_PR_VIEW="${GH_PR_VIEW:-OPEN CLEAN main}" \
+		GH_AUTO_ARMED="${GH_AUTO_ARMED:-false}" \
 		GH_ALLOW_AUTO_MERGE="${GH_ALLOW_AUTO_MERGE:-true}" \
 		GIT_BRANCH_EXISTS="${GIT_BRANCH_EXISTS:-0}" \
 		MIRROR_DIR="${MIRROR_DIR}" \
@@ -160,7 +181,7 @@ dependencies = ["lintro==1.2.3"]'
 }
 
 @test "createCommitOnBranch receives a variables-wrapped, correct payload" {
-	GH_STATES="MERGED"
+	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
 
@@ -173,8 +194,21 @@ dependencies = ["lintro==1.2.3"]'
 	assert_failure
 }
 
+@test "the fresh path opens exactly one PR (stateful create stub)" {
+	GH_STATES="MERGED MERGED"
+	run run_script
+	assert_success
+
+	# Exactly one `pr create`: the stub refuses a second create for the same
+	# head with GitHub's "already exists" error, so this fails on the
+	# 8afbdd2f double-create regression — which the fixed-URL stub hid.
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_success
+	assert_output 1
+}
+
 @test "enables auto-merge after checking the repo setting, then reports MERGED" {
-	GH_STATES="OPEN,MERGED"
+	GH_STATES="OPEN OPEN,MERGED MERGED"
 	run run_script
 	assert_success
 	assert_output --partial "Enabling auto-merge (squash) for mirror PR #22"
@@ -188,19 +222,44 @@ dependencies = ["lintro==1.2.3"]'
 	assert_success
 }
 
-@test "auto-merge disabled on the mirror fails fast before any merge work" {
+@test "already-armed auto-merge is not re-armed on the reuse path" {
+	GIT_BRANCH_EXISTS="1"
+	GH_OPEN_PR="1"
+	GH_PR_VIEW="OPEN CLEAN main"
+	GH_AUTO_ARMED="true"
+	GH_STATES="MERGED MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "Auto-merge already armed for mirror PR #22"
+
+	run grep -cF "pr merge" "${GH_LOG}"
+	assert_output 0
+}
+
+@test "auto-merge disabled on the mirror fails before any mirror write" {
 	GH_ALLOW_AUTO_MERGE="false"
 	run run_script
 	assert_failure
 	assert_output --partial "Auto-merge is disabled on lgtm-hq/lintro-pre-commit"
 	assert_output --partial "Allow auto-merge"
 
-	run grep -F "pr merge" "${GH_LOG}"
-	assert_failure
+	# The precondition runs before ANY mirror mutation: no branch heal, no
+	# ref POST, no signed commit, no PR — nothing is written for a run that
+	# cannot merge.
+	run grep -cF "api -X DELETE" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "git/refs" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "api graphql" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "pr merge" "${GH_LOG}"
+	assert_output 0
 }
 
 @test "a merge-poll timeout exits non-zero and prints the PR URL" {
-	GH_STATES="OPEN,OPEN,OPEN,OPEN"
+	GH_STATES="OPEN OPEN,OPEN OPEN,OPEN OPEN,OPEN OPEN"
 	MERGE_TIMEOUT_SECONDS="2"
 	MERGE_POLL_SECONDS="1"
 	run run_script
@@ -210,17 +269,25 @@ dependencies = ["lintro==1.2.3"]'
 }
 
 @test "a PR closed without merging stops the poll early" {
-	GH_STATES="OPEN,CLOSED"
+	GH_STATES="OPEN OPEN,CLOSED CLOSED"
 	run run_script
 	assert_failure
 	assert_output --partial "was closed without merging"
 	assert_output --partial "https://github.com/lgtm-hq/lintro-pre-commit/pull/22"
 }
 
+@test "a DIRTY merge state stops the poll early with the PR URL" {
+	GH_STATES="OPEN OPEN,OPEN DIRTY"
+	run run_script
+	assert_failure
+	assert_output --partial "is DIRTY (merge conflict)"
+	assert_output --partial "https://github.com/lgtm-hq/lintro-pre-commit/pull/22"
+}
+
 @test "the bump branch ref is created at base before createCommitOnBranch" {
 	# createCommitOnBranch appends to an existing branch; the script must
 	# POST refs/heads/<branch> at the base oid first (fresh and heal runs).
-	GH_STATES="MERGED"
+	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
 
@@ -238,8 +305,8 @@ dependencies = ["lintro==1.2.3"]'
 @test "a healthy open bump PR is reused instead of healed" {
 	GIT_BRANCH_EXISTS="1"
 	GH_OPEN_PR="1"
-	GH_PR_VIEW="OPEN CLEAN"
-	GH_STATES="MERGED"
+	GH_PR_VIEW="OPEN BLOCKED main"
+	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
 	assert_output --partial "Reusing open PR #22 for mirror/bump-lintro-1.2.3"
@@ -250,16 +317,19 @@ dependencies = ["lintro==1.2.3"]'
 	assert_output 0
 	run grep -cF "pr create" "${GH_LOG}"
 	assert_output 0
+	run grep -cF "api -X DELETE repos/lgtm-hq/lintro-pre-commit/git/refs/heads/mirror/bump-lintro-1.2.3" "${GH_LOG}"
+	# finish_after_merge deletes the merged branch ref exactly once.
+	assert_output 1
 }
 
 @test "a dirty open bump PR is healed: branch deleted, ref recreated, mutation ordered" {
 	GIT_BRANCH_EXISTS="1"
 	GH_OPEN_PR="1"
-	GH_PR_VIEW="OPEN DIRTY"
-	GH_STATES="MERGED"
+	GH_PR_VIEW="OPEN DIRTY main"
+	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
-	assert_output --partial "is not mergeable (OPEN DIRTY); healing the branch"
+	assert_output --partial "is not mergeable (OPEN DIRTY main); healing the branch"
 
 	run grep -F 'api -X DELETE repos/lgtm-hq/lintro-pre-commit/git/refs/heads/mirror/bump-lintro-1.2.3' "${GH_LOG}"
 	assert_success
@@ -279,9 +349,25 @@ dependencies = ["lintro==1.2.3"]'
 	assert_graphql_payload
 }
 
+@test "an open PR against another base is not reused (healed instead)" {
+	GIT_BRANCH_EXISTS="1"
+	GH_OPEN_PR="1"
+	GH_PR_VIEW="OPEN CLEAN other-base"
+	GH_STATES="MERGED MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "is not mergeable (OPEN CLEAN other-base); healing the branch"
+
+	# The stale branch is deleted and a fresh PR is opened against main.
+	run grep -F 'api -X DELETE repos/lgtm-hq/lintro-pre-commit/git/refs/heads/mirror/bump-lintro-1.2.3' "${GH_LOG}"
+	assert_success
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_output 1
+}
+
 @test "a stale branch with no open PR is deleted before the new commit is created" {
 	GIT_BRANCH_EXISTS="1"
-	GH_STATES="MERGED"
+	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
 	assert_output --partial "exists with no open PR; recreating it from origin/main"
@@ -291,7 +377,7 @@ dependencies = ["lintro==1.2.3"]'
 }
 
 @test "no rebase anywhere in the flow" {
-	GH_STATES="MERGED"
+	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
 

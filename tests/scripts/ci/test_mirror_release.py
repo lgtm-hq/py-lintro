@@ -273,13 +273,53 @@ def test_publish_script_reuses_a_healthy_open_pr_before_healing() -> None:
     An earlier run's auto-merge can still be pending; deleting the branch
     would close a healthy PR and restart its checks from zero. The script
     asks for the PR's state first and only heals a dirty/abandoned branch.
+    Reuse is gated on the PR targeting main (merging a PR against another
+    base would tag a main that never received the bump).
     """
     body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
 
     assert_that(body).contains("gh pr list --head")
+    assert_that(body).contains("--base main")
     assert_that(body).contains("mergeStateStatus")
+    assert_that(body).contains("baseRefName")
     assert_that(body).contains("Reusing open PR")
     assert_that(body).contains("healing the branch")
+
+
+def test_publish_script_opens_exactly_one_pr_and_checks_setting_first() -> None:
+    """The fresh path creates one PR and the setting check precedes writes.
+
+    Head 8afbdd2f shipped two P1s this pins: a duplicated `gh pr create`
+    block (the second call dies under set -e — "a pull request for branch
+    ... already exists"), and the allow_auto_merge precondition buried in
+    the merge step, after the ref POST, the signed commit and the PR.
+    """
+    body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
+
+    assert_that(body.count("gh pr create")).is_equal_to(1)
+    # The precondition call must precede every mirror write in the main
+    # flow (anchored at the sync block, after the function definitions).
+    lines = body.splitlines()
+    main_flow = next(
+        i for i, line in enumerate(lines) if "Sync to the mirror's current main" in line
+    )
+    setting_line = next(
+        i
+        for i, line in enumerate(lines)
+        if line.strip() == "require_auto_merge_enabled"
+    )
+    assert_that(setting_line).is_greater_than(main_flow)
+    for write in (
+        "git/refs/heads/${BRANCH}",  # heal DELETE + ref POST
+        "gh api graphql",  # createCommitOnBranch
+        "gh pr create",  # fresh PR
+        "pr merge",  # --auto
+    ):
+        for i, line in enumerate(lines):
+            if write in line and main_flow < i < setting_line:
+                pytest.fail(
+                    f"mirror write {write!r} at line {i + 1} precedes the precondition",
+                )
 
 
 def _write_fake_curl(bin_dir: Path, payload: str) -> None:

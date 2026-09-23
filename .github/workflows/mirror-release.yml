@@ -117,6 +117,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ steps.resolve.outputs.version }}
+          # The SHA256SUMS manifest and the attestations both live in the
+          # source repo, so one variable names it for both.
           ATTESTATION_REPO: lgtm-hq/py-lintro
           DIST_SIGNER_WORKFLOW: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml
         # yamllint disable-line rule:line-length
