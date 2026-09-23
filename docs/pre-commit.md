@@ -122,10 +122,11 @@ from source. This is the endorsed hermetic path — the same model
 
 The mirror's `rev:` tracks the lintro version it pins. For each **stable** py-lintro
 release, the tag publish pipeline calls `mirror-release.yml` after creating the GitHub
-Release: CI waits for the published wheel on PyPI, bumps the mirror pin, and tags the
-mirror automatically once `MIRROR_REPO_TOKEN` is configured. Prerelease tags are
-skipped. `mirror-release.yml` also accepts a `workflow_dispatch` with a `release_tag`
-for manual backfill.
+Release: CI waits for the published wheel on PyPI, verifies its digest and attestation
+against the release, bumps the mirror pin with a `lgtm-mirror-bot` App commit
+(GitHub-signed and attributed, as the mirror's rulesets require), and tags the mirror
+automatically. Prerelease tags are skipped. `mirror-release.yml` also accepts a
+`workflow_dispatch` with a `release_tag` for manual backfill.
 
 ## Alternative: isolated Python environment from this repo
 

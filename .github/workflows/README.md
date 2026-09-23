@@ -100,9 +100,9 @@ comments so Renovate can track digest updates. Policy is enforced by
   the release is created with `GITHUB_TOKEN`, whose actions GitHub does not raise
   workflow events for, so that trigger fired zero times across ~30 releases (#2599).
   `workflow_dispatch` with a `release_tag` stays for manual backfill. A `mirror-token`
-  guard job gates the call, so while `MIRROR_REPO_TOKEN` is unset the mirror bump is
-  skipped with a `::warning::` and a step-summary line instead of failing the tag run
-  (#2622).
+  guard job gates the call, so while the mirror App credentials are unset the mirror
+  bump is skipped with a `::warning::` and a step-summary line instead of failing the
+  tag run (#2622).
 
 Both callers set a dynamic `run-name` (event + branch) so post-merge release failures
 are traceable from the Actions list rather than the default commit subject. The mirror
@@ -314,9 +314,12 @@ Delete both variables once a validation round is recorded.
   `lgtm-digest-bump` GitHub App (Contents read/write only), minted immediately before
   the candidate digest commit with explicit `permission-contents: write`. It is
   installed only on `py-lintro`; do not substitute `RELEASE_APP_*`.
-- **`secrets.MIRROR_REPO_TOKEN`** — Cross-repo write to `lgtm-hq/lintro-pre-commit`
-  (fine-grained PAT or GitHub App token with contents + pull-requests write on that
-  repo) used by `mirror-release.yml`
+- **`secrets.MIRROR_APP_ID` / `secrets.MIRROR_APP_PRIVATE_KEY`** — The dedicated
+  `lgtm-mirror-bot` GitHub App (Contents R/W + Pull requests R/W), installed only on
+  `lintro-pre-commit`. Its installation token mints the mirror bump commit via
+  `createCommitOnBranch` (GitHub-signed, attributed to `lgtm-mirror-bot[bot]`, as the
+  mirror's rulesets require) and merges the bump PR; used by `mirror-release.yml`
+  (#2742), which replaced the retired plain-PAT secret.
 
 ## Concurrency
 

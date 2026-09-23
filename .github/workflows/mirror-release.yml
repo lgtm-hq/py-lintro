@@ -13,6 +13,12 @@ name: Release - Mirror Version Bump
 # GITHUB_TOKEN, and GitHub suppresses workflow events for actions taken with
 # that token, so the workflow never fired once across ~30 releases (#2599).
 # ``push: tags`` has the same recursion guard, hence ``workflow_call``.
+#
+# Mirror-side writes use the dedicated `lgtm-mirror-bot` GitHub App
+# (MIRROR_APP_ID / MIRROR_APP_PRIVATE_KEY, installed on lintro-pre-commit
+# only): the App token mints the bump commit via createCommitOnBranch, so it
+# is GitHub-signed and attributed, and merges the bump PR — the mirror's
+# rulesets require both (#2742).
 
 'on':
   workflow_call:
@@ -22,10 +28,13 @@ name: Release - Mirror Version Bump
         required: true
         type: string
     secrets:
-      MIRROR_REPO_TOKEN:
+      MIRROR_APP_ID:
+        description: 'App ID of the lgtm-mirror-bot GitHub App.'
+        required: true
+      MIRROR_APP_PRIVATE_KEY:
         description: >-
-          Token with contents and pull-requests write on
-          lgtm-hq/lintro-pre-commit.
+          Private key of the lgtm-mirror-bot GitHub App (PEM). Installed on
+          lgtm-hq/lintro-pre-commit with Contents R/W + Pull requests R/W.
         required: true
   workflow_dispatch:
     inputs:
@@ -44,10 +53,18 @@ jobs:
   mirror-bump:
     name: Bump lintro-pre-commit mirror
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # 50 min covers the configured step budgets: PyPI wheel wait ~20
+    # (30 x (30s curl + 10s sleep)), wheel verify/download ~6 (300s
+    # download + metadata + bundle), mint/commit/PR 1-2, merge poll 15
+    # (MERGE_TIMEOUT_SECONDS) — plus slack, so GitHub never kills the job
+    # while it polls.
+    timeout-minutes: 50
     permissions:
-      # read: checkout py-lintro CI scripts (mirror writes use MIRROR_REPO_TOKEN)
+      # read: checkout py-lintro CI scripts; also read the release's
+      # SHA256SUMS + wheel assets and its attestations for the wheel proof.
+      # Mirror-side writes use the lgtm-mirror-bot App token, not this one.
       contents: read
+      attestations: read
     env:
       RELEASE_TAG: ${{ inputs.release_tag }}
 
@@ -62,9 +79,15 @@ jobs:
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
             uploads.github.com:443
             pypi.org:443
             files.pythonhosted.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            timestamp.sigstore.dev:443
+            *.blob.core.windows.net:443
 
       - name: Checkout lintro scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -84,19 +107,55 @@ jobs:
         # yamllint disable-line rule:line-length
         run: lintro/scripts/ci/mirror/wait-for-pypi-wheel.sh lintro "$LINTRO_VERSION"
 
+      - name: Verify release wheel (digest + attestation)
+        # The wheel must be the bytes the release gate attested (#2562)
+        # before the mirror pins it and pushes its tag (#2742): PyPI's
+        # sha256 digest is compared against the release's SHA256SUMS and
+        # `gh attestation verify` proves provenance. A replaced PyPI
+        # artifact fails here, before any mirror-side write.
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+          # The SHA256SUMS manifest and the attestations both live in the
+          # source repo, so one variable names it for both.
+          ATTESTATION_REPO: lgtm-hq/py-lintro
+          DIST_SIGNER_WORKFLOW: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml
+        # yamllint disable-line rule:line-length
+        run: lintro/scripts/ci/mirror/verify_release_wheel.sh
+
+      - name: Mint lgtm-mirror-bot token
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        id: mirror-app
+        # Installation-scoped to lintro-pre-commit; the App grants Contents
+        # R/W + Pull requests R/W there and is installed nowhere else, so
+        # the token can write the mirror and nothing else (#2742).
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.MIRROR_APP_ID }}
+          private-key: ${{ secrets.MIRROR_APP_PRIVATE_KEY }}
+          owner: lgtm-hq
+          repositories: lintro-pre-commit
+          # Explicitly scope the minted token to what the bump needs, so it
+          # never inherits any other installation permission.
+          permission-contents: write
+          permission-pull-requests: write
+
       - name: Checkout lintro-pre-commit mirror
         if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lgtm-hq/lintro-pre-commit
-          token: ${{ secrets.MIRROR_REPO_TOKEN }}
+          token: ${{ steps.mirror-app.outputs.token }}
           path: mirror
 
       - name: Publish mirror release
         if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
         env:
-          GH_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
+          GH_TOKEN: ${{ steps.mirror-app.outputs.token }}
           MIRROR_DIR: mirror
+          MIRROR_REPO: lgtm-hq/lintro-pre-commit
           BUMP_SCRIPT: >-
             ${{ github.workspace }}/lintro/scripts/ci/mirror/bump_pin.py
           LINTRO_VERSION: ${{ steps.resolve.outputs.version }}

@@ -159,7 +159,8 @@ Release automation:
 - There is no TestPyPI staging lane. Releases are verified by installing the published
   package from PyPI, plus the binary and MCP gates.
 - The `lintro-pre-commit` mirror bump is skipped with a visible warning in the run
-  summary until the `MIRROR_REPO_TOKEN` secret exists; the release itself stays green.
+  summary until the `MIRROR_APP_ID` / `MIRROR_APP_PRIVATE_KEY` secrets exist; the
+  release itself stays green.
 
 For detailed contribution guidelines, see the project documentation or contact a
 maintainer.

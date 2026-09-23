@@ -3531,12 +3531,19 @@ def test_mirror_release_serializes_with_global_concurrency() -> None:
 
 
 def test_mirror_release_job_has_timeout() -> None:
-    """Mirror bump inherits a bounded job timeout instead of the 6-hour default."""
+    """Mirror bump inherits a bounded job timeout instead of the 6-hour default.
+
+    50 minutes covers the configured step budgets (#2742): the ~20-minute
+    PyPI wheel wait (30 x (30s curl + 10s sleep)), ~6 minutes of wheel
+    verify/download, 1-2 minutes of mint/commit/PR, the bounded 15-minute
+    auto-merge poll, and slack — GitHub must not kill the job while it
+    polls.
+    """
     workflow = _load_workflow(name="mirror-release.yml")
 
     timeout = workflow["jobs"]["mirror-bump"]["timeout-minutes"]
     assert_that(timeout).is_instance_of(int)
-    assert_that(timeout).is_equal_to(20)
+    assert_that(timeout).is_equal_to(50)
 
 
 def test_mirror_release_is_called_not_release_triggered() -> None:
@@ -3559,7 +3566,8 @@ def test_mirror_release_is_called_not_release_triggered() -> None:
         triggers["workflow_call"]["inputs"]["release_tag"]["required"],
     ).is_true()
     assert_that(triggers["workflow_call"]["secrets"]).contains_key(
-        "MIRROR_REPO_TOKEN",
+        "MIRROR_APP_ID",
+        "MIRROR_APP_PRIVATE_KEY",
     )
     assert_that(triggers["workflow_dispatch"]["inputs"]).contains_key("release_tag")
     assert_that(workflow["jobs"]["mirror-bump"]["env"]["RELEASE_TAG"]).is_equal_to(
@@ -3582,8 +3590,11 @@ def test_tag_pipeline_calls_the_mirror_after_the_github_release() -> None:
     assert_that(job["uses"]).is_equal_to("./.github/workflows/mirror-release.yml")
     assert_that(job["needs"]).contains("github-release")
     assert_that(job["with"]["release_tag"]).is_equal_to("${{ github.ref_name }}")
-    assert_that(job["secrets"]["MIRROR_REPO_TOKEN"]).is_equal_to(
-        "${{ secrets.MIRROR_REPO_TOKEN }}",
+    assert_that(job["secrets"]["MIRROR_APP_ID"]).is_equal_to(
+        "${{ secrets.MIRROR_APP_ID }}",
+    )
+    assert_that(job["secrets"]["MIRROR_APP_PRIVATE_KEY"]).is_equal_to(
+        "${{ secrets.MIRROR_APP_PRIVATE_KEY }}",
     )
     # `secrets: inherit` would hand the call every org/repo secret.
     assert_that(job["secrets"]).is_instance_of(dict)
@@ -3598,12 +3609,12 @@ def test_tag_pipeline_calls_the_mirror_after_the_github_release() -> None:
 
 
 def test_mirror_token_guard_probes_the_secret_into_an_output() -> None:
-    """A guard job turns the unreadable secret into a job output (#2622).
+    """A guard job turns the unreadable secrets into a job output (#2622).
 
     Secrets cannot be referenced from a job-level ``if``, so the only way to
-    gate the mirror call on ``MIRROR_REPO_TOKEN`` existing is to read it into
-    a step env var and re-export the verdict. The job itself needs nothing
-    from the repo, hence ``permissions: {}``.
+    gate the mirror call on the mirror App credentials existing is to read
+    them into a step env var and re-export the verdict. The job itself needs
+    nothing from the repo, hence ``permissions: {}``.
     """
     workflow = _load_workflow(name="publish-pypi-on-tag.yml")
     job = workflow["jobs"]["mirror-token"]
@@ -3616,8 +3627,11 @@ def test_mirror_token_guard_probes_the_secret_into_an_output() -> None:
 
     step = next(s for s in _job_steps(workflow, job="mirror-token") if "run" in s)
     assert_that(step["id"]).is_equal_to("probe")
-    assert_that(step["env"]["TOKEN"]).is_equal_to(
-        "${{ secrets.MIRROR_REPO_TOKEN }}",
+    assert_that(step["env"]["APP_ID"]).is_equal_to(
+        "${{ secrets.MIRROR_APP_ID }}",
+    )
+    assert_that(step["env"]["APP_KEY"]).is_equal_to(
+        "${{ secrets.MIRROR_APP_PRIVATE_KEY }}",
     )
     run = step["run"]
     assert_that(run).contains("has_token=true")
@@ -3630,10 +3644,12 @@ def test_mirror_token_guard_warns_when_the_secret_is_absent() -> None:
     """The skip is loud: an annotation plus a step-summary line (#2622)."""
     workflow = _load_workflow(name="publish-pypi-on-tag.yml")
     step = next(s for s in _job_steps(workflow, job="mirror-token") if "run" in s)
-    message = "MIRROR_REPO_TOKEN is not set; lintro-pre-commit mirror bump skipped"
+    message_a = "MIRROR_APP_ID / MIRROR_APP_PRIVATE_KEY are not both set;"
+    message_b = "lintro-pre-commit mirror bump skipped"
 
     run = step["run"]
-    assert_that(run).contains(f'msg="{message}"')
+    assert_that(run).contains(f'msg="{message_a}"')
+    assert_that(run).contains(f'msg="${{msg}} {message_b}"')
     assert_that(run).contains('echo "::warning::${msg}"')
     assert_that(run).contains('echo "${msg}." >>"$GITHUB_STEP_SUMMARY"')
 
@@ -3656,12 +3672,12 @@ def test_mirror_release_is_gated_on_the_token_guard() -> None:
 
 
 def test_mirror_release_job_is_read_only_in_source_repo() -> None:
-    """Cross-repo writes use MIRROR_REPO_TOKEN; source-repo perms stay read-only."""
+    """Cross-repo writes use the mirror App token; source-repo perms stay minimal."""
     workflow = _load_workflow(name="mirror-release.yml")
 
     assert_that(workflow["permissions"]).is_equal_to({})
     assert_that(workflow["jobs"]["mirror-bump"]["permissions"]).is_equal_to(
-        {"contents": "read"},
+        {"contents": "read", "attestations": "read"},
     )
 
 
@@ -3676,6 +3692,9 @@ def test_mirror_release_hardens_runner_with_blocked_egress() -> None:
     assert_that(endpoints).contains("pypi.org:443")
     assert_that(endpoints).contains("files.pythonhosted.org:443")
     assert_that(endpoints).contains("api.github.com:443")
+    # gh release download follows redirects to this host; the attestation
+    # bundle store (*.blob.core.windows.net) is enforced by the ratchet test.
+    assert_that(endpoints).contains("release-assets.githubusercontent.com:443")
 
 
 def test_mirror_release_actions_are_sha_pinned() -> None:
@@ -3692,22 +3711,76 @@ def test_mirror_release_actions_are_sha_pinned() -> None:
         assert_that(_SHA_PIN_RE.search(ref)).described_as(ref).is_not_none()
 
 
-def test_mirror_release_uses_cross_repo_token() -> None:
-    """The mirror checkout and publish step authenticate with MIRROR_REPO_TOKEN."""
+def test_mirror_release_mints_app_token_instead_of_a_pat() -> None:
+    """Mirror checkout and publish authenticate with a minted App token (#2742).
+
+    The bump commit must be GitHub-signed and attributed to the
+    ``lgtm-mirror-bot`` App account for the mirror's signature and
+    unattributed-changes rulesets; the retired plain-PAT secret could
+    provide neither. The mint is scoped to the mirror repo explicitly.
+    """
     workflow = _load_workflow(name="mirror-release.yml")
     steps = _job_steps(workflow, job="mirror-bump")
+
+    mint = next(
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/create-github-app-token@")
+    )
+    assert_that(mint["with"]["app-id"]).contains("secrets.MIRROR_APP_ID")
+    assert_that(mint["with"]["private-key"]).contains(
+        "secrets.MIRROR_APP_PRIVATE_KEY",
+    )
+    assert_that(mint["with"]["owner"]).is_equal_to("lgtm-hq")
+    assert_that(mint["with"]["repositories"]).is_equal_to("lintro-pre-commit")
+    # The minted token is scoped to exactly what the bump needs.
+    assert_that(mint["with"]["permission-contents"]).is_equal_to("write")
+    assert_that(mint["with"]["permission-pull-requests"]).is_equal_to("write")
 
     checkout = next(
         step
         for step in steps
         if step.get("with", {}).get("repository") == "lgtm-hq/lintro-pre-commit"
     )
-    assert_that(checkout["with"]["token"]).contains("secrets.MIRROR_REPO_TOKEN")
+    assert_that(checkout["with"]["token"]).contains("steps.mirror-app.outputs.token")
 
     publish = next(
         step for step in steps if "publish-mirror-release.sh" in step.get("run", "")
     )
-    assert_that(publish["env"]["GH_TOKEN"]).contains("secrets.MIRROR_REPO_TOKEN")
+    assert_that(publish["env"]["GH_TOKEN"]).contains("steps.mirror-app.outputs.token")
+
+
+def test_mirror_release_verifies_the_wheel_before_the_bump() -> None:
+    """The wheel is proven against the release gate before any mirror write (#2742).
+
+    wait-for-pypi-wheel.sh only proves existence; the verify step compares
+    PyPI's sha256 digest against the release's SHA256SUMS and checks the
+    build attestation, both before the App token is even minted.
+    """
+    workflow = _load_workflow(name="mirror-release.yml")
+    steps = _job_steps(workflow, job="mirror-bump")
+
+    def step_order(step: dict[str, Any]) -> int:
+        return steps.index(step)
+
+    verify = next(
+        step for step in steps if "verify_release_wheel.sh" in step.get("run", "")
+    )
+    mint = next(
+        step
+        for step in steps
+        if step.get("uses", "").startswith("actions/create-github-app-token@")
+    )
+    publish = next(
+        step for step in steps if "publish-mirror-release.sh" in step.get("run", "")
+    )
+    assert_that(step_order(verify)).is_less_than(step_order(mint))
+    assert_that(step_order(mint)).is_less_than(step_order(publish))
+
+    assert_that(verify["env"]["ATTESTATION_REPO"]).is_equal_to("lgtm-hq/py-lintro")
+    assert_that(verify["env"]["DIST_SIGNER_WORKFLOW"]).contains(
+        "reusable-build-python-dist.yml",
+    )
 
 
 def test_mirror_release_skips_prereleases() -> None:
@@ -3716,13 +3789,21 @@ def test_mirror_release_skips_prereleases() -> None:
     steps = _job_steps(workflow, job="mirror-bump")
     guard = "steps.resolve.outputs.is_prerelease == 'false'"
 
-    for needle in ("wait-for-pypi-wheel.sh", "publish-mirror-release.sh"):
+    for needle in (
+        "wait-for-pypi-wheel.sh",
+        "verify_release_wheel.sh",
+        "publish-mirror-release.sh",
+    ):
         step = next(s for s in steps if needle in s.get("run", ""))
         assert_that(step["if"]).contains(guard)
         # The tag itself is the only prerelease signal on the call path: there
         # is no release event payload to read `prerelease` from (#2599).
         assert_that(step["if"]).does_not_contain("github.event.release")
-        assert_that(step.get("env", {})).contains_key("LINTRO_VERSION")
+
+    # wait-for-pypi-wheel and publish take the version as an argument; the
+    # verify step reads it from the VERSION env var its script requires.
+    verify = next(s for s in steps if "verify_release_wheel.sh" in s.get("run", ""))
+    assert_that(verify["env"]["VERSION"]).contains("steps.resolve.outputs.version")
 
     mirror_checkout = next(
         s
@@ -3743,6 +3824,7 @@ def test_mirror_release_scripts_are_executable() -> None:
     scripts = (
         _REPO_ROOT / "scripts" / "ci" / "mirror" / "resolve-version.sh",
         _REPO_ROOT / "scripts" / "ci" / "mirror" / "wait-for-pypi-wheel.sh",
+        _REPO_ROOT / "scripts" / "ci" / "mirror" / "verify_release_wheel.sh",
         _REPO_ROOT / "scripts" / "ci" / "mirror" / "publish-mirror-release.sh",
         _REPO_ROOT / "scripts" / "ci" / "mirror" / "bump_pin.py",
     )

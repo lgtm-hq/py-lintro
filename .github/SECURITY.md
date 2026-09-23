@@ -52,12 +52,13 @@ documentation of their purposes and security considerations.
 
 ### Required Secrets
 
-| Secret Name                   | Purpose                                             | Scope                                      | Rotation                  |
-| ----------------------------- | --------------------------------------------------- | ------------------------------------------ | ------------------------- |
-| `GITHUB_TOKEN`                | Built-in token for GitHub API access                | Automatic                                  | Per-workflow              |
-| `MIRROR_REPO_TOKEN`           | Bump/tag the lintro-pre-commit mirror on release    | Contents + pull-requests write on mirror   | On compromise or key roll |
-| `HOMEBREW_TAP_DISPATCH_TOKEN` | Trigger tap formula updates via repository_dispatch | Dispatch-only on `homebrew-tap` (no write) | On compromise or key roll |
-| `CODECOV_TOKEN`               | Upload coverage reports                             | Codecov org                                | As needed                 |
+| Secret Name                   | Purpose                                             | Scope                                                 | Rotation                  |
+| ----------------------------- | --------------------------------------------------- | ----------------------------------------------------- | ------------------------- |
+| `GITHUB_TOKEN`                | Built-in token for GitHub API access                | Automatic                                             | Per-workflow              |
+| `MIRROR_APP_ID`               | lgtm-mirror-bot App: bump/tag the mirror on release | Contents + pull-requests write on mirror (App-scoped) | On compromise or key roll |
+| `MIRROR_APP_PRIVATE_KEY`      | lgtm-mirror-bot App private key (PEM)               | See `MIRROR_APP_ID`                                   | On compromise or key roll |
+| `HOMEBREW_TAP_DISPATCH_TOKEN` | Trigger tap formula updates via repository_dispatch | Dispatch-only on `homebrew-tap` (no write)            | On compromise or key roll |
+| `CODECOV_TOKEN`               | Upload coverage reports                             | Codecov org                                           | As needed                 |
 
 ### Optional Secrets
 

@@ -408,15 +408,16 @@ jobs:
         pipelines.actions.githubusercontent.com:443
 
   mirror-token:
-    name: Check mirror token
+    name: Check mirror app config
     # Secrets are not readable from a job-level ``if``, so the presence of
-    # MIRROR_REPO_TOKEN is resolved in a step and re-exported as an output the
-    # mirror job can gate on. Until the owner creates the secret the mirror
-    # bump is skipped with a warning instead of failing the whole tag run
-    # (#2622). Stable releases only: the mirror pins the wheel pre-commit
-    # consumers install, so a checkpoint prerelease must never bump it; gated
-    # explicitly like Homebrew and npm (the v0.160.3a4 checkpoint ran the
-    # lane, harmlessly, #2562).
+    # the lgtm-mirror-bot App credentials (MIRROR_APP_ID /
+    # MIRROR_APP_PRIVATE_KEY) is resolved in a step and re-exported as an
+    # output the mirror job can gate on. Until the owner sets both secrets
+    # the mirror bump is skipped with a warning instead of failing the whole
+    # tag run (#2622). Stable releases only: the mirror pins the wheel
+    # pre-commit consumers install, so a checkpoint prerelease must never
+    # bump it; gated explicitly like Homebrew and npm (the v0.160.3a4
+    # checkpoint ran the lane, harmlessly, #2562).
     needs: [classify-tag, github-release]
     if: >-
       ${{ !startsWith(github.ref_name, 'actions-v') &&
@@ -426,15 +427,17 @@ jobs:
     outputs:
       has_token: ${{ steps.probe.outputs.has_token }}
     steps:
-      - name: Probe MIRROR_REPO_TOKEN
+      - name: Probe mirror App credentials
         id: probe
         env:
-          TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
+          APP_ID: ${{ secrets.MIRROR_APP_ID }}
+          APP_KEY: ${{ secrets.MIRROR_APP_PRIVATE_KEY }}
         run: |
-          msg="MIRROR_REPO_TOKEN is not set; lintro-pre-commit mirror bump skipped"
-          if [ -n "$TOKEN" ]; then
+          msg="MIRROR_APP_ID / MIRROR_APP_PRIVATE_KEY are not both set;"
+          msg="${msg} lintro-pre-commit mirror bump skipped"
+          if [ -n "$APP_ID" ] && [ -n "$APP_KEY" ]; then
             echo "has_token=true" >>"$GITHUB_OUTPUT"
-            echo "MIRROR_REPO_TOKEN is set; mirror bump will run." \
+            echo "Mirror App credentials are set; mirror bump will run." \
               >>"$GITHUB_STEP_SUMMARY"
           else
             echo "has_token=false" >>"$GITHUB_OUTPUT"
@@ -455,16 +458,21 @@ jobs:
       needs.mirror-token.outputs.has_token == 'true' }}
     uses: ./.github/workflows/mirror-release.yml
     permissions:
-      # read: sparse checkout of scripts/ci/mirror in this repo. Mirror-side
-      # writes use MIRROR_REPO_TOKEN, not this token. A called workflow may
-      # not request more than its caller grants, so this must stay a superset
-      # of mirror-release.yml's job permissions (#2484, #2563).
+      # read: sparse checkout of scripts/ci/mirror in this repo, plus the
+      # release assets and attestations the wheel proof reads. Mirror-side
+      # writes use the lgtm-mirror-bot App token, not this token. A called
+      # workflow may not request more than its caller grants, so this must
+      # stay a superset of mirror-release.yml's job permissions (#2484,
+      # #2563).
       contents: read
+      attestations: read
     with:
       release_tag: ${{ github.ref_name }}
-    # Named secret rather than `secrets: inherit`: the call needs exactly one.
+    # Named secrets rather than `secrets: inherit`: the call needs exactly
+    # the mirror App credentials.
     secrets:
-      MIRROR_REPO_TOKEN: ${{ secrets.MIRROR_REPO_TOKEN }}
+      MIRROR_APP_ID: ${{ secrets.MIRROR_APP_ID }}
+      MIRROR_APP_PRIVATE_KEY: ${{ secrets.MIRROR_APP_PRIVATE_KEY }}
 
   build-binaries:
     name: Build platform binaries
