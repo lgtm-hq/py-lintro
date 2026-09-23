@@ -18,7 +18,7 @@ name: Release - Mirror Version Bump
 # (MIRROR_APP_ID / MIRROR_APP_PRIVATE_KEY, installed on lintro-pre-commit
 # only): the App token mints the bump commit via createCommitOnBranch, so it
 # is GitHub-signed and attributed, and merges the bump PR — the mirror's
-# rulesets require both (#2742). MIRROR_REPO_TOKEN is gone.
+# rulesets require both (#2742).
 
 'on':
   workflow_call:
@@ -53,7 +53,12 @@ jobs:
   mirror-bump:
     name: Bump lintro-pre-commit mirror
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # 50 min covers the configured step budgets: PyPI wheel wait ~20
+    # (30 x (30s curl + 10s sleep)), wheel verify/download ~6 (300s
+    # download + metadata + bundle), mint/commit/PR 1-2, merge poll 15
+    # (MERGE_TIMEOUT_SECONDS) — plus slack, so GitHub never kills the job
+    # while it polls.
+    timeout-minutes: 50
     permissions:
       # read: checkout py-lintro CI scripts; also read the release's
       # SHA256SUMS + wheel assets and its attestations for the wheel proof.

@@ -319,7 +319,7 @@ Delete both variables once a validation round is recorded.
   `lintro-pre-commit`. Its installation token mints the mirror bump commit via
   `createCommitOnBranch` (GitHub-signed, attributed to `lgtm-mirror-bot[bot]`, as the
   mirror's rulesets require) and merges the bump PR; used by `mirror-release.yml`
-  (#2742). `MIRROR_REPO_TOKEN` (a plain PAT) is retired.
+  (#2742), which replaced the retired plain-PAT secret.
 
 ## Concurrency
 

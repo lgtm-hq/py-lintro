@@ -40,8 +40,13 @@ Behavior:
   * Otherwise recreates the bump branch on the mirror's current main via
     createCommitOnBranch (signed + attributed), opens the PR, enables
     auto-merge, polls until MERGED, then tags vX.Y.Z on main.
-  * A stale bump branch from a failed earlier run is deleted and recreated
-    (dirty-PR auto-heal); its open PR closes with the branch.
+  * Refuses to run when the mirror has "Allow auto-merge" turned off — the
+    merge would fail after the checks anyway; the failure names the setting
+    and the PR to fix (#2742).
+  * A stale bump branch is healed only when its PR cannot merge: an open,
+    clean PR from an earlier run is reused (auto-merge re-armed and polled)
+    instead of being thrown away; a dirty/closed one is deleted and
+    recreated from current main (dirty-PR auto-heal).
 EOF
 	exit 0
 fi
@@ -68,7 +73,11 @@ push_tag() {
 	# git tag -a needs a tagger identity; the runner's checkout has none
 	# (the commit itself is API-created and needs no local identity).
 	git config user.name "${GIT_USER_NAME:-lgtm-mirror-bot[bot]}"
-	git config user.email "${GIT_USER_EMAIL:-lgtm-mirror-bot[bot]@users.noreply.github.com}"
+	# App-form noreply email (ID + username) so the tag object is attributed
+	# to the App account like the commit; the annotated tag itself stays
+	# unsigned — the mirror rulesets govern commits, not tags.
+	git config user.email \
+		"${GIT_USER_EMAIL:-5047677+lgtm-mirror-bot[bot]@users.noreply.github.com}"
 	if tag_exists_remote "$TAG"; then
 		log_info "Tag ${TAG} already exists on the mirror; nothing to tag"
 		return 0
@@ -77,6 +86,66 @@ push_tag() {
 	git tag -a "$TAG" -m "$TAG"
 	git push origin "$TAG"
 	log_success "Pushed mirror tag ${TAG}"
+}
+
+# --- merge without racing the required checks --------------------------------
+
+require_auto_merge_enabled() {
+	# `gh pr merge --auto` is refused by the API unless the repo setting is
+	# on; fail fast naming the setting and where to flip it (#2742).
+	if [[ "$(gh api "repos/${MIRROR_REPO}" --jq .allow_auto_merge)" != "true" ]]; then
+		log_error "Auto-merge is disabled on ${MIRROR_REPO}; enable \"Allow auto-merge\" in the repo settings (owners) before the mirror bump can merge"
+		exit 1
+	fi
+}
+
+merge_mirror_pr() {
+	require_auto_merge_enabled
+	log_info "Enabling auto-merge (squash) for mirror PR #${pr_number}"
+	# No --delete-branch: with --auto gh cannot delete the branch at the
+	# later auto-merge moment, and the mirror keeps branches; the ref is
+	# removed explicitly after MERGED is confirmed.
+	gh pr merge "$pr_number" --squash --auto
+
+	deadline=$((SECONDS + MERGE_TIMEOUT_SECONDS))
+	while ((SECONDS < deadline)); do
+		state="$(gh pr view "$pr_number" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
+		if [[ "$state" == "MERGED" ]]; then
+			log_success "Mirror PR #${pr_number} merged"
+			return 0
+		fi
+		# A closed PR can never merge; stop early instead of burning the
+		# whole bound on it.
+		if [[ "$state" == "CLOSED" ]]; then
+			log_error "Mirror PR #${pr_number} was closed without merging: https://github.com/${MIRROR_REPO}/pull/${pr_number}"
+			exit 1
+		fi
+		log_info "Mirror PR #${pr_number} state ${state}; waiting for the required checks"
+		sleep "$((MERGE_POLL_SECONDS < deadline - SECONDS ? MERGE_POLL_SECONDS : deadline - SECONDS))"
+	done
+
+	log_error "Mirror PR #${pr_number} did not merge within ${MERGE_TIMEOUT_SECONDS}s; finish it by hand: https://github.com/${MIRROR_REPO}/pull/${pr_number}"
+	exit 1
+}
+
+finish_after_merge() {
+	# The bump branch is now part of main; drop the stale ref (the mirror
+	# keeps branches on merge, so gh never deleted it).
+	gh api -X DELETE "repos/${MIRROR_REPO}/git/refs/heads/${BRANCH}" >/dev/null 2>&1 || true
+
+	git fetch origin main --quiet
+	git checkout -q main
+	git reset -q --hard origin/main
+	push_tag
+
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		{
+			echo "pr-number=$pr_number"
+			echo "tag=$TAG"
+		} >>"$GITHUB_OUTPUT"
+	fi
+
+	log_success "Mirror release ${TAG} published (PR #${pr_number})"
 }
 
 # Sync to the mirror's current main BEFORE touching pyproject.toml: the pin
@@ -99,11 +168,31 @@ fi
 
 base_oid="$(git rev-parse origin/main)"
 
-# Dirty-PR auto-heal (#2742): a branch left over from a failed earlier run
-# replays the same conflict every rerun. Delete it and recreate from the
-# mirror's current main; its stale PR closes with the branch.
+# Reuse-or-heal (#2742 review): a branch left over from an earlier run is
+# only thrown away when its PR cannot merge. An open, clean PR (auto-merge
+# still pending from a cancelled or timed-out run) is reused as-is; a dirty
+# one would replay the same conflict every rerun and is healed by
+# recreation from the mirror's current main, which cannot conflict. Its
+# stale PR closes with the deleted branch.
+existing_pr=""
 if git ls-remote --heads origin "$BRANCH" | grep -q .; then
-	log_warning "Bump branch ${BRANCH} already exists; recreating it from origin/main"
+	existing_pr="$(gh pr list --head "$BRANCH" --state open --json number \
+		--jq '.[0].number' || true)"
+	if [[ -n "$existing_pr" ]]; then
+		pr_state="$(gh pr view "$existing_pr" --json state,mergeStateStatus \
+			--jq '.state + " " + .mergeStateStatus')"
+		if [[ "$pr_state" == "OPEN CLEAN" || "$pr_state" == "OPEN BLOCKED" ]]; then
+			log_info "Reusing open PR #${existing_pr} for ${BRANCH} (clean; re-arming auto-merge)"
+			pr_number="$existing_pr"
+			pr_url="https://github.com/${MIRROR_REPO}/pull/${pr_number}"
+			merge_mirror_pr
+			finish_after_merge
+			exit 0
+		fi
+		log_warning "PR #${existing_pr} for ${BRANCH} is not mergeable (${pr_state}); healing the branch"
+	else
+		log_warning "Bump branch ${BRANCH} exists with no open PR; recreating it from origin/main"
+	fi
 	gh api -X DELETE "repos/${MIRROR_REPO}/git/refs/heads/${BRANCH}"
 fi
 
@@ -142,11 +231,13 @@ Refs lgtm-hq/py-lintro (mirror-release automation)" \
 			--arg contents "$(base64 <pyproject.toml | tr -d '\n')" \
 			'{
 			  query: $query,
-			  input: {
-			    branch: { repositoryNameWithOwner: $repo, branchName: $branch },
-			    expectedHeadOid: $oid,
-			    message: { headline: $headline, body: $body },
-			    fileChanges: { additions: [ { path: $path, contents: $contents } ] }
+			  variables: {
+			    input: {
+			      branch: { repositoryNameWithOwner: $repo, branchName: $branch },
+			      expectedHeadOid: $oid,
+			      message: { headline: $headline, body: $body },
+			      fileChanges: { additions: [ { path: $path, contents: $contents } ] }
+			    }
 			  }
 			}'
 	} | gh api graphql --input - |
@@ -172,37 +263,14 @@ pr_url="$(
 )"
 pr_number="${pr_url##*/}"
 
+log_info "Opening mirror version-bump PR"
+pr_url="$(
+	gh pr create --base main --head "$BRANCH" \
+		--title "$PR_TITLE" --body "$PR_BODY"
+)"
+pr_number="${pr_url##*/}"
+
 # --- merge without racing the required checks --------------------------------
 
-log_info "Enabling auto-merge (squash) for mirror PR #${pr_number}"
-gh pr merge "$pr_number" --squash --delete-branch --auto
-
-deadline=$((SECONDS + MERGE_TIMEOUT_SECONDS))
-while ((SECONDS < deadline)); do
-	state="$(gh pr view "$pr_number" --json state --jq .state 2>/dev/null || echo UNKNOWN)"
-	if [[ "$state" == "MERGED" ]]; then
-		log_success "Mirror PR #${pr_number} merged"
-		break
-	fi
-	log_info "Mirror PR #${pr_number} state ${state}; waiting ${MERGE_POLL_SECONDS}s for the required checks"
-	sleep "$MERGE_POLL_SECONDS"
-done
-
-if [[ "${state:-UNKNOWN}" != "MERGED" ]]; then
-	log_error "Mirror PR #${pr_number} did not merge within ${MERGE_TIMEOUT_SECONDS}s; finish it by hand: https://github.com/${MIRROR_REPO}/pull/${pr_number}"
-	exit 1
-fi
-
-git fetch origin main --quiet
-git checkout -q main
-git reset -q --hard origin/main
-push_tag
-
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	{
-		echo "pr-number=$pr_number"
-		echo "tag=$TAG"
-	} >>"$GITHUB_OUTPUT"
-fi
-
-log_success "Mirror release ${TAG} published (PR #${pr_number})"
+merge_mirror_pr
+finish_after_merge

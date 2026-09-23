@@ -233,12 +233,19 @@ def test_publish_script_creates_commit_via_the_api_and_never_races_merge() -> No
     assert_that(body).contains("createCommitOnBranch")
     assert_that(body).contains("expectedHeadOid")
     assert_that(body).does_not_contain("git commit")
-    # Merge: auto-merge, then a bounded poll, never an immediate merge.
-    assert_that(body).contains("--squash --delete-branch --auto")
+    # The mutation input travels under variables.input (a raw GraphQL HTTP
+    # body delivers variables there; a top-level input: is rejected).
+    assert_that(body).contains("variables: {")
+    assert_that(body).contains("input: {")
+    # Merge: the repo setting is checked, auto-merge armed, then a bounded
+    # poll — never an immediate merge.
+    assert_that(body).contains("allow_auto_merge")
+    assert_that(body).contains("--squash --auto")
     assert_that(body).contains("MERGE_TIMEOUT_SECONDS")
     assert_that(body).contains("MERGE_POLL_SECONDS")
     assert_that(body).contains('== "MERGED"')
-    # Timeout prints the PR URL for a human to finish.
+    # Closed PRs stop the poll early; timeout prints the PR URL.
+    assert_that(body).contains('== "CLOSED"')
     assert_that(body).contains("pull/${pr_number}")
 
 
@@ -258,6 +265,21 @@ def test_publish_script_heals_a_stale_bump_branch() -> None:
     # The ref must exist before the commit mutation (fresh + heal runs).
     assert_that(body).contains('gh api -X POST "repos/${MIRROR_REPO}/git/refs"')
     assert_that(body).does_not_contain("git rebase")
+
+
+def test_publish_script_reuses_a_healthy_open_pr_before_healing() -> None:
+    """A mergeable open PR is reused; only unmergeable branches are healed.
+
+    An earlier run's auto-merge can still be pending; deleting the branch
+    would close a healthy PR and restart its checks from zero. The script
+    asks for the PR's state first and only heals a dirty/abandoned branch.
+    """
+    body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
+
+    assert_that(body).contains("gh pr list --head")
+    assert_that(body).contains("mergeStateStatus")
+    assert_that(body).contains("Reusing open PR")
+    assert_that(body).contains("healing the branch")
 
 
 def _write_fake_curl(bin_dir: Path, payload: str) -> None:
@@ -342,6 +364,27 @@ def _wheel_metadata(digest: str) -> str:
             ],
         },
     )
+
+
+def _wheel_metadata_extra(digest: str, extra_name: str) -> str:
+    """PyPI JSON with the manifest wheel plus an extra same-version wheel.
+
+    The extra entry is *unmanifested*: not in the release SHA256SUMS. Both
+    wheels must clear the per-wheel digest + attestation loop before the
+    set-equality check rejects the extra one.
+    """
+    import json
+
+    base = json.loads(_wheel_metadata(digest))
+    base["urls"].append(
+        {
+            "packagetype": "bdist_wheel",
+            "filename": extra_name,
+            "url": f"https://files.pythonhosted.org/packages/bb/{extra_name}",
+            "digests": {"sha256": digest},
+        },
+    )
+    return json.dumps(base)
 
 
 def _setup_wheel_env(
@@ -526,6 +569,29 @@ def test_verify_wheel_rejects_tampered_downloaded_bytes(tmp_path: Path) -> None:
 
     assert_that(result.returncode).is_not_equal_to(0)
     assert_that(result.stderr).contains("sha256 mismatch for the downloaded")
+
+
+def test_verify_wheel_rejects_extra_pypi_wheel_not_in_manifest(tmp_path: Path) -> None:
+    """An extra same-version wheel on PyPI fails the gate (set equality).
+
+    Verifying only the first bdist_wheel would let pip/pre-commit install an
+    unmanifested wheel while the gate passes on the manifest-listed one; the
+    PyPI wheel set must equal the manifest wheel set.
+    """
+    extra = "lintro-1.2.3-cp312-cp312-macosx_11_0_arm64.whl"
+    env = _setup_wheel_env(
+        tmp_path,
+        metadata=_wheel_metadata_extra(WHEEL_SHA, extra),
+        manifest=f"{WHEEL_SHA}  {WHEEL_NAME}\n",
+    )
+
+    result = _run_verify_wheel(env)
+
+    assert_that(result.returncode).is_not_equal_to(0)
+    # The per-wheel loop refuses the unmanifested wheel first ("has no entry
+    # for"); the set-equality check is the backstop — either guard must fire.
+    combined = result.stderr + result.stdout
+    assert_that(combined).contains("has no entry for")
 
 
 @pytest.mark.parametrize("missing_var", ["ATTESTATION_REPO", "DIST_SIGNER_WORKFLOW"])

@@ -4,10 +4,11 @@
 #
 # The script drives git, gh and the GraphQL API against a real mirror
 # checkout, so these tests pin its control flow with stubbed gh/git
-# behaviour: (a) auto-merge enabled and MERGED within the bound, (b) the
-# merge poll timing out fails with the PR URL, (c) the rebase-onto-main
-# step is gone and the stale-branch heal runs instead, and the bump commit
-# is created via createCommitOnBranch, never plain git commit.
+# behaviour: the bump commit is created via createCommitOnBranch with a
+# correctly wrapped GraphQL payload, auto-merge is guarded by the repo
+# setting, the merge poll handles OPEN → MERGED and fails fast on closed
+# PRs, a healthy open PR is reused instead of healed, and a stale branch is
+# deleted and recreated — never plain git commit or rebase.
 
 load "../../helpers/common"
 
@@ -20,15 +21,39 @@ setup() {
 	mkdir -p "${STUB_BIN}"
 
 	# Stub gh: records every invocation, answers the PR state poll from
-	# GH_STATES (one state per poll, last one repeats), and fakes `pr list`
-	# (no open PR) and `pr create` (a fixed URL).
+	# GH_STATES (one state per poll, last one repeats), fakes `pr list` /
+	# `pr view --json state,mergeStateStatus` / `pr create`, and CAPTURES
+	# the GraphQL payload to graphql.json instead of dropping stdin.
 	GH_LOG="${BATS_TEST_TMPDIR}/gh.log"
+	GRAPHQL_JSON="${BATS_TEST_TMPDIR}/graphql.json"
 	: >"${GH_LOG}"
 	cat >"${STUB_BIN}/gh" <<STUB
 #!/usr/bin/env bash
 echo "\$*" >>"${GH_LOG}"
 if [[ "\$1" == "pr" && "\$2" == "list" ]]; then
-	echo ""
+	if [[ "\${GH_OPEN_PR:-0}" == "1" ]]; then
+		echo "22"
+	else
+		echo ""
+	fi
+	exit 0
+fi
+if [[ "\$1" == "pr" && "\$2" == "view" ]]; then
+	if [[ "\$*" == *mergeStateStatus* ]]; then
+		echo "\${GH_PR_VIEW:-MERGED MERGED}"
+	else
+		# One GH_STATES entry per poll, last one repeats; the poll index
+		# lives in a file because each gh call is a fresh process.
+		POLL_N="${BATS_TEST_TMPDIR}/poll.n"
+		touch "\${POLL_N}"
+		poll=\$(cat "\${POLL_N}")
+		n=\$(printf '%s\n' "\$GH_STATES" | tr ',' '\\n' | wc -l)
+		if [[ "\$poll" -lt "\$n" ]]; then
+			poll=\$((poll + 1))
+			echo "\$poll" >"\${POLL_N}"
+		fi
+		printf '%s\n' "\$GH_STATES" | tr ',' '\\n' | sed -n "\${poll}p"
+	fi
 	exit 0
 fi
 if [[ "\$1" == "pr" && "\$2" == "create" ]]; then
@@ -36,13 +61,16 @@ if [[ "\$1" == "pr" && "\$2" == "create" ]]; then
 	exit 0
 fi
 if [[ "\$1" == "pr" && "\$2" == "merge" ]]; then
-	exit 0
+	exit \${GH_PR_MERGE_RC:-0}
 fi
-if [[ "\$1" == "pr" && "\$2" == "view" ]]; then
-	echo "\${GH_STATES:-OPEN}"
+if [[ "\$1" == "api" && "\$2" == "repos/lgtm-hq/lintro-pre-commit" && "\$3" == "--jq" ]]; then
+	echo "\${GH_ALLOW_AUTO_MERGE:-true}"
 	exit 0
 fi
 if [[ "\$1" == "api" && "\$2" == "graphql" ]]; then
+	# Consume stdin (a real gh does too — dropping it EPIPEs the producer
+	# under Linux pipefail) and persist the payload for assertions.
+	cat >"${GRAPHQL_JSON}"
 	echo '{"data":{"createCommitOnBranch":{"commit":{"oid":"created0000000000000000000000000000000a"}}}}'
 	exit 0
 fi
@@ -83,10 +111,8 @@ exit 0
 STUB
 	chmod +x "${STUB_BIN}/git"
 
-	# Stub jq passthrough (real jq is fine; keep PATH simple instead).
 	MIRROR_DIR="${BATS_TEST_TMPDIR}/mirror"
 	mkdir -p "${MIRROR_DIR}"
-	printf '[project]\ndependencies = ["lintro==1.2.2"]\n' >"${MIRROR_DIR}/pyproject.toml"
 	# bump_pin.py rewrites the pin; the pyproject now differs from 1.2.3 so
 	# the bump path (branch + PR + merge + tag) runs.
 	printf '[project]\ndependencies = ["lintro==1.2.2"]\n' >"${MIRROR_DIR}/pyproject.toml"
@@ -95,7 +121,10 @@ STUB
 run_script() {
 	env PATH="${STUB_BIN}:${PATH}" \
 		GH_TOKEN=stub \
-		GH_STATES="${GH_STATES:-OPEN}" \
+		GH_STATES="${GH_STATES:-MERGED}" \
+		GH_OPEN_PR="${GH_OPEN_PR:-0}" \
+		GH_PR_VIEW="${GH_PR_VIEW:-MERGED MERGED}" \
+		GH_ALLOW_AUTO_MERGE="${GH_ALLOW_AUTO_MERGE:-true}" \
 		GIT_BRANCH_EXISTS="${GIT_BRANCH_EXISTS:-0}" \
 		MIRROR_DIR="${MIRROR_DIR}" \
 		MERGE_TIMEOUT_SECONDS="${MERGE_TIMEOUT_SECONDS:-5}" \
@@ -104,19 +133,33 @@ run_script() {
 		bash "$SCRIPT" 1.2.3
 }
 
-@test "enables auto-merge then reports MERGED within the bound" {
-	GH_STATES="MERGED"
-	run run_script
+assert_graphql_payload() {
+	# The mutation input must travel under `variables.input` (a raw GraphQL
+	# HTTP body delivers variables there; a top-level `input:` leaves $input
+	# unbound and the mutation is rejected — the ceabc852 regression).
+	run jq -r '.variables.input.expectedHeadOid' "$GRAPHQL_JSON"
 	assert_success
-	assert_output --partial "Enabling auto-merge (squash) for mirror PR #22"
-	assert_output --partial "Mirror PR #22 merged"
-	assert_output --partial "Mirror release v1.2.3 published (PR #22)"
+	assert_output "base000000000000000000000000000000000b"
 
-	run grep -F "pr merge 22 --squash --delete-branch --auto" "${GH_LOG}"
+	run jq -r '.variables.input.branch.branchName' "$GRAPHQL_JSON"
 	assert_success
+	assert_output "mirror/bump-lintro-1.2.3"
+
+	run jq -r '.variables.input.branch.repositoryNameWithOwner' "$GRAPHQL_JSON"
+	assert_success
+	assert_output "lgtm-hq/lintro-pre-commit"
+
+	run jq -r '.variables.input.fileChanges.additions[0].path' "$GRAPHQL_JSON"
+	assert_success
+	assert_output "pyproject.toml"
+
+	run bash -c "jq -r '.variables.input.fileChanges.additions[0].contents' '$GRAPHQL_JSON' | base64 --decode"
+	assert_success
+	assert_output '[project]
+dependencies = ["lintro==1.2.3"]'
 }
 
-@test "createCommitOnBranch is called and plain git commit is not" {
+@test "createCommitOnBranch receives a variables-wrapped, correct payload" {
 	GH_STATES="MERGED"
 	run run_script
 	assert_success
@@ -124,12 +167,40 @@ run_script() {
 	run grep -F "api graphql" "${GH_LOG}"
 	assert_success
 
+	assert_graphql_payload
+
 	run grep -F "git commit" "${GIT_LOG}"
 	assert_failure
 }
 
+@test "enables auto-merge after checking the repo setting, then reports MERGED" {
+	GH_STATES="OPEN,MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "Enabling auto-merge (squash) for mirror PR #22"
+	assert_output --partial "Mirror PR #22 merged"
+	assert_output --partial "Mirror release v1.2.3 published (PR #22)"
+
+	# The precondition must precede the merge in the gh call log.
+	run awk '/repos\/lgtm-hq\/lintro-pre-commit --jq .allow_auto_merge/{pre=NR}
+		/pr merge 22 --squash --auto/ && !seen {if (pre && NR > pre) ok=1; seen=1}
+		END {exit !(ok)}' "${GH_LOG}"
+	assert_success
+}
+
+@test "auto-merge disabled on the mirror fails fast before any merge work" {
+	GH_ALLOW_AUTO_MERGE="false"
+	run run_script
+	assert_failure
+	assert_output --partial "Auto-merge is disabled on lgtm-hq/lintro-pre-commit"
+	assert_output --partial "Allow auto-merge"
+
+	run grep -F "pr merge" "${GH_LOG}"
+	assert_failure
+}
+
 @test "a merge-poll timeout exits non-zero and prints the PR URL" {
-	GH_STATES="OPEN"
+	GH_STATES="OPEN,OPEN,OPEN,OPEN"
 	MERGE_TIMEOUT_SECONDS="2"
 	MERGE_POLL_SECONDS="1"
 	run run_script
@@ -138,15 +209,12 @@ run_script() {
 	assert_output --partial "https://github.com/lgtm-hq/lintro-pre-commit/pull/22"
 }
 
-@test "a stale bump branch is deleted before the new commit is created" {
-	GIT_BRANCH_EXISTS="1"
-	GH_STATES="MERGED"
+@test "a PR closed without merging stops the poll early" {
+	GH_STATES="OPEN,CLOSED"
 	run run_script
-	assert_success
-	assert_output --partial "recreating it from origin/main"
-
-	run grep -F "git/refs/heads/mirror/bump-lintro-1.2.3" "${GH_LOG}"
-	assert_success
+	assert_failure
+	assert_output --partial "was closed without merging"
+	assert_output --partial "https://github.com/lgtm-hq/lintro-pre-commit/pull/22"
 }
 
 @test "the bump branch ref is created at base before createCommitOnBranch" {
@@ -157,6 +225,68 @@ run_script() {
 	assert_success
 
 	run grep -F 'api -X POST repos/lgtm-hq/lintro-pre-commit/git/refs -f ref=refs/heads/mirror/bump-lintro-1.2.3 -f sha=base000000000000000000000000000000000b' "${GH_LOG}"
+	assert_success
+
+	# And the whole flow is ordered: DELETE (heal, if any) → POST ref →
+	# graphql mutation.
+	run awk '/graphql/{g=NR}
+		/git\/refs -f ref=/{p=NR}
+		END {exit !(p && g && p < g)}' "${GH_LOG}"
+	assert_success
+}
+
+@test "a healthy open bump PR is reused instead of healed" {
+	GIT_BRANCH_EXISTS="1"
+	GH_OPEN_PR="1"
+	GH_PR_VIEW="OPEN CLEAN"
+	GH_STATES="MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "Reusing open PR #22 for mirror/bump-lintro-1.2.3"
+	assert_output --partial "Mirror PR #22 merged"
+
+	# No heal, no new commit, no new PR on the reuse path.
+	run grep -cF "api graphql" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_output 0
+}
+
+@test "a dirty open bump PR is healed: branch deleted, ref recreated, mutation ordered" {
+	GIT_BRANCH_EXISTS="1"
+	GH_OPEN_PR="1"
+	GH_PR_VIEW="OPEN DIRTY"
+	GH_STATES="MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "is not mergeable (OPEN DIRTY); healing the branch"
+
+	run grep -F 'api -X DELETE repos/lgtm-hq/lintro-pre-commit/git/refs/heads/mirror/bump-lintro-1.2.3' "${GH_LOG}"
+	assert_success
+	run grep -F 'api -X POST repos/lgtm-hq/lintro-pre-commit/git/refs' "${GH_LOG}"
+	assert_success
+	run grep -F "api graphql" "${GH_LOG}"
+	assert_success
+
+	# DELETE → POST → graphql ordering (first occurrence of each).
+	run awk '
+		/-X DELETE .*git\/refs\/heads/ && !d { d = NR }
+		/git\/refs -f ref=/ && !p { p = NR }
+		/graphql/ && !g { g = NR }
+		END { exit !(d && p && g && d < p && p < g) }' "${GH_LOG}"
+	assert_success
+
+	assert_graphql_payload
+}
+
+@test "a stale branch with no open PR is deleted before the new commit is created" {
+	GIT_BRANCH_EXISTS="1"
+	GH_STATES="MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "exists with no open PR; recreating it from origin/main"
+
+	run grep -F "git/refs/heads/mirror/bump-lintro-1.2.3" "${GH_LOG}"
 	assert_success
 }
 

@@ -3533,14 +3533,17 @@ def test_mirror_release_serializes_with_global_concurrency() -> None:
 def test_mirror_release_job_has_timeout() -> None:
     """Mirror bump inherits a bounded job timeout instead of the 6-hour default.
 
-    30 minutes: the wheel wait plus the bounded 15-minute auto-merge poll
-    (#2742) no longer fit the old 20-minute bound.
+    50 minutes covers the configured step budgets (#2742): the ~20-minute
+    PyPI wheel wait (30 x (30s curl + 10s sleep)), ~6 minutes of wheel
+    verify/download, 1-2 minutes of mint/commit/PR, the bounded 15-minute
+    auto-merge poll, and slack — GitHub must not kill the job while it
+    polls.
     """
     workflow = _load_workflow(name="mirror-release.yml")
 
     timeout = workflow["jobs"]["mirror-bump"]["timeout-minutes"]
     assert_that(timeout).is_instance_of(int)
-    assert_that(timeout).is_equal_to(30)
+    assert_that(timeout).is_equal_to(50)
 
 
 def test_mirror_release_is_called_not_release_triggered() -> None:
@@ -3713,7 +3716,7 @@ def test_mirror_release_mints_app_token_instead_of_a_pat() -> None:
 
     The bump commit must be GitHub-signed and attributed to the
     ``lgtm-mirror-bot`` App account for the mirror's signature and
-    unattributed-changes rulesets; the retired MIRROR_REPO_TOKEN PAT could
+    unattributed-changes rulesets; the retired plain-PAT secret could
     provide neither. The mint is scoped to the mirror repo explicitly.
     """
     workflow = _load_workflow(name="mirror-release.yml")

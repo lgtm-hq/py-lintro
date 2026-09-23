@@ -38,6 +38,8 @@ Environment:
                           on exit)
   GH_CMD                  gh binary name (overridable in tests; default gh)
   CURL_CMD                curl binary name (overridable in tests; default curl)
+  SOURCE_REPO             owner/repo the SHA256SUMS release is fetched from
+                          (default: lgtm-hq/py-lintro)
   GITHUB_STEP_SUMMARY     When set, one line per check is appended
 EOF
 	exit 0
@@ -47,6 +49,7 @@ fi
 attestation_repo="${ATTESTATION_REPO:-}"
 dist_signer="${DIST_SIGNER_WORKFLOW:-}"
 release_tag="${RELEASE_TAG:-v${VERSION}}"
+source_repo="${SOURCE_REPO:-lgtm-hq/py-lintro}"
 gh_cmd="${GH_CMD:-gh}"
 curl_cmd="${CURL_CMD:-curl}"
 
@@ -61,9 +64,9 @@ for var in ATTESTATION_REPO DIST_SIGNER_WORKFLOW; do
 		exit 2
 	fi
 done
-for cmd in "$gh_cmd" "$curl_cmd"; do
+for cmd in "$gh_cmd" "$curl_cmd" jq; do
 	if ! command -v "$cmd" >/dev/null 2>&1; then
-		echo "${cmd} not found; both the GitHub CLI and curl are required" >&2
+		echo "${cmd} not found; the GitHub CLI, curl and jq are required" >&2
 		exit 2
 	fi
 done
@@ -94,46 +97,68 @@ fi
 
 # --- fetch the release's SHA256SUMS ------------------------------------------
 checksums_file="${work_dir}/SHA256SUMS"
-"$gh_cmd" release download "$release_tag" --repo lgtm-hq/py-lintro \
+"$gh_cmd" release download "$release_tag" --repo "$source_repo" \
 	--pattern SHA256SUMS --dir "$work_dir" --clobber >/dev/null
 [[ -s "$checksums_file" ]] || die "release ${release_tag} has no SHA256SUMS asset; refusing to pin an unverifiable wheel"
 
-# --- resolve the wheel's exact asset name, URL and PyPI digest ----------------
+# --- resolve every wheel's name, URL and PyPI digest -------------------------
+# All bdist_wheels are verified, and the PyPI wheel set must equal the
+# manifest's wheel set: pip may prefer any same-version wheel, so an extra
+# unmanifested one on PyPI must fail the gate, not just the first entry.
 metadata="$("$curl_cmd" -sf --connect-timeout 10 --max-time 30 \
 	"https://pypi.org/pypi/lintro/${VERSION}/json")" ||
 	die "PyPI metadata for lintro ${VERSION} is gone; cannot verify the wheel"
-wheel_name="$(jq -r '[.urls[] | select(.packagetype == "bdist_wheel")][0].filename // empty' <<<"$metadata")"
-[[ -n "$wheel_name" ]] || die "PyPI metadata for lintro ${VERSION} lists no wheel"
-wheel_url="$(jq -r '[.urls[] | select(.packagetype == "bdist_wheel")][0].url // empty' <<<"$metadata")"
-[[ -n "$wheel_url" ]] || die "PyPI metadata for ${wheel_name} carries no download URL"
-pypi_digest="$(jq -r '[.urls[] | select(.packagetype == "bdist_wheel")][0].digests.sha256 // empty' <<<"$metadata")"
-[[ -n "$pypi_digest" ]] || die "PyPI metadata for ${wheel_name} carries no sha256 digest"
 
-# --- 1. digest equality with the release manifest -----------------------------
-expected_digest="$(awk -v p="$wheel_name" '{ h = $1; $1 = ""; sub(/^[[:space:]]+/, ""); if ($0 == p) print h }' "$checksums_file" | tail -1)"
-[[ -n "$expected_digest" ]] || die "${checksums_file} has no entry for ${wheel_name}; refusing to pin an unlisted wheel"
-if [[ "$pypi_digest" != "$expected_digest" ]]; then
-	die "sha256 mismatch for ${wheel_name}: release manifest ${expected_digest}, PyPI ${pypi_digest}"
+# (filename url sha256) per bdist_wheel, one TSV line each.
+wheel_rows="$(
+	jq -r '.urls[] | select(.packagetype == "bdist_wheel") |
+		[.filename, .url, .digests.sha256 // ""] | @tsv' <<<"$metadata"
+)"
+[[ -n "$wheel_rows" ]] || die "PyPI metadata for lintro ${VERSION} lists no wheel"
+
+while IFS=$'\t' read -r wheel_name wheel_url pypi_digest; do
+	[[ -n "$wheel_name" && -n "$wheel_url" ]] ||
+		die "PyPI metadata for lintro ${VERSION} carries an incomplete wheel entry"
+	[[ -n "$pypi_digest" ]] ||
+		die "PyPI metadata for ${wheel_name} carries no sha256 digest"
+
+	# --- 1. digest equality with the release manifest -------------------------
+	expected_digest="$(awk -v p="$wheel_name" '{ h = $1; $1 = ""; sub(/^[[:space:]]+/, ""); if ($0 == p) print h }' "$checksums_file" | tail -1)"
+	[[ -n "$expected_digest" ]] || die "${checksums_file} has no entry for ${wheel_name}; refusing to pin an unlisted wheel"
+	if [[ "$pypi_digest" != "$expected_digest" ]]; then
+		die "sha256 mismatch for ${wheel_name}: release manifest ${expected_digest}, PyPI ${pypi_digest}"
+	fi
+	echo "==> ${wheel_name}: sha256 ok (PyPI digest matches the release manifest)"
+
+	# --- 2. provenance attestation on the downloaded bytes --------------------
+	# The bytes hashed and attested are the ones curl fetches from PyPI's own
+	# file URL — not a same-named copy from the GitHub Release.
+	"$curl_cmd" -sf --connect-timeout 10 --max-time 300 -o "$work_dir/$wheel_name" \
+		"$wheel_url" ||
+		die "download of ${wheel_url} failed"
+	wheel_file="${work_dir}/${wheel_name}"
+	[[ -s "$wheel_file" ]] || die "downloaded wheel ${wheel_file} is missing or empty"
+	actual="$("${sha_cmd[@]}" "$wheel_file" | awk '{print $1}')"
+	[[ "$actual" == "$expected_digest" ]] ||
+		die "sha256 mismatch for the downloaded ${wheel_name}: manifest ${expected_digest}, downloaded ${actual}"
+	if ! "$gh_cmd" attestation verify "$wheel_file" \
+		--repo "$attestation_repo" \
+		--signer-workflow "$dist_signer"; then
+		die "attestation verification failed for ${wheel_name} (expected ${attestation_repo} / ${dist_signer})"
+	fi
+
+	summary "- mirror wheel verified before pinning: \`${wheel_name}\` (PyPI digest + release manifest + attestation by \`${dist_signer}\`)"
+	echo "==> ${wheel_name}: attestation ok (signer ${dist_signer})"
+done <<<"$wheel_rows"
+
+# --- 3. set equality: PyPI wheels must all be in the manifest, and vice versa
+manifest_wheels="$(
+	awk '$2 ~ /\.whl$/ { print $2 }' "$checksums_file" | sort
+)"
+pypi_wheels="$(
+	jq -r '[.urls[] | select(.packagetype == "bdist_wheel") | .filename] | sort | .[]' <<<"$metadata"
+)"
+if ! diff <(printf '%s\n' "$manifest_wheels") <(printf '%s\n' "$pypi_wheels") >/dev/null; then
+	die "PyPI wheel set differs from the release manifest wheel set; refusing to pin (unmanifested or missing wheels on PyPI)"
 fi
-echo "==> ${wheel_name}: sha256 ok (PyPI digest matches the release manifest)"
-
-# --- 2. provenance attestation on the downloaded bytes ------------------------
-# The bytes hashed and attested are the ones curl fetches from PyPI's own
-# file URL — not a same-named copy from the GitHub Release.
-"$curl_cmd" -sf --connect-timeout 10 --max-time 300 -o "$work_dir/$wheel_name" \
-	"$wheel_url" ||
-	die "download of ${wheel_url} failed"
-wheel_file="${work_dir}/${wheel_name}"
-[[ -s "$wheel_file" ]] || die "downloaded wheel ${wheel_file} is missing or empty"
-actual="$("${sha_cmd[@]}" "$wheel_file" | awk '{print $1}')"
-[[ "$actual" == "$expected_digest" ]] ||
-	die "sha256 mismatch for the downloaded ${wheel_name}: manifest ${expected_digest}, downloaded ${actual}"
-if ! "$gh_cmd" attestation verify "$wheel_file" \
-	--repo "$attestation_repo" \
-	--signer-workflow "$dist_signer"; then
-	die "attestation verification failed for ${wheel_name} (expected ${attestation_repo} / ${dist_signer})"
-fi
-
-summary "- mirror wheel verified before pinning: \`${wheel_name}\` (PyPI digest + release manifest + attestation by \`${dist_signer}\`)"
-echo "==> ${wheel_name}: attestation ok (signer ${dist_signer})"
-echo "Verified ${wheel_name}: PyPI digest matches the release manifest and the attestation."
+echo "==> PyPI wheel set matches the release manifest"
