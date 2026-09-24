@@ -21,6 +21,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.168.4] - 2026-09-24
+
+### Changed
+
+- **deps**: update ai agent clis (#2767) (bedee33)
+- **deps**: update lockfile (#2782) (1814c64)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.168.3 (minor) (#2778)
+  (4adab22)
+- **deps**: update test-tools to 5.0.1 (patch) (#2774) (2c0035d)
+
+### Fixed
+
+- **ci**: sign and attribute the mirror bump commit and stop racing its merge (#2763)
+  (c456c0b)
+
 ## [0.168.3] - 2026-09-21
 
 ### Changed
