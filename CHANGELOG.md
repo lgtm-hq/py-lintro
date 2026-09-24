@@ -21,6 +21,13 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.168.5] - 2026-09-24
+
+### Fixed
+
+- **ci**: pin kimi-k3 and glm-5.3-flash smoke rows and log empty bodies (#2784)
+  (f2e2e71)
+
 ## [0.168.4] - 2026-09-24
 
 ### Changed
