@@ -1018,7 +1018,9 @@ def test_dogfood_lint_callers_carry_no_githubapp_grant(job_id: str) -> None:
     assert_that(job_with["egress-policy"]).is_equal_to("block")
     assert_that(job_with["allowed-endpoints-mode"]).is_equal_to("append")
     for endpoint in allowed:
-        assert_that(endpoint).described_as(endpoint).does_not_contain("githubapp.com")
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "githubapp.com",
+        )
     assert_that(allowed).contains(
         "github.com:443",
         "api.github.com:443",
@@ -1079,8 +1081,12 @@ def test_long_docker_ci_jobs_carry_no_githubapp_grant(job_id: str) -> None:
 
     assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
     assert_that(job["timeout-minutes"]).is_greater_than(10)
+    # Keep a positive floor so the guard cannot be satisfied by emptying the list.
+    assert_that(allowed).contains("github.com:443", "api.github.com:443")
     for endpoint in allowed:
-        assert_that(endpoint).described_as(endpoint).does_not_contain("githubapp.com")
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "githubapp.com",
+        )
 
 
 def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
@@ -2176,7 +2182,9 @@ def test_build_linux_carries_no_githubapp_grant() -> None:
 
     assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
     for endpoint in endpoints:
-        assert_that(endpoint).described_as(endpoint).does_not_contain("githubapp.com")
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "githubapp.com",
+        )
         assert_that(endpoint).described_as(
             f"{endpoint}: no glob may widen the block policy on this job",
         ).does_not_contain("*")
@@ -2189,6 +2197,69 @@ def test_build_linux_carries_no_githubapp_grant() -> None:
         "release-assets.githubusercontent.com:443",
     )
     assert_that(endpoints).does_not_contain_duplicates()
+
+
+#: Matches a pinned harden-runner ``uses:`` with its ``# vX.Y.Z`` comment.
+_HARDEN_RUNNER_PIN_RE = re.compile(
+    r"step-security/harden-runner@[0-9a-f]{40}\s+#\s*v(\d+)\.(\d+)\.(\d+)",
+)
+#: Matches the lgtm-ci reusable lint workflow pin the dogfood callers use.
+_LGTM_CI_QUALITY_LINT_PIN_RE = re.compile(
+    r"lgtm-hq/lgtm-ci/\.github/workflows/reusable-quality-lint\.yml"
+    r"@[0-9a-f]{40}\s+#\s*v(\d+)\.(\d+)\.(\d+)",
+)
+#: First harden-runner release that allows ``*.githubapp.com`` from GitHub meta.
+_HARDEN_RUNNER_GITHUB_META_FLOOR = (2, 21, 1)
+#: First lgtm-ci release whose reusable lint workflow pins that harden-runner.
+_LGTM_CI_GITHUB_META_FLOOR = (0, 70, 0)
+
+
+@pytest.mark.parametrize(
+    "workflow_name",
+    ["docker-ci.yml", "ai-review.yml", _BUILD_BINARY_WORKFLOW],
+)
+def test_githubapp_free_workflows_pin_a_meta_aware_harden_runner(
+    workflow_name: str,
+) -> None:
+    """Workflows without githubapp.com grants must pin harden-runner >= v2.21.1.
+
+    The guards above forbid the ``*.githubapp.com:443`` grant because v2.21.1
+    allows GitHub's hosted-runner watchdog hosts from GitHub meta on its own
+    (#2352, #2488). A downgrade of the pin would silently bring the exit-143
+    kills back while those guards stay green, so the premise is asserted here.
+    The pin comment is read from the raw file: YAML loading drops comments,
+    and the repo's pinning policy requires every action pin to carry one.
+    ``docker-ci.yml``'s dogfood callers inherit their enforcing harden-runner
+    step from lgtm-ci's reusable lint workflow, so that pin has its own floor.
+
+    Args:
+        workflow_name: Workflow whose harden-runner pins are under test.
+    """
+    text = (_REPO_ROOT / ".github" / "workflows" / workflow_name).read_text(
+        encoding="utf-8",
+    )
+    pins = _HARDEN_RUNNER_PIN_RE.findall(text)
+
+    assert_that(pins).described_as(
+        f"{workflow_name}: harden-runner pins",
+    ).is_not_empty()
+    for pin in pins:
+        version = tuple(int(part) for part in pin)
+        assert_that(version >= _HARDEN_RUNNER_GITHUB_META_FLOOR).described_as(
+            f"{workflow_name}: harden-runner v{'.'.join(pin)} is below "
+            f"v{'.'.join(map(str, _HARDEN_RUNNER_GITHUB_META_FLOOR))}",
+        ).is_true()
+
+    if workflow_name != "docker-ci.yml":
+        return
+    reusable_pins = _LGTM_CI_QUALITY_LINT_PIN_RE.findall(text)
+    assert_that(reusable_pins).described_as("dogfood reusable pins").is_not_empty()
+    for pin in reusable_pins:
+        version = tuple(int(part) for part in pin)
+        assert_that(version >= _LGTM_CI_GITHUB_META_FLOOR).described_as(
+            f"docker-ci.yml: reusable-quality-lint v{'.'.join(pin)} is below "
+            f"v{'.'.join(map(str, _LGTM_CI_GITHUB_META_FLOOR))}",
+        ).is_true()
 
 
 def test_auto_rerun_covers_tag_publish_workflows() -> None:

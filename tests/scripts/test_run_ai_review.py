@@ -1789,7 +1789,7 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
     assert_that(endpoints).does_not_contain(_WATCHDOG_WILDCARD_ENDPOINT)
     for endpoint in endpoints:
         assert_that(endpoint).described_as(endpoint).does_not_contain("*")
-        assert_that(endpoint).described_as(endpoint).does_not_contain(
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
             "githubapp.com",
         )
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
