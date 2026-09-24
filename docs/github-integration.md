@@ -196,6 +196,41 @@ Exit `2` disambiguates a provider error from the P1-findings exit `1`, so consum
 never have to guess whether stdout holds a review or an error — check for the top-level
 `error` key.
 
+#### Requesting a review from a pull-request comment
+
+A user with write access (`admin`, `maintain` or `write`) can ask for a review round by
+commenting on an open, non-draft pull request from a branch of this repository. The
+command must be the first line of the comment:
+
+| Comment                              | Review                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------- |
+| `@lintro review`                     | Full review of the whole diff; carried coverage is discarded (`--full`) |
+| `@lintro review delta`               | The change since the last recorded round, like a push                   |
+| `@lintro review <path> [<path> ...]` | Only files under these path prefixes (`--path`)                         |
+
+Path arguments are prefixes, not globs: `*`, `?`, `..` segments, absolute paths and
+characters outside `A-Z a-z 0-9 . _ / -` are refused. At most 20 prefixes per request.
+
+- An accepted request gets a 👀 reaction and runs the same review job as a push: the
+  same sticky comment, the same review state, the same repository-wide queue slot and
+  53-minute cap. A request never cancels a push's review and a push never cancels a
+  request's review: both run, one after the other, and the later one updates the sticky
+  comment.
+- A malformed request from a writer gets a reaction and the usage text as a reply, on
+  any pull request (the pull-request checks apply only to a well-formed request).
+- A request from anyone without write access or from a bot account, and a well-formed
+  request on a closed, draft or fork pull request, are ignored: the workflow logs why
+  and posts nothing.
+- Other comments never start or cancel a review.
+
+The request is validated in a separate `request` job that holds no secrets and only a
+read-only token (`scripts/ci/resolve_review_request.py`, with the parser in
+`lintro/ai/review/commands.py`). The comment text reaches it only through the
+environment, never a shell line. On `issue_comment` there is no pull-request base
+commit, so the review job installs lintro from the default-branch commit that supplied
+the workflow (`github.workflow_sha`). `issue_comment` is not affected by GitHub's
+2026-11-02 default restriction on `pull_request_target`.
+
 ### 5. Docker Image Publishing
 
 **File:** `.github/workflows/docker-build-publish.yml`

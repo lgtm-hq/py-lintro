@@ -53,6 +53,19 @@ _ZAI_EGRESS_HOSTS = ("api.z.ai:443",)
 #: a literal in a test module.
 
 
+def test_the_job_pr_number_comes_from_the_event_or_the_validated_request() -> None:
+    """``AI_REVIEW_PR`` is the event's PR number or the request job's output.
+
+    Every state-artifact name and the review step read it, so it must never be
+    anything a comment author controls directly.
+    """
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+
+    assert_that(loaded["jobs"]["ai-review"]["env"]["AI_REVIEW_PR"]).is_equal_to(
+        "${{ github.event.pull_request.number || needs.request.outputs.pr-number }}",
+    )
+
+
 def _pinned_checkout() -> str:
     """Return the repo-wide ``actions/checkout`` pin, resolved lazily.
 
@@ -625,9 +638,13 @@ def test_workflow_concurrency_keys_on_the_pr_number() -> None:
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     concurrency = loaded["concurrency"]
-    assert_that(concurrency["group"]).is_equal_to(
-        "ai-review-${{ github.event.pull_request.number || github.ref }}",
+    group = " ".join(concurrency["group"].split())
+    assert_that(group).is_equal_to(
+        "ai-review-${{ github.event_name == 'pull_request_target' "
+        "&& github.event.pull_request.number "
+        "|| format('comment-{0}', github.run_id) }}",
     )
+    assert_that(group).does_not_contain("github.ref")
     assert_that(concurrency["cancel-in-progress"]).is_true()
 
 
@@ -803,9 +820,7 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     # Structurally assert the checkout pins to the trusted base ref. A harmless
     # head-ref mention in a comment/log elsewhere in the file must not false-fail
     # this, so we assert on the parsed step rather than banning text file-wide.
-    assert_that(checkout["with"]["ref"]).is_equal_to(
-        "${{ github.event.pull_request.base.sha }}",
-    )
+    assert_that(checkout["with"]["ref"]).is_equal_to(_TRUSTED_CHECKOUT_REF)
     workflow_text = WORKFLOW.read_text(encoding="utf-8")
     assert_that(workflow_text).contains("TWO-PR BOOTSTRAP")
     assert_that(workflow_text).contains("default branch")
@@ -849,7 +864,13 @@ def test_is_checkout_like_action(*, uses: str, expected: bool) -> None:
     assert_that(_is_checkout_like_action(uses)).is_equal_to(expected)
 
 
-_TRUSTED_CHECKOUT_REF = "${{ github.event.pull_request.base.sha }}"
+#: The only checkout ref the credential-holding job may use: the PR's base
+#: commit on pull-request events and, on an on-request review (issue_comment,
+#: which has no base.sha), the default-branch commit that supplied the workflow
+#: definition (#2795). github.workflow_sha is the only accepted fallback.
+_TRUSTED_CHECKOUT_REF = (
+    "${{ github.event.pull_request.base.sha || github.workflow_sha }}"
+)
 
 
 @pytest.mark.parametrize(
@@ -862,6 +883,12 @@ _TRUSTED_CHECKOUT_REF = "${{ github.event.pull_request.base.sha }}"
         ("${{ github.ref_name }}", False),
         ("${{ github.sha }}", False),
         ("${{ github.event.pull_request.head.sha }}", False),
+        ("${{ github.event.pull_request.base.sha || github.sha }}", False),
+        (
+            "${{ github.event.pull_request.base.sha || "
+            "github.event.pull_request.head.sha }}",
+            False,
+        ),
     ],
     ids=[
         "base-sha",
@@ -871,10 +898,12 @@ _TRUSTED_CHECKOUT_REF = "${{ github.event.pull_request.base.sha }}"
         "ref-name",
         "github-sha",
         "pr-head-sha",
+        "fallback-github-sha",
+        "fallback-pr-head-sha",
     ],
 )
 def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
-    """Only the PR base SHA is a trusted checkout ref for this job.
+    """Only base.sha, falling back to workflow_sha, is trusted for this job.
 
     Args:
         ref: A checkout ``with.ref`` value, or empty when omitted.
@@ -892,6 +921,28 @@ def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
             )
         )
         assert_that(banned).is_equal_to(not trusted)
+
+
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "${{ github.event.pull_request.base.sha }}",
+        "${{ github.workflow_sha }}",
+        "${{ github.workflow_sha || github.event.pull_request.base.sha }}",
+    ],
+    ids=["base-sha-without-fallback", "workflow-sha-alone", "fallback-order-swapped"],
+)
+def test_checkout_ref_is_exactly_base_sha_then_workflow_sha(ref: str) -> None:
+    """Each trusted part alone, or in the other order, is not the audited ref.
+
+    base.sha alone leaves an on-request review without a ref; workflow_sha
+    alone would review pull-request events against the default branch's tip
+    instead of the PR's base; the swapped order does the same (#2795).
+
+    Args:
+        ref: A near-miss checkout ``with.ref`` value.
+    """
+    assert_that(ref).is_not_equal_to(_TRUSTED_CHECKOUT_REF)
 
 
 @pytest.mark.parametrize(
@@ -969,9 +1020,7 @@ def test_workflow_forbids_head_ref_fetches() -> None:
         with_block = step.get("with") or {}
         ref = str(with_block.get("ref", ""))
         if isinstance(uses, str) and _is_checkout_like_action(uses):
-            assert_that(ref).is_equal_to(
-                "${{ github.event.pull_request.base.sha }}",
-            )
+            assert_that(ref).is_equal_to(_TRUSTED_CHECKOUT_REF)
         assert_that(ref).does_not_contain("pull_request.head")
         assert_that(ref).does_not_contain("github.sha")
         assert_that(ref).does_not_contain("github.head_ref")
@@ -1322,6 +1371,7 @@ def _run_review_with_lint_stubs(
     wait_seconds: int,
     poll_seconds: str = "1",
     download_fails: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> tuple[str, list[str], int]:
     """Run the script end to end with ``gh`` and ``uv`` stubbed.
 
@@ -1338,6 +1388,8 @@ def _run_review_with_lint_stubs(
         wait_seconds: ``LINT_REPORT_WAIT_SECONDS`` override.
         poll_seconds: ``LINT_REPORT_POLL_SECONDS`` override; defaults to 1 s.
         download_fails: Make the stubbed ``gh run download`` exit non-zero.
+        extra_env: Further environment for the script, e.g. the on-request
+            review inputs.
 
     Returns:
         The script's combined output, the recorded ``uv`` argv, and the
@@ -1420,12 +1472,13 @@ def _run_review_with_lint_stubs(
         "LINT_REPORT_POLL_SECONDS": poll_seconds,
         "LINT_REPORT_WAIT_SECONDS": str(wait_seconds),
         "LINT_STUB_DOWNLOAD_FAILS": "1" if download_fails else "0",
+        **(extra_env or {}),
     }
     # Output goes to a file, not a captured pipe: the script's heartbeat
     # ``sleep`` outlives the EXIT trap and would hold a pipe open for 15 s.
     output = tmp_path / "output.log"
     with output.open("w", encoding="utf-8") as sink:
-        subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
+        completed = subprocess.run(  # nosec B603 - fixed argv run against a repo script in a controlled test; shell=False, no user shell input
             [str(SHELL_SCRIPT)],
             stdout=sink,
             stderr=subprocess.STDOUT,
@@ -1433,8 +1486,14 @@ def _run_review_with_lint_stubs(
             env=env,
             timeout=60,
         )
+    (tmp_path / "exit-code").write_text(str(completed.returncode), encoding="utf-8")
     argv = uv_argv.read_text(encoding="utf-8").splitlines() if uv_argv.exists() else []
-    listings = int(listing_count.read_text(encoding="utf-8").strip() or 0)
+    # No listing file: the script stopped before polling (a refused input).
+    listings = (
+        int(listing_count.read_text(encoding="utf-8").strip() or 0)
+        if listing_count.exists()
+        else 0
+    )
     return output.read_text(encoding="utf-8"), argv, listings
 
 
@@ -2020,7 +2079,7 @@ def test_workflow_locates_prior_state_via_existing_script() -> None:
     assert_that(run).contains("scripts/ci/run-ai-review.sh --locate-prior-state")
     assert_that(run).contains("GITHUB_OUTPUT")
     env = locate["env"]
-    assert_that(env["PR_NUMBER"]).is_equal_to("${{ github.event.number }}")
+    assert_that(env["PR_NUMBER"]).is_equal_to("${{ env.AI_REVIEW_PR }}")
     assert_that(env["GITHUB_REPOSITORY"]).is_equal_to("${{ github.repository }}")
     assert_that(env["GITHUB_RUN_ID"]).is_equal_to("${{ github.run_id }}")
     # A rerun keeps run_id and bumps run_attempt; the locator needs both to
@@ -2049,7 +2108,7 @@ def test_workflow_downloads_prior_state_across_runs() -> None:
         "${{ steps.prior-state.outputs.run-id }}",
     )
     assert_that(download_with["pattern"]).is_equal_to(
-        "lintro-review-state-pr-${{ github.event.number }}-*",
+        "lintro-review-state-pr-${{ env.AI_REVIEW_PR }}-*",
     )
     assert_that(download_with["merge-multiple"]).is_true()
     assert_that(download_with["github-token"]).is_equal_to(
@@ -2073,7 +2132,7 @@ def test_workflow_uploads_state_artifacts_on_always() -> None:
     upload_with = upload["with"]
     name = str(upload_with["name"])
     assert_that(name).contains("lintro-review-state-pr-")
-    assert_that(name).contains("github.event.number")
+    assert_that(name).contains("env.AI_REVIEW_PR")
     assert_that(name).contains("github.run_attempt")
     assert_that(name).contains("-final")
     assert_that(upload_with["path"]).is_equal_to("ai-review-state/")
@@ -2210,3 +2269,110 @@ def test_lint_report_wait_reads_leading_zero_values_as_decimal(
     assert_that(listings).is_between(1, 3)
     assert_that(argv[:3]).is_equal_to(["run", "lintro", "review"])
     assert_that(argv).contains("--lint-report-missing")
+
+
+# --- on-request review mode (#2795) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("mode", "paths", "expected", "absent"),
+    [
+        ("full", "[]", ["--full"], ["--path"]),
+        ("delta", "[]", [], ["--full", "--path"]),
+        ("", "", [], ["--full", "--path"]),
+        (
+            "paths",
+            '["lintro/ai/review","docs/github-integration.md"]',
+            ["--path", "lintro/ai/review", "--path", "docs/github-integration.md"],
+            ["--full"],
+        ),
+    ],
+    ids=["full", "delta", "pull-request-event", "paths"],
+)
+def test_the_request_mode_reaches_the_review_argv(
+    tmp_path: Path,
+    mode: str,
+    paths: str,
+    expected: list[str],
+    absent: list[str],
+) -> None:
+    """Each validated mode maps to exactly its ``lintro review`` flags.
+
+    An empty mode is a pull-request event and must leave the argv unchanged.
+
+    Args:
+        tmp_path: Per-test scratch directory.
+        mode: ``REVIEW_REQUEST_MODE``.
+        paths: ``REVIEW_REQUEST_PATHS``.
+        expected: Argv items that must appear, in order.
+        absent: Flags that must not appear.
+    """
+    output, argv, _ = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=5,
+        extra_env={
+            "REVIEW_REQUEST_MODE": mode,
+            "REVIEW_REQUEST_PATHS": paths,
+            "REVIEW_REQUESTER": "octocat",
+        },
+    )
+
+    assert_that(argv).is_not_empty()
+    if expected:
+        start = argv.index(expected[0])
+        assert_that(argv[start : start + len(expected)]).is_equal_to(expected)
+    for flag in absent:
+        assert_that(argv).does_not_contain(flag)
+    if mode:
+        assert_that(output).contains(f"on request by octocat: {mode}")
+
+
+@pytest.mark.parametrize(
+    ("mode", "paths", "message"),
+    [
+        ("paths", '["../etc"]', "refusing on-request path prefix"),
+        ("paths", '["/abs"]', "refusing on-request path prefix"),
+        ("paths", '["src/*.py"]', "refusing on-request path prefix"),
+        ("paths", "[]", "without any path prefix"),
+        ("everything", "[]", "unknown REVIEW_REQUEST_MODE"),
+        ("paths", "not-json", "is not a JSON list of strings"),
+        ("paths", '{"a": 1}', "is not a JSON list of strings"),
+        ("paths", "[1, 2]", "is not a JSON list of strings"),
+    ],
+    ids=[
+        "dotdot",
+        "absolute",
+        "glob",
+        "no-paths",
+        "unknown-mode",
+        "not-json",
+        "not-a-list",
+        "not-strings",
+    ],
+)
+def test_a_bad_request_input_fails_before_the_review_runs(
+    tmp_path: Path,
+    mode: str,
+    paths: str,
+    message: str,
+) -> None:
+    """The credential-holding step re-validates and never widens the review.
+
+    Args:
+        tmp_path: Per-test scratch directory.
+        mode: ``REVIEW_REQUEST_MODE``.
+        paths: ``REVIEW_REQUEST_PATHS``.
+        message: Text the error must contain.
+    """
+    output, argv, _ = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=5,
+        extra_env={"REVIEW_REQUEST_MODE": mode, "REVIEW_REQUEST_PATHS": paths},
+    )
+
+    assert_that(output).contains(message)
+    assert_that(argv).is_empty()
+    exit_code = int((tmp_path / "exit-code").read_text(encoding="utf-8"))
+    assert_that(exit_code).is_not_equal_to(0)
