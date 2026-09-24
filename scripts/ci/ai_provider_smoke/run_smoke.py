@@ -44,12 +44,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
 from urllib.parse import urlparse
 
@@ -80,9 +83,23 @@ _ANSWER_EXCERPT: Final[int] = 200
 #: Punctuation stripped from both ends before the answer is compared.
 _ANSWER_TRIM: Final[str] = " \t\r\n.!?'\"`*"
 
-#: Cap on the smoke response: enough for a word, small enough that a runaway
-#: generation cannot turn a smoke test into a bill.
+#: Default cap on the smoke response: enough for a word, small enough that a
+#: runaway generation cannot turn a smoke test into a bill. A row for a model
+#: that always reasons before answering (kimi-k3, glm-5.3-flash) overrides it with its
+#: own ``max_tokens``: those models spend the cap on a thinking block first, and
+#: at 16 they return a 200 whose only block is the reasoning, with no text at
+#: all — the ``EmptyResponse`` #2748 chased.
 SMOKE_MAX_TOKENS: Final[int] = 16
+
+#: Upper bound on a row's ``max_tokens``: room for a thinking model's reasoning
+#: on a one-word prompt, not for a generation worth paying for.
+SMOKE_MAX_TOKENS_CEILING: Final[int] = 4096
+
+#: Keys a row must carry, and the optional ones it may.
+_REQUIRED_KEYS: Final[frozenset[str]] = frozenset(
+    {"name", "protocol", "base_url", "key_env", "model"},
+)
+_OPTIONAL_KEYS: Final[frozenset[str]] = frozenset({"max_tokens"})
 
 #: Per-call timeout. A provider that cannot answer a one-word prompt inside a
 #: minute is a failure worth seeing, not a job worth waiting on.
@@ -101,6 +118,8 @@ class ProviderRow:
             secret of the same name) the credential arrives in. Never a
             credential value — nothing on this row is sensitive.
         model: Model slug sent with the smoke prompt.
+        max_tokens: Response cap for the call; a thinking model needs room for
+            its reasoning before the answer (see :data:`SMOKE_MAX_TOKENS`).
     """
 
     name: str
@@ -108,6 +127,7 @@ class ProviderRow:
     base_url: str
     key_env: str
     model: str
+    max_tokens: int = SMOKE_MAX_TOKENS
 
     @property
     def egress(self) -> str:
@@ -166,18 +186,30 @@ def _validate_row(*, entry: Any, index: int) -> ProviderRow:
     """
     if not isinstance(entry, dict):
         _fail_table(f"row {index} is not an object")
-    missing = {"name", "protocol", "base_url", "key_env", "model"} - set(entry)
+    missing = _REQUIRED_KEYS - set(entry)
     if missing:
         _fail_table(f"row {index} is missing {sorted(missing)}")
-    unknown = set(entry) - {"name", "protocol", "base_url", "key_env", "model"}
+    unknown = set(entry) - _REQUIRED_KEYS - _OPTIONAL_KEYS
     if unknown:
         _fail_table(f"row {index} has unknown keys {sorted(unknown)}")
+    max_tokens = entry.get("max_tokens", SMOKE_MAX_TOKENS)
+    # bool is an int subclass, so ``true`` would otherwise pass as 1.
+    if (
+        isinstance(max_tokens, bool)
+        or not isinstance(max_tokens, int)
+        or not 1 <= max_tokens <= SMOKE_MAX_TOKENS_CEILING
+    ):
+        _fail_table(
+            f"row {index} max_tokens {max_tokens!r} is not an integer in "
+            f"1..{SMOKE_MAX_TOKENS_CEILING}",
+        )
     row = ProviderRow(
         name=str(entry["name"]),
         protocol=str(entry["protocol"]),
         base_url=str(entry["base_url"]),
         key_env=str(entry["key_env"]),
         model=str(entry["model"]),
+        max_tokens=max_tokens,
     )
     if not _NAME_RE.match(row.name):
         _fail_table(f"row {index} name {row.name!r} is not a valid job name")
@@ -315,14 +347,14 @@ async def _complete(*, row: ProviderRow, credential_env: str) -> str:
         model=row.model,
         api_key_env=credential_env,
         api_base_url=row.base_url,
-        max_tokens=SMOKE_MAX_TOKENS,
+        max_tokens=row.max_tokens,
         transcript_logging=False,
     )
     provider = get_provider(config)
     try:
         response = await provider.complete(
             SMOKE_PROMPT,
-            max_tokens=SMOKE_MAX_TOKENS,
+            max_tokens=row.max_tokens,
             timeout=SMOKE_TIMEOUT,
         )
     finally:
@@ -379,6 +411,35 @@ def _credential_appears_in(text: str, *, env_name: str) -> bool:
     return bool(value) and value in text
 
 
+def _http_capture() -> ModuleType:
+    """Load the sibling ``http_capture`` module.
+
+    The script runs as a file, not as part of a package, and the tests load it
+    by path, so the sibling is loaded the same way rather than through
+    ``sys.path``.
+
+    Returns:
+        The loaded ``http_capture`` module.
+
+    Raises:
+        RuntimeError: When the module cannot be loaded.
+    """
+    name = "ai_provider_smoke_http_capture"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(
+        name,
+        Path(__file__).with_name("http_capture.py"),
+    )
+    if spec is None or spec.loader is None:
+        msg = "unable to load http_capture.py next to run_smoke.py"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _normalized_answer(text: str) -> str:
     """Return the response reduced to what the expected answer is compared on.
 
@@ -420,18 +481,36 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
         _write_github_output(name="outcome", value="skipped")
         return 0
 
+    http_capture = _http_capture()
     content = ""
     detail: str | None = None
-    try:
-        content = asyncio.run(_complete(row=row, credential_env=credential_env))
-    except Exception as exc:  # every failure is news here, none is fatal
-        detail = _safe_detail(f"{type(exc).__name__}: {exc}", env_name=credential_env)
+    started = time.monotonic()
+    with http_capture.capture_http() as capture:
+        try:
+            content = asyncio.run(_complete(row=row, credential_env=credential_env))
+        except Exception as exc:  # every failure is news here, none is fatal
+            detail = _safe_detail(
+                f"{type(exc).__name__}: {exc}",
+                env_name=credential_env,
+            )
+    latency = time.monotonic() - started
+    exchange = capture.last()
     if detail is None:
         answer = content.strip()
         if not answer:
             # An empty envelope is a failure of the provider, not a pass: the
-            # whole point of a prompt with a checkable answer.
-            detail = "EmptyResponse: provider returned an empty response body"
+            # whole point of a prompt with a checkable answer. What came back
+            # is described in full, so an empty 200, a reasoning-only answer
+            # cut off by the token cap, and a quota page read differently.
+            diagnostic = http_capture.describe_exchange(
+                exchange,
+                redact=lambda text: _safe_detail(text, env_name=credential_env),
+                protocol=row.protocol,
+            )
+            detail = (
+                "EmptyResponse: provider returned an empty response body\n"
+                f"{diagnostic}"
+            )
         elif _normalized_answer(answer) != "pong":
             # A gateway that answers at all but answers something else — an
             # error envelope rendered as prose, a refusal, a model that
@@ -450,7 +529,12 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
             )
 
     if detail is not None:
-        print(f"::error title={row.name} smoke failed::{detail}")
+        # A workflow command ends at the first newline: the headline becomes
+        # the annotation and any diagnostic lines follow as plain log lines.
+        headline, _, diagnostic = detail.partition("\n")
+        print(f"::error title={row.name} smoke failed::{headline}")
+        if diagnostic:
+            print(diagnostic)
         _write_summary(
             f"### `{row.name}` failed\n\n"
             f"- **Model:** `{row.model}`\n"
@@ -468,11 +552,20 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
         _write_github_output(name="outcome", value="failure")
         return 1
 
+    from lintro.ai.cost import estimate_cost
+
+    echoed, input_tokens, output_tokens = http_capture.usage_of(exchange)
+    cost = estimate_cost(echoed, input_tokens, output_tokens)
+    result = (
+        f"model {echoed}, {latency:.1f} s, "
+        f"{input_tokens} in / {output_tokens} out tokens, ~${cost:.6f}"
+    )
     _write_summary(
-        f"### `{row.name}` ok\n\nResponded with {len(content)} characters.\n",
+        f"### `{row.name}` ok\n\n"
+        f"Responded with {len(content)} characters ({result}).\n",
     )
     _write_github_output(name="outcome", value="success")
-    print(f"{row.name}: ok ({len(content)} characters)")
+    print(f"{row.name}: ok ({len(content)} characters; {result})")
     return 0
 
 
