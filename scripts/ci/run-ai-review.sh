@@ -244,7 +244,8 @@ sys.stdout.write("".join(f"{p}\n" for p in value))
 	while IFS= read -r request_path; do
 		[[ -z "$request_path" ]] && continue
 		if [[ ! "$request_path" =~ ^[A-Za-z0-9._/-]{1,200}$ ||
-			"$request_path" == /* || "/${request_path}/" == */../* ]]; then
+			"$request_path" == /* || "$request_path" == -* ||
+			"/${request_path}/" == */../* ]]; then
 			echo "::error::refusing on-request path prefix '${request_path}'" >&2
 			exit 1
 		fi
@@ -262,6 +263,26 @@ sys.stdout.write("".join(f"{p}\n" for p in value))
 esac
 if [[ -n "${REVIEW_REQUEST_MODE:-}" ]]; then
 	echo "[ai-review] on request by ${REVIEW_REQUESTER:-unknown}: ${REVIEW_REQUEST_MODE}"
+	# The request job checked the PR, but this job may have waited in the
+	# repo-wide queue since. Re-check the same three conditions now; a PR
+	# that was closed, drafted or is not from this repository gets no review
+	# (exit 0, logged). The head itself may have moved: like a push review,
+	# the round reviews the head as it is now (ruling 9 on #2795).
+	pr_payload=$(gh api "repos/${GITHUB_REPOSITORY:-}/pulls/${pr_number}" 2>/dev/null || true)
+	pr_eligible=$(PR_PAYLOAD="$pr_payload" REPO="${GITHUB_REPOSITORY:-}" python3 -c '
+import json, os
+try:
+    pull = json.loads(os.environ["PR_PAYLOAD"])
+except ValueError:
+    pull = {}
+head_repo = ((pull.get("head") or {}).get("repo") or {}).get("full_name", "")
+print("yes" if pull.get("state") == "open" and pull.get("draft") is False
+      and head_repo == os.environ["REPO"] else "no")
+' 2>/dev/null || echo no)
+	if [[ "$pr_eligible" != "yes" ]]; then
+		echo "[ai-review] on-request review skipped: PR #${pr_number} is no longer open, non-draft and from ${GITHUB_REPOSITORY:-this repository}"
+		exit 0
+	fi
 fi
 
 # Resume coverage is read from (and written to) this directory. The workflow

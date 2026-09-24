@@ -1438,7 +1438,11 @@ def _run_review_with_lint_stubs(
         [[ "$1" == "api" ]] || exit 1
         case "$2" in
             repos/lgtm-hq/py-lintro/pulls/{_LINT_PR_NUMBER}*)
-                printf '{{"head":{{"sha":"{_LINT_HEAD_SHA}"}}}}\\n' ;;
+                if [[ -n "${{LINT_STUB_PR_JSON:-}}" ]]; then
+                    printf '%s\\n' "$LINT_STUB_PR_JSON"
+                else
+                    printf '{{"state":"open","draft":false,"head":{{"sha":"{_LINT_HEAD_SHA}","repo":{{"full_name":"lgtm-hq/py-lintro"}}}}}}\\n'
+                fi ;;
             repos/lgtm-hq/py-lintro/actions/workflows/docker-ci.yml/runs*)
                 n=$(cat "{listing_count}" 2>/dev/null || echo 0)
                 n=$((n + 1))
@@ -2334,6 +2338,7 @@ def test_the_request_mode_reaches_the_review_argv(
         ("paths", '["../etc"]', "refusing on-request path prefix"),
         ("paths", '["/abs"]', "refusing on-request path prefix"),
         ("paths", '["src/*.py"]', "refusing on-request path prefix"),
+        ("paths", '["--full"]', "refusing on-request path prefix"),
         ("paths", "[]", "without any path prefix"),
         ("everything", "[]", "unknown REVIEW_REQUEST_MODE"),
         ("paths", "not-json", "is not a JSON list of strings"),
@@ -2344,6 +2349,7 @@ def test_the_request_mode_reaches_the_review_argv(
         "dotdot",
         "absolute",
         "glob",
+        "leading-dash",
         "no-paths",
         "unknown-mode",
         "not-json",
@@ -2376,3 +2382,64 @@ def test_a_bad_request_input_fails_before_the_review_runs(
     assert_that(argv).is_empty()
     exit_code = int((tmp_path / "exit-code").read_text(encoding="utf-8"))
     assert_that(exit_code).is_not_equal_to(0)
+
+
+@pytest.mark.parametrize(
+    "pull",
+    [
+        '{"state":"closed","draft":false,"head":{"repo":{"full_name":"lgtm-hq/py-lintro"}}}',
+        '{"state":"open","draft":true,"head":{"repo":{"full_name":"lgtm-hq/py-lintro"}}}',
+        '{"state":"open","draft":false,"head":{"repo":{"full_name":"someone/fork"}}}',
+        "not json",
+    ],
+    ids=["closed", "draft", "fork", "unreadable"],
+)
+def test_an_on_request_review_rechecks_the_pr_after_the_queue(
+    tmp_path: Path,
+    pull: str,
+) -> None:
+    """A PR closed, drafted or not from this repo by run time gets no review.
+
+    The request job checked the PR, but the review job may wait in the
+    repo-wide queue; the same three conditions are checked again at its start
+    (P2 on #2806). A refusal is a log line and exit 0, and the review never
+    runs.
+
+    Args:
+        tmp_path: Per-test scratch directory.
+        pull: The pulls API's answer at run time.
+    """
+    output, argv, _ = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=5,
+        extra_env={
+            "REVIEW_REQUEST_MODE": "delta",
+            "REVIEW_REQUESTER": "octocat",
+            "LINT_STUB_PR_JSON": pull,
+        },
+    )
+
+    assert_that(output).contains("on-request review skipped")
+    assert_that(argv).is_empty()
+    exit_code = int((tmp_path / "exit-code").read_text(encoding="utf-8"))
+    assert_that(exit_code).is_equal_to(0)
+
+
+def test_a_pull_request_event_review_does_not_recheck(tmp_path: Path) -> None:
+    """The re-check is for on-request reviews only; push reviews are unchanged.
+
+    Args:
+        tmp_path: Per-test scratch directory.
+    """
+    output, argv, _ = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=5,
+        extra_env={
+            "LINT_STUB_PR_JSON": '{"state":"closed","draft":true,"head":{}}',
+        },
+    )
+
+    assert_that(output).does_not_contain("on-request review skipped")
+    assert_that(argv).is_not_empty()

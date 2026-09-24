@@ -3,9 +3,12 @@
 
 Cross-run download is not ``download-artifact``'s default. This helper lists
 completed trusted runs of ``ai-review.yml`` and prints the newest run that
-carries a valid ``lintro-review-state-pr-<N>-*`` artifact. Conclusion is
-irrelevant: an INCOMPLETE (red) round is exactly the run to resume from
-(#2154). The current run is excluded from that walk, with one exception: on
+carries a valid ``lintro-review-state-pr-<N>-*`` artifact. Push reviews
+(``pull_request_target``) and on-request reviews (``issue_comment``, #2795)
+are both trusted sources. Conclusion is irrelevant: an INCOMPLETE (red)
+round is exactly the run to resume from (#2154). The one exception is a
+``skipped`` run, a PR comment that was not a review request, which never
+uploads state. The current run is excluded from that walk, with one exception: on
 a rerun (``GITHUB_RUN_ATTEMPT > 1``) whose earlier attempt already uploaded
 state artifacts, the current run id is selected so the rerun resumes its own
 cancelled attempt instead of re-reviewing the whole diff (#2506).
@@ -51,7 +54,20 @@ from urllib.parse import urlparse
 
 WORKFLOW_FILENAME: Final[str] = "ai-review.yml"
 WORKFLOW_PATH: Final[str] = f".github/workflows/{WORKFLOW_FILENAME}"
-WORKFLOW_EVENT: Final[str] = "pull_request_target"
+#: Events whose ai-review.yml runs are trusted resume sources. Both run the
+#: workflow definition from the default branch and install lintro from a
+#: trusted ref: pull_request_target (push reviews) and issue_comment
+#: (on-request reviews, #2795). A comment review's state must be found by the
+#: next push or comment review and by its own rerun, and vice versa; artifact
+#: names, keyed on the PR number, decide which PR a run's state belongs to.
+WORKFLOW_EVENTS: Final[frozenset[str]] = frozenset(
+    {"pull_request_target", "issue_comment"},
+)
+
+#: Conclusion of a run whose jobs were all skipped: every PR comment that is
+#: not a review request starts one. Such a run uploads nothing, so it is
+#: dropped before any artifact call to keep the walk cheap.
+SKIPPED_CONCLUSION: Final[str] = "skipped"
 # The untrusted lint job (#2571): docker-ci.yml runs on ``pull_request`` with
 # no secrets, lints the PR head, and uploads lintro's JSON report under this
 # artifact name. The review job downloads it for the exact head it reviews.
@@ -120,7 +136,7 @@ class WorkflowRun:
 
     Attributes:
         run_id: Actions run id.
-        event: Trigger event (must be ``pull_request_target``).
+        event: Trigger event (one of :data:`WORKFLOW_EVENTS`).
         status: Run status (must be ``completed``).
         path: Workflow path recorded on the run.
         created_at: When the run was created; newest wins. ``None``
@@ -129,6 +145,8 @@ class WorkflowRun:
             ``pull_request_target`` payloads; then artifact names decide.
         head_sha: Commit the run executed for. Empty when the payload
             omitted it; the lint-report locator then rejects the run.
+        conclusion: Final conclusion; ``skipped`` for a comment run that
+            was not a review request. Empty when absent.
     """
 
     run_id: int
@@ -138,6 +156,7 @@ class WorkflowRun:
     created_at: datetime | None
     pull_request_numbers: tuple[int, ...] = ()
     head_sha: str = ""
+    conclusion: str = ""
 
 
 @dataclass(frozen=True)
@@ -304,7 +323,7 @@ def is_trusted_review_run(run: WorkflowRun) -> bool:
     Returns:
         True when event and workflow path both match.
     """
-    return run.event == WORKFLOW_EVENT and Path(run.path).name == WORKFLOW_FILENAME
+    return run.event in WORKFLOW_EVENTS and Path(run.path).name == WORKFLOW_FILENAME
 
 
 def is_trusted_completed_run(run: WorkflowRun) -> bool:
@@ -427,6 +446,7 @@ def parse_workflow_run(payload: Mapping[str, Any]) -> WorkflowRun | None:
         created_at=_parse_datetime(str(payload.get("created_at", ""))),
         pull_request_numbers=_parse_pr_numbers(payload),
         head_sha=str(payload.get("head_sha", "") or ""),
+        conclusion=str(payload.get("conclusion", "") or ""),
     )
 
 
@@ -708,7 +728,7 @@ def can_resume_own_prior_attempt(
     walked only *completed* runs, so a review cancelled at the job budget
     re-reviewed the whole diff on every rerun. The same trust rules apply
     as to any other resume source: the run must be a
-    ``pull_request_target`` run of this workflow and must not belong to a
+    push-review or on-request run of this workflow and must not belong to a
     different pull request. Only ``status == "completed"`` is dropped —
     the run is by definition still in progress.
 
@@ -790,7 +810,9 @@ def locate_prior_state(
             return LocatedPrior(run_id=current_run_id)
     path = (
         f"repos/{repo}/actions/workflows/{WORKFLOW_FILENAME}/runs"
-        f"?event={WORKFLOW_EVENT}&status=completed"
+        # No event filter: push reviews and on-request reviews both carry
+        # state (#2795); trust is checked per run below.
+        "?status=completed"
     )
     newest_id: int | None = None
     seed_id: int | None = None
@@ -804,6 +826,8 @@ def locate_prior_state(
         if run is None:
             continue
         if not is_trusted_completed_run(run) or run.run_id == current_run_id:
+            continue
+        if run.conclusion == SKIPPED_CONCLUSION:
             continue
         if run.created_at is None:
             _log_locate(f"skip run-id={run.run_id}: missing created_at")

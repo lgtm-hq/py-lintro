@@ -14,7 +14,8 @@ Grammar (first line of the comment only, case-insensitive command word):
 * ``@lintro review delta``: the change since the last round.
 * ``@lintro review <path> [<path> ...]``: only files under those path
   prefixes. Prefixes only in v1: glob characters, ``..`` segments,
-  absolute paths and anything outside ``[A-Za-z0-9._/-]`` are rejected.
+  absolute paths, a leading ``-`` and anything outside ``[A-Za-z0-9._/-]``
+  are rejected.
 
 A comment that does not start with the command is not a request at all
 (``None``). A comment that starts with it but is malformed is a
@@ -122,6 +123,10 @@ def _path_problem(path: str) -> str:
         return "a path prefix contains a character other than letters, digits, . _ / -"
     if path.startswith("/"):
         return "a path prefix is absolute"
+    if path.startswith("-"):
+        # Never exploitable (click takes the next token as --path's value),
+        # but a prefix that reads like an option is refused on principle.
+        return "a path prefix starts with `-`"
     if ".." in path.split("/"):
         return "a path prefix contains a `..` segment"
     return ""
