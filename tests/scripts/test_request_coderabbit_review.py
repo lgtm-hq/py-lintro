@@ -84,18 +84,22 @@ def test_it_runs_from_the_base_definition_on_the_three_pr_events() -> None:
     )
 
 
-def test_it_fires_only_for_bot_authored_same_repository_pull_requests() -> None:
-    """Bot author and a branch of this repository, both required.
+def test_it_fires_only_for_bot_prs_from_this_repository_into_main() -> None:
+    """Bot author, a branch of this repository, and the default branch as base.
 
     Human-authored PRs are reviewed by CodeRabbit on its own. The Bot check
     alone is not enough: a GitHub App can author a PR from a fork, and that PR
-    must never reach the job holding the owner's PAT.
+    must never reach the job holding the owner's PAT. The default-branch check
+    is defense in depth: a PR into another branch would take this workflow and
+    its script from that branch.
     """
     condition = " ".join(_job()["if"].split())
 
     assert_that(condition).is_equal_to(
         "github.event.pull_request.user.type == 'Bot' && "
-        "github.event.pull_request.head.repo.full_name == github.repository",
+        "github.event.pull_request.head.repo.full_name == github.repository && "
+        "github.event.pull_request.base.ref == "
+        "github.event.repository.default_branch",
     )
 
 
@@ -103,7 +107,10 @@ def test_a_newer_push_supersedes_a_queued_request() -> None:
     """Per-PR concurrency, as in the repo's other PR workflows."""
     concurrency = _workflow()["concurrency"]
 
-    assert_that(concurrency["group"]).contains("github.event.pull_request.number")
+    assert_that(concurrency["group"]).is_equal_to(
+        "pr-coderabbit-review-request-"
+        "${{ github.event.pull_request.number || github.ref }}",
+    )
     assert_that(concurrency["cancel-in-progress"]).is_true()
 
 
@@ -113,19 +120,19 @@ def test_github_token_gets_nothing_beyond_the_checkout() -> None:
     assert_that(_job()["permissions"]).is_equal_to({"contents": "read"})
 
 
-def test_the_only_checkout_is_the_base_commit_script_without_credentials() -> None:
+def test_the_only_checkout_is_the_trusted_script_without_credentials() -> None:
     """No PR code is on disk in the job that holds the secret.
 
-    Exactly one checkout: the base commit, sparse to the one script, with no
-    persisted credentials. Never the head or the merge ref.
+    Exactly one shallow checkout: the commit this workflow definition came
+    from, sparse to the one script, with no persisted credentials. Never the
+    head or the merge ref.
     """
     checkouts = _steps_using(action="actions/checkout")
 
     assert_that(checkouts).is_length(1)
     options = checkouts[0]["with"]
-    assert_that(options["ref"]).is_equal_to(
-        "${{ github.event.pull_request.base.sha }}",
-    )
+    assert_that(options["ref"]).is_equal_to("${{ github.workflow_sha }}")
+    assert_that(options["fetch-depth"]).is_equal_to(1)
     assert_that(options["persist-credentials"]).is_false()
     assert_that(options["sparse-checkout"]).is_equal_to(_SCRIPT_PATH)
     assert_that(options["sparse-checkout-cone-mode"]).is_false()

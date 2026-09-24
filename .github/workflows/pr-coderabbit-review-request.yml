@@ -19,9 +19,12 @@ name: PR - CodeRabbit Review Request
 #     secrets available, so any branch could edit the step (or the Bot gate
 #     below) and read a PAT that can write to every lgtm-hq repo. On
 #     pull_request_target the definition is always the base branch's copy.
-#   * The job checks out nothing from the pull request: one sparse checkout of
-#     the base commit, limited to the one script, without persisted
-#     credentials. No PR code is on disk in the job that holds the secret.
+#   * The job checks out nothing from the pull request: one shallow sparse
+#     checkout of the commit this definition came from (github.workflow_sha),
+#     limited to the one script, without persisted credentials. No PR code is
+#     on disk in the job that holds the secret.
+#   * Only PRs into the default branch fire it, so a PR into any other branch
+#     (whose own copy of this file and script would run) never gets the PAT.
 #   * GITHUB_TOKEN gets only contents: read (for that checkout); the comment is
 #     posted with the PAT.
 #
@@ -44,16 +47,20 @@ concurrency:
 jobs:
   request-review:
     name: 🐇 Request CodeRabbit review
-    # Bot-authored PRs from branches of this repository only. Human-authored
-    # PRs are reviewed by CodeRabbit on its own. The same-repository check is
-    # needed as well as the Bot check: a GitHub App can author a PR from a
-    # fork, and that PR must never reach a job holding the owner's PAT.
+    # Bot-authored PRs from branches of this repository into the default
+    # branch only. Human-authored PRs are reviewed by CodeRabbit on its own.
+    # The same-repository check is needed as well as the Bot check: a GitHub
+    # App can author a PR from a fork, and that PR must never reach a job
+    # holding the owner's PAT. The default-branch check is defense in depth:
+    # a PR into any other branch would take this workflow, and the script,
+    # from that branch.
     if: >-
       github.event.pull_request.user.type == 'Bot' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch
     runs-on: ubuntu-24.04
     permissions:
-      contents: read # sparse checkout of the base commit's script
+      contents: read # sparse checkout of the trusted script
     timeout-minutes: 5
     steps:
       - name: Harden Runner
@@ -65,11 +72,13 @@ jobs:
             github.com:443
             api.github.com:443
 
-      - name: Checkout the base commit's request script
+      - name: Checkout the trusted request script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The base commit, never the pull request's head or merge ref.
-          ref: ${{ github.event.pull_request.base.sha }}
+          # The commit this workflow definition came from (the default
+          # branch's tip), never the pull request's head or merge ref.
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
           persist-credentials: false
           sparse-checkout: scripts/ci/request-coderabbit-review.sh
           sparse-checkout-cone-mode: false
