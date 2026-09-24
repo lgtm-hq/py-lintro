@@ -1,0 +1,91 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: PR - CodeRabbit Review Request
+# Ask CodeRabbit to review every push to a bot-authored pull request (#2726).
+#
+# CodeRabbit skips pull requests opened by a bot ("Review skipped — Bot user
+# detected") and ignores trigger comments posted by bot accounts. PRs here are
+# opened by lgtm-ai-bot[bot], so without this workflow none of them would get a
+# CodeRabbit review. The request is posted with the owner's fine-grained PAT
+# (org secret CODERABBIT_TRIGGER_TOKEN, Pull requests read/write), because a
+# human account is the only one CodeRabbit answers. Interim until CodeRabbit
+# reviews App-authored pull requests; docs/contributing.md says how to remove
+# it.
+#
+# SECURITY — why pull_request_target and not pull_request:
+#
+#   * On pull_request, GitHub runs the PR head's copy of this file with the
+#     secrets available, so any branch could edit the step (or the Bot gate
+#     below) and read a PAT that can write to every lgtm-hq repo. On
+#     pull_request_target the definition is always the base branch's copy.
+#   * The job checks out nothing from the pull request: one shallow sparse
+#     checkout of the commit this definition came from (github.workflow_sha),
+#     limited to the one script, without persisted credentials. No PR code is
+#     on disk in the job that holds the secret.
+#   * Only PRs into the default branch fire it, so a PR into any other branch
+#     (whose own copy of this file and script would run) never gets the PAT.
+#   * GITHUB_TOKEN gets only contents: read (for that checkout); the comment is
+#     posted with the PAT.
+#
+# pull_request_target is restricted by default on public repositories from
+# 2026-11-02; the Actions-policy decision for it is tracked on #2793, which
+# lists this workflow.
+
+'on':
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+# One request per PR at a time: a newer push supersedes a queued older one.
+concurrency:
+  # yamllint disable-line rule:line-length
+  group: pr-coderabbit-review-request-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  request-review:
+    name: 🐇 Request CodeRabbit review
+    # Bot-authored PRs from branches of this repository into the default
+    # branch only. Human-authored PRs are reviewed by CodeRabbit on its own.
+    # The same-repository check is needed as well as the Bot check: a GitHub
+    # App can author a PR from a fork, and that PR must never reach a job
+    # holding the owner's PAT. The default-branch check is defense in depth:
+    # a PR into any other branch would take this workflow, and the script,
+    # from that branch.
+    if: >-
+      github.event.pull_request.user.type == 'Bot' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == github.event.repository.default_branch
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read # sparse checkout of the trusted script
+    timeout-minutes: 5
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+
+      - name: Checkout the trusted request script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit this workflow definition came from (the default
+          # branch's tip), never the pull request's head or merge ref.
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: scripts/ci/request-coderabbit-review.sh
+          sparse-checkout-cone-mode: false
+
+      - name: Post the review request
+        env:
+          GH_TOKEN: ${{ secrets.CODERABBIT_TRIGGER_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: scripts/ci/request-coderabbit-review.sh
