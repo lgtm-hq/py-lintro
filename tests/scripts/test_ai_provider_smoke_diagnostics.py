@@ -262,21 +262,48 @@ def test_the_capture_records_the_sdk_exchange_and_restores_httpx(
     assert_that(exchange.headers).does_not_contain_key("set-cookie")
 
 
-def test_the_capture_restores_httpx_when_the_call_raises(capture: ModuleType) -> None:
-    """A failing call must not leave the wrapper installed.
+@pytest.mark.parametrize("transport", ["httpx", "httpx2"])
+def test_the_capture_restores_each_transport_when_the_call_raises(
+    capture: ModuleType,
+    transport: str,
+) -> None:
+    """A failing call must not leave either wrapper installed.
 
     Args:
         capture: The loaded capture module.
+        transport: The HTTP package under test, from ``TRANSPORTS``.
     """
-    original = httpx.AsyncClient.send
+    assert_that(capture.TRANSPORTS).contains(transport)
+    module = pytest.importorskip(transport)
+    original = module.AsyncClient.send
 
     def _fail() -> None:
         raise RuntimeError("boom")
 
     with pytest.raises(RuntimeError), capture.capture_http():
+        assert_that(module.AsyncClient.send).is_not_equal_to(original)
         _fail()
 
-    assert_that(httpx.AsyncClient.send).is_equal_to(original)
+    assert_that(module.AsyncClient.send).is_equal_to(original)
+
+
+def test_a_deeply_nested_body_is_described_not_raised(capture: ModuleType) -> None:
+    """Nesting deep enough to hit the parser's recursion limit is described.
+
+    ``json.loads`` raises ``RecursionError``, not ``ValueError``, on a body
+    nested past the interpreter's limit (100,000 levels here; 1,000 parse on
+    3.14). A gateway error page must not be able to take the diagnostic down.
+
+    Args:
+        capture: The loaded capture module.
+    """
+    depth = 100_000
+    exchange = _exchange(capture, body=b"[" * depth + b"]" * depth)
+
+    text = capture.describe_exchange(exchange, redact=lambda t: t)
+
+    assert_that(text).contains("body: not a completion envelope")
+    assert_that(capture.usage_of(exchange)).is_equal_to(("?", 0, 0))
 
 
 def test_the_capture_watches_httpx2_the_openai_sdk_sends_through(
@@ -313,6 +340,58 @@ def test_the_capture_watches_httpx2_the_openai_sdk_sends_through(
     assert_that(exchange.transport).is_equal_to("httpx2")
     assert_that(exchange.status).is_equal_to(429)
     assert_that(exchange.headers).contains_entry({"retry-after": "30"})
+
+
+@pytest.mark.parametrize(
+    ("body", "headers"),
+    [
+        ({"stop_reason": "x\n::add-mask::secret", "content": []}, {}),
+        ({"content": [{"type": "t\r\n::warning::pwned", "text": "x"}]}, {}),
+        ({"choices": [{"finish_reason": "::stop-commands::tok"}]}, {}),
+        ({"content": []}, {"x-request-id": "r ::error::boom"}),
+        ({"content": []}, {"server": "s\x1b[31m\n::group::g"}),
+    ],
+)
+def test_a_gateway_value_cannot_start_a_workflow_command(
+    capture: ModuleType,
+    body: dict[str, Any],
+    headers: dict[str, str],
+) -> None:
+    r"""A vendor string with a newline and ``::`` stays on its own line.
+
+    The runner executes any stdout line starting with ``::`` as a workflow
+    command, so a stop reason of ``x\\n::add-mask::secret`` must not reach the
+    log as two lines.
+
+    Args:
+        capture: The loaded capture module.
+        body: An envelope carrying the injection in a parsed field.
+        headers: Allowlisted headers, possibly carrying it.
+    """
+    exchange = _exchange(capture, body=body, headers=headers)
+
+    text = capture.describe_exchange(exchange, redact=lambda t: t)
+
+    lines = text.split("\n")
+    assert_that([line for line in lines if line.lstrip().startswith("::")]).is_empty()
+    assert_that(text).does_not_contain("\r")
+    assert_that(text).does_not_contain(" ")
+    assert_that(text).does_not_contain("\x1b")
+    assert_that(lines[0]).starts_with("HTTP status: 200")
+
+
+def test_the_sanitiser_escapes_breaks_and_marks_a_leading_command(
+    capture: ModuleType,
+) -> None:
+    """Line breaks become visible escapes; a leading ``::`` gets a ``!``.
+
+    Args:
+        capture: The loaded capture module.
+    """
+    assert_that(capture._scalar("a\nb")).is_equal_to("a\\nb")
+    assert_that(capture._scalar("::add-mask::x")).is_equal_to("!::add-mask::x")
+    assert_that(capture._scalar("end_turn")).is_equal_to("end_turn")
+    assert_that(capture._scalar(None)).is_equal_to("None")
 
 
 def test_an_unread_body_is_not_reported_as_empty(capture: ModuleType) -> None:
@@ -507,6 +586,7 @@ def test_a_credential_straddling_the_excerpt_cut_leaves_no_fragment(
     ("body", "headers"),
     [
         ({"content": []}, {"x-request-id": _FAKE_CREDENTIAL}),
+        ({"content": []}, {f"x-ratelimit-{_FAKE_CREDENTIAL}": "1"}),
         ({"stop_reason": _FAKE_CREDENTIAL, "content": []}, {}),
         ({"content": [{"type": _FAKE_CREDENTIAL, "text": "x"}]}, {}),
         ({"choices": [{"finish_reason": _FAKE_CREDENTIAL}]}, {}),
@@ -564,7 +644,7 @@ def test_the_excerpt_is_capped_in_bytes_without_splitting_a_character(
 
 @pytest.mark.parametrize(
     "model",
-    [_FAKE_CREDENTIAL, "model with spaces", ""],
+    [_FAKE_CREDENTIAL, "model with spaces", "", "safe-model\n"],
 )
 def test_the_echoed_model_on_a_pass_is_redacted_or_withheld(
     smoke: ModuleType,
@@ -875,6 +955,86 @@ def test_a_refused_call_writes_the_exchange_next_to_the_error(
     assert_that(recorded).contains(f"RuntimeError: Error code: {status}")
     for line in expected:
         assert_that(recorded).contains(line)
+
+
+def test_a_failing_diagnostic_never_costs_the_provider_error(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """If describing the exchange raises, the verdict and its error still land.
+
+    Only the exception's class name is added: its message could quote the
+    response, and with it the credential.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the Actions files.
+        monkeypatch: Environment and attribute patcher.
+    """
+    http_capture = smoke._http_capture()
+
+    def _explode(*_args: Any, **_kwargs: Any) -> str:
+        msg = f"leaks {_FAKE_CREDENTIAL}"
+        raise KeyError(msg)
+
+    async def _complete(**_kwargs: Any) -> str:
+        msg = "Credit balance is too low"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(http_capture, "describe_exchange", _explode)
+    monkeypatch.setattr(smoke, "_complete", _complete)
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+    error_file = tmp_path / "smoke-error.md"
+
+    code = smoke.run_smoke(
+        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "zai-api"),
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=error_file,
+    )
+
+    recorded = error_file.read_text(encoding="utf-8")
+    assert_that(code).is_equal_to(1)
+    assert_that(output.read_text(encoding="utf-8")).contains("outcome=failure")
+    assert_that(recorded).contains("RuntimeError: Credit balance is too low")
+    assert_that(recorded).contains("diagnostic unavailable: KeyError")
+    assert_that(recorded).does_not_contain(_FAKE_CREDENTIAL)
+
+
+def test_a_failure_before_any_response_says_none_was_recorded(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DNS, connect and pre-response timeouts leave no exchange; say so.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the Actions files.
+        monkeypatch: Environment and attribute patcher.
+    """
+
+    async def _complete(**_kwargs: Any) -> str:
+        msg = "timed out before a response"
+        raise TimeoutError(msg)
+
+    monkeypatch.setattr(smoke, "_complete", _complete)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+    error_file = tmp_path / "smoke-error.md"
+
+    code = smoke.run_smoke(
+        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "zai-api"),
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=error_file,
+    )
+
+    recorded = error_file.read_text(encoding="utf-8")
+    assert_that(code).is_equal_to(1)
+    assert_that(recorded).contains("TimeoutError: timed out before a response")
+    assert_that(recorded).contains("HTTP: no response was recorded for the call")
 
 
 def test_a_pass_reports_the_echoed_model_latency_and_tokens(

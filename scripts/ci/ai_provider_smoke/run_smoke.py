@@ -70,7 +70,7 @@ _NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 #: What an echoed model id may look like before it is printed on a pass. The
 #: value is the gateway's; anything else (a redaction notice, prose) is shown
 #: as ``?``.
-_MODEL_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9._:/@+-]{1,100}$")
+_MODEL_ID_RE: Final[re.Pattern[str]] = re.compile(r"[A-Za-z0-9._:/@+-]{1,100}")
 
 #: Credential variable names are uppercase environment identifiers.
 _ENV_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -499,16 +499,25 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
                 env_name=credential_env,
             )
     latency = time.monotonic() - started
-    exchange = capture.last()
-    diagnostic = http_capture.describe_exchange(
-        exchange,
-        redact=lambda text: _safe_detail(text, env_name=credential_env),
-        protocol=row.protocol,
-    )
-    if detail is not None and exchange is not None:
+    exchange = None
+    try:
+        exchange = capture.last()
+        diagnostic = http_capture.describe_exchange(
+            exchange,
+            redact=lambda text: _safe_detail(text, env_name=credential_env),
+            protocol=row.protocol,
+        )
+    except Exception as exc:  # the diagnostic must never cost the verdict
+        # Class name only: the message could quote the response, and with it
+        # the credential. The provider's own error, kept in ``detail``, is
+        # what the outcome files must carry.
+        diagnostic = f"diagnostic unavailable: {type(exc).__name__}"
+    if detail is not None:
         # The SDK's exception quotes the status and body at best; the
         # headers (retry-after, rate-limit counters) that tell a quota
-        # refusal from an outage are only in the exchange itself.
+        # refusal from an outage are only in the exchange itself. With no
+        # exchange at all (DNS, connect, a timeout before any response) the
+        # diagnostic says so, which is itself the finding.
         detail = f"{detail}\n{diagnostic}"
     if detail is None:
         answer = content.strip()
@@ -568,7 +577,7 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
     # The model name is the gateway's text, printed and summarised like an
     # error: redact it, and keep it only if it still looks like a model id.
     echoed = _safe_detail(echoed, env_name=credential_env)
-    if not _MODEL_ID_RE.match(echoed):
+    if not _MODEL_ID_RE.fullmatch(echoed):
         echoed = "?"
     cost = estimate_cost(echoed, input_tokens, output_tokens)
     result = (

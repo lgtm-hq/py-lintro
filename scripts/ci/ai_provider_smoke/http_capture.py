@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
@@ -56,6 +57,12 @@ _HEADER_PREFIXES: Final[tuple[str, ...]] = (
 #: ``httpx``, openai 3.x its fork ``httpx2``. A package that is not installed
 #: is skipped; the call cannot have gone through it.
 TRANSPORTS: Final[tuple[str, ...]] = ("httpx", "httpx2")
+
+#: Characters that end or break a log line: C0 controls, DEL, and the
+#: Unicode line and paragraph separators some log viewers honour.
+_LINE_BREAKERS: Final[re.Pattern[str]] = re.compile(
+    "[\x00-\x1f\x7f\x85\u2028\u2029]",
+)
 
 #: UTF-8 bytes of the redacted response body kept for the log. Bytes, not
 #: characters, so a multibyte error page cannot print several times the cap.
@@ -228,6 +235,29 @@ def _shown(value: Any) -> str:
     return str(_count(value))
 
 
+def _scalar(value: Any) -> str:
+    """Render one gateway-chosen value so it stays on its own log line.
+
+    The runner reads any stdout line that starts with ``::`` as a workflow
+    command (``::add-mask::``, ``::warning::``, ``::stop-commands::``). A stop
+    reason, block type or header value is the gateway's text, so a newline in
+    it could start such a line. Line-breaking characters are shown as
+    escapes, and a value that itself starts with ``::`` is prefixed with
+    ``!``. This is output hygiene, separate from credential redaction.
+
+    Args:
+        value: Any decoded JSON value or header value.
+
+    Returns:
+        A single-line rendering that cannot begin a workflow command.
+    """
+    text = _LINE_BREAKERS.sub(
+        lambda match: match.group().encode("unicode_escape").decode("ascii"),
+        str(value),
+    )
+    return f"!{text}" if text.lstrip().startswith("::") else text
+
+
 def _anthropic_shape(payload: dict[str, Any]) -> list[str]:
     """Describe an Anthropic Messages envelope.
 
@@ -239,14 +269,14 @@ def _anthropic_shape(payload: dict[str, Any]) -> list[str]:
     """
     content = payload.get("content")
     blocks = [
-        f"{block.get('type', '?')}({len(_block_text(block))} chars)"
+        f"{_scalar(block.get('type', '?'))}({len(_block_text(block))} chars)"
         for block in (content if isinstance(content, list) else [])
         if isinstance(block, dict)
     ]
     usage = _mapping(payload.get("usage"))
     thinking = _mapping(usage.get("output_tokens_details")).get("thinking_tokens")
     return [
-        f"stop_reason: {payload.get('stop_reason')}",
+        f"stop_reason: {_scalar(payload.get('stop_reason'))}",
         f"content blocks: {', '.join(blocks) or 'none'}",
         (
             f"output tokens: {_shown(usage.get('output_tokens'))} "
@@ -286,7 +316,7 @@ def _openai_shape(payload: dict[str, Any]) -> list[str]:
     content = str(message.get("content") or "")
     reasoning_content = str(message.get("reasoning_content") or "")
     return [
-        f"finish_reason: {choice.get('finish_reason')}",
+        f"finish_reason: {_scalar(choice.get('finish_reason'))}",
         (
             f"message: content({len(content)} chars), "
             f"reasoning_content({len(reasoning_content)} chars)"
@@ -324,7 +354,7 @@ def describe_exchange(
         return "HTTP: no response was recorded for the call"
     lines = [f"HTTP status: {exchange.status} (via {exchange.transport})"]
     for name in sorted(exchange.headers):
-        lines.append(f"header {name}: {exchange.headers[name]}")
+        lines.append(f"header {name}: {_scalar(exchange.headers[name])}")
     if exchange.body is None:
         # A streamed response the SDK never read: there is no body to show,
         # which is not the same finding as a body that arrived empty.
@@ -333,7 +363,7 @@ def describe_exchange(
     text = exchange.body.decode("utf-8", errors="replace")
     try:
         payload = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         payload = None
     shapes = [("choices", _openai_shape), ("content", _anthropic_shape)]
     if protocol == "anthropic":
@@ -398,7 +428,7 @@ def usage_of(exchange: CapturedExchange | None) -> tuple[str, int, int]:
         return "?", 0, 0
     try:
         payload = json.loads(exchange.body.decode("utf-8", errors="replace"))
-    except ValueError:
+    except (ValueError, RecursionError):
         return "?", 0, 0
     if not isinstance(payload, dict):
         return "?", 0, 0
