@@ -10,7 +10,11 @@
     "status, never a pass.",
     "protocol selects which of lintro's own API providers drives the call:",
     "'anthropic' and 'openai' are the two wire protocols lintro implements, and",
-    "gateways (kimi, z.ai) reuse them through base_url."
+    "gateways (kimi, z.ai) reuse them through base_url.",
+    "max_tokens is optional (default 16, at most 4096). kimi-k3 and glm-5.3-flash",
+    "always reason before answering and spend the cap on that first; at 16",
+    "they return a reasoning block and no text, which reads as an empty",
+    "response (#2748)."
   ],
   "providers": [
     {
@@ -32,14 +36,16 @@
       "protocol": "anthropic",
       "base_url": "https://api.moonshot.ai/anthropic",
       "key_env": "KIMI_API_KEY",
-      "model": "kimi-k2-turbo-preview"
+      "model": "kimi-k3",
+      "max_tokens": 1024
     },
     {
       "name": "zai-api",
-      "protocol": "anthropic",
-      "base_url": "https://api.z.ai/api/anthropic",
+      "protocol": "openai",
+      "base_url": "https://api.z.ai/api/coding/paas/v4",
       "key_env": "ZAI_AUTH_TOKEN",
-      "model": "glm-4.6"
+      "model": "glm-5.3-flash",
+      "max_tokens": 1024
     }
   ]
 }
