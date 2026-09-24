@@ -25,7 +25,6 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
-- **ai/review**: delta rounds read the change since the last round (#2754) (78d535d)
 - **ai/review**: delta rounds — from round two a `--pr` review's chunk calls embed the
   change since the last recorded round's head (restricted to the pull request's own
   files; the whole-PR hunk stays what the gates and budgets see) instead of the whole
