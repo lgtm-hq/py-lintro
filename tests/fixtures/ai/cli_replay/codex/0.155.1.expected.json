@@ -1,0 +1,8 @@
+{
+  "content": "pong",
+  "cost_estimate": 0.05781599999999999,
+  "input_tokens": 19152,
+  "model": "gpt-5.1-codex",
+  "output_tokens": 24,
+  "session_id": null
+}

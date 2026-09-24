@@ -7,10 +7,10 @@ CLI at the pinned version; parsing them with the real transport parsers is what
 turns a vendor schema change into a red diff instead of a broken review in
 production.
 
-The committed captures are hand-authored to the schema each parser documents,
-because recording real output needs the CLIs installed and a credential. Until
-an owner re-records, this guards our parsers rather than proving vendor
-output.
+The claude and codex captures are real recordings from the pinned binaries;
+cursor's is still hand-authored to the schema its parser documents, because
+recording real output needs the CLI installed and a credential. Until it is
+re-recorded, that row guards our parser rather than proving vendor output.
 
 The expectation files pin the cost the parser attributed to each call as
 well, so a break in cost extraction is caught here rather than falling back to
