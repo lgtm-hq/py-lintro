@@ -1827,8 +1827,9 @@ def test_workflow_installs_the_cli_from_the_dockerfile_pin() -> None:
     )
 
 
-# The only wildcard the AI Review job may allowlist: GitHub's hosted-runner
-# watchdog domain, whose region shard rotates (#2352).
+# The wildcard #2353 once granted for GitHub's hosted-runner watchdog
+# domain. harden-runner v2.21.1 allows it from GitHub meta itself, so the
+# AI Review job allowlists no wildcard at all (#2352, #2488).
 _WATCHDOG_WILDCARD_ENDPOINT = "*.githubapp.com:443"
 
 
@@ -1862,17 +1863,15 @@ def test_workflow_allows_the_npm_registry_egress() -> None:
         "pipelines.actions.githubusercontent.com:443",
         "results-receiver.actions.githubusercontent.com:443",
     )
-    # Hosted-runner watchdog endpoints (#2352). One wildcard, deliberately:
-    # the hosted-compute region shard rotates (eus-02 and iad-02 both seen on
-    # 2026-09-05), so exact hosts would leave this 75-minute job killable in
-    # every other region, and githubapp.com is a GitHub-owned domain. Any other
-    # wildcard — a bare `*`, `*:443`, or a third-party suffix — stays forbidden.
-    assert_that(endpoints).contains(_WATCHDOG_WILDCARD_ENDPOINT)
+    # No hosted-runner watchdog grant (#2352, #2488): harden-runner v2.21.1
+    # allows *.githubapp.com from GitHub meta, so the wildcard #2353 added is
+    # redundant, and with it gone no wildcard of any kind is permitted here.
+    assert_that(endpoints).does_not_contain(_WATCHDOG_WILDCARD_ENDPOINT)
     for endpoint in endpoints:
-        if "*" in endpoint:
-            assert_that(endpoint).described_as(endpoint).is_equal_to(
-                _WATCHDOG_WILDCARD_ENDPOINT,
-            )
+        assert_that(endpoint).described_as(endpoint).does_not_contain("*")
+        assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
+            "githubapp.com",
+        )
         assert_that(endpoint.lower()).described_as(endpoint).does_not_contain(
             "cursor.sh",
         )

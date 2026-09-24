@@ -364,24 +364,15 @@ jobs:
 
     steps:
       - name: Harden Runner
-        # GitHub's own hosted-runner control plane under githubapp.com: the
-        # hosted-compute-watchdog-prod-* and hosted-compute-request-
-        # orchestrator-prod-* shards (iad-01, iad-02, eus-01, eus-02 -- every
-        # shard observed in this repo's job logs) and the results receiver.
-        # The x64 job was reclaimed mid-run on 7 of 7 attempts for v0.147.7
-        # ("The runner has received a shutdown signal", 15-20 minutes in)
-        # while this list denied them, while the arm64 sibling -- same source,
-        # same runner class -- has never been observed dying that way (#1761,
-        # #2339). Exact hosts rather than the `*.githubapp.com:443` wildcard
-        # the docker-ci/ai-review jobs carry (#2353), by owner decision. If
-        # GitHub adds a shard the kills return; the trigger is the kill itself
-        # (a "shutdown signal" 15-20 minutes into a single matrix leg), not a
-        # named host -- a reclaimed runner does not reliably publish its
-        # harden-runner summary. The agreed procedure on that signal is an
-        # immediate issue and a next PR reverting this job to the wildcard
-        # (#2488 tracks narrowing the others). macOS legs are out of scope:
-        # never observed reclaimed, and harden-runner enforces differently
-        # there.
+        # GitHub's hosted-runner control-plane hosts under githubapp.com
+        # (hosted-compute-watchdog-*, hosted-compute-request-orchestrator-*,
+        # actions-results-receiver) need no entry here: harden-runner v2.21.1
+        # allows *.githubapp.com from GitHub meta. The x64 leg was reclaimed
+        # mid-run on 7 of 7 attempts for v0.147.7 while v2.21.0 denied them
+        # (#1761, #2339); the literal shard list that fixed it is gone with
+        # the wildcards elsewhere (#2488). If a "shutdown signal" kill 15-20
+        # minutes into a single matrix leg returns, open an issue and check
+        # the harden-runner version before touching this list.
         # The sigstore hosts and token.actions.githubusercontent.com serve
         # the attest step (OIDC token, Fulcio certificate, Rekor entry).
         # yamllint disable-line rule:line-length
@@ -408,15 +399,6 @@ jobs:
             tuf-repo-cdn.sigstore.dev:443
             timestamp.sigstore.dev:443
             oauth2.sigstore.dev:443
-            hosted-compute-watchdog-prod-iad-01.githubapp.com:443
-            hosted-compute-watchdog-prod-iad-02.githubapp.com:443
-            hosted-compute-watchdog-prod-eus-01.githubapp.com:443
-            hosted-compute-watchdog-prod-eus-02.githubapp.com:443
-            hosted-compute-request-orchestrator-prod-iad-01.githubapp.com:443
-            hosted-compute-request-orchestrator-prod-iad-02.githubapp.com:443
-            hosted-compute-request-orchestrator-prod-eus-01.githubapp.com:443
-            hosted-compute-request-orchestrator-prod-eus-02.githubapp.com:443
-            actions-results-receiver-production.githubapp.com:443
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -398,16 +398,9 @@ jobs:
         # wildcard endpoints, so `*.blob.core.windows.net` (used by
         # publish jobs) cannot be copied here. No additional blob-redirect
         # host has been observed on artifact upload/download in this repo.
-        # *.githubapp.com:443 covers GitHub's own hosted-runner watchdog and
-        # request-orchestrator endpoints (hosted-compute-watchdog-*,
-        # hosted-compute-request-orchestrator-*). Blocking them correlates with
-        # long jobs being reclaimed mid-run ("The runner has received a shutdown
-        # signal", exit 143), and this is the longest job in the repo (75 min)
-        # — see #2352. This is the one wildcard this job allows: the region
-        # shard rotates (eus-02 and iad-02 both seen on 2026-09-05), so exact
-        # hosts would leave the job killable in every other region, and
-        # githubapp.com is GitHub-owned — unlike the Cursor shards above, which
-        # stay exact. A bare `*` or `*:443` catch-all remains forbidden.
+        # GitHub's hosted-runner watchdog hosts (*.githubapp.com) need no entry
+        # here: harden-runner v2.21.1 allows them from GitHub meta (#2352,
+        # #2488). This job allows no wildcard endpoints at all.
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
@@ -428,7 +421,6 @@ jobs:
             files.pythonhosted.org:443
             nodejs.org:443
             registry.npmjs.org:443
-            *.githubapp.com:443
             ${{ env.AI_REVIEW_CURSOR_EGRESS }}
             ${{ env.AI_REVIEW_OPENAI_EGRESS }}
             ${{ env.AI_REVIEW_ZAI_EGRESS }}
