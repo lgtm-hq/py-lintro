@@ -67,6 +67,11 @@ SUPPORTED_PROTOCOLS: Final[frozenset[str]] = frozenset({"anthropic", "openai"})
 #: status context, so they are constrained to what both accept.
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
+#: What an echoed model id may look like before it is printed on a pass. The
+#: value is the gateway's; anything else (a redaction notice, prose) is shown
+#: as ``?``.
+_MODEL_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9._:/@+-]{1,100}$")
+
 #: Credential variable names are uppercase environment identifiers.
 _ENV_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
@@ -495,6 +500,16 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
             )
     latency = time.monotonic() - started
     exchange = capture.last()
+    diagnostic = http_capture.describe_exchange(
+        exchange,
+        redact=lambda text: _safe_detail(text, env_name=credential_env),
+        protocol=row.protocol,
+    )
+    if detail is not None and exchange is not None:
+        # The SDK's exception quotes the status and body at best; the
+        # headers (retry-after, rate-limit counters) that tell a quota
+        # refusal from an outage are only in the exchange itself.
+        detail = f"{detail}\n{diagnostic}"
     if detail is None:
         answer = content.strip()
         if not answer:
@@ -502,11 +517,6 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
             # whole point of a prompt with a checkable answer. What came back
             # is described in full, so an empty 200, a reasoning-only answer
             # cut off by the token cap, and a quota page read differently.
-            diagnostic = http_capture.describe_exchange(
-                exchange,
-                redact=lambda text: _safe_detail(text, env_name=credential_env),
-                protocol=row.protocol,
-            )
             detail = (
                 "EmptyResponse: provider returned an empty response body\n"
                 f"{diagnostic}"
@@ -555,6 +565,11 @@ def run_smoke(*, row: ProviderRow, credential_env: str, error_file: Path | None)
     from lintro.ai.cost import estimate_cost
 
     echoed, input_tokens, output_tokens = http_capture.usage_of(exchange)
+    # The model name is the gateway's text, printed and summarised like an
+    # error: redact it, and keep it only if it still looks like a model id.
+    echoed = _safe_detail(echoed, env_name=credential_env)
+    if not _MODEL_ID_RE.match(echoed):
+        echoed = "?"
     cost = estimate_cost(echoed, input_tokens, output_tokens)
     result = (
         f"model {echoed}, {latency:.1f} s, "

@@ -279,6 +279,57 @@ def test_the_capture_restores_httpx_when_the_call_raises(capture: ModuleType) ->
     assert_that(httpx.AsyncClient.send).is_equal_to(original)
 
 
+def test_the_capture_watches_httpx2_the_openai_sdk_sends_through(
+    capture: ModuleType,
+) -> None:
+    """Openai 3.x sends through ``httpx2``, not ``httpx``; both are watched.
+
+    Without this the openai-protocol rows (openai-api, zai-api) record nothing:
+    an empty answer loses its status and body, and a pass reports no model.
+
+    Args:
+        capture: The loaded capture module.
+    """
+    httpx2 = pytest.importorskip("httpx2")
+    originals = {"httpx": httpx.AsyncClient.send, "httpx2": httpx2.AsyncClient.send}
+
+    def _handler(_request: Any) -> Any:
+        return httpx2.Response(429, headers={"retry-after": "30"}, content=b"{}")
+
+    async def _call() -> None:
+        transport = httpx2.MockTransport(_handler)
+        async with httpx2.AsyncClient(transport=transport) as client:
+            await client.post("https://api.example.com/v1/chat/completions", json={})
+
+    with capture.capture_http() as recorded:
+        assert_that(httpx.AsyncClient.send).is_not_equal_to(originals["httpx"])
+        assert_that(httpx2.AsyncClient.send).is_not_equal_to(originals["httpx2"])
+        asyncio.run(_call())
+
+    assert_that(recorded.transports).contains("httpx", "httpx2")
+    assert_that(httpx.AsyncClient.send).is_equal_to(originals["httpx"])
+    assert_that(httpx2.AsyncClient.send).is_equal_to(originals["httpx2"])
+    exchange = recorded.last()
+    assert_that(exchange.transport).is_equal_to("httpx2")
+    assert_that(exchange.status).is_equal_to(429)
+    assert_that(exchange.headers).contains_entry({"retry-after": "30"})
+
+
+def test_an_unread_body_is_not_reported_as_empty(capture: ModuleType) -> None:
+    """A streamed response the SDK never read is a different finding.
+
+    Args:
+        capture: The loaded capture module.
+    """
+    exchange = capture.CapturedExchange(status=200, body=None)
+
+    text = capture.describe_exchange(exchange, redact=lambda t: t)
+
+    assert_that(text).contains("body: not read by the SDK")
+    assert_that(text).does_not_contain("body: empty")
+    assert_that(capture.usage_of(exchange)).is_equal_to(("?", 0, 0))
+
+
 def test_no_exchange_is_described_as_such(capture: ModuleType) -> None:
     """A call that never got a response says so rather than inventing one.
 
@@ -393,7 +444,7 @@ def test_a_quota_page_shows_its_status_and_first_bytes(capture: ModuleType) -> N
     assert_that(text).contains("HTTP status: 429")
     assert_that(text).contains("header retry-after: 30")
     assert_that(text).contains("body: not a completion envelope")
-    assert_that(text).contains(f"body ({len(page)} bytes; first 500 characters")
+    assert_that(text).contains(f"body ({len(page)} bytes; first 500 bytes")
     assert_that(text).contains("Insufficient balance")
     assert_that(text).does_not_contain("x" * 500)
 
@@ -440,7 +491,7 @@ def test_a_credential_straddling_the_excerpt_cut_leaves_no_fragment(
     Args:
         capture: The loaded capture module.
     """
-    prefix = "p" * (capture.BODY_EXCERPT_CHARS - 10)
+    prefix = "p" * (capture.BODY_EXCERPT_BYTES - 10)
     exchange = _exchange(capture, body=f"{prefix}{_FAKE_CREDENTIAL} tail".encode())
 
     text = capture.describe_exchange(
@@ -450,6 +501,116 @@ def test_a_credential_straddling_the_excerpt_cut_leaves_no_fragment(
 
     assert_that(text).does_not_contain(_FAKE_CREDENTIAL[:10])
     assert_that(text).contains("[REDACTED]")
+
+
+@pytest.mark.parametrize(
+    ("body", "headers"),
+    [
+        ({"content": []}, {"x-request-id": _FAKE_CREDENTIAL}),
+        ({"stop_reason": _FAKE_CREDENTIAL, "content": []}, {}),
+        ({"content": [{"type": _FAKE_CREDENTIAL, "text": "x"}]}, {}),
+        ({"choices": [{"finish_reason": _FAKE_CREDENTIAL}]}, {}),
+        ({"content": [], "usage": {"output_tokens": _FAKE_CREDENTIAL}}, {}),
+    ],
+)
+def test_a_credential_in_any_rendered_field_is_redacted(
+    capture: ModuleType,
+    smoke: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    body: dict[str, Any],
+    headers: dict[str, str],
+) -> None:
+    """Headers and parsed fields come from the gateway too, not only the body.
+
+    Uses the smoke's own ``_safe_detail`` as the redaction, so the test pins
+    what actually reaches the log, the summary and the error file.
+
+    Args:
+        capture: The loaded capture module.
+        smoke: The loaded smoke runner module.
+        monkeypatch: Environment patcher.
+        body: An envelope carrying the credential in one field.
+        headers: Allowlisted headers, possibly carrying the credential.
+    """
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+    exchange = _exchange(capture, body=body, headers=headers)
+
+    text = capture.describe_exchange(
+        exchange,
+        redact=lambda t: smoke._safe_detail(t, env_name="LINTRO_SMOKE_CREDENTIAL"),
+    )
+
+    assert_that(text).does_not_contain(_FAKE_CREDENTIAL)
+    assert_that(text).contains("HTTP status: 200")
+
+
+def test_the_excerpt_is_capped_in_bytes_without_splitting_a_character(
+    capture: ModuleType,
+) -> None:
+    """A multibyte body prints at most 500 bytes and no half character.
+
+    Args:
+        capture: The loaded capture module.
+    """
+    body = ("é" * 400).encode("utf-8")  # 800 bytes, 2 per character
+    exchange = _exchange(capture, body=body)
+
+    text = capture.describe_exchange(exchange, redact=lambda t: t)
+
+    excerpt = text.rsplit("after redaction): ", 1)[1]
+    assert_that(excerpt).is_equal_to(repr("é" * 250))
+    assert_that(excerpt).does_not_contain("\\ufffd")
+
+
+@pytest.mark.parametrize(
+    "model",
+    [_FAKE_CREDENTIAL, "model with spaces", ""],
+)
+def test_the_echoed_model_on_a_pass_is_redacted_or_withheld(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    model: str,
+) -> None:
+    """The gateway's model string is printed only if it is a model id.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the Actions files.
+        monkeypatch: Environment and attribute patcher.
+        capsys: Captured stdout.
+        model: The model field the gateway echoes.
+    """
+    body = {"model": model, "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    async def _complete(**_kwargs: Any) -> str:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as c:
+            await c.post("https://api.example.com/v1/messages", json={})
+        return "pong"
+
+    summary = tmp_path / "summary"
+    monkeypatch.setattr(smoke, "_complete", _complete)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+
+    code = smoke.run_smoke(
+        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "kimi-api"),
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=None,
+    )
+
+    out = capsys.readouterr().out
+    assert_that(code).is_equal_to(0)
+    assert_that(out).contains("model ?,")
+    assert_that(out).does_not_contain(_FAKE_CREDENTIAL)
+    assert_that(summary.read_text(encoding="utf-8")).does_not_contain(
+        _FAKE_CREDENTIAL,
+    )
 
 
 @pytest.mark.parametrize(
@@ -640,6 +801,80 @@ def test_the_row_protocol_breaks_a_tie_between_envelope_shapes(
 
     assert_that(text).contains(expected)
     assert_that(text).does_not_contain(absent)
+
+
+@pytest.mark.parametrize(
+    ("status", "headers", "body", "expected"),
+    [
+        (
+            429,
+            {"retry-after": "30", "x-ratelimit-remaining-requests": "0"},
+            {"error": {"code": "1113", "message": "Insufficient balance"}},
+            [
+                "HTTP status: 429",
+                "header retry-after: 30",
+                "header x-ratelimit-remaining-requests: 0",
+                "Insufficient balance",
+            ],
+        ),
+        (
+            401,
+            {"x-request-id": "req-1"},
+            {"error": {"message": "Authentication Failed"}},
+            ["HTTP status: 401", "header x-request-id: req-1", "Authentication"],
+        ),
+    ],
+)
+def test_a_refused_call_writes_the_exchange_next_to_the_error(
+    smoke: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    status: int,
+    headers: dict[str, str],
+    body: dict[str, Any],
+    expected: list[str],
+) -> None:
+    """A non-2xx carries its headers to the tracker, not only the SDK's text.
+
+    The z.ai 1113 refusal (#2748) surfaced as the SDK's exception text with
+    status and body but without retry-after or the rate-limit counters, which
+    are what tell a quota refusal from an outage.
+
+    Args:
+        smoke: The loaded smoke runner module.
+        tmp_path: Temporary directory for the Actions files.
+        monkeypatch: Environment and attribute patcher.
+        status: HTTP status the gateway returns.
+        headers: Response headers.
+        body: Response body.
+        expected: Lines the error file must carry.
+    """
+
+    def _handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status, headers=headers, json=body)
+
+    async def _complete(**_kwargs: Any) -> str:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as c:
+            response = await c.post("https://api.example.com/v1/messages", json={})
+        msg = f"Error code: {response.status_code}"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(smoke, "_complete", _complete)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setenv("LINTRO_SMOKE_CREDENTIAL", _FAKE_CREDENTIAL)
+    error_file = tmp_path / "smoke-error.md"
+
+    code = smoke.run_smoke(
+        row=next(r for r in smoke.load_table(path=_TABLE) if r.name == "zai-api"),
+        credential_env="LINTRO_SMOKE_CREDENTIAL",
+        error_file=error_file,
+    )
+
+    recorded = error_file.read_text(encoding="utf-8")
+    assert_that(code).is_equal_to(1)
+    assert_that(recorded).contains(f"RuntimeError: Error code: {status}")
+    for line in expected:
+        assert_that(recorded).contains(line)
 
 
 def test_a_pass_reports_the_echoed_model_latency_and_tokens(

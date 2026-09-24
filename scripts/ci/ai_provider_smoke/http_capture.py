@@ -9,21 +9,24 @@ whether the gateway sent an empty 200, a quota page, or a 200 whose only block
 was the model's reasoning (the answer a thinking model gives when the token
 cap runs out before it starts writing).
 
-:func:`capture_http` watches the SDK's own ``httpx`` client for the length of
-one call, so the exchange described is the one lintro's code path made, not a
-second request sent to explain the first. :func:`describe_exchange` turns it
-into log lines: the HTTP status, an allowlist of headers, the protocol-level
-stop reason, the content blocks with their sizes, the thinking/text token
-split, and the first bytes of the body. Credentials are never on that list:
-request headers are not recorded at all, and the body excerpt goes through the
-caller's redaction before it is printed.
+:func:`capture_http` watches the SDKs' own HTTP clients for the length of one
+call, so the exchange described is the one lintro's code path made, not a
+second request sent to explain the first. The two SDKs lintro drives send
+through different packages (anthropic through ``httpx``, openai through its
+fork ``httpx2``), so both are watched. :func:`describe_exchange` turns the
+exchange into log lines: the HTTP status, an allowlist of headers, the
+protocol-level stop reason, the content blocks with their sizes, the
+thinking/text token split, and the first bytes of the body. Request headers
+are never recorded, and every rendered line goes through the caller's
+redaction before it is printed.
 """
 
 from __future__ import annotations
 
+import importlib
 import json
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Final
 
@@ -49,8 +52,14 @@ _HEADER_PREFIXES: Final[tuple[str, ...]] = (
     "anthropic-ratelimit-",
 )
 
-#: Characters of the redacted response body kept for the log.
-BODY_EXCERPT_CHARS: Final[int] = 500
+#: HTTP packages whose ``AsyncClient.send`` the SDKs call: anthropic uses
+#: ``httpx``, openai 3.x its fork ``httpx2``. A package that is not installed
+#: is skipped; the call cannot have gone through it.
+TRANSPORTS: Final[tuple[str, ...]] = ("httpx", "httpx2")
+
+#: UTF-8 bytes of the redacted response body kept for the log. Bytes, not
+#: characters, so a multibyte error page cannot print several times the cap.
+BODY_EXCERPT_BYTES: Final[int] = 500
 
 
 @dataclass
@@ -60,12 +69,15 @@ class CapturedExchange:
     Attributes:
         status: HTTP status code.
         headers: Allowlisted response headers, names lower-cased.
-        body: Raw response body, or empty when the SDK never read it.
+        body: Raw response body, or None when the SDK never read it (a
+            streamed response); an empty body is ``b""``.
+        transport: The HTTP package that delivered the response.
     """
 
     status: int
     headers: dict[str, str] = field(default_factory=dict)
-    body: bytes = b""
+    body: bytes | None = b""
+    transport: str = "httpx"
 
 
 @dataclass
@@ -73,26 +85,29 @@ class HttpCapture:
     """Responses recorded while :func:`capture_http` is active.
 
     Attributes:
-        responses: The ``httpx`` responses, in the order they arrived; the SDK
-            retries, so only the last one is the answer the caller saw.
+        responses: ``(transport, response)`` pairs in the order they arrived;
+            the SDK retries, so only the last one is the answer the caller saw.
+        transports: The packages that were watched.
     """
 
-    responses: list[Any] = field(default_factory=list)
+    responses: list[tuple[str, Any]] = field(default_factory=list)
+    transports: list[str] = field(default_factory=list)
 
     def last(self) -> CapturedExchange | None:
         """Return the final exchange, reduced to what is safe to describe.
 
         Returns:
-            The last response's status, allowlisted headers and body, or None
-            when no request completed.
+            The last response's status, allowlisted headers, body and
+            transport, or None when no request completed.
         """
         if not self.responses:
             return None
-        response = self.responses[-1]
+        transport, response = self.responses[-1]
+        body: bytes | None
         try:
             body = bytes(response.content)
         except Exception:  # an unread stream has no body to show
-            body = b""
+            body = None
         headers = {
             name.lower(): value
             for name, value in response.headers.items()
@@ -102,6 +117,7 @@ class HttpCapture:
             status=int(response.status_code),
             headers=headers,
             body=body,
+            transport=transport,
         )
 
 
@@ -119,32 +135,53 @@ def _header_is_allowed(name: str) -> bool:
 
 
 @contextmanager
+def _watch(*, module_name: str, capture: HttpCapture) -> Iterator[None]:
+    """Record every response one HTTP package's async client receives.
+
+    Args:
+        module_name: The package to watch, from :data:`TRANSPORTS`.
+        capture: Where the responses are appended.
+
+    Yields:
+        None: The package is watched for the length of the block, then the
+            original ``send`` is restored, error or not.
+    """
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        yield
+        return
+    client = module.AsyncClient
+    original = client.send
+
+    async def _send(self: Any, request: Any, **kwargs: Any) -> Any:
+        response = await original(self, request, **kwargs)
+        capture.responses.append((module_name, response))
+        return response
+
+    client.send = _send
+    capture.transports.append(module_name)
+    try:
+        yield
+    finally:
+        client.send = original
+
+
+@contextmanager
 def capture_http() -> Iterator[HttpCapture]:
     """Record every response the SDK clients receive inside the block.
 
-    Both SDKs lintro drives (anthropic, openai) send through
-    ``httpx.AsyncClient.send``; wrapping it for the length of the call sees the
-    exact exchange without touching lintro's providers. The original method is
-    restored on exit, error or not.
+    Wrapping each transport's ``AsyncClient.send`` for the length of the call
+    sees the exact exchange without touching lintro's providers.
 
     Yields:
         HttpCapture: The capture the responses are appended to.
     """
-    import httpx
-
     capture = HttpCapture()
-    original = httpx.AsyncClient.send
-
-    async def _send(self: httpx.AsyncClient, request: Any, **kwargs: Any) -> Any:
-        response = await original(self, request, **kwargs)
-        capture.responses.append(response)
-        return response
-
-    httpx.AsyncClient.send = _send  # type: ignore[method-assign]
-    try:
+    with ExitStack() as stack:
+        for module_name in TRANSPORTS:
+            stack.enter_context(_watch(module_name=module_name, capture=capture))
         yield capture
-    finally:
-        httpx.AsyncClient.send = original  # type: ignore[method-assign]
 
 
 def _mapping(value: Any) -> dict[str, Any]:
@@ -174,6 +211,23 @@ def _count(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
+def _shown(value: Any) -> str:
+    """Render a token count for the log, or ``n/a`` when it is not one.
+
+    A count is printed only when it is an integer, so a gateway cannot put
+    arbitrary text on the token line.
+
+    Args:
+        value: Any decoded JSON value.
+
+    Returns:
+        The integer as text, or ``n/a``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return "n/a"
+    return str(_count(value))
+
+
 def _anthropic_shape(payload: dict[str, Any]) -> list[str]:
     """Describe an Anthropic Messages envelope.
 
@@ -195,8 +249,8 @@ def _anthropic_shape(payload: dict[str, Any]) -> list[str]:
         f"stop_reason: {payload.get('stop_reason')}",
         f"content blocks: {', '.join(blocks) or 'none'}",
         (
-            f"output tokens: {usage.get('output_tokens')} "
-            f"(thinking {thinking if thinking is not None else 'n/a'})"
+            f"output tokens: {_shown(usage.get('output_tokens'))} "
+            f"(thinking {_shown(thinking)})"
         ),
     ]
 
@@ -238,8 +292,8 @@ def _openai_shape(payload: dict[str, Any]) -> list[str]:
             f"reasoning_content({len(reasoning_content)} chars)"
         ),
         (
-            f"output tokens: {usage.get('completion_tokens')} "
-            f"(reasoning {reasoning if reasoning is not None else 'n/a'})"
+            f"output tokens: {_shown(usage.get('completion_tokens'))} "
+            f"(reasoning {_shown(reasoning)})"
         ),
     ]
 
@@ -254,9 +308,10 @@ def describe_exchange(
 
     Args:
         exchange: The captured exchange, or None when no request completed.
-        redact: The caller's redaction, applied to the whole body before it is
-            cut to the excerpt, so a credential straddling the cut cannot
-            survive as a fragment the redaction no longer recognises.
+        redact: The caller's redaction. It is applied to the whole body before
+            the body is cut to the excerpt, so a credential straddling the cut
+            cannot survive as a fragment, and then to every rendered line,
+            because header values and parsed fields come from the gateway too.
         protocol: The row's wire protocol. When given, its envelope shape is
             tried first, so a gateway error carrying the other protocol's keys
             is not described in the wrong terms; without it the body's keys
@@ -267,9 +322,14 @@ def describe_exchange(
     """
     if exchange is None:
         return "HTTP: no response was recorded for the call"
-    lines = [f"HTTP status: {exchange.status}"]
+    lines = [f"HTTP status: {exchange.status} (via {exchange.transport})"]
     for name in sorted(exchange.headers):
         lines.append(f"header {name}: {exchange.headers[name]}")
+    if exchange.body is None:
+        # A streamed response the SDK never read: there is no body to show,
+        # which is not the same finding as a body that arrived empty.
+        lines.append("body: not read by the SDK")
+        return _redact_block(lines, redact=redact)
     text = exchange.body.decode("utf-8", errors="replace")
     try:
         payload = json.loads(text)
@@ -292,12 +352,37 @@ def describe_exchange(
         lines.append("body: empty")
     else:
         lines.append("body: not a completion envelope")
-    excerpt = redact(text)[:BODY_EXCERPT_CHARS]
-    lines.append(
-        f"body ({len(exchange.body)} bytes; first {BODY_EXCERPT_CHARS} "
-        f"characters after redaction): {excerpt!r}",
+    # Cut on the UTF-8 encoding and drop a character the cut split, rather
+    # than emit half of one.
+    excerpt = (
+        redact(text)
+        .encode("utf-8")[:BODY_EXCERPT_BYTES]
+        .decode("utf-8", errors="ignore")
     )
-    return "\n".join(lines)
+    lines.append(
+        f"body ({len(exchange.body)} bytes; first {BODY_EXCERPT_BYTES} "
+        f"bytes after redaction): {excerpt!r}",
+    )
+    return _redact_block(lines, redact=redact)
+
+
+def _redact_block(lines: list[str], *, redact: Callable[[str], str]) -> str:
+    """Join the diagnostic lines with every one of them redacted.
+
+    Every line carries values the gateway chose (header values, stop reasons,
+    block types), not only the body excerpt. Each line is redacted on its own,
+    so a credential echoed into one field costs that line and not the whole
+    diagnostic; the joined block is then redacted once more, so nothing the
+    per-line pass could miss survives.
+
+    Args:
+        lines: The rendered diagnostic lines.
+        redact: The caller's redaction.
+
+    Returns:
+        The redacted, newline-joined block.
+    """
+    return redact("\n".join(redact(line) for line in lines))
 
 
 def usage_of(exchange: CapturedExchange | None) -> tuple[str, int, int]:
@@ -309,7 +394,7 @@ def usage_of(exchange: CapturedExchange | None) -> tuple[str, int, int]:
     Returns:
         ``(model, input_tokens, output_tokens)``; unknowns are ``"?"`` and 0.
     """
-    if exchange is None:
+    if exchange is None or exchange.body is None:
         return "?", 0, 0
     try:
         payload = json.loads(exchange.body.decode("utf-8", errors="replace"))
