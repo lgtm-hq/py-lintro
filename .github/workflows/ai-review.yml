@@ -89,19 +89,172 @@ name: AI Review - Dogfood
 # No paths filter: every PR gets the dogfood review (#1902). The lintro/**
 # filter dated from API-metered billing; under subscription billing the CI and
 # workflow diffs it skipped are exactly where recent regressions shipped.
+#
+# ON-REQUEST REVIEW (#2795, #2627 PR 2): a user with write access can comment
+# `@lintro review` (full), `@lintro review delta` or `@lintro review <path…>`
+# on a pull request. The `request` job validates the comment and the
+# commenter (scripts/ci/resolve_review_request.py; no secrets, read-only
+# token), `acknowledge` reacts 👀 (and posts the constant usage text for a
+# malformed request) with the App token, and `ai-review` runs the same review
+# as a push would (serialised with it, never cancelling it), with the mode
+# passed through validated outputs. The comment
+# text only ever reaches the request step through `env:`, never a `run:` line.
+# For issue_comment GitHub takes this file and GITHUB_SHA from the default
+# branch, and there is no pull_request.base.sha: the review job's checkout
+# falls back to github.workflow_sha, the protected default-branch commit that
+# supplied this definition. issue_comment is not affected by the 2026-11-02
+# pull_request_target restriction (#2793).
 'on':
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
 
 permissions: {}
 
+# Per PR for pull-request events: a push supersedes its own PR's pending or
+# running review. Every issue_comment run gets a group of its own (ruling 9 on
+# #2795, from a CodeRabbit finding): workflow-level concurrency is evaluated
+# before any job `if` or the permission check, so any comment that shared the
+# PR's group could cancel a running review, including a `@lintro review` from
+# a member or collaborator without write access. A comment run therefore never
+# cancels anything and is never cancelled by a push; a push and an on-request
+# review of the same PR both run, serialised by the repo-wide slot below, and
+# the later sticky wins. The permission API in the request job is the only
+# boundary on who may request a review.
 concurrency:
-  group: ai-review-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ai-review-${{ github.event_name == 'pull_request_target'
+    && github.event.pull_request.number
+    || format('comment-{0}', github.run_id) }}
   cancel-in-progress: true
 
 jobs:
+  request:
+    name: Resolve review request
+    # Comments on pull requests that start with the command word only. The
+    # script re-parses, checks write access through the API, and requires an
+    # open, non-draft, same-repository PR; every refusal is a log line.
+    if: >-
+      github.event_name == 'issue_comment'
+      && github.event.issue.pull_request
+      && startsWith(github.event.comment.body, '@lintro review')
+    runs-on: ubuntu-24.04
+    # No secrets in this job, and nothing it can write with.
+    permissions:
+      contents: read # sparse checkout of the gate script and the parser
+      pull-requests: read # read the PR's state, draft flag and head
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.resolve.outputs.run }}
+      mode: ${{ steps.resolve.outputs.mode }}
+      pr-number: ${{ steps.resolve.outputs.pr-number }}
+      head-sha: ${{ steps.resolve.outputs.head-sha }}
+      paths: ${{ steps.resolve.outputs.paths }}
+      comment-id: ${{ steps.resolve.outputs.comment-id }}
+      requester: ${{ steps.resolve.outputs.requester }}
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+
+      - name: Checkout the trusted gate script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The default-branch commit that supplied this workflow definition.
+          ref: ${{ github.workflow_sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          sparse-checkout: |
+            lintro/ai/review/commands.py
+            scripts/ci/resolve_review_request.py
+          sparse-checkout-cone-mode: false
+
+      - name: Check the request and the requester
+        id: resolve
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          COMMENTER: ${{ github.event.comment.user.login }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/resolve_review_request.py
+
+  acknowledge:
+    name: Acknowledge review request
+    needs: [request]
+    # Accepted requests get 👀; a malformed request from a writer also gets the
+    # constant usage text. A refused request never reaches this job.
+    if: >-
+      contains(fromJSON('["full","delta","paths","usage"]'), needs.request.outputs.mode)
+    runs-on: ubuntu-24.04
+    permissions: {}
+    timeout-minutes: 5
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: 'block'
+          allowed-endpoints: >
+            api.github.com:443
+
+      - name: Mint lintro-review App token
+        id: lintro-review-app
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+          private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
+          permission-issues: write
+          permission-pull-requests: write
+
+      # The usage text is one list item per line, kept identical to
+      # lintro/ai/review/commands.py USAGE_TEXT (asserted in tests).
+      # yamllint disable rule:line-length
+      - name: React, and answer a malformed request with the usage text
+        # yamllint disable-line rule:line-length
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          # Integers and a validated mode only; no comment text, no login.
+          COMMENT_ID: ${{ needs.request.outputs.comment-id }}
+          PR_NUMBER: ${{ needs.request.outputs.pr-number }}
+          REQUEST_MODE: ${{ needs.request.outputs.mode }}
+        with:
+          github-token: ${{ steps.lintro-review-app.outputs.token }}
+          script: |
+            const { owner, repo } = context.repo
+            await github.rest.reactions.createForIssueComment({
+              owner,
+              repo,
+              comment_id: Number(process.env.COMMENT_ID),
+              content: 'eyes',
+            })
+            if (process.env.REQUEST_MODE === 'usage') {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: Number(process.env.PR_NUMBER),
+                body: [
+                  'Usage (first line of a comment, by a user with write access):',
+                  '',
+                  '- `@lintro review`: full review of the whole diff',
+                  '- `@lintro review delta`: review the change since the last round',
+                  '- `@lintro review <path> [<path> ...]`: review only files under these path prefixes (at most 20, each up to 200 characters; no globs, no `..`, no leading `/` or `-`)',
+                ].join('\n'),
+              })
+            }
+      # yamllint enable rule:line-length
+
   ai-review:
     name: AI Review
+    needs: [request]
     runs-on: ubuntu-24.04
     # No job-level continue-on-error: that rewrites the conclusion to
     # `success`, which is precisely how a review that never ran kept
@@ -128,9 +281,17 @@ jobs:
     # Trade-off: a PR that breaks the review code itself won't be caught by this
     # job (that is covered by the unit tests in tests/), which is the correct
     # security posture. The credential is therefore safe to enable.
+    #
+    # On-request (#2795): runs only when the request job accepted the
+    # comment (write access, open non-draft same-repository PR). `!cancelled()`
+    # lets it run on pull-request events, where the request job is skipped.
     if: >-
-      github.event.pull_request.draft == false
-      && github.event.pull_request.head.repo.full_name == github.repository
+      !cancelled()
+      && ((github.event_name == 'pull_request_target'
+          && github.event.pull_request.draft == false
+          && github.event.pull_request.head.repo.full_name == github.repository)
+        || (github.event_name == 'issue_comment'
+          && needs.request.outputs.run == 'true'))
     permissions:
       # actions/checkout reads the trusted base ref with the workflow token.
       contents: read
@@ -210,6 +371,10 @@ jobs:
     # provider-gated pattern: they are allowlisted only for their lane, so the
     # other providers' jobs never reach those hosts.
     env:
+      # The reviewed PR: the event's on pull-request events, the request job's
+      # validated number on an on-request review.
+      # yamllint disable-line rule:line-length
+      AI_REVIEW_PR: ${{ github.event.pull_request.number || needs.request.outputs.pr-number }}
       # yamllint disable-line rule:line-length
       AI_REVIEW_CURSOR_EGRESS: ${{ vars.LINTRO_AI_PROVIDER == 'cursor' && 'downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443 agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443' || '' }}
       # yamllint disable-line rule:line-length
@@ -273,9 +438,13 @@ jobs:
         # code that runs with the credential must be trusted; the PR diff is
         # fetched separately via `gh` in the review step. base.sha is the exact
         # commit the PR targets and is already merged into main, so it is safe.
+        # On an on-request review (issue_comment) there is no base.sha; the
+        # fallback is github.workflow_sha, the protected default-branch commit
+        # that supplied this workflow definition, trusted for the same reason.
+        # It is the only fallback (audited in test_run_ai_review.py).
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.workflow_sha }}
           fetch-depth: 1
           # Nothing after this step talks to git over the network — `gh` uses
           # GH_TOKEN — so leaving the token in .git/config would only widen
@@ -293,7 +462,7 @@ jobs:
         id: prior-state
         continue-on-error: true
         env:
-          PR_NUMBER: ${{ github.event.number }}
+          PR_NUMBER: ${{ env.AI_REVIEW_PR }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           # A rerun keeps run_id and bumps run_attempt; the locator uses
@@ -316,7 +485,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           run-id: ${{ steps.prior-state.outputs.run-id }}
-          pattern: lintro-review-state-pr-${{ github.event.number }}-*
+          pattern: lintro-review-state-pr-${{ env.AI_REVIEW_PR }}-*
           merge-multiple: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ai-review-state
@@ -437,7 +606,12 @@ jobs:
       - name: Run AI review (posts comment; fails when nothing was reviewed)
         run: scripts/ci/run-ai-review.sh
         env:
-          PR_NUMBER: ${{ github.event.number }}
+          PR_NUMBER: ${{ env.AI_REVIEW_PR }}
+          # On-request review (#2795): validated outputs of the request job,
+          # empty on pull-request events. run-ai-review.sh re-validates them.
+          REVIEW_REQUEST_MODE: ${{ needs.request.outputs.mode }}
+          REVIEW_REQUEST_PATHS: ${{ needs.request.outputs.paths }}
+          REVIEW_REQUESTER: ${{ needs.request.outputs.requester }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           # The guarded credential. ANTHROPIC_API_KEY is deliberately absent:
           # its account has no balance, and its mere presence would make
@@ -523,7 +697,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # yamllint disable-line rule:line-length
-          name: lintro-review-state-pr-${{ github.event.number }}-attempt-${{ github.run_attempt }}-final
+          name: lintro-review-state-pr-${{ env.AI_REVIEW_PR }}-attempt-${{ github.run_attempt }}-final
           path: ai-review-state/
           if-no-files-found: ignore
           retention-days: 30

@@ -109,6 +109,13 @@ set -euo pipefail
 #   ACTIONS_RESULTS_URL     Actions artifact service origin for in-step upload.
 #   GITHUB_RUN_ATTEMPT      Distinguishes artifact names across retries.
 #   GITHUB_STEP_SUMMARY     When set, the outcome is appended as Markdown.
+#   REVIEW_REQUEST_MODE     On-request review (#2795): full, delta or paths,
+#                           from the request job's validated output. Empty on
+#                           pull-request events (unchanged behaviour). full
+#                           adds --full; paths adds one --path per prefix.
+#   REVIEW_REQUEST_PATHS    JSON list of path prefixes for mode paths,
+#                           re-validated here before use.
+#   REVIEW_REQUESTER        API-confirmed login of the requester; logged only.
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
@@ -119,8 +126,11 @@ Usage:
   scripts/ci/run-ai-review.sh <pr-number>
   scripts/ci/run-ai-review.sh --locate-prior-state
 
-Exits 0 only when a review was actually produced. A missing or dead credential,
-a depleted balance, or an unreachable provider exits 1 with a visible reason.
+Exits 0 when a review was actually produced, or when an on-request review's
+pull request is confirmed no longer eligible (closed, draft, or not from this
+repository). Exits 1 with a visible reason otherwise: a missing or dead
+credential, a depleted balance, an unreachable provider, an invalid request
+input, or an on-request pull request that could not be read.
 
 --locate-prior-state lists completed trusted ai-review.yml runs and writes
 run-id= for the latest one that carries a valid state artifact (empty when
@@ -209,6 +219,89 @@ echo "Running AI review on PR #${pr_number} (posts comment)..."
 repo_arg=()
 if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
 	repo_arg=(--repo "${GITHUB_REPOSITORY}")
+fi
+
+# On-request review (#2795). The request job already validated the mode and
+# the prefixes; both are checked again here because this is the step that
+# holds the credentials. Anything unexpected fails the job rather than
+# silently widening or narrowing the review.
+request_arg=()
+case "${REVIEW_REQUEST_MODE:-}" in
+"") ;;
+full) request_arg=(--full) ;;
+delta) ;;
+paths)
+	# Parse in a command substitution, not a process substitution, so a
+	# malformed value fails here with its own message instead of looking like
+	# an empty list.
+	if ! request_paths=$(REVIEW_REQUEST_PATHS="${REVIEW_REQUEST_PATHS:-}" python3 -c '
+import json, os, sys
+value = json.loads(os.environ["REVIEW_REQUEST_PATHS"])
+if not isinstance(value, list) or not all(isinstance(p, str) for p in value):
+    sys.exit(1)
+sys.stdout.write("".join(f"{p}\n" for p in value))
+' 2>/dev/null); then
+		echo "::error::REVIEW_REQUEST_PATHS is not a JSON list of strings" >&2
+		exit 1
+	fi
+	while IFS= read -r request_path; do
+		[[ -z "$request_path" ]] && continue
+		if [[ ! "$request_path" =~ ^[A-Za-z0-9._/-]{1,200}$ ||
+			"$request_path" == /* || "$request_path" == -* ||
+			"/${request_path}/" == */../* ]]; then
+			echo "::error::refusing on-request path prefix '${request_path}'" >&2
+			exit 1
+		fi
+		request_arg+=(--path "$request_path")
+	done <<<"$request_paths"
+	if [[ ${#request_arg[@]} -eq 0 ]]; then
+		echo "::error::on-request paths review without any path prefix" >&2
+		exit 1
+	fi
+	;;
+*)
+	echo "::error::unknown REVIEW_REQUEST_MODE '${REVIEW_REQUEST_MODE}'" >&2
+	exit 1
+	;;
+esac
+if [[ -n "${REVIEW_REQUEST_MODE:-}" ]]; then
+	echo "[ai-review] on request by ${REVIEW_REQUESTER:-unknown}: ${REVIEW_REQUEST_MODE}"
+	# The request job checked the PR, but this job may have waited in the
+	# repo-wide queue since. Re-check the same three conditions now. Two
+	# outcomes are kept apart (#2806):
+	#   - confirmed ineligible (closed, draft, or not from this repository):
+	#     no review, exit 0 with a log line; there is nothing to review;
+	#   - unreadable (gh failed, empty or non-object reply): the request is
+	#     NOT silently dropped; the job goes red with a visible reason so the
+	#     writer sees it and can re-request.
+	# The head itself may have moved: like a push review, the round reviews
+	# the head as it is now (ruling 9 on #2795).
+	if ! pr_payload=$(gh api "repos/${GITHUB_REPOSITORY:-}/pulls/${pr_number}" 2>/dev/null); then
+		report_not_invoked "On-request review: pull request #${pr_number} could not be read after the queue wait; re-request with @lintro review."
+	fi
+	pr_eligible=$(PR_PAYLOAD="$pr_payload" REPO="${GITHUB_REPOSITORY:-}" python3 -c '
+import json, os
+try:
+    pull = json.loads(os.environ["PR_PAYLOAD"])
+except ValueError:
+    pull = None
+if not isinstance(pull, dict):
+    print("unreadable")
+else:
+    head_repo = ((pull.get("head") or {}).get("repo") or {}).get("full_name", "")
+    print("yes" if pull.get("state") == "open" and pull.get("draft") is False
+          and head_repo == os.environ["REPO"] else "no")
+' 2>/dev/null || echo unreadable)
+	case "$pr_eligible" in
+	yes) ;;
+	no)
+		echo "[ai-review] on-request review skipped: PR #${pr_number} is no longer open, non-draft and from ${GITHUB_REPOSITORY:-this repository}"
+		exit 0
+		;;
+	*)
+		report_not_invoked "On-request review: pull request #${pr_number} returned an unreadable reply after the queue wait; re-request with @lintro review."
+		;;
+	esac
 fi
 
 # Resume coverage is read from (and written to) this directory. The workflow
@@ -390,7 +483,7 @@ fi
 # Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
 # ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.
 export PYTHONUNBUFFERED=1
-uv run lintro review --pr "${pr_number}" ${repo_arg[@]+"${repo_arg[@]}"} --depth 1 --post ${lint_report_arg[@]+"${lint_report_arg[@]}"} --output json >"$output_file" 2>&1 &
+uv run lintro review --pr "${pr_number}" ${repo_arg[@]+"${repo_arg[@]}"} --depth 1 --post ${request_arg[@]+"${request_arg[@]}"} ${lint_report_arg[@]+"${lint_report_arg[@]}"} --output json >"$output_file" 2>&1 &
 lintro_pid=$!
 # --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
 # group signal left it ignoring TERM (``trap '' TERM``).

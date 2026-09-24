@@ -213,7 +213,7 @@ def test_select_prior_run_id_ignores_conclusion(artifacts: ModuleType) -> None:
 
 
 def test_select_prior_run_id_rejects_wrong_event(artifacts: ModuleType) -> None:
-    """Only ``pull_request_target`` runs are trusted."""
+    """Only push-review and on-request runs are trusted; ``push`` is not."""
     push_run = _run(artifacts, 6, minutes=2, event="push")
     selected = artifacts.select_prior_run_id(
         [push_run],
@@ -1697,3 +1697,178 @@ def test_lint_report_artifact_contract_is_pinned_across_files(
     # A single-file artifact downloads under its own basename.
     assert_that(report_path.group(1)).is_equal_to(uploaded_path.name)
     assert_that(script).contains(LINT_FACTS_UNAVAILABLE)
+
+
+# --- on-request reviews share state with push reviews (#2795, #2806) ----------
+
+
+def _mixed_runs_api(
+    *,
+    runs: list[dict[str, Any]],
+    state_run_id: int,
+    requested: list[str],
+) -> Callable[[str], dict[str, Any]]:
+    """Build a ``gh api`` fake listing ``runs``; one of them carries PR 15 state.
+
+    Args:
+        runs: The ``workflow_runs`` payload, newest first.
+        state_run_id: The run whose artifacts include PR 15's state.
+        requested: Every requested path is appended here.
+
+    Returns:
+        A callable accepting a REST path and returning a JSON mapping.
+    """
+
+    def gh_api(path: str) -> dict[str, Any]:
+        requested.append(path)
+        if "workflows/" in path:
+            return {"workflow_runs": runs}
+        if f"runs/{state_run_id}/artifacts" in path:
+            return {
+                "artifacts": [
+                    {
+                        "id": 1,
+                        "name": "lintro-review-state-pr-15-attempt-1-final",
+                        "expired": False,
+                    },
+                ],
+            }
+        return {"artifacts": []}
+
+    return gh_api
+
+
+def _completed(run_id: int, *, event: str, hour: int, **extra: Any) -> dict[str, Any]:
+    """Return a completed ai-review.yml run payload.
+
+    Args:
+        run_id: Run id.
+        event: Trigger event.
+        hour: Creation hour on the test day (newer is larger).
+        **extra: Further payload fields (e.g. ``conclusion``).
+
+    Returns:
+        The run payload.
+    """
+    return {
+        "id": run_id,
+        "event": event,
+        "status": "completed",
+        "path": ".github/workflows/ai-review.yml",
+        "created_at": f"2026-08-24T{hour:02d}:00:00Z",
+        **extra,
+    }
+
+
+@pytest.mark.parametrize("state_event", ["issue_comment", "pull_request_target"])
+def test_state_from_either_review_path_is_found(
+    artifacts: ModuleType,
+    state_event: str,
+) -> None:
+    """A comment review's state is found by the next review, and vice versa.
+
+    The locator does not depend on which event the *current* run has, so one
+    case per event of the run that left the state covers both directions: a
+    push review after an on-request review, and an on-request review after a
+    push review (Greptile P1 on #2806).
+
+    Args:
+        artifacts: The loaded locator module.
+        state_event: Event of the run that uploaded PR 15's state.
+    """
+    requested: list[str] = []
+    gh_api = _mixed_runs_api(
+        runs=[_completed(200, event=state_event, hour=2)],
+        state_run_id=200,
+        requested=requested,
+    )
+
+    located = artifacts.locate_prior_state(
+        repo="lgtm-hq/py-lintro",
+        pr_number=15,
+        current_run_id=300,
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+
+
+def test_the_runs_query_carries_no_event_filter(artifacts: ModuleType) -> None:
+    """Both events are listed; trust is decided per run, not by the query.
+
+    Args:
+        artifacts: The loaded locator module.
+    """
+    requested: list[str] = []
+    gh_api = _mixed_runs_api(runs=[], state_run_id=0, requested=requested)
+
+    artifacts.locate_prior_state(
+        repo="lgtm-hq/py-lintro",
+        pr_number=15,
+        current_run_id=300,
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    (listing,) = [path for path in requested if "workflows/" in path]
+    assert_that(listing).contains("status=completed")
+    assert_that(listing).does_not_contain("event=")
+
+
+def test_skipped_comment_runs_are_passed_over_without_an_artifact_call(
+    artifacts: ModuleType,
+) -> None:
+    """Every non-request PR comment leaves a skipped run; none is fetched.
+
+    Args:
+        artifacts: The loaded locator module.
+    """
+    requested: list[str] = []
+    gh_api = _mixed_runs_api(
+        runs=[
+            _completed(310, event="issue_comment", hour=5, conclusion="skipped"),
+            _completed(305, event="issue_comment", hour=4, conclusion="skipped"),
+            _completed(200, event="pull_request_target", hour=2),
+        ],
+        state_run_id=200,
+        requested=requested,
+    )
+
+    located = artifacts.locate_prior_state(
+        repo="lgtm-hq/py-lintro",
+        pr_number=15,
+        current_run_id=400,
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(200)
+    assert_that([path for path in requested if "runs/310/" in path]).is_empty()
+    assert_that([path for path in requested if "runs/305/" in path]).is_empty()
+
+
+def test_an_on_request_rerun_resumes_its_own_attempt(artifacts: ModuleType) -> None:
+    """A rerun of a comment-requested review resumes itself, like a push one.
+
+    Args:
+        artifacts: The loaded locator module.
+    """
+    gh_api = _own_attempt_gh_api(
+        current_run_artifacts=[
+            {
+                "id": 1,
+                "name": "lintro-review-state-pr-15-attempt-1-ckpt-15",
+                "expired": False,
+            },
+        ],
+        run_event="issue_comment",
+    )
+
+    located = artifacts.locate_state_from_env(
+        _rerun_env(attempt="2"),
+        gh_api=gh_api,
+        now=NOW,
+    )
+
+    assert_that(located.run_id).is_equal_to(500)
