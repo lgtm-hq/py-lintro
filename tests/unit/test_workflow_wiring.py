@@ -996,15 +996,17 @@ def test_docker_ci_retries_dogfooding_lint_on_failure() -> None:
 
 
 @pytest.mark.parametrize("job_id", ["dogfooding-lint", "dogfooding_lint_retry"])
-def test_dogfood_lint_callers_allow_the_hosted_runner_watchdog(job_id: str) -> None:
-    """Dogfood lint callers must allow GitHub's hosted-runner watchdog (#2352).
+def test_dogfood_lint_callers_carry_no_githubapp_grant(job_id: str) -> None:
+    """Dogfood lint callers must not allowlist githubapp.com (#2352, #2488).
 
-    harden-runner block mode denied `hosted-compute-watchdog-*.githubapp.com`
-    and `hosted-compute-request-orchestrator-*.githubapp.com`, and long jobs
-    were reclaimed mid-run with exit 143. The reusable workflow's enforcing
+    harden-runner v2.21.0 block mode denied `hosted-compute-watchdog-*` and
+    `hosted-compute-request-orchestrator-*` under githubapp.com and long jobs
+    were reclaimed mid-run with exit 143, so #2353 added a `*.githubapp.com:443`
+    grant. v2.21.1 allows those hosts from GitHub meta on its own, so the grant
+    is redundant and must not come back. The reusable workflow's enforcing
     harden-runner step reads `allowed-endpoints` verbatim, so the caller must
-    carry the whole baseline plus the watchdog entry — asserting a couple of
-    baseline hosts keeps a future edit from shrinking the list to one entry.
+    still carry the whole baseline — asserting a couple of baseline hosts
+    keeps a future edit from shrinking the list to one entry.
 
     Args:
         job_id: Dogfooding lint caller whose egress allowlist is under test.
@@ -1015,7 +1017,8 @@ def test_dogfood_lint_callers_allow_the_hosted_runner_watchdog(job_id: str) -> N
 
     assert_that(job_with["egress-policy"]).is_equal_to("block")
     assert_that(job_with["allowed-endpoints-mode"]).is_equal_to("append")
-    assert_that(allowed).contains("*.githubapp.com:443")
+    for endpoint in allowed:
+        assert_that(endpoint).described_as(endpoint).does_not_contain("githubapp.com")
     assert_that(allowed).contains(
         "github.com:443",
         "api.github.com:443",
@@ -1053,12 +1056,14 @@ def test_dogfood_lint_callers_share_one_egress_allowlist() -> None:
         "publish",
     ],
 )
-def test_long_docker_ci_jobs_allow_the_hosted_runner_watchdog(job_id: str) -> None:
-    """Every long in-repo Docker CI job allows the watchdog endpoints (#2352).
+def test_long_docker_ci_jobs_carry_no_githubapp_grant(job_id: str) -> None:
+    """No long in-repo Docker CI job allowlists githubapp.com (#2352, #2488).
 
-    Jobs whose budget exceeds ~10 minutes are the ones observed dying with
-    "The runner has received a shutdown signal" while harden-runner blocked
-    GitHub's hosted-compute watchdog and request-orchestrator hosts.
+    Jobs whose budget exceeds ~10 minutes were the ones observed dying with
+    "The runner has received a shutdown signal" while harden-runner v2.21.0
+    blocked GitHub's hosted-compute watchdog and request-orchestrator hosts.
+    v2.21.1 allows `*.githubapp.com` from GitHub meta itself, so the grants
+    #2353 added are redundant and stay out.
 
     Args:
         job_id: Docker CI job whose harden-runner allowlist is under test.
@@ -1074,7 +1079,8 @@ def test_long_docker_ci_jobs_allow_the_hosted_runner_watchdog(job_id: str) -> No
 
     assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
     assert_that(job["timeout-minutes"]).is_greater_than(10)
-    assert_that(allowed).contains("*.githubapp.com:443")
+    for endpoint in allowed:
+        assert_that(endpoint).described_as(endpoint).does_not_contain("githubapp.com")
 
 
 def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> None:
@@ -2148,15 +2154,16 @@ def test_binary_jobs_never_install_the_dev_group() -> None:
             ).contains("--no-default-groups")
 
 
-def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
-    """The Linux binary build must allow GitHub's hosted-runner watchdog.
+def test_build_linux_carries_no_githubapp_grant() -> None:
+    """The Linux binary build must not allowlist githubapp.com (#2339, #2488).
 
-    harden-runner block mode denied ``hosted-compute-watchdog-*.githubapp.com``
-    and ``hosted-compute-request-orchestrator-*.githubapp.com``, and the x64
+    harden-runner v2.21.0 block mode denied ``hosted-compute-watchdog-*`` and
+    ``hosted-compute-request-orchestrator-*`` under githubapp.com, and the x64
     build was reclaimed mid-run on every attempt for v0.147.7 with "The runner
-    has received a shutdown signal" (#1761, #2339). The arm64 sibling runs the
-    same source on the same runner class and has never been observed dying that
-    way, which leaves the enforced egress allowlist as the lead.
+    has received a shutdown signal" (#1761, #2339). #2487 answered with a
+    literal shard list. v2.21.1 allows ``*.githubapp.com`` from GitHub meta on
+    its own, so the list is gone and no githubapp.com entry, literal or glob,
+    may return. No glob of any kind is permitted on this job either.
     """
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
     job = workflow["jobs"]["build-linux"]
@@ -2168,19 +2175,11 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
     endpoints = str(harden["with"]["allowed-endpoints"]).split()
 
     assert_that(harden["with"]["egress-policy"]).is_equal_to("block")
-    # Exact hosts by owner decision (#2339): every hosted-compute shard
-    # observed in this repo's job logs, for both control-plane families, plus
-    # the results receiver. The agreed fallback if a new shard appears is a
-    # revert to the `*.githubapp.com:443` wildcard in a follow-up PR, so this
-    # test pins the literals but does not forbid that wildcard.
-    for family in ("hosted-compute-watchdog", "hosted-compute-request-orchestrator"):
-        for shard in ("iad-01", "iad-02", "eus-01", "eus-02"):
-            assert_that(endpoints).contains(
-                f"{family}-prod-{shard}.githubapp.com:443",
-            )
-    assert_that(endpoints).contains(
-        "actions-results-receiver-production.githubapp.com:443",
-    )
+    for endpoint in endpoints:
+        assert_that(endpoint).described_as(endpoint).does_not_contain("githubapp.com")
+        assert_that(endpoint).described_as(
+            f"{endpoint}: no glob may widen the block policy on this job",
+        ).does_not_contain("*")
     # The job must still carry its baseline: build-binaries.yml is read from
     # the tag, so a shrunk list passes every PR and fails at the release.
     assert_that(endpoints).contains(
@@ -2190,13 +2189,6 @@ def test_build_linux_allows_the_hosted_runner_watchdog() -> None:
         "release-assets.githubusercontent.com:443",
     )
     assert_that(endpoints).does_not_contain_duplicates()
-    # Any other glob would silently widen the block policy; the agreed
-    # revert-to-wildcard fallback is the single form permitted here.
-    for endpoint in endpoints:
-        if "*" in endpoint:
-            assert_that(endpoint).described_as(
-                f"{endpoint}: only the agreed *.githubapp.com:443 fallback may glob",
-            ).is_equal_to("*.githubapp.com:443")
 
 
 def test_auto_rerun_covers_tag_publish_workflows() -> None:
