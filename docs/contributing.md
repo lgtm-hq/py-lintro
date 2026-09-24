@@ -289,6 +289,18 @@ All contributions go through code review:
 - No security vulnerabilities introduced
 - Commit messages follow Conventional Commits
 
+### CodeRabbit on bot-authored PRs
+
+CodeRabbit skips pull requests opened by a bot ("Review skipped — Bot user detected")
+and ignores trigger comments from bot accounts. Most PRs here are opened by
+`lgtm-ai-bot[bot]`, so `.github/workflows/pr-coderabbit-review-request.yml` posts
+`@coderabbitai review` on every push to a bot-authored PR, using the owner's
+fine-grained PAT (org secret `CODERABBIT_TRIGGER_TOKEN`, Pull requests read and write)
+through `scripts/ci/request-coderabbit-review.sh`. Human-authored PRs are reviewed by
+CodeRabbit on its own. This is interim: once CodeRabbit reviews App-authored PRs, delete
+the workflow, the script, its tests (`tests/scripts/test_request_coderabbit_review.py`)
+and this paragraph, then remove the secret (#2726).
+
 ---
 
 ## Merge Discipline
