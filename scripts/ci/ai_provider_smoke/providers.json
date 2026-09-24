@@ -42,7 +42,7 @@
     {
       "name": "zai-api",
       "protocol": "openai",
-      "base_url": "https://api.z.ai/api/paas/v4",
+      "base_url": "https://api.z.ai/api/coding/paas/v4",
       "key_env": "ZAI_AUTH_TOKEN",
       "model": "glm-5.3-flash",
       "max_tokens": 1024
