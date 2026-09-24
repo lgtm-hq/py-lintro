@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.170.0] - 2026-09-24
+
+### Added
+
+- **ai/review**: request a review round from a pull-request comment (#2806) (b9bfb95)
+
+### Changed
+
+- drop the githubapp.com egress grants harden-runner v2.21.1 makes redundant (#2809)
+  (8c85744)
+- request a CodeRabbit review on bot-authored PRs (#2801) (ef5a052)
+
 ## [0.169.1] - 2026-09-24
 
 ### Fixed
