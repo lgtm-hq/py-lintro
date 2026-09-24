@@ -23,7 +23,6 @@ redaction before it is printed.
 
 from __future__ import annotations
 
-import importlib
 import json
 import re
 from collections.abc import Callable, Iterator
@@ -141,6 +140,32 @@ def _header_is_allowed(name: str) -> bool:
     return lowered in _HEADER_ALLOWLIST or lowered.startswith(_HEADER_PREFIXES)
 
 
+def _transport_module(module_name: str) -> Any:
+    """Return an installed transport package, or None when it is absent.
+
+    Literal imports, one per name in :data:`TRANSPORTS`: the set is fixed, so
+    nothing here takes a module name from data.
+
+    Args:
+        module_name: One of :data:`TRANSPORTS`.
+
+    Returns:
+        The imported package, or None when it is not installed or unknown.
+    """
+    try:
+        if module_name == "httpx":
+            import httpx
+
+            return httpx
+        if module_name == "httpx2":
+            import httpx2
+
+            return httpx2
+    except ImportError:
+        return None
+    return None
+
+
 @contextmanager
 def _watch(*, module_name: str, capture: HttpCapture) -> Iterator[None]:
     """Record every response one HTTP package's async client receives.
@@ -153,9 +178,8 @@ def _watch(*, module_name: str, capture: HttpCapture) -> Iterator[None]:
         None: The package is watched for the length of the block, then the
             original ``send`` is restored, error or not.
     """
-    try:
-        module = importlib.import_module(module_name)
-    except ImportError:
+    module = _transport_module(module_name)
+    if module is None:
         yield
         return
     client = module.AsyncClient
