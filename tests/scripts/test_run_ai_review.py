@@ -2428,7 +2428,8 @@ def test_an_on_request_review_of_an_ineligible_pr_is_skipped(
     """A PR confirmed closed, drafted or not from this repo gets no review.
 
     The request job checked the PR, but the review job may wait in the
-    repo-wide queue; the same three conditions are checked again at its start.
+    queue for its review slot; the same three conditions are checked again at
+    its start.
     A confirmed-ineligible PR is a log line and exit 0: there is nothing to
     review.
 

@@ -1,9 +1,11 @@
 """Per-PR review budget: total spend across every round of one PR (#2796).
 
 ``ai.max_cost_usd`` bounds one round. ``ai.review_pr_budget_usd`` bounds the
-sum over every recorded round of the pull request (push, delta, full and
-targeted on-request rounds alike) plus the running round, so a PR that keeps
-being pushed cannot keep spending without limit.
+PR's cumulative review spend (``ReviewState.pr_spend_usd``: every round of the
+pull request, push, delta, full and targeted on-request alike) plus the running
+round, so a PR that keeps being pushed cannot keep spending without limit. The
+total is written at every mid-run checkpoint and at the final write and never
+decreases, so neither an interrupted round nor run-history pruning loses spend.
 
 Enforcement mirrors ``max_cost_usd`` exactly (:func:`cap_is_enforced`): the
 ``LINTRO_AI_REVIEW_PR_BUDGET_USD`` overlay always enforces, a YAML budget only
@@ -23,16 +25,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.review.cost_cap import cap_is_enforced, cost_cap_reason
 
 if TYPE_CHECKING:
     from lintro.ai.enums.config_source import ConfigSource
-    from lintro.ai.enums.cost_basis import CostBasis
     from lintro.ai.review.models.review_state import ReviewState
     from lintro.ai.review.session import ReviewSessionOptions
 
 __all__ = [
     "PR_BUDGET_REASON_PREFIX",
+    "RUNTIME_BOUND_NOTE",
     "PrBudget",
     "cost_stop_reason",
     "resolve_pr_budget",
@@ -45,6 +48,10 @@ __all__ = [
 #: classifier keys its ``pr_budget`` outcome on it (a test pins the two).
 PR_BUDGET_REASON_PREFIX = "PR budget"
 
+#: Appended where a PR-budget figure is shown on an unpriceable basis: on the
+#: subscription CLI transport the dollars are a runtime bound, not a bill.
+RUNTIME_BOUND_NOTE = "runtime bound on the cli transport"
+
 
 @dataclass(frozen=True, slots=True)
 class PrBudget:
@@ -52,13 +59,17 @@ class PrBudget:
 
     Attributes:
         budget_usd: The configured ``ai.review_pr_budget_usd``.
-        prior_spend_usd: Sum of ``usage.cost`` over the PR's recorded rounds.
+        prior_spend_usd: The PR's cumulative review spend before this round
+            (:attr:`ReviewState.review_spend_usd`).
         enforced: Whether reaching the budget stops the round.
+        unpriceable: Whether spend is a runtime bound rather than dollars
+            (the subscription CLI transport).
     """
 
     budget_usd: float
     prior_spend_usd: float
     enforced: bool
+    unpriceable: bool = False
 
     @property
     def remaining_usd(self) -> float:
@@ -86,11 +97,13 @@ def resolve_pr_budget(
     """
     if budget_usd is None:
         return None
-    runs = prior_state.runs if prior_state is not None else []
     return PrBudget(
         budget_usd=budget_usd,
-        prior_spend_usd=sum(run.usage.cost for run in runs),
+        prior_spend_usd=(
+            prior_state.review_spend_usd if prior_state is not None else 0.0
+        ),
         enforced=cap_is_enforced(source=source, basis=basis),
+        unpriceable=basis is CostBasis.UNPRICEABLE,
     )
 
 
@@ -172,5 +185,8 @@ def cost_stop_reason(*, round_cap: float | None, pr_budget: PrBudget | None) -> 
     """
     binding = _binding(round_cap=round_cap, pr_budget=pr_budget)
     if binding is not None:
-        return f"{PR_BUDGET_REASON_PREFIX} (${binding.budget_usd:.2f}) reached"
+        reason = f"{PR_BUDGET_REASON_PREFIX} (${binding.budget_usd:.2f}) reached"
+        if binding.unpriceable:
+            reason += f" ({RUNTIME_BOUND_NOTE})"
+        return reason
     return cost_cap_reason(cap=round_cap)

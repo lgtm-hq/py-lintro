@@ -253,9 +253,15 @@ are unchanged.
 across every round of one pull request: push, delta, full and targeted on-request rounds
 alike. It is unset by default: there is no check and no sticky line.
 
-- **Spend** is the sum of the recorded rounds' costs (`usage.cost` in the review state)
-  plus the running round's spend so far. The review state keeps the newest 30 rounds, so
-  on a pull request with more rounds than that, the oldest rounds no longer count.
+- **Spend** is the pull request's cumulative review spend (`pr_spend_usd` in the review
+  state) plus the running round's spend so far. Every round adds its cost when it
+  finishes, and every mid-run checkpoint stores the running round's spend too. So a
+  round that is killed after a checkpoint still counts, and the next round starts from
+  that figure. The total only grows: pruning the run history to the newest 30 rounds
+  never lowers it. A state written before this total existed seeds it from the rounds it
+  kept. The spend a round incurs after its last checkpoint (for example, synthesis or
+  verification) counts only when the round finishes or stops gracefully; a hard kill
+  after that point loses it.
 - **Enforcement** mirrors `ai.max_cost_usd`. The `LINTRO_AI_REVIEW_PR_BUDGET_USD`
   Actions variable, which the workflow forwards, always enforces. A budget set only in
   `.lintro-config.yaml` enforces only when spend is billed or estimated. So under the
@@ -267,6 +273,13 @@ alike. It is unset by default: there is no check and no sticky line.
   round before any provider call. A round that crosses the budget finishes the call in
   flight and stops before the next one. The limit is whichever is tighter: the budget or
   `ai.max_cost_usd`.
+- **Parallelism is unchanged** by a budget, enforced or not. Chunk calls still run
+  concurrently, so a round can overshoot the budget, but only by the calls already in
+  flight when it is reached: each call reserves its estimate against the budget before
+  it starts, and a call that would start past the limit does not. This is the same trade
+  `ai.max_cost_usd` accepts.
+- **On the `cli` transport** the figures are a runtime bound, not a bill: the sticky
+  line and the stop reason both end with "(runtime bound on the cli transport)".
 - **The stop is graceful.** Findings so far are posted, coverage is saved, and the stop
   reason reads `PR budget ($40.00) reached`. The sticky comment shows
   `PR budget: $X of $Y` on every round, where `X` includes the current round.

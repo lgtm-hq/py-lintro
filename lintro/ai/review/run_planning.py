@@ -305,7 +305,6 @@ def resolve_max_parallel_calls(
     *,
     ai_config: AIConfig,
     enforce_cost_cap: bool,
-    pr_budget_enforced: bool = False,
 ) -> int:
     """Return the concurrency ceiling for this run's chunk fan-out.
 
@@ -319,12 +318,11 @@ def resolve_max_parallel_calls(
     Args:
         ai_config: Resolved AI configuration for the run.
         enforce_cost_cap: Whether the run enforces ``ai.max_cost_usd``.
-        pr_budget_enforced: Whether an enforced PR budget caps it (#2796).
 
     Returns:
         Positive concurrency ceiling.
     """
-    if pr_budget_enforced or (enforce_cost_cap and ai_config.max_cost_usd is not None):
+    if enforce_cost_cap and ai_config.max_cost_usd is not None:
         return 1
     if (
         ai_config.transport == AITransport.CLI
@@ -455,7 +453,6 @@ def plan_run(
     max_parallel_calls = resolve_max_parallel_calls(
         ai_config=options.ai_config,
         enforce_cost_cap=options.enforce_cost_cap,
-        pr_budget_enforced=bool(options.pr_budget and options.pr_budget.enforced),
     )
     return ReviewRunPlan(
         policy=policy,

@@ -128,6 +128,9 @@ def test_the_slot_reads_the_same_pr_number_as_the_review() -> None:
         pytest.param("7", "", "ai-review-slot-odd", id="push-one-digit"),
         pytest.param("", "2808", "ai-review-slot-even", id="comment-even"),
         pytest.param("", "2809", "ai-review-slot-odd", id="comment-odd"),
+        # A refused request leaves no number; the expression reads "odd", but
+        # the job is skipped by its `if`, so it never holds the slot.
+        pytest.param("", "", "ai-review-slot-odd", id="no-pr-number"),
     ],
 )
 def test_the_slot_follows_the_pr_numbers_parity(

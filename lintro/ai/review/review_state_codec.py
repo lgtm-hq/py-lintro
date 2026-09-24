@@ -37,6 +37,7 @@ from lintro.ai.review.github_constants import (
     STATE_VERSION,
     STATE_VERSION_V2,
     STATE_VERSION_V3,
+    STATE_VERSION_V4,
 )
 from lintro.ai.review.models.finding_record import FindingRecord, rebaseline_records
 from lintro.ai.review.models.review_state import ReviewState
@@ -200,7 +201,12 @@ def decode_state(*, body: str) -> ReviewState:
     if isinstance(version, bool) or not isinstance(version, int):
         return ReviewState()
 
-    if version not in (STATE_VERSION_V2, STATE_VERSION_V3, STATE_VERSION):
+    if version not in (
+        STATE_VERSION_V2,
+        STATE_VERSION_V3,
+        STATE_VERSION_V4,
+        STATE_VERSION,
+    ):
         # Two cases, one answer. A v1 or unversioned blob predates round
         # numbers and finding identity, and #2305 retired its migration, so it
         # is read as absent. A blob written by a newer lintro is

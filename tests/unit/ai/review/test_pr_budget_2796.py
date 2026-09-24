@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -44,6 +45,7 @@ from lintro.ai.review.pr_budget import (
 )
 from lintro.ai.review.run_planning import resolve_max_parallel_calls
 from lintro.ai.review.session import ReviewSessionOptions, stop_hint
+from lintro.ai.review.state_store import load_ci_state
 from lintro.ai.review.sticky.history import _this_run_section
 
 _ENFORCED = PrBudget(budget_usd=40.0, prior_spend_usd=0.0, enforced=True)
@@ -204,6 +206,33 @@ def test_the_stop_reason_names_the_limit_that_stopped_the_round() -> None:
     )
 
 
+def test_an_unpriceable_basis_notes_the_runtime_bound() -> None:
+    """On the CLI transport the stop reason says the dollars are a bound."""
+    tight = PrBudget(
+        budget_usd=40.0,
+        prior_spend_usd=39.0,
+        enforced=True,
+        unpriceable=True,
+    )
+
+    assert_that(cost_stop_reason(round_cap=None, pr_budget=tight)).is_equal_to(
+        "PR budget ($40.00) reached (runtime bound on the cli transport)",
+    )
+
+
+def test_resolving_on_the_cli_basis_marks_it_unpriceable() -> None:
+    """The basis flows into the budget so the reason can carry the note."""
+    budget = resolve_pr_budget(
+        budget_usd=40.0,
+        source=ConfigSource.ENV,
+        basis=CostBasis.UNPRICEABLE,
+        prior_state=None,
+    )
+
+    assert budget is not None
+    assert_that(budget.unpriceable).is_true()
+
+
 def test_the_stop_hint_names_the_budget_and_its_overlay() -> None:
     """The operator hint for a PR-budget stop says what to raise."""
     hint = stop_hint(
@@ -215,19 +244,28 @@ def test_the_stop_hint_names_the_budget_and_its_overlay() -> None:
     assert_that(hint).contains(ENV_REVIEW_PR_BUDGET_USD)
 
 
-def test_an_enforced_budget_serialises_chunk_calls() -> None:
-    """Like an enforced round cap, so the resume queue cannot invert (#2154)."""
+def test_an_enforced_budget_leaves_parallelism_as_configured() -> None:
+    """Ruling 16: the budget does not serialise chunk calls.
+
+    Overshoot is bounded by ``CostBudget`` reservations to the calls already
+    in flight, the same trade an unenforced-parallel round cap accepts.
+    """
     config = AIConfig(transport=AITransport.API, max_parallel_calls=4)
+    options = ReviewSessionOptions(
+        provider=_provider(),
+        ai_config=config,
+        checklist_items=[],
+        checklist_text="",
+        classifications=[],
+        enforce_cost_cap=False,
+        pr_budget=PrBudget(budget_usd=40.0, prior_spend_usd=39.0, enforced=True),
+    )
 
     assert_that(
         resolve_max_parallel_calls(
-            ai_config=config,
-            enforce_cost_cap=False,
-            pr_budget_enforced=True,
+            ai_config=options.ai_config,
+            enforce_cost_cap=options.enforce_cost_cap,
         ),
-    ).is_equal_to(1)
-    assert_that(
-        resolve_max_parallel_calls(ai_config=config, enforce_cost_cap=False),
     ).is_equal_to(4)
 
 
@@ -447,6 +485,27 @@ def test_a_budget_crossed_mid_round_stops_at_the_next_check() -> None:
     assert_that(result.metadata.chunks_total).is_equal_to(2)
 
 
+def test_a_real_runs_checkpoints_carry_its_spend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each mid-run checkpoint stores what the round has spent so far.
+
+    Two chunks at $0.01 each; with no final write (the CLI's, skipped here),
+    the checkpointed state alone must already hold the round's $0.02.
+
+    Args:
+        tmp_path: The state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+
+    _review(provider=_provider(), pr_budget=None)
+    state = load_ci_state(directory=tmp_path, repo="", pr_number=0)
+
+    assert_that(state.review_spend_usd).is_close_to(0.02, 1e-9)
+
+
 @pytest.mark.parametrize(
     "pr_budget",
     [
@@ -499,6 +558,24 @@ def test_the_sticky_shows_the_prs_spend_against_its_budget() -> None:
 
     assert_that(section).contains("PR budget: $17.66 of $40.00")
     assert_that(section).does_not_contain("display only")
+    assert_that(section).does_not_contain("runtime bound")
+
+
+def test_the_sticky_notes_the_runtime_bound_on_the_cli_basis() -> None:
+    """An enforced budget on an unpriceable basis says what the dollars are."""
+    result = _review(provider=_provider(), pr_budget=None)
+    metadata = replace(
+        result.metadata,
+        pr_budget_usd=40.0,
+        pr_budget_spent_usd=17.66,
+        pr_budget_enforced=True,
+        cost_basis="unpriceable",
+    )
+    section = _sticky(replace(result, metadata=metadata))
+
+    assert_that(section).contains(
+        "PR budget: $17.66 of $40.00 (runtime bound on the cli transport)",
+    )
 
 
 def test_the_sticky_marks_a_display_only_budget() -> None:
@@ -508,6 +585,24 @@ def test_the_sticky_marks_a_display_only_budget() -> None:
     section = _sticky(replace(result, metadata=metadata))
 
     assert_that(section).contains("PR budget: $3.00 of $40.00 (display only")
+
+
+def test_a_display_only_budget_on_the_cli_basis_carries_both_notes() -> None:
+    """The unenforced CLI case (a YAML-only budget) names both facts once."""
+    result = _review(provider=_provider(), pr_budget=None)
+    metadata = replace(
+        result.metadata,
+        pr_budget_usd=40.0,
+        pr_budget_spent_usd=3.0,
+        cost_basis="unpriceable",
+    )
+    section = _sticky(replace(result, metadata=metadata))
+
+    assert_that(section).contains(
+        "PR budget: $3.00 of $40.00 (display only: not enforced on this cost "
+        "basis; runtime bound on the cli transport)",
+    )
+    assert_that(section.count("runtime bound")).is_equal_to(1)
 
 
 def test_the_cli_stamps_spend_including_this_round() -> None:

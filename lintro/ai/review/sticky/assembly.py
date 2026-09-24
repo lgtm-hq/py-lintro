@@ -166,6 +166,8 @@ def advance_review_state(*, request: StickyRequest) -> ReviewState:
         run_id=state.run_id,
         lintro_version=state.lintro_version,
         truncated=outcome.truncated,
+        # Cumulative, so pruning ``runs`` never drops spend (#2796).
+        pr_spend_usd=state.review_spend_usd + outcome.run.usage.cost,
     )
 
 
