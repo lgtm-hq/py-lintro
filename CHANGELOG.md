@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.169.1] - 2026-09-24
+
+### Fixed
+
+- **tests**: freeze the clocks behind two wall-clock flakes (#2791) (9e66208)
+
 ## [0.169.0] - 2026-09-24
 
 ### Added
