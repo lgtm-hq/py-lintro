@@ -108,8 +108,30 @@ def _this_run_section(
                 if (timings_note := format_timings_note(metadata=metadata))
                 else []
             ),
+            *(["", budget_line] if (budget_line := _pr_budget_line(result)) else []),
         ],
     )
+
+
+def _pr_budget_line(result: ReviewResult) -> str:
+    """Render ``PR budget: $X of $Y`` for a PR with a review budget (#2796).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        The line, or an empty string when ``ai.review_pr_budget_usd`` is unset.
+    """
+    metadata = result.metadata
+    if metadata.pr_budget_usd is None:
+        return ""
+    line = (
+        f"PR budget: ${metadata.pr_budget_spent_usd:.2f} "
+        f"of ${metadata.pr_budget_usd:.2f}"
+    )
+    if not metadata.pr_budget_enforced:
+        line += " (display only: not enforced on this cost basis)"
+    return line
 
 
 def _history_section(

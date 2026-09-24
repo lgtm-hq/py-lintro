@@ -146,7 +146,6 @@ def test_a_writer_on_an_open_pr_gets_a_review(tmp_path: Path, level: str) -> Non
         {
             "run": "true",
             "pr-number": "2795",
-            "head-sha": _HEAD,
             "mode": "full",
             "paths": "[]",
             "comment-id": "987654321",
@@ -338,6 +337,6 @@ def test_every_output_is_a_single_line(tmp_path: Path) -> None:
     keys = [line.split("=", 1)[0] for line in raw]
     assert_that(keys).does_not_contain_duplicates()
     assert_that(keys).is_equal_to(
-        ["run", "pr-number", "head-sha", "mode", "paths", "comment-id", "requester"],
+        ["run", "pr-number", "mode", "paths", "comment-id", "requester"],
     )
     assert_that(outputs["mode"]).is_equal_to("delta")

@@ -99,6 +99,8 @@ set -euo pipefail
 #   LINTRO_AI_PROVIDER      Optional overlay (workflow default: anthropic).
 #   LINTRO_AI_MODEL         Optional overlay (empty = provider/config default).
 #   LINTRO_AI_MAX_COST_USD  Optional spend ceiling overlay (empty = config default).
+#   LINTRO_AI_REVIEW_PR_BUDGET_USD  Optional per-PR review budget overlay
+#                           (#2796; empty = config default, unset = off).
 #   LINTRO_AI_TRANSPORT     Optional overlay (workflow default: cli).
 #   LINTRO_REVIEW_STATE_DIR Directory for coverage artifacts (default:
 #                           ai-review-state). The workflow downloads prior
@@ -267,25 +269,33 @@ esac
 if [[ -n "${REVIEW_REQUEST_MODE:-}" ]]; then
 	echo "[ai-review] on request by ${REVIEW_REQUESTER:-unknown}: ${REVIEW_REQUEST_MODE}"
 	# The request job checked the PR, but this job may have waited in the
-	# repo-wide queue since. Re-check the same three conditions now. Two
+	# review-slot queue since. Re-check the same three conditions now. Two
 	# outcomes are kept apart (#2806):
 	#   - confirmed ineligible (closed, draft, or not from this repository):
 	#     no review, exit 0 with a log line; there is nothing to review;
-	#   - unreadable (gh failed, empty or non-object reply): the request is
+	#   - unreadable (gh failed, an empty or non-object reply, or an object
+	#     without `state` or `head`): the request is
 	#     NOT silently dropped; the job goes red with a visible reason so the
 	#     writer sees it and can re-request.
 	# The head itself may have moved: like a push review, the round reviews
 	# the head as it is now (ruling 9 on #2795).
-	if ! pr_payload=$(gh api "repos/${GITHUB_REPOSITORY:-}/pulls/${pr_number}" 2>/dev/null); then
+	# gh's own error goes to the job log, never into the reason: the reason
+	# is a fixed sentence, and API text is not ours to put in an annotation.
+	gh_stderr=$(mktemp)
+	if ! pr_payload=$(gh api "repos/${GITHUB_REPOSITORY:-}/pulls/${pr_number}" 2>"$gh_stderr"); then
+		echo "[ai-review] reading pull request #${pr_number} failed; gh said:" >&2
+		cat "$gh_stderr" >&2
+		rm -f "$gh_stderr"
 		report_not_invoked "On-request review: pull request #${pr_number} could not be read after the queue wait; re-request with @lintro review."
 	fi
+	rm -f "$gh_stderr"
 	pr_eligible=$(PR_PAYLOAD="$pr_payload" REPO="${GITHUB_REPOSITORY:-}" python3 -c '
 import json, os
 try:
     pull = json.loads(os.environ["PR_PAYLOAD"])
 except ValueError:
     pull = None
-if not isinstance(pull, dict):
+if not isinstance(pull, dict) or "state" not in pull or "head" not in pull:
     print("unreadable")
 else:
     head_repo = ((pull.get("head") or {}).get("repo") or {}).get("full_name", "")
@@ -296,6 +306,9 @@ else:
 	yes) ;;
 	no)
 		echo "[ai-review] on-request review skipped: PR #${pr_number} is no longer open, non-draft and from ${GITHUB_REPOSITORY:-this repository}"
+		# The workflow downloaded the prior round's state here; the always()
+		# upload must not republish it as this skipped run's own state.
+		rm -rf -- "${LINTRO_REVIEW_STATE_DIR:-ai-review-state}"
 		exit 0
 		;;
 	*)

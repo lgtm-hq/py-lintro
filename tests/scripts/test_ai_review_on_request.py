@@ -18,6 +18,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+import pytest
 import yaml
 from assertpy import assert_that
 
@@ -169,7 +170,6 @@ _REQUEST_OUTPUTS = (
     "run",
     "mode",
     "pr-number",
-    "head-sha",
     "paths",
     "comment-id",
     "requester",
@@ -188,10 +188,59 @@ def test_the_request_outputs_are_routed_exactly() -> None:
     for name, value in outputs.items():
         assert_that(value).is_equal_to(f"${{{{ steps.resolve.outputs.{name} }}}}")
 
-    text = _WORKFLOW.read_text(encoding="utf-8")
-    read = set(re.findall(r"needs\.request\.outputs\.([a-z-]+)", text))
-    assert_that(read).is_subset_of(set(_REQUEST_OUTPUTS))
-    assert_that(read).contains("pr-number", "comment-id", "mode", "paths", "requester")
+    read = _outputs_read(_WORKFLOW.read_text(encoding="utf-8"))
+    # Every declared output is read somewhere: an unread output (head-sha
+    # until #2796) is dead routing that a later reader would trust.
+    assert_that(read).is_equal_to(set(_REQUEST_OUTPUTS))
+
+
+#: ``needs.request.outputs.<name>`` in dot form, or ``['<name>']`` /
+#: ``["<name>"]`` in bracket form; both are valid expression syntax.
+_OUTPUT_READ = re.compile(
+    r"""needs\.request\.outputs(?:\.([a-z-]+)|\[\s*['"]([a-z-]+)['"]\s*\])""",
+)
+
+
+def _outputs_read(text: str) -> set[str]:
+    """Return the request-job output names that ``text`` reads.
+
+    Args:
+        text: Workflow source.
+
+    Returns:
+        The output names read, in dot or bracket form.
+    """
+    return {dot or bracket for dot, bracket in _OUTPUT_READ.findall(text)}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        pytest.param("${{ needs.request.outputs.mode }}", {"mode"}, id="dot"),
+        pytest.param(
+            "${{ needs.request.outputs['pr-number'] }}",
+            {"pr-number"},
+            id="bracket-single-quote",
+        ),
+        pytest.param(
+            '${{ needs.request.outputs[ "paths" ] }}',
+            {"paths"},
+            id="bracket-double-quote",
+        ),
+        pytest.param("${{ needs.other.outputs.mode }}", set(), id="other-job"),
+    ],
+)
+def test_output_reads_are_found_in_dot_and_bracket_form(
+    text: str,
+    expected: set[str],
+) -> None:
+    """A bracket-form read cannot slip past the routing check.
+
+    Args:
+        text: A workflow fragment.
+        expected: The output names it reads.
+    """
+    assert_that(_outputs_read(text)).is_equal_to(expected)
 
 
 def test_the_gate_script_writes_exactly_the_declared_outputs() -> None:
@@ -277,7 +326,7 @@ def test_the_usage_reply_is_the_parsers_usage_text() -> None:
 
 
 def test_the_review_job_runs_on_both_paths_with_validated_inputs() -> None:
-    """The shared review job: request outputs only, slot and cap unchanged."""
+    """The shared review job: request outputs only, a review slot, the 53 min cap."""
     job = _job("ai-review")
 
     assert_that(job["needs"]).is_equal_to(["request"])
@@ -303,6 +352,7 @@ def test_the_review_job_runs_on_both_paths_with_validated_inputs() -> None:
         "${{ needs.request.outputs.requester }}",
     )
     assert_that(job["timeout-minutes"]).is_equal_to(53)
-    assert_that(job["concurrency"]).is_equal_to(
-        {"group": "ai-review-repo-wide", "cancel-in-progress": False, "queue": "max"},
-    )
+    # The slot expression itself is pinned in test_ai_review_slots.py.
+    assert_that(job["concurrency"]["group"]).starts_with("ai-review-slot-")
+    assert_that(job["concurrency"]["cancel-in-progress"]).is_false()
+    assert_that(job["concurrency"]["queue"]).is_equal_to("max")

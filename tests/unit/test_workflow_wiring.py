@@ -5645,6 +5645,8 @@ _DOGFOOD_ONLY_ENV = {
     # A spend ceiling for a whole review; the smoke is one trivial prompt per
     # lane.
     "LINTRO_AI_MAX_COST_USD",
+    # Total review spend across a PR's rounds (#2796); the smoke reviews no PR.
+    "LINTRO_AI_REVIEW_PR_BUDGET_USD",
     # Review-state artifact upload (#2173); the smoke persists nothing.
     "ACTIONS_RUNTIME_TOKEN",
     "ACTIONS_RESULTS_URL",

@@ -23,6 +23,7 @@ from lintro.ai.config_overrides import (
     ENV_PROVIDER,
     ENV_PROVIDER_BLOCK_PREFIX,
     ENV_REVIEW,
+    ENV_REVIEW_PR_BUDGET_USD,
     ENV_TRANSPORT,
 )
 from lintro.ai.enums import AITransport
@@ -456,6 +457,7 @@ def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         ENV_ENABLED,
         ENV_MAX_COST_USD,
+        ENV_REVIEW_PR_BUDGET_USD,
         ENV_MODEL,
         ENV_PROVIDER,
         ENV_REVIEW,

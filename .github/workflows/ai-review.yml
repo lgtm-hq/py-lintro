@@ -43,6 +43,8 @@ name: AI Review - Dogfood
 # overlay (#2024 / #2155): `uncapped` lifts the ceiling; overlay `0` is
 # rejected as ambiguous. YAML `0` is still a literal $0 cap. Under the CLI
 # transport the figure is a runtime bound, not marginal dollars (#1923).
+# The `LINTRO_AI_REVIEW_PR_BUDGET_USD` variable is the same kind of overlay
+# for the per-PR review budget, `ai.review_pr_budget_usd` (#2796).
 # Historical note: #2018 / 9f43a98a briefly shipped 0.50; #2025 restored 2.00
 # as the interim committed cap; this rollout removes that committed cap.
 #
@@ -119,7 +121,7 @@ permissions: {}
 # PR's group could cancel a running review, including a `@lintro review` from
 # a member or collaborator without write access. A comment run therefore never
 # cancels anything and is never cancelled by a push; a push and an on-request
-# review of the same PR both run, serialised by the repo-wide slot below, and
+# review of the same PR both run, serialised by the PR's review slot below, and
 # the later sticky wins. The permission API in the request job is the only
 # boundary on who may request a review.
 concurrency:
@@ -149,7 +151,6 @@ jobs:
       run: ${{ steps.resolve.outputs.run }}
       mode: ${{ steps.resolve.outputs.mode }}
       pr-number: ${{ steps.resolve.outputs.pr-number }}
-      head-sha: ${{ steps.resolve.outputs.head-sha }}
       paths: ${{ steps.resolve.outputs.paths }}
       comment-id: ${{ steps.resolve.outputs.comment-id }}
       requester: ${{ steps.resolve.outputs.requester }}
@@ -326,14 +327,23 @@ jobs:
     # its *own* previous attempt instead of only completed earlier runs, so
     # each attempt makes progress rather than re-reviewing the whole diff.
     timeout-minutes: 53
-    # Repo-wide serialisation (#2506). The workflow-level group above is
-    # per-PR with cancel-in-progress, so a push still supersedes its own
-    # PR's review; it keeps the default queue: single because a stale
-    # pending review of the same PR is exactly what should be replaced.
-    # This fixed job-level group additionally admits one review job at a
-    # time across the repo, and never cancels: a queued review waits for
-    # the running one so concurrent PRs cannot pile onto the same provider
-    # rate limit.
+    # Two review slots (#2796, #2627 PR 3; one repo-wide slot since #2506).
+    # The workflow-level group above is per-PR with cancel-in-progress, so a
+    # push still supersedes its own PR's review; it keeps the default
+    # queue: single because a stale pending review of the same PR is
+    # exactly what should be replaced. This job-level group additionally
+    # admits one review job at a time per slot, two across the repo, and
+    # never cancels: a queued review waits for the running one so
+    # concurrent PRs cannot pile onto the same provider rate limit.
+    #
+    # The slot is the PR number's parity (ruling 12 on #2796), not the run
+    # number's: every run of one PR, push or on-request, lands in the same
+    # slot, so a push and an on-request review of that PR are still
+    # serialised (ruling 9 on #2795) and never race on the sticky comment
+    # or the review-state artifacts. Expressions have no arithmetic
+    # operators, so parity is read off the number's last digit. The split
+    # is static: two busy PRs of the same parity queue behind each other
+    # while the other slot idles, which is never worse than one slot.
     #
     # The two levels stack; the job-level group does NOT opt this job out
     # of the workflow-level one. They govern different objects: a
@@ -359,7 +369,16 @@ jobs:
     # requires. The cost is accepted by design: with the 53 min cap above, a
     # deep queue can leave a review pending for hours before it starts.
     concurrency:
-      group: ai-review-repo-wide
+      group: >-
+        ai-review-slot-${{ (endsWith(format('{0}',
+        github.event.pull_request.number || needs.request.outputs.pr-number),
+        '0') || endsWith(format('{0}', github.event.pull_request.number
+        || needs.request.outputs.pr-number), '2') || endsWith(format('{0}',
+        github.event.pull_request.number || needs.request.outputs.pr-number),
+        '4') || endsWith(format('{0}', github.event.pull_request.number
+        || needs.request.outputs.pr-number), '6') || endsWith(format('{0}',
+        github.event.pull_request.number || needs.request.outputs.pr-number),
+        '8')) && 'even' || 'odd' }}
       cancel-in-progress: false
       queue: max
     # Cursor shards are appended only when the dogfood provider is Cursor.
@@ -672,6 +691,12 @@ jobs:
           # transport treats a numeric cap as a runtime bound, not
           # marginal dollars, under subscription auth.
           LINTRO_AI_MAX_COST_USD: ${{ vars.LINTRO_AI_MAX_COST_USD }}
+          # Per-PR review budget overlay (#2796): total spend across every
+          # round of one PR. Unset leaves the budget off. Same grammar as
+          # the round cap; an overlay always enforces, even under the CLI
+          # transport, where committed YAML alone is display-only.
+          # yamllint disable-line rule:line-length
+          LINTRO_AI_REVIEW_PR_BUDGET_USD: ${{ vars.LINTRO_AI_REVIEW_PR_BUDGET_USD }}
           # In-step persist upload (#2173). Masked outputs from the
           # github-script step above; blank when the runner omitted them.
           ACTIONS_RUNTIME_TOKEN: ${{ steps.artifact-runtime.outputs.runtime-token }}

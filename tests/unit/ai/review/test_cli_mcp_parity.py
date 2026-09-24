@@ -30,6 +30,7 @@ from click.testing import CliRunner
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.pr_budget import PrBudget
 from lintro.ai.review.preparation import (
     DEFAULT_EXECUTION_POLICY,
     PreparedReview,
@@ -59,6 +60,7 @@ CLI_ONLY_POLICY_FIELDS: frozenset[str] = frozenset(
         "prior_state",
         "force_full",
         "enforce_cost_cap",
+        "pr_budget",
     },
 )
 
@@ -512,6 +514,7 @@ SESSION_OPTION_SOURCES: dict[str, tuple[str, str]] = {
     "prior_state": ("policy", "prior_state"),
     "force_full": ("policy", "force_full"),
     "enforce_cost_cap": ("policy", "enforce_cost_cap"),
+    "pr_budget": ("policy", "pr_budget"),
 }
 
 #: Session fields no adapter sets on this path. They must still arrive at the
@@ -559,6 +562,7 @@ def test_execute_review_forwards_every_prepared_and_policy_field(
         prior_state=ReviewState(),
         force_full=True,
         enforce_cost_cap=False,
+        pr_budget=PrBudget(budget_usd=40.0, prior_spend_usd=1.0, enforced=True),
     )
     sources = {"prepared": prepared, "policy": policy}
     captured: list[ReviewSessionOptions] = []

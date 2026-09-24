@@ -206,7 +206,6 @@ def resolve(env: dict[str, str]) -> int:
         {
             "run": "true",
             "pr-number": pr_number,
-            "head-sha": head_sha,
             "mode": str(command.mode),
             "paths": json.dumps(list(command.paths), separators=(",", ":")),
             "comment-id": comment_id,

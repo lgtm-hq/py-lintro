@@ -1,6 +1,6 @@
 """Env-var and CLI-flag overlays for AI configuration (#1970, #2024, #2153).
 
-Exactly six environment variables map onto six shared ``ai:`` fields. Invalid
+Exactly seven environment variables map onto seven shared ``ai:`` fields. Invalid
 values fail at resolution with a calm diagnostic naming the variable (or
 flag) and the accepted values — they never fall through to the config
 default.
@@ -35,6 +35,7 @@ __all__ = [
     "ENV_ENABLED",
     "ENV_PROVIDER_BLOCK_PREFIX",
     "ENV_MAX_COST_USD",
+    "ENV_REVIEW_PR_BUDGET_USD",
     "ENV_MODEL",
     "ENV_PROVIDER",
     "ENV_REVIEW",
@@ -52,6 +53,9 @@ ENV_TRANSPORT = "LINTRO_AI_TRANSPORT"
 ENV_ENABLED = "LINTRO_AI_ENABLED"
 ENV_REVIEW = "LINTRO_AI_REVIEW"
 ENV_MAX_COST_USD = "LINTRO_AI_MAX_COST_USD"
+#: Per-PR review budget (#2796); env only, no flag: a PR budget is operator
+#: policy for CI (an Actions variable), not a per-invocation knob.
+ENV_REVIEW_PR_BUDGET_USD = "LINTRO_AI_REVIEW_PR_BUDGET_USD"
 
 #: Prefix of the per-provider block overrides: the remainder is the provider
 #: name and the field name, upper-cased and joined by a double underscore
@@ -72,6 +76,7 @@ OVERRIDE_FIELDS: tuple[str, ...] = (
     "enabled",
     "review",
     "max_cost_usd",
+    "review_pr_budget_usd",
 )
 
 _ENV_BY_FIELD: dict[str, str] = {
@@ -81,6 +86,7 @@ _ENV_BY_FIELD: dict[str, str] = {
     "enabled": ENV_ENABLED,
     "review": ENV_REVIEW,
     "max_cost_usd": ENV_MAX_COST_USD,
+    "review_pr_budget_usd": ENV_REVIEW_PR_BUDGET_USD,
 }
 
 _ENABLED_TRUE = frozenset({"1", "true"})
@@ -100,7 +106,7 @@ _FLAG_BY_FIELD: dict[str, str] = {
 
 
 def read_env_overrides() -> dict[str, Any]:
-    """Read the six ``LINTRO_AI_*`` overrides that are present.
+    """Read the seven ``LINTRO_AI_*`` overrides that are present.
 
     Unset or whitespace-only variables are omitted (layer absent). There is
     no meta-gate variable.
@@ -135,6 +141,14 @@ def read_env_overrides() -> dict[str, Any]:
         overlay["max_cost_usd"] = _parse_max_cost_usd(
             max_cost_raw,
             name=ENV_MAX_COST_USD,
+        )
+    pr_budget_raw = _env_text(ENV_REVIEW_PR_BUDGET_USD)
+    if pr_budget_raw is not None:
+        # Same grammar as the round cap: a positive USD figure, ``uncapped``
+        # to lift a YAML budget for this run, and ``0`` rejected.
+        overlay["review_pr_budget_usd"] = _parse_max_cost_usd(
+            pr_budget_raw,
+            name=ENV_REVIEW_PR_BUDGET_USD,
         )
     return overlay
 
@@ -291,7 +305,7 @@ def apply_env_overrides(
 ) -> tuple[AIConfig, dict[str, ConfigSource]]:
     """Overlay environment values onto a parsed config.
 
-    Both layers are read here: the six flat ``LINTRO_AI_*`` variables and the
+    Both layers are read here: the seven flat ``LINTRO_AI_*`` variables and the
     ``LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`` block overrides (#2309).
 
     Args:

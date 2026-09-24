@@ -342,6 +342,17 @@ class AIConfig(BaseModel):
             "exceed this ceiling by up to n − 1 in-flight calls' cost."
         ),
     )
+    review_pr_budget_usd: float | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Total review spend in USD allowed across every AI review round "
+            "of one pull request (#2796). None (the default) disables the "
+            "check. Enforced like max_cost_usd: always from "
+            "LINTRO_AI_REVIEW_PR_BUDGET_USD, and from config only when spend "
+            "is billed or estimated."
+        ),
+    )
     max_prompt_tokens: int = Field(
         default=12000,
         ge=1000,

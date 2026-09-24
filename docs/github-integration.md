@@ -213,7 +213,8 @@ leading `-`, and characters outside `A-Z a-z 0-9 . _ / -` are refused. At most 2
 prefixes per request, each up to 200 characters.
 
 - An accepted request gets a 👀 reaction and runs the same review job as a push: the
-  same sticky comment, the same review state, the same repository-wide queue slot and
+  same sticky comment, the same review state, the same review slot (see
+  [Review slots and the per-PR budget](#review-slots-and-the-per-pr-budget)) and
   53-minute cap. A request never cancels a push's review and a push never cancels a
   request's review: both run, one after the other, and the later one updates the sticky
   comment.
@@ -223,9 +224,9 @@ prefixes per request, each up to 200 characters.
   request on a closed, draft or fork pull request, are ignored: the workflow logs why
   and posts nothing.
 - The review job checks the pull request again when it starts, after any wait in the
-  queue. If it has since been closed or turned into a draft, the review is skipped and
-  logged. If it cannot be read at that point, the job fails with a visible reason, so
-  the requester can ask again.
+  queue. If it has since been closed, turned into a draft, or is no longer from this
+  repository, the review is skipped and logged. If it cannot be read at that point, the
+  job fails with a visible reason, so the requester can ask again.
 - Other comments never start or cancel a review.
 
 The request is validated in a separate `request` job that holds no secrets and only a
@@ -235,6 +236,55 @@ environment, never a shell line. On `issue_comment` there is no pull-request bas
 commit, so the review job installs lintro from the default-branch commit that supplied
 the workflow (`github.workflow_sha`). `issue_comment` is not affected by GitHub's
 2026-11-02 default restriction on `pull_request_target`.
+
+#### Review slots and the per-PR budget
+
+**Two review slots (#2796).** At most two review jobs run at once across the repository.
+Each job waits in one of two queues, `ai-review-slot-even` or `ai-review-slot-odd`,
+chosen by the parity of the pull request's number. Every round of one pull request, push
+or on-request, uses the same slot, so two rounds of one pull request never run at the
+same time and never race on the sticky comment or the review state. A queued review
+waits (`cancel-in-progress: false`, `queue: max`); it is never dropped. The split is
+static: two busy pull requests of the same parity queue behind each other while the
+other slot is idle. The per-pull-request cancel group for pushes and the 53-minute cap
+are unchanged.
+
+**Per-PR review budget (#2796).** `ai.review_pr_budget_usd` caps the total review spend
+across every round of one pull request: push, delta, full and targeted on-request rounds
+alike. It is unset by default: there is no check and no sticky line.
+
+- **Spend** is the sum of the recorded rounds' costs (`usage.cost` in the review state)
+  plus the running round's spend so far. The review state keeps the newest 30 rounds, so
+  on a pull request with more rounds than that, the oldest rounds no longer count.
+- **Enforcement** mirrors `ai.max_cost_usd`. The `LINTRO_AI_REVIEW_PR_BUDGET_USD`
+  Actions variable, which the workflow forwards, always enforces. A budget set only in
+  `.lintro-config.yaml` enforces only when spend is billed or estimated. So under the
+  `cli` transport, a budget set only in the config is display-only, and the sticky line
+  says so. The variable still enforces there. The variable takes a positive USD figure
+  or `uncapped`; `0` is rejected as ambiguous.
+- **Checks** run before the round's first provider call and at the round cap's existing
+  check points, before each chunk and each later pass. A budget already spent stops the
+  round before any provider call. A round that crosses the budget finishes the call in
+  flight and stops before the next one. The limit is whichever is tighter: the budget or
+  `ai.max_cost_usd`.
+- **The stop is graceful.** Findings so far are posted, coverage is saved, and the stop
+  reason reads `PR budget ($40.00) reached`. The sticky comment shows
+  `PR budget: $X of $Y` on every round, where `X` includes the current round.
+- **The check's outcome at the budget:**
+  - Coverage of the head is incomplete: the check goes red (exit 1) with its own
+    `pr_budget` outcome and the headline
+    `PR review budget reached — N/M files covered at HEAD`. Later rounds stop at the
+    same budget, so raise the variable to review the rest, or leave the pull request as
+    it is.
+  - Coverage carried from earlier rounds is complete: every file is already covered at
+    the head, so the check is green (exit 0), like any complete review.
+- **Choosing a figure:** on #2806, the round on the second head cost
+  **$10.03** and the
+  round on the third **$7.63**, so two rounds cost about
+  $17.66. A budget that stops a
+  runaway pull request without cutting off a normal three-to-four-round one sits around
+  **$40–60**.
+  Unset keeps today's behaviour.
 
 ### 5. Docker Image Publishing
 

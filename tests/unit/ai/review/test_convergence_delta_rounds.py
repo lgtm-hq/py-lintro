@@ -61,8 +61,12 @@ def test_the_trajectory_is_the_same_for_delta_and_full_rounds() -> None:
 
 @pytest.mark.parametrize(
     ("threshold", "stable_rounds"),
-    [(0.5, 2), (0.5, 3), (0.15, 2), (None, 2)],
-    ids=["stops-after-two", "stops-after-three", "never-quiet-enough", "disabled"],
+    [
+        pytest.param(0.5, 2, id="stops-after-two"),
+        pytest.param(0.5, 3, id="stops-after-three"),
+        pytest.param(0.15, 2, id="never-quiet-enough"),
+        pytest.param(None, 2, id="disabled"),
+    ],
 )
 def test_the_stop_decision_is_the_same_for_delta_and_full_rounds(
     threshold: float | None,

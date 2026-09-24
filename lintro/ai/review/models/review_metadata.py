@@ -67,6 +67,12 @@ class ReviewMetadata:
             uncapped without ``max_cost_usd_source``).
         max_cost_usd_source (str): Provenance of ``max_cost_usd`` (#2024).
             Empty on legacy records.
+        pr_budget_usd (float | None): ``ai.review_pr_budget_usd`` for the PR
+            (#2796). ``None`` when unset: no check and no sticky line.
+        pr_budget_spent_usd (float): The PR's review spend including this
+            round: prior rounds' ``usage.cost`` plus ``cost_estimate_usd``.
+        pr_budget_enforced (bool): Whether reaching the budget stops a round;
+            False for a config-only budget on an unpriceable basis.
         phase_timings (dict[str, float]): Per-phase wall-clock seconds for
             regression visibility. Keys include ``context_collection``,
             ``provider`` (chunk + custom-agent provider calls), and
@@ -153,6 +159,9 @@ class ReviewMetadata:
     transport_source: str = ""
     max_cost_usd: float | None = None
     max_cost_usd_source: str = ""
+    pr_budget_usd: float | None = None
+    pr_budget_spent_usd: float = 0.0
+    pr_budget_enforced: bool = False
     phase_timings: dict[str, float] = field(default_factory=dict)
     diff_gate: DiffGateCounts = field(default_factory=DiffGateCounts)
     timings: ReviewTimings | None = None
