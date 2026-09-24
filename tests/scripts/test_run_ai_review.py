@@ -933,16 +933,28 @@ def test_checkout_ref_must_be_base_sha(*, ref: str, trusted: bool) -> None:
     ids=["base-sha-without-fallback", "workflow-sha-alone", "fallback-order-swapped"],
 )
 def test_checkout_ref_is_exactly_base_sha_then_workflow_sha(ref: str) -> None:
-    """Each trusted part alone, or in the other order, is not the audited ref.
+    """The workflow's real ref is the audited one and none of its near-misses.
 
     base.sha alone leaves an on-request review without a ref; workflow_sha
     alone would review pull-request events against the default branch's tip
-    instead of the PR's base; the swapped order does the same (#2795).
+    instead of the PR's base; the swapped order does the same (#2795). The
+    comparison is against the ref read from ai-review.yml, so this test fails
+    if the workflow drifts to any of these.
 
     Args:
         ref: A near-miss checkout ``with.ref`` value.
     """
-    assert_that(ref).is_not_equal_to(_TRUSTED_CHECKOUT_REF)
+    loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    (checkout,) = [
+        step
+        for step in loaded["jobs"]["ai-review"]["steps"]
+        if isinstance(step.get("uses"), str)
+        and step["uses"].startswith("actions/checkout@")
+    ]
+    real_ref = checkout["with"]["ref"]
+
+    assert_that(real_ref).is_equal_to(_TRUSTED_CHECKOUT_REF)
+    assert_that(ref).is_not_equal_to(real_ref)
 
 
 @pytest.mark.parametrize(
@@ -1438,7 +1450,12 @@ def _run_review_with_lint_stubs(
         [[ "$1" == "api" ]] || exit 1
         case "$2" in
             repos/lgtm-hq/py-lintro/pulls/{_LINT_PR_NUMBER}*)
-                if [[ -n "${{LINT_STUB_PR_JSON:-}}" ]]; then
+                if [[ "${{LINT_STUB_PR_FAILS:-0}}" == "1" ]]; then
+                    echo "stub: HTTP 502" >&2
+                    exit 1
+                elif [[ "${{LINT_STUB_PR_EMPTY:-0}}" == "1" ]]; then
+                    :
+                elif [[ -n "${{LINT_STUB_PR_JSON:-}}" ]]; then
                     printf '%s\\n' "$LINT_STUB_PR_JSON"
                 else
                     printf '{{"state":"open","draft":false,"head":{{"sha":"{_LINT_HEAD_SHA}","repo":{{"full_name":"lgtm-hq/py-lintro"}}}}}}\\n'
@@ -2390,20 +2407,19 @@ def test_a_bad_request_input_fails_before_the_review_runs(
         '{"state":"closed","draft":false,"head":{"repo":{"full_name":"lgtm-hq/py-lintro"}}}',
         '{"state":"open","draft":true,"head":{"repo":{"full_name":"lgtm-hq/py-lintro"}}}',
         '{"state":"open","draft":false,"head":{"repo":{"full_name":"someone/fork"}}}',
-        "not json",
     ],
-    ids=["closed", "draft", "fork", "unreadable"],
+    ids=["closed", "draft", "fork"],
 )
-def test_an_on_request_review_rechecks_the_pr_after_the_queue(
+def test_an_on_request_review_of_an_ineligible_pr_is_skipped(
     tmp_path: Path,
     pull: str,
 ) -> None:
-    """A PR closed, drafted or not from this repo by run time gets no review.
+    """A PR confirmed closed, drafted or not from this repo gets no review.
 
     The request job checked the PR, but the review job may wait in the
-    repo-wide queue; the same three conditions are checked again at its start
-    (P2 on #2806). A refusal is a log line and exit 0, and the review never
-    runs.
+    repo-wide queue; the same three conditions are checked again at its start.
+    A confirmed-ineligible PR is a log line and exit 0: there is nothing to
+    review.
 
     Args:
         tmp_path: Per-test scratch directory.
@@ -2424,6 +2440,50 @@ def test_an_on_request_review_rechecks_the_pr_after_the_queue(
     assert_that(argv).is_empty()
     exit_code = int((tmp_path / "exit-code").read_text(encoding="utf-8"))
     assert_that(exit_code).is_equal_to(0)
+
+
+@pytest.mark.parametrize(
+    ("stub_env", "reason"),
+    [
+        ({"LINT_STUB_PR_FAILS": "1"}, "could not be read"),
+        ({"LINT_STUB_PR_EMPTY": "1"}, "unreadable reply"),
+        ({"LINT_STUB_PR_JSON": "not json"}, "unreadable reply"),
+        ({"LINT_STUB_PR_JSON": "[]"}, "unreadable reply"),
+    ],
+    ids=["gh-fails", "empty-payload", "not-json", "not-an-object"],
+)
+def test_an_unreadable_pr_fails_the_on_request_review_visibly(
+    tmp_path: Path,
+    stub_env: dict[str, str],
+    reason: str,
+) -> None:
+    """A PR that cannot be read is a red job with a reason, not a quiet skip.
+
+    A transient API error after the queue wait must not drop a writer's valid
+    request behind a green check (AI Review P2 / Greptile on #2806).
+
+    Args:
+        tmp_path: Per-test scratch directory.
+        stub_env: How the stubbed pulls call fails.
+        reason: Text the visible reason must contain.
+    """
+    output, argv, _ = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=5,
+        extra_env={
+            "REVIEW_REQUEST_MODE": "delta",
+            "REVIEW_REQUESTER": "octocat",
+            **stub_env,
+        },
+    )
+
+    assert_that(output).contains(reason)
+    assert_that(output).contains("re-request with @lintro review")
+    assert_that(output).does_not_contain("on-request review skipped")
+    assert_that(argv).is_empty()
+    exit_code = int((tmp_path / "exit-code").read_text(encoding="utf-8"))
+    assert_that(exit_code).is_equal_to(1)
 
 
 def test_a_pull_request_event_review_does_not_recheck(tmp_path: Path) -> None:

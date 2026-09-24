@@ -13,6 +13,8 @@ checkout, and the review job's slot and cap are unchanged.
 
 from __future__ import annotations
 
+import ast
+import re
 from pathlib import Path
 from typing import Any
 
@@ -111,20 +113,24 @@ def test_a_comment_can_never_cancel_a_review() -> None:
     assert_that(group).contains("format('comment-{0}', github.run_id)")
 
 
-def test_no_run_line_ever_reads_the_comment_or_the_issue() -> None:
+def test_no_run_line_or_input_ever_reads_the_comment_or_the_issue() -> None:
     """Comment text reaches steps only through ``env:`` (ruling 4).
 
     A ``${{ github.event.comment.* }}`` or ``${{ github.event.issue.* }}``
-    template inside ``run:`` would be expanded into the shell before it runs.
+    template is expanded before the step runs: inside ``run:`` into the shell,
+    and inside ``with:`` into an action's inputs (a github-script body is
+    code). Both are scanned for every step of every job.
     """
     for job_id, job in _workflow()["jobs"].items():
         for step in job.get("steps", []):
-            run = str(step.get("run", ""))
             where = f"{job_id}: {step.get('name')}"
-            assert_that(run).described_as(where).does_not_contain(
+            expanded = str(step.get("run", "")) + yaml.safe_dump(step.get("with") or {})
+            assert_that(expanded).described_as(where).does_not_contain(
                 "github.event.comment",
             )
-            assert_that(run).described_as(where).does_not_contain("github.event.issue")
+            assert_that(expanded).described_as(where).does_not_contain(
+                "github.event.issue",
+            )
 
 
 def test_the_request_job_is_the_secret_free_gate() -> None:
@@ -155,6 +161,60 @@ def test_the_request_job_is_the_secret_free_gate() -> None:
         "${{ github.event.comment.body }}",
     )
     assert_that(resolve["env"]["GH_TOKEN"]).is_equal_to("${{ github.token }}")
+
+
+#: The request job's outputs, exactly the names the gate script writes
+#: (the gate's own tests pin the written names in the same order).
+_REQUEST_OUTPUTS = (
+    "run",
+    "mode",
+    "pr-number",
+    "head-sha",
+    "paths",
+    "comment-id",
+    "requester",
+)
+
+
+def test_the_request_outputs_are_routed_exactly() -> None:
+    """Every consumer reads a declared output; each output is the gate's.
+
+    ``acknowledge`` and ``ai-review`` read ``needs.request.outputs.<name>``
+    for pr-number, comment-id, mode, paths and requester; a typo in any of
+    them would silently read an empty string.
+    """
+    outputs = _job("request")["outputs"]
+    assert_that(tuple(outputs)).is_equal_to(_REQUEST_OUTPUTS)
+    for name, value in outputs.items():
+        assert_that(value).is_equal_to(f"${{{{ steps.resolve.outputs.{name} }}}}")
+
+    text = _WORKFLOW.read_text(encoding="utf-8")
+    read = set(re.findall(r"needs\.request\.outputs\.([a-z-]+)", text))
+    assert_that(read).is_subset_of(set(_REQUEST_OUTPUTS))
+    assert_that(read).contains("pr-number", "comment-id", "mode", "paths", "requester")
+
+
+def test_the_gate_script_writes_exactly_the_declared_outputs() -> None:
+    """The names the gate writes on an accepted request are the job's outputs."""
+    tree = ast.parse((_REPO_ROOT / _GATE_SCRIPT).read_text(encoding="utf-8"))
+    accepted = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Dict)
+        and any(
+            isinstance(key, ast.Constant)
+            and key.value == "run"
+            and isinstance(value, ast.Constant)
+            and value.value == "true"
+            for key, value in zip(node.keys, node.values, strict=True)
+        )
+    ]
+
+    assert_that(accepted).described_as("accepted-request output dict").is_length(1)
+    written = [
+        str(key.value) for key in accepted[0].keys if isinstance(key, ast.Constant)
+    ]
+    assert_that(sorted(written)).is_equal_to(sorted(_REQUEST_OUTPUTS))
 
 
 def test_the_gate_script_is_invoked_only_by_the_request_job() -> None:

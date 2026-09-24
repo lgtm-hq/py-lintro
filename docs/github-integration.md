@@ -208,8 +208,9 @@ command must be the first line of the comment:
 | `@lintro review delta`               | The change since the last recorded round, like a push                   |
 | `@lintro review <path> [<path> ...]` | Only files under these path prefixes (`--path`)                         |
 
-Path arguments are prefixes, not globs: `*`, `?`, `..` segments, absolute paths and
-characters outside `A-Z a-z 0-9 . _ / -` are refused. At most 20 prefixes per request.
+Path arguments are prefixes, not globs: `*`, `?`, `..` segments, absolute paths, a
+leading `-`, and characters outside `A-Z a-z 0-9 . _ / -` are refused. At most 20
+prefixes per request, each up to 200 characters.
 
 - An accepted request gets a 👀 reaction and runs the same review job as a push: the
   same sticky comment, the same review state, the same repository-wide queue slot and
@@ -221,6 +222,10 @@ characters outside `A-Z a-z 0-9 . _ / -` are refused. At most 20 prefixes per re
 - A request from anyone without write access or from a bot account, and a well-formed
   request on a closed, draft or fork pull request, are ignored: the workflow logs why
   and posts nothing.
+- The review job checks the pull request again when it starts, after any wait in the
+  queue. If it has since been closed or turned into a draft, the review is skipped and
+  logged. If it cannot be read at that point, the job fails with a visible reason, so
+  the requester can ask again.
 - Other comments never start or cancel a review.
 
 The request is validated in a separate `request` job that holds no secrets and only a

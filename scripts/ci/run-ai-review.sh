@@ -126,8 +126,11 @@ Usage:
   scripts/ci/run-ai-review.sh <pr-number>
   scripts/ci/run-ai-review.sh --locate-prior-state
 
-Exits 0 only when a review was actually produced. A missing or dead credential,
-a depleted balance, or an unreachable provider exits 1 with a visible reason.
+Exits 0 when a review was actually produced, or when an on-request review's
+pull request is confirmed no longer eligible (closed, draft, or not from this
+repository). Exits 1 with a visible reason otherwise: a missing or dead
+credential, a depleted balance, an unreachable provider, an invalid request
+input, or an on-request pull request that could not be read.
 
 --locate-prior-state lists completed trusted ai-review.yml runs and writes
 run-id= for the latest one that carries a valid state artifact (empty when
@@ -264,25 +267,41 @@ esac
 if [[ -n "${REVIEW_REQUEST_MODE:-}" ]]; then
 	echo "[ai-review] on request by ${REVIEW_REQUESTER:-unknown}: ${REVIEW_REQUEST_MODE}"
 	# The request job checked the PR, but this job may have waited in the
-	# repo-wide queue since. Re-check the same three conditions now; a PR
-	# that was closed, drafted or is not from this repository gets no review
-	# (exit 0, logged). The head itself may have moved: like a push review,
-	# the round reviews the head as it is now (ruling 9 on #2795).
-	pr_payload=$(gh api "repos/${GITHUB_REPOSITORY:-}/pulls/${pr_number}" 2>/dev/null || true)
+	# repo-wide queue since. Re-check the same three conditions now. Two
+	# outcomes are kept apart (#2806):
+	#   - confirmed ineligible (closed, draft, or not from this repository):
+	#     no review, exit 0 with a log line; there is nothing to review;
+	#   - unreadable (gh failed, empty or non-object reply): the request is
+	#     NOT silently dropped; the job goes red with a visible reason so the
+	#     writer sees it and can re-request.
+	# The head itself may have moved: like a push review, the round reviews
+	# the head as it is now (ruling 9 on #2795).
+	if ! pr_payload=$(gh api "repos/${GITHUB_REPOSITORY:-}/pulls/${pr_number}" 2>/dev/null); then
+		report_not_invoked "On-request review: pull request #${pr_number} could not be read after the queue wait; re-request with @lintro review."
+	fi
 	pr_eligible=$(PR_PAYLOAD="$pr_payload" REPO="${GITHUB_REPOSITORY:-}" python3 -c '
 import json, os
 try:
     pull = json.loads(os.environ["PR_PAYLOAD"])
 except ValueError:
-    pull = {}
-head_repo = ((pull.get("head") or {}).get("repo") or {}).get("full_name", "")
-print("yes" if pull.get("state") == "open" and pull.get("draft") is False
-      and head_repo == os.environ["REPO"] else "no")
-' 2>/dev/null || echo no)
-	if [[ "$pr_eligible" != "yes" ]]; then
+    pull = None
+if not isinstance(pull, dict):
+    print("unreadable")
+else:
+    head_repo = ((pull.get("head") or {}).get("repo") or {}).get("full_name", "")
+    print("yes" if pull.get("state") == "open" and pull.get("draft") is False
+          and head_repo == os.environ["REPO"] else "no")
+' 2>/dev/null || echo unreadable)
+	case "$pr_eligible" in
+	yes) ;;
+	no)
 		echo "[ai-review] on-request review skipped: PR #${pr_number} is no longer open, non-draft and from ${GITHUB_REPOSITORY:-this repository}"
 		exit 0
-	fi
+		;;
+	*)
+		report_not_invoked "On-request review: pull request #${pr_number} returned an unreadable reply after the queue wait; re-request with @lintro review."
+		;;
+	esac
 fi
 
 # Resume coverage is read from (and written to) this directory. The workflow

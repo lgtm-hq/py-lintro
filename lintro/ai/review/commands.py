@@ -60,7 +60,8 @@ USAGE_TEXT: Final[str] = (
     "- `@lintro review`: full review of the whole diff\n"
     "- `@lintro review delta`: review the change since the last round\n"
     "- `@lintro review <path> [<path> ...]`: review only files under these "
-    "path prefixes (no globs, no `..`, no leading `/`)"
+    "path prefixes (at most 20, each up to 200 characters; no globs, "
+    "no `..`, no leading `/` or `-`)"
 )
 
 
