@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -155,13 +156,59 @@ def test_captures_are_owner_readable_only(tmp_path: Path) -> None:
     assert_that(path.parent.stat().st_mode & 0o077).is_equal_to(0)
 
 
-def test_repeated_identical_captures_do_not_fail(tmp_path: Path) -> None:
+def _freeze_capture_clock(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    seconds: float,
+) -> None:
+    """Pin the wall clock the capture filename reads.
+
+    The name embeds ``int(time.time())``, so two captures that straddle a
+    second boundary get different names; a test that relies on "the same
+    second" must fix the second rather than hope for it (#2278). Only the
+    ``time`` name inside ``raw_response`` is replaced, never the global clock.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        seconds: Epoch seconds the capture code will see.
+    """
+    monkeypatch.setattr(
+        "lintro.ai.raw_response.time",
+        SimpleNamespace(time=lambda: seconds),
+    )
+
+
+def test_repeated_identical_captures_do_not_fail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two identical responses in the same second still both resolve a path."""
+    _freeze_capture_clock(monkeypatch, seconds=1_700_000_000.4)
     first = _persist(raw="same prose", workspace_root=tmp_path)
     second = _persist(raw="same prose", workspace_root=tmp_path)
 
     assert_that(first.name).is_equal_to(second.name)
     assert_that(second.read_text(encoding="utf-8")).is_equal_to("same prose")
+
+
+def test_capture_name_follows_the_frozen_second(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The filename reads the patched clock, so a different second differs.
+
+    Guards the freeze above: if the capture code stopped reading the
+    module-local ``time``, the same-second test would pass by luck again
+    instead of by construction.
+    """
+    _freeze_capture_clock(monkeypatch, seconds=1_700_000_000.9)
+    first = _persist(raw="same prose", workspace_root=tmp_path)
+    _freeze_capture_clock(monkeypatch, seconds=1_700_000_001.0)
+    second = _persist(raw="same prose", workspace_root=tmp_path)
+
+    assert_that(first.name).contains("-1700000000-")
+    assert_that(second.name).contains("-1700000001-")
+    assert_that(first.name).is_not_equal_to(second.name)
 
 
 def test_symlinked_capture_directory_is_refused(
