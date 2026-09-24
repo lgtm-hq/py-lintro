@@ -89,6 +89,7 @@ from lintro.ai.review.preparation import (
     prepare_review,
 )
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
+from lintro.ai.review.sticky import stamp_finding_ids
 from lintro.ai.transport import (
     format_resolved_profile_log,
     resolve_max_cost_with_source,
@@ -1309,6 +1310,12 @@ def _render_post_and_exit(
             findings=result.findings,
             policy=PostingPolicy.from_ai_config(prepared.ai_config),
         ),
+    )
+    # Ids come from the match, never from line order (#2627).
+    result = stamp_finding_ids(
+        result=result,
+        prior_state=prior_state,
+        head_sha=prepared.context.head_ref,
     )
     question_map = build_prompt_question_map(items=prepared.checklist_items)
     render = _ReviewRender(

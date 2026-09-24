@@ -1178,3 +1178,21 @@ def test_a_provider_that_fails_to_build_releases_the_prepared_tree(
 
     assert_that(result.is_error).is_true()
     assert_that(tree.exists()).is_false()
+
+
+def test_review_payload_findings_carry_a_stable_finding_id(
+    repo: Path,
+    stub_ai: Callable[..., list[Any]],
+) -> None:
+    """Every MCP finding carries ``finding_id`` = ``<fingerprint>#<ordinal>`` (#2627)."""
+    result = _result()
+    stub_ai(result=result)
+
+    _result_obj, payload = _call(workspace=repo, arguments={"base": "main"})
+
+    ids = [item["finding_id"] for item in payload["findings"]]
+    assert_that(ids).is_length(len(result.findings))
+    for finding_id in ids:
+        fingerprint, _, ordinal = finding_id.partition("#")
+        assert_that(fingerprint).is_length(16)
+        assert_that(int(ordinal)).is_greater_than_or_equal_to(1)

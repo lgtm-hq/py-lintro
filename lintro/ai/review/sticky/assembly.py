@@ -44,6 +44,7 @@ from lintro.ai.review.sticky.body import round_sections, state_sections
 from lintro.ai.review.sticky.history import _archive_body
 from lintro.ai.review.sticky.state import (
     matcher_reviewed_paths,
+    matcher_reviewed_ranges,
     stamp_comment_ids,
 )
 from lintro.ai.review.verdict import apply_coverage_gate
@@ -88,6 +89,7 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
         head_sha=request.head_sha,
         reviewed_paths=matcher_reviewed_paths(result=request.result),
         departed_paths=request.departed_paths,
+        reviewed_ranges=matcher_reviewed_ranges(result=request.result),
     )
     match = replace(
         match,

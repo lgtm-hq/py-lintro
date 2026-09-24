@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from lintro.ai.review.coverage_rounds import (
@@ -143,6 +143,8 @@ class ClassifyFilesRequest:
         pending_invalidations: Unserved group/import pairs from a prior
             capped round.
         consumed_flags: ``(path, hash)`` pairs already honored once.
+        open_thread_paths: Files carrying an open finding from a prior
+            round (#2627); re-read even when their hash is unchanged.
         force_full: When True, treat every file as never-reviewed.
     """
 
@@ -154,6 +156,7 @@ class ClassifyFilesRequest:
     flags: Sequence[FlaggedFile] = ()
     pending_invalidations: Sequence[tuple[str, str]] = ()
     consumed_flags: Sequence[tuple[str, str]] = ()
+    open_thread_paths: Sequence[str] = ()
     force_full: bool = False
 
 
@@ -220,33 +223,31 @@ def classify_files(*, request: ClassifyFilesRequest) -> tuple[ClassifiedFile, ..
         consumed_flags=request.consumed_flags,
     )
 
+    # Precedence, highest first: the earlier a bucket, the sooner it runs
+    # under a cap. Open threads (#2627) sit with model flags: both are an
+    # explicit ask to re-read a file whose hash did not change.
+    buckets: tuple[tuple[FileReviewNeed, Collection[str]], ...] = (
+        (FileReviewNeed.NEVER_REVIEWED, never_reviewed - sampled_covered),
+        (FileReviewNeed.DIRECTLY_CHANGED, directly_changed),
+        (FileReviewNeed.MODEL_FLAGGED, allowed_flags),
+        (FileReviewNeed.OPEN_THREAD, set(request.open_thread_paths)),
+        (FileReviewNeed.GROUP_INVALIDATED, group_invalidated),
+        (FileReviewNeed.IMPORT_INVALIDATED, import_invalidated),
+    )
     classified: list[ClassifiedFile] = []
     for path in eligible_paths:
-        current = current_hashes.get(path, "")
-        if path in never_reviewed and path not in sampled_covered:
-            need = FileReviewNeed.NEVER_REVIEWED
-            reason = ""
-        elif path in directly_changed:
-            need = FileReviewNeed.DIRECTLY_CHANGED
-            reason = ""
-        elif path in allowed_flags:
-            need = FileReviewNeed.MODEL_FLAGGED
-            reason = allowed_flags[path]
-        elif path in group_invalidated:
-            need = FileReviewNeed.GROUP_INVALIDATED
-            reason = ""
-        elif path in import_invalidated:
-            need = FileReviewNeed.IMPORT_INVALIDATED
-            reason = ""
-        else:
-            need = FileReviewNeed.COVERED
-            reason = ""
+        need = next(
+            (need for need, members in buckets if path in members),
+            FileReviewNeed.COVERED,
+        )
         classified.append(
             ClassifiedFile(
                 path=path,
-                patch_hash=current,
+                patch_hash=current_hashes.get(path, ""),
                 need=need,
-                flag_reason=reason,
+                flag_reason=(
+                    allowed_flags[path] if need is FileReviewNeed.MODEL_FLAGGED else ""
+                ),
             ),
         )
     return tuple(classified)

@@ -18,6 +18,7 @@ from lintro.ai.review.coverage import (
     queue_paths,
     review_eligible_paths,
 )
+from lintro.ai.review.delta import open_thread_paths
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.import_graph import importers_of
 from lintro.ai.review.models.coverage_counts import CoverageCounts
@@ -45,12 +46,19 @@ class ResumePlan:
         queue: Paths that need a provider read, in cap-safe order.
         hashes: Current normalized patch hash per path.
         eligible: Review-eligible paths.
+        reviewed_ranges: ``(path, start, end)`` old-side line ranges (the prior
+            head's coordinates) a delta round (#2627) showed for the files it
+            narrowed; set by the run
+            planner after the delta is applied so the mid-run checkpoints
+            and the final round match on the same inputs. Empty on a full
+            round.
     """
 
     classified: tuple[ClassifiedFile, ...]
     queue: tuple[str, ...]
     hashes: dict[str, str]
     eligible: tuple[str, ...]
+    reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
 
     def counts(self, *, reviewed_now: Sequence[str]) -> CoverageCounts:
         """Return counters after the provider finished *reviewed_now*."""
@@ -108,6 +116,9 @@ def plan_resume(
             flags=flags,
             pending_invalidations=pending,
             consumed_flags=consumed,
+            open_thread_paths=(
+                () if prior is None or force_full else open_thread_paths(prior=prior)
+            ),
             force_full=force_full,
         ),
     )

@@ -121,12 +121,15 @@ class RunRecord:
             ("delegated_diff_embedded", coverage.delegated_diff_embedded),
             ("generated_questions", coverage.generated_questions),
             ("questions_diff_trimmed", coverage.questions_diff_trimmed),
+            ("delta_since", coverage.delta_since),
+            ("delta_reason", coverage.delta_reason),
             ("downgraded_p2", outcome.downgraded_p2),
             ("refuted", outcome.refuted),
             ("verified", outcome.verified),
             ("dropped_outside_diff", outcome.dropped_outside_diff),
             ("cost_basis", usage.cost_basis),
             ("context", usage.context),
+            ("merge_base", identity.merge_base),
         )
         payload.update({key: value for key, value in optional if value})
         if outcome.resolved is not None:
@@ -189,6 +192,7 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         auth_mode=str(payload.get("auth_mode", "")),
         depth=coerce_int(payload.get("depth")),
         strictness=str(payload.get("strictness", "")),
+        merge_base=str(payload.get("merge_base", "") or ""),
     )
 
 
@@ -215,6 +219,8 @@ def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
         ),
         generated_questions=coerce_int(payload.get("generated_questions")),
         questions_diff_trimmed=_strict_bool(payload.get("questions_diff_trimmed")),
+        delta_since=str(payload.get("delta_since", "") or ""),
+        delta_reason=str(payload.get("delta_reason", "") or ""),
     )
 
 

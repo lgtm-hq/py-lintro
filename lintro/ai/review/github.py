@@ -74,6 +74,7 @@ from lintro.ai.review.sticky import (
     build_sticky_bodies,
     build_sticky_comment,
     matcher_reviewed_paths,
+    matcher_reviewed_ranges,
     parse_sticky_state,
 )
 
@@ -224,6 +225,7 @@ def post_review_to_github(
         head_sha=head_sha,
         reviewed_paths=matcher_reviewed_paths(result=result),
         departed_paths=settings.departed_paths,
+        reviewed_ranges=matcher_reviewed_ranges(result=result),
     )
 
     # A finding that maps to no line in the diff never gets an inline comment,

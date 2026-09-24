@@ -18,6 +18,7 @@ from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_constants import _SEVERITY_EMOJI
 from lintro.ai.review.github_contract import RenderLimits
 from lintro.ai.review.github_notes import format_convergence_note
+from lintro.ai.review.lifecycle.markers import finding_marker
 from lintro.ai.review.models.finding_match_result import FindingMatchResult
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
@@ -38,6 +39,7 @@ from lintro.ai.review.sticky.cells import (
     _sorted_open_records,
 )
 from lintro.ai.review.sticky.constants import _QUESTION_EMOJI, _TITLE_LIMIT
+from lintro.ai.review.sticky.scope import _scope_line
 
 
 def _open_pruning_marker(*, dropped: int) -> str:
@@ -114,17 +116,22 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
         f"{open_count} open · {fixed_total} fixed this round{rebaselined_bit}"
     )
     note = format_convergence_note(trajectory=score_trajectory(runs=tuple(runs)))
+    scope = _scope_line(runs=tuple(runs), round_number=round_number)
     markers = _pruning_markers(
         dropped_open=open_count - len(open_records),
         dropped_fixed=fixed_total - len(fixed_now),
     )
     if not open_records and not fixed_now:
         empty = [heading, "", "✅ Nothing open."]
+        if scope:
+            empty.extend(["", scope])
         if note:
             empty.extend(["", note])
         empty.extend(markers)
         return "\n".join(empty)
     lines = [heading]
+    if scope:
+        lines.extend(["", scope])
     if note:
         lines.extend(["", note])
     # Only the inline tier sits in the Δ table; P3 nits open no thread and
@@ -145,7 +152,7 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
             f"| {_severity_cell(record=record)} "
             f"| {_finding_cell(record=record, repo=repo, pr_number=pr_number)} "
             f"| `{_location(record=record)}` "
-            f"| round {record.since_round} |",
+            f"| round {record.since_round} {finding_marker(key=record.key)}|",
         )
     for record in fixed_now:
         lines.append(
@@ -153,7 +160,7 @@ def _findings_round_section(*, plan: StickyPlan, limits: RenderLimits) -> str:
             f"| {_severity_cell(record=record)} "
             f"| ~~{_cell(text=record.title, limit=_TITLE_LIMIT)}~~ "
             f"| `{_location(record=record)}` "
-            f"| round {record.since_round} |",
+            f"| round {record.since_round} {finding_marker(key=record.key)}|",
         )
     lines.extend(_nits_block(records=nit_records, match=match))
     lines.extend(markers)
@@ -194,7 +201,7 @@ def _nits_block(
         lines.append(
             f"| {_delta_cell(record=record, match=match)} "
             f"| {_nit_cell(record=record)} "
-            f"| `{_location(record=record)}` |",
+            f"| `{_location(record=record)}` {finding_marker(key=record.key)}|",
         )
     lines.extend(["", "</details>"])
     return lines

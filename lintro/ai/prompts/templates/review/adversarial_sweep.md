@@ -5,6 +5,6 @@ Prior findings (do not duplicate):
 {prior_findings_json}
 </{boundary}>
 
-Diff: <{boundary}> {diff} </{boundary}>
+{diff_scope}Diff: <{boundary}> {diff} </{boundary}>
 
 Output JSON: {{"findings": [...]}} — NEW findings only. Empty array if nothing new.

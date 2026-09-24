@@ -806,6 +806,60 @@ selection render as "Additional checks" after the questions, and the corpus sche
 tooling that used to accompany it is gone — the loader's validation against the Python
 enums is the only authority.
 
+### Delta rounds (what round two reads)
+
+From round two on, a `--pr` review reads the **delta since the last recorded round**
+(#2627). File-level resume already keeps the provider off every file whose whole-PR
+patch hash is unchanged; a delta round narrows what the remaining chunk calls _embed_:
+for a queued file the prompt carries `git diff <prior head>..<head>` for that file,
+computed in the PR head worktree, rather than the whole pull-request change to it. The
+rule, in one sentence: **a delta round narrows what the model reads and what it may
+resolve; it never narrows what it may report.**
+
+- **What is read.** Each chunk keeps its whole-PR hunk in `diff` — that is what the
+  diff-location gate, the cross-chunk contradiction guard and the budgets see — and gets
+  a `read_diff` the prompt embeds. The range is restricted to files the PR's whole diff
+  names, so a file that only a merge from `main` brought into `prior..head` is never
+  embedded; when the base branch was merged into the PR since the prior round (the
+  recorded merge-base moved), the round reads the whole diff instead, because for a file
+  both sides touched the delta would carry base-authored lines as the PR's. A delta hunk
+  that is not smaller than the whole hunk (a large change followed by a large revert) is
+  not used. A delta round never delegates `git diff` to the agent.
+- **What may be resolved.** A prior open finding on a file the round read is resolved
+  only if its line lies inside a hunk the round actually read — measured on the hunks'
+  old side, the prior head's coordinates a prior finding's line is in, so an insertion
+  or deletion above the finding cannot shift it in or out of range; outside those lines
+  it is carried, not resolved (`FindingMatchResult.range_carries`). The mid-run
+  checkpoints match on the same ranges as the final round. Full rounds resolve as
+  before. The prompt says what range the embedded text is ("the change since the
+  previous review round … unchanged context lines may still be earlier changes of this
+  pull request"), and the depth-3 adversarial sweep and an output-exhaustion split read
+  the same delta text.
+- **What is reported and counted.** Findings are never filtered by delta location, and
+  coverage identity stays the whole-PR patch hash, so a changed file the round did not
+  read still forces `INCOMPLETE` (ADR-0007). The question pass and the synthesis call
+  keep the whole-PR changed-file list (ADR-0010, layer 2).
+
+Files that carry an **open finding** from a prior round are queued every delta round
+(`FileReviewNeed.OPEN_THREAD`, behind changed files) so a thread is re-litigated against
+its own code; a file re-queued that way but unchanged since the prior head keeps its
+whole-PR hunk. Round one, a run that is not `--pr`, a prior round without a recorded
+head, the same head again, a rewritten branch (the prior head is no longer an ancestor —
+a force-push), a merged-in base, a range git could not compute, a run without a tree,
+and `--full` all read the whole diff; the sticky comment says which under the Findings
+heading ("Round N read the delta since `abc1234`" / "Round N read the whole diff: the
+branch was rewritten since the prior round"), and the run record carries `delta_since`,
+`delta_reason` and the `merge_base` the next round compares against.
+
+Every finding on the JSON surface carries a stable **`finding_id`** — the same
+`<fingerprint>#<ordinal>` key the review state, the sticky's Δ-table rows (a hidden
+`<!-- lintro-finding:… -->` marker) and the inline-thread marker use. The CLI sets it
+from the match against prior state after the posting policy ran, never by recomputing
+ordinals from line order (two same-fingerprint findings that swapped lines keep their
+keys); a run without prior state gets the key a first round would assign. The
+fingerprint is a sha256 prefix over path, category and normalized title, deliberately
+line-free, so a finding on head N and the same finding on head N+1 match by id.
+
 ### Review convergence (deterministic re-review stop)
 
 File-level resume already spares a long-lived PR from re-reading files it has covered at

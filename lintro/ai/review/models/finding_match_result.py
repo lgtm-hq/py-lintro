@@ -29,6 +29,12 @@ class FindingMatchResult:
             paired with a prior open record and kept it open. Keyed by what
             the round reported rather than by record key, so the sticky can
             tag the note it rendered without rebuilding the pairing.
+        range_carries: Keys of prior open records carried because a delta
+            round read their file but not their line (#2627); rendered
+            as carried, never resolved.
+        finding_ids: The record key of each current finding, in the order
+            the findings were given — the ``finding_id`` the JSON surface
+            carries, taken from the match rather than recomputed.
     """
 
     records: tuple[FindingRecord, ...] = field(default_factory=tuple)
@@ -38,6 +44,8 @@ class FindingMatchResult:
     regressed: tuple[FindingRecord, ...] = field(default_factory=tuple)
     outcomes: dict[str, FindingMatchOutcome] = field(default_factory=dict)
     note_carries: frozenset[tuple[str, int]] = field(default_factory=frozenset)
+    range_carries: frozenset[str] = field(default_factory=frozenset)
+    finding_ids: tuple[str, ...] = field(default_factory=tuple)
 
     def outcome_for(self, *, record: FindingRecord) -> FindingMatchOutcome | None:
         """Return the transition assigned to ``record`` in this round.

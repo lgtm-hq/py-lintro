@@ -8,9 +8,10 @@ behind on an older sticky comment. Building the run record itself lives in
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
+from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
@@ -37,6 +38,84 @@ def matcher_reviewed_paths(*, result: ReviewResult) -> frozenset[str] | None:
     if result.coverage is not None:
         return frozenset()
     return None
+
+
+def matcher_reviewed_ranges(
+    *,
+    result: ReviewResult,
+) -> dict[str, tuple[tuple[int, int], ...]] | None:
+    """Return the per-file line ranges a delta round read (#2627).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        ``{path: ((start, end), ...)}`` for the files the round narrowed, or
+        ``None`` on a full round so the matcher resolves as before.
+    """
+    return ranges_by_path(reviewed_ranges=result.metadata.reviewed_ranges)
+
+
+def ranges_by_path(
+    *,
+    reviewed_ranges: Sequence[tuple[str, int, int]],
+) -> dict[str, tuple[tuple[int, int], ...]] | None:
+    """Group ``(path, start, end)`` triples into the matcher's mapping.
+
+    Args:
+        reviewed_ranges: The triples a delta round recorded.
+
+    Returns:
+        ``{path: ((start, end), ...)}``, or ``None`` when there are none (a
+        full round), so the matcher resolves as before.
+    """
+    if not reviewed_ranges:
+        return None
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for path, start, end in reviewed_ranges:
+        ranges.setdefault(path, []).append((start, end))
+    return {path: tuple(items) for path, items in ranges.items()}
+
+
+def stamp_finding_ids(
+    *,
+    result: ReviewResult,
+    prior_state: ReviewState | None,
+    head_sha: str,
+    departed_paths: frozenset[str] | None = None,
+) -> ReviewResult:
+    """Set each finding's ``finding_id`` from the match against prior state.
+
+    Matching is pure over ``(prior_state, findings)``, so this yields the very
+    keys the state store, the sticky rows and the inline-thread markers use —
+    never a recomputation from line order, which would disagree for two
+    same-fingerprint findings that swapped lines (#2627).
+
+    Args:
+        result: The round's result after the posting policy ran.
+        prior_state: Prior rounds, or ``None``.
+        head_sha: The head under review.
+        departed_paths: Paths that left the diff.
+
+    Returns:
+        The result with ``finding_id`` set on every finding.
+    """
+    match = match_findings(
+        previous=prior_state,
+        findings=result.findings,
+        round_number=(prior_state or ReviewState()).next_round,
+        head_sha=head_sha,
+        reviewed_paths=matcher_reviewed_paths(result=result),
+        departed_paths=departed_paths,
+        reviewed_ranges=matcher_reviewed_ranges(result=result),
+    )
+    return replace(
+        result,
+        findings=tuple(
+            replace(finding, finding_id=key)
+            for finding, key in zip(result.findings, match.finding_ids, strict=True)
+        ),
+    )
 
 
 def stamp_comment_ids(

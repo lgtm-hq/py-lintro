@@ -312,3 +312,76 @@ def test_the_seam_module_exposes_the_shared_call_ai() -> None:
     from lintro.ai.invoke import call_ai
 
     assert_that(provider_call.call_ai).is_same_as(call_ai)
+
+
+def test_a_mid_run_checkpoint_carries_what_a_delta_round_did_not_re_read(
+    tmp_path: Path,
+) -> None:
+    """The checkpoint matches on the round's read ranges, like the final round (#2627).
+
+    Args:
+        tmp_path: Pytest temporary directory used as the state directory.
+    """
+    from lintro.ai.review.enums.finding_status import FindingStatus
+    from lintro.ai.review.models.finding_record import FindingRecord
+    from lintro.ai.review.models.review_finding import Severity
+    from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.models.run_identity import RunIdentity
+    from lintro.ai.review.models.run_record import RunRecord
+
+    context = _context()
+    prior = ReviewState(
+        findings=(
+            FindingRecord(
+                fingerprint="inrange",
+                severity=Severity.P2,
+                category="logic-bug",
+                title="in",
+                file="src/app.py",
+                line=2,
+                status=FindingStatus.OPEN,
+                since_round=1,
+            ),
+            FindingRecord(
+                fingerprint="unread",
+                severity=Severity.P2,
+                category="logic-bug",
+                title="out",
+                file="src/app.py",
+                line=80,
+                status=FindingStatus.OPEN,
+                since_round=1,
+            ),
+        ),
+        runs=(RunRecord(identity=RunIdentity(round=1, sha="b" * 40)),),
+    )
+    resume = replace(
+        plan_resume(
+            context=context,
+            prior=prior,
+            extra_skips=[],
+            groups=(("src/app.py",),),
+            force_full=False,
+        ),
+        reviewed_ranges=(("src/app.py", 1, 10),),
+    )
+    checkpoint = checkpoint_writer(
+        resume=resume,
+        context=context,
+        prior_state=prior,
+        force_full=False,
+        policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+    )
+    states: list[ReviewState] = []
+    with (
+        patch.dict("os.environ", {"LINTRO_REVIEW_STATE_DIR": str(tmp_path)}),
+        patch(
+            "lintro.ai.review.incremental_coverage.write_state_part",
+            side_effect=lambda **kwargs: states.append(kwargs["state"]),
+        ),
+    ):
+        checkpoint([_partial()])  # the chunk reported nothing
+
+    by_key = {record.key: record.status for record in states[-1].findings}
+    assert_that(by_key["inrange#1"]).is_equal_to(FindingStatus.RESOLVED)
+    assert_that(by_key["unread#1"]).is_equal_to(FindingStatus.OPEN)

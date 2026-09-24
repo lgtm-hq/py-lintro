@@ -969,5 +969,5 @@ def test_sticky_nit_row_carries_description_and_fix(
 
     assert_that(body).contains(
         "| **new** | **Nit title**<br>The branch is never taken.<br>"
-        "Fix: Compare with >=. | `src/app.py:9` |",
+        "Fix: Compare with >=. | `src/app.py:9` <!-- lintro-finding:",
     )

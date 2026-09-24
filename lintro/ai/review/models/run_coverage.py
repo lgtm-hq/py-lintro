@@ -47,6 +47,10 @@ class RunCoverage:
             outcome's ``questions``, which counts question-kind findings.
         questions_diff_trimmed: True when the question pass saw only a prefix
             of the PR diff; serialized only when True.
+        delta_since: The prior head this round read the delta from (#2627);
+            empty on a full round.
+        delta_reason: Why the round was a delta or a full read; empty on a
+            record written before delta rounds existed.
     """
 
     files_reviewed: int = 0
@@ -60,3 +64,5 @@ class RunCoverage:
     delegated_diff_embedded: bool = False
     generated_questions: int = 0
     questions_diff_trimmed: bool = False
+    delta_since: str = ""
+    delta_reason: str = ""

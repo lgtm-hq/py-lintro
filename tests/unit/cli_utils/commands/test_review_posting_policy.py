@@ -162,7 +162,7 @@ def _run(*, result: ReviewResult, post: bool = False) -> None:
     )
     prepared = SimpleNamespace(
         ai_config=AIConfig(review_inline_min_confidence=ConfidenceLevel.HIGH),
-        context=SimpleNamespace(changed_files=()),
+        context=SimpleNamespace(changed_files=(), head_ref="deadbeef"),
         checklist_items=(),
         workspace_root=".",
     )

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import asdict
 from typing import Any
 
 from lintro.ai.review.convergence import format_convergence_stamp
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
+from lintro.ai.review.finding_identity import current_records
 from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding
@@ -110,6 +112,31 @@ def render_inline_post_failure_json(*, failure: InlinePostFailure) -> str:
         A compact JSON object keyed by :data:`INLINE_POST_FAILURE_KEY`.
     """
     return json.dumps({INLINE_POST_FAILURE_KEY: failure.to_dict()})
+
+
+def findings_to_dicts(*, findings: Sequence[ReviewFinding]) -> list[dict[str, Any]]:
+    """Serialize a round's findings, each carrying its stable ``finding_id``.
+
+    The id is the record key the state store and the inline-thread marker
+    already use — ``<fingerprint>#<ordinal>``. When the adapter stamped it
+    from the match against prior state it is used as is; a finding never
+    matched (no prior state, a fixture) gets the key a first round would
+    assign. Either way a consumer (the corpus scorer, a delta round) can
+    match a finding on one head to the same finding on the next (#2627).
+
+    Args:
+        findings: The round's findings, in reported order.
+
+    Returns:
+        One payload per finding, in the same order.
+    """
+    fallback = current_records(findings=findings, round_number=1)
+    payloads: list[dict[str, Any]] = []
+    for finding, record in zip(findings, fallback, strict=True):
+        payload = finding_to_dict(finding=finding)
+        payload["finding_id"] = finding.finding_id or record.key
+        payloads.append(payload)
+    return payloads
 
 
 def finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
@@ -221,7 +248,7 @@ def review_result_to_dict(*, result: ReviewResult) -> dict[str, Any]:
             if result.verdict_reasoning is not None
             else None
         ),
-        "findings": [finding_to_dict(finding=finding) for finding in result.findings],
+        "findings": findings_to_dicts(findings=result.findings),
         # #2101: dropped suggestions are never silent. Each finding carries its
         # own ``suggestion_dropped`` tag; these keys give consumers the run
         # total without re-deriving it from the finding list.

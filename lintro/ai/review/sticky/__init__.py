@@ -68,8 +68,10 @@ from lintro.ai.review.sticky.assembly import (
 )
 from lintro.ai.review.sticky.state import (
     matcher_reviewed_paths,
+    matcher_reviewed_ranges,
     parse_sticky_state,
     stamp_comment_ids,
+    stamp_finding_ids,
 )
 
 __all__ = [
@@ -77,7 +79,9 @@ __all__ = [
     "build_sticky_bodies",
     "build_sticky_comment",
     "matcher_reviewed_paths",
+    "matcher_reviewed_ranges",
     "parse_sticky_state",
     "render_state_sticky",
     "stamp_comment_ids",
+    "stamp_finding_ids",
 ]

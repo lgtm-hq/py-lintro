@@ -39,7 +39,7 @@ and callers should expect a single long-running call.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, NoReturn
@@ -409,6 +409,30 @@ def _finding_body(*, finding: ReviewFinding) -> str:
     )
 
 
+def _findings_payload(*, findings: Sequence[ReviewFinding]) -> list[dict[str, Any]]:
+    """Serialize the findings, each with its stable ``finding_id`` (#2627).
+
+    The MCP run carries no prior state, so the id is the key a first round
+    assigns — the same ``<fingerprint>#<ordinal>`` the CLI's JSON carries.
+
+    Args:
+        findings: The result's findings, in reported order.
+
+    Returns:
+        One payload per finding.
+    """
+    from lintro.ai.review.finding_identity import current_records
+
+    records = current_records(findings=findings, round_number=1)
+    return [
+        {
+            "finding_id": finding.finding_id or record.key,
+            **_finding_to_dict(finding=finding),
+        }
+        for finding, record in zip(findings, records, strict=True)
+    ]
+
+
 def _finding_to_dict(*, finding: ReviewFinding) -> dict[str, Any]:
     """Serialize one review finding for the tool payload.
 
@@ -537,7 +561,7 @@ def _review_payload(
         )
     payload: dict[str, Any] = {
         "summary": result.summary,
-        "findings": [_finding_to_dict(finding=finding) for finding in result.findings],
+        "findings": _findings_payload(findings=result.findings),
         "run": _run_metadata(metadata=result.metadata),
         "budget": budget.to_dict(exceeded=exceeded),
         "readiness_verdict": result.readiness_verdict.value,

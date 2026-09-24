@@ -117,6 +117,7 @@ def _identity(
         auth_mode=auth_mode,
         depth=metadata.depth,
         strictness=metadata.strictness,
+        merge_base=metadata.merge_base,
     )
 
 
@@ -142,6 +143,8 @@ def _coverage(*, result: ReviewResult) -> RunCoverage:
         delegated_diff_embedded=metadata.delegated_diff_embedded,
         generated_questions=len(metadata.generated_questions),
         questions_diff_trimmed=metadata.questions_diff_trimmed,
+        delta_since=metadata.delta_since,
+        delta_reason=metadata.delta_reason,
     )
 
 
