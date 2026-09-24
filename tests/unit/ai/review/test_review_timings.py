@@ -16,6 +16,7 @@ from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError
 from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.review import chunk_runner
 from lintro.ai.review.github_notes import format_run_mechanics
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_chunk import ReviewChunk
@@ -35,6 +36,36 @@ from lintro.ai.review.timings import (
 )
 
 _MODEL = "claude-sonnet-4-20250514"
+
+
+class _FakeMonotonic:
+    """A monotonic clock that moves only when the test advances it.
+
+    It stands in for the ``time`` name inside ``chunk_runner`` alone. The
+    global ``time.monotonic`` is also asyncio's loop clock, so patching it
+    would break ``asyncio.sleep``; the module-local name is the patch point.
+    It starts at zero so a span of ``call_delay`` is exact in floating point.
+    """
+
+    def __init__(self) -> None:
+        """Start the clock at zero."""
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        """Return the current fake stamp.
+
+        Returns:
+            Seconds since the fake clock started.
+        """
+        return self.now
+
+    def advance(self, *, seconds: float) -> None:
+        """Move the clock forward.
+
+        Args:
+            seconds: Seconds to add.
+        """
+        self.now += seconds
 
 
 def _timings_of(*, result: ReviewResult) -> ReviewTimings:
@@ -161,10 +192,13 @@ def _run(
         depth: Review depth.
         max_parallel_calls: Concurrency ceiling for chunk calls; ``None``
             keeps the production ``AIConfig`` default.
-        call_delay: Seconds each stubbed provider call sleeps.
-        stop: ``"cost_cap"`` makes the first provider call raise a cost-cap
-            stop so the remaining queued chunks are cancelled; ``"sigterm"``
-            sets the injected stop event while the first call is sleeping.
+        call_delay: Simulated seconds each stubbed provider call takes: a
+            real sleep, or an advance of ``chunk_runner``'s clock when a test
+            has swapped in a ``_FakeMonotonic``.
+        stop: ``"cost_cap"`` makes every admitted provider call raise a
+            cost-cap stop after its delay, so the run stops and the chunks
+            still queued are cancelled; ``"sigterm"`` sets the injected stop
+            event while the first call is in flight.
         max_cost_usd: Optional spend cap; the orchestrator serializes chunk
             calls whenever one is set.
         generated_questions: The ``review_generated_questions`` knob; the
@@ -203,7 +237,20 @@ def _run(
         del kwargs
         if stop == "sigterm":
             stop_event.set()
-        if call_delay:
+        # A test that swaps ``chunk_runner``'s clock for a _FakeMonotonic gets
+        # exact spans: the call advances that clock instead of sleeping. Read
+        # through ``vars()`` on purpose: ``chunk_runner`` does not export its
+        # ``time`` import, so mypy rejects ``chunk_runner.time``. The clock is
+        # patched by the test rather than passed in, because a ``clock``
+        # argument would take ``_run`` past the eight-parameter ratchet.
+        clock = vars(chunk_runner).get("time")
+        if call_delay and isinstance(clock, _FakeMonotonic):
+            # Yield before the clock moves, as a real sleep would: the sibling
+            # tasks start and stamp their queue entry while this call is in
+            # flight, not after it has finished.
+            await asyncio.sleep(0)
+            clock.advance(seconds=call_delay)
+        elif call_delay:
             await asyncio.sleep(call_delay)
         if stop == "cost_cap":
             raise AICostBudgetExceededError("cost cap reached")
@@ -557,21 +604,34 @@ def test_chunks_cancelled_while_queued_still_report_their_wait(
 ) -> None:
     """A chunk cancelled before semaphore admission is not lost.
 
-    With one slot and a cost-cap stop on the first call, the other chunks
-    never reach the provider; they must still appear as failed, with their
-    wait recorded and no provider-sized in-flight time, so the breakdown
-    accounts for every chunk the run planned.
+    Three chunks contend for one slot: one is admitted, two queue. The stubbed
+    provider raises a cost-cap stop after its delay, on every call. The leader
+    runs one call and stops; the chunk admitted the moment its slot frees also
+    runs one stub call before the stop reaches it; the last chunk is cancelled
+    while still queued. That last chunk is the case this test exists for: it
+    must still appear as failed, with its wait recorded and no in-flight time,
+    so the breakdown accounts for every chunk the run planned.
+
+    In production a call after a cost-cap stop is refused up front by the
+    budget's pre-call check and spends nothing; the stub's raise-after-delay is
+    what lets the second chunk reach it here.
 
     Args:
         tmp_path: Temporary repository root.
     """
-    result = _run(
-        tmp_path=tmp_path,
-        chunk_count=3,
-        max_parallel_calls=1,
-        call_delay=0.01,
-        stop="cost_cap",
-    )
+    # The spans come from a fake clock, not from measured wall time: the
+    # previous `>= 0.01` bounds on real durations failed under runner load and
+    # left the schedule itself untested (#2278). Only stub calls move the clock,
+    # so every span is exact and the schedule is the same on every run.
+    call_delay = 0.01
+    with patch("lintro.ai.review.chunk_runner.time", _FakeMonotonic()):
+        result = _run(
+            tmp_path=tmp_path,
+            chunk_count=3,
+            max_parallel_calls=1,
+            call_delay=call_delay,
+            stop="cost_cap",
+        )
 
     timings = _timings_of(result=result)
     assert_that(result.metadata.partial).is_true()
@@ -579,20 +639,21 @@ def test_chunks_cancelled_while_queued_still_report_their_wait(
     assert_that([chunk.failed for chunk in timings.chunks]).is_equal_to(
         [True, True, True],
     )
-    # The leader is whichever chunk the semaphore admitted first, not
-    # necessarily index 0 once the breakdown is sorted by chunk index. Identify
-    # it by the shortest wait: a sibling cancelled just after admission can
-    # briefly out-measure the leader on in-flight time under load, which made
-    # the previous `max(in_flight_seconds)` pick the wrong chunk (#2315).
-    leader = min(timings.chunks, key=lambda chunk: chunk.queued_seconds)
-    assert_that(leader.in_flight_seconds).is_greater_than_or_equal_to(0.01)
-    for chunk in timings.chunks:
-        if chunk is leader:
-            continue
-        # Every sibling waited behind the leader's full call before the stop
-        # reached it. Whether it was then cancelled while still queued or just
-        # after admission depends on scheduling, so only the wait is bounded.
-        assert_that(chunk.queued_seconds).is_greater_than_or_equal_to(0.01)
+    # Order by admission, not chunk index: the leader is whichever chunk the
+    # semaphore admitted first (#2315), and each later chunk waited exactly the
+    # stub calls ahead of it.
+    leader, next_admitted, cancelled = sorted(
+        timings.chunks,
+        key=lambda chunk: chunk.queued_seconds,
+    )
+    assert_that(
+        [leader.queued_seconds, next_admitted.queued_seconds, cancelled.queued_seconds],
+    ).is_equal_to([0.0, call_delay, 2 * call_delay])
+    assert_that(leader.in_flight_seconds).is_equal_to(call_delay)
+    assert_that(next_admitted.in_flight_seconds).is_equal_to(call_delay)
+    # Cancelled while queued: the wait is recorded, the in-flight time is zero.
+    assert_that(cancelled.in_flight_seconds).is_equal_to(0.0)
+    assert_that(cancelled.failed).is_true()
 
 
 def test_sigterm_during_single_chunk_records_the_chunk_as_failed(
