@@ -13,7 +13,7 @@ from lintro.ai.review.models.finding_record import FindingRecord, rebaseline_rec
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.run_record import RunRecord
 
-__all__ = ["ReviewState"]
+__all__ = ["ReviewState", "spend_from_payload"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +115,8 @@ class ReviewState:
         }
         if self.truncated:
             payload["truncated"] = True
+        if self.review_spend_usd:
+            payload["pr_spend_usd"] = self.review_spend_usd
         return payload
 
     def to_artifact_dict(self) -> dict[str, Any]:
@@ -210,11 +212,11 @@ class ReviewState:
             run_id=str(payload.get("run_id", "")),
             lintro_version=str(payload.get("lintro_version", "")),
             truncated=bool(payload.get("truncated", False)),
-            pr_spend_usd=_spend_from_payload(payload),
+            pr_spend_usd=spend_from_payload(payload),
         )
 
 
-def _spend_from_payload(payload: dict[str, Any]) -> float:
+def spend_from_payload(payload: dict[str, Any]) -> float:
     """Return the stored cumulative spend, or 0.0 when absent or invalid.
 
     A v4 artifact has no ``pr_spend_usd``; :attr:`ReviewState.review_spend_usd`

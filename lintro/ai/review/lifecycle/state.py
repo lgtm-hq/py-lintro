@@ -193,6 +193,38 @@ def resolve_prior_state(
     return prior_state
 
 
+def _checkpointed_spend(*, repo: str, pr_number: int | None) -> float:
+    """Return the PR spend this run's checkpoints already put on disk (#2796).
+
+    The final write adds only the completed result's cost to the prior total.
+    A call that was charged and then cancelled (a parallel chunk stopped at
+    the budget) is in a checkpoint but not in the result, so the final write
+    must never lower the total its own checkpoints recorded.
+
+    CI only, like :func:`_load_stored_state`: a local run never reads the
+    workflow artifacts (the #2154 trust boundary), even with
+    ``LINTRO_REVIEW_STATE_DIR`` set, and never the local ledger, which holds
+    other PRs' entries. Parts already in the directory from the downloaded
+    prior are harmless: the prior total was loaded from them, so none exceeds
+    it.
+
+    Args:
+        repo: ``owner/name`` the parts must belong to.
+        pr_number: Pull request number the parts must belong to.
+
+    Returns:
+        The largest total among this PR's parts, or 0.0 when there are none.
+    """
+    if not _in_actions() or pr_number is None:
+        return 0.0
+    on_disk = load_ci_state(
+        directory=state_dir(ci=True),
+        repo=repo,
+        pr_number=pr_number,
+    )
+    return on_disk.review_spend_usd
+
+
 def persist_review_state(
     *,
     result: object,
@@ -242,6 +274,13 @@ def persist_review_state(
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
         lintro_version=_lintro_version(pkg_version),
+    )
+    state = replace(
+        state,
+        pr_spend_usd=max(
+            state.pr_spend_usd,
+            _checkpointed_spend(repo=repo, pr_number=pr_number),
+        ),
     )
     write_state_part(
         state=state,

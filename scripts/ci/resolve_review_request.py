@@ -17,9 +17,10 @@ security boundary for on-request reviews, in this order:
    repository (the automatic review's guard), so fork PRs never run.
 
 Only validated values are written to ``$GITHUB_OUTPUT``: the PR number, the
-head SHA, the mode, the path prefixes (JSON), the comment id and the requester
-login as returned by the permission API. The comment text itself never leaves
-this script.
+mode, the path prefixes (JSON), the comment id and the requester login as
+returned by the permission API. The head SHA is checked and logged but not
+written: the review job re-reads the PR and reviews its head as it is then.
+The comment text itself never leaves this script.
 
 Environment:
     COMMENT_BODY   The comment text (passed through env, never a template).

@@ -1,11 +1,14 @@
 """Per-PR review budget, ``ai.review_pr_budget_usd`` (#2796, #2627 PR 3).
 
-Spend is the sum of ``usage.cost`` over the PR's recorded rounds plus the
-running round. Enforcement mirrors ``ai.max_cost_usd``: the env overlay always
-enforces, a YAML budget only on a billed or estimated basis. An enforced
-budget becomes the round's ``CostBudget`` ceiling (the tighter of the two), so
-a spent budget stops the round before its first provider call and a crossed
-one stops it at the next check, with a ``PR budget`` stop reason.
+Spend is the PR's cumulative review spend (``ReviewState.pr_spend_usd``,
+written at every checkpoint and the final write, never decreasing) plus the
+running round; ``test_pr_spend_2796.py`` covers how that total is kept.
+Enforcement mirrors ``ai.max_cost_usd``: the env overlay always enforces, a
+YAML budget only on a billed or estimated basis. An enforced budget becomes
+the round's ``CostBudget`` ceiling (the tighter of the two), so a spent budget
+stops the round before its first provider call and a crossed one stops it at
+the next check, with a ``PR budget`` stop reason. Parallelism is unchanged
+(ruling 16).
 """
 
 from __future__ import annotations
@@ -43,10 +46,11 @@ from lintro.ai.review.pr_budget import (
     resolve_pr_budget,
     round_ceiling,
 )
-from lintro.ai.review.run_planning import resolve_max_parallel_calls
+from lintro.ai.review.run_planning import plan_run
 from lintro.ai.review.session import ReviewSessionOptions, stop_hint
 from lintro.ai.review.state_store import load_ci_state
 from lintro.ai.review.sticky.history import _this_run_section
+from lintro.ai.review.timings import ReviewTimingRecorder
 
 _ENFORCED = PrBudget(budget_usd=40.0, prior_spend_usd=0.0, enforced=True)
 
@@ -261,12 +265,19 @@ def test_an_enforced_budget_leaves_parallelism_as_configured() -> None:
         pr_budget=PrBudget(budget_usd=40.0, prior_spend_usd=39.0, enforced=True),
     )
 
-    assert_that(
-        resolve_max_parallel_calls(
-            ai_config=options.ai_config,
-            enforce_cost_cap=options.enforce_cost_cap,
-        ),
-    ).is_equal_to(4)
+    with patch(
+        "lintro.ai.review.run_planning.resolve_review_chunks",
+        return_value=_chunks(),
+    ):
+        plan = plan_run(
+            context=_context(),
+            options=options,
+            timings=ReviewTimingRecorder(),
+        )
+
+    assert_that(plan.max_parallel_calls).is_equal_to(4)
+    # The budget is still the ceiling: parallel, but bounded.
+    assert_that(plan.budget.max_cost_usd).is_close_to(1.0, 1e-9)
 
 
 @pytest.mark.parametrize(

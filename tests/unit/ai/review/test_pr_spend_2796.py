@@ -28,6 +28,10 @@ from lintro.ai.review.enums.changed_file_status import ChangedFileStatus
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.github_constants import MAX_STORED_RUNS, STATE_VERSION
 from lintro.ai.review.incremental_coverage import checkpoint_writer
+from lintro.ai.review.lifecycle.state import (
+    persist_review_state,
+    resolve_prior_state,
+)
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
@@ -39,8 +43,9 @@ from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.pr_budget import resolve_pr_budget
 from lintro.ai.review.resume import plan_resume
+from lintro.ai.review.review_state_codec import decode_state, leftover_state_block
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
-from lintro.ai.review.state_store import load_ci_state, union_states
+from lintro.ai.review.state_store import load_ci_state, union_states, write_state_part
 from lintro.ai.review.sticky.assembly import advance_review_state
 
 
@@ -264,6 +269,143 @@ def test_an_old_or_bad_total_seeds_from_the_surviving_runs(stored: object) -> No
 
     assert_that(restored.pr_spend_usd).is_equal_to(0.0)
     assert_that(restored.review_spend_usd).is_close_to(5.0, 1e-9)
+
+
+@pytest.mark.parametrize(
+    ("checkpointed", "expected"),
+    [
+        pytest.param(9.0, 9.0, id="checkpoint-higher-kept"),
+        pytest.param(5.5, 6.0, id="final-higher-wins"),
+    ],
+)
+def test_the_final_write_never_lowers_the_checkpointed_total(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    checkpointed: float,
+    expected: float,
+) -> None:
+    """A charged-then-cancelled call stays counted (ruling 17 (a)).
+
+    The round's checkpoint recorded more spend than the completed result
+    carries (a parallel chunk was charged, then cancelled at the budget). The
+    final write keeps the higher on-disk total instead of replacing it.
+
+    Args:
+        tmp_path: Scratch directory holding the state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        checkpointed: The total this round's checkpoint wrote.
+        expected: The total the final write must persist.
+    """
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    prior = ReviewState(runs=_runs(5.0), pr_spend_usd=5.0)
+    write_state_part(
+        state=replace(prior, repo="o/r", pr_number=2811, pr_spend_usd=checkpointed),
+        directory=state_dir,
+        sequence=2,
+        final=True,
+    )
+
+    persist_review_state(
+        result=_result(1.0),
+        context=_context(),
+        prior=prior,
+        pr_number=2811,
+        repo="o/r",
+    )
+    written = load_ci_state(directory=state_dir, repo="o/r", pr_number=2811)
+
+    assert_that(written.pr_spend_usd).is_close_to(expected, 1e-9)
+
+
+def test_another_prs_parts_never_raise_the_total(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only this PR's parts are read back; a stray part is ignored.
+
+    Args:
+        tmp_path: Scratch directory holding the state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    write_state_part(
+        state=ReviewState(repo="o/r", pr_number=9999, pr_spend_usd=500.0),
+        directory=state_dir,
+        sequence=2,
+    )
+
+    persist_review_state(
+        result=_result(1.0),
+        context=_context(),
+        prior=ReviewState(runs=_runs(5.0), pr_spend_usd=5.0),
+        pr_number=2811,
+        repo="o/r",
+    )
+    written = load_ci_state(directory=state_dir, repo="o/r", pr_number=2811)
+
+    assert_that(written.pr_spend_usd).is_close_to(6.0, 1e-9)
+
+
+def test_a_local_run_never_reads_ci_artifacts_for_spend(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Outside Actions the checkpoint read-back is skipped (#2154 boundary).
+
+    Args:
+        tmp_path: Scratch directory holding the state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(state_dir))
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.chdir(tmp_path)
+    write_state_part(
+        state=ReviewState(repo="o/r", pr_number=2811, pr_spend_usd=500.0),
+        directory=state_dir,
+        sequence=2,
+    )
+
+    persist_review_state(
+        result=_result(1.0),
+        context=_context(),
+        prior=ReviewState(runs=_runs(5.0), pr_spend_usd=5.0),
+        pr_number=2811,
+        repo="o/r",
+    )
+    written = load_ci_state(directory=state_dir, repo="o/r", pr_number=2811)
+
+    assert_that(written.pr_spend_usd).is_close_to(6.0, 1e-9)
+
+
+def test_the_sticky_fallback_keeps_the_cumulative_total() -> None:
+    """A state recovered from a sticky blob does not re-seed from its runs.
+
+    ``resolve_prior_state`` falls back to the sticky comment's own state when
+    no artifact is found (ruling 17 (b)).
+    """
+    state = ReviewState(runs=_runs(1.0, 2.0), pr_spend_usd=48.0)
+
+    decoded = decode_state(body=leftover_state_block(state=state))
+    resolved = resolve_prior_state(prior_state=None, sticky_state=decoded)
+
+    assert_that(resolved.review_spend_usd).is_close_to(48.0, 1e-9)
+
+
+def test_a_sticky_blob_without_a_total_seeds_from_its_runs() -> None:
+    """An older blob (no ``pr_spend_usd``) still counts the runs it kept."""
+    block = leftover_state_block(state=ReviewState(runs=_runs(1.0, 2.0)))
+    old_block = block.replace(',"pr_spend_usd":3.0', "")
+    assert_that(old_block).is_not_equal_to(block)
+
+    decoded = decode_state(body=old_block)
+
+    assert_that(decoded.pr_spend_usd).is_equal_to(0.0)
+    assert_that(decoded.review_spend_usd).is_close_to(3.0, 1e-9)
 
 
 def test_merging_parts_keeps_the_largest_total() -> None:
