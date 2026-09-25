@@ -53,7 +53,7 @@ env:
 jobs:
   resolve-table:
     name: 🧮 Resolve provider table
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the table and its loader
     timeout-minutes: 5
@@ -90,7 +90,7 @@ jobs:
     # checks tab explains itself without anyone reading this file.
     name: ${{ matrix.name }}
     needs: [resolve-table]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout lintro and its provider code path
       statuses: write # report ai-provider-smoke/<name> on main's HEAD
@@ -203,7 +203,7 @@ jobs:
     # nothing itself: no issue, no second dedup key — it finds the notifier's
     # issue by the notifier's own title and comments the error text there.
     if: always() && needs.notify-failure.result != 'skipped'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the comment script
       issues: write # comment the provider error text on the tracker issue

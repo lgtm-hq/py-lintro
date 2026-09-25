@@ -183,7 +183,7 @@ jobs:
     name: 🚦 Test Gate
     needs: [test-compat, test-coverage, test-shell]
     if: always() && !cancelled()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     outputs:
       result: ${{ steps.gate.outputs.result }}
@@ -238,7 +238,7 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
       needs.test-coverage.outputs.passed == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read

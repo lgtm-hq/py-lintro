@@ -189,7 +189,7 @@ jobs:
     if: >-
       github.ref_type == 'tag' &&
       !startsWith(github.ref_name, 'actions-v')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       # read: sparse checkout of the gate scripts
       contents: read
@@ -606,7 +606,7 @@ jobs:
       !startsWith(github.ref_name, 'actions-v') &&
       (needs.classify-tag.outputs.is_prerelease == 'false' ||
       needs.classify-tag.outputs.validation_channels == 'true')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       # read: checkout
       contents: read

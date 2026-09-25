@@ -141,7 +141,7 @@ jobs:
       github.event_name == 'issue_comment'
       && github.event.issue.pull_request
       && startsWith(github.event.comment.body, '@lintro review')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # No secrets in this job, and nothing it can write with.
     permissions:
       contents: read # sparse checkout of the gate script and the parser
@@ -194,7 +194,7 @@ jobs:
     # constant usage text. A refused request never reaches this job.
     if: >-
       contains(fromJSON('["full","delta","paths","usage"]'), needs.request.outputs.mode)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions: {}
     timeout-minutes: 5
     steps:
@@ -256,7 +256,7 @@ jobs:
   ai-review:
     name: AI Review
     needs: [request]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # No job-level continue-on-error: that rewrites the conclusion to
     # `success`, which is precisely how a review that never ran kept
     # reading as a pass (#1826). Locate/download are the only step-level

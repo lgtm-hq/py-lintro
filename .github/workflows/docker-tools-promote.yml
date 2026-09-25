@@ -53,7 +53,7 @@ jobs:
   resolve:
     name: Classify main tools image update
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       pull-requests: read
@@ -95,7 +95,7 @@ jobs:
     name: Promote candidate digest
     needs: resolve
     if: needs.resolve.outputs.action == 'promote' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -228,7 +228,7 @@ jobs:
     name: Skip consumer-only digest update
     needs: resolve
     if: needs.resolve.outputs.action == 'skip' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - run: echo 'Consumer-only Renovate digest update needs no tools image build.'
