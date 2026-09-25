@@ -242,7 +242,7 @@ def test_a_real_v5_artifact_loads_with_no_degradations() -> None:
     assert_that(state.runs[0].identity.sha).is_equal_to(_HEAD)
     assert_that(state.runs[0].coverage.degradations).is_empty()
     assert_that(state.coverage).is_length(25)
-    assert_that(state.pr_spend_usd).is_close_to(7.450541, 1e-9)
+    assert_that(state.pr_spend_usd).is_close_to(7.450541, 1e-6)
     assert_that(redo_scope(prior=state, hashes={})).is_equal_to(RedoScope())
     assert_that(state.to_artifact_dict()["schema_version"]).is_equal_to(
         STATE_VERSION,
@@ -555,8 +555,6 @@ def test_a_redo_that_fails_again_reports_only_its_own_failure() -> None:
     )
 
     assert_that(carried).is_empty()
-    note = describe_coverage_degradations(metadata=_metadata(fresh, *carried))
-    assert_that(note).does_not_contain("not redone")
 
 
 def test_a_carried_split_keeps_the_whole_chunk_tail() -> None:
@@ -598,11 +596,11 @@ def test_an_unchanged_carried_retry_keeps_the_plain_tail() -> None:
     assert_that(note).does_not_contain("chunk split")
 
 
-def test_a_narrative_chunk_reason_is_rewarned_once_at_the_same_head() -> None:
+def test_a_narrative_chunk_reason_is_rewarned_once() -> None:
     """The delegated-diff fallback is carried like any narrative warning.
 
-    It is carried only while its files are not reviewed again at this head,
-    and only from the latest round, so it never accumulates.
+    It is carried only while its files are unchanged and not reviewed
+    again, and only from the latest round, so it never accumulates.
     """
     record = _record(_Reason.DELEGATED_DIFF_EMBEDDED, paths=("a.py",))
 

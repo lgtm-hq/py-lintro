@@ -121,7 +121,8 @@ def render_review_terminal(
         output.print(f"[dim]{verification_note}[/dim]")
     narrative_note = format_narrative_note(metadata=metadata)
     if narrative_note:
-        # Depth notes, not coverage losses (#2803).
+        # Narrative notes: a failed question pass, a carried synthesis or
+        # verification failure; none is a coverage loss (#2803).
         output.print(f"[yellow]{narrative_note}[/yellow]")
 
     if metadata.timings is not None:

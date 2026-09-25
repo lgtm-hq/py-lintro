@@ -259,8 +259,8 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     if not_redone:
         clauses.append(
             "work the previous round degraded was not redone "
-            f"({', '.join(not_redone)}); it is redone when these files are reviewed "
-            "again",
+            f"({', '.join(not_redone)}); the files it names are redone when they "
+            "are reviewed again",
         )
 
     known = {
