@@ -38,7 +38,22 @@ run log then says why, as one of `empty`, `not_json`, `not_list`, `no_question`,
 `turn_limit` or `call_failed`, and quotes the redacted start of the model's answer when
 one was received (for `turn_limit`, which leaves no answer, it gives the turn count
 instead). `turn_limit` and `not_json` are retried once; the coverage degradation's
-`detail` records the kind and whether a retry was made.
+`detail` records the kind and whether a retry was made. The review is still complete, so
+the failure is a note, not the "Coverage limited" warning, and the CI check passes with
+a `::warning::`.
+
+A rerun reaches the same verdict as the attempt it reruns, unless it redid the work that
+attempt degraded. Each round saves its coverage degradations, with the step and the
+files each one hit, in the review state (schema v6). A later round at the same head
+reads the latest round's list. A per-file reason whose files were still credited
+(`output_exhaustion_retried`, `adversarial_sweep_failed`) sends those files back for
+review. A redo that succeeds clears the reason. A redo that fails again, or that the
+cost cap or PR budget stops, records the reason again and fails the check as the first
+attempt did. A narrative reason whose step did not run again (a failed question pass on
+a rerun with nothing left to review) is recorded again with the same warning.
+`turn_limit_reached` and `split_half_failed` need nothing extra: their files were never
+credited, so a rerun reviews them anyway. A cut diff (`diff_truncated`) is already
+re-reported by its coverage record until the file changes. A new head starts fresh.
 
 ## Update in place
 

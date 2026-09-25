@@ -480,7 +480,11 @@ may go unreported.
   `synthesis_degraded`, so the sticky's run history marks the round
   `ℹ️ synthesis limited`; it never keys the convergence stop rule or forces another
   round, because per-file coverage is complete and a large PR would otherwise re-review
-  forever (#2704).
+  forever (#2704). A failed per-PR question pass (`generated_questions_failed`) is
+  narrative too (#2803): every file was still reviewed against the full rubric, so it is
+  shown as a note beside the synthesis and verification notes, and the CI check passes
+  with a `::warning::`. The other narrative reasons are `verification_failed`,
+  `delegated_diff_embedded` and `no_tree_for_agent`.
 - The terminal prints a `⚠ Coverage limited` banner under the run header.
 - The GitHub review body (in **📊 Run stats**) and the sticky comment both carry the
   same warning row, and the sticky's run history marks the round `⚠️ coverage limited`.
