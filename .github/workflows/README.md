@@ -172,8 +172,8 @@ validation channels (see "Validation-only switches" below and
   The app-token commit retriggers PR checks; its `lgtm-digest-bump[bot]` actor fails the
   candidate job gate, so the commit cannot start a second candidate build. Once
   lgtm-hq/.github#54 lands, the org Renovate preset lists the bot in
-  `gitIgnoredAuthors`, so the commit no longer marks the PR as edited; a Renovate
-  rebase then drops it and the actor-gated flow builds a fresh candidate.
+  `gitIgnoredAuthors`, so the commit no longer marks the PR as edited; a Renovate rebase
+  then drops it and the actor-gated flow builds a fresh candidate.
 - **docker-tools-publish.yml** — Validates tools-image pull requests and runs the weekly
   no-cache rebuild for CVE freshness. Maintainer `workflow_dispatch` can publish a tools
   image explicitly. Merged Renovate candidates are promoted by digest, without a
