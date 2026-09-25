@@ -767,6 +767,17 @@ async def test_a_stop_during_the_retry_keeps_the_first_attempts_tokens(
     assert_that(result.metadata.partial).is_true()
     assert_that(result.metadata.stopped_reason).contains("cost cap")
     assert_that(result.metadata.token_usage["prompt"]).is_equal_to(10)
+    # The persisted record says a retry was made, not a never-retried pass.
+    assert_that(
+        [(item.reason, item.detail) for item in result.metadata.coverage_degradations],
+    ).is_equal_to(
+        [
+            (
+                CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
+                "not_json; retried once",
+            ),
+        ],
+    )
 
 
 async def test_a_run_stopped_after_the_pass_still_reports_it(

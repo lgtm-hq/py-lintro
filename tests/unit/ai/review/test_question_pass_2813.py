@@ -330,6 +330,10 @@ async def test_the_first_attempt_is_recorded_before_a_stopped_retry() -> None:
     assert_that(recorded).is_length(1)
     assert_that(recorded[0].failure_kind).is_equal_to(QuestionFailureKind.NOT_JSON)
     assert_that(recorded[0].usage.input_tokens).is_equal_to(10)
+    # A stopped retry still reads as retried, never as a pass never retried.
+    assert_that(recorded[0].retried).is_true()
+    (degradation,) = question_pass_degradations(questions=recorded[0])
+    assert_that(degradation.detail).is_equal_to("not_json; retried once")
 
 
 async def test_nothing_is_recorded_when_no_retry_follows() -> None:
@@ -459,3 +463,23 @@ async def test_a_call_failed_warning_is_one_line() -> None:
     assert_that(failed).is_length(1)
     assert_that(failed[0].rstrip("\n")).does_not_contain("\n")
     assert_that(failed[0]).contains("\\n::error::injected")
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        pytest.param("null", id="null"),
+        pytest.param("42", id="number"),
+        pytest.param('"n/a"', id="string"),
+        pytest.param("```json\ntrue\n```", id="fenced-bool"),
+    ],
+)
+def test_a_whole_answer_scalar_is_not_json(answer: str) -> None:
+    """A scalar answer holds no object-shaped JSON, so it is retried.
+
+    Args:
+        answer: The whole answer, a JSON scalar.
+    """
+    assert_that(parse_questions(answer).failure).is_equal_to(
+        QuestionFailureKind.NOT_JSON,
+    )

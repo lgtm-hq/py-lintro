@@ -54,7 +54,8 @@ def parse_questions(content: str) -> ParsedQuestions:
     questions wins, so a stray bracketed citation in prose (``see [5]``)
     cannot shadow the real payload beside it (#2826). When none yields:
 
-    * an answer that is wholly JSON is classified by that value;
+    * an answer that is wholly a JSON scalar is ``not_json`` (retried);
+    * an answer that is wholly a JSON object or list is classified by it;
     * otherwise by the first embedded object;
     * a list of objects without a question is ``no_question``;
     * prose whose only brackets are scalar lists is ``not_json`` (retried).
@@ -73,6 +74,10 @@ def parse_questions(content: str) -> ParsedQuestions:
         if questions:
             return ParsedQuestions(questions=questions)
     wholes = [c.payload for c in candidates if c.whole]
+    if wholes and not isinstance(wholes[0], dict | list):
+        # A whole-answer scalar (``null``, ``42``, ``"n/a"``) holds no
+        # object-shaped JSON: not_json, so it gets the one retry.
+        return ParsedQuestions(failure=QuestionFailureKind.NOT_JSON)
     objects = [c.payload for c in candidates if isinstance(c.payload, dict)]
     decisive = wholes or objects
     if decisive:

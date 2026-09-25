@@ -44,10 +44,11 @@ async def run_with_one_retry(
     Args:
         generate: Makes one attempt with the given call shape.
         shape: The first attempt's call shape.
-        record: Receives the failed first attempt before the retry starts,
-            so a cost-cap stop or SIGTERM during the retry still leaves its
-            billed usage with the run (#2826). The returned result supersedes
-            it when the retry completes.
+        record: Receives the failed first attempt, marked ``retried``, before
+            the retry starts, so a cost-cap stop or SIGTERM during the retry
+            still leaves its billed usage with the run (#2826) and the record
+            says a retry was made. The returned result supersedes it when the
+            retry completes.
 
     Returns:
         The usable questions (from either attempt), or a failed result that
@@ -61,7 +62,9 @@ async def run_with_one_retry(
         return first
     _log_failure(result=first, retrying=True)
     if record is not None:
-        record(first)
+        # Marked retried: if the retry is stopped, the run records
+        # "<kind>; retried once", not a pass that was never retried (#2803).
+        record(replace(first, retried=True))
     retry_shape = (
         CallShape(use_one_shot=True, no_tools=True)
         if first.failure_kind is QuestionFailureKind.TURN_LIMIT
