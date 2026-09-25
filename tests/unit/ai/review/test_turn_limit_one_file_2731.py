@@ -590,6 +590,17 @@ async def test_row_3_on_a_half_makes_no_further_call() -> None:
     assert_that(partial.files).is_equal_to(("docs/other.md",))
     reasons = [d.reason for d in partial.coverage_degradations]
     assert_that(reasons).contains(CoverageDegradationReason.TURN_LIMIT_REACHED)
+    # The limited half's row names that half alone, so a rerun redoes it
+    # and not the half that answered (#2803).
+    limited_rows = [
+        d
+        for d in partial.coverage_degradations
+        if d.reason is CoverageDegradationReason.TURN_LIMIT_REACHED
+    ]
+    assert_that(limited_rows).is_length(1)
+    limited = limited_rows[0]
+    assert_that(limited.paths).is_equal_to(tuple(seen[2].chunk.files))
+    assert_that(limited.paths).does_not_contain("docs/other.md")
 
 
 async def test_row_8_on_a_half_is_lost_not_split_again() -> None:
