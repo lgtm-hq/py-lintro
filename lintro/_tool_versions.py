@@ -91,7 +91,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     # repo's own osv-scanner dogfood. install-tools.sh installs this exact pin
     # with ``uv tool install`` into an isolated venv instead. Renovate tracks
     # it against the pypi datasource (see renovate.json).
-    ToolName.CHECKOV: "3.3.16",
+    ToolName.CHECKOV: "3.3.19",
     # Bundled with the rustc toolchain — bump only alongside rustc (#2205).
     ToolName.CLIPPY: "1.98.1",
     # cppcheck ships no portable single binary, so both the tools image and the
