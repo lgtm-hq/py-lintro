@@ -58,6 +58,19 @@ _DEPTH_PASS_CLAUSES: dict[CoverageDegradationReason, str] = {
     ),
 }
 
+#: How a per-file reason carried from the attempt a round reruns is named in
+#: the "not redone" clause (#2803), in the words its own clause uses.
+_NOT_REDONE_LABELS: dict[CoverageDegradationReason, str] = {
+    CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED: (
+        "a chunk split after exhausting the output limit"
+    ),
+    CoverageDegradationReason.ADVERSARIAL_SWEEP_FAILED: (
+        "a failed depth-3 adversarial sweep"
+    ),
+    CoverageDegradationReason.SPLIT_HALF_FAILED: "a split chunk's lost half",
+    CoverageDegradationReason.TURN_LIMIT_REACHED: "a chunk that hit the turn limit",
+}
+
 
 def _plural(*, count: int, noun: str) -> str:
     """Return ``noun`` pluralized for ``count``.
@@ -97,13 +110,15 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # A per-file reason carried from the attempt this round reruns (#2803)
     # belongs to no chunk of this round; it gets its own clause below and
     # stays out of the per-chunk counts. A carried cut keeps its own wording.
+    carried_reasons = {
+        item.reason
+        for item in recorded
+        if item.chunk_index == CARRIED_CHUNK_INDEX
+        and item.reason is not CoverageDegradationReason.DIFF_TRUNCATED
+    }
     not_redone = sorted(
-        {
-            str(item.reason).replace("_", " ")
-            for item in recorded
-            if item.chunk_index == CARRIED_CHUNK_INDEX
-            and item.reason is not CoverageDegradationReason.DIFF_TRUNCATED
-        },
+        _NOT_REDONE_LABELS.get(reason, str(reason).replace("_", " "))
+        for reason in carried_reasons
     )
     degradations = tuple(
         item
@@ -245,6 +260,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     tail = (
         "findings that need the whole chunk in view may go unreported."
         if split_chunks
+        or CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED in carried_reasons
         else "some issues may go unreported."
     )
     if not coverage:
