@@ -99,7 +99,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # stays out of the per-chunk counts. A carried cut keeps its own wording.
     not_redone = sorted(
         {
-            str(item.reason)
+            str(item.reason).replace("_", " ")
             for item in recorded
             if item.chunk_index == CARRIED_CHUNK_INDEX
             and item.reason is not CoverageDegradationReason.DIFF_TRUNCATED

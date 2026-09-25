@@ -161,7 +161,9 @@ def format_question_pass_note_line(*, metadata: ReviewMetadata) -> str:
         not fail.
     """
     note = format_question_pass_note(metadata=metadata)
-    return f"<sub>{note}</sub>" if note else ""
+    if not note:
+        return ""
+    return f"<sub>{sanitize_comment_text(note, limit=300)}</sub>"
 
 
 def format_verification_note_line(*, metadata: ReviewMetadata) -> str:
