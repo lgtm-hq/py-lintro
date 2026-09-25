@@ -95,6 +95,29 @@ def test_path_prefixes_ask_for_a_targeted_review() -> None:
 
 
 @pytest.mark.parametrize(
+    "paths",
+    [
+        pytest.param(("a" * 200,), id="exactly-200-characters"),
+        pytest.param(tuple(f"p{n}" for n in range(MAX_PATHS)), id="exactly-max-paths"),
+    ],
+)
+def test_the_limits_themselves_are_accepted(paths: tuple[str, ...]) -> None:
+    """A request at the cap is a targeted review, not a usage reply.
+
+    The refusals above sit one past each limit; these pin the limit itself,
+    so an off-by-one in either check fails here.
+
+    Args:
+        paths: Path prefixes exactly at a limit.
+    """
+    command = parse_review_command("@lintro review " + " ".join(paths))
+
+    assert_that(command).is_equal_to(
+        ReviewCommand(mode=ReviewRequestMode.PATHS, paths=paths),
+    )
+
+
+@pytest.mark.parametrize(
     ("body", "problem"),
     [
         ("@lintro review delta now", "`delta` takes no arguments"),
@@ -106,6 +129,7 @@ def test_path_prefixes_ask_for_a_targeted_review() -> None:
         ("@lintro review /etc/passwd", "absolute"),
         ("@lintro review --full", "starts with `-`"),
         ("@lintro review -x", "starts with `-`"),
+        ("@lintro review -", "starts with `-`"),
         ("@lintro review $(id)", "character other than"),
         ("@lintro review " + "a" * 201, "longer than 200"),
         ("@lintro review " + " ".join(["p"] * (MAX_PATHS + 1)), f"at most {MAX_PATHS}"),
@@ -120,6 +144,7 @@ def test_path_prefixes_ask_for_a_targeted_review() -> None:
         "absolute",
         "leading-double-dash",
         "leading-dash",
+        "bare-dash",
         "shell-syntax",
         "too-long",
         "too-many",

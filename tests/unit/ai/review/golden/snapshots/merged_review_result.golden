@@ -28,6 +28,9 @@
     "transport_source": "",
     "max_cost_usd": null,
     "max_cost_usd_source": "",
+    "pr_budget_usd": null,
+    "pr_budget_spent_usd": 0.0,
+    "pr_budget_enforced": false,
     "phase_timings": {},
     "diff_gate": {
       "outside_diff": 0,

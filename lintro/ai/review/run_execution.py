@@ -26,6 +26,7 @@ from lintro.ai.review.custom_agent_runner import (
 from lintro.ai.review.exceptions import ReviewExecutionError
 from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.interrupt import install_review_interrupt
+from lintro.ai.review.pr_budget import cost_stop_reason, round_cap
 from lintro.ai.review.question_pass import RunQuestions, run_question_pass
 from lintro.ai.review.repo_context import repo_context_source_for
 from lintro.ai.review.result_assembly import (
@@ -38,7 +39,6 @@ from lintro.ai.review.run_finalize import (
 )
 from lintro.ai.review.session import (
     ChunkRunPlan,
-    cost_cap_reason,
     is_cost_cap_stop,
     is_timeout_stop,
     stop_hint,
@@ -178,6 +178,7 @@ async def run_passes(
                 prior_state=options.prior_state,
                 force_full=options.force_full,
                 policy=plan.policy,
+                round_spend=lambda: plan.budget.spent,
             ),
         )
     if plan.resume.queue:
@@ -329,7 +330,10 @@ async def execute_run(
         # residual budget. Any other failure (auth, provider, parser) must
         # propagate so callers surface a real error via the #1101 taxonomy.
         if is_cost_cap_stop(exc=exc):
-            stopped_reason = cost_cap_reason(cap=plan.budget.max_cost_usd)
+            stopped_reason = cost_stop_reason(
+                round_cap=round_cap(options=options),
+                pr_budget=options.pr_budget,
+            )
         elif is_timeout_stop(exc=exc):
             stopped_reason = timeout_reason(exc=exc)
         else:

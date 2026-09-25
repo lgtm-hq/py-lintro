@@ -202,6 +202,9 @@ def test_workflow_feeds_lintro_ai_env_from_repo_variables() -> None:
     assert_that(env["LINTRO_AI_MAX_COST_USD"]).is_equal_to(
         "${{ vars.LINTRO_AI_MAX_COST_USD }}",
     )
+    assert_that(env["LINTRO_AI_REVIEW_PR_BUDGET_USD"]).is_equal_to(
+        "${{ vars.LINTRO_AI_REVIEW_PR_BUDGET_USD }}",
+    )
     assert_that(env).does_not_contain_key("AI_REVIEW_MAX_COST_USD")
 
 
@@ -648,15 +651,17 @@ def test_workflow_concurrency_keys_on_the_pr_number() -> None:
     assert_that(concurrency["cancel-in-progress"]).is_true()
 
 
-def test_workflow_serializes_ai_review_repo_wide() -> None:
-    """A second, repo-wide group queues reviews instead of cancelling them.
+def test_workflow_serializes_ai_review_in_two_slots() -> None:
+    """A second, job-level group queues reviews instead of cancelling them.
 
     The workflow-level group is per-PR with ``cancel-in-progress``, so a
     push supersedes its own review. That alone lets every open PR review
     at once and pile onto the same provider rate limit, and a cancelled
     review is exactly the case #2506 is trying to stop paying for. The
-    job-level group is a fixed name with ``cancel-in-progress: false``:
-    one review job at a time across the repo, and the queued ones wait.
+    job-level group has ``cancel-in-progress: false``: one review job at a
+    time per slot, two slots keyed on the PR number's parity since #2796
+    (one repo-wide slot before), and the queued ones wait. The exact slot
+    expression is pinned in ``tests/scripts/test_ai_review_slots.py``.
 
     ``queue: max`` is required there, not optional. The default
     ``queue: single`` holds at most one pending run per group and cancels
@@ -676,10 +681,10 @@ def test_workflow_serializes_ai_review_repo_wide() -> None:
     loaded = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
 
     job_concurrency = loaded["jobs"]["ai-review"]["concurrency"]
-    assert_that(job_concurrency["group"]).is_equal_to("ai-review-repo-wide")
+    assert_that(job_concurrency["group"]).starts_with("ai-review-slot-${{")
+    assert_that(job_concurrency["group"]).contains("'even' || 'odd'")
     assert_that(job_concurrency["cancel-in-progress"]).is_false()
     assert_that(job_concurrency["queue"]).is_equal_to("max")
-    assert_that(job_concurrency["group"]).does_not_contain("${{")
     assert_that(loaded["concurrency"]).does_not_contain_key("queue")
 
 
@@ -1384,6 +1389,7 @@ def _run_review_with_lint_stubs(
     poll_seconds: str = "1",
     download_fails: bool = False,
     extra_env: dict[str, str] | None = None,
+    seed_state: bool = False,
 ) -> tuple[str, list[str], int]:
     """Run the script end to end with ``gh`` and ``uv`` stubbed.
 
@@ -1402,6 +1408,8 @@ def _run_review_with_lint_stubs(
         download_fails: Make the stubbed ``gh run download`` exit non-zero.
         extra_env: Further environment for the script, e.g. the on-request
             review inputs.
+        seed_state: Put a prior round's state file in the state directory,
+            as the workflow's download step does before the script runs.
 
     Returns:
         The script's combined output, the recorded ``uv`` argv, and the
@@ -1411,6 +1419,8 @@ def _run_review_with_lint_stubs(
     bin_dir.mkdir()
     state_dir = tmp_path / "state"
     state_dir.mkdir()
+    if seed_state:
+        (state_dir / "review-state.json").write_text("{}\n", encoding="utf-8")
     listing_count = tmp_path / "listings"
     uv_argv = tmp_path / "uv-argv"
     appears_on = "never" if report_appears_on_poll is None else report_appears_on_poll
@@ -2355,6 +2365,7 @@ def test_the_request_mode_reaches_the_review_argv(
         ("paths", '["/abs"]', "refusing on-request path prefix"),
         ("paths", '["src/*.py"]', "refusing on-request path prefix"),
         ("paths", '["--full"]', "refusing on-request path prefix"),
+        ("paths", '["-"]', "refusing on-request path prefix"),
         ("paths", "[]", "without any path prefix"),
         ("everything", "[]", "unknown REVIEW_REQUEST_MODE"),
         ("paths", "not-json", "is not a JSON list of strings"),
@@ -2366,6 +2377,7 @@ def test_the_request_mode_reaches_the_review_argv(
         "absolute",
         "glob",
         "leading-dash",
+        "bare-dash",
         "no-paths",
         "unknown-mode",
         "not-json",
@@ -2416,7 +2428,8 @@ def test_an_on_request_review_of_an_ineligible_pr_is_skipped(
     """A PR confirmed closed, drafted or not from this repo gets no review.
 
     The request job checked the PR, but the review job may wait in the
-    repo-wide queue; the same three conditions are checked again at its start.
+    queue for its review slot; the same three conditions are checked again at
+    its start.
     A confirmed-ineligible PR is a log line and exit 0: there is nothing to
     review.
 
@@ -2441,6 +2454,77 @@ def test_an_on_request_review_of_an_ineligible_pr_is_skipped(
     assert_that(exit_code).is_equal_to(0)
 
 
+def test_a_skipped_on_request_review_leaves_no_state_to_upload(
+    tmp_path: Path,
+) -> None:
+    """A confirmed-ineligible PR's skip clears the downloaded prior state.
+
+    The workflow downloads the prior round's state into the state directory
+    before the script runs, and the ``always()`` upload publishes whatever is
+    left there. A skipped run must not republish the prior round's state as
+    its own (carry (a) from #2806).
+
+    Args:
+        tmp_path: Per-test scratch directory.
+    """
+    state_dir = tmp_path / "state"
+    output, argv, _ = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=5,
+        extra_env={
+            "REVIEW_REQUEST_MODE": "delta",
+            "REVIEW_REQUESTER": "octocat",
+            "LINT_STUB_PR_JSON": (
+                '{"state":"closed","draft":false,'
+                '"head":{"repo":{"full_name":"lgtm-hq/py-lintro"}}}'
+            ),
+        },
+        seed_state=True,
+    )
+
+    assert_that(output).contains("on-request review skipped")
+    assert_that(argv).is_empty()
+    assert_that(state_dir.exists()).is_false()
+    exit_code = int((tmp_path / "exit-code").read_text(encoding="utf-8"))
+    assert_that(exit_code).is_equal_to(0)
+
+
+def test_gh_stderr_reaches_the_log_but_not_the_reason(tmp_path: Path) -> None:
+    """A failed PR read logs gh's own error; the reason stays a fixed sentence.
+
+    Carry (f) from #2806: the operator sees why ``gh`` failed, and API text
+    never lands inside the annotation's reason.
+
+    Args:
+        tmp_path: Per-test scratch directory.
+    """
+    output, argv, _ = _run_review_with_lint_stubs(
+        tmp_path,
+        report_appears_on_poll=1,
+        wait_seconds=5,
+        extra_env={
+            "REVIEW_REQUEST_MODE": "delta",
+            "REVIEW_REQUESTER": "octocat",
+            "LINT_STUB_PR_FAILS": "1",
+        },
+    )
+
+    assert_that(output).contains("gh said:")
+    assert_that(output).contains("stub: HTTP 502")
+    reason_lines = [line for line in output.splitlines() if "could not be read" in line]
+    assert_that(reason_lines).is_not_empty()
+    for line in reason_lines:
+        assert_that(line).does_not_contain("HTTP 502")
+    assert_that(argv).is_empty()
+    exit_code = int((tmp_path / "exit-code").read_text(encoding="utf-8"))
+    assert_that(exit_code).is_equal_to(1)
+
+
+#: A pulls reply with a head but no ``state``: unreadable, not ineligible.
+_NO_STATE_REPLY = '{"head":{"repo":{"full_name":"lgtm-hq/py-lintro"}}}'
+
+
 @pytest.mark.parametrize(
     ("stub_env", "reason"),
     [
@@ -2448,8 +2532,19 @@ def test_an_on_request_review_of_an_ineligible_pr_is_skipped(
         ({"LINT_STUB_PR_EMPTY": "1"}, "unreadable reply"),
         ({"LINT_STUB_PR_JSON": "not json"}, "unreadable reply"),
         ({"LINT_STUB_PR_JSON": "[]"}, "unreadable reply"),
+        ({"LINT_STUB_PR_JSON": "{}"}, "unreadable reply"),
+        ({"LINT_STUB_PR_JSON": '{"state":"open"}'}, "unreadable reply"),
+        ({"LINT_STUB_PR_JSON": _NO_STATE_REPLY}, "unreadable reply"),
     ],
-    ids=["gh-fails", "empty-payload", "not-json", "not-an-object"],
+    ids=[
+        "gh-fails",
+        "empty-payload",
+        "not-json",
+        "not-an-object",
+        "empty-object",
+        "no-head",
+        "no-state",
+    ],
 )
 def test_an_unreadable_pr_fails_the_on_request_review_visibly(
     tmp_path: Path,

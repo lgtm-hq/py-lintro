@@ -156,6 +156,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
     pending: tuple[tuple[str, str], ...] = ()
     consumed: dict[tuple[str, str], None] = {}
     truncated = False
+    pr_spend = 0.0
     identity = ReviewState()
     for state in states:
         identity = state
@@ -171,6 +172,8 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         for key in state.consumed_flags:
             consumed[key] = None
         truncated = truncated or state.truncated
+        # Monotonic: a later part never lowers the PR's spend (#2796).
+        pr_spend = max(pr_spend, state.review_spend_usd)
     return ReviewState(
         version=ARTIFACT_STATE_VERSION,
         runs=runs,
@@ -188,6 +191,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         run_id=identity.run_id,
         lintro_version=identity.lintro_version,
         truncated=truncated,
+        pr_spend_usd=pr_spend,
     )
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,7 +13,7 @@ from lintro.ai.review.models.finding_record import FindingRecord, rebaseline_rec
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.run_record import RunRecord
 
-__all__ = ["ReviewState"]
+__all__ = ["ReviewState", "spend_from_payload"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,10 @@ class ReviewState:
         run_id: Actions run id that wrote the state.
         lintro_version: Lintro version that wrote the state.
         truncated: True when older runs or resolved findings were pruned.
+        pr_spend_usd: The PR's cumulative review spend in USD (#2796): every
+            round's cost, including a round interrupted after a checkpoint.
+            Only ever grows; run pruning never lowers it. Read it through
+            :attr:`review_spend_usd`.
     """
 
     version: int = STATE_VERSION
@@ -62,6 +67,16 @@ class ReviewState:
     run_id: str = ""
     lintro_version: str = ""
     truncated: bool = False
+    pr_spend_usd: float = 0.0
+
+    @property
+    def review_spend_usd(self) -> float:
+        """Return the PR's review spend, never below the retained runs' sum.
+
+        A state built without the cumulative total (a pre-v5 artifact, a
+        legacy sticky blob, a hand-built state) still counts its runs.
+        """
+        return max(self.pr_spend_usd, sum(run.usage.cost for run in self.runs))
 
     @property
     def next_round(self) -> int:
@@ -100,6 +115,8 @@ class ReviewState:
         }
         if self.truncated:
             payload["truncated"] = True
+        if self.review_spend_usd:
+            payload["pr_spend_usd"] = self.review_spend_usd
         return payload
 
     def to_artifact_dict(self) -> dict[str, Any]:
@@ -131,6 +148,7 @@ class ReviewState:
                 {"path": path, "hash": patch_hash}
                 for path, patch_hash in self.consumed_flags
             ],
+            "pr_spend_usd": self.review_spend_usd,
         }
         if self.truncated:
             payload["truncated"] = True
@@ -194,7 +212,27 @@ class ReviewState:
             run_id=str(payload.get("run_id", "")),
             lintro_version=str(payload.get("lintro_version", "")),
             truncated=bool(payload.get("truncated", False)),
+            pr_spend_usd=spend_from_payload(payload),
         )
+
+
+def spend_from_payload(payload: dict[str, Any]) -> float:
+    """Return the stored cumulative spend, or 0.0 when absent or invalid.
+
+    A v4 artifact has no ``pr_spend_usd``; :attr:`ReviewState.review_spend_usd`
+    then seeds the total from the runs that survived pruning.
+
+    Args:
+        payload: Decoded artifact mapping.
+
+    Returns:
+        A finite, non-negative USD figure.
+    """
+    raw = payload.get("pr_spend_usd")
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return 0.0
+    value = float(raw)
+    return value if math.isfinite(value) and value >= 0 else 0.0
 
 
 def _pending_from_payload(

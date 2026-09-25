@@ -47,7 +47,7 @@ def write_incremental_coverage_part(
     force_full: bool,
     sequence: int,
     policy: ReviewSensitivityPolicy,
-    stopped_reason: str = "",
+    round_spend_usd: float = 0.0,
 ) -> None:
     """Checkpoint coverage and this-run findings for a later SIGTERM.
 
@@ -65,7 +65,9 @@ def write_incremental_coverage_part(
         force_full: When True, do not inherit prior coverage.
         sequence: Monotonic part number for this run.
         policy: Sensitivity policy used to filter checkpoint findings.
-        stopped_reason: Optional in-flight stop note stored on new records.
+        round_spend_usd: What this round has spent so far. Persisted on top of
+            the prior total, so a round killed after this checkpoint still
+            counts against the PR's review budget (#2796).
     """
     directory_override = os.environ.get("LINTRO_REVIEW_STATE_DIR", "").strip()
     if not directory_override:
@@ -82,7 +84,6 @@ def write_incremental_coverage_part(
         head_sha=context.head_ref,
         round_number=prior_state.next_round if prior_state is not None else 1,
         prior=None if force_full else prior_state,
-        stopped_reason=stopped_reason,
         truncated_paths=truncated_paths(partials=collected),
     )
     pr_raw = os.environ.get("PR_NUMBER", "").strip()
@@ -125,6 +126,12 @@ def write_incremental_coverage_part(
             workflow="ai-review.yml",
             event=os.environ.get("GITHUB_EVENT_NAME", "") or seed.event,
             run_id=os.environ.get("GITHUB_RUN_ID", "") or seed.run_id,
+            # From the prior state, not ``seed``: a ``--full`` seed is empty,
+            # and a full round must not reset the PR's spend.
+            pr_spend_usd=(
+                (prior_state.review_spend_usd if prior_state is not None else 0.0)
+                + round_spend_usd
+            ),
         ),
         directory=state_dir(ci=True),
         sequence=sequence,
@@ -139,6 +146,7 @@ def checkpoint_writer(
     prior_state: ReviewState | None,
     force_full: bool,
     policy: ReviewSensitivityPolicy,
+    round_spend: Callable[[], float] | None = None,
 ) -> Callable[[list[ChunkReviewPartial]], None]:
     """Build the per-chunk callback that writes the run's coverage parts.
 
@@ -152,6 +160,8 @@ def checkpoint_writer(
         prior_state: Prior artifact state, if any.
         force_full: When True, do not inherit prior coverage.
         policy: Sensitivity policy used to filter checkpoint findings.
+        round_spend: Reads what the round has spent so far (its
+            ``CostBudget.spent``), or None to record no spend.
 
     Returns:
         A callback the chunk fan-out invokes with everything completed so far.
@@ -175,6 +185,7 @@ def checkpoint_writer(
                 force_full=force_full,
                 sequence=next_sequence,
                 policy=policy,
+                round_spend_usd=round_spend() if round_spend is not None else 0.0,
             )
         except Exception:
             logger.opt(exception=True).warning(

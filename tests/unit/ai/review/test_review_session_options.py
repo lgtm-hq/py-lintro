@@ -33,6 +33,7 @@ from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.orchestrator import run_review
+from lintro.ai.review.pr_budget import PrBudget
 from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.session import ReviewSessionOptions
@@ -63,6 +64,7 @@ EXPECTED_SESSION_DEFAULTS: dict[str, object] = {
     "prior_state": None,
     "force_full": False,
     "enforce_cost_cap": True,
+    "pr_budget": None,
     "stop": None,
     "synthesis": None,
     "verify": ReviewVerifyMode.P1_AND_LOW_CONFIDENCE,
@@ -234,6 +236,7 @@ def test_run_review_forwards_the_options_object_unchanged(
     workspace_root = Path("/tmp/workspace")
     prior_state = ReviewState()
     stop = asyncio.Event()
+    pr_budget = PrBudget(budget_usd=40.0, prior_spend_usd=1.0, enforced=True)
     synthesis = ReviewSynthesisConfig(enabled=True)
 
     options = ReviewSessionOptions(
@@ -257,6 +260,7 @@ def test_run_review_forwards_the_options_object_unchanged(
         prior_state=prior_state,
         force_full=True,
         enforce_cost_cap=False,
+        pr_budget=pr_budget,
         stop=stop,
         synthesis=synthesis,
         verify=ReviewVerifyMode.P1,
@@ -293,6 +297,7 @@ def test_run_review_forwards_the_options_object_unchanged(
         "prior_state": prior_state,
         "force_full": True,
         "enforce_cost_cap": False,
+        "pr_budget": pr_budget,
         "stop": stop,
         "synthesis": synthesis,
         "verify": ReviewVerifyMode.P1,

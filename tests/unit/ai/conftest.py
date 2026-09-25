@@ -23,6 +23,7 @@ from lintro.ai.config_overrides import (
     ENV_PROVIDER,
     ENV_PROVIDER_BLOCK_PREFIX,
     ENV_REVIEW,
+    ENV_REVIEW_PR_BUDGET_USD,
     ENV_TRANSPORT,
 )
 from lintro.ai.enums import AITransport
@@ -33,6 +34,18 @@ from lintro.ai.providers.cli_transport import CliTransport
 from lintro.ai.registry import AIProvider
 from lintro.parsers.base_issue import BaseIssue
 from lintro.utils.console.logger import ThreadSafeConsoleLogger
+
+#: The flat ``LINTRO_AI_*`` overrides this suite clears. The tree-wide
+#: ``tests/conftest.py`` list must match it; a test pins the two together.
+FLAT_AI_OVERRIDE_ENV: tuple[str, ...] = (
+    ENV_ENABLED,
+    ENV_MAX_COST_USD,
+    ENV_REVIEW_PR_BUDGET_USD,
+    ENV_MODEL,
+    ENV_PROVIDER,
+    ENV_REVIEW,
+    ENV_TRANSPORT,
+)
 
 
 class RecordingConsoleLogger(ThreadSafeConsoleLogger):
@@ -453,15 +466,7 @@ def _clear_provider_block_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     for name in [n for n in os.environ if n.startswith(ENV_PROVIDER_BLOCK_PREFIX)]:
         monkeypatch.delenv(name, raising=False)
-    for name in (
-        ENV_ENABLED,
-        ENV_MAX_COST_USD,
-        ENV_MODEL,
-        ENV_PROVIDER,
-        ENV_REVIEW,
-        ENV_TRANSPORT,
-        BARE_MODE_ENV,
-    ):
+    for name in (*FLAT_AI_OVERRIDE_ENV, BARE_MODE_ENV):
         monkeypatch.delenv(name, raising=False)
 
 

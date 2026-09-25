@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_badges import format_cost, format_int
 from lintro.ai.review.github_constants import (
@@ -26,6 +27,7 @@ from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.run_outcome import NARRATIVE_LIMIT
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.pr_budget import RUNTIME_BOUND_NOTE
 from lintro.ai.review.sticky.cells import (
     _cell,
     _fmt_compact,
@@ -108,8 +110,33 @@ def _this_run_section(
                 if (timings_note := format_timings_note(metadata=metadata))
                 else []
             ),
+            *(["", budget_line] if (budget_line := _pr_budget_line(result)) else []),
         ],
     )
+
+
+def _pr_budget_line(result: ReviewResult) -> str:
+    """Render ``PR budget: $X of $Y`` for a PR with a review budget (#2796).
+
+    Args:
+        result: Current review result.
+
+    Returns:
+        The line, or an empty string when ``ai.review_pr_budget_usd`` is unset.
+    """
+    metadata = result.metadata
+    if metadata.pr_budget_usd is None:
+        return ""
+    line = (
+        f"PR budget: ${metadata.pr_budget_spent_usd:.2f} "
+        f"of ${metadata.pr_budget_usd:.2f}"
+    )
+    notes = []
+    if not metadata.pr_budget_enforced:
+        notes.append("display only: not enforced on this cost basis")
+    if metadata.cost_basis == CostBasis.UNPRICEABLE.value:
+        notes.append(RUNTIME_BOUND_NOTE)
+    return f"{line} ({'; '.join(notes)})" if notes else line
 
 
 def _history_section(

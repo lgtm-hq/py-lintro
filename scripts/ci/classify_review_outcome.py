@@ -19,6 +19,12 @@ nothing (#1826). This module is the decision point that fixes that — it maps a
   findings are kept; the check goes red and the annotation names every
   recorded reason, because a partial finding set must never read as a clean
   pass.
+* **pr budget** -- the PR's review budget (``ai.review_pr_budget_usd``, #2796)
+  stopped the round before every eligible file was covered at HEAD. Findings
+  so far are posted and coverage is checkpointed; red like **incomplete**, but
+  with its own reason, because the next round does not resume on its own: it
+  stops at the same budget until an operator raises it. A budget stop that
+  leaves coverage complete (carried from earlier rounds) is **reviewed**.
 * **converged** -- the deterministic convergence stop rule (#2099) skipped the
   round before any provider call, because the last N rounds all scored below
   the configured threshold. Nothing was reviewed, but nothing needed to be, and
@@ -108,6 +114,11 @@ INLINE_POST_FAILURE_KEY: Final[str] = "inline_post_failure"
 
 DEFAULT_TRANSPORT: Final[str] = "cli"
 
+# Every stopped_reason a PR-budget stop writes starts with this (#2796).
+# Mirrors lintro.ai.review.pr_budget.PR_BUDGET_REASON_PREFIX; a contract test
+# in tests/scripts/test_classify_review_outcome_pr_budget.py pins the pair.
+PR_BUDGET_REASON_PREFIX: Final[str] = "PR budget"
+
 # Top-level key `lintro review` writes when the convergence stop rule skipped
 # the round (#2099). Mirrors lintro.ai.review.output.CONVERGED_ENVELOPE_KEY;
 # tests/scripts/test_classify_review_outcome.py fails if the two drift.
@@ -173,6 +184,8 @@ class ReviewOutcome(StrEnum):
     Members:
         REVIEWED: A review was produced; findings may or may not be present.
         INCOMPLETE: A review was produced but coverage-at-HEAD is not 100%.
+        PR_BUDGET: Like :attr:`INCOMPLETE`, but the PR's review budget
+            stopped the round, so it will not resume without an operator.
         DEGRADED: Every eligible file was reviewed, but not at full depth --
             the envelope's ``findings_coverage_complete`` is false (#2395).
         CONVERGED: The round was deliberately skipped by the convergence stop
@@ -184,6 +197,7 @@ class ReviewOutcome(StrEnum):
 
     REVIEWED = auto()
     INCOMPLETE = auto()
+    PR_BUDGET = auto()
     DEGRADED = auto()
     CONVERGED = auto()
     NO_CREDENTIAL = auto()
@@ -195,12 +209,14 @@ class ReviewOutcome(StrEnum):
         """Return whether a review actually reached the pull request.
 
         Returns:
-            True for :attr:`REVIEWED`, :attr:`INCOMPLETE` and
-            :attr:`DEGRADED` (a partial review was produced).
+            True for :attr:`REVIEWED`, :attr:`INCOMPLETE`,
+            :attr:`PR_BUDGET` and :attr:`DEGRADED` (a partial review was
+            produced).
         """
         return self in {
             ReviewOutcome.REVIEWED,
             ReviewOutcome.INCOMPLETE,
+            ReviewOutcome.PR_BUDGET,
             ReviewOutcome.DEGRADED,
         }
 
@@ -215,9 +231,14 @@ class ReviewOutcome(StrEnum):
         reviewed, but a limit or a failed pass may have suppressed findings).
 
         Returns:
-            True for :attr:`INCOMPLETE` and :attr:`DEGRADED`.
+            True for :attr:`INCOMPLETE`, :attr:`PR_BUDGET` and
+            :attr:`DEGRADED`.
         """
-        return self in {ReviewOutcome.INCOMPLETE, ReviewOutcome.DEGRADED}
+        return self in {
+            ReviewOutcome.INCOMPLETE,
+            ReviewOutcome.PR_BUDGET,
+            ReviewOutcome.DEGRADED,
+        }
 
     @property
     def review_unavailable(self) -> bool:
@@ -657,6 +678,22 @@ def _incomplete_report(
     """
     covered = coverage.get("covered_at_head", 0)
     eligible = coverage.get("eligible", 0)
+    stopped_reason = str(coverage.get("stopped_reason") or "")
+    if stopped_reason.startswith(PR_BUDGET_REASON_PREFIX):
+        return OutcomeReport(
+            outcome=ReviewOutcome.PR_BUDGET,
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    "PR review budget reached — "
+                    f"{covered}/{eligible} files covered at HEAD; "
+                    "raise LINTRO_AI_REVIEW_PR_BUDGET_USD to review the rest"
+                ),
+            ),
+            detail=stopped_reason,
+            exit_code=1,
+            transport=transport,
+        )
     return OutcomeReport(
         outcome=ReviewOutcome.INCOMPLETE,
         headline=_with_transport(
@@ -667,7 +704,7 @@ def _incomplete_report(
                 "next round resumes"
             ),
         ),
-        detail=str(coverage.get("stopped_reason") or ""),
+        detail=stopped_reason,
         exit_code=1,
         transport=transport,
     )
@@ -982,6 +1019,18 @@ def render_summary(*, report: OutcomeReport) -> str:
                 "The next round resumes with unreviewed files first. "
                 "P1 findings still pass this check; an unfinished review "
                 "does not.",
+                "",
+            ],
+        )
+    if report.outcome is ReviewOutcome.PR_BUDGET:
+        lines.extend(
+            [
+                "A review was produced, but the PR's review budget "
+                "(`ai.review_pr_budget_usd`) ran out before every file was "
+                "covered at HEAD. Findings so far are posted and coverage is "
+                "saved. Later rounds stop at the same budget: raise the "
+                "`LINTRO_AI_REVIEW_PR_BUDGET_USD` Actions variable to review "
+                "the rest, or leave the PR as it is.",
                 "",
             ],
         )

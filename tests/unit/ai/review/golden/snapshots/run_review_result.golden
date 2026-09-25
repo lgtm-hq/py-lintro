@@ -33,6 +33,9 @@
     "transport_source": "",
     "max_cost_usd": null,
     "max_cost_usd_source": "",
+    "pr_budget_usd": null,
+    "pr_budget_spent_usd": 0.0,
+    "pr_budget_enforced": false,
     "phase_timings": {
       "context_collection": -1.0,
       "parse_merge": -1.0,

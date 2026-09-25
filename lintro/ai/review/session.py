@@ -31,13 +31,14 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.enums import AITransport
-from lintro.ai.exceptions import AICostBudgetExceededError
+from lintro.ai.review.cost_cap import cost_cap_reason, is_cost_cap_stop
 from lintro.ai.review.errors_taxonomy import (
     ReviewErrorKind,
     classify_provider_error,
     resolve_cause_text,
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
+from lintro.ai.review.pr_budget import PR_BUDGET_REASON_PREFIX
 from lintro.ai.review.repo_context import RepoContextSource
 from lintro.config.review_config import ReviewVerifyMode
 
@@ -55,6 +56,7 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.file_classification import FileClassification
     from lintro.ai.review.models.review_context import ReviewContext
     from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.pr_budget import PrBudget
     from lintro.ai.review.progress import ReviewProgressCallback
     from lintro.ai.review.sensitivity import ReviewSensitivityPolicy
     from lintro.ai.review.timings import ReviewTimingRecorder
@@ -231,6 +233,8 @@ class ReviewSessionOptions:
         force_full: Discard carried coverage (``--full``).
         enforce_cost_cap: When True, honor ``ai.max_cost_usd`` and serialize
             chunk calls so concurrency cannot violate queue order.
+        pr_budget: The PR's review budget for this round (#2796), or None
+            when ``ai.review_pr_budget_usd`` is unset.
         stop: Optional event set to persist and halt (tests inject this;
             production uses SIGTERM/SIGINT via ``install_review_interrupt``).
         synthesis: Cross-chunk synthesis configuration (#2269). ``None`` or a
@@ -258,6 +262,7 @@ class ReviewSessionOptions:
     prior_state: ReviewState | None = None
     force_full: bool = False
     enforce_cost_cap: bool = True
+    pr_budget: PrBudget | None = None
     stop: asyncio.Event | None = None
     synthesis: ReviewSynthesisConfig | None = None
     verify: ReviewVerifyMode = ReviewVerifyMode.P1_AND_LOW_CONFIDENCE
@@ -373,45 +378,6 @@ def aborted_before_completion(
     )
 
 
-def is_cost_cap_stop(*, exc: BaseException) -> bool:
-    """Return whether an exception represents a graceful cost-cap stop.
-
-    The cost cap can surface either as a raw
-    :class:`~lintro.ai.exceptions.AICostBudgetExceededError` (when the
-    top-of-loop ``budget.check()`` raises) or wrapped inside a
-    :class:`~lintro.ai.review.exceptions.ReviewExecutionError` (when an
-    intra-chunk check raises and the chunk failure is wrapped). Both cases are
-    detected by walking the ``__cause__`` chain so a cost-cap stop is never
-    misclassified as a genuine provider error, and vice versa.
-
-    Args:
-        exc: The exception raised while reviewing chunks.
-
-    Returns:
-        True when the underlying cause is a cost-cap exhaustion.
-    """
-    current: BaseException | None = exc
-    while current is not None:
-        if isinstance(current, AICostBudgetExceededError):
-            return True
-        current = current.__cause__
-    return False
-
-
-def cost_cap_reason(*, cap: float | None) -> str:
-    """Build the human-readable ``stopped_reason`` for a cost-cap stop.
-
-    Args:
-        cap: The configured ``ai.max_cost_usd`` ceiling, if any.
-
-    Returns:
-        A message such as ``"cost cap ($0.50) reached"``.
-    """
-    if cap is None:
-        return "cost cap reached"
-    return f"cost cap (${cap:.2f}) reached"
-
-
 def is_timeout_stop(*, exc: BaseException) -> bool:
     """Return whether an exception is a persistable mid-round timeout.
 
@@ -484,6 +450,11 @@ def stop_hint(*, stopped_reason: str, ai_config: AIConfig) -> str:
             else "ai.transports.api.timeout"
         )
         return f"Raise {timeout_setting} or narrow --path to review the rest."
+    if stopped_reason.startswith(PR_BUDGET_REASON_PREFIX):
+        return (
+            "Raise ai.review_pr_budget_usd (LINTRO_AI_REVIEW_PR_BUDGET_USD) "
+            "to review the rest; coverage was persisted."
+        )
     return "Raise ai.max_cost_usd or narrow --path to review the rest."
 
 

@@ -80,6 +80,7 @@ from lintro.ai.review.output import (
 )
 from lintro.ai.review.patch_validation import validate_result_suggested_patches
 from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
+from lintro.ai.review.pr_budget import PrBudget, resolve_pr_budget
 from lintro.ai.review.pr_head_guard import RemoveOnError
 from lintro.ai.review.preparation import (
     PreparedReview,
@@ -220,12 +221,14 @@ class _MetadataStamp:
         resolved_ai: Effective AI configuration with per-field provenance.
         cap: The effective spend ceiling, or None when uncapped.
         cap_source: Where that ceiling came from.
+        pr_budget: The PR's review budget for this round, or None (#2796).
     """
 
     profile: ResolvedTransportSettings
     resolved_ai: ResolvedAIConfig
     cap: float | None
     cap_source: ConfigSource
+    pr_budget: PrBudget | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1016,6 +1019,12 @@ def _finish_review(
             )
 
         cap, cap_source = resolve_max_cost_with_source(resolved_ai)
+        pr_budget = resolve_pr_budget(
+            budget_usd=resolved_ai.config.review_pr_budget_usd,
+            source=resolved_ai.source_of("review_pr_budget_usd"),
+            basis=resolved_profile.cost_basis,
+            prior_state=prior_state,
+        )
         result = _run_round(
             options=options,
             prepared=prepared,
@@ -1028,12 +1037,14 @@ def _finish_review(
                     source=cap_source,
                     basis=resolved_profile.cost_basis,
                 ),
+                pr_budget=pr_budget,
             ),
             stamp=_MetadataStamp(
                 profile=resolved_profile,
                 resolved_ai=resolved_ai,
                 cap=cap,
                 cap_source=cap_source,
+                pr_budget=pr_budget,
             ),
             targets=targets,
             console=console,
@@ -1221,8 +1232,34 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
             transport_source=stamp.resolved_ai.source_of("transport").value,
             max_cost_usd=stamp.cap,
             max_cost_usd_source=stamp.cap_source.value,
+            **_pr_budget_fields(result=result, pr_budget=stamp.pr_budget),
         ),
     )
+
+
+def _pr_budget_fields(
+    *,
+    result: ReviewResult,
+    pr_budget: PrBudget | None,
+) -> dict[str, Any]:
+    """Return the PR-budget metadata fields for this round (#2796).
+
+    Args:
+        result: The completed review.
+        pr_budget: The PR's review budget, or None when unset.
+
+    Returns:
+        The fields to stamp; empty when no budget is configured.
+    """
+    if pr_budget is None:
+        return {}
+    return {
+        "pr_budget_usd": pr_budget.budget_usd,
+        "pr_budget_spent_usd": (
+            pr_budget.prior_spend_usd + result.metadata.cost_estimate_usd
+        ),
+        "pr_budget_enforced": pr_budget.enforced,
+    }
 
 
 def _replay_unposted_findings(

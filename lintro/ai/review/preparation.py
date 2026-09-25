@@ -70,6 +70,7 @@ if TYPE_CHECKING:
     )
     from lintro.ai.review.models.review_result import ReviewResult
     from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.pr_budget import PrBudget
     from lintro.ai.review.progress import ReviewProgressCallback
     from lintro.ai.review.sensitivity import ReviewSensitivityPolicy
     from lintro.config.lintro_config import LintroConfig
@@ -243,6 +244,7 @@ class ReviewExecutionPolicy:
         prior_state: Resume state from a previous round.
         force_full: Discard carried coverage and review everything again.
         enforce_cost_cap: Honor ``ai.max_cost_usd`` and serialize chunk calls.
+        pr_budget: The PR's review budget for this round (#2796), or None.
     """
 
     progress: ReviewProgressCallback | None = None
@@ -250,6 +252,7 @@ class ReviewExecutionPolicy:
     prior_state: ReviewState | None = None
     force_full: bool = False
     enforce_cost_cap: bool = True
+    pr_budget: PrBudget | None = None
 
 
 #: The policy of a surface with no adapter-specific execution knobs. Its values
@@ -435,6 +438,7 @@ def execute_review(
             prior_state=policy.prior_state,
             force_full=policy.force_full,
             enforce_cost_cap=policy.enforce_cost_cap,
+            pr_budget=policy.pr_budget,
             synthesis=prepared.synthesis,
             verify=prepared.verify,
         ),

@@ -42,6 +42,7 @@ from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.group_labels import REL_DIRECTORY_PREFIX, REL_SINGLE_FILE
 from lintro.ai.review.models.delta_plan import DeltaPlan
 from lintro.ai.review.models.review_chunk import ReviewChunk
+from lintro.ai.review.pr_budget import run_cost_ceiling
 from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.prompts import estimate_prompt_overhead
 from lintro.ai.review.resume import filter_chunks, plan_resume
@@ -471,11 +472,7 @@ def plan_run(
             else options.ai_config
         ),
         tracker=options.progress or NullReviewProgress(),
-        budget=CostBudget(
-            max_cost_usd=(
-                options.ai_config.max_cost_usd if options.enforce_cost_cap else None
-            ),
-        ),
+        budget=CostBudget(max_cost_usd=run_cost_ceiling(options=options)),
         max_parallel_calls=max_parallel_calls,
         effective_max_parallel=max(min(len(chunks), max_parallel_calls), 1),
         # Branch on the provider's declared capability, not its identity

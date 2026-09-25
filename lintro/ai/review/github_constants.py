@@ -21,10 +21,13 @@ STATE_MARKER_SUFFIX = "-->"
 # computed over the canonical category, so every open finding record read from
 # a v2/v3 blob is archived as re-baselined rather than matched. v1 is no
 # longer a readable version: #2305 retired its migration, so a v1 blob decodes
-# as no state at all and the round starts fresh.
-STATE_VERSION = 4
+# as no state at all and the round starts fresh. v5 (#2796) adds
+# ``pr_spend_usd``, the PR's cumulative review spend; a v4 artifact without
+# it seeds the total from its surviving runs.
+STATE_VERSION = 5
 STATE_VERSION_V2 = 2
 STATE_VERSION_V3 = 3
+STATE_VERSION_V4 = 4
 #: Versions whose open finding records are re-baselined on load (#2723).
 REBASELINED_STATE_VERSIONS = frozenset({STATE_VERSION_V2, STATE_VERSION_V3})
 

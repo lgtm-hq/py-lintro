@@ -1253,6 +1253,13 @@ ai:
   # (float >= 0 | null, default: null)
   max_cost_usd: null
 
+  # Total review spend in USD across every AI review round of one pull
+  # request (#2796). Unset disables the check and the sticky line.
+  # Enforced like max_cost_usd: always from LINTRO_AI_REVIEW_PR_BUDGET_USD,
+  # from config only when spend is billed or estimated.
+  # (float > 0 | null, default: null)
+  review_pr_budget_usd: null
+
   # Token budget for a fix prompt before context is trimmed — a soft budget,
   # see "Data & Privacy". (int >= 1000, default: 12000)
   max_prompt_tokens: 12000
@@ -1783,9 +1790,9 @@ config for a single invocation. `lintro review` also accepts `--provider`, `--mo
 `--review/--no-review`, `--max-cost-usd`, and the repeatable
 `--provider-option NAME=VALUE` for one `ai.providers.<provider>.<field>` setting.
 Environment variables (`LINTRO_AI_PROVIDER`, `LINTRO_AI_MODEL`, `LINTRO_AI_TRANSPORT`,
-`LINTRO_AI_ENABLED`, `LINTRO_AI_REVIEW`, `LINTRO_AI_MAX_COST_USD`, and
-`LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`) apply to every AI surface and lose to CLI
-flags. There is no `--enabled` flag.
+`LINTRO_AI_ENABLED`, `LINTRO_AI_REVIEW`, `LINTRO_AI_MAX_COST_USD`,
+`LINTRO_AI_REVIEW_PR_BUDGET_USD`, and `LINTRO_AI_PROVIDERS__<PROVIDER>__<FIELD>`) apply
+to every AI surface and lose to CLI flags. There is no `--enabled` flag.
 
 ### Invocation overrides
 
@@ -1803,14 +1810,15 @@ Overlays replace the active transport profile's cost cap
 (`ai.transports.api.max_cost_usd` / `ai.transports.cli.max_cost_usd_advisory`) as well
 as the legacy `ai.max_cost_usd` scalar.
 
-| Variable / flag                                           | Overrides         | Notes                                                                                        |
-| --------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------------- |
-| `LINTRO_AI_PROVIDER` / `lintro review --provider`         | `ai.provider`     | `anthropic`, `openai`, or `cursor`                                                           |
-| `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`        | any model id; empty env falls through                                                        |
-| `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`    | `api` or `cli`                                                                               |
-| `LINTRO_AI_ENABLED`                                       | `ai.enabled`      | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag. |
-| `LINTRO_AI_REVIEW` / `lintro review --review/--no-review` | `ai.review`       | `1`/`0`/`true`/`false`. The master `ai.enabled` switch must also be on.                      |
-| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd` | USD cap. Overlay `uncapped` lifts. Overlay `0` is rejected (YAML `0` is $0).                 |
+| Variable / flag                                           | Overrides                 | Notes                                                                                                             |
+| --------------------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `LINTRO_AI_PROVIDER` / `lintro review --provider`         | `ai.provider`             | `anthropic`, `openai`, or `cursor`                                                                                |
+| `LINTRO_AI_MODEL` / `lintro review --model`               | `ai.model`                | any model id; empty env falls through                                                                             |
+| `LINTRO_AI_TRANSPORT` / `--transport`                     | `ai.transport`            | `api` or `cli`                                                                                                    |
+| `LINTRO_AI_ENABLED`                                       | `ai.enabled`              | `1`/`0`/`true`/`false`. `=1` does not turn on `ai.review` or `ai.lint`. No `--enabled` flag.                      |
+| `LINTRO_AI_REVIEW` / `lintro review --review/--no-review` | `ai.review`               | `1`/`0`/`true`/`false`. The master `ai.enabled` switch must also be on.                                           |
+| `LINTRO_AI_MAX_COST_USD` / `lintro review --max-cost-usd` | `ai.max_cost_usd`         | USD cap. Overlay `uncapped` lifts. Overlay `0` is rejected (YAML `0` is $0).                                      |
+| `LINTRO_AI_REVIEW_PR_BUDGET_USD` (env only)               | `ai.review_pr_budget_usd` | Per-PR review budget (#2796). Same grammar as `LINTRO_AI_MAX_COST_USD`: positive USD or `uncapped`; `0` rejected. |
 
 > **Do not copy a cost cap between the two surfaces.** `0` means different things in
 > YAML and in an overlay: `ai.max_cost_usd: 0` is a real $0 cap that stops the run on
