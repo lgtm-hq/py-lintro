@@ -1174,6 +1174,20 @@ def render_summary(*, report: OutcomeReport) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _command_data(*, text: str) -> str:
+    """Escape text for a workflow-command payload.
+
+    Args:
+        text: The annotation text.
+
+    Returns:
+        The text with `%` and CR percent-encoded, in that order (escaping `%`
+        last would re-escape the escapes), and LF folded to a space so the
+        annotation stays one line.
+    """
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
+
+
 def _emit(*, report: OutcomeReport) -> None:
     """Write the workflow annotation and job summary for an outcome.
 
@@ -1192,14 +1206,10 @@ def _emit(*, report: OutcomeReport) -> None:
     body = report.headline
     if report.detail:
         body = f"{body}: {report.detail}"
-    # Workflow-command payloads need `%`, CR and LF percent-encoded, in that
-    # order -- escaping `%` last would re-escape the escapes.
-    escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
-    print(f"::{annotation} title={title}::{escaped}")
+    print(f"::{annotation} title={title}::{_command_data(text=body)}")
     for note in report.notes:
         # A narrative degradation warns without reddening the check (#2803).
-        escaped_note = note.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
-        print(f"::warning title={title}::{escaped_note}")
+        print(f"::warning title={title}::{_command_data(text=note)}")
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:

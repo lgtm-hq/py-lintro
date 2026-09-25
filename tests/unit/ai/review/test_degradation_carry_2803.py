@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from assertpy import assert_that
@@ -47,6 +48,7 @@ from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.resume import plan_resume, records_for_reviewed
 from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
@@ -303,7 +305,10 @@ def test_a_per_file_reason_without_files_redoes_the_whole_head() -> None:
     coverage = (CoverageRecord(path="a.py", patch_hash="h1"),)
 
     assert_that(scope.whole_head).is_true()
-    assert_that(scope.filter_coverage(coverage=coverage, hashes={})).is_empty()
+    # The file is unchanged, so only the whole-head scope drops its record.
+    assert_that(
+        scope.filter_coverage(coverage=coverage, hashes={"a.py": "h1"}),
+    ).is_empty()
 
 
 def test_the_redo_also_drops_a_same_hash_sibling() -> None:
@@ -782,3 +787,27 @@ def test_a_redo_file_the_round_never_reached_stays_evicted() -> None:
     )
     (row,) = carried
     assert_that(row.paths).is_equal_to(("b.py",))
+
+
+def test_a_fresh_pass_failure_keeps_its_own_note_not_the_carried_one() -> None:
+    """A failure this round leaves an outcome, so the carried note stays out."""
+    metadata = replace(
+        _metadata(
+            CoverageDegradation(
+                reason=_Reason.SYNTHESIS_FAILED,
+                chunk_index=SYNTHESIS_CHUNK_INDEX,
+            ),
+        ),
+        synthesis=SynthesisOutcome(
+            findings_added=0,
+            truncated=False,
+            failed=True,
+            diff_files_included=1,
+            diff_files_total=1,
+        ),
+    )
+
+    lines = format_pass_note_lines(metadata=metadata)
+
+    assert_that(" ".join(lines)).does_not_contain(CARRIED_SYNTHESIS_NOTE)
+    assert_that(" ".join(lines)).contains("did not complete")

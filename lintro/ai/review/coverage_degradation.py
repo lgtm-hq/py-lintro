@@ -314,6 +314,8 @@ def format_narrative_note(*, metadata: ReviewMetadata) -> str:
     outcomes. A round that carries an earlier round's failure of a pass it
     did not run again (#2803) has no outcome to describe, so the failure is
     named here; the failed per-PR question pass has no outcome note at all.
+    A pass that failed this round always leaves an outcome (``failed``), so
+    a missing outcome with the reason present means the reason was carried.
 
     Args:
         metadata: Review run metadata carrying ``coverage_degradations``.

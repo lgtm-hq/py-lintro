@@ -157,8 +157,8 @@ def format_narrative_note_line(*, metadata: ReviewMetadata) -> str:
         metadata: Review run metadata carrying ``coverage_degradations``.
 
     Returns:
-        The note wrapped in ``<sub>``, or an empty string when no narrative
-        degradation lacks its own note.
+        The note wrapped in ``<sub>``, or an empty string when there is no
+        narrative degradation to report.
     """
     note = format_narrative_note(metadata=metadata)
     if not note:
