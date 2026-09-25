@@ -21,6 +21,12 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.171.0] - 2026-09-25
+
+### Added
+
+- **ai-review**: two review slots and a per-PR review budget (#2811) (ae22696)
+
 ## [0.170.0] - 2026-09-24
 
 ### Added
