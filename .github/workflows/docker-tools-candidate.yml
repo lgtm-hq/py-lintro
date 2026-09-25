@@ -78,7 +78,7 @@ jobs:
       github.actor == 'renovate[bot]' &&
       needs.resolve-pr.result == 'success'
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@86e29ba560701a8d73f31713eb0841ef50f6029c # v0.74.5
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
     permissions:
       contents: read
       packages: write
@@ -103,7 +103,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '86e29ba560701a8d73f31713eb0841ef50f6029c' # v0.74.5
+      tooling-ref: '234e84901ae4ac14f2d44f02fad517d95712cec3' # v0.75.0
       egress-policy: block
       egress-preset: docker
       allowed-endpoints-mode: replace
@@ -186,13 +186,6 @@ jobs:
       - name: Show digest diff
         if: steps.update.outputs.changed == 'true'
         run: git diff --check
-      - name: Configure commit
-        if: steps.update.outputs.changed == 'true'
-        run: |
-          git config user.name 'lgtm-digest-bump[bot]'
-          git config user.email 'lgtm-digest-bump[bot]@users.noreply.github.com'
-          git add Dockerfile docker/ai-tools.Dockerfile
-          git commit -m "chore(deps): pin tools candidate digest"
       - name: Mint lgtm-digest-bump token
         if: steps.update.outputs.changed == 'true'
         id: digest-app
@@ -202,15 +195,20 @@ jobs:
           app-id: ${{ secrets.DIGEST_APP_ID }}
           private-key: ${{ secrets.DIGEST_APP_PRIVATE_KEY }}
           permission-contents: write
-      - name: Push digest commit
+      - name: Create signed digest commit
         if: steps.update.outputs.changed == 'true'
-        env:
-          DIGEST_TOKEN: ${{ steps.digest-app.outputs.token }}
-          REPOSITORY: ${{ github.repository }}
-          BRANCH: ${{ github.ref_name }}
-        # The token travels in an Authorization header only, never in the
-        # remote URL, so a failed push cannot echo it in the printed remote.
-        run: |
-          auth="$(printf 'x-access-token:%s' "${DIGEST_TOKEN}" | base64 | tr -d '\n')"
-          git -c "http.extraheader=AUTHORIZATION: basic ${auth}" \
-            push "https://github.com/${REPOSITORY}.git" "HEAD:${BRANCH}"
+        # GitHub creates and signs the commit (createCommitOnBranch), so it
+        # satisfies main's required_signatures once the PR squash-merges.
+        # Append mode never moves the ref and fails cleanly if Renovate pushed
+        # again after this run started; that newer push starts its own run.
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
+        with:
+          token: ${{ steps.digest-app.outputs.token }}
+          branch: ${{ github.ref_name }}
+          mode: append
+          expected-head: ${{ github.sha }}
+          message: 'chore(deps): pin tools candidate digest'
+          files: |
+            Dockerfile
+            docker/ai-tools.Dockerfile

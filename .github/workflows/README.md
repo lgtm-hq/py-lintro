@@ -166,11 +166,14 @@ validation channels (see "Validation-only switches" below and
   version directly until the recovery workflow (lgtm-hq/lgtm-ci#966) lands.
 - **docker-tools-candidate.yml** — On an in-repository `renovate/**` push that changes a
   tool-version manifest, builds a candidate `lintro-tools` image and commits its digest
-  to both Dockerfile pin sites. The app-token push retriggers PR checks; its
-  `lgtm-digest-bump[bot]` actor fails the candidate job gate, so the commit cannot start
-  a second candidate build. Renovate normally preserves that digest commit as a branch
-  modification; a rebase that discards it simply causes the actor-gated flow to build a
-  fresh candidate.
+  to both Dockerfile pin sites. The commit is created through the API by lgtm-ci's
+  `create-signed-commit` action in append mode (#2825), so GitHub signs it and it
+  satisfies `required_signatures`; it fails cleanly if Renovate pushed again meanwhile.
+  The app-token commit retriggers PR checks; its `lgtm-digest-bump[bot]` actor fails the
+  candidate job gate, so the commit cannot start a second candidate build. The org
+  Renovate preset lists the bot in `gitIgnoredAuthors` (lgtm-hq/.github#53), so the
+  commit does not mark the PR as edited; a Renovate rebase drops it and the actor-gated
+  flow builds a fresh candidate.
 - **docker-tools-publish.yml** — Validates tools-image pull requests and runs the weekly
   no-cache rebuild for CVE freshness. Maintainer `workflow_dispatch` can publish a tools
   image explicitly. Merged Renovate candidates are promoted by digest, without a
@@ -312,8 +315,10 @@ Delete both variables once a validation round is recorded.
   via lgtm-ci release workflows)
 - **`secrets.DIGEST_APP_ID` / `secrets.DIGEST_APP_PRIVATE_KEY`** — The dedicated
   `lgtm-digest-bump` GitHub App (Contents read/write only), minted immediately before
-  the candidate digest commit with explicit `permission-contents: write`. It is
-  installed only on `py-lintro`; do not substitute `RELEASE_APP_*`.
+  the candidate digest commit with explicit `permission-contents: write`. Its token
+  creates that commit via `createCommitOnBranch` (GitHub-signed, attributed to
+  `lgtm-digest-bump[bot]`). It is installed only on `py-lintro`; do not substitute
+  `RELEASE_APP_*`.
 - **`secrets.MIRROR_APP_ID` / `secrets.MIRROR_APP_PRIVATE_KEY`** — The dedicated
   `lgtm-mirror-bot` GitHub App (Contents R/W + Pull requests R/W), installed only on
   `lintro-pre-commit`. Its installation token mints the mirror bump commit via
