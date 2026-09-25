@@ -193,7 +193,7 @@ CMD ["--help"]
 # manages the digest bump. Only the `ai` target below depends on this stage, so
 # `--target base` / `--target full` builds never pull it.
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:6e8f5297929bd7fd26cda7700206456719363a21df6360f90aada994e8d89106 AS aitools
+FROM ghcr.io/lgtm-hq/lintro-ai-tools:latest@sha256:72d43b897c9571f257a4220ad62ac6e1ce305a89c0240dd59e00aee961328f8a AS aitools
 
 # -----------------------------------------------------------------------------
 # Stage: ai — full image plus the agent CLIs `--transport cli` drives
