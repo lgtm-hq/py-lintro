@@ -17,7 +17,10 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
-from lintro.ai.review.models.coverage_degradation import CARRIED_CHUNK_INDEX
+from lintro.ai.review.models.coverage_degradation import (
+    CARRIED_CHUNK_INDEX,
+    CoverageDegradation,
+)
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_metadata import ReviewMetadata
@@ -72,6 +75,24 @@ _NOT_REDONE_LABELS: dict[CoverageDegradationReason, str] = {
 }
 
 
+def _not_redone_label(*, item: CoverageDegradation) -> str:
+    """Name a carried per-file reason for the "not redone" clause.
+
+    Args:
+        item: The carried degradation.
+
+    Returns:
+        The label its own clause uses; an unchanged single-file retry is
+        not called a split, and a reason without a label reads as words.
+    """
+    if (
+        item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
+        and not item.split
+    ):
+        return "a single-file chunk retried after exhausting the output limit"
+    return _NOT_REDONE_LABELS.get(item.reason, str(item.reason).replace("_", " "))
+
+
 def _plural(*, count: int, noun: str) -> str:
     """Return ``noun`` pluralized for ``count``.
 
@@ -110,15 +131,13 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     # A per-file reason carried from the attempt this round reruns (#2803)
     # belongs to no chunk of this round; it gets its own clause below and
     # stays out of the per-chunk counts. A carried cut keeps its own wording.
-    carried_reasons = {
-        item.reason
-        for item in recorded
-        if item.chunk_index == CARRIED_CHUNK_INDEX
-        and item.reason is not CoverageDegradationReason.DIFF_TRUNCATED
-    }
     not_redone = sorted(
-        _NOT_REDONE_LABELS.get(reason, str(reason).replace("_", " "))
-        for reason in carried_reasons
+        {
+            _not_redone_label(item=item)
+            for item in recorded
+            if item.chunk_index == CARRIED_CHUNK_INDEX
+            and item.reason is not CoverageDegradationReason.DIFF_TRUNCATED
+        },
     )
     degradations = tuple(
         item
@@ -260,7 +279,12 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     tail = (
         "findings that need the whole chunk in view may go unreported."
         if split_chunks
-        or CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED in carried_reasons
+        or any(
+            item.reason is CoverageDegradationReason.OUTPUT_EXHAUSTION_RETRIED
+            and item.split
+            and item.chunk_index == CARRIED_CHUNK_INDEX
+            for item in recorded
+        )
         else "some issues may go unreported."
     )
     if not coverage:
