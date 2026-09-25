@@ -43,12 +43,16 @@ class CoverageDegradation:
         limit: The numeric bound the degradation reports, when it has one: the
             per-call turn limit for ``TURN_LIMIT_REACHED`` (#2685). Serialized
             only when set, so older records round-trip byte-identically.
+        detail: Why the limit applied, when a reason has more than one cause:
+            the failed question pass's kind, plus "; retried once" after a
+            failed retry (#2813). Serialized only when set.
     """
 
     reason: CoverageDegradationReason
     chunk_index: int
     split: bool = True
     limit: int | None = None
+    detail: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the degradation for JSON and MCP payloads.
@@ -70,4 +74,6 @@ class CoverageDegradation:
         if self.limit is not None:
 
             payload["limit"] = self.limit
+        if self.detail:
+            payload["detail"] = self.detail
         return payload

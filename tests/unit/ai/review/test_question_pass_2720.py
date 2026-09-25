@@ -421,10 +421,19 @@ def test_the_questions_ceiling_is_reserved_in_the_prompt_overhead() -> None:
 async def test_a_turn_limited_call_keeps_its_billed_usage(tmp_path: Path) -> None:
     """A CLI call stopped at the turn limit was billed; the failed pass says so.
 
+    The turn limit is retried once (#2813); here the retry is turn-limited
+    too, so both billed attempts count and the degradation names the kind.
+
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
     seam = _scripted_seam(
+        AITurnLimitError(
+            "Claude CLI stopped at the per-call turn limit (12 turns)",
+            input_tokens=700,
+            output_tokens=30,
+            cost_estimate=0.07,
+        ),
         AITurnLimitError(
             "Claude CLI stopped at the per-call turn limit (12 turns)",
             input_tokens=700,
@@ -439,11 +448,18 @@ async def test_a_turn_limited_call_keeps_its_billed_usage(tmp_path: Path) -> Non
 
     assert_that(result.metadata.partial).is_false()
     assert_that(
-        [item.reason for item in result.metadata.coverage_degradations],
-    ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])
-    # 700 (the billed question call) + 10 + 10.
-    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(720)
-    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.09, 1e-9)
+        [(item.reason, item.detail) for item in result.metadata.coverage_degradations],
+    ).is_equal_to(
+        [
+            (
+                CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
+                "turn_limit; retried once",
+            ),
+        ],
+    )
+    # 700 + 700 (both billed question calls) + 10 + 10.
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(1420)
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.16, 1e-9)
 
 
 async def test_fenced_json_is_accepted() -> None:

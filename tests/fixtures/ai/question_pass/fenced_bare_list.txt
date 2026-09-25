@@ -1,0 +1,9 @@
+```json
+[
+  {
+    "id": "G1",
+    "question": "Does the caller grant the scope?",
+    "rationale": "r"
+  }
+]
+```
