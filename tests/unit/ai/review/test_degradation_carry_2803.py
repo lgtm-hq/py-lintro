@@ -48,7 +48,7 @@ from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.patch_hash import normalized_patch_hash
-from lintro.ai.review.resume import plan_resume
+from lintro.ai.review.resume import plan_resume, records_for_reviewed
 from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
 
 _HEAD = "b0153e29169bfcb2b702b97ad92be5e4bf84929b"
@@ -726,3 +726,61 @@ def test_a_carried_pass_failure_keeps_its_note_on_the_posted_surfaces() -> None:
     assert_that(lines[1]).contains(CARRIED_SYNTHESIS_NOTE)
     assert_that(lines[1]).contains(CARRIED_VERIFICATION_NOTE)
     assert_that(format_coverage_limited_warning(metadata=metadata)).is_empty()
+
+
+def test_a_redo_file_the_round_never_reached_stays_evicted() -> None:
+    """Two files owe a redo and the round stops after one: the other keeps no credit.
+
+    The saved coverage must not bring the unreached file's old record back,
+    and its degradation is recorded again for it alone.
+    """
+    diffs = {
+        path: (
+            f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
+            f"@@ -1,1 +1,2 @@\n context\n+change-{path}\n"
+        )
+        for path in ("a.py", "b.py")
+    }
+    hashes = {path: normalized_patch_hash(diff) for path, diff in diffs.items()}
+    context = ReviewContext(
+        base_ref="main",
+        head_ref=_HEAD,
+        changed_files=[
+            ChangedFile(path=path, status="modified", additions=1, deletions=0)
+            for path in diffs
+        ],
+        unified_diff="\n".join(diffs.values()),
+        pr_metadata=None,
+    )
+    prior = ReviewState(
+        runs=_state(
+            _record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=("a.py", "b.py")),
+        ).runs,
+        coverage=tuple(
+            CoverageRecord(path=path, patch_hash=hashes[path], round=1)
+            for path in diffs
+        ),
+    )
+    plan = plan_resume(context=context, prior=prior)
+
+    saved = records_for_reviewed(
+        plan=plan,
+        reviewed_paths=("a.py",),
+        head_sha=_HEAD,
+        round_number=2,
+        prior=prior,
+    )
+    carried = carried_degradations(
+        prior=prior,
+        current=(),
+        reviewed=("a.py",),
+        steps_ran=(),
+        hashes=hashes,
+    )
+
+    assert_that(plan.queue).contains("a.py", "b.py")
+    assert_that([(record.path, record.round) for record in saved]).is_equal_to(
+        [("a.py", 2)],
+    )
+    (row,) = carried
+    assert_that(row.paths).is_equal_to(("b.py",))

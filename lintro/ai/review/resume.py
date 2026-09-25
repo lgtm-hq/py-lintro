@@ -201,7 +201,13 @@ def records_for_reviewed(
     }
     merged: dict[tuple[str, str], CoverageRecord] = {}
     if prior is not None:
-        for record in prior.coverage:
+        # The redo's eviction holds in the saved coverage too: a file set aside
+        # for a redo this round never reached keeps no credit (#2803).
+        kept = redo_scope(prior=prior, hashes=plan.hashes).filter_coverage(
+            coverage=prior.coverage,
+            hashes=plan.hashes,
+        )
+        for record in kept:
             merged[record.identity] = record
     reviewed = set(reviewed_paths)
     for item in plan.classified:
