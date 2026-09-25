@@ -21,6 +21,21 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.171.1] - 2026-09-25
+
+### Changed
+
+- **deps**: bump the Claude Code CLI pin to 2.1.282 (#2830) (f087b43)
+- **deps**: update dependency astral-sh/uv to 0.12.19 (patch) (#2768) (f4e1231)
+- **deps**: update python:3.14-slim docker digest to caaf356 (#2738) (43cd867)
+
+### Fixed
+
+- **ai-review**: parse Opus-shaped question answers, classify and retry once (#2826)
+  (9cf863f)
+- **ai-review**: keep the cumulative PR spend total on every state path (#2817)
+  (1796e58)
+
 ## [0.171.0] - 2026-09-25
 
 ### Added
