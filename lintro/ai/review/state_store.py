@@ -142,10 +142,10 @@ def load_ci_state(
         # One visible line per load, not one per part (#2814).
         logger.info(
             "Skipped {} review-state part(s) for another repository or pull "
-            "request (want {} #{}): {}",
+            "request (want {}, {}): {}",
             len(skipped),
             repo or "any repository",
-            pr_number,
+            f"#{pr_number}" if pr_number else "no pull request",
             ", ".join(skipped),
         )
     if not loaded:

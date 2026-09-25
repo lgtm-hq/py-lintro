@@ -472,7 +472,7 @@ def test_a_part_skipped_for_another_pr_is_logged_at_info(tmp_path: Path) -> None
 
     skipped = [line for line in messages if "part-0001.json" in line]
     assert_that(skipped).is_length(1)
-    assert_that(skipped[0]).contains("INFO").contains("want o/r #2817")
+    assert_that(skipped[0]).contains("INFO").contains("want o/r, #2817")
 
 
 def test_many_skipped_parts_log_one_info_line(tmp_path: Path) -> None:
@@ -493,3 +493,23 @@ def test_many_skipped_parts_log_one_info_line(tmp_path: Path) -> None:
     summaries = [line for line in messages if "Skipped" in line]
     assert_that(summaries).is_length(1)
     assert_that(summaries[0]).contains("Skipped 5 review-state part(s)")
+
+
+def test_a_no_pr_load_names_no_pull_request_in_its_summary(tmp_path: Path) -> None:
+    """A no-PR load says so, instead of rendering the key as ``#0``.
+
+    Args:
+        tmp_path: Scratch state directory.
+    """
+    _part(tmp_path, "part-0001.json", {"repo": "o/r", "pr_number": 5})
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="INFO")
+    try:
+        load_ci_state(directory=tmp_path, repo="", pr_number=0)
+    finally:
+        logger.remove(sink)
+
+    summaries = [line for line in messages if "Skipped" in line]
+    assert_that(summaries).is_length(1)
+    assert_that(summaries[0]).contains("want any repository, no pull request")
+    assert_that(summaries[0]).does_not_contain("#0")
