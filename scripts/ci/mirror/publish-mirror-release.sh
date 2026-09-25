@@ -228,37 +228,50 @@ require_auto_merge_enabled
 base_oid="$(git rev-parse origin/main)"
 
 # Reuse-or-heal (#2742 review): a branch left over from an earlier run is
-# only thrown away when its PR cannot merge. An open PR against main
-# (auto-merge still pending from a cancelled or timed-out run) is reused
-# as-is unless its merge state is DIRTY: a dirty PR would replay the same
-# conflict every rerun and is healed by recreation from the mirror's
-# current main, which cannot conflict. Its stale PR closes with the deleted
-# branch. A leftover branch with no open PR is not deleted: reset mode
-# moves it. A failed `pr list` fails the run — guessing "no PR" would
+# only thrown away when its PR cannot merge. The lookup lists every open PR
+# whose head is the bump branch, whatever its base: filtering on --base main
+# would miss a PR against another base, and resetting the branch in place
+# would then rewrite that PR's head and leave `pr create` to fail on the
+# existing head (#2835 review). An open PR against main (auto-merge still
+# pending from a cancelled or timed-out run) is reused as-is unless its
+# merge state is DIRTY: a dirty PR would replay the same conflict every
+# rerun. Any other open PR — dirty, or against another base, which merging
+# would not update main — is healed by deleting the branch, which closes
+# it, and recreating it from the mirror's current main, which cannot
+# conflict. A leftover branch with no open PR at all is not deleted: reset
+# mode moves it. A failed `pr list` fails the run — guessing "no PR" would
 # rewrite the branch under the very PR that needs reusing or healing.
-existing_pr=""
 if git ls-remote --heads origin "$BRANCH" | grep -q .; then
-	existing_pr="$(gh pr list --head "$BRANCH" --base main --state open --json number \
-		--jq '.[0].number // ""')"
-	if [[ -n "$existing_pr" ]]; then
-		pr_info="$(gh pr view "$existing_pr" --json state,mergeStateStatus,baseRefName \
-			--jq '.state + " " + (.mergeStateStatus // "UNKNOWN") + " " + .baseRefName')"
-		read -r pr_state pr_merge_state pr_base <<<"$pr_info"
+	# One "number base mergeState" line per open PR for the head; an empty
+	# mergeStateStatus reads as UNKNOWN (not yet computed, not DIRTY).
+	open_prs="$(gh pr list --repo "$MIRROR_REPO" --head "$BRANCH" --state open \
+		--json number,baseRefName,mergeStateStatus \
+		--jq '.[] | "\(.number) \(.baseRefName) \(.mergeStateStatus // "" | if . == "" then "UNKNOWN" else . end)"')"
+	reusable_pr=""
+	reusable_state=""
+	while read -r open_number open_base open_merge_state; do
+		[[ -z "$open_number" ]] && continue
 		# Any open PR against main whose merge state is not DIRTY (CLEAN,
 		# BLOCKED, UNKNOWN, UNSTABLE, BEHIND, HAS_HOOKS) is
-		# mergeable-in-waiting; only a dirty PR — or one targeting another
-		# base, which merging would not update main — heals.
-		if [[ "$pr_state" == "OPEN" && "$pr_merge_state" != "DIRTY" && "$pr_base" == "main" ]]; then
-			log_info "Reusing open PR #${existing_pr} for ${BRANCH} (${pr_state} ${pr_merge_state})"
-			pr_number="$existing_pr"
-			pr_url="https://github.com/${MIRROR_REPO}/pull/${pr_number}"
-			merge_mirror_pr
-			finish_after_merge
-			exit 0
+		# mergeable-in-waiting.
+		if [[ "$open_base" == "main" && "$open_merge_state" != "DIRTY" ]]; then
+			reusable_pr="$open_number"
+			reusable_state="$open_merge_state"
 		fi
-		# Deleting the branch closes the unmergeable PR, so the fresh PR
-		# below never inherits its cached DIRTY state or foreign base.
-		log_warning "PR #${existing_pr} for ${BRANCH} is not mergeable (${pr_info}); healing the branch"
+	done <<<"$open_prs"
+	if [[ -n "$reusable_pr" ]]; then
+		log_info "Reusing open PR #${reusable_pr} for ${BRANCH} (OPEN ${reusable_state} main)"
+		pr_number="$reusable_pr"
+		pr_url="https://github.com/${MIRROR_REPO}/pull/${pr_number}"
+		merge_mirror_pr
+		finish_after_merge
+		exit 0
+	fi
+	if [[ -n "$open_prs" ]]; then
+		# Deleting the branch closes every open PR on it, so the fresh PR
+		# below never inherits a cached DIRTY state or a foreign base, and
+		# `pr create` never meets an existing PR for the head.
+		log_warning "Open PR(s) for ${BRANCH} cannot merge into main (${open_prs//$'\n'/; }); healing the branch"
 		gh api -X DELETE "repos/${MIRROR_REPO}/git/refs/heads/${BRANCH}"
 	else
 		# No PR to close: reset mode below moves the stale branch onto

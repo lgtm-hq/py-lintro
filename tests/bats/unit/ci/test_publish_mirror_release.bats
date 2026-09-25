@@ -10,9 +10,10 @@
 # (#2834); the auto-merge precondition runs before any mirror write;
 # `pr create` fires exactly once per fresh run; the merge poll handles
 # OPEN → MERGED and fails fast on closed/dirty PRs; a healthy open PR is
-# reused instead of healed; an unmergeable PR's branch is deleted before
-# the reset; and a stale branch with no PR is reset in place — never plain
-# git commit or rebase.
+# reused instead of healed; an unmergeable PR's branch — dirty, or open
+# against another base — is deleted before the reset; and a stale branch
+# with no open PR on any base is reset in place — never plain git commit or
+# rebase.
 
 load "../../helpers/common"
 
@@ -26,29 +27,26 @@ setup() {
 
 	# Stub gh: records every invocation, answers the PR state poll from
 	# GH_STATES (one state per poll, last one repeats), and fakes `pr list`
-	# / `pr view` / `pr create` / `pr merge`.
+	# / `pr view` / `pr create` / `pr merge`. `pr list` prints the script's
+	# jq-shaped "number base mergeState" lines from GH_OPEN_PRS (entries
+	# comma-separated, empty = no open PR on any base).
 	GH_LOG="${BATS_TEST_TMPDIR}/gh.log"
 	: >"${GH_LOG}"
 	cat >"${STUB_BIN}/gh" <<STUB
 #!/usr/bin/env bash
 echo "\$*" >>"${GH_LOG}"
 if [[ "\$1" == "pr" && "\$2" == "list" ]]; then
-	if [[ "\${GH_OPEN_PR:-0}" == "1" ]]; then
-		echo "22"
-	else
-		echo ""
+	if [[ "\${GH_PR_LIST_RC:-0}" != "0" ]]; then
+		echo "HTTP 502: pr list failed" >&2
+		exit "\${GH_PR_LIST_RC}"
 	fi
+	[[ -n "\${GH_OPEN_PRS:-}" ]] && printf '%s\n' "\$GH_OPEN_PRS" | tr ',' '\\n'
 	exit 0
 fi
 if [[ "\$1" == "pr" && "\$2" == "view" ]]; then
 	case "\$*" in
 	*autoMergeRequest*)
 		echo "\${GH_AUTO_ARMED:-false}"
-		;;
-	*baseRefName*)
-		# Reuse-path guard: "state mergeState base" ("UNKNOWN" fills an
-		# empty mergeStateStatus, as the script's jq fallback does).
-		printf '%s\n' "\${GH_PR_VIEW:-OPEN CLEAN main}"
 		;;
 	*)
 		# Merge poll: "state mergeState" per poll from GH_STATES, last one
@@ -165,8 +163,8 @@ run_script() {
 	env PATH="${STUB_BIN}:${PATH}" \
 		GH_TOKEN=stub \
 		GH_STATES="${GH_STATES:-MERGED MERGED}" \
-		GH_OPEN_PR="${GH_OPEN_PR:-0}" \
-		GH_PR_VIEW="${GH_PR_VIEW:-OPEN CLEAN main}" \
+		GH_OPEN_PRS="${GH_OPEN_PRS:-}" \
+		GH_PR_LIST_RC="${GH_PR_LIST_RC:-0}" \
 		GH_AUTO_ARMED="${GH_AUTO_ARMED:-false}" \
 		GH_ALLOW_AUTO_MERGE="${GH_ALLOW_AUTO_MERGE:-true}" \
 		GIT_BRANCH_EXISTS="${GIT_BRANCH_EXISTS:-0}" \
@@ -278,8 +276,7 @@ dependencies = ["lintro==1.2.3"]'
 
 @test "already-armed auto-merge is not re-armed on the reuse path" {
 	GIT_BRANCH_EXISTS="1"
-	GH_OPEN_PR="1"
-	GH_PR_VIEW="OPEN CLEAN main"
+	GH_OPEN_PRS="22 main CLEAN"
 	GH_AUTO_ARMED="true"
 	GH_STATES="MERGED MERGED"
 	run run_script
@@ -340,12 +337,11 @@ dependencies = ["lintro==1.2.3"]'
 
 @test "a healthy open bump PR is reused instead of healed" {
 	GIT_BRANCH_EXISTS="1"
-	GH_OPEN_PR="1"
-	GH_PR_VIEW="OPEN BLOCKED main"
+	GH_OPEN_PRS="22 main BLOCKED"
 	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
-	assert_output --partial "Reusing open PR #22 for mirror/bump-lintro-1.2.3"
+	assert_output --partial "Reusing open PR #22 for mirror/bump-lintro-1.2.3 (OPEN BLOCKED main)"
 	assert_output --partial "Mirror PR #22 merged"
 
 	# No heal, no new commit, no new PR on the reuse path.
@@ -360,12 +356,11 @@ dependencies = ["lintro==1.2.3"]'
 
 @test "a dirty open bump PR is healed: branch deleted, then reset by the shared script" {
 	GIT_BRANCH_EXISTS="1"
-	GH_OPEN_PR="1"
-	GH_PR_VIEW="OPEN DIRTY main"
+	GH_OPEN_PRS="22 main DIRTY"
 	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
-	assert_output --partial "is not mergeable (OPEN DIRTY main); healing the branch"
+	assert_output --partial "cannot merge into main (22 main DIRTY); healing the branch"
 
 	# DELETE (closes the unmergeable PR) → shared script reset (first
 	# occurrence of each; finish_after_merge deletes the ref again later).
@@ -380,20 +375,73 @@ dependencies = ["lintro==1.2.3"]'
 	assert_output 1
 }
 
-@test "an open PR against another base is not reused (healed instead)" {
+@test "the open-PR lookup lists PRs for the head on every base" {
 	GIT_BRANCH_EXISTS="1"
-	GH_OPEN_PR="1"
-	GH_PR_VIEW="OPEN CLEAN other-base"
 	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
-	assert_output --partial "is not mergeable (OPEN CLEAN other-base); healing the branch"
 
-	# The stale branch is deleted and a fresh PR is opened against main.
-	run grep -F 'api -X DELETE repos/lgtm-hq/lintro-pre-commit/git/refs/heads/mirror/bump-lintro-1.2.3' "${GH_LOG}"
+	# The lookup names the mirror and the head, and never filters on a
+	# base: a PR against another base must be seen, not mistaken for none.
+	run grep -F "pr list --repo lgtm-hq/lintro-pre-commit --head mirror/bump-lintro-1.2.3 --state open" "${GH_LOG}"
 	assert_success
+	run grep -F -- "--base" <(grep -F "pr list" "${GH_LOG}")
+	assert_failure
+}
+
+@test "an open PR against another base is healed: branch deleted before the commit, fresh PR on main" {
+	GIT_BRANCH_EXISTS="1"
+	GH_OPEN_PRS="22 release CLEAN"
+	GH_STATES="MERGED MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "cannot merge into main (22 release CLEAN); healing the branch"
+	refute_output --partial "Reusing open PR"
+	refute_output --partial "exists with no open PR"
+
+	# DELETE (closes the foreign-base PR) → shared script reset, so the
+	# branch is never reset under that PR's head.
+	run awk '
+		/-X DELETE .*git\/refs\/heads\/mirror\/bump-lintro-1\.2\.3/ && !d { d = NR }
+		/^create-signed-commit$/ && !c { c = NR }
+		END { exit !(d && c && d < c) }' "${GH_LOG}"
+	assert_success
+
+	assert_signed_commit_args
+	# Exactly one fresh PR, against main.
+	run grep -cF "pr create --base main --head mirror/bump-lintro-1.2.3" "${GH_LOG}"
+	assert_output 1
 	run grep -cF "pr create" "${GH_LOG}"
 	assert_output 1
+}
+
+@test "a healthy main PR is reused even alongside a foreign-base PR" {
+	GIT_BRANCH_EXISTS="1"
+	GH_OPEN_PRS="21 release CLEAN,22 main UNKNOWN"
+	GH_STATES="MERGED MERGED"
+	run run_script
+	assert_success
+	assert_output --partial "Reusing open PR #22 for mirror/bump-lintro-1.2.3 (OPEN UNKNOWN main)"
+
+	run grep -cxF "create-signed-commit" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_output 0
+}
+
+@test "a failed open-PR lookup fails the run before any branch write" {
+	GIT_BRANCH_EXISTS="1"
+	GH_PR_LIST_RC="1"
+	run run_script
+	assert_failure
+	refute_output --partial "exists with no open PR"
+
+	run grep -cF "api -X DELETE" "${GH_LOG}"
+	assert_output 0
+	run grep -cxF "create-signed-commit" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_output 0
 }
 
 @test "a stale branch with no open PR is reset in place, not deleted first" {
@@ -402,6 +450,7 @@ dependencies = ["lintro==1.2.3"]'
 	run run_script
 	assert_success
 	assert_output --partial "exists with no open PR; resetting it onto origin/main"
+	refute_output --partial "healing the branch"
 
 	# Reset mode moves the branch in one step; the only branch DELETE is
 	# finish_after_merge's cleanup, after the signed commit.

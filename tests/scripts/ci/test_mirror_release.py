@@ -372,14 +372,17 @@ def test_publish_script_reuses_a_healthy_open_pr_before_healing() -> None:
     would close a healthy PR and restart its checks from zero. The script
     asks for the PR's state first and only heals a dirty/abandoned branch.
     Reuse is gated on the PR targeting main (merging a PR against another
-    base would tag a main that never received the bump).
+    base would tag a main that never received the bump). The lookup lists
+    open PRs for the head on every base: a --base main filter would miss a
+    foreign-base PR and reset the branch under it (#2835 review).
     """
     body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
 
-    assert_that(body).contains("gh pr list --head")
-    assert_that(body).contains("--base main")
-    assert_that(body).contains("mergeStateStatus")
-    assert_that(body).contains("baseRefName")
+    lookup = next(line for line in body.splitlines() if "gh pr list" in line)
+    assert_that(lookup).contains('--repo "$MIRROR_REPO" --head "$BRANCH" --state open')
+    assert_that(lookup).does_not_contain("--base")
+    assert_that(body).contains("--json number,baseRefName,mergeStateStatus")
+    assert_that(body).contains('"$open_base" == "main"')
     assert_that(body).contains("Reusing open PR")
     assert_that(body).contains("healing the branch")
 
