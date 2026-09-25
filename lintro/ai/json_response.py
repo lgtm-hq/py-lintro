@@ -10,6 +10,8 @@ from typing import Any
 
 __all__ = [
     "CliSchemaRequest",
+    "JsonCandidate",
+    "iter_json_candidates",
     "load_json_object",
     "parse_fix_response_payload",
     "parse_review_response_payload",
@@ -154,6 +156,51 @@ def _extract_json_span(text: str, *, expect_object: bool = False) -> str | None:
         if _is_parseable_json(span):
             return span
     return spans[0]
+
+
+@dataclass(frozen=True, slots=True)
+class JsonCandidate:
+    """One JSON value found in a model answer.
+
+    Attributes:
+        payload: The decoded value.
+        whole: True when it is the entire answer (optionally inside one
+            fence), False when it is a span embedded in prose.
+    """
+
+    payload: Any
+    whole: bool
+
+
+def iter_json_candidates(*, content: str) -> Iterator[JsonCandidate]:
+    """Yield every JSON value in *content*, in the order a reader meets it.
+
+    First the whole answer (as-is, or as the body of a single fenced block),
+    then each fenced block, then each balanced span in the prose. Unlike
+    :func:`strip_json_fences`, nothing is chosen here: a caller that knows
+    which shape it wants can skip a stray bracketed citation (``[5]``) and
+    keep the real payload beside it (#2826).
+
+    Args:
+        content: Raw model response text.
+
+    Yields:
+        JsonCandidate: Each parseable value, in order.
+    """
+    stripped = content.strip()
+    blocks = [block.strip() for block in _JSON_FENCE_PATTERN.findall(stripped)]
+    whole_text = stripped
+    if len(blocks) == 1 and not _JSON_FENCE_PATTERN.sub("", stripped).strip():
+        whole_text = blocks[0]
+    if _is_parseable_json(whole_text):
+        yield JsonCandidate(payload=json.loads(whole_text), whole=True)
+        return
+    for block in blocks:
+        if _is_parseable_json(block):
+            yield JsonCandidate(payload=json.loads(block), whole=False)
+    for span in _iter_balanced_json_spans(stripped):
+        if _is_parseable_json(span):
+            yield JsonCandidate(payload=json.loads(span), whole=False)
 
 
 def strip_json_fences(*, content: str, expect_object: bool = False) -> str:

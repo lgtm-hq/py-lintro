@@ -36,8 +36,9 @@ or a positive value.
 When the per-PR question pass fails, every chunk is reviewed with the rubric alone. The
 run log then says why, as one of `empty`, `not_json`, `not_list`, `no_question`,
 `turn_limit` or `call_failed`, and quotes the redacted start of the model's answer when
-one was received. `turn_limit` and `not_json` are retried once; the coverage
-degradation's `detail` records the kind and whether a retry was made.
+one was received (for `turn_limit`, which leaves no answer, it gives the turn count
+instead). `turn_limit` and `not_json` are retried once; the coverage degradation's
+`detail` records the kind and whether a retry was made.
 
 ## Update in place
 

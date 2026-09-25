@@ -21,7 +21,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from lintro.ai.json_response import strip_json_fences
+from lintro.ai.json_response import iter_json_candidates
 from lintro.ai.review.enums.question_failure_kind import QuestionFailureKind
 from lintro.ai.review.prompt_redaction import redact_prompt_text
 
@@ -50,6 +50,15 @@ class ParsedQuestions:
 def parse_questions(content: str) -> ParsedQuestions:
     """Return the usable questions in *content* under the tolerant grammar.
 
+    Every JSON value in the answer is a candidate, and the first that yields
+    questions wins, so a stray bracketed citation in prose (``see [5]``)
+    cannot shadow the real payload beside it (#2826). When none yields:
+
+    * an answer that is wholly JSON is classified by that value;
+    * otherwise by the first embedded object;
+    * a list of objects without a question is ``no_question``;
+    * prose whose only brackets are scalar lists is ``not_json`` (retried).
+
     Args:
         content: The model's raw answer.
 
@@ -58,23 +67,49 @@ def parse_questions(content: str) -> ParsedQuestions:
     """
     if not content.strip():
         return ParsedQuestions(failure=QuestionFailureKind.EMPTY)
-    try:
-        payload = json.loads(strip_json_fences(content=content))
-    except (json.JSONDecodeError, ValueError):
-        return ParsedQuestions(failure=QuestionFailureKind.NOT_JSON)
+    candidates = list(iter_json_candidates(content=content))
+    for candidate in candidates:
+        questions = _questions_in(candidate.payload)
+        if questions:
+            return ParsedQuestions(questions=questions)
+    wholes = [c.payload for c in candidates if c.whole]
+    objects = [c.payload for c in candidates if isinstance(c.payload, dict)]
+    decisive = wholes or objects
+    if decisive:
+        items = _list_source(decisive[0])
+        kind = (
+            QuestionFailureKind.NOT_LIST
+            if items is None
+            else QuestionFailureKind.NO_QUESTION
+        )
+        return ParsedQuestions(failure=kind)
+    if any(
+        isinstance(c.payload, list) and any(isinstance(i, dict) for i in c.payload)
+        for c in candidates
+    ):
+        return ParsedQuestions(failure=QuestionFailureKind.NO_QUESTION)
+    return ParsedQuestions(failure=QuestionFailureKind.NOT_JSON)
+
+
+def _questions_in(payload: Any) -> tuple[str, ...]:
+    """Return the question texts one candidate carries under the grammar.
+
+    Args:
+        payload: A decoded JSON value.
+
+    Returns:
+        The non-empty ``question`` strings of its list source, in order.
+    """
     items = _list_source(payload)
     if items is None:
-        return ParsedQuestions(failure=QuestionFailureKind.NOT_LIST)
-    questions = tuple(
+        return ()
+    return tuple(
         item["question"]
         for item in items
         if isinstance(item, dict)
         and isinstance(item.get("question"), str)
         and item["question"].strip()
     )
-    if not questions:
-        return ParsedQuestions(failure=QuestionFailureKind.NO_QUESTION)
-    return ParsedQuestions(questions=questions)
 
 
 def _list_source(payload: Any) -> list[Any] | None:
@@ -111,8 +146,9 @@ def capture_for_log(content: str) -> str:
         content: The model's raw answer.
 
     Returns:
-        A JSON string literal of at most :data:`CAPTURE_CHARS` source
-        characters.
+        A JSON string literal of the first :data:`CAPTURE_CHARS` characters
+        of the redacted answer (redaction first, so a cut can only split a
+        ``[REDACTED]`` marker, never a secret).
     """
     redacted = redact_prompt_text(text=content, source="question pass answer")
     return json.dumps(redacted[:CAPTURE_CHARS])

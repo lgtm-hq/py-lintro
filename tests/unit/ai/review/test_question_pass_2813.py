@@ -73,6 +73,9 @@ def _fixture(name: str) -> str:
         pytest.param("fenced_bare_list.txt", id="fenced-bare-list"),
         pytest.param("single_key_object.txt", id="single-key-object"),
         pytest.param("prose_wrapped_object.txt", id="prose-wrapped"),
+        # A trailing bracketed citation must not shadow the real payload (#2826).
+        pytest.param("canonical_then_citation.txt", id="canonical-then-citation"),
+        pytest.param("bare_list_then_citation.txt", id="bare-list-then-citation"),
     ],
 )
 def test_the_accepted_shapes_yield_the_question(name: str) -> None:
@@ -100,6 +103,12 @@ def test_the_accepted_shapes_yield_the_question(name: str) -> None:
         ),
         pytest.param("empty.txt", QuestionFailureKind.EMPTY, id="empty"),
         pytest.param("not_json.txt", QuestionFailureKind.NOT_JSON, id="not-json"),
+        # Prose with only scalar brackets is not JSON, so it is retried (#2826).
+        pytest.param(
+            "prose_refusal_with_brackets.txt",
+            QuestionFailureKind.NOT_JSON,
+            id="prose-refusal-with-brackets",
+        ),
     ],
 )
 def test_the_rejected_shapes_name_their_kind(
@@ -234,19 +243,27 @@ async def test_a_failed_retry_records_the_first_kind_and_the_retry() -> None:
 
 
 @pytest.mark.parametrize(
-    "first",
+    ("first", "detail"),
     [
-        pytest.param(_failed(QuestionFailureKind.EMPTY), id="empty"),
-        pytest.param(_failed(QuestionFailureKind.NOT_LIST), id="not-list"),
-        pytest.param(_failed(QuestionFailureKind.NO_QUESTION), id="no-question"),
-        pytest.param(AIProviderError("server error"), id="call-failed"),
+        pytest.param(_failed(QuestionFailureKind.EMPTY), "empty", id="empty"),
+        pytest.param(_failed(QuestionFailureKind.NOT_LIST), "not_list", id="not-list"),
+        pytest.param(
+            _failed(QuestionFailureKind.NO_QUESTION),
+            "no_question",
+            id="no-question",
+        ),
+        pytest.param(AIProviderError("server error"), "call_failed", id="call-failed"),
     ],
 )
-async def test_other_kinds_are_never_retried(first: RunQuestions | Exception) -> None:
+async def test_other_kinds_are_never_retried(
+    first: RunQuestions | Exception,
+    detail: str,
+) -> None:
     """``empty``, ``not_list``, ``no_question`` and ``call_failed``: one call.
 
     Args:
         first: The only attempt's outcome.
+        detail: The literal the degradation must carry.
     """
     script = _Script(first, _ok())
 
@@ -256,7 +273,7 @@ async def test_other_kinds_are_never_retried(first: RunQuestions | Exception) ->
     assert_that(result.failed).is_true()
     assert_that(result.retried).is_false()
     (degradation,) = question_pass_degradations(questions=result)
-    assert_that(degradation.detail).is_equal_to(str(result.failure_kind))
+    assert_that(degradation.detail).is_equal_to(detail)
 
 
 @pytest.mark.parametrize(
