@@ -54,6 +54,9 @@ from lintro.ai.review.resume import plan_resume, records_for_reviewed
 from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
 
 _HEAD = "b0153e29169bfcb2b702b97ad92be5e4bf84929b"
+#: The head the v5 fixture records (PR #2826's final run); kept apart from
+#: ``_HEAD`` so the generic test head can change freely.
+_FIXTURE_SHA = "b0153e29169bfcb2b702b97ad92be5e4bf84929b"
 _OTHER_HEAD = "0" * 40
 #: Current patch hashes for the files the carry tests name.
 _HASHES = {"a.py": "ha", "b.py": "hb"}
@@ -241,7 +244,7 @@ def test_a_real_v5_artifact_loads_with_no_degradations() -> None:
     state = ReviewState.from_artifact_dict(payload)
 
     assert_that(state.runs).is_length(1)
-    assert_that(state.runs[0].identity.sha).is_equal_to(_HEAD)
+    assert_that(state.runs[0].identity.sha).is_equal_to(_FIXTURE_SHA)
     assert_that(state.runs[0].coverage.degradations).is_empty()
     assert_that(state.coverage).is_length(25)
     assert_that(state.pr_spend_usd).is_close_to(7.450541, 1e-6)

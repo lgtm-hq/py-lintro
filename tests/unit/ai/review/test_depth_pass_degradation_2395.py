@@ -351,6 +351,11 @@ async def test_both_depth_passes_failing_still_keeps_the_main_pass(
     assert_that(format_narrative_note(metadata=result.metadata)).is_equal_to(
         GENERATED_QUESTIONS_FAILED_NOTE,
     )
+    # The wording itself is pinned, not only the constant.
+    assert_that(GENERATED_QUESTIONS_FAILED_NOTE).is_equal_to(
+        "The per-PR question pass failed, so every chunk was reviewed against "
+        "the rubric alone.",
+    )
     assert_that(note).does_not_contain("question pass")
     assert_that(note).contains(
         "1 chunk kept only the main pass after the depth-3 adversarial sweep failed",
