@@ -240,7 +240,9 @@ base_oid="$(git rev-parse origin/main)"
 # it, and recreating it from the mirror's current main, which cannot
 # conflict. A leftover branch with no open PR at all is not deleted: reset
 # mode moves it. A failed `pr list` fails the run — guessing "no PR" would
-# rewrite the branch under the very PR that needs reusing or healing.
+# rewrite the branch under the very PR that needs reusing or healing. If the
+# signed commit then fails after a heal, the old PR stays closed with no
+# replacement until the next run, which takes the fresh-branch path.
 if git ls-remote --heads origin "$BRANCH" | grep -q .; then
 	# One "number base mergeState" line per open PR for the head; an empty
 	# mergeStateStatus reads as UNKNOWN (not yet computed, not DIRTY).

@@ -168,6 +168,8 @@ jobs:
         if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
         env:
           GH_TOKEN: ${{ steps.mirror-app.outputs.token }}
+          # The shared helper also writes commit-sha/commit-url to
+          # GITHUB_OUTPUT; this step has no id, so they are unused.
           LGTM_CI_TOOLING_DIR: ${{ github.workspace }}/.lgtm-ci-tooling
           MIRROR_DIR: mirror
           MIRROR_REPO: lgtm-hq/lintro-pre-commit
