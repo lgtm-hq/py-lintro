@@ -235,6 +235,8 @@ class ReviewSessionOptions:
             chunk calls so concurrency cannot violate queue order.
         pr_budget: The PR's review budget for this round (#2796), or None
             when ``ai.review_pr_budget_usd`` is unset.
+        state_pr: The PR this run's state is keyed on (#2814): mid-run
+            checkpoints are stamped with it, as the final write is.
         stop: Optional event set to persist and halt (tests inject this;
             production uses SIGTERM/SIGINT via ``install_review_interrupt``).
         synthesis: Cross-chunk synthesis configuration (#2269). ``None`` or a
@@ -263,6 +265,7 @@ class ReviewSessionOptions:
     force_full: bool = False
     enforce_cost_cap: bool = True
     pr_budget: PrBudget | None = None
+    state_pr: int | None = None
     stop: asyncio.Event | None = None
     synthesis: ReviewSynthesisConfig | None = None
     verify: ReviewVerifyMode = ReviewVerifyMode.P1_AND_LOW_CONFIDENCE

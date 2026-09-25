@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport
@@ -27,10 +28,13 @@ from lintro.ai.enums.config_source import ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.exceptions import AICostBudgetExceededError
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.review.enums.review_strictness import ReviewStrictness
+from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.lifecycle.state import (
     load_prior_review_state,
     persist_review_state,
 )
+from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_record import RunRecord
@@ -38,11 +42,13 @@ from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.pr_budget import PrBudget, resolve_pr_budget
+from lintro.ai.review.resume import plan_resume
 from lintro.ai.review.review_state_codec import (
     decode_state,
     leftover_state_block,
     prune_state_to_fit,
 )
+from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.session import ReviewSessionOptions
 from lintro.ai.review.state_store import load_ci_state, write_state_part
 from lintro.ai.review.sticky.assembly import advance_review_state
@@ -199,9 +205,6 @@ def test_pruning_to_one_run_still_keeps_the_total() -> None:
     assert_that(pruned.review_spend_usd).is_close_to(99.0, 1e-9)
 
 
-# --- Item 2: one "which PR" predicate ---------------------------------------
-
-
 def test_pruning_a_state_without_a_stored_total_keeps_its_run_spend() -> None:
     """A legacy state (spend from its runs only) keeps that spend when pruned."""
     runs = tuple(RunRecord(usage=RunUsage(cost=2.0)) for _ in range(6))
@@ -324,3 +327,169 @@ def test_a_no_pr_load_still_reads_parts_without_a_pr(tmp_path: Path) -> None:
     loaded = load_ci_state(directory=tmp_path, repo="", pr_number=0)
 
     assert_that(loaded.review_spend_usd).is_equal_to(500.0)
+
+
+# --- Head 2: checkpoints carry the final write's PR ------------------------
+
+
+def _write_checkpoint(
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    state_pr: int | None,
+    env_pr: str | None,
+    force_full: bool = False,
+) -> None:
+    """Write one mid-run checkpoint the way ``execute_run`` does.
+
+    Args:
+        tmp_path: The state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+        state_pr: The CLI's ``state_pr`` (``--pr`` or the CI event).
+        env_pr: ``PR_NUMBER``, or None to leave it unset.
+        force_full: One flag for the resume plan and the writer, as
+            ``execute_run`` passes ``options.force_full`` to both.
+    """
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    if env_pr is None:
+        monkeypatch.delenv("PR_NUMBER", raising=False)
+    else:
+        monkeypatch.setenv("PR_NUMBER", env_pr)
+    context = _spend_context()
+    writer = checkpoint_writer(
+        resume=plan_resume(
+            context=context,
+            prior=None,
+            extra_skips=[],
+            groups=(("src/app.py",),),
+            force_full=force_full,
+        ),
+        context=context,
+        prior_state=None,
+        force_full=force_full,
+        policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+        round_spend=lambda: 0.4,
+        state_pr=state_pr,
+    )
+    writer(
+        [
+            ChunkReviewPartial(
+                findings=(),
+                input_tokens=0,
+                output_tokens=0,
+                cost_estimate=0.4,
+                files=("src/app.py",),
+            ),
+        ],
+    )
+
+
+def test_an_event_resolved_pr_stamps_the_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With ``PR_NUMBER`` unset, the checkpoint carries the CLI's resolved PR.
+
+    The named-PR resume load then finds it, instead of silently skipping a
+    part stamped with no PR (Fable on #2817).
+
+    Args:
+        tmp_path: The state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    _write_checkpoint(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        state_pr=2817,
+        env_pr=None,
+    )
+
+    loaded = load_ci_state(directory=tmp_path, repo="o/r", pr_number=2817)
+
+    assert_that(loaded.pr_number).is_equal_to(2817)
+    assert_that(loaded.coverage).is_not_empty()
+    assert_that(loaded.review_spend_usd).is_close_to(0.4, 1e-9)
+
+
+def test_the_resolved_pr_wins_over_the_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The final write's PR, not ``PR_NUMBER``, keys the checkpoint.
+
+    Args:
+        tmp_path: The state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    _write_checkpoint(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        state_pr=2817,
+        env_pr="1",
+    )
+
+    assert_that(
+        load_ci_state(directory=tmp_path, repo="o/r", pr_number=2817).pr_number,
+    ).is_equal_to(2817)
+
+
+def test_without_a_resolved_pr_the_environment_still_stamps(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Library callers without a CLI keep the ``PR_NUMBER`` fallback.
+
+    Args:
+        tmp_path: The state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    _write_checkpoint(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        state_pr=None,
+        env_pr="2817",
+    )
+
+    assert_that(
+        load_ci_state(directory=tmp_path, repo="o/r", pr_number=2817).pr_number,
+    ).is_equal_to(2817)
+
+
+def test_a_part_skipped_for_another_pr_is_logged_at_info(tmp_path: Path) -> None:
+    """The skip is visible in the job log, not silent.
+
+    Args:
+        tmp_path: Scratch state directory.
+    """
+    _part(tmp_path, "part-0001.json", {"repo": "o/r", "pr_number": None})
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="INFO")
+    try:
+        load_ci_state(directory=tmp_path, repo="o/r", pr_number=2817)
+    finally:
+        logger.remove(sink)
+
+    skipped = [line for line in messages if "part-0001.json" in line]
+    assert_that(skipped).is_length(1)
+    assert_that(skipped[0]).contains("INFO").contains("want o/r #2817")
+
+
+def test_many_skipped_parts_log_one_info_line(tmp_path: Path) -> None:
+    """A directory of foreign parts logs one summary, not one line per part.
+
+    Args:
+        tmp_path: Scratch state directory.
+    """
+    for index in range(5):
+        _part(tmp_path, f"part-{index:04d}.json", {"repo": "o/r", "pr_number": 1})
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="INFO")
+    try:
+        load_ci_state(directory=tmp_path, repo="o/r", pr_number=2817)
+    finally:
+        logger.remove(sink)
+
+    summaries = [line for line in messages if "Skipped" in line]
+    assert_that(summaries).is_length(1)
+    assert_that(summaries[0]).contains("Skipped 5 review-state part(s)")

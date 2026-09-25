@@ -1038,6 +1038,7 @@ def _finish_review(
                     basis=resolved_profile.cost_basis,
                 ),
                 pr_budget=pr_budget,
+                state_pr=targets.state_pr,
             ),
             stamp=_MetadataStamp(
                 profile=resolved_profile,

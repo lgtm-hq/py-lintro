@@ -21,6 +21,7 @@ from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.session import ReviewSessionOptions
 from lintro.cli_utils.commands import review as review_module
 from lintro.cli_utils.commands.review import review_command
 from lintro.config.review_config import ReviewConvergenceConfig
@@ -628,3 +629,35 @@ def test_a_converged_skip_keeps_an_open_p1_blocking(
     assert_that(review_calls["get_provider"]).is_equal_to(0)
     assert_that(result.exit_code).is_equal_to(1)
     assert_that(_envelope(output=result.output)["converged"]["open_p1"]).is_equal_to(1)
+
+
+def test_the_event_resolved_pr_keys_the_runs_checkpoints(
+    patched_review: ReviewConvergenceConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--post`` with no ``--pr``: the CI event's PR reaches the round (#2814).
+
+    The final write keys state on the CLI's ``state_pr``; the mid-run
+    checkpoints must be stamped with the same PR, so the session options
+    carry it even when ``PR_NUMBER`` is unset.
+
+    Args:
+        patched_review: Convergence config the command reads.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    del patched_review
+    _with_prior_state(monkeypatch=monkeypatch, state=ReviewState())
+    monkeypatch.setattr(review_module, "_detect_pr_number_from_env", lambda: 42)
+    monkeypatch.delenv("PR_NUMBER", raising=False)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/name")
+    seen: list[int | None] = []
+
+    def _capture(*_args: object, options: ReviewSessionOptions, **_kw: object) -> None:
+        seen.append(options.state_pr)
+        raise _RoundRanError
+
+    monkeypatch.setattr(preparation_module, "run_review", _capture)
+
+    CliRunner().invoke(review_command, ["--post"])
+
+    assert_that(seen).is_equal_to([42])
