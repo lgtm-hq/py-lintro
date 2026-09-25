@@ -207,7 +207,7 @@ def carried_degradations(
     reviewed: Collection[str],
     steps_ran: Collection[DegradationStep],
     hashes: dict[str, str],
-    head_complete: bool = True,
+    head_complete: bool = False,
 ) -> tuple[CoverageDegradation, ...]:
     """Return the earlier degradations this round records again.
 
@@ -228,7 +228,8 @@ def carried_degradations(
         steps_ran: Once-per-round steps this round ran.
         hashes: Current patch hash per file in this round's diff.
         head_complete: Whether every eligible file is covered at the head
-            after this round.
+            after this round. False by default, so a caller that does not know
+            carries a whole-head row rather than dropping it.
 
     Returns:
         The latest round's degradations this round did not redo, excluding
