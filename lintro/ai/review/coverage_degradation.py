@@ -211,7 +211,7 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     if not_redone:
         clauses.append(
             "work the previous attempt at this head degraded was not redone "
-            f"({', '.join(not_redone)}); the next round redoes it",
+            f"({', '.join(not_redone)}); a later round at this head redoes it",
         )
 
     known = {

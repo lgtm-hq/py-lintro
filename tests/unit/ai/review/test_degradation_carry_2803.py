@@ -504,3 +504,44 @@ def test_the_run_record_keeps_every_degradation_at_its_head() -> None:
         [DegradationStep.QUESTION_PASS, DegradationStep.ADVERSARIAL_SWEEP],
     )
     assert_that(coverage.coverage_limited).is_true()
+
+
+def test_a_reviewed_file_does_not_clear_a_question_pass_failure() -> None:
+    """Only the question pass running again clears its failure."""
+    record = _record(
+        _Reason.GENERATED_QUESTIONS_FAILED,
+        chunk_index=SYNTHESIS_CHUNK_INDEX,
+        paths=(),
+    )
+
+    carried = carried_degradations(
+        prior=_state(record),
+        head_sha=_HEAD,
+        current=(),
+        reviewed=("a.py",),
+        steps_ran=(),
+    )
+
+    assert_that(carried).is_equal_to((record.degradation,))
+
+
+def test_a_redo_that_fails_again_reports_only_its_own_failure() -> None:
+    """The fresh row stands; the earlier one is not carried beside it."""
+    fresh = CoverageDegradation(
+        reason=_Reason.TURN_LIMIT_REACHED,
+        chunk_index=0,
+        split=False,
+        paths=("a.py",),
+    )
+
+    carried = carried_degradations(
+        prior=_state(_record(_Reason.TURN_LIMIT_REACHED, paths=("a.py",))),
+        head_sha=_HEAD,
+        current=(fresh,),
+        reviewed=(),
+        steps_ran=(),
+    )
+
+    assert_that(carried).is_empty()
+    note = describe_coverage_degradations(metadata=_metadata(fresh, *carried))
+    assert_that(note).does_not_contain("not redone")

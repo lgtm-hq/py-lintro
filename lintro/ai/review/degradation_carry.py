@@ -161,13 +161,22 @@ def _redone(
     *,
     record: DegradationRecord,
     reviewed: Collection[str],
+    attempted: Collection[str],
     steps_ran: Collection[DegradationStep],
 ) -> bool:
     """Return whether this round redid the work a record degraded.
 
+    A file-step record is redone when its files were reviewed, or when this
+    round attempted any of them and recorded its own degradation for them:
+    a redo that failed again reports that failure, not the earlier one. The
+    redo runs at this round's depth, so a depth-3 sweep failure is redone by
+    a depth-2 rerun that reviews the file: the sweep is not part of that
+    round's contract.
+
     Args:
         record: A degradation from the latest round at this head.
         reviewed: Files this round reviewed.
+        attempted: Files this round's own file-step degradations name.
         steps_ran: Once-per-round steps this round ran.
 
     Returns:
@@ -177,7 +186,9 @@ def _redone(
         paths = record.degradation.paths
         if not paths:
             return bool(reviewed)
-        return all(path in reviewed for path in paths)
+        return all(path in reviewed for path in paths) or any(
+            path in attempted for path in paths
+        )
     return record.step in steps_ran
 
 
@@ -205,11 +216,22 @@ def carried_degradations(
         file-step row takes :data:`CARRIED_CHUNK_INDEX`: no chunk of this
         round read it, so it must not count against this round's chunks.
     """
+    attempted = {
+        path
+        for item in current
+        if item.chunk_index != CARRIED_CHUNK_INDEX
+        for path in item.paths
+    }
     carried: list[CoverageDegradation] = []
     for record in latest_degradations(prior=prior, head_sha=head_sha):
         if record.reason in _CARRIED_BY_COVERAGE or record.step is DegradationStep.RUN:
             continue
-        if _redone(record=record, reviewed=reviewed, steps_ran=steps_ran):
+        if _redone(
+            record=record,
+            reviewed=reviewed,
+            attempted=attempted,
+            steps_ran=steps_ran,
+        ):
             continue
         degradation = record.degradation
         if record.step in _FILE_STEPS:

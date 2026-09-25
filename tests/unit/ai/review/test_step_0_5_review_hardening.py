@@ -257,8 +257,8 @@ async def test_a_failed_second_half_keeps_the_first_half(tmp_path: Path) -> None
     )
     # The loss names only the failed half's files, so a rerun redoes those
     # and not the half that was reviewed (#2803).
-    assert_that(partial.coverage_degradations[-1].paths).does_not_contain("src/a.py")
     assert_that(partial.coverage_degradations[-1].paths).is_not_empty()
+    assert_that(partial.coverage_degradations[-1].paths).does_not_contain("src/a.py")
     assert_that(partial.input_tokens).is_equal_to(10)
 
 
