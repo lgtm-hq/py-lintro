@@ -18,6 +18,7 @@ from lintro.ai.review.coverage import (
     queue_paths,
     review_eligible_paths,
 )
+from lintro.ai.review.degradation_carry import redo_scope
 from lintro.ai.review.delta import open_thread_paths
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.import_graph import importers_of
@@ -95,6 +96,12 @@ def plan_resume(
         skipped=(*context.skipped_files, *extra_skips),
     )
     coverage = () if prior is None or force_full else prior.coverage
+    # A rerun at the head whose last round degraded a file it still credited
+    # reviews that file again, so the rerun cannot pass on the carry (#2803).
+    coverage = redo_scope(prior=prior, head_sha=context.head_ref).filter_coverage(
+        coverage=coverage,
+        hashes=hashes,
+    )
     flags = () if prior is None or force_full else prior.flagged_files
     pending = () if prior is None or force_full else prior.pending_invalidations
     consumed = () if prior is None or force_full else prior.consumed_flags

@@ -233,14 +233,14 @@ def test_the_final_write_adds_the_round_to_a_checkpointed_total() -> None:
 
 
 def test_the_total_round_trips_through_the_artifact() -> None:
-    """``pr_spend_usd`` is written and read back at schema v5."""
+    """``pr_spend_usd`` is written and read back at the current schema."""
     state = ReviewState(runs=_runs(1.0), pr_spend_usd=42.5)
 
     payload = json.loads(json.dumps(state.to_artifact_dict()))
     restored = ReviewState.from_artifact_dict(payload)
 
     assert_that(payload["schema_version"]).is_equal_to(STATE_VERSION)
-    assert_that(STATE_VERSION).is_equal_to(5)
+    assert_that(STATE_VERSION).is_greater_than_or_equal_to(5)
     assert_that(restored.pr_spend_usd).is_equal_to(42.5)
 
 
