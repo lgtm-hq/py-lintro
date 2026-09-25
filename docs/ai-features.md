@@ -466,15 +466,17 @@ may go unreported.
   (the file is still credited as covered at its current hash so the review converges;
   its coverage record carries a `truncated` marker, and every later round that skips the
   file as covered re-records the degradation with a `chunk_index` of `-2` until the
-  file's diff changes and it is reviewed again), a failed depth pass, or — when the
-  synthesis pass ran — `synthesis_truncated` / `synthesis_failed`) and the
-  `chunk_index`. The synthesis reasons carry a placeholder `chunk_index` of `-1`. A
-  chunk that was split and whose depth-3 sweep also failed contributes two entries with
-  the same `chunk_index`. `findings_coverage_complete` is the derived "per-file finding
-  depth was not limited" boolean: any per-file entry in `coverage_degradations` makes it
-  false. The two synthesis reasons do **not** (#2702): findings coverage is per file and
-  every file was reviewed at depth whether or not the whole-PR narrative pass saw all of
-  it, so a truncated or failed synthesis is a narrative degradation, exposed as
+  file's diff changes and it is reviewed again), `turn_limit_reached` when a chunk hit
+  the per-call turn limit twice and its files were left unreviewed, a failed depth pass
+  (`adversarial_sweep_failed` for the depth-3 sweep), or — when the synthesis pass ran —
+  `synthesis_truncated` / `synthesis_failed`) and the `chunk_index`. The synthesis
+  reasons carry a placeholder `chunk_index` of `-1`. A chunk that was split and whose
+  depth-3 sweep also failed contributes two entries with the same `chunk_index`.
+  `findings_coverage_complete` is the derived "per-file finding depth was not limited"
+  boolean: any per-file entry in `coverage_degradations` makes it false. The two
+  synthesis reasons do **not** (#2702): findings coverage is per file and every file was
+  reviewed at depth whether or not the whole-PR narrative pass saw all of it, so a
+  truncated or failed synthesis is a narrative degradation, exposed as
   `ReviewMetadata.synthesis_degraded` and described by the synthesis note, never as a
   partial review. The persisted run record carries the same flag as
   `synthesis_degraded`, so the sticky's run history marks the round

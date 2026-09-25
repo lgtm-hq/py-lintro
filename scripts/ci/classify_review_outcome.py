@@ -458,7 +458,11 @@ def _narrative_notes(*, text: str) -> tuple[str, ...]:
         raw = payload.get(DEPTH_DEGRADATIONS_KEY)
         reasons: list[str] = []
         for item in raw if isinstance(raw, list) else []:
-            reason = str(item.get("reason") or "") if isinstance(item, Mapping) else ""
+            reason = (
+                str(item.get("reason") or "").strip()
+                if isinstance(item, Mapping)
+                else ""
+            )
             if reason in NARRATIVE_DEGRADATION_REASONS and reason not in reasons:
                 reasons.append(reason)
         notes: list[str] = []

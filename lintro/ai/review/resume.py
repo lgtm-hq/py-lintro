@@ -98,10 +98,11 @@ def plan_resume(
     coverage = () if prior is None or force_full else prior.coverage
     # A rerun at the head whose last round degraded a file it still credited
     # reviews that file again, so the rerun cannot pass on the carry (#2803).
-    coverage = redo_scope(prior=prior, head_sha=context.head_ref).filter_coverage(
-        coverage=coverage,
-        hashes=hashes,
-    )
+    if prior is not None and not force_full:
+        coverage = redo_scope(
+            prior=prior,
+            head_sha=context.head_ref,
+        ).filter_coverage(coverage=coverage, hashes=hashes)
     flags = () if prior is None or force_full else prior.flagged_files
     pending = () if prior is None or force_full else prior.pending_invalidations
     consumed = () if prior is None or force_full else prior.consumed_flags
