@@ -255,13 +255,15 @@ alike. It is unset by default: there is no check and no sticky line.
 
 - **Spend** is the pull request's cumulative review spend (`pr_spend_usd` in the review
   state) plus the running round's spend so far. Every round adds its cost when it
-  finishes, and every mid-run checkpoint stores the running round's spend too. So a
-  round that is killed after a checkpoint still counts, and the next round starts from
-  that figure. The total only grows: pruning the run history to the newest 30 rounds
-  never lowers it. A state written before this total existed seeds it from the rounds it
-  kept. The spend a round incurs after its last checkpoint (for example, synthesis or
-  verification) counts only when the round finishes or stops gracefully; a hard kill
-  after that point loses it.
+  finishes: everything it charged, including a call whose result was dropped (a chunk
+  cancelled at a budget stop), so the sticky line shows the figure the next round
+  enforces against (#2814). Every mid-run checkpoint stores the running round's spend
+  too. So a round that is killed after a checkpoint still counts, and the next round
+  starts from that figure. The total only grows: pruning the run history to the newest
+  30 rounds never lowers it. A state written before this total existed seeds it from the
+  rounds it kept. The spend a round incurs after its last checkpoint (for example,
+  synthesis or verification) counts only when the round finishes or stops gracefully; a
+  hard kill after that point loses it.
 - **Enforcement** mirrors `ai.max_cost_usd`. The `LINTRO_AI_REVIEW_PR_BUDGET_USD`
   Actions variable, which the workflow forwards, always enforces. A budget set only in
   `.lintro-config.yaml` enforces only when spend is billed or estimated. So under the

@@ -61,6 +61,7 @@ CLI_ONLY_POLICY_FIELDS: frozenset[str] = frozenset(
         "force_full",
         "enforce_cost_cap",
         "pr_budget",
+        "state_pr",
     },
 )
 
@@ -515,6 +516,7 @@ SESSION_OPTION_SOURCES: dict[str, tuple[str, str]] = {
     "force_full": ("policy", "force_full"),
     "enforce_cost_cap": ("policy", "enforce_cost_cap"),
     "pr_budget": ("policy", "pr_budget"),
+    "state_pr": ("policy", "state_pr"),
 }
 
 #: Session fields no adapter sets on this path. They must still arrive at the
@@ -563,6 +565,7 @@ def test_execute_review_forwards_every_prepared_and_policy_field(
         force_full=True,
         enforce_cost_cap=False,
         pr_budget=PrBudget(budget_usd=40.0, prior_spend_usd=1.0, enforced=True),
+        state_pr=2817,
     )
     sources = {"prepared": prepared, "policy": policy}
     captured: list[ReviewSessionOptions] = []

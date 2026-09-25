@@ -17,6 +17,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from lintro.ai.review.github_constants import STATE_VERSION
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -126,14 +128,26 @@ def load_ci_state(
         key=lambda path: path.name,
     )
     loaded: list[ReviewState] = []
+    skipped: list[str] = []
     for path in parts:
         parsed = _load_artifact_file(
             path=path,
             repo=repo,
             pr_number=pr_number,
+            skipped=skipped,
         )
         if parsed is not None:
             loaded.append(parsed)
+    if skipped:
+        # One visible line per load, not one per part (#2814).
+        logger.info(
+            "Skipped {} review-state part(s) for another repository or pull "
+            "request (want {}, {}): {}",
+            len(skipped),
+            repo or "any repository",
+            f"#{pr_number}" if pr_number else "no pull request",
+            ", ".join(skipped),
+        )
     if not loaded:
         return ReviewState()
     return union_states(loaded)
@@ -301,8 +315,19 @@ def _load_artifact_file(
     path: Path,
     repo: str,
     pr_number: int | None,
+    skipped: list[str] | None = None,
 ) -> ReviewState | None:
-    """Parse one artifact file, or None when it must not be trusted."""
+    """Parse one artifact file, or None when it must not be trusted.
+
+    Args:
+        path: The part file.
+        repo: The repository the caller wants, or empty for any.
+        pr_number: The PR the caller wants, ``0`` for none, None for any.
+        skipped: Collects the names of parts skipped for identity.
+
+    Returns:
+        The parsed state, or None.
+    """
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeError):
@@ -318,14 +343,37 @@ def _load_artifact_file(
         return None
     if version_n < 2 or version_n > ARTIFACT_STATE_VERSION:
         return None
+    # A part with an empty identity never matches a caller that names one
+    # (#2814): the spend read-back and resume both trust this filter.
     stored_repo = str(payload.get("repo", ""))
-    if repo and stored_repo and stored_repo != repo:
-        return None
     stored_pr = payload.get("pr_number")
-    if pr_number is not None and stored_pr not in (None, "", pr_number):
-        try:
-            if int(stored_pr) != pr_number:
-                return None
-        except (TypeError, ValueError):
-            return None
+    wrong_repo = bool(repo) and stored_repo != repo
+    wrong_pr = pr_number is not None and _pr_key(stored_pr) != (pr_number or 0)
+    if wrong_repo or wrong_pr:
+        logger.debug(
+            "Skipping state part {} (repo {!r}, pull request {!r})",
+            path.name,
+            stored_repo,
+            stored_pr,
+        )
+        if skipped is not None:
+            skipped.append(path.name)
+        return None
     return ReviewState.from_artifact_dict(payload)
+
+
+def _pr_key(raw: object) -> int | None:
+    """Return a stored ``pr_number`` as a key: ``0`` for none, None if bad.
+
+    Args:
+        raw: The payload's ``pr_number``.
+
+    Returns:
+        The number, ``0`` when absent or empty, or None when unparseable.
+    """
+    if raw in (None, ""):
+        return 0
+    try:
+        return int(str(raw))
+    except ValueError:
+        return None

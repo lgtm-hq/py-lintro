@@ -12,7 +12,7 @@ local review never touches the state directory.
 from __future__ import annotations
 
 import os
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -35,7 +35,25 @@ if TYPE_CHECKING:
     from lintro.ai.review.resume import ResumePlan
     from lintro.ai.review.sensitivity import ReviewSensitivityPolicy
 
-__all__ = ["checkpoint_writer", "write_incremental_coverage_part"]
+__all__ = ["CheckpointStamp", "checkpoint_writer", "write_incremental_coverage_part"]
+
+
+@dataclass(frozen=True, slots=True)
+class CheckpointStamp:
+    """What a checkpoint stamps beyond the run's own coverage and findings.
+
+    Attributes:
+        pr_number: The PR the final write keys this run's state on (the
+            CLI's ``state_pr``: ``--pr`` or the CI event, #2814). None falls
+            back to ``PR_NUMBER``, then to the prior state's PR.
+        round_spend_usd: What this round has spent so far (#2796).
+    """
+
+    pr_number: int | None = None
+    round_spend_usd: float = 0.0
+
+
+_NO_STAMP = CheckpointStamp()
 
 
 def write_incremental_coverage_part(
@@ -47,7 +65,7 @@ def write_incremental_coverage_part(
     force_full: bool,
     sequence: int,
     policy: ReviewSensitivityPolicy,
-    round_spend_usd: float = 0.0,
+    stamp: CheckpointStamp = _NO_STAMP,
 ) -> None:
     """Checkpoint coverage and this-run findings for a later SIGTERM.
 
@@ -65,9 +83,9 @@ def write_incremental_coverage_part(
         force_full: When True, do not inherit prior coverage.
         sequence: Monotonic part number for this run.
         policy: Sensitivity policy used to filter checkpoint findings.
-        round_spend_usd: What this round has spent so far. Persisted on top of
-            the prior total, so a round killed after this checkpoint still
-            counts against the PR's review budget (#2796).
+        stamp: The PR this run's state is keyed on, and what the round has
+            spent so far (persisted on top of the prior total, so a round
+            killed after this checkpoint still counts against the budget).
     """
     directory_override = os.environ.get("LINTRO_REVIEW_STATE_DIR", "").strip()
     if not directory_override:
@@ -120,7 +138,9 @@ def write_incremental_coverage_part(
             findings=match.records,
             coverage=records,
             repo=os.environ.get("GITHUB_REPOSITORY", "") or seed.repo,
-            pr_number=int(pr_raw) if pr_raw.isdigit() else seed.pr_number,
+            # The same PR the final write keys on, so a named-PR resume load
+            # never skips this run's own parts (#2814).
+            pr_number=_checkpoint_pr(stamp=stamp, pr_raw=pr_raw, seed=seed),
             base_sha=context.base_ref or seed.base_sha,
             head_sha=context.head_ref or seed.head_sha,
             workflow="ai-review.yml",
@@ -130,13 +150,34 @@ def write_incremental_coverage_part(
             # and a full round must not reset the PR's spend.
             pr_spend_usd=(
                 (prior_state.review_spend_usd if prior_state is not None else 0.0)
-                + round_spend_usd
+                + stamp.round_spend_usd
             ),
         ),
         directory=state_dir(ci=True),
         sequence=sequence,
         final=True,
     )
+
+
+def _checkpoint_pr(
+    *,
+    stamp: CheckpointStamp,
+    pr_raw: str,
+    seed: ReviewState,
+) -> int | None:
+    """Return the PR a checkpoint is stamped with.
+
+    Args:
+        stamp: The caller's stamp; its ``pr_number`` wins when set.
+        pr_raw: ``PR_NUMBER`` from the environment, stripped.
+        seed: The state the checkpoint is built on.
+
+    Returns:
+        The PR number, or None when nothing names one.
+    """
+    if stamp.pr_number is not None:
+        return stamp.pr_number
+    return int(pr_raw) if pr_raw.isdigit() else seed.pr_number
 
 
 def checkpoint_writer(
@@ -147,6 +188,7 @@ def checkpoint_writer(
     force_full: bool,
     policy: ReviewSensitivityPolicy,
     round_spend: Callable[[], float] | None = None,
+    state_pr: int | None = None,
 ) -> Callable[[list[ChunkReviewPartial]], None]:
     """Build the per-chunk callback that writes the run's coverage parts.
 
@@ -162,6 +204,7 @@ def checkpoint_writer(
         policy: Sensitivity policy used to filter checkpoint findings.
         round_spend: Reads what the round has spent so far (its
             ``CostBudget.spent``), or None to record no spend.
+        state_pr: The PR the final write keys this run's state on, or None.
 
     Returns:
         A callback the chunk fan-out invokes with everything completed so far.
@@ -185,7 +228,10 @@ def checkpoint_writer(
                 force_full=force_full,
                 sequence=next_sequence,
                 policy=policy,
-                round_spend_usd=round_spend() if round_spend is not None else 0.0,
+                stamp=CheckpointStamp(
+                    pr_number=state_pr,
+                    round_spend_usd=round_spend() if round_spend is not None else 0.0,
+                ),
             )
         except Exception:
             logger.opt(exception=True).warning(

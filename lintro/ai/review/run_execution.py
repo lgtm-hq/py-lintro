@@ -179,6 +179,7 @@ async def run_passes(
                 force_full=options.force_full,
                 policy=plan.policy,
                 round_spend=lambda: plan.budget.spent,
+                state_pr=options.state_pr,
             ),
         )
     if plan.resume.queue:

@@ -27,6 +27,7 @@ evidence of a quiet round.
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import Any
 
 from lintro.ai.review.enums.finding_status import FindingStatus
@@ -263,14 +264,19 @@ def prune_state_to_fit(
 
     runs = list(state.runs)
     findings = list(state.findings)
+    # Read before any run is dropped: a state with no stored total counts its
+    # runs, and pruning them must not lower its spend (#2814).
+    spend = state.review_spend_usd
 
     def candidate_for(*, kept_findings: list[FindingRecord]) -> ReviewState:
         """Build the pruned candidate state for the current working lists."""
-        return ReviewState(
-            version=state.version,
+        # replace, not a fresh state: every later field survives pruning.
+        return replace(
+            state,
             runs=tuple(runs),
             findings=tuple(kept_findings),
             truncated=True,
+            pr_spend_usd=spend,
         )
 
     while len(runs) > 1:

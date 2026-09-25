@@ -115,7 +115,7 @@ def _load_stored_state(
         return load_ci_state(
             directory=state_dir(ci=True),
             repo=repo,
-            pr_number=pr_number or 0,
+            pr_number=_state_pr_number(pr_number),
         )
     local = load_local_state(
         key=local_ledger_key(pr_number=pr_number, head_ref=head_ref),
@@ -193,13 +193,30 @@ def resolve_prior_state(
     return prior_state
 
 
+def _state_pr_number(pr_number: int | None) -> int:
+    """Return the pull request key the CI state is stored under (#2814).
+
+    ``0`` means "no pull request". Every CI state read in this module keys on
+    this one predicate, so the load and the spend read-back cannot disagree
+    about which PR they mean.
+
+    Args:
+        pr_number: Pull request number, or ``None`` for a local branch run.
+
+    Returns:
+        The PR number, or ``0`` when there is none.
+    """
+    return pr_number or 0
+
+
 def _checkpointed_spend(*, repo: str, pr_number: int | None) -> float:
     """Return the PR spend this run's checkpoints already put on disk (#2796).
 
-    The final write adds only the completed result's cost to the prior total.
-    A call that was charged and then cancelled (a parallel chunk stopped at
-    the budget) is in a checkpoint but not in the result, so the final write
-    must never lower the total its own checkpoints recorded.
+    A floor, kept on purpose (ruling 20 on #2814). Since #2814 the round's
+    cost is everything it charged to its budget, so the final write's total
+    already covers every checkpoint and this read-back changes nothing. It
+    stays so a future pass that bypasses the round's budget still cannot make
+    the final write lower the total its checkpoints recorded.
 
     CI only, like :func:`_load_stored_state`: a local run never reads the
     workflow artifacts (the #2154 trust boundary), even with
@@ -215,12 +232,13 @@ def _checkpointed_spend(*, repo: str, pr_number: int | None) -> float:
     Returns:
         The largest total among this PR's parts, or 0.0 when there are none.
     """
-    if not _in_actions() or pr_number is None:
+    pr_key = _state_pr_number(pr_number)
+    if not _in_actions() or not pr_key:
         return 0.0
     on_disk = load_ci_state(
         directory=state_dir(ci=True),
         repo=repo,
-        pr_number=pr_number,
+        pr_number=pr_key,
     )
     return on_disk.review_spend_usd
 

@@ -245,6 +245,7 @@ class ReviewExecutionPolicy:
         force_full: Discard carried coverage and review everything again.
         enforce_cost_cap: Honor ``ai.max_cost_usd`` and serialize chunk calls.
         pr_budget: The PR's review budget for this round (#2796), or None.
+        state_pr: The PR this run's state is keyed on (#2814), or None.
     """
 
     progress: ReviewProgressCallback | None = None
@@ -253,6 +254,7 @@ class ReviewExecutionPolicy:
     force_full: bool = False
     enforce_cost_cap: bool = True
     pr_budget: PrBudget | None = None
+    state_pr: int | None = None
 
 
 #: The policy of a surface with no adapter-specific execution knobs. Its values
@@ -439,6 +441,7 @@ def execute_review(
             force_full=policy.force_full,
             enforce_cost_cap=policy.enforce_cost_cap,
             pr_budget=policy.pr_budget,
+            state_pr=policy.state_pr,
             synthesis=prepared.synthesis,
             verify=prepared.verify,
         ),
