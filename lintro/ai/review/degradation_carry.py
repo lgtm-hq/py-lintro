@@ -163,6 +163,7 @@ def _redone(
     reviewed: Collection[str],
     attempted: Collection[str],
     steps_ran: Collection[DegradationStep],
+    head_complete: bool,
 ) -> bool:
     """Return whether this round redid the work a record degraded.
 
@@ -178,6 +179,9 @@ def _redone(
         reviewed: Files this round reviewed.
         attempted: Files this round's own file-step degradations name.
         steps_ran: Once-per-round steps this round ran.
+        head_complete: Whether every eligible file is covered at the head
+            after this round. A record naming no files sent the whole head
+            back (:func:`redo_scope`), so only a complete head redid it.
 
     Returns:
         True when this round's own outcome for that work stands instead.
@@ -185,7 +189,7 @@ def _redone(
     if record.step in _FILE_STEPS:
         paths = record.degradation.paths
         if not paths:
-            return bool(reviewed)
+            return bool(reviewed) and head_complete
         return all(path in reviewed for path in paths) or any(
             path in attempted for path in paths
         )
@@ -199,6 +203,7 @@ def carried_degradations(
     current: Sequence[CoverageDegradation],
     reviewed: Collection[str],
     steps_ran: Collection[DegradationStep],
+    head_complete: bool = True,
 ) -> tuple[CoverageDegradation, ...]:
     """Return the earlier degradations this round records again.
 
@@ -208,6 +213,8 @@ def carried_degradations(
         current: The degradations this round recorded itself.
         reviewed: Files this round reviewed.
         steps_ran: Once-per-round steps this round ran.
+        head_complete: Whether every eligible file is covered at the head
+            after this round; a whole-head redo counts only then.
 
     Returns:
         The latest same-head round's degradations whose work this round did
@@ -231,6 +238,7 @@ def carried_degradations(
             reviewed=reviewed,
             attempted=attempted,
             steps_ran=steps_ran,
+            head_complete=head_complete,
         ):
             continue
         degradation = record.degradation

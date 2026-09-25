@@ -392,6 +392,7 @@ def assemble_review_result(
                 current=metadata.coverage_degradations,
                 reviewed=covered_now,
                 steps_ran={step for step, did in ran.items() if did},
+                head_complete=coverage.complete,
             ),
         ),
         reviewed_paths=actually_reviewed,

@@ -197,3 +197,27 @@ def test_a_hard_failure_gets_no_notes(classifier: ModuleType) -> None:
     )
 
     assert_that(report.notes).is_empty()
+
+
+def test_both_notes_on_a_clean_review_come_in_order(classifier: ModuleType) -> None:
+    """The question-pass note first, then the line naming the other reasons.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    report = classifier.classify(
+        status=0,
+        output=_envelope(
+            "generated_questions_failed",
+            "synthesis_failed",
+            complete=True,
+        ),
+    )
+
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.notes).is_equal_to(
+        (
+            GENERATED_QUESTIONS_FAILED_NOTE,
+            "Recorded without failing this check: synthesis_failed.",
+        ),
+    )

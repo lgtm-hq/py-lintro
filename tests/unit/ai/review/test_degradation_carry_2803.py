@@ -622,3 +622,31 @@ def test_a_narrative_chunk_reason_is_rewarned_once_at_the_same_head() -> None:
             steps_ran=(),
         ),
     ).is_empty()
+
+
+def test_a_whole_head_reason_is_redone_only_by_a_complete_head() -> None:
+    """A partial round that reviewed some files has not redone the head."""
+    record = _record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=())
+    prior = _state(record)
+
+    partial = carried_degradations(
+        prior=prior,
+        head_sha=_HEAD,
+        current=(),
+        reviewed=("a.py",),
+        steps_ran=(),
+        head_complete=False,
+    )
+    complete = carried_degradations(
+        prior=prior,
+        head_sha=_HEAD,
+        current=(),
+        reviewed=("a.py",),
+        steps_ran=(),
+        head_complete=True,
+    )
+
+    assert_that([row.reason for row in partial]).is_equal_to(
+        [_Reason.ADVERSARIAL_SWEEP_FAILED],
+    )
+    assert_that(complete).is_empty()
