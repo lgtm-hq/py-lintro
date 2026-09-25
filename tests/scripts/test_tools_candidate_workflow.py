@@ -143,14 +143,14 @@ def test_candidate_workflow_preserves_digest_push_security_contract() -> None:
         for index, step in enumerate(steps)
         if isinstance(step, dict) and step.get("id") == "digest-app"
     )
-    push_index = next(
+    commit_index = next(
         index
         for index, step in enumerate(steps)
-        if isinstance(step, dict) and step.get("name") == "Push digest commit"
+        if isinstance(step, dict) and step.get("name") == "Create signed digest commit"
     )
     mint = steps[mint_index]
-    push_step = steps[push_index]
-    assert_that(mint_index).is_equal_to(push_index - 1)
+    commit_step = steps[commit_index]
+    assert_that(mint_index).is_equal_to(commit_index - 1)
     assert_that(mint["if"]).is_equal_to("steps.update.outputs.changed == 'true'")
     assert_that(mint["uses"]).is_equal_to(
         "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
@@ -162,19 +162,31 @@ def test_candidate_workflow_preserves_digest_push_security_contract() -> None:
             "permission-contents": "write",
         },
     )
-    assert_that(push_step["if"]).is_equal_to("steps.update.outputs.changed == 'true'")
-    digest_token = "${{ steps.digest-app.outputs.token }}"  # nosec B105 - expression
-    assert_that(push_step["env"]).is_equal_to(
-        {
-            "DIGEST_TOKEN": digest_token,
-            "REPOSITORY": "${{ github.repository }}",
-            "BRANCH": "${{ github.ref_name }}",
-        },
+    # The digest commit is created through the API so GitHub signs it
+    # (#2825): no local git commit or push, and append mode pinned to the
+    # exact Renovate head this run built from.
+    assert_that(commit_step["if"]).is_equal_to("steps.update.outputs.changed == 'true'")
+    assert_that(str(commit_step["uses"])).starts_with(
+        "lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@",
     )
-    push_script = str(push_step["run"])
-    assert_that(push_script).does_not_contain("x-access-token:${DIGEST_TOKEN}@")
-    assert_that(push_script).does_not_contain("set-url")
-    assert_that(push_script).contains("http.extraheader=AUTHORIZATION: basic")
+    assert_that(commit_step).does_not_contain_key("run")
+    digest_token = "${{ steps.digest-app.outputs.token }}"  # nosec B105 - expression
+    commit_inputs = commit_step["with"]
+    assert_that(commit_inputs["token"]).is_equal_to(digest_token)
+    assert_that(commit_inputs["branch"]).is_equal_to("${{ github.ref_name }}")
+    assert_that(commit_inputs["mode"]).is_equal_to("append")
+    assert_that(commit_inputs["expected-head"]).is_equal_to("${{ github.sha }}")
+    assert_that(commit_inputs["message"]).is_equal_to(
+        "chore(deps): pin tools candidate digest",
+    )
+    assert_that(str(commit_inputs["files"]).split()).is_equal_to(
+        ["Dockerfile", "docker/ai-tools.Dockerfile"],
+    )
+    for step in steps:
+        run = str(step.get("run", "")) if isinstance(step, dict) else ""
+        assert_that(run).does_not_contain("git commit")
+        assert_that(run).does_not_contain("git push")
+        assert_that(run).does_not_contain(" push ")
 
 
 def test_resolve_pr_retries_until_renovate_creates_pr(

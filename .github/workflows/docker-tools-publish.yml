@@ -60,7 +60,7 @@ jobs:
   tools-image:
     name: 🐳 Lintro Tools Image
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@86e29ba560701a8d73f31713eb0841ef50f6029c # v0.74.5
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
     permissions:
       contents: read
       packages: write # push image, cache, and staging tags to GHCR
@@ -96,7 +96,7 @@ jobs:
       cosign-sign: true
       scan: true
       scan-exit-code: '0'
-      tooling-ref: '86e29ba560701a8d73f31713eb0841ef50f6029c' # v0.74.5
+      tooling-ref: '234e84901ae4ac14f2d44f02fad517d95712cec3' # v0.75.0
       egress-policy: block
       egress-preset: docker
       # Full list (v0.50.0+ replace semantics): the reusable passes
