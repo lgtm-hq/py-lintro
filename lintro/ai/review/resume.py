@@ -96,13 +96,14 @@ def plan_resume(
         skipped=(*context.skipped_files, *extra_skips),
     )
     coverage = () if prior is None or force_full else prior.coverage
-    # A rerun at the head whose last round degraded a file it still credited
-    # reviews that file again, so the rerun cannot pass on the carry (#2803).
+    # A file the last round degraded but still credited is reviewed again
+    # while its patch hash is unchanged, whatever the head, so no later round
+    # can pass on the carry (#2803).
     if prior is not None and not force_full:
-        coverage = redo_scope(
-            prior=prior,
-            head_sha=context.head_ref,
-        ).filter_coverage(coverage=coverage, hashes=hashes)
+        coverage = redo_scope(prior=prior, hashes=hashes).filter_coverage(
+            coverage=coverage,
+            hashes=hashes,
+        )
     flags = () if prior is None or force_full else prior.flagged_files
     pending = () if prior is None or force_full else prior.pending_invalidations
     consumed = () if prior is None or force_full else prior.consumed_flags

@@ -19,7 +19,7 @@ from lintro.ai.review.checklist_display import (
 from lintro.ai.review.coverage_degradation import (
     COVERAGE_LIMITED_HEADLINE,
     describe_coverage_degradations,
-    format_question_pass_note,
+    format_narrative_note,
 )
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.models.review_finding import ReviewFinding
@@ -119,10 +119,10 @@ def render_review_terminal(
     verification_note = format_verification_note(metadata=metadata)
     if verification_note:
         output.print(f"[dim]{verification_note}[/dim]")
-    question_note = format_question_pass_note(metadata=metadata)
-    if question_note:
-        # A depth note, not a coverage loss (#2803).
-        output.print(f"[yellow]{question_note}[/yellow]")
+    narrative_note = format_narrative_note(metadata=metadata)
+    if narrative_note:
+        # Depth notes, not coverage losses (#2803).
+        output.print(f"[yellow]{narrative_note}[/yellow]")
 
     if metadata.timings is not None:
         # One line, always on: which phase dominated the wait (#2148).

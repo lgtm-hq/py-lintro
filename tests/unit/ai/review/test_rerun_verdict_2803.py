@@ -27,11 +27,12 @@ from lintro.ai.providers.capabilities import ProviderCapabilities
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.review.coverage_degradation import (
     GENERATED_QUESTIONS_FAILED_NOTE,
-    format_question_pass_note,
+    format_narrative_note,
 )
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.coverage_degradation import (
     CARRIED_CHUNK_INDEX,
@@ -47,10 +48,12 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.output import review_result_to_json
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.pr_budget import PR_BUDGET_REASON_PREFIX, PrBudget
+from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
 from lintro.ai.review.session import ReviewSessionOptions
 
 _HEAD = "feature"
@@ -88,35 +91,47 @@ def classifier(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     return module
 
 
-def _diff(path: str) -> str:
+def _diff(path: str, *, added: str = "") -> str:
     """Return a one-line unified diff for ``path``.
 
     Args:
         path: Repository-relative file path.
+        added: The added line; defaults to one derived from the path.
 
     Returns:
         The diff.
     """
     return (
         f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
-        f"@@ -1,1 +1,2 @@\n context\n+change-{path}\n"
+        f"@@ -1,1 +1,2 @@\n context\n+{added or f'change-{path}'}\n"
     )
 
 
-def _context() -> ReviewContext:
-    """Return the two-file review context at ``_HEAD``.
+def _context(
+    *,
+    head: str = _HEAD,
+    edits: dict[str, str] | None = None,
+) -> ReviewContext:
+    """Return the two-file review context.
+
+    Args:
+        head: The head the context reviews.
+        edits: Added line per path for files a later push changed.
 
     Returns:
         The context.
     """
+    edits = edits or {}
     return ReviewContext(
         base_ref="main",
-        head_ref=_HEAD,
+        head_ref=head,
         changed_files=[
             ChangedFile(path=path, status="modified", additions=1, deletions=0)
             for path in _PATHS
         ],
-        unified_diff="\n".join(_diff(path) for path in _PATHS),
+        unified_diff="\n".join(
+            _diff(path, added=edits.get(path, "")) for path in _PATHS
+        ),
         pr_metadata=None,
     )
 
@@ -190,6 +205,7 @@ def _run(
     depth: int = 1,
     fail_calls: frozenset[int] = frozenset(),
     pr_budget: PrBudget | None = None,
+    context: ReviewContext | None = None,
 ) -> ReviewResult:
     """Rerun the review over ``prior`` with a recording fake transport.
 
@@ -199,6 +215,7 @@ def _run(
         depth: Review depth.
         fail_calls: 1-based call numbers that time out.
         pr_budget: The PR budget for the round, if any.
+        context: The context to review; defaults to the unchanged head.
 
     Returns:
         The review result.
@@ -221,7 +238,7 @@ def _run(
 
     with patch("lintro.ai.review.provider_call.call_ai", side_effect=_call_ai):
         return run_review(
-            _context(),
+            context or _context(),
             options=ReviewSessionOptions(
                 provider=provider,
                 ai_config=AIConfig(
@@ -301,7 +318,7 @@ def test_a_failed_question_pass_is_rewarned_without_a_call(
     assert_that(report.notes).is_equal_to((GENERATED_QUESTIONS_FAILED_NOTE,))
     assert_that(report.notes).is_equal_to(attempt_1.notes)
     assert_that(attempt_1.exit_code).is_equal_to(0)
-    assert_that(format_question_pass_note(metadata=result.metadata)).is_equal_to(
+    assert_that(format_narrative_note(metadata=result.metadata)).is_equal_to(
         GENERATED_QUESTIONS_FAILED_NOTE,
     )
 
@@ -480,32 +497,98 @@ def test_a_redo_is_charged_to_the_pr_budget(classifier: ModuleType) -> None:
     assert_that(_classify(classifier, result).exit_code).is_equal_to(0)
 
 
-def test_a_new_head_carries_nothing(classifier: ModuleType) -> None:
-    """The same degraded state one push later resumes as before #2803.
+def _next_state(*, prior: ReviewState, result: ReviewResult, head: str) -> ReviewState:
+    """Return the state a round leaves behind, as the CI state write builds it.
+
+    Args:
+        prior: The state the round resumed.
+        result: The round's result.
+        head: The head the round reviewed.
+
+    Returns:
+        The prior runs plus this round's run record, and this round's coverage.
+    """
+    record = run_record_from_result(
+        request=StickyRequest(result=result, prior_state=prior, head_sha=head),
+        totals=RoundTotals(
+            round_number=prior.next_round,
+            verdict=ReviewVerdict.READY,
+            resolved=0,
+            open_after=0,
+            convergence_score=0.0,
+        ),
+    )
+    return ReviewState(runs=(*prior.runs, record), coverage=result.coverage_records)
+
+
+def test_a_push_that_leaves_the_file_unchanged_still_redoes_it_once(
+    classifier: ModuleType,
+) -> None:
+    """Sweep failed on a.py at H1; H2 touches only b.py: a.py is redone once.
 
     Args:
         classifier: The loaded classifier module.
     """
-    state = _degraded_state(
+    prior = _degraded_state(
         CoverageDegradation(
             reason=_Reason.ADVERSARIAL_SWEEP_FAILED,
             chunk_index=0,
             paths=("a.py",),
         ),
     )
-    moved = ReviewState(
-        runs=(
-            RunRecord(
-                identity=RunIdentity(round=1, sha="older-head"),
-                coverage=state.runs[0].coverage,
-            ),
-        ),
-        coverage=state.coverage,
-    )
+    pushed = _context(head="H2", edits={"b.py": "edited-b"})
     calls: list[str] = []
 
-    result = _run(prior=moved, calls=calls)
+    result = _run(prior=prior, calls=calls, context=pushed)
+    again_calls: list[str] = []
+    again = _run(
+        prior=_next_state(prior=prior, result=result, head="H2"),
+        calls=again_calls,
+        context=pushed,
+    )
 
-    assert_that(calls).is_empty()
+    assert_that(result.metadata.reviewed_paths).contains("a.py", "b.py")
     assert_that(result.metadata.coverage_degradations).is_empty()
     assert_that(_classify(classifier, result).exit_code).is_equal_to(0)
+    assert_that(again_calls).is_empty()
+    assert_that(again.metadata.coverage_degradations).is_empty()
+
+
+def test_a_push_that_changes_the_degraded_file_carries_nothing(
+    classifier: ModuleType,
+) -> None:
+    """a.py changed at H2 owes nothing, even when the budget stops the round.
+
+    The changed file is reviewed on its own merits; while it is not, the
+    round is incomplete at the head, not degraded.
+
+    Args:
+        classifier: The loaded classifier module.
+    """
+    prior = _degraded_state(
+        CoverageDegradation(
+            reason=_Reason.ADVERSARIAL_SWEEP_FAILED,
+            chunk_index=0,
+            paths=("a.py",),
+        ),
+    )
+    pushed = _context(head="H2", edits={"a.py": "edited-a"})
+    calls: list[str] = []
+    stopped_calls: list[str] = []
+
+    result = _run(prior=prior, calls=calls, context=pushed)
+    stopped = _run(
+        prior=prior,
+        calls=stopped_calls,
+        context=pushed,
+        pr_budget=PrBudget(budget_usd=40.0, prior_spend_usd=40.0, enforced=True),
+    )
+
+    # b.py rides along as a.py's chunk-group mate (group invalidation).
+    assert_that(result.metadata.reviewed_paths).contains("a.py")
+    assert_that(result.metadata.coverage_degradations).is_empty()
+    assert_that(_classify(classifier, result).exit_code).is_equal_to(0)
+    assert_that(stopped_calls).is_empty()
+    assert_that(stopped.metadata.coverage_degradations).is_empty()
+    stopped_report = _classify(classifier, stopped)
+    assert_that(stopped_report.outcome).is_equal_to(classifier.ReviewOutcome.PR_BUDGET)

@@ -26,7 +26,7 @@ from lintro.ai.review.coverage_degradation import (
     COVERAGE_LIMITED_HEADLINE,
     PARTIAL_REVIEW_LABEL,
     describe_coverage_degradations,
-    format_question_pass_note,
+    format_narrative_note,
 )
 from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
@@ -59,7 +59,7 @@ __all__ = [
     "format_lint_facts_note",
     "format_partial_review_label",
     "format_pass_note_lines",
-    "format_question_pass_note_line",
+    "format_narrative_note_line",
     "format_run_mechanics",
     "format_synthesis_note_line",
     "format_verification_note_line",
@@ -132,7 +132,7 @@ def format_pass_note_lines(*, metadata: ReviewMetadata) -> list[str]:
     """Return the optional-pass fine-print notes, each after a blank line.
 
     The review body and the sticky's run-stats block both show the synthesis
-    (#2269), verification (#2728) and failed question pass (#2803) notes in
+    (#2269), verification (#2728) and narrative degradation (#2803) notes in
     this order; one helper keeps the two surfaces identical.
 
     Args:
@@ -145,25 +145,25 @@ def format_pass_note_lines(*, metadata: ReviewMetadata) -> list[str]:
     notes = (
         format_synthesis_note_line(metadata=metadata),
         format_verification_note_line(metadata=metadata),
-        format_question_pass_note_line(metadata=metadata),
+        format_narrative_note_line(metadata=metadata),
     )
     return [line for note in notes if note for line in ("", note)]
 
 
-def format_question_pass_note_line(*, metadata: ReviewMetadata) -> str:
-    """Render the failed question pass note as a fine-print line (#2803).
+def format_narrative_note_line(*, metadata: ReviewMetadata) -> str:
+    """Render the narrative degradation note as a fine-print line (#2803).
 
     Args:
         metadata: Review run metadata carrying ``coverage_degradations``.
 
     Returns:
-        The note wrapped in ``<sub>``, or an empty string when the pass did
-        not fail.
+        The note wrapped in ``<sub>``, or an empty string when no narrative
+        degradation lacks its own note.
     """
-    note = format_question_pass_note(metadata=metadata)
+    note = format_narrative_note(metadata=metadata)
     if not note:
         return ""
-    return f"<sub>{sanitize_comment_text(note, limit=300)}</sub>"
+    return f"<sub>{sanitize_comment_text(note, limit=600)}</sub>"
 
 
 def format_verification_note_line(*, metadata: ReviewMetadata) -> str:

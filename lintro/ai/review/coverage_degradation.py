@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
+    SYNTHESIS_DEGRADATION_REASONS,
     CoverageDegradationReason,
 )
 from lintro.ai.review.models.coverage_degradation import (
@@ -28,9 +29,11 @@ if TYPE_CHECKING:
 __all__ = [
     "COVERAGE_LIMITED_HEADLINE",
     "PARTIAL_REVIEW_LABEL",
+    "CARRIED_SYNTHESIS_NOTE",
+    "CARRIED_VERIFICATION_NOTE",
     "GENERATED_QUESTIONS_FAILED_NOTE",
     "describe_coverage_degradations",
-    "format_question_pass_note",
+    "format_narrative_note",
 ]
 
 #: Short label reused as the bold lead-in on the posted GitHub surfaces.
@@ -44,6 +47,17 @@ COVERAGE_LIMITED_HEADLINE = "Coverage limited — not a guaranteed full finding 
 GENERATED_QUESTIONS_FAILED_NOTE = (
     "The per-PR question pass failed, so every chunk was reviewed against "
     "the rubric alone."
+)
+
+#: Notes for a synthesis or verification failure an earlier round recorded
+#: and this round carries without running the pass again (#2803).
+CARRIED_SYNTHESIS_NOTE = (
+    "The synthesis pass did not complete on the round this one repeats, so "
+    "cross-chunk duplicate merging was not applied."
+)
+CARRIED_VERIFICATION_NOTE = (
+    "Verification did not complete on the round this one repeats, so the "
+    "selected findings stay unverified."
 )
 
 #: What a degraded run is called in the *header* of each posted surface
@@ -244,8 +258,9 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
 
     if not_redone:
         clauses.append(
-            "work the previous attempt at this head degraded was not redone "
-            f"({', '.join(not_redone)}); it is redone when this head is reviewed again",
+            "work the previous round degraded was not redone "
+            f"({', '.join(not_redone)}); it is redone when these files are reviewed "
+            "again",
         )
 
     known = {
@@ -292,20 +307,31 @@ def describe_coverage_degradations(*, metadata: ReviewMetadata) -> str:
     return f"{'; '.join(clauses)}. {coverage}{tail}"
 
 
-def format_question_pass_note(*, metadata: ReviewMetadata) -> str:
-    """Return the note for a run whose per-PR question pass failed.
+def format_narrative_note(*, metadata: ReviewMetadata) -> str:
+    """Return the note for the narrative degradations no pass note explains.
+
+    The synthesis and verification notes are built from those passes'
+    outcomes. A round that carries an earlier round's failure of a pass it
+    did not run again (#2803) has no outcome to describe, so the failure is
+    named here; the failed per-PR question pass has no outcome note at all.
 
     Args:
         metadata: Review run metadata carrying ``coverage_degradations``.
 
     Returns:
-        :data:`GENERATED_QUESTIONS_FAILED_NOTE`, or an empty string when the pass
-        did not fail. A rerun that carried the failure forward (#2803)
-        records the same reason, so it renders the same note.
+        One sentence per such degradation, or an empty string when there is
+        none. The text is identical whether the reason was recorded by this
+        round or carried from the last one.
     """
-    if any(
-        item.reason is CoverageDegradationReason.GENERATED_QUESTIONS_FAILED
-        for item in metadata.coverage_degradations
+    reasons = {item.reason for item in metadata.coverage_degradations}
+    sentences = []
+    if CoverageDegradationReason.GENERATED_QUESTIONS_FAILED in reasons:
+        sentences.append(GENERATED_QUESTIONS_FAILED_NOTE)
+    if metadata.synthesis is None and reasons & SYNTHESIS_DEGRADATION_REASONS:
+        sentences.append(CARRIED_SYNTHESIS_NOTE)
+    if (
+        metadata.verification is None
+        and CoverageDegradationReason.VERIFICATION_FAILED in reasons
     ):
-        return GENERATED_QUESTIONS_FAILED_NOTE
-    return ""
+        sentences.append(CARRIED_VERIFICATION_NOTE)
+    return " ".join(sentences)

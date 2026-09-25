@@ -33,7 +33,7 @@ from lintro.ai.review.coverage_degradation import (
     GENERATED_QUESTIONS_FAILED_NOTE,
     PARTIAL_REVIEW_LABEL,
     describe_coverage_degradations,
-    format_question_pass_note,
+    format_narrative_note,
 )
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
@@ -348,7 +348,7 @@ async def test_both_depth_passes_failing_still_keeps_the_main_pass(
 
     # The failed question pass is a narrative note of its own since #2803,
     # never a clause of the coverage-limited warning.
-    assert_that(format_question_pass_note(metadata=result.metadata)).is_equal_to(
+    assert_that(format_narrative_note(metadata=result.metadata)).is_equal_to(
         GENERATED_QUESTIONS_FAILED_NOTE,
     )
     assert_that(note).does_not_contain("question pass")

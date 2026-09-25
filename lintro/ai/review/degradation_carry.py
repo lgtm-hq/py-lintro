@@ -1,11 +1,14 @@
 """Keep a rerun's verdict equal to the attempt it reruns (#2803).
 
-A rerun at the same head resumes the saved state. Before state v6 that state
-said only "reviewed, nothing found", so a rerun of a job that failed on a
-coverage degradation reviewed nothing and passed. Each run record now keeps
-its degradations as
+A rerun resumes the saved state. Before state v6 that state said only
+"reviewed, nothing found", so a rerun of a job that failed on a coverage
+degradation reviewed nothing and passed. Each run record now keeps its
+degradations as
 :class:`~lintro.ai.review.models.degradation_record.DegradationRecord` rows,
-and the next round at the same head reads the latest one twice:
+and the next round reads the latest round's rows twice. What a row owes is
+keyed by each file's patch hash, as coverage is, not by the head: a later
+head that leaves a degraded file unchanged still owes its redo, and a file
+whose content changed is reviewed on its own merits.
 
 * :func:`redo_scope`, at resume planning: a per-file reason whose files were
   credited anyway (a split and re-reviewed chunk, a failed adversarial sweep)
@@ -15,8 +18,6 @@ and the next round at the same head reads the latest one twice:
   warning (a narrative reason) or fails the same way (a per-file reason,
   including a redo the budget stopped). Work the round did redo answers for
   itself.
-
-A new head starts fresh: its files are reviewed by hash as before.
 """
 
 from __future__ import annotations
@@ -99,29 +100,66 @@ class RedoScope:
         )
 
 
-def latest_degradations(
-    *,
-    prior: ReviewState | None,
-    head_sha: str,
-) -> tuple[DegradationRecord, ...]:
-    """Return the latest round's degradations when it reviewed this head.
+def latest_degradations(*, prior: ReviewState | None) -> tuple[DegradationRecord, ...]:
+    """Return the degradations the latest round recorded.
 
     Args:
         prior: The resumed state, or ``None``.
-        head_sha: The head this round reviews.
 
     Returns:
-        The latest run's records at ``head_sha``; empty when there is no
-        prior run, the latest run reviewed another head, or its records
-        predate v6.
+        The latest run's records; empty when there is no prior run or its
+        record predates v6. The head the round reviewed does not matter:
+        what a record owes is keyed by each file's patch hash, as coverage
+        is, so a later head that leaves a degraded file unchanged still owes
+        its redo.
     """
-    if prior is None or not prior.runs or not head_sha:
+    if prior is None or not prior.runs:
         return ()
-    latest = prior.runs[-1]
-    if latest.identity.sha != head_sha:
-        return ()
+    return prior.runs[-1].coverage.degradations
+
+
+def _degraded_hashes(*, prior: ReviewState | None) -> dict[str, str]:
+    """Return the patch hash each file had when the latest round credited it.
+
+    Args:
+        prior: The resumed state, or ``None``.
+
+    Returns:
+        Path to hash for the coverage records the latest round wrote.
+    """
+    if prior is None or not prior.runs:
+        return {}
+    latest_round = prior.runs[-1].identity.round
+    return {
+        record.path: record.patch_hash
+        for record in prior.coverage
+        if record.round == latest_round
+    }
+
+
+def _owed_paths(
+    *,
+    paths: Sequence[str],
+    degraded: dict[str, str],
+    hashes: dict[str, str],
+) -> tuple[str, ...]:
+    """Return the files whose degraded work still applies to their content.
+
+    Args:
+        paths: The files a degradation named.
+        degraded: Hash per file as the degrading round credited it.
+        hashes: Current patch hash per file in this round's diff.
+
+    Returns:
+        The files still in the diff at the content the degradation hit. A
+        file that round credited is owed only at that hash; a changed file
+        is reviewed on its own merits. A file it did not credit (a turn
+        limit, a lost half) is owed while it is in the diff.
+    """
     return tuple(
-        record for record in latest.coverage.degradations if record.head_sha == head_sha
+        path
+        for path in paths
+        if path in hashes and degraded.get(path, hashes[path]) == hashes[path]
     )
 
 
@@ -133,95 +171,71 @@ def _needs_redo(record: DegradationRecord) -> bool:
     )
 
 
-def redo_scope(*, prior: ReviewState | None, head_sha: str) -> RedoScope:
-    """Return the files a rerun at ``head_sha`` must review again.
+def redo_scope(*, prior: ReviewState | None, hashes: dict[str, str]) -> RedoScope:
+    """Return the files this round must review again.
 
     Args:
         prior: The resumed state, or ``None``.
-        head_sha: The head this round reviews.
+        hashes: Current patch hash per file in this round's diff.
 
     Returns:
-        The scope; empty unless the latest round at this head recorded a
-        per-file reason.
+        The scope; empty unless the latest round recorded a per-file reason
+        for a file still at the content it degraded.
     """
     records = [
-        record
-        for record in latest_degradations(prior=prior, head_sha=head_sha)
-        if _needs_redo(record)
+        record for record in latest_degradations(prior=prior) if _needs_redo(record)
     ]
+    degraded = _degraded_hashes(prior=prior)
     return RedoScope(
         paths=frozenset(
-            path for record in records for path in record.degradation.paths
+            path
+            for record in records
+            for path in _owed_paths(
+                paths=record.degradation.paths,
+                degraded=degraded,
+                hashes=hashes,
+            )
         ),
         whole_head=any(not record.degradation.paths for record in records),
     )
 
 
-def _redone(
-    *,
-    record: DegradationRecord,
-    reviewed: Collection[str],
-    attempted: Collection[str],
-    steps_ran: Collection[DegradationStep],
-    head_complete: bool,
-) -> bool:
-    """Return whether this round redid the work a record degraded.
-
-    A file-step record is redone when its files were reviewed, or when this
-    round attempted any of them and recorded its own degradation for them:
-    a redo that failed again reports that failure, not the earlier one. The
-    redo runs at this round's depth, so a depth-3 sweep failure is redone by
-    a depth-2 rerun that reviews the file: the sweep is not part of that
-    round's contract.
-
-    Args:
-        record: A degradation from the latest round at this head.
-        reviewed: Files this round reviewed.
-        attempted: Files this round's own file-step degradations name.
-        steps_ran: Once-per-round steps this round ran.
-        head_complete: Whether every eligible file is covered at the head
-            after this round. A record naming no files sent the whole head
-            back (:func:`redo_scope`), so only a complete head redid it.
-
-    Returns:
-        True when this round's own outcome for that work stands instead.
-    """
-    if record.step in _FILE_STEPS:
-        paths = record.degradation.paths
-        if not paths:
-            return bool(reviewed) and head_complete
-        return all(path in reviewed for path in paths) or any(
-            path in attempted for path in paths
-        )
-    return record.step in steps_ran
-
-
 def carried_degradations(
     *,
     prior: ReviewState | None,
-    head_sha: str,
     current: Sequence[CoverageDegradation],
     reviewed: Collection[str],
     steps_ran: Collection[DegradationStep],
+    hashes: dict[str, str],
     head_complete: bool = True,
 ) -> tuple[CoverageDegradation, ...]:
     """Return the earlier degradations this round records again.
 
+    A file-step row is judged per file. A file no longer owes the row when
+    this round reviewed it, attempted it and recorded its own degradation
+    for it (a redo that failed again reports that failure), or changed its
+    content; the row is carried for the files that still owe it. The redo
+    runs at this round's depth, so a depth-3 sweep failure is redone by a
+    depth-2 round that reviews the file: the sweep is not part of that
+    round's work. A row naming no files sent the whole head back, so only a
+    round that leaves the head complete redoes it. A once-per-round step is
+    redone when this round ran it.
+
     Args:
         prior: The resumed state, or ``None`` (``--full`` passes ``None``).
-        head_sha: The head this round reviews.
         current: The degradations this round recorded itself.
         reviewed: Files this round reviewed.
         steps_ran: Once-per-round steps this round ran.
+        hashes: Current patch hash per file in this round's diff.
         head_complete: Whether every eligible file is covered at the head
-            after this round; a whole-head redo counts only then.
+            after this round.
 
     Returns:
-        The latest same-head round's degradations whose work this round did
-        not redo, excluding the ones the coverage records already re-report,
-        the run-setup facts every round recomputes, and exact repeats. A
-        file-step row takes :data:`CARRIED_CHUNK_INDEX`: no chunk of this
-        round read it, so it must not count against this round's chunks.
+        The latest round's degradations this round did not redo, excluding
+        the ones the coverage records already re-report, the run-setup facts
+        every round recomputes, and exact repeats. A file-step row takes
+        :data:`CARRIED_CHUNK_INDEX`: no chunk of this round read it, so it
+        must not count against this round's chunks.
     """
     attempted = {
         path
@@ -229,21 +243,33 @@ def carried_degradations(
         if item.chunk_index != CARRIED_CHUNK_INDEX
         for path in item.paths
     }
+    degraded = _degraded_hashes(prior=prior)
     carried: list[CoverageDegradation] = []
-    for record in latest_degradations(prior=prior, head_sha=head_sha):
+    for record in latest_degradations(prior=prior):
         if record.reason in _CARRIED_BY_COVERAGE or record.step is DegradationStep.RUN:
-            continue
-        if _redone(
-            record=record,
-            reviewed=reviewed,
-            attempted=attempted,
-            steps_ran=steps_ran,
-            head_complete=head_complete,
-        ):
             continue
         degradation = record.degradation
         if record.step in _FILE_STEPS:
-            degradation = replace(degradation, chunk_index=CARRIED_CHUNK_INDEX)
+            owed = tuple(
+                path
+                for path in _owed_paths(
+                    paths=degradation.paths,
+                    degraded=degraded,
+                    hashes=hashes,
+                )
+                if path not in reviewed and path not in attempted
+            )
+            if degradation.paths and not owed:
+                continue
+            if not degradation.paths and reviewed and head_complete:
+                continue
+            degradation = replace(
+                degradation,
+                chunk_index=CARRIED_CHUNK_INDEX,
+                paths=owed,
+            )
+        elif record.step in steps_ran:
+            continue
         if degradation in current or degradation in carried:
             continue
         carried.append(degradation)
