@@ -101,7 +101,7 @@ jobs:
         # filter true, so infrastructure trouble scans rather than silently
         # skipping the gate.
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@86e29ba560701a8d73f31713eb0841ef50f6029c # v0.74.5
+        uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@d32388495d571a0ee13383bacc732765bf4e9e7d # v0.74.6
         with:
           filters: |
             # Anything that can change the dependency graph the release gate
@@ -172,7 +172,7 @@ jobs:
           steps.changes.outputs.changes == '' ||
           fromJSON(steps.changes.outputs.changes).deps
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@86e29ba560701a8d73f31713eb0841ef50f6029c # v0.74.5
+        uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@d32388495d571a0ee13383bacc732765bf4e9e7d # v0.74.6
         with:
           target: .
           target-type: dir
@@ -187,7 +187,7 @@ jobs:
           steps.changes.outputs.changes == '' ||
           fromJSON(steps.changes.outputs.changes).deps
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@86e29ba560701a8d73f31713eb0841ef50f6029c # v0.74.5
+        uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@d32388495d571a0ee13383bacc732765bf4e9e7d # v0.74.6
         with:
           target: ${{ steps.sbom.outputs.sbom-file }}
           target-type: sbom
