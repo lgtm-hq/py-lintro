@@ -74,6 +74,25 @@ if ! _load_bats_library "assert"; then
 		fi
 	}
 
+	# shellcheck disable=SC2154
+	refute_output() {
+		local unexpected
+		if [[ "$1" == "--partial" ]]; then
+			unexpected="$2"
+			[[ "${output}" != *"${unexpected}"* ]] || {
+				echo "# Expected output not to contain: ${unexpected}" >&2
+				echo "# Actual output: ${output}" >&2
+				return 1
+			}
+		else
+			unexpected="$1"
+			[[ "${output}" != "${unexpected}" ]] || {
+				echo "# Expected output to differ from: ${unexpected}" >&2
+				return 1
+			}
+		fi
+	}
+
 	assert_equal() {
 		[[ "$1" == "$2" ]] || {
 			echo "# Expected: $1" >&2

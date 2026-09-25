@@ -3,11 +3,12 @@
 # Purpose: Bump the lintro pin in the lintro-pre-commit mirror, open+merge a
 #          version-bump PR, and tag the mirror with the matching release version.
 #
-# The bump commit is created through the GitHub API (GraphQL
+# The bump commit is created by lgtm-ci's shared
+# scripts/ci/git/create-signed-commit.sh (reset mode, GraphQL
 # createCommitOnBranch) with a lgtm-mirror-bot App token, so GitHub signs it
 # and attributes it to the App account — the mirror's rulesets require both
-# (#2742). The merge uses --auto plus a bounded poll, so the required checks
-# decide the merge instead of racing them.
+# (#2742, #2834). The merge uses --auto plus a bounded poll, so the required
+# checks decide the merge instead of racing them.
 
 set -euo pipefail
 
@@ -30,6 +31,9 @@ Environment:
   GH_TOKEN       lgtm-mirror-bot App installation token with contents +
                  pull-requests write on the mirror repo (required).
   MIRROR_REPO    owner/name of the mirror repository (default: lgtm-hq/lintro-pre-commit).
+  LGTM_CI_TOOLING_DIR  Checkout of lgtm-hq/lgtm-ci (scripts/ci/) providing
+                 scripts/ci/git/create-signed-commit.sh (required when a
+                 bump commit is needed).
   MERGE_TIMEOUT_SECONDS  Bound for the auto-merge poll (default: 900).
   MERGE_POLL_SECONDS     Interval for the auto-merge poll (default: 20).
 
@@ -37,16 +41,19 @@ Behavior:
   * Rewrites pyproject.toml's lintro pin to <version>.
   * If already pinned (idempotent re-run), ensures the vX.Y.Z tag exists and
     exits 0 without opening a PR.
-  * Otherwise recreates the bump branch on the mirror's current main via
-    createCommitOnBranch (signed + attributed), opens the PR, enables
-    auto-merge, polls until MERGED, then tags vX.Y.Z on main.
+  * Otherwise resets the bump branch to the mirror's current main plus the
+    bump commit via lgtm-ci's create-signed-commit.sh --mode reset (signed +
+    attributed), opens the PR, enables auto-merge, polls until MERGED, then
+    tags vX.Y.Z on main.
   * Refuses to run when the mirror has "Allow auto-merge" turned off — the
     merge would fail after the checks anyway; the failure names the setting
     and the PR to fix (#2742).
   * A stale bump branch is healed only when its PR cannot merge: an open,
     clean PR from an earlier run is reused (auto-merge re-armed and polled)
-    instead of being thrown away; a dirty/closed one is deleted and
-    recreated from current main (dirty-PR auto-heal).
+    instead of being thrown away; a dirty one (or one against another
+    base) is deleted, closing its PR, and recreated from current main
+    (dirty-PR auto-heal). A leftover branch with no open PR is reset in
+    place.
 EOF
 	exit 0
 fi
@@ -198,10 +205,22 @@ if git diff --quiet -- pyproject.toml; then
 	exit 0
 fi
 
+# The shared signed-commit script must be present before any mirror write:
+# a missing checkout would otherwise fail after the branch heal (#2834).
+if [[ -z "${LGTM_CI_TOOLING_DIR:-}" ]]; then
+	log_error "LGTM_CI_TOOLING_DIR is not set; point it at a checkout of lgtm-hq/lgtm-ci (scripts/ci/)"
+	exit 1
+fi
+SIGNED_COMMIT_SCRIPT="${LGTM_CI_TOOLING_DIR}/scripts/ci/git/create-signed-commit.sh"
+if [[ ! -f "$SIGNED_COMMIT_SCRIPT" ]]; then
+	log_error "lgtm-ci create-signed-commit script not found at ${SIGNED_COMMIT_SCRIPT}; check the LGTM_CI_TOOLING_DIR checkout"
+	exit 1
+fi
+
 # A disabled auto-merge setting fails the run here — after "a bump is
-# needed" is known, but BEFORE any mirror mutation (branch heal, ref POST,
-# signed commit, PR): nothing is written for a run that cannot merge
-# (#2742).
+# needed" is known, but BEFORE any mirror mutation (branch heal, temp
+# branch, signed commit, PR): nothing is written for a run that cannot
+# merge (#2742).
 require_auto_merge_enabled
 
 # --- create the bump branch on current main (API-created commit) ------------
@@ -209,89 +228,82 @@ require_auto_merge_enabled
 base_oid="$(git rev-parse origin/main)"
 
 # Reuse-or-heal (#2742 review): a branch left over from an earlier run is
-# only thrown away when its PR cannot merge. An open PR against main
-# (auto-merge still pending from a cancelled or timed-out run) is reused
-# as-is unless its merge state is DIRTY: a dirty PR would replay the same
-# conflict every rerun and is healed by recreation from the mirror's
-# current main, which cannot conflict. Its stale PR closes with the deleted
-# branch. A failed `pr list` fails the run — guessing "no PR" and deleting
-# the branch would destroy the very PR that needs reusing or healing.
-existing_pr=""
+# only thrown away when its PR cannot merge. The lookup lists every open PR
+# whose head is the bump branch, whatever its base: filtering on --base main
+# would miss a PR against another base, and resetting the branch in place
+# would then rewrite that PR's head and leave `pr create` to fail on the
+# existing head (#2835 review). An open PR against main (auto-merge still
+# pending from a cancelled or timed-out run) is reused as-is unless its
+# merge state is DIRTY: a dirty PR would replay the same conflict every
+# rerun. Any other open PR — dirty, or against another base, which merging
+# would not update main — is healed by deleting the branch, which closes
+# it, and recreating it from the mirror's current main, which cannot
+# conflict. A leftover branch with no open PR at all is not deleted: reset
+# mode moves it. A failed `pr list` fails the run — guessing "no PR" would
+# rewrite the branch under the very PR that needs reusing or healing. If the
+# signed commit then fails after a heal, the old PR stays closed with no
+# replacement until the next run, which takes the fresh-branch path.
 if git ls-remote --heads origin "$BRANCH" | grep -q .; then
-	existing_pr="$(gh pr list --head "$BRANCH" --base main --state open --json number \
-		--jq '.[0].number // ""')"
-	if [[ -n "$existing_pr" ]]; then
-		pr_info="$(gh pr view "$existing_pr" --json state,mergeStateStatus,baseRefName \
-			--jq '.state + " " + (.mergeStateStatus // "UNKNOWN") + " " + .baseRefName')"
-		read -r pr_state pr_merge_state pr_base <<<"$pr_info"
+	# One "number base mergeState" line per open PR for the head; an empty
+	# mergeStateStatus reads as UNKNOWN (not yet computed, not DIRTY).
+	open_prs="$(gh pr list --repo "$MIRROR_REPO" --head "$BRANCH" --state open \
+		--json number,baseRefName,mergeStateStatus \
+		--jq '.[] | "\(.number) \(.baseRefName) \(.mergeStateStatus // "" | if . == "" then "UNKNOWN" else . end)"')"
+	reusable_pr=""
+	reusable_state=""
+	while read -r open_number open_base open_merge_state; do
+		[[ -z "$open_number" ]] && continue
 		# Any open PR against main whose merge state is not DIRTY (CLEAN,
 		# BLOCKED, UNKNOWN, UNSTABLE, BEHIND, HAS_HOOKS) is
-		# mergeable-in-waiting; only a dirty PR — or one targeting another
-		# base, which merging would not update main — heals.
-		if [[ "$pr_state" == "OPEN" && "$pr_merge_state" != "DIRTY" && "$pr_base" == "main" ]]; then
-			log_info "Reusing open PR #${existing_pr} for ${BRANCH} (${pr_state} ${pr_merge_state})"
-			pr_number="$existing_pr"
-			pr_url="https://github.com/${MIRROR_REPO}/pull/${pr_number}"
-			merge_mirror_pr
-			finish_after_merge
-			exit 0
+		# mergeable-in-waiting.
+		if [[ "$open_base" == "main" && "$open_merge_state" != "DIRTY" ]]; then
+			reusable_pr="$open_number"
+			reusable_state="$open_merge_state"
 		fi
-		log_warning "PR #${existing_pr} for ${BRANCH} is not mergeable (${pr_info}); healing the branch"
-	else
-		log_warning "Bump branch ${BRANCH} exists with no open PR; recreating it from origin/main"
+	done <<<"$open_prs"
+	if [[ -n "$reusable_pr" ]]; then
+		log_info "Reusing open PR #${reusable_pr} for ${BRANCH} (OPEN ${reusable_state} main)"
+		pr_number="$reusable_pr"
+		pr_url="https://github.com/${MIRROR_REPO}/pull/${pr_number}"
+		merge_mirror_pr
+		finish_after_merge
+		exit 0
 	fi
-	gh api -X DELETE "repos/${MIRROR_REPO}/git/refs/heads/${BRANCH}"
+	if [[ -n "$open_prs" ]]; then
+		# Deleting the branch closes every open PR on it, so the fresh PR
+		# below never inherits a cached DIRTY state or a foreign base, and
+		# `pr create` never meets an existing PR for the head.
+		log_warning "Open PR(s) for ${BRANCH} cannot merge into main (${open_prs//$'\n'/; }); healing the branch"
+		gh api -X DELETE "repos/${MIRROR_REPO}/git/refs/heads/${BRANCH}"
+	else
+		# No PR to close: reset mode below moves the stale branch onto
+		# origin/main plus the bump commit in one step, no delete needed.
+		log_warning "Bump branch ${BRANCH} exists with no open PR; resetting it onto origin/main"
+	fi
 fi
 
-# createCommitOnBranch appends to an EXISTING branch (CommittableBranch
-# .branchName: "the branch to append the commit to"), so the ref must exist
-# at base_oid first — on fresh runs and after the heal alike.
-log_info "Creating ${BRANCH} at ${base_oid}"
-gh api -X POST "repos/${MIRROR_REPO}/git/refs" \
-	-f ref="refs/heads/${BRANCH}" -f sha="$base_oid" >/dev/null
-
-log_info "Creating bump commit on ${BRANCH} via createCommitOnBranch"
-# The mutation and its input travel as one JSON payload on gh's stdin; no
-# quoting layer ever sees the base64 file contents.
-created_oid="$(
-	{
-		jq -n \
-			--rawfile query <(
-				cat <<'GRAPHQL'
-mutation($input: CreateCommitOnBranchInput!) {
-	createCommitOnBranch(input: $input) {
-		commit {
-			oid
-		}
-	}
-}
-GRAPHQL
-			) \
-			--arg repo "$MIRROR_REPO" \
-			--arg branch "${BRANCH}" \
-			--arg oid "$base_oid" \
-			--arg headline "chore: bump lintro to ${VERSION}" \
-			--arg body "Sync the pinned lintro wheel to the ${TAG} py-lintro release.
+# lgtm-ci's shared create-signed-commit script in reset mode makes the bump
+# branch exactly base_oid plus the bump commit: the commit is made on a
+# short-lived signed-commit-tmp/* branch, then the bump branch is created or
+# force-moved to it in one step (never parked at base), and a failed commit
+# leaves it untouched. Run from the mirror checkout: --file paths are read
+# from the current directory.
+log_info "Creating bump commit on ${BRANCH} via lgtm-ci create-signed-commit (reset onto ${base_oid})"
+commit_output="$(
+	bash "$SIGNED_COMMIT_SCRIPT" \
+		--mode reset \
+		--base "$base_oid" \
+		--branch "$BRANCH" \
+		--repository "$MIRROR_REPO" \
+		--message "chore: bump lintro to ${VERSION}" \
+		--body "Sync the pinned lintro wheel to the ${TAG} py-lintro release.
 
 Refs lgtm-hq/py-lintro (mirror-release automation)" \
-			--arg path "pyproject.toml" \
-			--arg contents "$(base64 <pyproject.toml | tr -d '\n')" \
-			'{
-			  query: $query,
-			  variables: {
-			    input: {
-			      branch: { repositoryNameWithOwner: $repo, branchName: $branch },
-			      expectedHeadOid: $oid,
-			      message: { headline: $headline, body: $body },
-			      fileChanges: { additions: [ { path: $path, contents: $contents } ] }
-			    }
-			  }
-			}'
-	} | gh api graphql --input - |
-		jq -r '.data.createCommitOnBranch.commit.oid'
+		--file pyproject.toml
 )"
-if [[ -z "$created_oid" || "$created_oid" == "null" ]]; then
-	log_error "createCommitOnBranch returned no commit; the bump branch was not created"
+created_oid="$(sed -n 's/^commit-sha=//p' <<<"$commit_output" | tail -n 1)"
+if [[ -z "$created_oid" ]]; then
+	log_error "create-signed-commit reported no commit-sha; the bump branch was not updated"
 	exit 1
 fi
 log_success "Created bump commit ${created_oid} (GitHub-signed, attributed to the App)"
@@ -301,8 +313,9 @@ log_success "Created bump commit ${created_oid} (GitHub-signed, attributed to th
 PR_TITLE="chore: bump lintro to ${VERSION}"
 PR_BODY="Automated version bump: pins the published \`lintro==${VERSION}\` wheel to match py-lintro ${TAG}. Merged and tagged \`${TAG}\` by mirror-release automation."
 
-# Always open a fresh PR: the branch was just created (fresh run) or its old
-# PR closed when the heal deleted the branch — no open PR can exist for it.
+# Always open a fresh PR: the branch was just created (fresh run), had no
+# open PR (reset in place), or its old PR closed when the heal deleted the
+# branch — no open PR can exist for it.
 log_info "Opening mirror version-bump PR"
 pr_url="$(
 	gh pr create --base main --head "$BRANCH" \

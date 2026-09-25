@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -22,6 +23,7 @@ BUMP_SCRIPT = MIRROR_DIR / "bump_pin.py"
 WAIT_WHEEL_SCRIPT = MIRROR_DIR / "wait-for-pypi-wheel.sh"
 PUBLISH_SCRIPT = MIRROR_DIR / "publish-mirror-release.sh"
 CLASSIFY_SCRIPT = ROOT / "scripts" / "ci" / "classify-release-tag.py"
+MIRROR_WORKFLOW = ROOT / ".github" / "workflows" / "mirror-release.yml"
 
 
 def _load_bump_pin_module() -> Any:
@@ -224,19 +226,26 @@ def test_publish_script_creates_commit_via_the_api_and_never_races_merge() -> No
     Plain `git commit` under a noreply identity produced an unsigned,
     unattributed commit the mirror's rulesets reject, and an immediate
     `gh pr merge` raced the required checks. Pins the replacement shape:
-    createCommitOnBranch for the commit, `--auto` plus a bounded MERGED poll
-    for the merge.
+    lgtm-ci's shared create-signed-commit script (createCommitOnBranch) for
+    the commit (#2834), `--auto` plus a bounded MERGED poll for the merge.
     """
     body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
 
-    # Signed, attributed commit: created through the GraphQL API.
-    assert_that(body).contains("createCommitOnBranch")
-    assert_that(body).contains("expectedHeadOid")
+    # Signed, attributed commit: created by the shared lgtm-ci script in
+    # reset mode, never by an inline mutation or a local git commit.
+    assert_that(body).contains(
+        "${LGTM_CI_TOOLING_DIR}/scripts/ci/git/create-signed-commit.sh",
+    )
+    assert_that(body).contains('bash "$SIGNED_COMMIT_SCRIPT"')
+    assert_that(body).contains("--mode reset")
+    assert_that(body).contains('--base "$base_oid"')
+    assert_that(body).contains('--branch "$BRANCH"')
+    assert_that(body).contains('--repository "$MIRROR_REPO"')
+    assert_that(body).contains("--file pyproject.toml")
+    assert_that(body).contains("commit-sha=")
+    assert_that(body).does_not_contain("gh api graphql")
+    assert_that(body).does_not_contain("expectedHeadOid")
     assert_that(body).does_not_contain("git commit")
-    # The mutation input travels under variables.input (a raw GraphQL HTTP
-    # body delivers variables there; a top-level input: is rejected).
-    assert_that(body).contains("variables: {")
-    assert_that(body).contains("input: {")
     # Merge: the repo setting is checked, auto-merge armed, then a bounded
     # poll — never an immediate merge.
     assert_that(body).contains("allow_auto_merge")
@@ -249,22 +258,111 @@ def test_publish_script_creates_commit_via_the_api_and_never_races_merge() -> No
     assert_that(body).contains("pull/${pr_number}")
 
 
+def test_publish_script_requires_the_lgtm_ci_tooling_checkout(tmp_path: Path) -> None:
+    """A missing LGTM_CI_TOOLING_DIR fails clearly before any mirror write.
+
+    Runs the real script with stub git/gh on PATH: the pin changes, so a
+    bump commit is needed, and the run must stop naming the variable before
+    the auto-merge check or any branch, commit or PR call.
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    gh_log = tmp_path / "gh.log"
+    for name, script in (
+        ("git", '#!/usr/bin/env bash\n[[ "$1" == "diff" ]] && exit 1\nexit 0\n'),
+        ("gh", f'#!/usr/bin/env bash\necho "$*" >>"{gh_log}"\nexit 0\n'),
+    ):
+        stub = bin_dir / name
+        stub.write_text(script, encoding="utf-8")
+        stub.chmod(0o755)
+    mirror = tmp_path / "mirror"
+    mirror.mkdir()
+    (mirror / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["lintro==1.2.2"]\n',
+        encoding="utf-8",
+    )
+
+    for tooling_dir, message in (
+        (None, "LGTM_CI_TOOLING_DIR is not set"),
+        (str(tmp_path / "no-such-dir"), "create-signed-commit script not found"),
+    ):
+        env = os.environ.copy()
+        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
+        env["GH_TOKEN"] = "stub"  # nosec B105 - placeholder for the stub gh
+        env["MIRROR_DIR"] = str(mirror)
+        env.pop("LGTM_CI_TOOLING_DIR", None)
+        if tooling_dir is not None:
+            env["LGTM_CI_TOOLING_DIR"] = tooling_dir
+        result = subprocess.run(  # nosec B603 - fixed argv against repo script
+            [str(PUBLISH_SCRIPT), "1.2.3"],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            cwd=ROOT,
+        )
+
+        assert_that(result.returncode).is_not_equal_to(0)
+        assert_that(result.stderr + result.stdout).contains(message)
+        # Nothing reached the mirror: not even the auto-merge setting read.
+        assert_that(gh_log.exists()).is_false()
+
+
 def test_publish_script_heals_a_stale_bump_branch() -> None:
-    """An existing bump branch is deleted and recreated, not rebased (#2742).
+    """A stale bump branch is reset or recreated, never rebased (#2742).
 
     The rerun path reused a leftover branch and rebased it into the same
     conflict every time (lintro-pre-commit #23 sat dirty until merged by
-    hand). Recreation from the mirror's current main cannot conflict.
-    createCommitOnBranch appends to an existing branch, so the ref is also
-    (re)created at the base oid before the mutation runs.
+    hand). Rebuilding from the mirror's current main cannot conflict. An
+    unmergeable open PR's branch is deleted (closing that PR) before the
+    reset; a branch with no open PR is moved in place by reset mode, so the
+    script no longer POSTs the ref itself (#2834).
     """
     body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
 
     assert_that(body).contains("git ls-remote --heads origin")
-    assert_that(body).contains("git/refs/heads/${BRANCH}")
-    # The ref must exist before the commit mutation (fresh + heal runs).
-    assert_that(body).contains('gh api -X POST "repos/${MIRROR_REPO}/git/refs"')
+    assert_that(body).contains(
+        'gh api -X DELETE "repos/${MIRROR_REPO}/git/refs/heads/${BRANCH}"',
+    )
+    assert_that(body).does_not_contain('gh api -X POST "repos/${MIRROR_REPO}/git/refs"')
     assert_that(body).does_not_contain("git rebase")
+
+
+def test_mirror_workflow_checks_out_lgtm_ci_tooling_for_the_publish_step() -> None:
+    """The mirror-bump job provides the shared signed-commit script (#2834).
+
+    The lgtm-ci checkout must be sparse, credential-free, pinned to a full
+    SHA, placed before the publish step, and exposed to it as an absolute
+    LGTM_CI_TOOLING_DIR.
+    """
+    workflow = yaml.safe_load(MIRROR_WORKFLOW.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["mirror-bump"]["steps"]
+    names = [step.get("name") for step in steps]
+
+    checkout_index = names.index("Checkout lgtm-ci tooling")
+    publish_index = names.index("Publish mirror release")
+    assert_that(checkout_index).is_less_than(publish_index)
+
+    checkout = steps[checkout_index]
+    assert_that(checkout["uses"]).starts_with("actions/checkout@")
+    assert_that(checkout["if"]).is_equal_to(steps[publish_index]["if"])
+    with_ = checkout["with"]
+    assert_that(with_["repository"]).is_equal_to("lgtm-hq/lgtm-ci")
+    assert_that(with_["path"]).is_equal_to(".lgtm-ci-tooling")
+    assert_that(with_["sparse-checkout"]).is_equal_to("scripts/ci/")
+    assert_that(with_["persist-credentials"]).is_false()
+    assert_that(with_["ref"]).matches(r"^[0-9a-f]{40}$")
+
+    publish_env = steps[publish_index]["env"]
+    assert_that(publish_env["LGTM_CI_TOOLING_DIR"]).is_equal_to(
+        "${{ github.workspace }}/.lgtm-ci-tooling",
+    )
+
+    # Harden-runner must let the checkout reach GitHub.
+    harden = steps[0]
+    assert_that(harden["uses"]).starts_with("step-security/harden-runner@")
+    endpoints = harden["with"]["allowed-endpoints"].split()
+    assert_that(endpoints).contains("github.com:443", "codeload.github.com:443")
 
 
 def test_publish_script_reuses_a_healthy_open_pr_before_healing() -> None:
@@ -274,14 +372,17 @@ def test_publish_script_reuses_a_healthy_open_pr_before_healing() -> None:
     would close a healthy PR and restart its checks from zero. The script
     asks for the PR's state first and only heals a dirty/abandoned branch.
     Reuse is gated on the PR targeting main (merging a PR against another
-    base would tag a main that never received the bump).
+    base would tag a main that never received the bump). The lookup lists
+    open PRs for the head on every base: a --base main filter would miss a
+    foreign-base PR and reset the branch under it (#2835 review).
     """
     body = PUBLISH_SCRIPT.read_text(encoding="utf-8")
 
-    assert_that(body).contains("gh pr list --head")
-    assert_that(body).contains("--base main")
-    assert_that(body).contains("mergeStateStatus")
-    assert_that(body).contains("baseRefName")
+    lookup = next(line for line in body.splitlines() if "gh pr list" in line)
+    assert_that(lookup).contains('--repo "$MIRROR_REPO" --head "$BRANCH" --state open')
+    assert_that(lookup).does_not_contain("--base")
+    assert_that(body).contains("--json number,baseRefName,mergeStateStatus")
+    assert_that(body).contains('"$open_base" == "main"')
     assert_that(body).contains("Reusing open PR")
     assert_that(body).contains("healing the branch")
 
@@ -310,8 +411,8 @@ def test_publish_script_opens_exactly_one_pr_and_checks_setting_first() -> None:
     )
     assert_that(setting_line).is_greater_than(main_flow)
     for write in (
-        "git/refs/heads/${BRANCH}",  # heal DELETE + ref POST
-        "gh api graphql",  # createCommitOnBranch
+        "git/refs/heads/${BRANCH}",  # heal DELETE
+        'bash "$SIGNED_COMMIT_SCRIPT"',  # shared create-signed-commit call
         "gh pr create",  # fresh PR
         "pr merge",  # --auto
     ):
