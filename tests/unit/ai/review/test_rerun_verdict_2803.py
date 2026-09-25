@@ -415,12 +415,11 @@ def test_a_turn_limited_chunk_is_reviewed_again(classifier: ModuleType) -> None:
 
     assert_that(calls).is_length(1)
     assert_that(coverage.reviewed).is_equal_to(1)
-    laundered = (
-        not result.metadata.partial
-        and coverage.reviewed == 0
-        and not result.metadata.coverage_degradations
-    )
-    assert_that(laundered).is_false()
+    # The redo reviewed the chunk and it answered, so the rerun is a real
+    # review: complete, not partial, and nothing left to report.
+    assert_that(coverage.complete).is_true()
+    assert_that(result.metadata.partial).is_false()
+    assert_that(result.metadata.coverage_degradations).is_empty()
     assert_that(_classify(classifier, result).exit_code).is_equal_to(0)
 
 
