@@ -26,8 +26,12 @@ SCRIPT = (
 
 
 @pytest.fixture
-def classifier() -> ModuleType:
+def classifier(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     """Load the classifier script as a module.
+
+    Args:
+        monkeypatch: Registers the module for the test only, so no entry
+            outlives it.
 
     Returns:
         The classifier module.
@@ -40,7 +44,7 @@ def classifier() -> ModuleType:
         msg = f"Unable to load module from {SCRIPT}"
         raise RuntimeError(msg)
     module = importlib.util.module_from_spec(spec)
-    sys.modules["classify_review_outcome"] = module
+    monkeypatch.setitem(sys.modules, "classify_review_outcome", module)
     spec.loader.exec_module(module)
     return module
 

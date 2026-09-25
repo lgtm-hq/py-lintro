@@ -167,7 +167,7 @@ async def _retry_after_exhaustion(
         "reviewing each once.",
     )
     partials: list[ChunkReviewPartial] = []
-    lost_half = False
+    lost_files: list[str] = []
     for position, half in enumerate(halves):
         half_request = replace(request, chunk=half)
         billed: AITurnLimitError | None = None
@@ -215,17 +215,20 @@ async def _retry_after_exhaustion(
                 files=", ".join(half.files),
                 error=exc,
             )
-            lost_half = True
+            lost_files.extend(half.files)
     merged = merge_half_partials(partials=partials)
     half_failed: tuple[CoverageDegradation, ...] = ()
-    if lost_half:
+    if lost_files:
         # Named separately from the split itself so the run can say that
         # one half's files were not reviewed rather than "re-reviewed in
         # halves", and so the coverage sentence never claims every chunk.
+        # It names only the lost half's files, so a rerun redoes those and
+        # not the surviving half's (#2803).
         half_failed = (
             CoverageDegradation(
                 reason=CoverageDegradationReason.SPLIT_HALF_FAILED,
                 chunk_index=request.chunk_index,
+                paths=tuple(lost_files),
             ),
         )
     return replace(

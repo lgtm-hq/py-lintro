@@ -22,6 +22,7 @@ from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
 from lintro.ai.review.enums.degradation_step import DegradationStep, step_for_reason
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_constants import STATE_VERSION
 from lintro.ai.review.github_notes import (
     format_coverage_limited_warning,
@@ -43,9 +44,10 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.resume import plan_resume
-from lintro.ai.review.run_record_factory import _coverage
+from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
 
 _HEAD = "b0153e29169bfcb2b702b97ad92be5e4bf84929b"
 _OTHER_HEAD = "0" * 40
@@ -345,7 +347,11 @@ def test_plan_resume_queues_the_redo_file_at_the_same_head() -> None:
 
 def test_a_step_that_did_not_run_is_carried_with_its_warning() -> None:
     """A rerun with nothing to review records the failed question pass again."""
-    record = _record(_Reason.GENERATED_QUESTIONS_FAILED, chunk_index=-1, paths=())
+    record = _record(
+        _Reason.GENERATED_QUESTIONS_FAILED,
+        chunk_index=SYNTHESIS_CHUNK_INDEX,
+        paths=(),
+    )
 
     carried = carried_degradations(
         prior=_state(record),
@@ -360,7 +366,11 @@ def test_a_step_that_did_not_run_is_carried_with_its_warning() -> None:
 
 def test_a_step_that_ran_again_answers_for_itself() -> None:
     """A question pass this round ran replaces the earlier failure."""
-    record = _record(_Reason.GENERATED_QUESTIONS_FAILED, chunk_index=-1, paths=())
+    record = _record(
+        _Reason.GENERATED_QUESTIONS_FAILED,
+        chunk_index=SYNTHESIS_CHUNK_INDEX,
+        paths=(),
+    )
 
     carried = carried_degradations(
         prior=_state(record),
@@ -435,7 +445,7 @@ def test_a_carried_per_file_reason_is_worded_as_not_redone() -> None:
     note = describe_coverage_degradations(metadata=metadata)
 
     assert_that(metadata.findings_coverage_complete).is_false()
-    assert_that(note).contains("was not redone (adversarial_sweep_failed)")
+    assert_that(note).contains("was not redone (adversarial sweep failed)")
     assert_that(note).does_not_contain("of 0 chunk")
     assert_that(note).does_not_contain("Every chunk was reviewed")
 
@@ -473,7 +483,16 @@ def test_the_run_record_keeps_every_degradation_at_its_head() -> None:
     )
     result = ReviewResult(metadata=_metadata(*degradations), summary="", findings=())
 
-    coverage = _coverage(result=result, head_sha=_HEAD)
+    coverage = run_record_from_result(
+        request=StickyRequest(result=result, head_sha=_HEAD),
+        totals=RoundTotals(
+            round_number=1,
+            verdict=ReviewVerdict.READY,
+            resolved=0,
+            open_after=0,
+            convergence_score=0.0,
+        ),
+    ).coverage
 
     assert_that([record.degradation for record in coverage.degradations]).is_equal_to(
         list(degradations),
