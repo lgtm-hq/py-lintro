@@ -44,8 +44,10 @@ a `::warning::`.
 
 A rerun reaches the same verdict as the attempt it reruns, unless it redid the work that
 attempt degraded. Each round saves its coverage degradations, with the step and the
-files each one hit, in the review state (schema v6). A later round at the same head
-reads the latest round's list. A per-file reason whose files were still credited
+files each one hit, in the review state (schema v6). The next round reads the latest
+round's list, keyed like coverage by each file's patch hash rather than by the head: a
+push that leaves a degraded file unchanged still owes its redo, and a file whose content
+changed is reviewed on its own merits. A per-file reason whose files were still credited
 (`output_exhaustion_retried`, `adversarial_sweep_failed`) sends those files back for
 review. A redo that succeeds clears the reason. A redo that fails again, or that the
 cost cap or PR budget stops, records the reason again and fails the check as the first
@@ -55,7 +57,6 @@ a rerun with nothing left to review) is recorded again with the same warning.
 not credited in the failing round, so usually there is no coverage to set aside, but an
 earlier round's coverage for one of those files is set aside too. A cut diff
 (`diff_truncated`) is already re-reported by its coverage record until the file changes.
-A new head starts fresh.
 
 ## Update in place
 

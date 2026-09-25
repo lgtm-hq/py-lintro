@@ -24,7 +24,7 @@ STATE_MARKER_SUFFIX = "-->"
 # as no state at all and the round starts fresh. v5 (#2796) adds
 # ``pr_spend_usd``, the PR's cumulative review spend; a v4 artifact without
 # it seeds the total from its surviving runs. v6 (#2803) adds each run's
-# ``degradations`` records, so a rerun at the same head can redo a failed step
+# ``degradations`` records, so the next round can redo a failed step
 # or carry its warning; a v5 run loads with none.
 STATE_VERSION = 6
 STATE_VERSION_V2 = 2

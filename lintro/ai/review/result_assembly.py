@@ -376,7 +376,8 @@ def assemble_review_result(
         seconds=time.monotonic() - outcome.validation_started,
     )
     duration_seconds = time.monotonic() - plan.timings.started_at
-    # A rerun at the same head records again what it did not redo (#2803).
+    # The round records again what the last round degraded and it did not redo
+    # (#2803).
     ran = {
         DegradationStep.QUESTION_PASS: outcome.questions is not None,
         DegradationStep.SYNTHESIS: synthesis is not None,
@@ -388,10 +389,10 @@ def assemble_review_result(
             *metadata.coverage_degradations,
             *carried_degradations(
                 prior=None if options.force_full else options.prior_state,
-                head_sha=context.head_ref,
                 current=metadata.coverage_degradations,
                 reviewed=covered_now,
                 steps_ran={step for step, did in ran.items() if did},
+                hashes=plan.resume.hashes,
                 head_complete=coverage.complete,
             ),
         ),

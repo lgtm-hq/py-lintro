@@ -8,6 +8,8 @@ from pathlib import Path
 from assertpy import assert_that
 
 from lintro.ai.review.coverage_degradation import (
+    CARRIED_SYNTHESIS_NOTE,
+    CARRIED_VERIFICATION_NOTE,
     GENERATED_QUESTIONS_FAILED_NOTE,
     describe_coverage_degradations,
 )
@@ -51,6 +53,8 @@ from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_res
 
 _HEAD = "b0153e29169bfcb2b702b97ad92be5e4bf84929b"
 _OTHER_HEAD = "0" * 40
+#: Current patch hashes for the files the carry tests name.
+_HASHES = {"a.py": "ha", "b.py": "hb"}
 _V5_FIXTURE = (
     Path(__file__).resolve().parents[3]
     / "fixtures"
@@ -239,23 +243,28 @@ def test_a_real_v5_artifact_loads_with_no_degradations() -> None:
     assert_that(state.runs[0].coverage.degradations).is_empty()
     assert_that(state.coverage).is_length(25)
     assert_that(state.pr_spend_usd).is_close_to(7.450541, 1e-9)
-    assert_that(redo_scope(prior=state, head_sha=_HEAD)).is_equal_to(RedoScope())
+    assert_that(redo_scope(prior=state, hashes={})).is_equal_to(RedoScope())
     assert_that(state.to_artifact_dict()["schema_version"]).is_equal_to(
         STATE_VERSION,
     )
 
 
-def test_only_the_latest_run_at_this_head_is_read() -> None:
-    """An older head, or a latest run at another head, carries nothing."""
+def test_only_the_latest_run_is_read_whatever_its_head() -> None:
+    """The latest run's records are read at any head; older runs never are."""
     record = _record(_Reason.ADVERSARIAL_SWEEP_FAILED)
-
-    assert_that(latest_degradations(prior=_state(record), head_sha=_HEAD)).is_equal_to(
-        (record,),
+    older_then_clean = ReviewState(
+        runs=(
+            *_state(record).runs,
+            RunRecord(identity=RunIdentity(round=2, sha=_OTHER_HEAD)),
+        ),
     )
+
+    assert_that(latest_degradations(prior=_state(record))).is_equal_to((record,))
     assert_that(
-        latest_degradations(prior=_state(record, sha=_OTHER_HEAD), head_sha=_HEAD),
-    ).is_empty()
-    assert_that(latest_degradations(prior=None, head_sha=_HEAD)).is_empty()
+        latest_degradations(prior=_state(record, sha=_OTHER_HEAD)),
+    ).is_equal_to((record,))
+    assert_that(latest_degradations(prior=older_then_clean)).is_empty()
+    assert_that(latest_degradations(prior=None)).is_empty()
 
 
 def test_a_credited_per_file_reason_is_redone() -> None:
@@ -265,7 +274,7 @@ def test_a_credited_per_file_reason_is_redone() -> None:
             _record(_Reason.OUTPUT_EXHAUSTION_RETRIED, paths=("a.py",)),
             _record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=("b.py",)),
         ),
-        head_sha=_HEAD,
+        hashes=_HASHES,
     )
 
     assert_that(scope).is_equal_to(RedoScope(paths=frozenset({"a.py", "b.py"})))
@@ -279,7 +288,7 @@ def test_narrative_and_cut_reasons_are_not_redone() -> None:
             _record(_Reason.SYNTHESIS_FAILED, paths=()),
             _record(_Reason.DIFF_TRUNCATED),
         ),
-        head_sha=_HEAD,
+        hashes=_HASHES,
     )
 
     assert_that(scope).is_equal_to(RedoScope())
@@ -289,7 +298,7 @@ def test_a_per_file_reason_without_files_redoes_the_whole_head() -> None:
     """With no files to name, the redo fails toward more review."""
     scope = redo_scope(
         prior=_state(_record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=())),
-        head_sha=_HEAD,
+        hashes=_HASHES,
     )
     coverage = (CoverageRecord(path="a.py", patch_hash="h1"),)
 
@@ -311,8 +320,8 @@ def test_the_redo_also_drops_a_same_hash_sibling() -> None:
     assert_that([record.path for record in kept]).is_equal_to(["c.py"])
 
 
-def test_plan_resume_queues_the_redo_file_at_the_same_head() -> None:
-    """A covered file whose last round degraded is queued again."""
+def test_plan_resume_queues_the_redo_file_at_any_head() -> None:
+    """A covered file the last round degraded is queued again while unchanged."""
     diffs = {
         path: (
             f"diff --git a/{path} b/{path}\n--- a/{path}\n+++ b/{path}\n"
@@ -340,9 +349,11 @@ def test_plan_resume_queues_the_redo_file_at_the_same_head() -> None:
     assert_that(plan_resume(context=context, prior=prior).queue).is_equal_to(
         ("a.py",),
     )
-    # The same state one push later carries both files: a new head starts fresh.
+    # One push later a.py is unchanged, so it still owes the redo (#2803).
     moved = ReviewState(runs=_state(degraded, sha=_OTHER_HEAD).runs, coverage=coverage)
-    assert_that(plan_resume(context=context, prior=moved).queue).is_empty()
+    assert_that(plan_resume(context=context, prior=moved).queue).is_equal_to(
+        ("a.py",),
+    )
 
 
 def test_a_step_that_did_not_run_is_carried_with_its_warning() -> None:
@@ -355,7 +366,7 @@ def test_a_step_that_did_not_run_is_carried_with_its_warning() -> None:
 
     carried = carried_degradations(
         prior=_state(record),
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=(),
         steps_ran=(),
@@ -374,7 +385,7 @@ def test_a_step_that_ran_again_answers_for_itself() -> None:
 
     carried = carried_degradations(
         prior=_state(record),
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=("a.py",),
         steps_ran=(DegradationStep.QUESTION_PASS,),
@@ -390,14 +401,14 @@ def test_a_redone_file_drops_the_reason_and_an_unreviewed_one_keeps_it() -> None
 
     redone = carried_degradations(
         prior=prior,
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=("a.py", "b.py"),
         steps_ran=(),
     )
     not_redone = carried_degradations(
         prior=prior,
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=("a.py",),
         steps_ran=(),
@@ -407,7 +418,8 @@ def test_a_redone_file_drops_the_reason_and_an_unreviewed_one_keeps_it() -> None
     (row,) = not_redone
     assert_that(row.reason).is_equal_to(_Reason.ADVERSARIAL_SWEEP_FAILED)
     assert_that(row.chunk_index).is_equal_to(CARRIED_CHUNK_INDEX)
-    assert_that(row.paths).is_equal_to(("a.py", "b.py"))
+    # Only the file still owing the redo is carried (#2803).
+    assert_that(row.paths).is_equal_to(("b.py",))
 
 
 def test_recomputed_and_coverage_carried_reasons_are_not_carried() -> None:
@@ -421,7 +433,7 @@ def test_recomputed_and_coverage_carried_reasons_are_not_carried() -> None:
             ),
             _record(_Reason.DIFF_TRUNCATED),
         ),
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=(),
         steps_ran=(),
@@ -516,7 +528,7 @@ def test_a_reviewed_file_does_not_clear_a_question_pass_failure() -> None:
 
     carried = carried_degradations(
         prior=_state(record),
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=("a.py",),
         steps_ran=(),
@@ -536,7 +548,7 @@ def test_a_redo_that_fails_again_reports_only_its_own_failure() -> None:
 
     carried = carried_degradations(
         prior=_state(_record(_Reason.TURN_LIMIT_REACHED, paths=("a.py",))),
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(fresh,),
         reviewed=(),
         steps_ran=(),
@@ -596,14 +608,14 @@ def test_a_narrative_chunk_reason_is_rewarned_once_at_the_same_head() -> None:
 
     carried = carried_degradations(
         prior=_state(record),
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=(),
         steps_ran=(),
     )
     again = carried_degradations(
         prior=_state(record),
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=carried,
         reviewed=(),
         steps_ran=(),
@@ -616,7 +628,7 @@ def test_a_narrative_chunk_reason_is_rewarned_once_at_the_same_head() -> None:
     assert_that(
         carried_degradations(
             prior=_state(record),
-            head_sha=_HEAD,
+            hashes=_HASHES,
             current=(),
             reviewed=("a.py",),
             steps_ran=(),
@@ -631,7 +643,7 @@ def test_a_whole_head_reason_is_redone_only_by_a_complete_head() -> None:
 
     partial = carried_degradations(
         prior=prior,
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=("a.py",),
         steps_ran=(),
@@ -639,7 +651,7 @@ def test_a_whole_head_reason_is_redone_only_by_a_complete_head() -> None:
     )
     complete = carried_degradations(
         prior=prior,
-        head_sha=_HEAD,
+        hashes=_HASHES,
         current=(),
         reviewed=("a.py",),
         steps_ran=(),
@@ -650,3 +662,67 @@ def test_a_whole_head_reason_is_redone_only_by_a_complete_head() -> None:
         [_Reason.ADVERSARIAL_SWEEP_FAILED],
     )
     assert_that(complete).is_empty()
+
+
+def test_a_changed_file_owes_nothing() -> None:
+    """A file whose hash moved since the degrading round is not redone or carried."""
+    degraded_round = ReviewState(
+        runs=_state(_record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=("a.py",))).runs,
+        coverage=(CoverageRecord(path="a.py", patch_hash="old", round=1),),
+    )
+
+    assert_that(redo_scope(prior=degraded_round, hashes={"a.py": "new"})).is_equal_to(
+        RedoScope(),
+    )
+    assert_that(
+        carried_degradations(
+            prior=degraded_round,
+            current=(),
+            reviewed=(),
+            steps_ran=(),
+            hashes={"a.py": "new"},
+        ),
+    ).is_empty()
+
+
+def test_a_row_is_carried_only_for_the_files_still_owing_it() -> None:
+    """A fresh row on one file never clears the others the old row named."""
+    fresh = CoverageDegradation(
+        reason=_Reason.TURN_LIMIT_REACHED,
+        chunk_index=0,
+        split=False,
+        paths=("a.py",),
+    )
+
+    carried = carried_degradations(
+        prior=_state(_record(_Reason.TURN_LIMIT_REACHED, paths=("a.py", "b.py"))),
+        current=(fresh,),
+        reviewed=(),
+        steps_ran=(),
+        hashes=_HASHES,
+    )
+
+    (row,) = carried
+    assert_that(row.paths).is_equal_to(("b.py",))
+    assert_that(row.chunk_index).is_equal_to(CARRIED_CHUNK_INDEX)
+
+
+def test_a_carried_pass_failure_keeps_its_note_on_the_posted_surfaces() -> None:
+    """With no synthesis or verification outcome this round, the note still shows."""
+    metadata = _metadata(
+        CoverageDegradation(
+            reason=_Reason.SYNTHESIS_FAILED,
+            chunk_index=SYNTHESIS_CHUNK_INDEX,
+        ),
+        CoverageDegradation(
+            reason=_Reason.VERIFICATION_FAILED,
+            chunk_index=SYNTHESIS_CHUNK_INDEX,
+        ),
+    )
+
+    lines = format_pass_note_lines(metadata=metadata)
+
+    assert_that(lines).is_length(2)
+    assert_that(lines[1]).contains(CARRIED_SYNTHESIS_NOTE)
+    assert_that(lines[1]).contains(CARRIED_VERIFICATION_NOTE)
+    assert_that(format_coverage_limited_warning(metadata=metadata)).is_empty()

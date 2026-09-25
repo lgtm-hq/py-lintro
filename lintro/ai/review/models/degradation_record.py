@@ -20,7 +20,7 @@ class DegradationRecord:
     """A degradation a round recorded, kept in its run record.
 
     Before v6 the saved state held only booleans and counts per round, so a
-    rerun at the same head resumed "reviewed, nothing found" and dropped the
+    rerun resumed "reviewed, nothing found" and dropped the
     reason the first attempt failed on (#2803). The record keeps the reason,
     the step it came from, the files it hit and the head it was recorded at,
     so the rerun can redo the step or carry the reason forward.

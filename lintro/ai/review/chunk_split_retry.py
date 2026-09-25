@@ -308,6 +308,9 @@ def _turn_limited_partial(
             CoverageDegradation(
                 reason=CoverageDegradationReason.TURN_LIMIT_REACHED,
                 chunk_index=request.chunk_index,
+                # The files this request covered: a half's own, so a rerun
+                # redoes the limited half and not its sibling (#2803).
+                paths=tuple(request.chunk.files),
                 limit=resolve_max_turns(
                     call_kind=AICallKind.REVIEW,
                     configured=request.ai_config.transports.cli.max_turns,
