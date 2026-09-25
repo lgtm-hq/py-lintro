@@ -21,6 +21,18 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.171.2] - 2026-09-25
+
+### Changed
+
+- **ci**: create the mirror bump commit with lgtm-ci's shared signing script (#2835)
+  (6f88cb4)
+
+### Fixed
+
+- **ci**: sign candidate digest commits via lgtm-ci create-signed-commit (#2831)
+  (51ce5a0)
+
 ## [0.171.1] - 2026-09-25
 
 ### Changed
