@@ -17,6 +17,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
 from lintro.ai.review.github_constants import STATE_VERSION
 from lintro.ai.review.models.coverage_record import CoverageRecord
 from lintro.ai.review.models.finding_record import FindingRecord
@@ -318,14 +320,30 @@ def _load_artifact_file(
         return None
     if version_n < 2 or version_n > ARTIFACT_STATE_VERSION:
         return None
+    # A part with an empty identity never matches a caller that names one
+    # (#2814): the spend read-back and resume both trust this filter.
     stored_repo = str(payload.get("repo", ""))
-    if repo and stored_repo and stored_repo != repo:
+    if repo and stored_repo != repo:
+        logger.debug("Skipping state part {} (repo {!r})", path.name, stored_repo)
         return None
-    stored_pr = payload.get("pr_number")
-    if pr_number is not None and stored_pr not in (None, "", pr_number):
-        try:
-            if int(stored_pr) != pr_number:
-                return None
-        except (TypeError, ValueError):
-            return None
+    if pr_number is not None and _pr_key(payload.get("pr_number")) != (pr_number or 0):
+        logger.debug("Skipping state part {} (another pull request)", path.name)
+        return None
     return ReviewState.from_artifact_dict(payload)
+
+
+def _pr_key(raw: object) -> int | None:
+    """Return a stored ``pr_number`` as a key: ``0`` for none, None if bad.
+
+    Args:
+        raw: The payload's ``pr_number``.
+
+    Returns:
+        The number, ``0`` when absent or empty, or None when unparseable.
+    """
+    if raw in (None, ""):
+        return 0
+    try:
+        return int(str(raw))
+    except ValueError:
+        return None

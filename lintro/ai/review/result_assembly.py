@@ -233,7 +233,7 @@ def assemble_review_result(
             # measurement can see what the section cost.
             "context": sum(item.context_tokens for item in outcome.partials),
         },
-        cost_estimate_usd=total_cost,
+        cost_estimate_usd=max(total_cost, plan.budget.spent),
         base_ref=context.base_ref,
         head_ref=context.head_ref,
         timestamp=datetime.now(tz=UTC).isoformat(),

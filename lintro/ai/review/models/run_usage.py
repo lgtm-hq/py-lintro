@@ -21,7 +21,10 @@ class RunUsage:
         prompt: Prompt (input) tokens consumed.
         completion: Completion (output) tokens produced.
         total: Total tokens consumed.
-        cost: Estimated cost in USD.
+        cost: Estimated cost in USD: everything the round charged to its
+            budget (#2814), so it can exceed what the token counts price
+            when a call was charged and its result dropped (a chunk
+            cancelled at a budget stop, a turn-limited call).
         estimated: True when token counts were estimated locally.
         cost_basis: How ``cost`` should be read (``billed``, ``estimated``,
             or ``unpriceable``) (#1923).
