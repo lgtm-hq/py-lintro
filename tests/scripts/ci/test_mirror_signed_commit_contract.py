@@ -232,6 +232,9 @@ def _fetch_helper_file(*, url: str, rel: str, ref: str, deadline: float) -> byte
         if remaining <= 0:
             break
         try:
+            # The URL is always the fixed https raw.githubusercontent.com path of
+            # lgtm-ci at the pinned commit; no other scheme or host is reachable.
+            # nosemgrep: dynamic-urllib-use-detected
             response = urllib.request.urlopen(  # nosec B310 - fixed https URL
                 url,
                 timeout=min(_FETCH_TIMEOUT_SECONDS, remaining),
