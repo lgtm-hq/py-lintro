@@ -84,7 +84,7 @@ env:
   # digest so the pinned release is readable and Renovate has a version to
   # bump (see the customManager in renovate.json).
   LINTRO_FORK_FALLBACK_IMAGE: >-
-    ghcr.io/lgtm-hq/py-lintro:0.168.3@sha256:b1f7e700224c3f5246e3e77d538b5d68ab62fbf4a53322521242e4287adf0b72
+    ghcr.io/lgtm-hq/py-lintro:0.171.0@sha256:7dcb2d8b61b594b0ebb2620b8d668804b8591cba8aed8d357cbde7cfbcf67aa0
 
 jobs:
   # Required-check-safe replacement for on.<event>.paths (see header
