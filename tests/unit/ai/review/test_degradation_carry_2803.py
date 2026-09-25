@@ -563,3 +563,62 @@ def test_a_carried_split_keeps_the_whole_chunk_tail() -> None:
 
     assert_that(note).contains("a chunk split after exhausting the output limit")
     assert_that(note).contains("whole chunk in view")
+
+
+def test_an_unchanged_carried_retry_keeps_the_plain_tail() -> None:
+    """A single-file chunk retried unchanged never lost its whole-chunk view."""
+    metadata = _metadata(
+        CoverageDegradation(
+            reason=_Reason.OUTPUT_EXHAUSTION_RETRIED,
+            chunk_index=CARRIED_CHUNK_INDEX,
+            split=False,
+            paths=("a.py",),
+        ),
+        chunks_total=0,
+        partial=True,
+    )
+
+    note = describe_coverage_degradations(metadata=metadata)
+
+    assert_that(note).does_not_contain("whole chunk in view")
+    assert_that(note).contains("Some issues may go unreported")
+    assert_that(note).contains("a single-file chunk retried after exhausting")
+    assert_that(note).does_not_contain("chunk split")
+
+
+def test_a_narrative_chunk_reason_is_rewarned_once_at_the_same_head() -> None:
+    """The delegated-diff fallback is carried like any narrative warning.
+
+    It is carried only while its files are not reviewed again at this head,
+    and only from the latest round, so it never accumulates.
+    """
+    record = _record(_Reason.DELEGATED_DIFF_EMBEDDED, paths=("a.py",))
+
+    carried = carried_degradations(
+        prior=_state(record),
+        head_sha=_HEAD,
+        current=(),
+        reviewed=(),
+        steps_ran=(),
+    )
+    again = carried_degradations(
+        prior=_state(record),
+        head_sha=_HEAD,
+        current=carried,
+        reviewed=(),
+        steps_ran=(),
+    )
+
+    (row,) = carried
+    assert_that(row.reason).is_equal_to(_Reason.DELEGATED_DIFF_EMBEDDED)
+    assert_that(row.chunk_index).is_equal_to(CARRIED_CHUNK_INDEX)
+    assert_that(again).is_empty()
+    assert_that(
+        carried_degradations(
+            prior=_state(record),
+            head_sha=_HEAD,
+            current=(),
+            reviewed=("a.py",),
+            steps_ran=(),
+        ),
+    ).is_empty()

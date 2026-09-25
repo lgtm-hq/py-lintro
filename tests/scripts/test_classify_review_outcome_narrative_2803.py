@@ -57,7 +57,8 @@ def _envelope(*reasons: str, complete: bool) -> str:
         complete: Value of ``findings_coverage_complete``.
 
     Returns:
-        Captured-output text containing the review JSON envelope.
+        A JSON string holding one finished review envelope, suitable for
+        ``classify`` or for a file passed to ``main``.
     """
     return json.dumps(
         {
