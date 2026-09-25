@@ -421,10 +421,19 @@ def test_the_questions_ceiling_is_reserved_in_the_prompt_overhead() -> None:
 async def test_a_turn_limited_call_keeps_its_billed_usage(tmp_path: Path) -> None:
     """A CLI call stopped at the turn limit was billed; the failed pass says so.
 
+    The turn limit is retried once (#2813); here the retry is turn-limited
+    too, so both billed attempts count and the degradation names the kind.
+
     Args:
         tmp_path: Pytest temporary directory fixture.
     """
     seam = _scripted_seam(
+        AITurnLimitError(
+            "Claude CLI stopped at the per-call turn limit (12 turns)",
+            input_tokens=700,
+            output_tokens=30,
+            cost_estimate=0.07,
+        ),
         AITurnLimitError(
             "Claude CLI stopped at the per-call turn limit (12 turns)",
             input_tokens=700,
@@ -439,11 +448,18 @@ async def test_a_turn_limited_call_keeps_its_billed_usage(tmp_path: Path) -> Non
 
     assert_that(result.metadata.partial).is_false()
     assert_that(
-        [item.reason for item in result.metadata.coverage_degradations],
-    ).is_equal_to([CoverageDegradationReason.GENERATED_QUESTIONS_FAILED])
-    # 700 (the billed question call) + 10 + 10.
-    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(720)
-    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.09, 1e-9)
+        [(item.reason, item.detail) for item in result.metadata.coverage_degradations],
+    ).is_equal_to(
+        [
+            (
+                CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
+                "turn_limit; retried once",
+            ),
+        ],
+    )
+    # 700 + 700 (both billed question calls) + 10 + 10.
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(1420)
+    assert_that(result.metadata.cost_estimate_usd).is_close_to(0.16, 1e-9)
 
 
 async def test_fenced_json_is_accepted() -> None:
@@ -726,6 +742,42 @@ async def test_a_cost_cap_stop_on_the_question_call_ends_the_run_as_partial(
     assert_that(result.metadata.stopped_reason).contains("cost cap")
     assert_that(result.metadata.chunks_reviewed).is_equal_to(0)
     assert_that(result.metadata.coverage_degradations).is_empty()
+
+
+async def test_a_stop_during_the_retry_keeps_the_first_attempts_tokens(
+    tmp_path: Path,
+) -> None:
+    """A billed first attempt is charged even when its retry is stopped (#2826).
+
+    The first answer is not JSON (retried); the retry hits the cost cap. The
+    partial run still carries the first attempt's tokens; its cost was in the
+    budget's ``spent`` already.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    seam = _scripted_seam(
+        _response(content="not json at all"),
+        AICostBudgetExceededError("cost cap reached"),
+    )
+
+    result = await _run(tmp_path=tmp_path, call_ai=seam)
+
+    assert_that(seam.call_count).is_equal_to(2)
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).contains("cost cap")
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(10)
+    # The persisted record says a retry was made, not a never-retried pass.
+    assert_that(
+        [(item.reason, item.detail) for item in result.metadata.coverage_degradations],
+    ).is_equal_to(
+        [
+            (
+                CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
+                "not_json; retried once",
+            ),
+        ],
+    )
 
 
 async def test_a_run_stopped_after_the_pass_still_reports_it(

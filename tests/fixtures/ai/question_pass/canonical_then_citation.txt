@@ -1,0 +1,3 @@
+{"generated_questions": [{"id": "G1", "question": "Does the caller grant the scope?", "rationale": "r"}]}
+
+Thanks. See chunks [2] and [5].

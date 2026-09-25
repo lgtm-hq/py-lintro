@@ -1,0 +1,3 @@
+[{"id": "G1", "question": "Does the caller grant the scope?", "rationale": "r"}]
+
+These follow checklist items [1] and [3].

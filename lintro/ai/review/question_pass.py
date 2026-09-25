@@ -12,16 +12,13 @@ echoed back. When the diff had to be trimmed to fit, the run says so.
 from __future__ import annotations
 
 import asyncio
-import json
 from contextlib import suppress
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from lintro.ai.cli_bounds import CallShape
-from lintro.ai.exceptions import AIProviderError, AITurnLimitError
-from lintro.ai.json_response import strip_json_fences
+from lintro.ai.exceptions import AIProviderError
 from lintro.ai.prompts.review import (
     REVIEW_GENERATE_QUESTIONS_TEMPLATE,
     format_changed_files_for_prompt,
@@ -32,20 +29,23 @@ from lintro.ai.review.context.diff_parse import split_unified_diff_by_file
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.enums.question_failure_kind import QuestionFailureKind
 from lintro.ai.review.interrupt import SIGTERM_TIMEOUT_MESSAGE
 from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.coverage_degradation import (
     SYNTHESIS_CHUNK_INDEX,
     CoverageDegradation,
 )
+from lintro.ai.review.models.run_questions import RunQuestions
 from lintro.ai.review.prompt_redaction import redact_prompt_text
-from lintro.ai.review.session import is_cost_cap_stop
+from lintro.ai.review.question_attempts import run_with_one_retry
+from lintro.ai.review.question_parse import capture_for_log, parse_questions
 from lintro.ai.review.timings import ReviewPhase
 from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
     from typing import Any
 
     from lintro.ai.budget import CostBudget
@@ -82,41 +82,6 @@ MAX_QUESTION_CHARS = 600
 MAX_RUN_QUESTIONS_TOKENS = (
     MAX_RUN_QUESTIONS * MAX_QUESTION_CHARS + (MAX_RUN_QUESTIONS - 1) + 3
 ) // 4
-
-
-@dataclass(frozen=True, slots=True)
-class RunQuestions:
-    """The per-PR questions one run's chunks share.
-
-    Attributes:
-        text: Rendered "consider" items (``G1. …``), empty when none.
-        count: Number of questions rendered.
-        diff_trimmed: True when the whole-PR diff did not fit the budget and
-            the generator saw a prefix of its files.
-        files_seen: Files whose diff the generator saw.
-        files_total: Files in the PR diff.
-        failed: True when the call or its answer was unusable; the run then
-            reviews with the rubric alone and records the degradation.
-        usage: Token and cost usage of the generator call.
-    """
-
-    text: str = ""
-    count: int = 0
-    diff_trimmed: bool = False
-    files_seen: int = 0
-    files_total: int = 0
-    failed: bool = False
-    usage: ChunkReviewPartial = ChunkReviewPartial(
-        findings=(),
-        input_tokens=0,
-        output_tokens=0,
-        cost_estimate=0.0,
-    )
-
-    @property
-    def lines(self) -> tuple[str, ...]:
-        """The rendered questions, one per line, for the run record."""
-        return tuple(self.text.splitlines())
 
 
 def fit_diff_to_budget(*, unified_diff: str, diff_budget: int) -> tuple[str, int, int]:
@@ -252,36 +217,13 @@ async def generate_run_questions(
         files_total=total,
         usage=usage,
     )
-    try:
-        payload = json.loads(strip_json_fences(content=response.content))
-    except (json.JSONDecodeError, ValueError):
-        logger.warning(
-            "Failed to parse the per-PR questions; reviewing with the rubric alone",
-        )
-        return _failed(base)
-    questions = (
-        payload.get("generated_questions") if isinstance(payload, dict) else None
-    )
-    if not isinstance(questions, list):
-        logger.warning(
-            "Per-PR questions payload had no list; reviewing with the rubric alone",
-        )
-        return _failed(base)
-    lines: list[str] = []
-    for item in questions:
-        if len(lines) >= MAX_RUN_QUESTIONS:
-            break
-        if not isinstance(item, dict):
-            continue
-        question = item.get("question")
-        if isinstance(question, str) and question.strip():
-            lines.append(_question_line(index=len(lines) + 1, question=question))
-    if not lines:
-        logger.warning(
-            "Per-PR questions payload had no usable question; reviewing with the "
-            "rubric alone",
-        )
-        return _failed(base)
+    parsed = parse_questions(response.content)
+    if parsed.failure is not None:
+        return _failed(base, kind=parsed.failure, content=response.content)
+    lines = [
+        _question_line(index=index, question=question)
+        for index, question in enumerate(parsed.questions[:MAX_RUN_QUESTIONS], 1)
+    ]
     return RunQuestions(
         text="\n".join(lines),
         count=len(lines),
@@ -374,14 +316,30 @@ def _question_line(*, index: int, question: str) -> str:
     return f"{cut}…"
 
 
-def _failed(base: RunQuestions) -> RunQuestions:
-    """Return *base* marked failed, keeping its usage and trimming facts."""
+def _failed(
+    base: RunQuestions,
+    *,
+    kind: QuestionFailureKind,
+    content: str,
+) -> RunQuestions:
+    """Return *base* marked failed, keeping its usage and trimming facts.
+
+    Args:
+        base: The attempt's usage and trimming facts.
+        kind: Why the answer was unusable.
+        content: The answer, captured (redacted, bounded, one line) for the log.
+
+    Returns:
+        The failed result.
+    """
     return RunQuestions(
         diff_trimmed=base.diff_trimmed,
         files_seen=base.files_seen,
         files_total=base.files_total,
         failed=True,
         usage=base.usage,
+        failure_kind=kind,
+        capture=capture_for_log(content),
     )
 
 
@@ -391,6 +349,7 @@ async def run_question_pass(
     options: ReviewSessionOptions,
     plan: ReviewRunPlan,
     stop: asyncio.Event | None = None,
+    record: Callable[[RunQuestions], None] | None = None,
 ) -> RunQuestions:
     """Run the once-per-run question pass for a review, degrading on failure.
 
@@ -399,68 +358,39 @@ async def run_question_pass(
         options: Session options (the provider to call).
         plan: The resolved run plan (config, budget, repo root, diff budget).
         stop: Event a SIGTERM/SIGINT handler sets to stop the run.
+        record: Receives a failed first attempt before its retry, so the run
+            keeps that attempt's billed usage if the retry is stopped.
 
     Returns:
         The shared questions: empty when the pass is disabled by
         configuration, empty and ``failed`` when it did not produce a usable
-        answer.
-
-    Raises:
-        Exception: A cost-cap stop (``AICostBudgetExceededError``) or the
-            SIGTERM timeout raised by the call is re-raised untouched so the
-            orchestrator finalizes a partial review; both are the run's
-            graceful halt, not a failed pass.
+        answer. A cost-cap stop or the SIGTERM timeout raised by either
+        attempt propagates untouched (from :func:`run_with_one_retry`), so the
+        orchestrator finalizes a partial review: both are the run's graceful
+        halt, not a failed pass.
     """
     if not plan.ai_config.review_generated_questions:
         return RunQuestions()
     # The span is recorded only when the pass runs, so a disabled pass leaves
     # no zero-length phase behind (#2148).
     with plan.timings.phase(name=ReviewPhase.GENERATED_QUESTIONS):
-        try:
-            return await generate_run_questions(
+        # Never reuse the built-in review's durable session: the pass is a
+        # standalone whole-PR question, not a chunk, and it runs first, so a
+        # durable session would carry its transcript into every chunk review.
+        return await run_with_one_retry(
+            generate=lambda shape: generate_run_questions(
                 context=context,
                 provider=options.provider,
                 ai_config=plan.ai_config,
                 budget=plan.budget,
                 diff_budget=plan.synthesis_diff_budget,
                 repo_root=plan.repo_root,
-                # Never reuse the built-in review's durable session: the pass
-                # is a standalone whole-PR question, not a chunk, and it runs
-                # first, so a durable session would carry its transcript into
-                # every chunk review.
-                shape=CallShape(use_one_shot=True, no_tools=plan.tools_disabled),
+                shape=shape,
                 stop=stop,
-            )
-        except Exception as exc:
-            # A cost-cap stop or the SIGTERM interrupt is the run's graceful
-            # halt, not a failed pass: let it reach the orchestrator so the
-            # review ends as a partial with the usual stop reason. A provider
-            # timeout on this optional call degrades like any other failure,
-            # the way a depth pass does (#2395).
-            if is_cost_cap_stop(exc=exc) or SIGTERM_TIMEOUT_MESSAGE in str(exc):
-                raise
-            logger.warning(
-                "Per-PR question pass failed ({}); reviewing with the rubric alone",
-                exc,
-            )
-            # A turn-limited CLI call was billed and already charged to the
-            # budget; the failed pass keeps that usage so the totals agree.
-            usage = (
-                ChunkReviewPartial(
-                    findings=(),
-                    input_tokens=exc.input_tokens,
-                    output_tokens=exc.output_tokens,
-                    cost_estimate=exc.cost_estimate,
-                )
-                if isinstance(exc, AITurnLimitError)
-                else ChunkReviewPartial(
-                    findings=(),
-                    input_tokens=0,
-                    output_tokens=0,
-                    cost_estimate=0.0,
-                )
-            )
-            return RunQuestions(failed=True, usage=usage)
+            ),
+            shape=CallShape(use_one_shot=True, no_tools=plan.tools_disabled),
+            record=record,
+        )
 
 
 def question_pass_degradations(
@@ -481,10 +411,14 @@ def question_pass_degradations(
     """
     if questions is None or not questions.failed:
         return ()
+    detail = str(questions.failure_kind or "")
+    if detail and questions.retried:
+        detail = f"{detail}; retried once"
     return (
         CoverageDegradation(
             reason=CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
             chunk_index=SYNTHESIS_CHUNK_INDEX,
             split=False,
+            detail=detail,
         ),
     )
