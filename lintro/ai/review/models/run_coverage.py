@@ -56,10 +56,12 @@ class RunCoverage:
         delta_reason: Why the round was a delta or a full read; empty on a
             record written before delta rounds existed.
         degradations: Every coverage degradation the round recorded, with
-            its step, files and head (#2803, state v6). A rerun at the same
-            head reads them to redo a failed step or re-emit a warning, so
-            its verdict matches the original attempt's. Serialized only when
-            non-empty; a v5 record loads with none.
+            its step, files and head (#2803, state v6). The next round reads
+            the latest round's records, keyed by each file's patch hash rather
+            than the head, to redo a failed step or re-emit a warning, so its
+            verdict matches the original attempt's while the files are
+            unchanged. Serialized only when non-empty; a v5 record loads with
+            none.
     """
 
     files_reviewed: int = 0

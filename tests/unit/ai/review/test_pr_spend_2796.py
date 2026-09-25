@@ -240,7 +240,7 @@ def test_the_total_round_trips_through_the_artifact() -> None:
     restored = ReviewState.from_artifact_dict(payload)
 
     assert_that(payload["schema_version"]).is_equal_to(STATE_VERSION)
-    assert_that(STATE_VERSION).is_greater_than_or_equal_to(6)
+    assert_that(STATE_VERSION).is_equal_to(6)
     assert_that(restored.pr_spend_usd).is_equal_to(42.5)
 
 
