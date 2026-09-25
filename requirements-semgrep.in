@@ -2,4 +2,4 @@
 # Recompile (hash-pinned, Python 3.11 floor matching requires-python):
 #   ./scripts/ci/compile-semgrep-lock.sh
 # Commit the result: CI's semgrep-lock check fails on drift (#2436).
-semgrep==1.176.1
+semgrep==1.178.0
