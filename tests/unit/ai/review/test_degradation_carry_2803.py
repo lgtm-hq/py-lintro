@@ -445,7 +445,7 @@ def test_a_carried_per_file_reason_is_worded_as_not_redone() -> None:
     note = describe_coverage_degradations(metadata=metadata)
 
     assert_that(metadata.findings_coverage_complete).is_false()
-    assert_that(note).contains("was not redone (adversarial sweep failed)")
+    assert_that(note).contains("was not redone (a failed depth-3 adversarial sweep)")
     assert_that(note).does_not_contain("of 0 chunk")
     assert_that(note).does_not_contain("Every chunk was reviewed")
 
@@ -545,3 +545,21 @@ def test_a_redo_that_fails_again_reports_only_its_own_failure() -> None:
     assert_that(carried).is_empty()
     note = describe_coverage_degradations(metadata=_metadata(fresh, *carried))
     assert_that(note).does_not_contain("not redone")
+
+
+def test_a_carried_split_keeps_the_whole_chunk_tail() -> None:
+    """A split carried from the attempt names the whole-chunk risk."""
+    metadata = _metadata(
+        CoverageDegradation(
+            reason=_Reason.OUTPUT_EXHAUSTION_RETRIED,
+            chunk_index=CARRIED_CHUNK_INDEX,
+            paths=("a.py",),
+        ),
+        chunks_total=0,
+        partial=True,
+    )
+
+    note = describe_coverage_degradations(metadata=metadata)
+
+    assert_that(note).contains("a chunk split after exhausting the output limit")
+    assert_that(note).contains("whole chunk in view")
