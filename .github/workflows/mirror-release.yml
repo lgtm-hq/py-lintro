@@ -16,8 +16,9 @@ name: Release - Mirror Version Bump
 #
 # Mirror-side writes use the dedicated `lgtm-mirror-bot` GitHub App
 # (MIRROR_APP_ID / MIRROR_APP_PRIVATE_KEY, installed on lintro-pre-commit
-# only): the App token mints the bump commit via createCommitOnBranch, so it
-# is GitHub-signed and attributed, and merges the bump PR — the mirror's
+# only): the App token mints the bump commit through lgtm-ci's shared
+# create-signed-commit script (createCommitOnBranch, #2834), so it is
+# GitHub-signed and attributed, and merges the bump PR — the mirror's
 # rulesets require both (#2742).
 
 'on':
@@ -150,10 +151,24 @@ jobs:
           token: ${{ steps.mirror-app.outputs.token }}
           path: mirror
 
+      - name: Checkout lgtm-ci tooling
+        if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
+        # The bump commit is made by lgtm-ci's shared create-signed-commit
+        # script (#2834); only scripts/ci/ is needed.
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: 234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Publish mirror release
         if: ${{ steps.resolve.outputs.is_prerelease == 'false' }}
         env:
           GH_TOKEN: ${{ steps.mirror-app.outputs.token }}
+          LGTM_CI_TOOLING_DIR: ${{ github.workspace }}/.lgtm-ci-tooling
           MIRROR_DIR: mirror
           MIRROR_REPO: lgtm-hq/lintro-pre-commit
           BUMP_SCRIPT: >-

@@ -2,14 +2,17 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Tests for scripts/ci/mirror/publish-mirror-release.sh (#2742)
 #
-# The script drives git, gh and the GraphQL API against a real mirror
-# checkout, so these tests pin its control flow with stubbed gh/git
-# behaviour: the bump commit is created via createCommitOnBranch with a
-# correctly wrapped GraphQL payload, the auto-merge precondition runs
-# before any mirror write, `pr create` fires exactly once per fresh run,
-# the merge poll handles OPEN → MERGED and fails fast on closed/dirty PRs,
-# a healthy open PR is reused instead of healed, and a stale branch is
-# deleted and recreated — never plain git commit or rebase.
+# The script drives git, gh and lgtm-ci's shared create-signed-commit
+# script against a real mirror checkout, so these tests pin its control
+# flow with stubbed gh/git and a stub shared script under a fake
+# LGTM_CI_TOOLING_DIR: the bump commit is made by the shared script in
+# reset mode with the expected arguments, run from the mirror checkout
+# (#2834); the auto-merge precondition runs before any mirror write;
+# `pr create` fires exactly once per fresh run; the merge poll handles
+# OPEN → MERGED and fails fast on closed/dirty PRs; a healthy open PR is
+# reused instead of healed; an unmergeable PR's branch is deleted before
+# the reset; and a stale branch with no PR is reset in place — never plain
+# git commit or rebase.
 
 load "../../helpers/common"
 
@@ -22,11 +25,9 @@ setup() {
 	mkdir -p "${STUB_BIN}"
 
 	# Stub gh: records every invocation, answers the PR state poll from
-	# GH_STATES (one state per poll, last one repeats), fakes `pr list` /
-	# `pr view` / `pr create` / `pr merge`, and CAPTURES the GraphQL payload
-	# to graphql.json instead of dropping stdin.
+	# GH_STATES (one state per poll, last one repeats), and fakes `pr list`
+	# / `pr view` / `pr create` / `pr merge`.
 	GH_LOG="${BATS_TEST_TMPDIR}/gh.log"
-	GRAPHQL_JSON="${BATS_TEST_TMPDIR}/graphql.json"
 	: >"${GH_LOG}"
 	cat >"${STUB_BIN}/gh" <<STUB
 #!/usr/bin/env bash
@@ -87,22 +88,44 @@ if [[ "\$1" == "api" && "\$2" == "repos/lgtm-hq/lintro-pre-commit" && "\$3" == "
 	echo "\${GH_ALLOW_AUTO_MERGE:-true}"
 	exit 0
 fi
-if [[ "\$1" == "api" && "\$2" == "graphql" ]]; then
-	# Consume stdin (a real gh does too — dropping it EPIPEs the producer
-	# under Linux pipefail) and persist the payload for assertions.
-	cat >"${GRAPHQL_JSON}"
-	echo '{"data":{"createCommitOnBranch":{"commit":{"oid":"created0000000000000000000000000000000a"}}}}'
-	exit 0
-fi
 if [[ "\$1" == "api" && "\$2" == "-X" && "\$3" == "DELETE" ]]; then
 	exit \${GH_DELETE_REF_RC:-0}
-fi
-if [[ "\$1" == "api" && "\$2" == "-X" && "\$3" == "POST" && "\$*" == *"repos/lgtm-hq/lintro-pre-commit/git/refs"* ]]; then
-	exit \${GH_CREATE_REF_RC:-0}
 fi
 exit 0
 STUB
 	chmod +x "${STUB_BIN}/gh"
+
+	# Stub lgtm-ci's create-signed-commit.sh under a fake tooling checkout:
+	# it logs a marker line into gh.log (so ordering against gh calls can be
+	# asserted), records its cwd and flag=value pairs (the multi-line --body
+	# is only marked present), snapshots ./pyproject.toml as read from its
+	# cwd, and prints the commit-sha= line the real script prints.
+	LGTM_CI_TOOLING_DIR="${BATS_TEST_TMPDIR}/lgtm-ci-tooling"
+	mkdir -p "${LGTM_CI_TOOLING_DIR}/scripts/ci/git"
+	SIGNED_ARGS="${BATS_TEST_TMPDIR}/signed-commit.args"
+	SIGNED_PYPROJECT="${BATS_TEST_TMPDIR}/signed-commit.pyproject"
+	cat >"${LGTM_CI_TOOLING_DIR}/scripts/ci/git/create-signed-commit.sh" <<STUB
+#!/usr/bin/env bash
+echo "create-signed-commit" >>"${GH_LOG}"
+{
+	printf 'cwd=%s\\n' "\$PWD"
+	while [[ \$# -gt 0 ]]; do
+		if [[ "\$1" == "--body" ]]; then
+			printf '%s\\n' "--body=<set>"
+		else
+			printf '%s=%s\\n' "\$1" "\$2"
+		fi
+		shift 2
+	done
+} >>"${SIGNED_ARGS}"
+cp pyproject.toml "${SIGNED_PYPROJECT}"
+if [[ "\${SIGNED_COMMIT_RC:-0}" != "0" ]]; then
+	echo "[ERROR] createCommitOnBranch returned no commit: stub failure" >&2
+	exit "\${SIGNED_COMMIT_RC}"
+fi
+echo "commit-sha=created0000000000000000000000000000000a"
+echo "commit-url=https://github.com/lgtm-hq/lintro-pre-commit/commit/created0000000000000000000000000000000a"
+STUB
 
 	# Stub git: the script only needs fetch/rev-parse/checkout/reset/tag and
 	# ls-remote answers, all faked; the mirror checkout itself is a plain dir
@@ -148,50 +171,81 @@ run_script() {
 		GH_ALLOW_AUTO_MERGE="${GH_ALLOW_AUTO_MERGE:-true}" \
 		GIT_BRANCH_EXISTS="${GIT_BRANCH_EXISTS:-0}" \
 		MIRROR_DIR="${MIRROR_DIR}" \
+		LGTM_CI_TOOLING_DIR="${LGTM_CI_TOOLING_DIR}" \
+		SIGNED_COMMIT_RC="${SIGNED_COMMIT_RC:-0}" \
 		MERGE_TIMEOUT_SECONDS="${MERGE_TIMEOUT_SECONDS:-5}" \
 		MERGE_POLL_SECONDS="${MERGE_POLL_SECONDS:-1}" \
 		BUMP_SCRIPT="${PROJECT_ROOT}/scripts/ci/mirror/bump_pin.py" \
 		bash "$SCRIPT" 1.2.3
 }
 
-assert_graphql_payload() {
-	# The mutation input must travel under `variables.input` (a raw GraphQL
-	# HTTP body delivers variables there; a top-level `input:` leaves $input
-	# unbound and the mutation is rejected — the ceabc852 regression).
-	run jq -r '.variables.input.expectedHeadOid' "$GRAPHQL_JSON"
-	assert_success
-	assert_output "base000000000000000000000000000000000b"
+assert_signed_commit_args() {
+	# The shared script gets reset mode onto the synced main, the bump
+	# branch, the mirror repo, the existing headline and the pin file, and
+	# runs from the mirror checkout so --file pyproject.toml resolves there.
+	local expected
+	for expected in \
+		"cwd=${MIRROR_DIR}" \
+		"--mode=reset" \
+		"--base=base000000000000000000000000000000000b" \
+		"--branch=mirror/bump-lintro-1.2.3" \
+		"--repository=lgtm-hq/lintro-pre-commit" \
+		"--message=chore: bump lintro to 1.2.3" \
+		"--body=<set>" \
+		"--file=pyproject.toml"; do
+		run grep -cxF -- "$expected" "$SIGNED_ARGS"
+		assert_success
+		assert_output 1
+	done
 
-	run jq -r '.variables.input.branch.branchName' "$GRAPHQL_JSON"
-	assert_success
-	assert_output "mirror/bump-lintro-1.2.3"
-
-	run jq -r '.variables.input.branch.repositoryNameWithOwner' "$GRAPHQL_JSON"
-	assert_success
-	assert_output "lgtm-hq/lintro-pre-commit"
-
-	run jq -r '.variables.input.fileChanges.additions[0].path' "$GRAPHQL_JSON"
-	assert_success
-	assert_output "pyproject.toml"
-
-	run bash -c "jq -r '.variables.input.fileChanges.additions[0].contents' '$GRAPHQL_JSON' | base64 --decode"
+	# The file it uploads is the bumped pin.
+	run cat "$SIGNED_PYPROJECT"
 	assert_success
 	assert_output '[project]
 dependencies = ["lintro==1.2.3"]'
 }
 
-@test "createCommitOnBranch receives a variables-wrapped, correct payload" {
+@test "the shared create-signed-commit script makes the bump commit in reset mode" {
 	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
+	assert_output --partial "Created bump commit created0000000000000000000000000000000a"
 
+	run grep -cxF "create-signed-commit" "${GH_LOG}"
+	assert_output 1
+
+	assert_signed_commit_args
+
+	# No inline mutation or ref POST is left in the script's own calls.
 	run grep -F "api graphql" "${GH_LOG}"
-	assert_success
-
-	assert_graphql_payload
-
+	assert_failure
+	run grep -F "api -X POST" "${GH_LOG}"
+	assert_failure
 	run grep -F "git commit" "${GIT_LOG}"
 	assert_failure
+}
+
+@test "a missing LGTM_CI_TOOLING_DIR fails before any mirror write" {
+	LGTM_CI_TOOLING_DIR="${BATS_TEST_TMPDIR}/no-such-tooling"
+	run run_script
+	assert_failure
+	assert_output --partial "create-signed-commit script not found at ${LGTM_CI_TOOLING_DIR}/scripts/ci/git/create-signed-commit.sh"
+
+	# Not even the auto-merge setting read reaches the mirror.
+	run cat "${GH_LOG}"
+	assert_output ""
+}
+
+@test "a failed signed commit stops the run before any PR is opened" {
+	SIGNED_COMMIT_RC="1"
+	run run_script
+	assert_failure
+	assert_output --partial "createCommitOnBranch returned no commit"
+
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_output 0
+	run grep -cF "pr merge" "${GH_LOG}"
+	assert_output 0
 }
 
 @test "the fresh path opens exactly one PR (stateful create stub)" {
@@ -244,13 +298,13 @@ dependencies = ["lintro==1.2.3"]'
 	assert_output --partial "Allow auto-merge"
 
 	# The precondition runs before ANY mirror mutation: no branch heal, no
-	# ref POST, no signed commit, no PR — nothing is written for a run that
-	# cannot merge.
+	# signed commit (and so no temp branch), no PR — nothing is written for
+	# a run that cannot merge.
 	run grep -cF "api -X DELETE" "${GH_LOG}"
 	assert_output 0
 	run grep -cF "git/refs" "${GH_LOG}"
 	assert_output 0
-	run grep -cF "api graphql" "${GH_LOG}"
+	run grep -cxF "create-signed-commit" "${GH_LOG}"
 	assert_output 0
 	run grep -cF "pr create" "${GH_LOG}"
 	assert_output 0
@@ -284,24 +338,6 @@ dependencies = ["lintro==1.2.3"]'
 	assert_output --partial "https://github.com/lgtm-hq/lintro-pre-commit/pull/22"
 }
 
-@test "the bump branch ref is created at base before createCommitOnBranch" {
-	# createCommitOnBranch appends to an existing branch; the script must
-	# POST refs/heads/<branch> at the base oid first (fresh and heal runs).
-	GH_STATES="MERGED MERGED"
-	run run_script
-	assert_success
-
-	run grep -F 'api -X POST repos/lgtm-hq/lintro-pre-commit/git/refs -f ref=refs/heads/mirror/bump-lintro-1.2.3 -f sha=base000000000000000000000000000000000b' "${GH_LOG}"
-	assert_success
-
-	# And the whole flow is ordered: DELETE (heal, if any) → POST ref →
-	# graphql mutation.
-	run awk '/graphql/{g=NR}
-		/git\/refs -f ref=/{p=NR}
-		END {exit !(p && g && p < g)}' "${GH_LOG}"
-	assert_success
-}
-
 @test "a healthy open bump PR is reused instead of healed" {
 	GIT_BRANCH_EXISTS="1"
 	GH_OPEN_PR="1"
@@ -313,7 +349,7 @@ dependencies = ["lintro==1.2.3"]'
 	assert_output --partial "Mirror PR #22 merged"
 
 	# No heal, no new commit, no new PR on the reuse path.
-	run grep -cF "api graphql" "${GH_LOG}"
+	run grep -cxF "create-signed-commit" "${GH_LOG}"
 	assert_output 0
 	run grep -cF "pr create" "${GH_LOG}"
 	assert_output 0
@@ -322,7 +358,7 @@ dependencies = ["lintro==1.2.3"]'
 	assert_output 1
 }
 
-@test "a dirty open bump PR is healed: branch deleted, ref recreated, mutation ordered" {
+@test "a dirty open bump PR is healed: branch deleted, then reset by the shared script" {
 	GIT_BRANCH_EXISTS="1"
 	GH_OPEN_PR="1"
 	GH_PR_VIEW="OPEN DIRTY main"
@@ -331,22 +367,17 @@ dependencies = ["lintro==1.2.3"]'
 	assert_success
 	assert_output --partial "is not mergeable (OPEN DIRTY main); healing the branch"
 
-	run grep -F 'api -X DELETE repos/lgtm-hq/lintro-pre-commit/git/refs/heads/mirror/bump-lintro-1.2.3' "${GH_LOG}"
-	assert_success
-	run grep -F 'api -X POST repos/lgtm-hq/lintro-pre-commit/git/refs' "${GH_LOG}"
-	assert_success
-	run grep -F "api graphql" "${GH_LOG}"
-	assert_success
-
-	# DELETE → POST → graphql ordering (first occurrence of each).
+	# DELETE (closes the unmergeable PR) → shared script reset (first
+	# occurrence of each; finish_after_merge deletes the ref again later).
 	run awk '
-		/-X DELETE .*git\/refs\/heads/ && !d { d = NR }
-		/git\/refs -f ref=/ && !p { p = NR }
-		/graphql/ && !g { g = NR }
-		END { exit !(d && p && g && d < p && p < g) }' "${GH_LOG}"
+		/-X DELETE .*git\/refs\/heads\/mirror\/bump-lintro-1\.2\.3/ && !d { d = NR }
+		/^create-signed-commit$/ && !c { c = NR }
+		END { exit !(d && c && d < c) }' "${GH_LOG}"
 	assert_success
 
-	assert_graphql_payload
+	assert_signed_commit_args
+	run grep -cF "pr create" "${GH_LOG}"
+	assert_output 1
 }
 
 @test "an open PR against another base is not reused (healed instead)" {
@@ -365,15 +396,24 @@ dependencies = ["lintro==1.2.3"]'
 	assert_output 1
 }
 
-@test "a stale branch with no open PR is deleted before the new commit is created" {
+@test "a stale branch with no open PR is reset in place, not deleted first" {
 	GIT_BRANCH_EXISTS="1"
 	GH_STATES="MERGED MERGED"
 	run run_script
 	assert_success
-	assert_output --partial "exists with no open PR; recreating it from origin/main"
+	assert_output --partial "exists with no open PR; resetting it onto origin/main"
 
-	run grep -F "git/refs/heads/mirror/bump-lintro-1.2.3" "${GH_LOG}"
+	# Reset mode moves the branch in one step; the only branch DELETE is
+	# finish_after_merge's cleanup, after the signed commit.
+	run grep -cF "api -X DELETE repos/lgtm-hq/lintro-pre-commit/git/refs/heads/mirror/bump-lintro-1.2.3" "${GH_LOG}"
+	assert_output 1
+	run awk '
+		/^create-signed-commit$/ && !c { c = NR }
+		/-X DELETE .*git\/refs\/heads\/mirror\/bump-lintro-1\.2\.3/ && !d { d = NR }
+		END { exit !(c && d && c < d) }' "${GH_LOG}"
 	assert_success
+
+	assert_signed_commit_args
 }
 
 @test "no rebase anywhere in the flow" {

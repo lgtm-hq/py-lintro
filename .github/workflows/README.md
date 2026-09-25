@@ -321,10 +321,12 @@ Delete both variables once a validation round is recorded.
   `RELEASE_APP_*`.
 - **`secrets.MIRROR_APP_ID` / `secrets.MIRROR_APP_PRIVATE_KEY`** — The dedicated
   `lgtm-mirror-bot` GitHub App (Contents R/W + Pull requests R/W), installed only on
-  `lintro-pre-commit`. Its installation token mints the mirror bump commit via
-  `createCommitOnBranch` (GitHub-signed, attributed to `lgtm-mirror-bot[bot]`, as the
-  mirror's rulesets require) and merges the bump PR; used by `mirror-release.yml`
-  (#2742), which replaced the retired plain-PAT secret.
+  `lintro-pre-commit`. Its installation token mints the mirror bump commit through
+  lgtm-ci's shared `scripts/ci/git/create-signed-commit.sh` (reset mode, #2834), which
+  still uses `createCommitOnBranch`, so the commit stays GitHub-signed and attributed to
+  `lgtm-mirror-bot[bot]` as the mirror's rulesets require. The token also merges the
+  bump PR; used by `mirror-release.yml` (#2742), which replaced the retired plain-PAT
+  secret.
 
 ## Concurrency
 
