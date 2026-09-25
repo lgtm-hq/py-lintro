@@ -25,11 +25,12 @@ import shutil
 import subprocess  # nosec B404 - drives repo shell scripts with shell=False
 import sys
 import textwrap
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 import yaml
@@ -187,6 +188,51 @@ def _pinned_lgtm_ci_ref() -> str:
     return ref
 
 
+def _helper_unavailable(message: str) -> NoReturn:
+    """Fail in CI, skip locally, when the pinned helper cannot be used.
+
+    CI must not pass without running the contract check, so under GitHub
+    Actions a missing helper or tool is a failure; on a developer machine
+    without network or tools it is a skip.
+
+    Args:
+        message: Why the pinned helper is unavailable.
+    """
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        pytest.fail(f"{message} (required in CI)")
+    pytest.skip(message)
+
+
+def _fetch_helper_file(*, url: str, rel: str, ref: str) -> bytes:
+    """Fetch one pinned lgtm-ci file, retrying transient failures.
+
+    Args:
+        url: Raw URL of the file at the pinned ref.
+        rel: Repo-relative path, for messages.
+        ref: The pinned lgtm-ci ref, for messages.
+
+    Returns:
+        The file contents.
+    """
+    last_error = ""
+    for attempt in range(3):
+        try:
+            response = urllib.request.urlopen(  # nosec B310 - fixed https URL
+                url,
+                timeout=30,
+            )
+            with response:
+                return bytes(response.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                pytest.fail(f"{rel} is missing at lgtm-ci {ref} (HTTP 404): {url}")
+            last_error = f"HTTP {exc.code}"
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_error = str(exc)
+        time.sleep(2 * (attempt + 1))
+    _helper_unavailable(f"could not fetch pinned lgtm-ci helper {url}: {last_error}")
+
+
 @pytest.fixture(scope="module")
 def lgtm_ci_tooling(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Fetch the pinned helper and its sourced libraries into a tooling dir.
@@ -199,24 +245,12 @@ def lgtm_ci_tooling(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """
     for tool in ("jq", "git"):
         if shutil.which(tool) is None:
-            pytest.skip(f"{tool} is not available; the pinned helper needs it")
+            _helper_unavailable(f"{tool} is not available; the pinned helper needs it")
     ref = _pinned_lgtm_ci_ref()
     tooling = tmp_path_factory.mktemp("lgtm-ci-tooling")
     for rel in HELPER_FILES:
         url = f"https://raw.githubusercontent.com/lgtm-hq/lgtm-ci/{ref}/{rel}"
-        try:
-            response = urllib.request.urlopen(  # nosec B310 - fixed https URL
-                url,
-                timeout=30,
-            )
-            with response:
-                body = response.read()
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                pytest.fail(f"{rel} is missing at lgtm-ci {ref} (HTTP 404): {url}")
-            pytest.skip(f"could not fetch pinned lgtm-ci helper {url}: HTTP {exc.code}")
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            pytest.skip(f"no network to fetch pinned lgtm-ci helper {url}: {exc}")
+        body = _fetch_helper_file(url=url, rel=rel, ref=ref)
         target = tooling / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(body)
