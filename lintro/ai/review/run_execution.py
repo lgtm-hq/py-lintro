@@ -154,6 +154,9 @@ async def run_passes(
             options=options,
             plan=plan,
             stop=interrupt,
+            # A failed first attempt lands here before its retry, so a stop
+            # during the retry still charges the tokens it billed (#2826).
+            record=lambda attempt: setattr(progress, "questions", attempt),
         )
         # Recorded before the fan-out so a run the fan-out stops (cost cap,
         # timeout, SIGTERM) still reports the pass it already paid for; the

@@ -26,7 +26,7 @@ class QuestionFailureKind(StrEnum):
     CALL_FAILED = auto()
 
 
-#: The kinds one more attempt can plausibly fix (ruling 21 on #2813): a call
+#: The kinds one more attempt can plausibly fix (the accepted #2813 design): a call
 #: cut off at its turn limit, and an answer that was not JSON. A blank answer,
 #: a well-formed answer of the wrong shape, and a provider error are not
 #: retried.

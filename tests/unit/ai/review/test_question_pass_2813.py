@@ -21,6 +21,7 @@ from types import ModuleType
 
 import pytest
 from assertpy import assert_that
+from loguru import logger
 
 from lintro.ai.cli_bounds import CallShape
 from lintro.ai.exceptions import (
@@ -278,10 +279,58 @@ async def test_a_stop_propagates_on_either_attempt(
     """
     outcomes = (_failed(QuestionFailureKind.NOT_JSON), stop) if on_retry else (stop,)
     script = _Script(*outcomes)
+    recorded: list[RunQuestions] = []
 
     with pytest.raises(type(stop)):
-        await run_with_one_retry(generate=script, shape=_FIRST_SHAPE)
+        await run_with_one_retry(
+            generate=script,
+            shape=_FIRST_SHAPE,
+            record=recorded.append,
+        )
     assert_that(script.shapes).is_length(2 if on_retry else 1)
+    # A stop on the retry leaves the billed first attempt with the run (#2826);
+    # a stop on the first call has nothing billed to keep.
+    assert_that([r.usage.input_tokens for r in recorded]).is_equal_to(
+        [10] if on_retry else [],
+    )
+
+
+async def test_the_first_attempt_is_recorded_before_a_stopped_retry() -> None:
+    """``record`` receives the billed first attempt before the retry runs."""
+    recorded: list[RunQuestions] = []
+    script = _Script(
+        _failed(QuestionFailureKind.NOT_JSON),
+        AICostBudgetExceededError("cap"),
+    )
+
+    with pytest.raises(AICostBudgetExceededError):
+        await run_with_one_retry(
+            generate=script,
+            shape=_FIRST_SHAPE,
+            record=recorded.append,
+        )
+
+    assert_that(recorded).is_length(1)
+    assert_that(recorded[0].failure_kind).is_equal_to(QuestionFailureKind.NOT_JSON)
+    assert_that(recorded[0].usage.input_tokens).is_equal_to(10)
+
+
+async def test_nothing_is_recorded_when_no_retry_follows() -> None:
+    """A pass that succeeds, or fails without a retry, records nothing early."""
+    recorded: list[RunQuestions] = []
+
+    await run_with_one_retry(
+        generate=_Script(_ok()),
+        shape=_FIRST_SHAPE,
+        record=recorded.append,
+    )
+    await run_with_one_retry(
+        generate=_Script(_failed(QuestionFailureKind.NOT_LIST)),
+        shape=_FIRST_SHAPE,
+        record=recorded.append,
+    )
+
+    assert_that(recorded).is_empty()
 
 
 async def test_a_turn_limit_capture_is_json_encoded() -> None:
@@ -375,3 +424,21 @@ def test_the_classifier_outcome_ignores_detail() -> None:
 
     assert_that(with_detail.outcome).is_equal_to(without.outcome)
     assert_that(with_detail.exit_code).is_equal_to(without.exit_code)
+
+
+async def test_a_call_failed_warning_is_one_line() -> None:
+    """Provider error text is JSON-encoded, so a ``::`` line stays inert."""
+    messages: list[str] = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    try:
+        await run_with_one_retry(
+            generate=_Script(AIProviderError("boom\n::error::injected")),
+            shape=_FIRST_SHAPE,
+        )
+    finally:
+        logger.remove(sink)
+
+    failed = [line for line in messages if "question call failed" in line]
+    assert_that(failed).is_length(1)
+    assert_that(failed[0].rstrip("\n")).does_not_contain("\n")
+    assert_that(failed[0]).contains("\\n::error::injected")

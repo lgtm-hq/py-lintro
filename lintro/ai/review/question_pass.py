@@ -45,7 +45,7 @@ from lintro.ai.sanitize import make_boundary_marker
 from lintro.ai.token_budget import estimate_tokens
 
 if TYPE_CHECKING:
-    from collections.abc import Coroutine
+    from collections.abc import Callable, Coroutine
     from typing import Any
 
     from lintro.ai.budget import CostBudget
@@ -349,6 +349,7 @@ async def run_question_pass(
     options: ReviewSessionOptions,
     plan: ReviewRunPlan,
     stop: asyncio.Event | None = None,
+    record: Callable[[RunQuestions], None] | None = None,
 ) -> RunQuestions:
     """Run the once-per-run question pass for a review, degrading on failure.
 
@@ -357,6 +358,8 @@ async def run_question_pass(
         options: Session options (the provider to call).
         plan: The resolved run plan (config, budget, repo root, diff budget).
         stop: Event a SIGTERM/SIGINT handler sets to stop the run.
+        record: Receives a failed first attempt before its retry, so the run
+            keeps that attempt's billed usage if the retry is stopped.
 
     Returns:
         The shared questions: empty when the pass is disabled by
@@ -386,6 +389,7 @@ async def run_question_pass(
                 stop=stop,
             ),
             shape=CallShape(use_one_shot=True, no_tools=plan.tools_disabled),
+            record=record,
         )
 
 

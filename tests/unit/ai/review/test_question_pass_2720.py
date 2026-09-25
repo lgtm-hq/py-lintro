@@ -744,6 +744,31 @@ async def test_a_cost_cap_stop_on_the_question_call_ends_the_run_as_partial(
     assert_that(result.metadata.coverage_degradations).is_empty()
 
 
+async def test_a_stop_during_the_retry_keeps_the_first_attempts_tokens(
+    tmp_path: Path,
+) -> None:
+    """A billed first attempt is charged even when its retry is stopped (#2826).
+
+    The first answer is not JSON (retried); the retry hits the cost cap. The
+    partial run still carries the first attempt's tokens; its cost was in the
+    budget's ``spent`` already.
+
+    Args:
+        tmp_path: Pytest temporary directory fixture.
+    """
+    seam = _scripted_seam(
+        _response(content="not json at all"),
+        AICostBudgetExceededError("cost cap reached"),
+    )
+
+    result = await _run(tmp_path=tmp_path, call_ai=seam)
+
+    assert_that(seam.call_count).is_equal_to(2)
+    assert_that(result.metadata.partial).is_true()
+    assert_that(result.metadata.stopped_reason).contains("cost cap")
+    assert_that(result.metadata.token_usage["prompt"]).is_equal_to(10)
+
+
 async def test_a_run_stopped_after_the_pass_still_reports_it(
     tmp_path: Path,
 ) -> None:

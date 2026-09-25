@@ -37,12 +37,17 @@ async def run_with_one_retry(
     *,
     generate: Callable[[CallShape], Awaitable[RunQuestions]],
     shape: CallShape,
+    record: Callable[[RunQuestions], None] | None = None,
 ) -> RunQuestions:
     """Run the question pass, retrying once for the retryable kinds.
 
     Args:
         generate: Makes one attempt with the given call shape.
         shape: The first attempt's call shape.
+        record: Receives the failed first attempt before the retry starts,
+            so a cost-cap stop or SIGTERM during the retry still leaves its
+            billed usage with the run (#2826). The returned result supersedes
+            it when the retry completes.
 
     Returns:
         The usable questions (from either attempt), or a failed result that
@@ -55,6 +60,8 @@ async def run_with_one_retry(
             _log_failure(result=first, retrying=False)
         return first
     _log_failure(result=first, retrying=True)
+    if record is not None:
+        record(first)
     retry_shape = (
         CallShape(use_one_shot=True, no_tools=True)
         if first.failure_kind is QuestionFailureKind.TURN_LIMIT
@@ -119,7 +126,7 @@ async def _attempt(
                     else ""
                 ),
             )
-        logger.warning("Per-PR question call failed ({})", exc)
+        logger.warning("Per-PR question call failed ({})", json.dumps(str(exc)))
         return RunQuestions(failed=True, failure_kind=QuestionFailureKind.CALL_FAILED)
 
 
