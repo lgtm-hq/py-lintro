@@ -64,6 +64,12 @@ HELPER_FILES = (
     "scripts/ci/lib/github/format.sh",
 )
 
+# Total time the fixture may spend fetching the helper, well under the
+# repository's 120 s pytest timeout, so an outage is reported as such.
+_FETCH_BUDGET_SECONDS = 60.0
+_FETCH_TIMEOUT_SECONDS = 10.0
+_FETCH_ATTEMPTS = 3
+
 # Strict gh mock. State (does the bump branch exist on the "server"?) lives
 # in a file because each gh call is a fresh process; every call is logged as
 # one JSON line, with stdin for the GraphQL call.
@@ -203,23 +209,32 @@ def _helper_unavailable(message: str) -> NoReturn:
     pytest.skip(message)
 
 
-def _fetch_helper_file(*, url: str, rel: str, ref: str) -> bytes:
+def _fetch_helper_file(*, url: str, rel: str, ref: str, deadline: float) -> bytes:
     """Fetch one pinned lgtm-ci file, retrying transient failures.
+
+    Every attempt and backoff stays inside ``deadline`` (a ``time.monotonic``
+    value shared by all files), so the fixture reports why the helper is
+    unavailable well before pytest's own per-test timeout fires. There is no
+    sleep after the final attempt.
 
     Args:
         url: Raw URL of the file at the pinned ref.
         rel: Repo-relative path, for messages.
         ref: The pinned lgtm-ci ref, for messages.
+        deadline: ``time.monotonic()`` value after which no attempt starts.
 
     Returns:
         The file contents.
     """
-    last_error = ""
-    for attempt in range(3):
+    last_error = "fetch budget exhausted before the first attempt"
+    for attempt in range(_FETCH_ATTEMPTS):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         try:
             response = urllib.request.urlopen(  # nosec B310 - fixed https URL
                 url,
-                timeout=30,
+                timeout=min(_FETCH_TIMEOUT_SECONDS, remaining),
             )
             with response:
                 return bytes(response.read())
@@ -229,7 +244,8 @@ def _fetch_helper_file(*, url: str, rel: str, ref: str) -> bytes:
             last_error = f"HTTP {exc.code}"
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = str(exc)
-        time.sleep(2 * (attempt + 1))
+        if attempt + 1 < _FETCH_ATTEMPTS:
+            time.sleep(min(2.0 * (attempt + 1), max(0.0, deadline - time.monotonic())))
     _helper_unavailable(f"could not fetch pinned lgtm-ci helper {url}: {last_error}")
 
 
@@ -248,9 +264,10 @@ def lgtm_ci_tooling(tmp_path_factory: pytest.TempPathFactory) -> Path:
             _helper_unavailable(f"{tool} is not available; the pinned helper needs it")
     ref = _pinned_lgtm_ci_ref()
     tooling = tmp_path_factory.mktemp("lgtm-ci-tooling")
+    deadline = time.monotonic() + _FETCH_BUDGET_SECONDS
     for rel in HELPER_FILES:
         url = f"https://raw.githubusercontent.com/lgtm-hq/lgtm-ci/{ref}/{rel}"
-        body = _fetch_helper_file(url=url, rel=rel, ref=ref)
+        body = _fetch_helper_file(url=url, rel=rel, ref=ref, deadline=deadline)
         target = tooling / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(body)
