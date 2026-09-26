@@ -65,7 +65,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
         with:
-          python-version: '3.12'
+          python-version: '3.14'
           install-dependencies: false
 
       - name: Setup Node and Bun
@@ -159,7 +159,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
         with:
-          python-version: '3.12'
+          python-version: '3.14'
           install-dependencies: false
 
       - name: Setup Node and Bun
