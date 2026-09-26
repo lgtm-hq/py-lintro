@@ -37,7 +37,7 @@ jobs:
   # module docstring), so an API hiccup cannot freeze the release train.
   publish-gate:
     name: 🚦 Publish Gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       actions: read # read publish-pypi-on-tag.yml run conclusions
     timeout-minutes: 5

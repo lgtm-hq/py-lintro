@@ -89,7 +89,7 @@ concurrency:
 jobs:
   stage:
     name: Verify and stage npm package set
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       # read: checkout and download release assets

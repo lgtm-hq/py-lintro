@@ -37,7 +37,7 @@ concurrency:
 jobs:
   build-and-link:
     name: Build and check documentation site
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Harden Runner
@@ -131,7 +131,7 @@ jobs:
 
   test:
     name: Test documentation site
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     steps:
       - name: Harden Runner

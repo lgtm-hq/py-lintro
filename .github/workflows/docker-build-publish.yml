@@ -64,7 +64,7 @@ jobs:
     # `env` context is unavailable in job-level `with:` blocks of
     # reusable-workflow calls, so the list reaches them as a job output.
     name: Resolve allowed endpoints
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       endpoints: ${{ steps.resolve.outputs.endpoints }}
     steps:
@@ -92,7 +92,7 @@ jobs:
   validate-backfill-inputs:
     if: github.event_name == 'workflow_dispatch'
     name: Validate backfill inputs
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     outputs:
       backfill_version: ${{ steps.validate.outputs.backfill_version }}
       backfill_ref: ${{ steps.validate.outputs.backfill_ref }}

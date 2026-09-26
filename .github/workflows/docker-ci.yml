@@ -99,7 +99,7 @@ jobs:
   # still runs everything. Only an explicit pipeline == 'false' skips work.
   changes:
     name: 🔎 Detect Relevant Changes
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     timeout-minutes: 5
@@ -260,7 +260,7 @@ jobs:
       !cancelled() &&
       needs.changes.outputs.pipeline != 'false' &&
       needs.changes.outputs.lint-scope != 'changed'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the scripts and the requirements files
     # Resolution is a single uv metadata pass over ~66 packages; anything
@@ -337,7 +337,7 @@ jobs:
     # the drift check is red before the first layer is pulled.
     needs: [changes, semgrep-lock]
     if: '!cancelled()'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout and build context
       packages: write # push CI-tagged images to GHCR
@@ -642,7 +642,7 @@ jobs:
       needs.changes.outputs.pipeline != 'false' &&
       needs.changes.outputs.lint-scope == 'changed' &&
       needs.docker-build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # pull the CI lint image from GHCR
@@ -777,7 +777,7 @@ jobs:
       !cancelled() &&
       needs.changes.outputs.pipeline != 'false' &&
       needs.docker-build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # pull the CI lint image from GHCR
@@ -999,7 +999,7 @@ jobs:
         github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the gate scripts below
     timeout-minutes: 5
@@ -1184,7 +1184,7 @@ jobs:
     if: >-
       !cancelled() &&
       needs.docker-build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # GHCR login and CI image pull steps below
@@ -1291,7 +1291,7 @@ jobs:
     if: >-
       !cancelled() &&
       needs.docker-build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # GHCR login and CI image pull steps below
@@ -1462,7 +1462,7 @@ jobs:
       needs.changes.outputs.pipeline != 'false' &&
       needs.code-quality-gate.outputs.result == 'success' &&
       needs.code-quality-gate.outputs.infra-flake != 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout and metadata extraction
       packages: write # promote (retag) release images in GHCR

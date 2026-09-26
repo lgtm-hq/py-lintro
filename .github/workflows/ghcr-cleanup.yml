@@ -99,7 +99,7 @@ jobs:
   # partial reruns can still pull the run-scoped image — see issue #1138.
   sweep-ci-tags:
     name: 🧹 Sweep ephemeral CI tags
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout sweep-ci-ghcr-tags.sh
       packages: write # delete aged-out CI tags from GHCR
@@ -145,7 +145,7 @@ jobs:
   # and can never be deleted by this job.
   sweep-sha-tags:
     name: 🧹 Sweep aged commit tags
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout sweep-ci-ghcr-tags.sh
       packages: write # delete aged-out CI tags from GHCR
@@ -179,7 +179,7 @@ jobs:
 
   sweep-tools-candidates:
     name: 🧹 Sweep tools candidate tags
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
@@ -271,7 +271,7 @@ jobs:
     # always(): the status is the whole point of the job. A failure that
     # skipped it would be invisible, which is the failure mode being removed.
     if: always() && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout report-workflow-commit-status.sh
       statuses: write # report ghcr-cleanup on main's HEAD
