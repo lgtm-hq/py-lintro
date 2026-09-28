@@ -49,7 +49,7 @@
     "c": ["cppcheck"],
     "cpp": ["cppcheck"],
     "go": ["golangci_lint", "semgrep"],
-    "ruby": ["semgrep"],
+    "ruby": ["rubocop", "semgrep"],
     "sql": ["sqlfluff"],
     "protobuf": ["buf"],
     "shell": ["shellcheck", "shfmt"],
@@ -398,6 +398,18 @@
       "version_command": ["pytest", "--version"],
       "languages": ["python"],
       "tags": ["testing"]
+    },
+    {
+      "name": "rubocop",
+      "install": {
+        "type": "gem",
+        "package": "rubocop"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["rubocop", "--version"],
+      "languages": ["ruby"],
+      "tags": ["linter", "formatter"]
     },
     {
       "name": "ruff",

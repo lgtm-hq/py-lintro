@@ -15,6 +15,7 @@ Usage:
 from lintro.tools.core.install_strategies import (  # noqa: F401
     binary_strategy,
     cargo_strategy,
+    gem_strategy,
     npm_strategy,
     pip_strategy,
     rustup_strategy,

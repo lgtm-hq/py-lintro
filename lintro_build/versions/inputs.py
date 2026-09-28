@@ -323,7 +323,7 @@ def read_binary_tool_versions(path: Path) -> dict[str, str]:
 
     AST-walks the file for the ``TOOL_VERSIONS`` assignment, then parses each
     ``ToolName.X: "ver"`` entry. Used as the single source for non-npm/non-pypi
-    tools (binary, cargo, rustup) when populating the manifest.
+    tools (binary, cargo, gem, rustup) when populating the manifest.
 
     Args:
         path: Path to ``lintro/_tool_versions.py``.

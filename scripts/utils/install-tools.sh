@@ -97,6 +97,7 @@ This script installs:
   - Mypy (Python static type checker)
   - Cppcheck (C/C++ static analysis)
   - Checkov (Terraform Infrastructure-as-Code security scanner)
+  - RuboCop (Ruby linting and formatting)
   - Clippy (Rust linter; requires Rust toolchain)
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
@@ -201,7 +202,7 @@ should_install() {
 SUPPORTED_TOOLS=(
 	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
 	"checkov" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep"
+	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "rubocop" "ruff" "rustfmt" "semgrep"
 	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
 	"trufflehog" "tsc" "typos"
 	"vale" "vue-tsc" "yamllint"
@@ -1657,6 +1658,41 @@ main() {
 			exit 1
 		fi
 	fi # pip-audit
+	if should_install "rubocop"; then
+		# Install rubocop (Ruby linter/formatter) as a Ruby gem.
+		echo -e "${BLUE}Installing rubocop...${NC}"
+		RUBOCOP_VERSION=$(get_tool_version "rubocop") || exit 1
+		# --bindir alone only picks the executable directory; the default gem
+		# home is root-owned, so a non-root --local run also needs
+		# --user-install to have a writable gem home. Docker runs as root with
+		# ruby installed by the image, so it keeps the system gem home.
+		RUBOCOP_GEM_ARGS=(install rubocop --version "${RUBOCOP_VERSION}" --no-document --bindir "$BIN_DIR")
+		rubocop_is_docker=0
+		if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+			rubocop_is_docker=1
+		else
+			RUBOCOP_GEM_ARGS+=(--user-install)
+		fi
+		if [ $DRY_RUN -eq 1 ]; then
+			log_info "[DRY-RUN] Would install rubocop v${RUBOCOP_VERSION}"
+		elif ! command -v gem &>/dev/null; then
+			# Ruby is not a lintro prerequisite. In Docker the image installs
+			# it, so a missing gem there is a real image bug; locally it just
+			# means this machine has no Ruby, which must not abort the install
+			# of every remaining tool.
+			if [ "$rubocop_is_docker" -eq 1 ]; then
+				echo -e "${RED}✗ 'gem' (Ruby) not found; cannot install rubocop${NC}"
+				exit 1
+			fi
+			echo -e "${YELLOW}⚠ 'gem' (Ruby) not found; skipping rubocop${NC}"
+			echo -e "${YELLOW}  Install Ruby, then re-run with --tools rubocop${NC}"
+		elif gem "${RUBOCOP_GEM_ARGS[@]}"; then
+			echo -e "${GREEN}✓ rubocop installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install rubocop${NC}"
+			exit 1
+		fi
+	fi # rubocop
 
 	# Install checkov (Terraform IaC security scanner) into its own venv.
 	# checkov pins `packaging>=23.0,<24.0` while lintro pins `packaging>=25.0`,
@@ -2239,6 +2275,7 @@ main() {
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
 		["pylint"]="Python static analysis (duplicate-code)"
+		["rubocop"]="Ruby linting and formatting"
 		["ruff"]="Python linting and formatting"
 		["rustfmt"]="Rust formatting"
 		["semgrep"]="Security scanning"
@@ -2266,7 +2303,7 @@ main() {
 	# Verify installations
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "checkov" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "checkov" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "rubocop" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
