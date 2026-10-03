@@ -363,11 +363,7 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     )
     persist = jobs["persist-pinned-digest"]
     assert isinstance(persist, dict)
-    assert_that(str(persist["if"])).contains("needs.resolve.outputs.action == 'skip'")
-    assert_that(str(persist["if"])).contains(
-        "needs.resolve.outputs.action == 'backfill'",
-    )
-    assert_that(str(persist["if"])).contains("pin-changed == 'true'")
+    assert_that(str(persist["if"])).contains("needs.resolve.result == 'success'")
     assert_that(persist["permissions"]["packages"]).is_equal_to("write")
 
 
@@ -638,7 +634,7 @@ def test_cleanup_main_skips_persistent_tag_added_before_delete(
     )
     monkeypatch.setattr(
         cleanup_module,
-        "retained_promoted_digests",
+        "collect_default_branch_digests",
         lambda **_kwargs: set(),
     )
 
@@ -691,7 +687,7 @@ def test_cleanup_main_treats_concurrent_404_as_benign(
     )
     monkeypatch.setattr(
         cleanup_module,
-        "retained_promoted_digests",
+        "collect_default_branch_digests",
         lambda **_kwargs: set(),
     )
 
@@ -1258,7 +1254,7 @@ def test_sweep_keeps_going_when_one_pull_request_lookup_fails(
     )
     monkeypatch.setattr(
         cleanup_module,
-        "retained_promoted_digests",
+        "collect_default_branch_digests",
         lambda **_kwargs: set(),
     )
 
@@ -1546,15 +1542,20 @@ def test_promote_workflow_wires_expected_digest_and_pinned_tag() -> None:
         "ghcr.io/lgtm-hq/lintro-tools:pinned-${{ steps.pin.outputs.sha7 }}",
     )
     persist = workflow["jobs"]["persist-pinned-digest"]
+    assert_that(str(persist["if"])).contains("needs.resolve.result == 'success'")
     persist_run = next(
         step
         for step in persist["steps"]
         if "tag-pinned-tools-digest.sh" in str(step.get("run", ""))
     )
+    resolve_env = next(
+        step
+        for step in workflow["jobs"]["resolve"]["steps"]
+        if "promote-tools-candidate.py" in str(step.get("run", ""))
+    )["env"]
+    assert_that(resolve_env["GITHUB_EVENT_BEFORE"]).contains("github.event.before")
     assert_that(persist_run["env"]["GITHUB_SHA"]).contains("github.sha")
-    assert_that(persist_run["env"]["REQUIRE_EPHEMERAL_ONLY"]).contains(
-        "needs.resolve.outputs.action == 'backfill'",
-    )
+    assert_that(persist_run["env"]["REQUIRE_EPHEMERAL_ONLY"]).is_equal_to("true")
 
 
 def test_sweep_keeps_merged_candidate_still_pinned_on_main(
@@ -1593,7 +1594,7 @@ def test_sweep_keeps_merged_candidate_still_pinned_on_main(
     )
     monkeypatch.setattr(
         cleanup_module,
-        "retained_promoted_digests",
+        "collect_default_branch_digests",
         lambda **_kwargs: set(),
     )
 
@@ -1683,7 +1684,7 @@ def test_sweep_collection_failure_deletes_nothing(
     monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
     monkeypatch.setattr(
         cleanup_module,
-        "retained_promoted_digests",
+        "collect_default_branch_digests",
         lambda **_kwargs: set(),
     )
 
@@ -1737,7 +1738,7 @@ def test_sweep_deletes_unreferenced_stale_candidate(
     )
     monkeypatch.setattr(
         cleanup_module,
-        "retained_promoted_digests",
+        "collect_default_branch_digests",
         lambda **_kwargs: set(),
     )
 
@@ -1746,26 +1747,124 @@ def test_sweep_deletes_unreferenced_stale_candidate(
     assert_that(deletes[0]).contains("versions/11")
 
 
-def test_retained_promoted_keeps_newest_n(
+def test_sweep_pre_delete_recheck_failure_deletes_nothing(
     *,
     cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The newest N ``pinned-*`` versions stay even when nothing references them."""
-    versions = [
-        _candidate_payload(
-            version_id=index,
-            digest=f"sha256:{str(index) * 64}",
-            tags=(f"pinned-{index:07d}",),
-            updated_at=f"2026-09-0{index}T00:00:00Z",
+    """A failed default-branch re-check must abort remaining deletions."""
+    payload = _candidate_payload(
+        version_id=11,
+        digest=f"sha256:{'3' * 64}",
+        tags=("tools-candidate-pr11-abcdef1", "sha-abcdef1"),
+        updated_at="2020-01-01T00:00:00Z",
+    )
+    deletes: list[str] = []
+
+    def fake_gh_json(*args: str) -> object:
+        endpoint = next(
+            (
+                arg
+                for arg in args
+                if arg.startswith("orgs/") or arg.startswith("repos/")
+            ),
+            "",
         )
-        for index in range(1, 7)
-    ]
+        if "--method" in args and "DELETE" in args:
+            deletes.append(endpoint)
+            return None
+        if "packages/container" in endpoint and endpoint.endswith(
+            "versions?per_page=100",
+        ):
+            return [[payload]]
+        if endpoint.endswith("/versions/11"):
+            return payload
+        if "/pulls/11" in endpoint:
+            return {"state": "closed", "merged_at": "2020-01-02T00:00:00Z"}
+        raise AssertionError(f"unexpected API call: {args}")
 
-    retained = cleanup_module.retained_promoted_digests(versions=versions, retain=5)
+    monkeypatch.setenv("GH_TOKEN", "token")
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_protected_digests",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            cleanup_module.ProtectionCollectionError("contents 503"),
+        ),
+    )
 
-    assert_that(retained).is_length(5)
-    assert_that(retained).does_not_contain(f"sha256:{'1' * 64}")
-    assert_that(retained).contains(f"sha256:{'6' * 64}")
+    assert_that(cleanup_module.main()).is_equal_to(1)
+    assert_that(deletes).is_empty()
+
+
+def test_sweep_skips_non_renovate_heads_and_logs_pin_404s(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only renovate/* heads are read; a 404 pin is logged, not silent."""
+    digest = f"sha256:{'1' * 64}"
+    text = f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@{digest}\n"
+
+    def fake_gh_json(*args: str) -> object:
+        endpoint = args[0] if args else ""
+        if endpoint == "repos/lgtm-hq/py-lintro":
+            return {"default_branch": "main"}
+        if "contents/docker?" in endpoint and "ref=main" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if "contents/docker/ai-tools.Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if endpoint.startswith("repos/lgtm-hq/py-lintro/pulls?"):
+            return [
+                [
+                    {"head": {"sha": "deadbeef", "ref": "feature/unrelated"}},
+                    {"head": {"sha": "abc1234", "ref": "renovate/lintro-tools"}},
+                ],
+            ]
+        if "ref=deadbeef" in endpoint:
+            raise AssertionError(f"non-renovate head was read: {args}")
+        if "contents/docker?" in endpoint and "ref=abc1234" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=abc1234" in endpoint:
+            raise RuntimeError("HTTP 404: Not Found")
+        if "contents/docker/ai-tools.Dockerfile?ref=abc1234" in endpoint:
+            return _contents_file(text)
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+
+    protected = cleanup_module.collect_protected_digests(
+        repository="lgtm-hq/py-lintro",
+    )
+    logged = capsys.readouterr().out
+    assert_that(protected).contains(digest)
+    assert_that(protected).contains(f"sha256:{'0' * 64}")
+    assert_that(logged).contains("Dockerfile at abc1234")
+    assert_that(logged).contains("404")
 
 
 def test_pin_changed_detects_consumer_dockerfile_on_direct_push(
@@ -1789,6 +1888,39 @@ def test_pin_changed_detects_consumer_dockerfile_on_direct_push(
     ).is_true()
 
 
+def test_pin_changed_uses_push_before_after_range(
+    *,
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A multi-commit main push must inspect the whole before...after range."""
+    before = "b" * 40
+    after = "c" * 40
+    compared: list[tuple[str, str]] = []
+
+    def fake_compare(*, repository: str, before: str, after: str) -> set[str]:
+        del repository
+        compared.append((before, after))
+        return {"docker/ai-tools.Dockerfile"}
+
+    def fake_commit_files(*, repository: str, sha: str) -> set[str]:
+        del repository, sha
+        raise AssertionError("must not inspect only the head commit")
+
+    monkeypatch.setenv("GITHUB_EVENT_BEFORE", before)
+    monkeypatch.setattr(promotion_module, "_merged_pr", lambda **_kwargs: None)
+    monkeypatch.setattr(promotion_module, "_compare_files", fake_compare)
+    monkeypatch.setattr(promotion_module, "_commit_files", fake_commit_files)
+
+    assert_that(
+        promotion_module._pin_changed(
+            repository="lgtm-hq/py-lintro",
+            merge_sha=after,
+        ),
+    ).is_true()
+    assert_that(compared).is_equal_to([(before, after)])
+
+
 @pytest.fixture
 def pin_tag_module() -> ModuleType:
     """Load the persistent-tag backfill helper."""
@@ -1808,16 +1940,17 @@ def test_backfill_dispatch_skips_classification(
     output = tmp_path / "github_output"
     output.touch()
     calls: list[tuple[str, ...]] = []
+
+    def fake_resolve(**_kwargs: object) -> tuple[str, str]:
+        calls.append(("resolve",))
+        return ("promote", "nope")
+
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setenv("BACKFILL_PINNED", "true")
     monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
-    monkeypatch.setattr(
-        promotion_module,
-        "resolve_main_action",
-        lambda **_kwargs: calls.append(("resolve",)) or ("promote", "nope"),
-    )
+    monkeypatch.setattr(promotion_module, "resolve_main_action", fake_resolve)
 
     assert_that(promotion_module.main()).is_equal_to(0)
     assert_that(calls).is_empty()
@@ -1831,7 +1964,7 @@ def test_backfill_dispatch_skips_classification(
     [
         (("tools-candidate-pr2773-9888e2d5", "sha-9888e2d", "renovate-yaml-2.x"), True),
         (("tools-candidate-pr2773-9888e2d5", "pinned-a958f6c"), False),
-        (("latest",), False),
+        (("latest", "sha-9888e2d", "renovate-yaml-2.x"), True),
     ],
     ids=["ephemeral-only", "already-pinned", "has-latest"],
 )
@@ -1842,7 +1975,7 @@ def test_backfill_needs_tag_only_for_ephemeral_versions(
     tags: tuple[str, ...],
     needs_tag: bool,
 ) -> None:
-    """The yaml #2773 pin shape still needs a persistent tag; others do not."""
+    """Only pinned-* is durable; latest on today's #2773 pin still needs a tag."""
     digest = "sha256:89e331828b133522515f39b1e1492b75ceb61815fc5dc4d7841174f8da9c36a7"
     monkeypatch.setattr(
         pin_tag_module,
@@ -1856,3 +1989,116 @@ def test_backfill_needs_tag_only_for_ephemeral_versions(
             digest=digest,
         ),
     ).is_equal_to(needs_tag)
+
+
+def _write_executable(path: Path, text: str) -> Path:
+    """Write a stub script and mark it executable."""
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_tag_pinned_tools_digest_skips_when_already_pinned(
+    *,
+    tmp_path: Path,
+) -> None:
+    """REQUIRE_EPHEMERAL_ONLY treats needs-tag rc 1 as an idempotent skip."""
+    digest = f"sha256:{'a' * 64}"
+    reader = tmp_path / "read.py"
+    reader.write_text(
+        f"import sys\nprint('{digest}' if sys.argv[1:] == ['--read'] else '')\n",
+        encoding="utf-8",
+    )
+    needs = tmp_path / "needs.py"
+    needs.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+    promote = _write_executable(
+        tmp_path / "promote.sh",
+        "#!/usr/bin/env bash\necho PROMOTED >&2\nexit 0\n",
+    )
+    result = subprocess.run(  # nosec B603
+        [str(_REPO_ROOT / "scripts/ci/tag-pinned-tools-digest.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "GITHUB_SHA": "ABCDEF1234567890",
+            "PIN_READER": str(reader),
+            "PIN_NEEDS_TAG": str(needs),
+            "PROMOTE_SCRIPT": str(promote),
+            "REQUIRE_EPHEMERAL_ONLY": "true",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("already has a pinned-* tag")
+    assert_that(result.stdout + result.stderr).does_not_contain("PROMOTED")
+
+
+def test_tag_pinned_tools_digest_fails_when_needs_tag_errors(
+    *,
+    tmp_path: Path,
+) -> None:
+    """A needs-tag helper rc 2 must fail the persist job."""
+    digest = f"sha256:{'a' * 64}"
+    reader = tmp_path / "read.py"
+    reader.write_text(
+        f"import sys\nprint('{digest}' if sys.argv[1:] == ['--read'] else '')\n",
+        encoding="utf-8",
+    )
+    needs = tmp_path / "needs.py"
+    needs.write_text("import sys\nsys.exit(2)\n", encoding="utf-8")
+    promote = _write_executable(
+        tmp_path / "promote.sh",
+        "#!/usr/bin/env bash\necho PROMOTED >&2\nexit 0\n",
+    )
+    result = subprocess.run(  # nosec B603
+        [str(_REPO_ROOT / "scripts/ci/tag-pinned-tools-digest.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "GITHUB_SHA": "abcdef1234567890",
+            "PIN_READER": str(reader),
+            "PIN_NEEDS_TAG": str(needs),
+            "PROMOTE_SCRIPT": str(promote),
+            "REQUIRE_EPHEMERAL_ONLY": "true",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stdout + result.stderr).does_not_contain("PROMOTED")
+
+
+def test_tag_pinned_tools_digest_derives_sha7_from_merge_sha(
+    *,
+    tmp_path: Path,
+) -> None:
+    """The persist tag is pinned- plus the first seven lowercase hex chars."""
+    digest = f"sha256:{'b' * 64}"
+    reader = tmp_path / "read.py"
+    reader.write_text(
+        f"import sys\nprint('{digest}' if sys.argv[1:] == ['--read'] else '')\n",
+        encoding="utf-8",
+    )
+    needs = tmp_path / "needs.py"
+    needs.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    promote = _write_executable(
+        tmp_path / "promote.sh",
+        "#!/usr/bin/env bash\nprintf 'TAGS=%s\\n' \"${TAGS}\"\n",
+    )
+    result = subprocess.run(  # nosec B603
+        [str(_REPO_ROOT / "scripts/ci/tag-pinned-tools-digest.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "GITHUB_SHA": "ABCDEF1234567890deadbeef",
+            "PIN_READER": str(reader),
+            "PIN_NEEDS_TAG": str(needs),
+            "PROMOTE_SCRIPT": str(promote),
+            "REQUIRE_EPHEMERAL_ONLY": "true",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains(":pinned-abcdef1")

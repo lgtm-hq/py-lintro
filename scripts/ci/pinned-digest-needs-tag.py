@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Exit 0 when a lintro-tools digest still needs a persistent GHCR tag.
+"""Exit 0 when a lintro-tools digest still needs a ``pinned-*`` tag.
 
-Used by the one-time backfill (#2845). A digest whose only tags are
-ephemeral (``tools-candidate-*``, ``sha-*``, ``renovate-*``) is the
-shape that the sweeper deletes. Any other tag, including ``pinned-*``
-or ``latest``, is enough to keep it.
+``latest`` and ``renovate-*`` move. Only ``pinned-<sha7>`` stays on the
+digest main actually pins, so that is the only persistent tag this
+helper accepts (#2845).
 """
 
 from __future__ import annotations
@@ -22,9 +21,7 @@ except ModuleNotFoundError:
 
 PACKAGE = "lintro-tools"
 DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
-EPHEMERAL_RE = re.compile(
-    r"^(?:tools-candidate-pr[1-9][0-9]*-[0-9a-f]{7,40}|sha-|renovate-)",
-)
+PINNED_RE = re.compile(r"^pinned-[0-9a-f]{7,40}$")
 PAGE_SIZE = 100
 
 
@@ -60,22 +57,20 @@ def _version_tags(*, owner: str, digest: str) -> tuple[str, ...] | None:
 
 
 def digest_needs_persistent_tag(*, owner: str, digest: str) -> bool:
-    """Return whether *digest* has only ephemeral tags, or is unknown.
+    """Return whether *digest* still lacks a ``pinned-*`` tag.
 
     Args:
         owner: GHCR org that owns ``lintro-tools``.
         digest: Full ``sha256:<64 hex>`` digest.
 
     Returns:
-        ``True`` when the digest is missing or every tag is ephemeral.
-
-    Raises:
-        RuntimeError: If the package listing cannot be parsed.
+        ``True`` when the digest is missing or has no ``pinned-*`` tag.
+        ``latest`` alone is not enough: the next publish takes it away.
     """
     tags = _version_tags(owner=owner, digest=digest)
     if tags is None:
         return True
-    return all(EPHEMERAL_RE.match(tag) for tag in tags)
+    return not any(PINNED_RE.fullmatch(tag) for tag in tags)
 
 
 def main() -> int:
@@ -92,9 +87,9 @@ def main() -> int:
         print(str(exc), file=sys.stderr)
         return 2
     if needs_tag:
-        print(f"{digest} has no persistent tag")
+        print(f"{digest} has no pinned-* tag")
         return 0
-    print(f"{digest} already has a persistent tag")
+    print(f"{digest} already has a pinned-* tag")
     return 1
 
 

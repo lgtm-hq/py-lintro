@@ -21,7 +21,9 @@ Environment:
   PIN_READER     Override the digest reader (tests)
   REQUIRE_EPHEMERAL_ONLY
                  When "true", skip tagging if the digest already has a
-                 persistent tag (one-time backfill, #2845)
+                 pinned-* tag (self-healing persist / backfill, #2845)
+  PIN_NEEDS_TAG  Override the pinned-tag checker (tests)
+  PROMOTE_SCRIPT Override the retag script (tests)
   GH_TOKEN       Required when REQUIRE_EPHEMERAL_ONLY=true
   GITHUB_REPOSITORY  owner/name used to resolve the GHCR org
 EOF
@@ -51,9 +53,10 @@ source_image="${SOURCE_IMAGE:-ghcr.io/lgtm-hq/lintro-tools}"
 
 if [[ "${REQUIRE_EPHEMERAL_ONLY:-false}" == "true" ]]; then
 	needs_rc=0
-	DIGEST="$digest" python3 "${_script_dir}/pinned-digest-needs-tag.py" || needs_rc=$?
+	_needs="${PIN_NEEDS_TAG:-${_script_dir}/pinned-digest-needs-tag.py}"
+	DIGEST="$digest" python3 "$_needs" || needs_rc=$?
 	if [[ "$needs_rc" -eq 1 ]]; then
-		echo "Skipping pinned-${sha7}: ${digest} already has a persistent tag"
+		echo "Skipping pinned-${sha7}: ${digest} already has a pinned-* tag"
 		exit 0
 	fi
 	if [[ "$needs_rc" -ne 0 ]]; then
@@ -61,8 +64,9 @@ if [[ "${REQUIRE_EPHEMERAL_ONLY:-false}" == "true" ]]; then
 	fi
 fi
 
+_promote="${PROMOTE_SCRIPT:-${_script_dir}/promote-ci-docker-images.sh}"
 SOURCE_IMAGE="$source_image" \
 	SOURCE_DIGEST="$digest" \
 	EXPECTED_DIGEST="$digest" \
 	TAGS="${source_image}:pinned-${sha7}" \
-	"${_script_dir}/promote-ci-docker-images.sh"
+	"$_promote"

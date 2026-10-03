@@ -48,6 +48,8 @@ BUILD_PATHS = frozenset(
     },
 )
 CONSUMER_PATHS = frozenset({"Dockerfile", "docker/ai-tools.Dockerfile"})
+_FULL_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_ZERO_SHA = "0" * 40
 
 
 def _pages(payload: object) -> list[dict[str, Any]]:
@@ -270,13 +272,39 @@ def _commit_files(*, repository: str, sha: str) -> set[str]:
     }
 
 
+def _compare_files(*, repository: str, before: str, after: str) -> set[str]:
+    """Return paths changed on a push range."""
+    payload = _gh_json(f"repos/{repository}/compare/{before}...{after}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("GitHub returned a malformed compare response")
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise RuntimeError("GitHub returned a malformed compare file list")
+    return {
+        filename for file in files if isinstance(filename := file.get("filename"), str)
+    }
+
+
 def _pin_changed(*, repository: str, merge_sha: str) -> bool:
-    """Return whether the merge touched a consumer lintro-tools pin file."""
+    """Return whether the push touched a consumer lintro-tools pin file."""
     pr = _merged_pr(repository=repository, merge_sha=merge_sha)
     if pr is not None and isinstance(pr.get("number"), int):
         paths = _pull_request_files(repository=repository, pr_number=pr["number"])
     else:
-        paths = _commit_files(repository=repository, sha=merge_sha)
+        before = os.environ.get("GITHUB_EVENT_BEFORE", "").strip().lower()
+        if (
+            before
+            and before != _ZERO_SHA
+            and _FULL_SHA_RE.fullmatch(before) is not None
+            and before != merge_sha.lower()
+        ):
+            paths = _compare_files(
+                repository=repository,
+                before=before,
+                after=merge_sha,
+            )
+        else:
+            paths = _commit_files(repository=repository, sha=merge_sha)
     return bool(paths & CONSUMER_PATHS)
 
 

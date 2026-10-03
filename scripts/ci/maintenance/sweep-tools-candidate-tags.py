@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Delete stale or closed-unmerged ``lintro-tools`` candidate versions."""
+"""Delete stale or closed-unmerged ``lintro-tools`` candidate versions.
+
+Collect protected digests once (default branch plus open ``renovate/*``
+heads). Before each delete, re-read only the default-branch pins. Any
+collection or re-check failure aborts remaining deletions. ``pinned-*``
+tags are not candidates; there is no retain-N of old promoted versions.
+"""
 
 from __future__ import annotations
 
@@ -33,7 +39,6 @@ CANDIDATE_RE = re.compile(
 EPHEMERAL_RE = re.compile(
     r"^(?:tools-candidate-pr[1-9][0-9]*-[0-9a-f]{7,40}|sha-|renovate-)",
 )
-PINNED_RE = re.compile(r"^pinned-[0-9a-f]{7,40}$")
 DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
 PINNED_DIGEST_RE = re.compile(
     rf"{re.escape(PACKAGE_REF)}(?::[^\s@]+)?@(sha256:[a-f0-9]{{64}})",
@@ -42,7 +47,7 @@ PINNED_DIGEST_RE = re.compile(
 ROOT_DOCKERFILE = "Dockerfile"
 DOCKER_DIR = "docker"
 PAGE_SIZE = 100
-DEFAULT_RETAIN_PROMOTED = 5
+RENOVATE_REF_PREFIX = "renovate/"
 
 
 @dataclass(frozen=True)
@@ -243,6 +248,7 @@ def _dockerfile_paths(*, repository: str, ref: str, required: bool) -> list[str]
             raise ProtectionCollectionError(
                 f"missing {DOCKER_DIR}/ on {repository}@{ref}",
             )
+        print(f"Skipping {DOCKER_DIR}/ at {ref}: contents API returned 404")
         return paths
     if not isinstance(payload, list):
         raise ProtectionCollectionError(
@@ -283,6 +289,7 @@ def _digests_at_ref(*, repository: str, ref: str, required: bool) -> set[str]:
                 raise ProtectionCollectionError(
                     f"missing {path} on {repository}@{ref}",
                 )
+            print(f"Skipping {path} at {ref}: contents API returned 404")
             continue
         digests.update(
             _extract_pinned_digests(_decode_contents(payload=payload, path=path)),
@@ -302,12 +309,15 @@ def _default_branch(*, repository: str) -> str:
 
 
 def _open_pull_heads(*, repository: str) -> list[str]:
-    """Return head SHAs for every open pull request."""
+    """Return head SHAs for open Renovate digest PRs."""
     pulls = _paginated_dicts(endpoint=f"repos/{repository}/pulls?state=open")
     heads: list[str] = []
     for pull in pulls:
         head = pull.get("head")
         sha = head.get("sha") if isinstance(head, dict) else None
+        ref = head.get("ref") if isinstance(head, dict) else None
+        if not isinstance(ref, str) or not ref.startswith(RENOVATE_REF_PREFIX):
+            continue
         if not isinstance(sha, str) or not sha:
             raise ProtectionCollectionError("open pull request is missing head SHA")
         heads.append(sha)
@@ -315,7 +325,7 @@ def _open_pull_heads(*, repository: str) -> list[str]:
 
 
 def collect_protected_digests(*, repository: str) -> set[str]:
-    """Collect ``lintro-tools`` digests pinned on main or open PR heads.
+    """Collect digests pinned on main or open ``renovate/*`` PR heads.
 
     Args:
         repository: ``owner/name`` of the consumer repository.
@@ -342,47 +352,20 @@ def collect_protected_digests(*, repository: str) -> set[str]:
     return {digest.lower() for digest in protected}
 
 
-def retained_promoted_digests(
-    *,
-    versions: list[dict[str, Any]],
-    retain: int,
-) -> set[str]:
-    """Return digests of the newest *retain* ``pinned-*`` versions.
-
-    Args:
-        versions: GHCR package-version payloads.
-        retain: How many distinct promoted digests to keep.
-
-    Returns:
-        Digests that must be retained for rollback even when unreferenced.
-    """
-    promoted: list[tuple[datetime, str]] = []
-    for payload in versions:
-        name = payload.get("name")
-        updated_at = payload.get("updated_at")
-        metadata = payload.get("metadata")
-        container = metadata.get("container") if isinstance(metadata, dict) else None
-        tags = container.get("tags") if isinstance(container, dict) else None
-        if not isinstance(name, str) or DIGEST_RE.fullmatch(name) is None:
-            continue
-        if not isinstance(updated_at, str) or not isinstance(tags, list):
-            continue
-        if not any(isinstance(tag, str) and PINNED_RE.fullmatch(tag) for tag in tags):
-            continue
-        try:
-            timestamp = parse_timestamp(updated_at)
-        except ValueError:
-            continue
-        promoted.append((timestamp, name.lower()))
-    promoted.sort(key=lambda item: item[0], reverse=True)
-    retained: list[str] = []
-    for _, digest in promoted:
-        if digest in retained:
-            continue
-        retained.append(digest)
-        if len(retained) >= retain:
-            break
-    return set(retained)
+def collect_default_branch_digests(*, repository: str) -> set[str]:
+    """Re-read only the default-branch pin sites before a delete."""
+    try:
+        branch = _default_branch(repository=repository)
+        return {
+            digest.lower()
+            for digest in _digests_at_ref(
+                repository=repository,
+                ref=branch,
+                required=True,
+            )
+        }
+    except (RuntimeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ProtectionCollectionError(str(exc)) from exc
 
 
 def _pull_request(*, repository: str, number: int) -> tuple[str | None, str | None]:
@@ -435,7 +418,7 @@ def _refresh_candidate(
 
 
 def _is_protected(*, digest: str, protected: set[str]) -> bool:
-    """Return whether *digest* is currently pinned or retained."""
+    """Return whether *digest* is currently pinned on a protected ref."""
     return bool(digest) and digest.lower() in protected
 
 
@@ -480,7 +463,7 @@ def _sweep_candidate(
         )
         return
     try:
-        current_protected = collect_protected_digests(repository=repository)
+        current_protected = collect_default_branch_digests(repository=repository)
         current_protected.update(protected_digests)
     except ProtectionCollectionError as exc:
         raise ProtectionCollectionError(
@@ -532,16 +515,6 @@ def main() -> int:
     if min_age_days < 1:
         print("MIN_AGE_DAYS must be positive", file=sys.stderr)
         return 2
-    try:
-        retain_promoted = int(
-            os.environ.get("RETAIN_PROMOTED", str(DEFAULT_RETAIN_PROMOTED)),
-        )
-    except ValueError:
-        print("RETAIN_PROMOTED must be an integer", file=sys.stderr)
-        return 2
-    if retain_promoted < 1:
-        print("RETAIN_PROMOTED must be positive", file=sys.stderr)
-        return 2
     dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
     repository = os.environ.get("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
     owner = repository.split("/", 1)[0]
@@ -550,9 +523,6 @@ def main() -> int:
     try:
         versions = _package_versions(owner=owner)
         protected = collect_protected_digests(repository=repository)
-        protected.update(
-            retained_promoted_digests(versions=versions, retain=retain_promoted),
-        )
     except (RuntimeError, json.JSONDecodeError, ProtectionCollectionError) as exc:
         print(f"Skipping all deletions: {exc}", file=sys.stderr)
         return 1

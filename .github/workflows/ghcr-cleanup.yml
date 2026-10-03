@@ -210,7 +210,6 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           # yamllint disable-line rule:line-length
           MIN_AGE_DAYS: ${{ github.event_name != 'workflow_dispatch' && 14 || inputs.candidate_min_age_days }}
-          RETAIN_PROMOTED: '5'
           DRY_RUN: ${{ inputs.dry_run == true }}
         run: python3 scripts/ci/maintenance/sweep-tools-candidate-tags.py
 

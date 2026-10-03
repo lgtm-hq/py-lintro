@@ -9,6 +9,10 @@ name: Promote - Lintro Tools Candidate
 # digest commit changes the PR head SHA before GitHub creates the merge commit.
 # Non-Renovate main updates use the canonical build fallback below; a Renovate
 # merge with a missing candidate fails closed instead of rebuilding.
+# persist-pinned-digest then tags the digest the Dockerfiles pin as pinned-<sha7>
+# without moving latest. That job is idempotent and runs on every successful
+# classify so a dropped queued run in lintro-tools-registry still heals later.
+# Re-running an old promote still moves latest backwards.
 #
 # The promote step refuses a candidate whose tool manifest inputs no longer
 # match main (#2497). The workflow_dispatch input below is that guard's
@@ -45,8 +49,8 @@ name: Promote - Lintro Tools Candidate
       backfill_pinned_tag:
         description: >-
           Tag the digest currently pinned on main as pinned-<sha7> without
-          moving latest. Use once after #2845 merges if that digest still
-          has only ephemeral tags.
+          moving latest. Use when that digest has no pinned-* tag. latest
+          alone is not enough. Re-running an old promote still moves latest.
         required: false
         default: false
         type: boolean
@@ -99,6 +103,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
           # yamllint disable-line rule:line-length
           BACKFILL_PINNED: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill_pinned_tag == true }}
         run: python3 scripts/ci/promote-tools-candidate.py
@@ -248,14 +253,11 @@ jobs:
   persist-pinned-digest:
     name: Persist the digest main pins
     needs: resolve
-    # Consumer-only merges never build, and a canonical publish can still
-    # change the pin. Both must attach pinned-<sha7> without moving latest.
-    if: >-
-      github.ref == 'refs/heads/main' &&
-      (needs.resolve.outputs.action == 'skip' ||
-       needs.resolve.outputs.action == 'backfill' ||
-       (needs.resolve.outputs.action == 'publish' &&
-        needs.resolve.outputs.pin-changed == 'true'))
+    # Self-healing: every classified main run ensures the digest the
+    # Dockerfiles pin has a pinned-* tag. The shared registry concurrency
+    # group can drop a queued promote; the next run repairs it. Idempotent
+    # when the digest already has pinned-*. Does not move latest.
+    if: github.ref == 'refs/heads/main' && needs.resolve.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -300,5 +302,5 @@ jobs:
           GITHUB_SHA: ${{ github.sha }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          REQUIRE_EPHEMERAL_ONLY: ${{ needs.resolve.outputs.action == 'backfill' }}
+          REQUIRE_EPHEMERAL_ONLY: 'true'
         run: scripts/ci/tag-pinned-tools-digest.sh
