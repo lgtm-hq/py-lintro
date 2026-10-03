@@ -1921,6 +1921,71 @@ def test_pin_changed_uses_push_before_after_range(
     assert_that(compared).is_equal_to([(before, after)])
 
 
+def test_pin_changed_failure_does_not_block_persist(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed pin-changed lookup must not fail classify or persist."""
+    output = tmp_path / "github_output"
+    output.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    def fail_pin_changed(**_kwargs: object) -> bool:
+        raise RuntimeError("compare 502")
+
+    monkeypatch.setattr(
+        promotion_module,
+        "resolve_main_action",
+        lambda **_kwargs: ("skip", None),
+    )
+    monkeypatch.setattr(promotion_module, "_pin_changed", fail_pin_changed)
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert_that(lines).contains("action=skip")
+    assert_that(lines).contains("pin-changed=false")
+
+
+def test_sweep_required_pin_404_fails_closed(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 404 on a default-branch pin file must abort collection."""
+
+    def fake_gh_json(*args: str) -> object:
+        endpoint = args[0] if args else ""
+        if endpoint == "repos/lgtm-hq/py-lintro":
+            return {"default_branch": "main"}
+        if "contents/docker?" in endpoint and "ref=main" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if "contents/docker/ai-tools.Dockerfile?ref=main" in endpoint:
+            raise RuntimeError("HTTP 404: Not Found")
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+
+    with pytest.raises(
+        cleanup_module.ProtectionCollectionError,
+        match="docker/ai-tools.Dockerfile",
+    ):
+        cleanup_module.collect_default_branch_digests(repository="lgtm-hq/py-lintro")
+
+
 @pytest.fixture
 def pin_tag_module() -> ModuleType:
     """Load the persistent-tag backfill helper."""
@@ -1989,6 +2054,23 @@ def test_backfill_needs_tag_only_for_ephemeral_versions(
             digest=digest,
         ),
     ).is_equal_to(needs_tag)
+
+
+def test_needs_tag_oserror_exits_two(
+    *,
+    pin_tag_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing gh binary must not look like an already-pinned skip."""
+    digest = f"sha256:{'a' * 64}"
+    monkeypatch.setenv("DIGEST", digest)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    def fail_needs_tag(**_kwargs: object) -> bool:
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(pin_tag_module, "digest_needs_persistent_tag", fail_needs_tag)
+
+    assert_that(pin_tag_module.main()).is_equal_to(2)
 
 
 def _write_executable(path: Path, text: str) -> Path:

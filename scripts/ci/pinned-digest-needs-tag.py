@@ -83,7 +83,7 @@ def main() -> int:
     owner = repository.split("/", 1)[0]
     try:
         needs_tag = digest_needs_persistent_tag(owner=owner, digest=digest)
-    except (RuntimeError, json.JSONDecodeError) as exc:
+    except (RuntimeError, OSError, json.JSONDecodeError) as exc:
         print(str(exc), file=sys.stderr)
         return 2
     if needs_tag:

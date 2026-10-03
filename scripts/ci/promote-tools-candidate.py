@@ -384,9 +384,9 @@ def main() -> int:
             repository=os.environ["GITHUB_REPOSITORY"],
             merge_sha=os.environ["GITHUB_SHA"],
         )
-    except (KeyError, RuntimeError, json.JSONDecodeError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+    except (KeyError, RuntimeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        print(f"pin-changed check failed; treating as false: {exc}", file=sys.stderr)
+        pin_changed = False
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as output_file:

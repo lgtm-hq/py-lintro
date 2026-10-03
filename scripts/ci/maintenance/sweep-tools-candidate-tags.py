@@ -285,7 +285,7 @@ def _digests_at_ref(*, repository: str, ref: str, required: bool) -> set[str]:
             f"repos/{repository}/contents/{path}?ref={ref}",
         )
         if not found:
-            if required and path == ROOT_DOCKERFILE:
+            if required:
                 raise ProtectionCollectionError(
                     f"missing {path} on {repository}@{ref}",
                 )
