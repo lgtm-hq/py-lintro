@@ -19,6 +19,11 @@ Environment:
   GITHUB_SHA     Merge commit whose first seven hex chars name the tag
   SOURCE_IMAGE   Image repository (default: ghcr.io/lgtm-hq/lintro-tools)
   PIN_READER     Override the digest reader (tests)
+  REQUIRE_EPHEMERAL_ONLY
+                 When "true", skip tagging if the digest already has a
+                 persistent tag (one-time backfill, #2845)
+  GH_TOKEN       Required when REQUIRE_EPHEMERAL_ONLY=true
+  GITHUB_REPOSITORY  owner/name used to resolve the GHCR org
 EOF
 }
 
@@ -43,6 +48,18 @@ fi
 sha7="$(printf '%s' "$GITHUB_SHA" | tr '[:upper:]' '[:lower:]')"
 sha7="${sha7:0:7}"
 source_image="${SOURCE_IMAGE:-ghcr.io/lgtm-hq/lintro-tools}"
+
+if [[ "${REQUIRE_EPHEMERAL_ONLY:-false}" == "true" ]]; then
+	needs_rc=0
+	DIGEST="$digest" python3 "${_script_dir}/pinned-digest-needs-tag.py" || needs_rc=$?
+	if [[ "$needs_rc" -eq 1 ]]; then
+		echo "Skipping pinned-${sha7}: ${digest} already has a persistent tag"
+		exit 0
+	fi
+	if [[ "$needs_rc" -ne 0 ]]; then
+		exit "$needs_rc"
+	fi
+fi
 
 SOURCE_IMAGE="$source_image" \
 	SOURCE_DIGEST="$digest" \

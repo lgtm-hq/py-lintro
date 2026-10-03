@@ -323,6 +323,17 @@ def candidate_sha(tag: str | None) -> str:
 
 def main() -> int:
     """Resolve and export the promotion source tag."""
+    if os.environ.get("BACKFILL_PINNED", "").lower() == "true":
+        print("Backfill persistent tag for the digest main pins")
+        output = os.environ.get("GITHUB_OUTPUT")
+        if output:
+            with open(output, "a", encoding="utf-8") as output_file:
+                output_file.write("action=backfill\n")
+                output_file.write("candidate-tag=\n")
+                output_file.write("candidate-sha=\n")
+                output_file.write("candidate-pr=\n")
+                output_file.write("pin-changed=false\n")
+        return 0
     try:
         action, tag = resolve_main_action(
             repository=os.environ["GITHUB_REPOSITORY"],

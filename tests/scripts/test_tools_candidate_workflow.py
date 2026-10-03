@@ -325,9 +325,15 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     )
     assert "reusable-docker.yml@" in fallback["uses"]
     assert resolve["permissions"]["packages"] == "read"
-    # The one dispatch entry point is the staleness guard's escape hatch
-    # (#2497); nothing else may be driven by hand.
-    assert set(trigger["workflow_dispatch"]["inputs"]) == {"force_publish"}
+    # force_publish is the staleness-guard escape hatch (#2497).
+    # backfill_pinned_tag is the one-time #2845 persistent-tag repair.
+    assert set(trigger["workflow_dispatch"]["inputs"]) == {
+        "force_publish",
+        "backfill_pinned_tag",
+    }
+    assert_that(
+        trigger["workflow_dispatch"]["inputs"]["backfill_pinned_tag"]["default"],
+    ).is_false()
     assert resolve["if"] == "github.ref == 'refs/heads/main'"
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
@@ -358,6 +364,9 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     persist = jobs["persist-pinned-digest"]
     assert isinstance(persist, dict)
     assert_that(str(persist["if"])).contains("needs.resolve.outputs.action == 'skip'")
+    assert_that(str(persist["if"])).contains(
+        "needs.resolve.outputs.action == 'backfill'",
+    )
     assert_that(str(persist["if"])).contains("pin-changed == 'true'")
     assert_that(persist["permissions"]["packages"]).is_equal_to("write")
 
@@ -1543,6 +1552,9 @@ def test_promote_workflow_wires_expected_digest_and_pinned_tag() -> None:
         if "tag-pinned-tools-digest.sh" in str(step.get("run", ""))
     )
     assert_that(persist_run["env"]["GITHUB_SHA"]).contains("github.sha")
+    assert_that(persist_run["env"]["REQUIRE_EPHEMERAL_ONLY"]).contains(
+        "needs.resolve.outputs.action == 'backfill'",
+    )
 
 
 def test_sweep_keeps_merged_candidate_still_pinned_on_main(
@@ -1775,3 +1787,72 @@ def test_pin_changed_detects_consumer_dockerfile_on_direct_push(
             merge_sha="a" * 40,
         ),
     ).is_true()
+
+
+@pytest.fixture
+def pin_tag_module() -> ModuleType:
+    """Load the persistent-tag backfill helper."""
+    return _load(
+        "pinned_digest_needs_tag",
+        _REPO_ROOT / "scripts/ci/pinned-digest-needs-tag.py",
+    )
+
+
+def test_backfill_dispatch_skips_classification(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A backfill dispatch must not promote or rebuild."""
+    output = tmp_path / "github_output"
+    output.touch()
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("BACKFILL_PINNED", "true")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setattr(
+        promotion_module,
+        "resolve_main_action",
+        lambda **_kwargs: calls.append(("resolve",)) or ("promote", "nope"),
+    )
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+    assert_that(calls).is_empty()
+    assert_that(output.read_text(encoding="utf-8").splitlines()).contains(
+        "action=backfill",
+    )
+
+
+@pytest.mark.parametrize(
+    ("tags", "needs_tag"),
+    [
+        (("tools-candidate-pr2773-9888e2d5", "sha-9888e2d", "renovate-yaml-2.x"), True),
+        (("tools-candidate-pr2773-9888e2d5", "pinned-a958f6c"), False),
+        (("latest",), False),
+    ],
+    ids=["ephemeral-only", "already-pinned", "has-latest"],
+)
+def test_backfill_needs_tag_only_for_ephemeral_versions(
+    *,
+    pin_tag_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tags: tuple[str, ...],
+    needs_tag: bool,
+) -> None:
+    """The yaml #2773 pin shape still needs a persistent tag; others do not."""
+    digest = "sha256:89e331828b133522515f39b1e1492b75ceb61815fc5dc4d7841174f8da9c36a7"
+    monkeypatch.setattr(
+        pin_tag_module,
+        "_version_tags",
+        lambda **_kwargs: tags,
+    )
+
+    assert_that(
+        pin_tag_module.digest_needs_persistent_tag(
+            owner="lgtm-hq",
+            digest=digest,
+        ),
+    ).is_equal_to(needs_tag)

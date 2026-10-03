@@ -42,6 +42,14 @@ name: Promote - Lintro Tools Candidate
         description: 'Promote the resolved candidate even if main has newer tool manifest commits'
         required: false
         default: 'false'
+      backfill_pinned_tag:
+        description: >-
+          Tag the digest currently pinned on main as pinned-<sha7> without
+          moving latest. Use once after #2845 merges if that digest still
+          has only ephemeral tags.
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -91,6 +99,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
+          # yamllint disable-line rule:line-length
+          BACKFILL_PINNED: ${{ github.event_name == 'workflow_dispatch' && inputs.backfill_pinned_tag == true }}
         run: python3 scripts/ci/promote-tools-candidate.py
   promote:
     name: Promote candidate digest
@@ -243,6 +253,7 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' &&
       (needs.resolve.outputs.action == 'skip' ||
+       needs.resolve.outputs.action == 'backfill' ||
        (needs.resolve.outputs.action == 'publish' &&
         needs.resolve.outputs.pin-changed == 'true'))
     runs-on: ubuntu-24.04
@@ -287,4 +298,7 @@ jobs:
       - name: Tag the pinned digest
         env:
           GITHUB_SHA: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          REQUIRE_EPHEMERAL_ONLY: ${{ needs.resolve.outputs.action == 'backfill' }}
         run: scripts/ci/tag-pinned-tools-digest.sh
