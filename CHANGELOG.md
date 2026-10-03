@@ -21,6 +21,23 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.171.2] - 2026-10-03
+
+### Changed
+
+- **deps**: update dependency yaml to 2.9.1 (patch) (#2773) (a958f6c)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro docker tag to 0.171.1 (minor) (#2820)
+  (d04637d)
+- **deps**: update dependency svelte to 5.57.1 (patch) (#2772) (4c96263)
+- **ci**: create the mirror bump commit with lgtm-ci's shared signing script (#2835)
+  (6f88cb4)
+
+### Fixed
+
+- **deps**: resolve open security advisories (#2847) (ebcac23)
+- **ci**: sign candidate digest commits via lgtm-ci create-signed-commit (#2831)
+  (51ce5a0)
+
 ## [0.171.1] - 2026-09-25
 
 ### Changed
