@@ -4,3 +4,21 @@
 # suppressions. Review periodically and add [[IgnoredVulns]] entries only when
 # necessary. Each entry is time-boxed via ignoreUntil so it cannot silently
 # outlive its rationale.
+
+# --- http-cache-semantics (npm, transitive via astro) ---
+# No patched release: GHSA-ch52-4w7c-c8xp covers <= 4.2.0 (latest) and
+# first_patched_version is null. Track: https://github.com/kornelski/http-cache-semantics/issues/56
+
+[[IgnoredVulns]]
+id = "GHSA-ch52-4w7c-c8xp"
+ignoreUntil = 2026-11-02
+reason = "http-cache-semantics@4.2.0: no patched release (advisory first_patched_version = none; 4.2.0 is latest, only 4.2.0-beta prereleases exist). Transitive via astro (root bun.lock dev tooling and apps/site/bun.lock), build-time only: astro imports it solely in dist/assets/build/remote.js to cache remote images during `astro build`. The docs site is static output with no SSR, no shared HTTP cache and no remote image config, so the cross-user max-stale disclosure has no reachable multi-user cache. Not exploitable. Upstream: https://github.com/kornelski/http-cache-semantics/issues/56"
+
+# --- braces (npm, transitive via micromatch) ---
+# No patched release: GHSA-vfj7-8cjw-p6xm covers <= 3.0.3 (latest) and
+# first_patched_version is null. Track: https://github.com/micromatch/braces/issues/70
+
+[[IgnoredVulns]]
+id = "GHSA-vfj7-8cjw-p6xm"
+ignoreUntil = 2026-11-02
+reason = "braces@3.0.3: no patched release (advisory first_patched_version = none; 3.0.3 is latest). Dev/lint tooling only (root package.json devDependencies, also bundled in the lintro tools image): reached via micromatch/fast-glob from markdownlint-cli2, stylelint and spectral-cli, plus vite/rollup at build time. Input is glob patterns from the operator's own CLI args and lint configs, never network or end-user input; worst case is a stack-exhaustion crash of a single local lint/build process (DoS only, no confidentiality or integrity impact). Upstream: https://github.com/micromatch/braces/issues/70"

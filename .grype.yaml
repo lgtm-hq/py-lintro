@@ -1,0 +1,23 @@
+# Grype configuration for the Dependency Vulnerability Gate
+# (.github/workflows/dependency-vuln-gate.yml, lgtm-ci scan-vulnerabilities).
+#
+# Grype reads this file from the working directory. Mirror ONLY entries that
+# are also suppressed in .osv-scanner.toml, where the full rationale and the
+# time box (ignoreUntil) live. Grype ignore rules cannot expire on their own,
+# so remove an entry here whenever its .osv-scanner.toml counterpart is
+# removed or lapses.
+
+---
+ignore:
+  # http-cache-semantics <= 4.2.0: no patched release; build-time only via
+  # astro (remote image cache). Mirrors .osv-scanner.toml, review by 2026-11-02.
+  - vulnerability: GHSA-ch52-4w7c-c8xp
+    package:
+      name: http-cache-semantics
+      type: npm
+  # braces <= 3.0.3: no patched release; dev/lint tooling glob expansion only.
+  # Mirrors .osv-scanner.toml, review by 2026-11-02.
+  - vulnerability: GHSA-vfj7-8cjw-p6xm
+    package:
+      name: braces
+      type: npm
