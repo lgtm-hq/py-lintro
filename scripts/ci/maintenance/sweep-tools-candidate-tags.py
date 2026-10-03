@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -25,12 +26,23 @@ except ModuleNotFoundError as exc:
     from scripts.ci.github_api import gh_json as _gh_json
 
 PACKAGE = "lintro-tools"
+PACKAGE_REF = "ghcr.io/lgtm-hq/lintro-tools"
 CANDIDATE_RE = re.compile(
     r"^tools-candidate-pr(?P<number>[1-9][0-9]*)-[0-9a-f]{7,40}$",
 )
 EPHEMERAL_RE = re.compile(
     r"^(?:tools-candidate-pr[1-9][0-9]*-[0-9a-f]{7,40}|sha-|renovate-)",
 )
+PINNED_RE = re.compile(r"^pinned-[0-9a-f]{7,40}$")
+DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
+PINNED_DIGEST_RE = re.compile(
+    rf"{re.escape(PACKAGE_REF)}(?::[^\s@]+)?@(sha256:[a-f0-9]{{64}})",
+    flags=re.IGNORECASE,
+)
+ROOT_DOCKERFILE = "Dockerfile"
+DOCKER_DIR = "docker"
+PAGE_SIZE = 100
+DEFAULT_RETAIN_PROMOTED = 5
 
 
 @dataclass(frozen=True)
@@ -44,6 +56,7 @@ class CandidateVersion:
     # Kept as a construction/read compatibility shim for callers of the
     # original single-PR helper. Parsed versions always populate pr_numbers.
     pr_number: int | None = None
+    digest: str = ""
 
     def __post_init__(self) -> None:
         """Normalize legacy and multi-PR construction into distinct numbers."""
@@ -67,17 +80,19 @@ def candidate_version(payload: dict[str, Any]) -> CandidateVersion | None:
     version_id = payload.get("id")
     updated_at = payload.get("updated_at")
     metadata = payload.get("metadata")
+    name = payload.get("name")
     container = metadata.get("container") if isinstance(metadata, dict) else None
     tags = container.get("tags") if isinstance(container, dict) else None
     if not isinstance(version_id, (str, int)) or not isinstance(updated_at, str):
         return None
     if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
         return None
+    digest = name if isinstance(name, str) and DIGEST_RE.fullmatch(name) else ""
     candidate_tags = [tag for tag in tags if CANDIDATE_RE.fullmatch(tag)]
     if not candidate_tags or any(not EPHEMERAL_RE.match(tag) for tag in tags):
         # Deleting a GHCR version deletes every tag on that digest. Never
         # delete a candidate version that was promoted or otherwise acquired
-        # a persistent tag.
+        # a persistent tag. pinned-* is persistent (#2845).
         return None
     pr_numbers = tuple(
         sorted(
@@ -99,6 +114,7 @@ def candidate_version(payload: dict[str, Any]) -> CandidateVersion | None:
         tags=tuple(tags),
         updated_at=timestamp,
         pr_numbers=pr_numbers,
+        digest=digest,
     )
 
 
@@ -141,21 +157,232 @@ def should_delete(
     return all(state == "closed" and not merged for state, merged in pr_states.values())
 
 
-def _package_versions(*, owner: str) -> list[dict[str, Any]]:
-    """List all package versions, preserving pagination."""
-    payload = _gh_json(
-        f"orgs/{owner}/packages/container/{PACKAGE}/versions?per_page=100",
-        "--paginate",
-        "--slurp",
-    )
+class ProtectionCollectionError(RuntimeError):
+    """Raised when protected-digest collection is incomplete or failed."""
+
+
+def _flatten_pages(payload: object, *, endpoint: str) -> list[dict[str, Any]]:
+    """Flatten a ``gh api --paginate --slurp`` list-of-pages response."""
     if not isinstance(payload, list):
-        raise RuntimeError("GitHub returned a malformed package-version response")
+        raise ProtectionCollectionError(
+            f"GitHub returned a malformed paginated response for {endpoint}",
+        )
     entries: list[dict[str, Any]] = []
     for page in payload:
         if not isinstance(page, list):
-            raise RuntimeError("GitHub returned a malformed package-version page")
+            raise ProtectionCollectionError(
+                f"GitHub returned a malformed page for {endpoint}",
+            )
         entries.extend(item for item in page if isinstance(item, dict))
     return entries
+
+
+def _confirm_pagination_complete(*, endpoint: str, pages: object) -> None:
+    """Fail closed when a full last page may mean a missed page."""
+    if not isinstance(pages, list) or not pages:
+        return
+    last = pages[-1]
+    if not isinstance(last, list) or len(last) < PAGE_SIZE:
+        return
+    next_page = len(pages) + 1
+    separator = "&" if "?" in endpoint else "?"
+    extra = _gh_json(f"{endpoint}{separator}page={next_page}")
+    if extra:
+        raise ProtectionCollectionError(
+            f"incomplete pagination for {endpoint}: page {next_page} is not empty",
+        )
+
+
+def _paginated_dicts(*, endpoint: str) -> list[dict[str, Any]]:
+    """Return every page of a list endpoint, or fail closed."""
+    paged = f"{endpoint}{'&' if '?' in endpoint else '?'}per_page={PAGE_SIZE}"
+    payload = _gh_json(paged, "--paginate", "--slurp")
+    entries = _flatten_pages(payload, endpoint=endpoint)
+    _confirm_pagination_complete(endpoint=paged, pages=payload)
+    return entries
+
+
+def _package_versions(*, owner: str) -> list[dict[str, Any]]:
+    """List all package versions, preserving pagination."""
+    endpoint = f"orgs/{owner}/packages/container/{PACKAGE}/versions"
+    try:
+        return _paginated_dicts(endpoint=endpoint)
+    except ProtectionCollectionError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+
+def _decode_contents(*, payload: object, path: str) -> str:
+    """Decode a GitHub contents API file payload."""
+    if not isinstance(payload, dict):
+        raise ProtectionCollectionError(f"malformed contents response for {path}")
+    if payload.get("type") != "file":
+        raise ProtectionCollectionError(f"{path} is not a file")
+    encoding = payload.get("encoding")
+    content = payload.get("content")
+    if encoding != "base64" or not isinstance(content, str):
+        raise ProtectionCollectionError(f"unreadable contents for {path}")
+    try:
+        return base64.b64decode(content, validate=False).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as exc:
+        raise ProtectionCollectionError(f"could not decode {path}") from exc
+
+
+def _extract_pinned_digests(text: str) -> set[str]:
+    """Return ``lintro-tools`` digests referenced in Dockerfile text."""
+    return {match.group(1).lower() for match in PINNED_DIGEST_RE.finditer(text)}
+
+
+def _dockerfile_paths(*, repository: str, ref: str, required: bool) -> list[str]:
+    """Return consumer Dockerfile paths at *ref*."""
+    paths = [ROOT_DOCKERFILE]
+    found, payload = _gh_json_allow_not_found(
+        f"repos/{repository}/contents/{DOCKER_DIR}?ref={ref}",
+    )
+    if not found:
+        if required:
+            raise ProtectionCollectionError(
+                f"missing {DOCKER_DIR}/ on {repository}@{ref}",
+            )
+        return paths
+    if not isinstance(payload, list):
+        raise ProtectionCollectionError(
+            f"malformed {DOCKER_DIR}/ listing on {repository}@{ref}",
+        )
+    for entry in payload:
+        if not isinstance(entry, dict):
+            raise ProtectionCollectionError(
+                f"malformed {DOCKER_DIR}/ entry on {repository}@{ref}",
+            )
+        name = entry.get("name")
+        path = entry.get("path")
+        entry_type = entry.get("type")
+        if (
+            entry_type != "file"
+            or not isinstance(name, str)
+            or not isinstance(path, str)
+        ):
+            continue
+        if name.endswith(".Dockerfile"):
+            paths.append(path)
+    return paths
+
+
+def _digests_at_ref(*, repository: str, ref: str, required: bool) -> set[str]:
+    """Collect ``lintro-tools`` pin digests from Dockerfiles at *ref*."""
+    digests: set[str] = set()
+    for path in _dockerfile_paths(
+        repository=repository,
+        ref=ref,
+        required=required,
+    ):
+        found, payload = _gh_json_allow_not_found(
+            f"repos/{repository}/contents/{path}?ref={ref}",
+        )
+        if not found:
+            if required and path == ROOT_DOCKERFILE:
+                raise ProtectionCollectionError(
+                    f"missing {path} on {repository}@{ref}",
+                )
+            continue
+        digests.update(
+            _extract_pinned_digests(_decode_contents(payload=payload, path=path)),
+        )
+    return digests
+
+
+def _default_branch(*, repository: str) -> str:
+    """Return the repository default branch name."""
+    payload = _gh_json(f"repos/{repository}")
+    if not isinstance(payload, dict):
+        raise ProtectionCollectionError("malformed repository response")
+    branch = payload.get("default_branch")
+    if not isinstance(branch, str) or not branch:
+        raise ProtectionCollectionError("repository is missing default_branch")
+    return branch
+
+
+def _open_pull_heads(*, repository: str) -> list[str]:
+    """Return head SHAs for every open pull request."""
+    pulls = _paginated_dicts(endpoint=f"repos/{repository}/pulls?state=open")
+    heads: list[str] = []
+    for pull in pulls:
+        head = pull.get("head")
+        sha = head.get("sha") if isinstance(head, dict) else None
+        if not isinstance(sha, str) or not sha:
+            raise ProtectionCollectionError("open pull request is missing head SHA")
+        heads.append(sha)
+    return heads
+
+
+def collect_protected_digests(*, repository: str) -> set[str]:
+    """Collect ``lintro-tools`` digests pinned on main or open PR heads.
+
+    Args:
+        repository: ``owner/name`` of the consumer repository.
+
+    Returns:
+        Normalized ``sha256:<hex>`` digests that must not be deleted.
+
+    Raises:
+        ProtectionCollectionError: If any read or pagination step is incomplete.
+    """
+    try:
+        branch = _default_branch(repository=repository)
+        protected = _digests_at_ref(
+            repository=repository,
+            ref=branch,
+            required=True,
+        )
+        for sha in _open_pull_heads(repository=repository):
+            protected.update(
+                _digests_at_ref(repository=repository, ref=sha, required=False),
+            )
+    except (RuntimeError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ProtectionCollectionError(str(exc)) from exc
+    return {digest.lower() for digest in protected}
+
+
+def retained_promoted_digests(
+    *,
+    versions: list[dict[str, Any]],
+    retain: int,
+) -> set[str]:
+    """Return digests of the newest *retain* ``pinned-*`` versions.
+
+    Args:
+        versions: GHCR package-version payloads.
+        retain: How many distinct promoted digests to keep.
+
+    Returns:
+        Digests that must be retained for rollback even when unreferenced.
+    """
+    promoted: list[tuple[datetime, str]] = []
+    for payload in versions:
+        name = payload.get("name")
+        updated_at = payload.get("updated_at")
+        metadata = payload.get("metadata")
+        container = metadata.get("container") if isinstance(metadata, dict) else None
+        tags = container.get("tags") if isinstance(container, dict) else None
+        if not isinstance(name, str) or DIGEST_RE.fullmatch(name) is None:
+            continue
+        if not isinstance(updated_at, str) or not isinstance(tags, list):
+            continue
+        if not any(isinstance(tag, str) and PINNED_RE.fullmatch(tag) for tag in tags):
+            continue
+        try:
+            timestamp = parse_timestamp(updated_at)
+        except ValueError:
+            continue
+        promoted.append((timestamp, name.lower()))
+    promoted.sort(key=lambda item: item[0], reverse=True)
+    retained: list[str] = []
+    for _, digest in promoted:
+        if digest in retained:
+            continue
+        retained.append(digest)
+        if len(retained) >= retain:
+            break
+    return set(retained)
 
 
 def _pull_request(*, repository: str, number: int) -> tuple[str | None, str | None]:
@@ -207,6 +434,11 @@ def _refresh_candidate(
     return candidate_version(payload)
 
 
+def _is_protected(*, digest: str, protected: set[str]) -> bool:
+    """Return whether *digest* is currently pinned or retained."""
+    return bool(digest) and digest.lower() in protected
+
+
 def _sweep_candidate(
     *,
     candidate: CandidateVersion,
@@ -215,8 +447,20 @@ def _sweep_candidate(
     now: datetime,
     min_age_days: int,
     dry_run: bool,
+    protected_digests: set[str],
 ) -> None:
     """Evaluate a single candidate version and delete it when eligible."""
+    if not candidate.digest:
+        print(
+            f"Skipping {candidate.version_id}: version payload has no digest",
+        )
+        return
+    if _is_protected(digest=candidate.digest, protected=protected_digests):
+        print(
+            f"Skipping {candidate.version_id}: protected (pinned) "
+            f"{candidate.digest}",
+        )
+        return
     pr_states = _pull_request_states(repository=repository, candidate=candidate)
     if not should_delete(
         candidate,
@@ -233,6 +477,22 @@ def _sweep_candidate(
         print(
             f"Skipping {candidate.version_id}: package tags changed "
             "or the version was removed",
+        )
+        return
+    try:
+        current_protected = collect_protected_digests(repository=repository)
+        current_protected.update(protected_digests)
+    except ProtectionCollectionError as exc:
+        raise ProtectionCollectionError(
+            f"protection re-check failed for {candidate.version_id}: {exc}",
+        ) from exc
+    if not refreshed.digest or _is_protected(
+        digest=refreshed.digest,
+        protected=current_protected,
+    ):
+        print(
+            f"Skipping {candidate.version_id}: protected (pinned) "
+            f"{refreshed.digest or 'unknown'}",
         )
         return
     pr_states = _pull_request_states(repository=repository, candidate=refreshed)
@@ -272,20 +532,36 @@ def main() -> int:
     if min_age_days < 1:
         print("MIN_AGE_DAYS must be positive", file=sys.stderr)
         return 2
+    try:
+        retain_promoted = int(
+            os.environ.get("RETAIN_PROMOTED", str(DEFAULT_RETAIN_PROMOTED)),
+        )
+    except ValueError:
+        print("RETAIN_PROMOTED must be an integer", file=sys.stderr)
+        return 2
+    if retain_promoted < 1:
+        print("RETAIN_PROMOTED must be positive", file=sys.stderr)
+        return 2
     dry_run = os.environ.get("DRY_RUN", "false").lower() == "true"
     repository = os.environ.get("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
     owner = repository.split("/", 1)[0]
     now = datetime.now(UTC)
 
     try:
-        candidates = [
-            parsed
-            for payload in _package_versions(owner=owner)
-            if (parsed := candidate_version(payload)) is not None
-        ]
-    except (RuntimeError, json.JSONDecodeError) as exc:
-        print(str(exc), file=sys.stderr)
+        versions = _package_versions(owner=owner)
+        protected = collect_protected_digests(repository=repository)
+        protected.update(
+            retained_promoted_digests(versions=versions, retain=retain_promoted),
+        )
+    except (RuntimeError, json.JSONDecodeError, ProtectionCollectionError) as exc:
+        print(f"Skipping all deletions: {exc}", file=sys.stderr)
         return 1
+
+    candidates = [
+        parsed
+        for payload in versions
+        if (parsed := candidate_version(payload)) is not None
+    ]
 
     failed = False
     for candidate in candidates:
@@ -297,7 +573,11 @@ def main() -> int:
                 now=now,
                 min_age_days=min_age_days,
                 dry_run=dry_run,
+                protected_digests=protected,
             )
+        except ProtectionCollectionError as exc:
+            print(f"Skipping remaining deletions: {exc}", file=sys.stderr)
+            return 1
         except (RuntimeError, json.JSONDecodeError) as exc:
             # One unreachable version or pull request must not strand every
             # other candidate; report it, keep sweeping, and exit non-zero.

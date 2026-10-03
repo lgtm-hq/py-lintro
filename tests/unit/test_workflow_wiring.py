@@ -6545,6 +6545,10 @@ def test_tools_promote_passes_manifest_staleness_shas() -> None:
     # The guard's escape hatch has to be reachable: the refusal message tells
     # operators to force the promote, so a dispatch must be able to set it.
     assert_that(env["FORCE_PUBLISH"]).contains("inputs.force_publish")
+    assert_that(env["EXPECTED_DIGEST"]).contains("steps.pin.outputs.digest")
+    assert_that(str(env["TAGS"])).contains("lintro-tools:latest")
+    assert_that(str(env["TAGS"])).contains("lintro-tools:pinned-")
+    assert_that(str(env["TAGS"])).contains("steps.pin.outputs.sha7")
     dispatch = workflow["on"]["workflow_dispatch"]
     assert_that(dispatch["inputs"]).contains_key("force_publish")
 

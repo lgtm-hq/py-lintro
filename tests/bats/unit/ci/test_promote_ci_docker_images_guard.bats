@@ -135,3 +135,33 @@ run_promote() {
 	assert_output --partial "imagetools inspect"
 	[[ "${output}" != *"imagetools create"* ]]
 }
+
+@test "SOURCE_DIGEST tags a pinned ref without resolving CI_TAG (#2845)" {
+	run env PATH="${STUB_BIN}:${PATH}" \
+		SOURCE_IMAGE=ghcr.io/lgtm-hq/lintro-tools \
+		SOURCE_DIGEST=sha256:aaa111 \
+		EXPECTED_DIGEST=sha256:aaa111 \
+		TAGS=ghcr.io/lgtm-hq/lintro-tools:pinned-f128661 \
+		"$SCRIPT"
+	assert_success
+
+	run cat "${DOCKER_LOG}"
+	assert_output --partial "buildx imagetools create --prefer-index=false"
+	assert_output --partial "ghcr.io/lgtm-hq/lintro-tools@sha256:aaa111"
+	assert_output --partial "--tag ghcr.io/lgtm-hq/lintro-tools:pinned-f128661"
+	[[ "${output}" != *"lintro-tools:latest"* ]]
+}
+
+@test "SOURCE_DIGEST mismatch against EXPECTED_DIGEST fails closed" {
+	run env PATH="${STUB_BIN}:${PATH}" \
+		SOURCE_IMAGE=ghcr.io/lgtm-hq/lintro-tools \
+		SOURCE_DIGEST=sha256:aaa111 \
+		EXPECTED_DIGEST=sha256:bbb222 \
+		TAGS=ghcr.io/lgtm-hq/lintro-tools:pinned-f128661 \
+		"$SCRIPT"
+	assert_failure
+	assert_output --partial "Refusing to promote"
+
+	run cat "${DOCKER_LOG}"
+	[[ "${output}" != *"imagetools create"* ]]
+}

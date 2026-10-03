@@ -64,6 +64,7 @@ jobs:
       candidate-tag: ${{ steps.candidate.outputs.candidate-tag }}
       candidate-sha: ${{ steps.candidate.outputs.candidate-sha }}
       candidate-pr: ${{ steps.candidate.outputs.candidate-pr }}
+      pin-changed: ${{ steps.candidate.outputs.pin-changed }}
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
@@ -137,11 +138,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Read the tools digest main pins
+        id: pin
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/update-tools-image-digest.py --read
       - name: Promote candidate by digest
         env:
           SOURCE_IMAGE: ghcr.io/lgtm-hq/lintro-tools
           CI_TAG: ${{ needs.resolve.outputs.candidate-tag }}
-          TAGS: ghcr.io/lgtm-hq/lintro-tools:latest
+          # latest plus a persistent pinned-<merge-sha7> so the digest main
+          # pins cannot become ephemeral-only after the next rebuild (#2845).
+          TAGS: |
+            ghcr.io/lgtm-hq/lintro-tools:latest
+            ghcr.io/lgtm-hq/lintro-tools:pinned-${{ steps.pin.outputs.sha7 }}
+          EXPECTED_DIGEST: ${{ steps.pin.outputs.digest }}
           # Staleness guard inputs (#2497): refuse to retag a candidate whose
           # manifest inputs no longer match main.
           CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate-sha }}
@@ -224,11 +235,56 @@ jobs:
         get.trivy.dev:443
         mirror.gcr.io:443
 
-  skip-consumer-digest:
-    name: Skip consumer-only digest update
+  persist-pinned-digest:
+    name: Persist the digest main pins
     needs: resolve
-    if: needs.resolve.outputs.action == 'skip' && github.ref == 'refs/heads/main'
+    # Consumer-only merges never build, and a canonical publish can still
+    # change the pin. Both must attach pinned-<sha7> without moving latest.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (needs.resolve.outputs.action == 'skip' ||
+       (needs.resolve.outputs.action == 'publish' &&
+        needs.resolve.outputs.pin-changed == 'true'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 15
     steps:
-      - run: echo 'Consumer-only Renovate digest update needs no tools image build.'
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+      - name: Checkout
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        # yamllint disable-line rule:line-length
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          driver: docker
+      - name: Log in to GHCR
+        # yamllint disable-line rule:line-length
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag the pinned digest
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: scripts/ci/tag-pinned-tools-digest.sh

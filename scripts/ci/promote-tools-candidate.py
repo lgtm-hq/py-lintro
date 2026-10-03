@@ -257,6 +257,29 @@ def resolve_main_action(
     return "promote", tag
 
 
+def _commit_files(*, repository: str, sha: str) -> set[str]:
+    """Return paths changed on a single commit."""
+    payload = _gh_json(f"repos/{repository}/commits/{sha}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("GitHub returned a malformed commit response")
+    files = payload.get("files")
+    if not isinstance(files, list):
+        raise RuntimeError("GitHub returned a malformed commit file list")
+    return {
+        filename for file in files if isinstance(filename := file.get("filename"), str)
+    }
+
+
+def _pin_changed(*, repository: str, merge_sha: str) -> bool:
+    """Return whether the merge touched a consumer lintro-tools pin file."""
+    pr = _merged_pr(repository=repository, merge_sha=merge_sha)
+    if pr is not None and isinstance(pr.get("number"), int):
+        paths = _pull_request_files(repository=repository, pr_number=pr["number"])
+    else:
+        paths = _commit_files(repository=repository, sha=merge_sha)
+    return bool(paths & CONSUMER_PATHS)
+
+
 def candidate_pr(tag: str | None) -> str:
     """Return the pull request number a candidate tag embeds.
 
@@ -317,6 +340,14 @@ def main() -> int:
     else:
         message = "Publish canonical tools image"
     print(message)
+    try:
+        pin_changed = _pin_changed(
+            repository=os.environ["GITHUB_REPOSITORY"],
+            merge_sha=os.environ["GITHUB_SHA"],
+        )
+    except (KeyError, RuntimeError, json.JSONDecodeError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
         with open(output, "a", encoding="utf-8") as output_file:
@@ -324,6 +355,7 @@ def main() -> int:
             output_file.write(f"candidate-tag={tag or ''}\n")
             output_file.write(f"candidate-sha={candidate_sha(tag)}\n")
             output_file.write(f"candidate-pr={candidate_pr(tag)}\n")
+            output_file.write(f"pin-changed={'true' if pin_changed else 'false'}\n")
     return 0
 
 
