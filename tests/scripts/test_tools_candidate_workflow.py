@@ -1934,6 +1934,7 @@ def test_pin_changed_failure_does_not_block_persist(
     monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
     monkeypatch.setenv("GITHUB_SHA", "a" * 40)
     monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+
     def fail_pin_changed(**_kwargs: object) -> bool:
         raise RuntimeError("compare 502")
 
@@ -2065,6 +2066,7 @@ def test_needs_tag_oserror_exits_two(
     digest = f"sha256:{'a' * 64}"
     monkeypatch.setenv("DIGEST", digest)
     monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+
     def fail_needs_tag(**_kwargs: object) -> bool:
         raise FileNotFoundError("gh")
 
