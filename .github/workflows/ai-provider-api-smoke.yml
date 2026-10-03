@@ -186,7 +186,7 @@ jobs:
     # `ai-provider-smoke` is what makes a provider alarm distinguishable from
     # a #2212-style main failure at a glance.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
     permissions:
       actions: read # read workflow/job metadata for the failure context
       contents: read # repository context for the issue body
@@ -194,7 +194,7 @@ jobs:
     with:
       workflow-key: ai-provider-api-smoke
       failure-issue-labels: 'bug,ci,ai,ai-provider-smoke'
-      tooling-ref: '234e84901ae4ac14f2d44f02fad517d95712cec3' # v0.75.0
+      tooling-ref: '22bb159287eb23a812d533090615525eccb839ac' # v0.75.1
 
   annotate-failure-issue:
     name: 🧾 Quote provider errors on the tracker
