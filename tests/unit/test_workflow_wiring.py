@@ -1405,6 +1405,7 @@ _PIPELINE_RELEVANT_TOP_LEVEL: frozenset[str] = frozenset(
         ".github",
         ".gitignore",
         ".gitleaks.toml",
+        ".grype.yaml",
         ".hadolint.yaml",
         ".lintro-config.yaml",
         ".lintro-ignore",
