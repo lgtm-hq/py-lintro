@@ -195,6 +195,10 @@ def test_resolve_pipeline_relevance_non_pr_events_never_skip(
         (["test_samples/sample.md"], "pipeline=true"),
         (["test_samples/violations.py"], "pipeline=true"),
         (["docs/.markdownlint-cli2.jsonc"], "pipeline=true"),
+        # Vulnerability-suppression configs alone must still run the
+        # Security Audit (osv-scanner via lintro) in the heavy pipeline.
+        ([".osv-scanner.toml"], "pipeline=true"),
+        ([".grype.yaml"], "pipeline=true"),
     ],
 )
 def test_resolve_pipeline_relevance_deny_by_default(
