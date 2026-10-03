@@ -34,8 +34,8 @@ FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:89e331828b133522515f39b1e1492b75
 # registry or release feed to query -- so it is bumped by hand; the weekly
 # rebuild keeps everything around it fresh regardless.
 ARG NODE_VERSION=24.21.0
-ARG CLAUDE_CODE_VERSION=2.1.282
-ARG CODEX_VERSION=0.155.1
+ARG CLAUDE_CODE_VERSION=2.1.286
+ARG CODEX_VERSION=0.159.2
 ARG CURSOR_AGENT_VERSION=2026.07.23-e383d2b
 # Cursor ships no checksum sidecar, so both architectures' hashes are pinned
 # here by hand and bumped together with CURSOR_AGENT_VERSION. Recompute with:
