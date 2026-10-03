@@ -164,6 +164,9 @@ jobs:
               # The gate + release publish workflow themselves
               - '.github/workflows/publish-pypi-on-tag.yml'
               - '.github/workflows/dependency-vuln-gate.yml'
+              # grype reads its ignore rules from .grype.yaml in the working
+              # directory, so a config-only change alters the gate's verdict.
+              - '.grype.yaml'
       - name: Generate SBOM
         id: sbom
         # Same syft action, target and format as the release gate; the

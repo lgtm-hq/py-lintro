@@ -5064,6 +5064,8 @@ def test_dependency_vuln_gate_scopes_to_dependency_paths() -> None:
     assert_that(deps).contains("**/go.sum")
     # The gate exercises itself and the real release gate.
     assert_that(deps).contains(".github/workflows/publish-pypi-on-tag.yml")
+    # grype's ignore rules change the verdict without touching a manifest.
+    assert_that(deps).contains(".grype.yaml")
 
 
 def test_dependency_vuln_gate_filter_is_pure_allow_list() -> None:
@@ -5153,6 +5155,21 @@ def test_dependency_vuln_gate_filter_globs_match_committed_manifests() -> None:
     unmatched = [path for path in manifests if not spec.match_file(path)]
 
     assert_that(unmatched).is_empty()
+
+
+def test_dependency_vuln_gate_runs_on_grype_config_only_change() -> None:
+    """A PR that only edits ``.grype.yaml`` still runs the grype scan.
+
+    The scan action invokes grype in the checkout, where it loads
+    ``.grype.yaml``; removing an ignore there changes the gate's verdict, so a
+    config-only diff must match the ``deps`` filter or the change would go
+    unverified until the release scan (#1667).
+    """
+    detect_step = _vuln_gate_step(uses_prefix=_VULN_DETECT_ACTION)
+    patterns = yaml.safe_load(detect_step["with"]["filters"])["deps"]
+    spec = GitIgnoreSpec.from_lines(patterns)
+
+    assert_that(spec.match_file(".grype.yaml")).is_true()
 
 
 def _js_regex_to_python(pattern: str) -> str:
