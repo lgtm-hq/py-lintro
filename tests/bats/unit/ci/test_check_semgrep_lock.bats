@@ -180,7 +180,9 @@ write_lockfile() {
 	write_lockfile "${RESOLVED}"
 	printf 'semgrep==1.174.0\n' >"${REPO}/requirements-semgrep.in"
 	sed 's/^semgrep==1.173.0/semgrep==1.174.0/' "${RESOLVED}" >"${RESOLVED}.next"
-	UV_STUB_RESOLVED="${RESOLVED}.next" run "${REPO}/scripts/ci/compile-semgrep-lock.sh"
+	# This exercises manual compilation in a fixture layout without Git; do not
+	# inherit the CI runner's output file and enable workflow change reporting.
+	UV_STUB_RESOLVED="${RESOLVED}.next" run env -u GITHUB_OUTPUT "${REPO}/scripts/ci/compile-semgrep-lock.sh"
 	assert_success
 
 	run grep -c 'semgrep==1.174.0' "${REPO}/requirements-semgrep.txt"

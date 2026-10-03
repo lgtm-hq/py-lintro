@@ -522,7 +522,7 @@ def test_renovate_runs_no_post_upgrade_commands() -> None:
     """Renovate never runs repository commands (#2180, #2436).
 
     Version artifacts are generated at package build time, and the isolated
-    semgrep lockfile is recompiled by a human or agent with
+    semgrep lockfile is recompiled by the Renovate workflow or locally with
     ``scripts/ci/compile-semgrep-lock.sh`` and enforced by the docker-ci
     ``semgrep-lock`` gate. The Mend-hosted app executes neither
     ``postUpgradeTasks`` nor ``allowedCommands`` (a self-hosted-only global

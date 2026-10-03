@@ -164,6 +164,14 @@ validation channels (see "Validation-only switches" below and
   full + ai images, registry cache at `:cache`). Called in `staging` mode by the tag
   pipeline; the `backfill_version`/`backfill_ref` dispatch still publishes a historical
   version directly until the recovery workflow (lgtm-hq/lgtm-ci#966) lands.
+- **semgrep-lock-renovate.yml** — On canonical-repository pushes by `renovate[bot]` to
+  `renovate/semgrep-*`, recompiles `requirements-semgrep.txt` while preserving
+  compatible transitive pins. On `renovate/lock-file-maintenance`, uses `--upgrade` to
+  refresh transitives. Only a changed lockfile mints the `lgtm-digest-bump` token and
+  appends a signed commit, using the candidate workflow's shared signing action and
+  expected-head guard. Forks and other actors are skipped. The resolver version comes
+  from `docker/tools.Dockerfile`; the drift gate still checks every pin change. Semgrep
+  automerge remains a separate follow-up after a real Renovate PR proves this workflow.
 - **docker-tools-candidate.yml** — On an in-repository `renovate/**` push that changes a
   tool-version manifest, builds a candidate `lintro-tools` image and commits its digest
   to both Dockerfile pin sites. The commit is created through the API by lgtm-ci's

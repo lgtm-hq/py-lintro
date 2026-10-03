@@ -198,6 +198,7 @@ Scripts for GitHub Actions workflows and continuous integration.
 | `compile-semgrep-lock.sh`                      | Recompile hash-pinned `requirements-semgrep.txt` from the `.in` pin                                                              | `./scripts/ci/compile-semgrep-lock.sh`                                                                                     |
 | `check-semgrep-lock.sh`                        | Fail when the committed `requirements-semgrep.txt` drifted from the `.in` pin (docker-ci `semgrep-lock` gate)                    | `./scripts/ci/check-semgrep-lock.sh`                                                                                       |
 | `semgrep-lock-lib.sh`                          | Shared compile invocation sourced by the two semgrep lockfile scripts (library; running it prints help)                          | `source scripts/ci/semgrep-lock-lib.sh`                                                                                    |
+| `read-tools-uv-version.sh`                     | Emit the tools-image uv pin as a GitHub step output                                                                              | `GITHUB_OUTPUT=<file> ./scripts/ci/read-tools-uv-version.sh`                                                               |
 | `generate-builtin-tool-index.py`               | Generate the gitignored `lintro/plugins/_builtin_index.py` from the per-tool packages (shim over `lintro_build/`)                | `python3 scripts/ci/generate-builtin-tool-index.py [--check]`                                                              |
 | `smoke-test-binary.py`                         | Assert a built binary's tool registry is populated (`#2006`)                                                                     | `python scripts/ci/smoke-test-binary.py dist/nuitka/lintro`                                                                |
 | `stage-python-coverage-html.sh`                | Stage flat HTML coverage for GitHub Pages bundling                                                                               | `./scripts/ci/testing/stage-python-coverage-html.sh --help`                                                                |
@@ -515,9 +516,10 @@ Installs the lockfile-pinned semgrep into an isolated venv and symlinks `semgrep
 
 `compile-semgrep-lock.sh` re-resolves `requirements-semgrep.txt` from the
 `requirements-semgrep.in` pin (hash-pinned, Python 3.11 floor). Run it by hand whenever
-the `.in` pin changes and commit the result — nothing regenerates it automatically, and
-the Mend-hosted Renovate app never executed the `postUpgradeTasks` that once claimed
-otherwise (#2436).
+the `.in` pin changes and commit the result. The `semgrep-lock-renovate.yml` workflow
+also recompiles on Renovate semgrep branches, and uses `--upgrade` on weekly
+lock-file-maintenance to refresh compatible transitives. The Mend-hosted Renovate app
+itself never executes `postUpgradeTasks` (#2436).
 
 `check-semgrep-lock.sh` is the CI enforcement: the `semgrep-lock` job in `docker-ci.yml`
 re-resolves into a temporary file through the same shared helper, diffs it against the
@@ -529,6 +531,7 @@ the image build itself still reports, because it is a required check.
 
 ```bash
 ./scripts/ci/compile-semgrep-lock.sh
+./scripts/ci/compile-semgrep-lock.sh --upgrade
 ./scripts/ci/check-semgrep-lock.sh
 ```
 
