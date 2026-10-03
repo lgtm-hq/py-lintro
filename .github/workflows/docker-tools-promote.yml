@@ -15,11 +15,10 @@ name: Promote - Lintro Tools Candidate
 # Re-running an old promote still moves latest backwards.
 #
 # The promote step refuses a candidate whose tool manifest inputs no longer
-# match main (#2497). The workflow_dispatch input below is that guard's
-# escape hatch: re-running the promote by hand with force_publish=true retags
-# the resolved candidate anyway. The safe remedy is usually the other one --
-# dispatch docker-tools-publish.yml with force_publish=true to rebuild the
-# image from main.
+# match main (#2497). force_publish=true is that guard's escape hatch only.
+# It does not skip EXPECTED_DIGEST: the candidate must still be the digest
+# the Dockerfiles pin, or latest would move off what main consumes (#2845).
+# To rebuild from main, dispatch docker-tools-publish.yml instead.
 
 'on':
   push:
@@ -43,7 +42,9 @@ name: Promote - Lintro Tools Candidate
     inputs:
       force_publish:
         # yamllint disable-line rule:line-length
-        description: 'Promote the resolved candidate even if main has newer tool manifest commits'
+        description: >-
+          Bypass the manifest staleness guard only. The candidate digest must
+          still match the digest the Dockerfiles pin.
         required: false
         default: 'false'
       backfill_pinned_tag:

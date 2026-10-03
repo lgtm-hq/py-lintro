@@ -334,6 +334,9 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     assert_that(
         trigger["workflow_dispatch"]["inputs"]["backfill_pinned_tag"]["default"],
     ).is_false()
+    assert_that(
+        trigger["workflow_dispatch"]["inputs"]["force_publish"]["description"],
+    ).contains("Dockerfiles pin")
     assert resolve["if"] == "github.ref == 'refs/heads/main'"
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
