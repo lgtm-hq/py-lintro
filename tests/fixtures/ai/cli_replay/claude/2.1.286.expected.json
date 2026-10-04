@@ -1,8 +1,8 @@
 {
   "content": "pong",
-  "cost_estimate": 0.20680275,
+  "cost_estimate": 0.1383945,
   "input_tokens": 3,
   "model": "claude-sonnet-4-6",
   "output_tokens": 5,
-  "session_id": "cc55b2ad-51d5-4530-9cdf-c439c5cb4461"
+  "session_id": "aaa7bb11-e196-492c-bf21-f1acc9bf7b09"
 }
