@@ -16,6 +16,7 @@ from loguru import logger
 
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_badges import severity_counts
+from lintro.ai.review.models.degradation_record import DegradationRecord
 from lintro.ai.review.models.review_finding import Severity
 from lintro.ai.review.models.review_metadata import ReviewMetadata
 from lintro.ai.review.models.review_result import ReviewResult
@@ -81,7 +82,7 @@ def run_record_from_result(
             round_number=totals.round_number,
             auth_mode=effective_auth,
         ),
-        coverage=_coverage(result=result),
+        coverage=_coverage(result=result, head_sha=request.head_sha),
         usage=_usage(
             request=request,
             auth_mode=effective_auth,
@@ -121,11 +122,13 @@ def _identity(
     )
 
 
-def _coverage(*, result: ReviewResult) -> RunCoverage:
+def _coverage(*, result: ReviewResult, head_sha: str) -> RunCoverage:
     """Assemble the coverage group for this round.
 
     Args:
         result: Current review result.
+        head_sha: The head this round reviewed, stamped on its degradation
+            records (#2803).
 
     Returns:
         The coverage group.
@@ -145,6 +148,10 @@ def _coverage(*, result: ReviewResult) -> RunCoverage:
         questions_diff_trimmed=metadata.questions_diff_trimmed,
         delta_since=metadata.delta_since,
         delta_reason=metadata.delta_reason,
+        degradations=tuple(
+            DegradationRecord.from_degradation(degradation=item, head_sha=head_sha)
+            for item in metadata.coverage_degradations
+        ),
     )
 
 

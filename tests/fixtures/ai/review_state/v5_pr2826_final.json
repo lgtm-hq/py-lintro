@@ -1,0 +1,315 @@
+{
+  "base_sha": "f4e12319ce94ee6d1dbfbfff71e94f7417a2ec10",
+  "consumed_flags": [
+    {
+      "hash": "f03c70bbbcd0ff650b2092c07d4d8d1a79448ed2d99a06e1c072030437681875",
+      "path": "lintro/ai/review/question_attempts.py"
+    },
+    {
+      "hash": "081a42ca73bc8b93ee351fc677fa9c8e1e78f7d7123aeea871f78ce827906411",
+      "path": "lintro/ai/review/question_parse.py"
+    },
+    {
+      "hash": "1bd2a44678506f540e467cf7b71b2e1c0371d9d426fabfa17ca27ed244672475",
+      "path": "docs/ai-review-report.md"
+    },
+    {
+      "hash": "ec1e2734bfbf9cffcd72d53357cfb71c2a4395a918ab5f02630065fb22a89145",
+      "path": "lintro/ai/review/enums/question_failure_kind.py"
+    }
+  ],
+  "coverage": [
+    {
+      "hash": "1bd2a44678506f540e467cf7b71b2e1c0371d9d426fabfa17ca27ed244672475",
+      "path": "docs/ai-review-report.md",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "bb3dd1b43a091616b537b87aa54bb3e4bb1570f6b5f81c629a08100d70b1b271",
+      "path": "lintro/ai/json_response.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "ec1e2734bfbf9cffcd72d53357cfb71c2a4395a918ab5f02630065fb22a89145",
+      "path": "lintro/ai/review/enums/question_failure_kind.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "8c1b491e338f4c39f7e884c723e05941e11a25f0aaa72a34182a872755fcc171",
+      "path": "lintro/ai/review/models/coverage_degradation.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "22086fa1c6965db2f1c315fdea97e4e76b569fd434fd570045010a330edeb293",
+      "path": "lintro/ai/review/models/run_questions.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "f03c70bbbcd0ff650b2092c07d4d8d1a79448ed2d99a06e1c072030437681875",
+      "path": "lintro/ai/review/question_attempts.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "081a42ca73bc8b93ee351fc677fa9c8e1e78f7d7123aeea871f78ce827906411",
+      "path": "lintro/ai/review/question_parse.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "926c646d486e05aaac10083a604738a243e63cc27a843ea6354e14e63135efa6",
+      "path": "lintro/ai/review/question_pass.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "2a816c18ff7a20fa40ceb280cf9f188c92f41be836e708535889c2d1dc731a98",
+      "path": "lintro/ai/review/run_execution.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "503e56d87b3f096090cc9a01f719856751fbc93721b8e3d0ac3b802abeec6881",
+      "path": "tests/fixtures/ai/question_pass/bare_list.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "dfb37733a33d3659828649f53b30292bf92b5962fe7fc320f3af7cf547b7677c",
+      "path": "tests/fixtures/ai/question_pass/bare_list_then_citation.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "8169264a5f6f477e0d130f0d398c58bc460f7b1e952c31b8e0d0afd17f3a979c",
+      "path": "tests/fixtures/ai/question_pass/canonical.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "a5ccddca97b3f57735e95532191723c8f15cb77e970b6a814fa0d2aa97dbab81",
+      "path": "tests/fixtures/ai/question_pass/canonical_then_citation.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "b7d64837a05716c257b87946db8e77c041adefc8ed624df09b1dd6121916e25b",
+      "path": "tests/fixtures/ai/question_pass/empty.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "c788c54172f7bd18529a5ee3a8b6408428282f9eb6e01e4dc9b84c927cc8b852",
+      "path": "tests/fixtures/ai/question_pass/fenced_bare_list.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "e3c83a93eeda55a572d2b497da4bb182efbc552008f1692dc5346ef8a851f92c",
+      "path": "tests/fixtures/ai/question_pass/nested_deeper.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "7f98647505ede5932d813827bede0b841b7927a24924a08b9b9407f829708a85",
+      "path": "tests/fixtures/ai/question_pass/not_a_list_value.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "fc502ac778588f871052b860e7caceb67558c3cac3a6338bb78676b4ae28d7e6",
+      "path": "tests/fixtures/ai/question_pass/not_json.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "c4f48a289cdb98744f1341fff07ab7c8016e771eaa63f3b84b25bb0b99efb8e4",
+      "path": "tests/fixtures/ai/question_pass/prose_refusal_with_brackets.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "6dfe582cce5ebd52389fbb70a659aabec27171c5c3451f0a14525b42784f592e",
+      "path": "tests/fixtures/ai/question_pass/prose_wrapped_object.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "115cc0df6e7b1fbaf2f75511f4933c27b11949ce61ed3db3d5aed36948c5e5bd",
+      "path": "tests/fixtures/ai/question_pass/single_key_object.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "77a1f88f5d570c837acaa41307c2b30433a543d74db72297fd1f977a2d8d4753",
+      "path": "tests/fixtures/ai/question_pass/strings_list.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "457e7464b7cc47486ada735ab8d49a0379862cf22d51f3dc701b71e7ae900491",
+      "path": "tests/fixtures/ai/question_pass/two_key_object.txt",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "ff6c7c7e1469ec26dd55ff88d6f882a5a2eba57b90b898eaed0c719fbfbce313",
+      "path": "tests/unit/ai/review/test_question_pass_2720.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    },
+    {
+      "hash": "8161c9f1bfa2fe29a75d814483a009e205a88991ad7710d233a08710d5997998",
+      "path": "tests/unit/ai/review/test_question_pass_2813.py",
+      "reviewed_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "round": 1
+    }
+  ],
+  "event": "pull_request_target",
+  "findings": [
+    {
+      "category": "contract-drift",
+      "cause": "[redacted]",
+      "confidence": "high",
+      "description": "[redacted]",
+      "evidence_style": "cross_file",
+      "file": "docs/ai-review-report.md",
+      "fingerprint": "4229f3d5d94dadc9",
+      "fix": "[redacted]",
+      "line": 39,
+      "occurrences": [
+        {
+          "file": "docs/ai-review-report.md",
+          "line": 39
+        },
+        {
+          "file": "lintro/ai/review/models/run_questions.py",
+          "line": 31
+        }
+      ],
+      "occurrences_total": 2,
+      "ordinal": 1,
+      "severity": "P3",
+      "since_round": 1,
+      "status": "open",
+      "title": "[redacted]"
+    },
+    {
+      "category": "contract-drift",
+      "cause": "[redacted]",
+      "checklist_ids": [4],
+      "confidence": "high",
+      "description": "[redacted]",
+      "file": "lintro/ai/json_response.py",
+      "fingerprint": "21a2109443236344",
+      "fix": "[redacted]",
+      "line": 176,
+      "ordinal": 1,
+      "severity": "P3",
+      "since_round": 1,
+      "status": "open",
+      "title": "[redacted]"
+    },
+    {
+      "category": "contract-drift",
+      "cause": "[redacted]",
+      "confidence": "high",
+      "description": "[redacted]",
+      "evidence_style": "cross_file",
+      "file": "lintro/ai/review/enums/question_failure_kind.py",
+      "fingerprint": "3b9d4d88eab21297",
+      "fix": "[redacted]",
+      "line": 13,
+      "occurrences": [
+        {
+          "file": "lintro/ai/review/enums/question_failure_kind.py",
+          "line": 13
+        },
+        {
+          "file": "lintro/ai/review/enums/question_failure_kind.py",
+          "line": 32
+        }
+      ],
+      "occurrences_total": 2,
+      "ordinal": 1,
+      "severity": "P3",
+      "since_round": 1,
+      "status": "open",
+      "title": "[redacted]"
+    }
+  ],
+  "flagged_files": [
+    {
+      "path": "lintro/ai/review/question_attempts.py",
+      "reason": "[redacted]"
+    },
+    {
+      "path": "lintro/ai/review/question_parse.py",
+      "reason": "[redacted]"
+    },
+    {
+      "path": "docs/ai-review-report.md",
+      "reason": "[redacted]"
+    },
+    {
+      "path": "lintro/ai/review/enums/question_failure_kind.py",
+      "reason": "[redacted]"
+    }
+  ],
+  "head_sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+  "lintro_version": "0.171.0",
+  "pending_invalidations": [],
+  "pr_number": 2826,
+  "pr_spend_usd": 7.450541,
+  "repo": "lgtm-hq/py-lintro",
+  "run_id": "0",
+  "runs": [
+    {
+      "auth_mode": "subscription",
+      "checks": 23,
+      "chunks_reviewed": 7,
+      "chunks_total": 7,
+      "completion": 157089,
+      "confidence": "",
+      "context": 24173,
+      "convergence_score": 9.0,
+      "cost": 7.450541,
+      "cost_basis": "unpriceable",
+      "delta_reason": "first_round",
+      "depth": 1,
+      "downgraded": 0,
+      "duration": 1810.01,
+      "estimated": true,
+      "files_reviewed": 25,
+      "files_skipped": 0,
+      "generated_questions": 9,
+      "merge_base": "f4e12319ce94ee6d1dbfbfff71e94f7417a2ec10",
+      "model": "claude-opus-5-5",
+      "narrative": "[redacted]",
+      "open_after": 3,
+      "p1": 0,
+      "p2": 0,
+      "p3": 3,
+      "partial": false,
+      "prompt": 542916,
+      "provider": "anthropic",
+      "questions": 0,
+      "resolved": 0,
+      "round": 1,
+      "sha": "b0153e29169bfcb2b702b97ad92be5e4bf84929b",
+      "strictness": "balanced",
+      "timestamp": "2026-09-25T13:14:00.155982+00:00",
+      "total": 700005,
+      "transport": "cli",
+      "verdict": "nits_only"
+    }
+  ],
+  "schema_version": 5,
+  "version": 5,
+  "workflow": "ai-review.yml"
+}

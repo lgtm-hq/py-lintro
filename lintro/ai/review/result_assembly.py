@@ -18,16 +18,17 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from lintro.ai.enums import AITransport
-from lintro.ai.model_pricing import get_context_window
 from lintro.ai.review.coverage import (
     inherit_same_round_paths,
     pending_invalidations_for,
 )
 from lintro.ai.review.coverage_rounds import resolve_run_flags
+from lintro.ai.review.degradation_carry import carried_degradations
 from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     CoverageDegradationReason,
 )
+from lintro.ai.review.enums.degradation_step import DegradationStep
 from lintro.ai.review.enums.file_review_need import FileReviewNeed
 from lintro.ai.review.enums.finding_origin import FindingOrigin
 from lintro.ai.review.file_selection import (
@@ -36,7 +37,6 @@ from lintro.ai.review.file_selection import (
 )
 from lintro.ai.review.finding_parser import reject_context_findings
 from lintro.ai.review.merge import merge_review_results, truncated_paths
-from lintro.ai.review.models.coverage_counts import CoverageCounts
 from lintro.ai.review.models.coverage_degradation import (
     CARRIED_CHUNK_INDEX,
     CoverageDegradation,
@@ -48,7 +48,7 @@ from lintro.ai.review.question_pass import question_pass_degradations
 from lintro.ai.review.resume import carried_truncated_paths, records_for_reviewed
 from lintro.ai.review.severity_gate import apply_cross_chunk_guard
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
-from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
+from lintro.ai.review.timings import ReviewPhase
 from lintro.ai.review.verification import verification_degradations
 
 if TYPE_CHECKING:
@@ -66,7 +66,6 @@ __all__ = [
     "ReviewRunOutcome",
     "assemble_review_result",
     "custom_agents_only_summary",
-    "empty_review_result",
 ]
 
 
@@ -377,8 +376,26 @@ def assemble_review_result(
         seconds=time.monotonic() - outcome.validation_started,
     )
     duration_seconds = time.monotonic() - plan.timings.started_at
+    # The round records again what the last round degraded and it did not redo
+    # (#2803).
+    ran = {
+        DegradationStep.QUESTION_PASS: outcome.questions is not None,
+        DegradationStep.SYNTHESIS: synthesis is not None,
+        DegradationStep.VERIFICATION: outcome.verification is not None,
+    }
     metadata = replace(
         metadata,
+        coverage_degradations=(
+            *metadata.coverage_degradations,
+            *carried_degradations(
+                prior=None if options.force_full else options.prior_state,
+                current=metadata.coverage_degradations,
+                reviewed=covered_now,
+                steps_ran={step for step, did in ran.items() if did},
+                hashes=plan.resume.hashes,
+                head_complete=coverage.complete,
+            ),
+        ),
         reviewed_paths=actually_reviewed,
         files_reviewed=len(actually_reviewed),
         duration_seconds=duration_seconds,
@@ -431,69 +448,4 @@ def custom_agents_only_summary(
     return (
         f"Custom review agents only: {agents_run} agent(s) ran and reported "
         f"{findings} finding(s)."
-    )
-
-
-def empty_review_result(
-    *,
-    context: ReviewContext,
-    options: ReviewSessionOptions,
-) -> ReviewResult:
-    """Return an empty result when no changes are present.
-
-    Args:
-        context: Collected review diff context.
-        options: Session options for the run.
-
-    Returns:
-        A result recording that the review had nothing to look at.
-    """
-    provider = options.provider
-    depth = options.depth
-    checklist_items = options.checklist_items
-    context_window_override = options.context_window_override
-    context_collection_seconds = options.context_collection_seconds
-    empty_timings = ReviewTimingRecorder()
-    empty_timings.add_phase(
-        name=ReviewPhase.CONTEXT_COLLECTION,
-        seconds=context_collection_seconds,
-    )
-    context_window = get_context_window(
-        model=provider.model_name,
-        override=context_window_override,
-    )
-    metadata = ReviewMetadata(
-        model=provider.model_name,
-        provider=provider.name,
-        context_window=context_window,
-        depth=depth,
-        chunks_total=0,
-        chunks_current=0,
-        files_reviewed=0,
-        files_total=0,
-        checklist_items=len(checklist_items),
-        token_usage={"prompt": 0, "completion": 0, "total": 0},
-        cost_estimate_usd=0.0,
-        base_ref=context.base_ref,
-        head_ref=context.head_ref,
-        timestamp=datetime.now(tz=UTC).isoformat(),
-        lint_facts_note=options.lint_note,
-        phase_timings={
-            "context_collection": max(context_collection_seconds, 0.0),
-            "provider": 0.0,
-            "parse_merge": 0.0,
-        },
-        # Nothing ran after context collection, so the run's duration and
-        # the timings total are the same figure (#2148).
-        duration_seconds=max(context_collection_seconds, 0.0),
-        timings=empty_timings.build(
-            total_seconds=max(context_collection_seconds, 0.0),
-            max_parallel=1,
-        ),
-    )
-    return ReviewResult(
-        metadata=metadata,
-        summary="No changes found to review.",
-        findings=(),
-        coverage=CoverageCounts(),
     )

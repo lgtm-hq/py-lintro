@@ -309,6 +309,6 @@ def test_the_factory_records_synthesis_degraded_from_the_result() -> None:
 
     metadata = _metadata(CoverageDegradationReason.SYNTHESIS_TRUNCATED)
     result = ReviewResult(findings=(), metadata=metadata, summary="")
-    coverage = _coverage(result=result)
+    coverage = _coverage(result=result, head_sha="abc1234")
     assert_that(coverage.synthesis_degraded).is_true()
     assert_that(coverage.coverage_limited).is_false()
