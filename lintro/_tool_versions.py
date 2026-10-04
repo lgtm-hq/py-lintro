@@ -106,7 +106,7 @@ TOOL_VERSIONS: dict[ToolName | str, str] = {
     ToolName.CPPCHECK: "2.17.1",
     ToolName.DOTENV_LINTER: "4.0.0",
     ToolName.GITLEAKS: "8.30.1",
-    ToolName.GOLANGCI_LINT: "2.13.2",
+    ToolName.GOLANGCI_LINT: "2.14.0",
     ToolName.HADOLINT: "2.15.1",
     ToolName.OSV_SCANNER: "2.5.1",
     ToolName.RUSTC: "1.98.1",
