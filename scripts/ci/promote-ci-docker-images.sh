@@ -25,7 +25,10 @@ Usage:
 
 Environment:
   SOURCE_IMAGE   Image repository, e.g. ghcr.io/lgtm-hq/py-lintro (required)
-  CI_TAG         Ephemeral CI tag to promote, e.g. ci-123456789 (required)
+  CI_TAG         Ephemeral CI tag to promote, e.g. ci-123456789 (required
+                 unless SOURCE_DIGEST is set)
+  SOURCE_DIGEST  When set, skip CI_TAG resolution and retag this digest
+                 (sha256:...). Used to attach pinned-* without moving latest.
   TAGS           Whitespace/newline-separated destination refs, e.g. the
                  docker/metadata-action tags output (required)
   CANDIDATE_SHA  Commit the candidate image was built from. When set, the
@@ -105,6 +108,7 @@ retry_registry() {
 
 source_image="${SOURCE_IMAGE:-}"
 ci_tag="${CI_TAG:-}"
+source_digest="${SOURCE_DIGEST:-}"
 tags="${TAGS:-}"
 
 if [[ -z "$source_image" ]]; then
@@ -112,8 +116,8 @@ if [[ -z "$source_image" ]]; then
 	exit 2
 fi
 
-if [[ -z "$ci_tag" ]]; then
-	echo "CI_TAG is required" >&2
+if [[ -z "$ci_tag" && -z "$source_digest" ]]; then
+	echo "CI_TAG or SOURCE_DIGEST is required" >&2
 	exit 2
 fi
 
@@ -128,14 +132,24 @@ fi
 _promote_script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${_promote_script_dir}/check-tools-manifest-staleness.sh"
 
-source_ref="${source_image}:${ci_tag}"
+if [[ -n "$source_digest" ]]; then
+	if [[ "$source_digest" != sha256:* ]]; then
+		echo "SOURCE_DIGEST must be sha256:... (got: ${source_digest})" >&2
+		exit 2
+	fi
+	digest="$source_digest"
+	source_ref="${source_image}@${digest}"
+	echo "Using SOURCE_DIGEST ${digest}"
+else
+	source_ref="${source_image}:${ci_tag}"
 
-digest="$(retry_registry docker buildx imagetools inspect \
-	--format '{{.Manifest.Digest}}' "$source_ref")"
+	digest="$(retry_registry docker buildx imagetools inspect \
+		--format '{{.Manifest.Digest}}' "$source_ref")"
 
-if [[ "$digest" != sha256:* ]]; then
-	echo "Could not resolve digest for ${source_ref} (got: ${digest})" >&2
-	exit 1
+	if [[ "$digest" != sha256:* ]]; then
+		echo "Could not resolve digest for ${source_ref} (got: ${digest})" >&2
+		exit 1
+	fi
 fi
 
 expected_digest="${EXPECTED_DIGEST:-}"

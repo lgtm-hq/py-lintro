@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import importlib.util
 import os
 import re
@@ -324,9 +325,18 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
     )
     assert "reusable-docker.yml@" in fallback["uses"]
     assert resolve["permissions"]["packages"] == "read"
-    # The one dispatch entry point is the staleness guard's escape hatch
-    # (#2497); nothing else may be driven by hand.
-    assert set(trigger["workflow_dispatch"]["inputs"]) == {"force_publish"}
+    # force_publish is the staleness-guard escape hatch (#2497).
+    # backfill_pinned_tag is the one-time #2845 persistent-tag repair.
+    assert set(trigger["workflow_dispatch"]["inputs"]) == {
+        "force_publish",
+        "backfill_pinned_tag",
+    }
+    assert_that(
+        trigger["workflow_dispatch"]["inputs"]["backfill_pinned_tag"]["default"],
+    ).is_false()
+    assert_that(
+        trigger["workflow_dispatch"]["inputs"]["force_publish"]["description"],
+    ).contains("Dockerfiles pin")
     assert resolve["if"] == "github.ref == 'refs/heads/main'"
     assert workflow["concurrency"]["group"] == "lintro-tools-registry"
     cleanup = _load_workflow("ghcr-cleanup.yml")
@@ -354,6 +364,10 @@ def test_main_workflow_has_mutually_exclusive_promotion_fallback() -> None:
         ".github/workflows/docker-tools-publish.yml"
         in _trigger(workflow)["push"]["paths"]
     )
+    persist = jobs["persist-pinned-digest"]
+    assert isinstance(persist, dict)
+    assert_that(str(persist["if"])).contains("needs.resolve.result == 'success'")
+    assert_that(persist["permissions"]["packages"]).is_equal_to("write")
 
 
 def test_digest_updater_changes_both_pin_sites(
@@ -593,6 +607,7 @@ def test_cleanup_main_skips_persistent_tag_added_before_delete(
     """A promotion racing the sweep prevents the destructive delete."""
     old = {
         "id": 7,
+        "name": f"sha256:{'d' * 64}",
         "updated_at": "2026-08-01T00:00:00Z",
         "metadata": {
             "container": {"tags": ["tools-candidate-pr42-abcdef1"]},
@@ -615,6 +630,16 @@ def test_cleanup_main_skips_persistent_tag_added_before_delete(
 
     monkeypatch.setenv("GH_TOKEN", "token")
     monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_protected_digests",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: set(),
+    )
 
     assert_that(cleanup_module.main()).is_equal_to(0)
     assert_that(
@@ -634,6 +659,7 @@ def test_cleanup_main_treats_concurrent_404_as_benign(
     """A version deleted by another worker does not fail the sweep."""
     candidate = {
         "id": 7,
+        "name": f"sha256:{'c' * 64}",
         "updated_at": "2026-08-01T00:00:00Z",
         "metadata": {
             "container": {"tags": ["tools-candidate-pr42-abcdef1"]},
@@ -657,6 +683,16 @@ def test_cleanup_main_treats_concurrent_404_as_benign(
 
     monkeypatch.setenv("GH_TOKEN", "token")
     monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_protected_digests",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: set(),
+    )
 
     assert_that(cleanup_module.main()).is_equal_to(0)
     assert_that(
@@ -1214,6 +1250,16 @@ def test_sweep_keeps_going_when_one_pull_request_lookup_fails(
     monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
     monkeypatch.setattr(cleanup_module, "_package_versions", fake_versions)
     monkeypatch.setattr(cleanup_module, "_sweep_candidate", fake_sweep)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_protected_digests",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: set(),
+    )
 
     exit_code = cleanup_module.main()
 
@@ -1302,6 +1348,11 @@ def test_promotion_exports_candidate_sha_and_pr(
         "resolve_main_action",
         lambda **_kwargs: ("promote", tag),
     )
+    monkeypatch.setattr(
+        promotion_module,
+        "_pin_changed",
+        lambda **_kwargs: True,
+    )
 
     assert_that(promotion_module.main()).is_equal_to(0)
 
@@ -1310,6 +1361,7 @@ def test_promotion_exports_candidate_sha_and_pr(
     assert_that(lines).contains(f"candidate-tag={tag}")
     assert_that(lines).contains("candidate-sha=0123456789ab")
     assert_that(lines).contains("candidate-pr=4321")
+    assert_that(lines).contains("pin-changed=true")
 
 
 def test_promotion_exports_empty_candidate_fields_without_a_tag(
@@ -1339,6 +1391,11 @@ def test_promotion_exports_empty_candidate_fields_without_a_tag(
         "resolve_main_action",
         lambda **_kwargs: ("publish", None),
     )
+    monkeypatch.setattr(
+        promotion_module,
+        "_pin_changed",
+        lambda **_kwargs: False,
+    )
 
     assert_that(promotion_module.main()).is_equal_to(0)
 
@@ -1346,6 +1403,7 @@ def test_promotion_exports_empty_candidate_fields_without_a_tag(
     assert_that(lines).contains("action=publish")
     assert_that(lines).contains("candidate-sha=")
     assert_that(lines).contains("candidate-pr=")
+    assert_that(lines).contains("pin-changed=false")
 
 
 def test_candidate_outputs_and_guard_env_stay_in_lockstep() -> None:
@@ -1363,7 +1421,7 @@ def test_candidate_outputs_and_guard_env_stay_in_lockstep() -> None:
     written_keys = set(
         re.findall(r'output_file\.write\(f?"([a-z-]+)=', resolver_source),
     )
-    assert_that(written_keys).contains("candidate-sha", "candidate-pr")
+    assert_that(written_keys).contains("candidate-sha", "candidate-pr", "pin-changed")
 
     workflow = _load_workflow("docker-tools-promote.yml")
     resolve_outputs = workflow["jobs"]["resolve"]["outputs"]
@@ -1393,3 +1451,741 @@ def test_candidate_outputs_and_guard_env_stay_in_lockstep() -> None:
     for name in ("CANDIDATE_SHA", "CANDIDATE_PR", "MAIN_SHA", "FORCE_PUBLISH"):
         assert_that(env).contains_key(name)
         assert_that(guard_source).described_as(name).contains(f"${{{name}:-}}")
+
+
+def _contents_file(text: str) -> dict[str, str]:
+    """Return a GitHub contents API file payload."""
+    return {
+        "type": "file",
+        "encoding": "base64",
+        "content": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+    }
+
+
+def _candidate_payload(
+    *,
+    version_id: int,
+    digest: str,
+    tags: tuple[str, ...],
+    updated_at: str = "2026-09-12T00:00:00Z",
+) -> dict[str, Any]:
+    """Return a GHCR package-version payload."""
+    return {
+        "id": version_id,
+        "name": digest,
+        "updated_at": updated_at,
+        "metadata": {"container": {"tags": list(tags)}},
+    }
+
+
+def test_cleanup_parser_rejects_pinned_persistent_tag(
+    *,
+    cleanup_module: ModuleType,
+) -> None:
+    """A promoted ``pinned-*`` tag must keep the version out of the sweeper."""
+    payload = _candidate_payload(
+        version_id=7,
+        digest=f"sha256:{'e' * 64}",
+        tags=("tools-candidate-pr2507-4bbd7556b5f0", "pinned-f128661"),
+    )
+
+    assert_that(cleanup_module.candidate_version(payload)).is_none()
+    assert_that(cleanup_module.EPHEMERAL_RE.match("pinned-f128661")).is_none()
+
+
+def test_read_pin_digest_requires_both_sites_to_agree(
+    *,
+    digest_module: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Promotion reads the digest main actually pins, not a single site."""
+    digest = f"sha256:{'a' * 64}"
+    other = f"sha256:{'b' * 64}"
+    root = tmp_path / "Dockerfile"
+    ai = tmp_path / "ai-tools.Dockerfile"
+    root.write_text(
+        f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@{digest} AS tools\n",
+        encoding="utf-8",
+    )
+    ai.write_text(
+        f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@{digest} AS ai-tools\n",
+        encoding="utf-8",
+    )
+
+    assert_that(digest_module.read_pin_digest(paths=(root, ai))).is_equal_to(digest)
+    ai.write_text(
+        f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@{other} AS ai-tools\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="disagree"):
+        digest_module.read_pin_digest(paths=(root, ai))
+    assert_that(digest_module.pinned_tag(sha="F1286617abc")).is_equal_to(
+        "pinned-f128661",
+    )
+
+
+def test_promote_workflow_wires_expected_digest_and_pinned_tag() -> None:
+    """The promote job tags the Dockerfile digest and fails closed on mismatch."""
+    workflow = _load_workflow("docker-tools-promote.yml")
+    steps = workflow["jobs"]["promote"]["steps"]
+    pin = next(step for step in steps if step.get("id") == "pin")
+    promote = next(
+        step
+        for step in steps
+        if "scripts/ci/promote-ci-docker-images.sh" in str(step.get("run", ""))
+    )
+    assert_that(pin["run"]).contains("update-tools-image-digest.py --read")
+    assert_that(promote["env"]["EXPECTED_DIGEST"]).is_equal_to(
+        "${{ steps.pin.outputs.digest }}",
+    )
+    assert_that(str(promote["env"]["TAGS"])).contains(
+        "ghcr.io/lgtm-hq/lintro-tools:latest",
+    )
+    assert_that(str(promote["env"]["TAGS"])).contains(
+        "ghcr.io/lgtm-hq/lintro-tools:pinned-${{ steps.pin.outputs.sha7 }}",
+    )
+    persist = workflow["jobs"]["persist-pinned-digest"]
+    assert_that(str(persist["if"])).contains("needs.resolve.result == 'success'")
+    persist_run = next(
+        step
+        for step in persist["steps"]
+        if "tag-pinned-tools-digest.sh" in str(step.get("run", ""))
+    )
+    resolve_env = next(
+        step
+        for step in workflow["jobs"]["resolve"]["steps"]
+        if "promote-tools-candidate.py" in str(step.get("run", ""))
+    )["env"]
+    assert_that(resolve_env["GITHUB_EVENT_BEFORE"]).contains("github.event.before")
+    assert_that(persist_run["env"]["GITHUB_SHA"]).contains("github.sha")
+    assert_that(persist_run["env"]["REQUIRE_EPHEMERAL_ONLY"]).is_equal_to("true")
+
+
+def test_sweep_keeps_merged_candidate_still_pinned_on_main(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The #2507 shape: ephemeral-only, aged, merged, still pinned, must live."""
+    digest = "sha256:e58186580c3095fb1f41b3e2f87bf7f1b663e6c41ef2a49eecb2cb97fa5ee739"
+    payload = _candidate_payload(
+        version_id=1239532845,
+        digest=digest,
+        tags=("sha-4bbd755", "tools-candidate-pr2507-4bbd7556b5f0"),
+        updated_at="2026-09-12T00:00:00Z",
+    )
+    deletes: list[str] = []
+
+    def fake_gh_json(*args: str) -> object:
+        if "--method" in args and "DELETE" in args:
+            deletes.append(args[-1])
+            return None
+        endpoint = args[0] if args else ""
+        if "packages/container" in endpoint and endpoint.endswith(
+            "versions?per_page=100",
+        ):
+            return [[payload]]
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setenv("GH_TOKEN", "token")
+    monkeypatch.setenv("MIN_AGE_DAYS", "14")
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_protected_digests",
+        lambda **_kwargs: {digest},
+    )
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: set(),
+    )
+
+    assert_that(cleanup_module.main()).is_equal_to(0)
+    assert_that(deletes).is_empty()
+
+
+def test_sweep_keeps_digest_pinned_in_open_renovate_pr(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An open digest PR protects its candidate even when main has moved on."""
+    digest = f"sha256:{'1' * 64}"
+    text = f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@{digest}\n"
+    calls: list[str] = []
+
+    def fake_gh_json(*args: str) -> object:
+        calls.append(args[0] if args else "")
+        endpoint = args[0] if args else ""
+        if endpoint == "repos/lgtm-hq/py-lintro":
+            return {"default_branch": "main"}
+        if "contents/docker?" in endpoint and "ref=main" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if "contents/docker/ai-tools.Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if endpoint.startswith("repos/lgtm-hq/py-lintro/pulls?"):
+            return [[{"head": {"sha": "abc1234", "ref": "renovate/tools"}}]]
+        if "ref=abc1234" in endpoint and "contents/docker?" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=abc1234" in endpoint:
+            return _contents_file(text)
+        if "contents/docker/ai-tools.Dockerfile?ref=abc1234" in endpoint:
+            return _contents_file(text)
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+
+    protected = cleanup_module.collect_protected_digests(
+        repository="lgtm-hq/py-lintro",
+    )
+    assert_that(protected).contains(digest)
+    assert_that(protected).contains(f"sha256:{'0' * 64}")
+
+
+def test_sweep_collection_failure_deletes_nothing(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed reference read must not delete any candidate versions."""
+    payload = _candidate_payload(
+        version_id=9,
+        digest=f"sha256:{'2' * 64}",
+        tags=("tools-candidate-pr9-abcdef1",),
+        updated_at="2020-01-01T00:00:00Z",
+    )
+    deletes: list[str] = []
+
+    def fake_gh_json(*args: str) -> object:
+        if "--method" in args and "DELETE" in args:
+            deletes.append(args[-1])
+            return None
+        if "packages/container" in (args[0] if args else ""):
+            return [[payload]]
+        raise RuntimeError("HTTP 500: contents unavailable")
+
+    monkeypatch.setenv("GH_TOKEN", "token")
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: set(),
+    )
+
+    assert_that(cleanup_module.main()).is_equal_to(1)
+    assert_that(deletes).is_empty()
+
+
+def test_sweep_deletes_unreferenced_stale_candidate(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unreferenced stale candidates are still removed."""
+    digest = f"sha256:{'3' * 64}"
+    payload = _candidate_payload(
+        version_id=11,
+        digest=digest,
+        tags=("tools-candidate-pr11-abcdef1", "sha-abcdef1"),
+        updated_at="2020-01-01T00:00:00Z",
+    )
+    deletes: list[str] = []
+
+    def fake_gh_json(*args: str) -> object:
+        endpoint = next(
+            (
+                arg
+                for arg in args
+                if arg.startswith("orgs/") or arg.startswith("repos/")
+            ),
+            "",
+        )
+        if "--method" in args and "DELETE" in args:
+            deletes.append(endpoint)
+            return None
+        if "packages/container" in endpoint and endpoint.endswith(
+            "versions?per_page=100",
+        ):
+            return [[payload]]
+        if endpoint.endswith("/versions/11"):
+            return payload
+        if "/pulls/11" in endpoint:
+            return {"state": "closed", "merged_at": "2020-01-02T00:00:00Z"}
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setenv("GH_TOKEN", "token")
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_protected_digests",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: set(),
+    )
+
+    assert_that(cleanup_module.main()).is_equal_to(0)
+    assert_that(deletes).is_length(1)
+    assert_that(deletes[0]).contains("versions/11")
+
+
+def test_sweep_pre_delete_recheck_failure_deletes_nothing(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed default-branch re-check must abort remaining deletions."""
+    payload = _candidate_payload(
+        version_id=11,
+        digest=f"sha256:{'3' * 64}",
+        tags=("tools-candidate-pr11-abcdef1", "sha-abcdef1"),
+        updated_at="2020-01-01T00:00:00Z",
+    )
+    deletes: list[str] = []
+
+    def fake_gh_json(*args: str) -> object:
+        endpoint = next(
+            (
+                arg
+                for arg in args
+                if arg.startswith("orgs/") or arg.startswith("repos/")
+            ),
+            "",
+        )
+        if "--method" in args and "DELETE" in args:
+            deletes.append(endpoint)
+            return None
+        if "packages/container" in endpoint and endpoint.endswith(
+            "versions?per_page=100",
+        ):
+            return [[payload]]
+        if endpoint.endswith("/versions/11"):
+            return payload
+        if "/pulls/11" in endpoint:
+            return {"state": "closed", "merged_at": "2020-01-02T00:00:00Z"}
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setenv("GH_TOKEN", "token")
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_protected_digests",
+        lambda **_kwargs: set(),
+    )
+    monkeypatch.setattr(
+        cleanup_module,
+        "collect_default_branch_digests",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            cleanup_module.ProtectionCollectionError("contents 503"),
+        ),
+    )
+
+    assert_that(cleanup_module.main()).is_equal_to(1)
+    assert_that(deletes).is_empty()
+
+
+def test_sweep_skips_non_renovate_heads_and_logs_pin_404s(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Only renovate/* heads are read; a 404 pin is logged, not silent."""
+    digest = f"sha256:{'1' * 64}"
+    text = f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@{digest}\n"
+
+    def fake_gh_json(*args: str) -> object:
+        endpoint = args[0] if args else ""
+        if endpoint == "repos/lgtm-hq/py-lintro":
+            return {"default_branch": "main"}
+        if "contents/docker?" in endpoint and "ref=main" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if "contents/docker/ai-tools.Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if endpoint.startswith("repos/lgtm-hq/py-lintro/pulls?"):
+            return [
+                [
+                    {"head": {"sha": "deadbeef", "ref": "feature/unrelated"}},
+                    {"head": {"sha": "abc1234", "ref": "renovate/lintro-tools"}},
+                ],
+            ]
+        if "ref=deadbeef" in endpoint:
+            raise AssertionError(f"non-renovate head was read: {args}")
+        if "contents/docker?" in endpoint and "ref=abc1234" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=abc1234" in endpoint:
+            raise RuntimeError("HTTP 404: Not Found")
+        if "contents/docker/ai-tools.Dockerfile?ref=abc1234" in endpoint:
+            return _contents_file(text)
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+
+    protected = cleanup_module.collect_protected_digests(
+        repository="lgtm-hq/py-lintro",
+    )
+    logged = capsys.readouterr().out
+    assert_that(protected).contains(digest)
+    assert_that(protected).contains(f"sha256:{'0' * 64}")
+    assert_that(logged).contains("Dockerfile at abc1234")
+    assert_that(logged).contains("404")
+
+
+def test_pin_changed_detects_consumer_dockerfile_on_direct_push(
+    *,
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A direct main push that edits Dockerfile is a pin change."""
+    monkeypatch.setattr(promotion_module, "_merged_pr", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        promotion_module,
+        "_commit_files",
+        lambda **_kwargs: {"Dockerfile"},
+    )
+
+    assert_that(
+        promotion_module._pin_changed(
+            repository="lgtm-hq/py-lintro",
+            merge_sha="a" * 40,
+        ),
+    ).is_true()
+
+
+def test_pin_changed_uses_push_before_after_range(
+    *,
+    promotion_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A multi-commit main push must inspect the whole before...after range."""
+    before = "b" * 40
+    after = "c" * 40
+    compared: list[tuple[str, str]] = []
+
+    def fake_compare(*, repository: str, before: str, after: str) -> set[str]:
+        del repository
+        compared.append((before, after))
+        return {"docker/ai-tools.Dockerfile"}
+
+    def fake_commit_files(*, repository: str, sha: str) -> set[str]:
+        del repository, sha
+        raise AssertionError("must not inspect only the head commit")
+
+    monkeypatch.setenv("GITHUB_EVENT_BEFORE", before)
+    monkeypatch.setattr(promotion_module, "_merged_pr", lambda **_kwargs: None)
+    monkeypatch.setattr(promotion_module, "_compare_files", fake_compare)
+    monkeypatch.setattr(promotion_module, "_commit_files", fake_commit_files)
+
+    assert_that(
+        promotion_module._pin_changed(
+            repository="lgtm-hq/py-lintro",
+            merge_sha=after,
+        ),
+    ).is_true()
+    assert_that(compared).is_equal_to([(before, after)])
+
+
+def test_pin_changed_failure_does_not_block_persist(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed pin-changed lookup must not fail classify or persist."""
+    output = tmp_path / "github_output"
+    output.touch()
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+
+    def fail_pin_changed(**_kwargs: object) -> bool:
+        raise RuntimeError("compare 502")
+
+    monkeypatch.setattr(
+        promotion_module,
+        "resolve_main_action",
+        lambda **_kwargs: ("skip", None),
+    )
+    monkeypatch.setattr(promotion_module, "_pin_changed", fail_pin_changed)
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+    lines = output.read_text(encoding="utf-8").splitlines()
+    assert_that(lines).contains("action=skip")
+    assert_that(lines).contains("pin-changed=false")
+
+
+def test_sweep_required_pin_404_fails_closed(
+    *,
+    cleanup_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 404 on a default-branch pin file must abort collection."""
+
+    def fake_gh_json(*args: str) -> object:
+        endpoint = args[0] if args else ""
+        if endpoint == "repos/lgtm-hq/py-lintro":
+            return {"default_branch": "main"}
+        if "contents/docker?" in endpoint and "ref=main" in endpoint:
+            return [
+                {
+                    "name": "ai-tools.Dockerfile",
+                    "path": "docker/ai-tools.Dockerfile",
+                    "type": "file",
+                },
+            ]
+        if "contents/Dockerfile?ref=main" in endpoint:
+            return _contents_file(
+                f"FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:{'0' * 64}\n",
+            )
+        if "contents/docker/ai-tools.Dockerfile?ref=main" in endpoint:
+            raise RuntimeError("HTTP 404: Not Found")
+        raise AssertionError(f"unexpected API call: {args}")
+
+    monkeypatch.setattr(cleanup_module, "_gh_json", fake_gh_json)
+
+    with pytest.raises(
+        cleanup_module.ProtectionCollectionError,
+        match="docker/ai-tools.Dockerfile",
+    ):
+        cleanup_module.collect_default_branch_digests(repository="lgtm-hq/py-lintro")
+
+
+@pytest.fixture
+def pin_tag_module() -> ModuleType:
+    """Load the persistent-tag backfill helper."""
+    return _load(
+        "pinned_digest_needs_tag",
+        _REPO_ROOT / "scripts/ci/pinned-digest-needs-tag.py",
+    )
+
+
+def test_backfill_dispatch_skips_classification(
+    *,
+    promotion_module: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A backfill dispatch must not promote or rebuild."""
+    output = tmp_path / "github_output"
+    output.touch()
+    calls: list[tuple[str, ...]] = []
+
+    def fake_resolve(**_kwargs: object) -> tuple[str, str]:
+        calls.append(("resolve",))
+        return ("promote", "nope")
+
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setenv("BACKFILL_PINNED", "true")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_REF", "refs/heads/main")
+    monkeypatch.setattr(promotion_module, "resolve_main_action", fake_resolve)
+
+    assert_that(promotion_module.main()).is_equal_to(0)
+    assert_that(calls).is_empty()
+    assert_that(output.read_text(encoding="utf-8").splitlines()).contains(
+        "action=backfill",
+    )
+
+
+@pytest.mark.parametrize(
+    ("tags", "needs_tag"),
+    [
+        (("tools-candidate-pr2773-9888e2d5", "sha-9888e2d", "renovate-yaml-2.x"), True),
+        (("tools-candidate-pr2773-9888e2d5", "pinned-a958f6c"), False),
+        (("latest", "sha-9888e2d", "renovate-yaml-2.x"), True),
+    ],
+    ids=["ephemeral-only", "already-pinned", "has-latest"],
+)
+def test_backfill_needs_tag_only_for_ephemeral_versions(
+    *,
+    pin_tag_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    tags: tuple[str, ...],
+    needs_tag: bool,
+) -> None:
+    """Only pinned-* is durable; latest on today's #2773 pin still needs a tag."""
+    digest = "sha256:89e331828b133522515f39b1e1492b75ceb61815fc5dc4d7841174f8da9c36a7"
+    monkeypatch.setattr(
+        pin_tag_module,
+        "_version_tags",
+        lambda **_kwargs: tags,
+    )
+
+    assert_that(
+        pin_tag_module.digest_needs_persistent_tag(
+            owner="lgtm-hq",
+            digest=digest,
+        ),
+    ).is_equal_to(needs_tag)
+
+
+def test_needs_tag_oserror_exits_two(
+    *,
+    pin_tag_module: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing gh binary must not look like an already-pinned skip."""
+    digest = f"sha256:{'a' * 64}"
+    monkeypatch.setenv("DIGEST", digest)
+    monkeypatch.setenv("GITHUB_REPOSITORY", "lgtm-hq/py-lintro")
+
+    def fail_needs_tag(**_kwargs: object) -> bool:
+        raise FileNotFoundError("gh")
+
+    monkeypatch.setattr(pin_tag_module, "digest_needs_persistent_tag", fail_needs_tag)
+
+    assert_that(pin_tag_module.main()).is_equal_to(2)
+
+
+def _write_executable(path: Path, text: str) -> Path:
+    """Write a stub script and mark it executable."""
+    path.write_text(text, encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+def test_tag_pinned_tools_digest_skips_when_already_pinned(
+    *,
+    tmp_path: Path,
+) -> None:
+    """REQUIRE_EPHEMERAL_ONLY treats needs-tag rc 1 as an idempotent skip."""
+    digest = f"sha256:{'a' * 64}"
+    reader = tmp_path / "read.py"
+    reader.write_text(
+        f"import sys\nprint('{digest}' if sys.argv[1:] == ['--read'] else '')\n",
+        encoding="utf-8",
+    )
+    needs = tmp_path / "needs.py"
+    needs.write_text("import sys\nsys.exit(1)\n", encoding="utf-8")
+    promote = _write_executable(
+        tmp_path / "promote.sh",
+        "#!/usr/bin/env bash\necho PROMOTED >&2\nexit 0\n",
+    )
+    result = subprocess.run(  # nosec B603
+        [str(_REPO_ROOT / "scripts/ci/tag-pinned-tools-digest.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "GITHUB_SHA": "ABCDEF1234567890",
+            "PIN_READER": str(reader),
+            "PIN_NEEDS_TAG": str(needs),
+            "PROMOTE_SCRIPT": str(promote),
+            "REQUIRE_EPHEMERAL_ONLY": "true",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains("already has a pinned-* tag")
+    assert_that(result.stdout + result.stderr).does_not_contain("PROMOTED")
+
+
+def test_tag_pinned_tools_digest_fails_when_needs_tag_errors(
+    *,
+    tmp_path: Path,
+) -> None:
+    """A needs-tag helper rc 2 must fail the persist job."""
+    digest = f"sha256:{'a' * 64}"
+    reader = tmp_path / "read.py"
+    reader.write_text(
+        f"import sys\nprint('{digest}' if sys.argv[1:] == ['--read'] else '')\n",
+        encoding="utf-8",
+    )
+    needs = tmp_path / "needs.py"
+    needs.write_text("import sys\nsys.exit(2)\n", encoding="utf-8")
+    promote = _write_executable(
+        tmp_path / "promote.sh",
+        "#!/usr/bin/env bash\necho PROMOTED >&2\nexit 0\n",
+    )
+    result = subprocess.run(  # nosec B603
+        [str(_REPO_ROOT / "scripts/ci/tag-pinned-tools-digest.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "GITHUB_SHA": "abcdef1234567890",
+            "PIN_READER": str(reader),
+            "PIN_NEEDS_TAG": str(needs),
+            "PROMOTE_SCRIPT": str(promote),
+            "REQUIRE_EPHEMERAL_ONLY": "true",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stdout + result.stderr).does_not_contain("PROMOTED")
+
+
+def test_tag_pinned_tools_digest_derives_sha7_from_merge_sha(
+    *,
+    tmp_path: Path,
+) -> None:
+    """The persist tag is pinned- plus the first seven lowercase hex chars."""
+    digest = f"sha256:{'b' * 64}"
+    reader = tmp_path / "read.py"
+    reader.write_text(
+        f"import sys\nprint('{digest}' if sys.argv[1:] == ['--read'] else '')\n",
+        encoding="utf-8",
+    )
+    needs = tmp_path / "needs.py"
+    needs.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    promote = _write_executable(
+        tmp_path / "promote.sh",
+        "#!/usr/bin/env bash\nprintf 'TAGS=%s\\n' \"${TAGS}\"\n",
+    )
+    result = subprocess.run(  # nosec B603
+        [str(_REPO_ROOT / "scripts/ci/tag-pinned-tools-digest.sh")],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "GITHUB_SHA": "ABCDEF1234567890deadbeef",
+            "PIN_READER": str(reader),
+            "PIN_NEEDS_TAG": str(needs),
+            "PROMOTE_SCRIPT": str(promote),
+            "REQUIRE_EPHEMERAL_ONLY": "true",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(0)
+    assert_that(result.stdout).contains(":pinned-abcdef1")

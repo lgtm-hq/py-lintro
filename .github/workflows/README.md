@@ -190,7 +190,9 @@ validation channels (see "Validation-only switches" below and
   candidate and retag its exact digest as `lintro-tools:latest`; ordinary main tools
   changes (including installer/build-script updates) use a canonical publish fallback.
   Consumer-only digest pins are skipped. A merged Renovate PR with a missing candidate
-  fails closed rather than rebuilding.
+  fails closed rather than rebuilding. Every successful classify also ensures the digest
+  currently pinned on main has a `pinned-<sha7>` tag (idempotent; does not move
+  `latest`). Re-running an old promote still moves `latest` backwards.
 
 ## Security & maintenance
 
@@ -198,9 +200,11 @@ validation channels (see "Validation-only switches" below and
   (`py-lintro`, `py-lintro-base`) plus age-based sweeps of ephemeral `ci-*`, `sha-*`,
   `renovate-*`, and tools candidate tags. The reusable candidate build emits the custom
   candidate tag plus `sha-*`/`renovate-*` companion tags; candidates are removed when
-  their PR is closed without merge or they are at least 14 days old. Versions with any
-  persistent tag (such as promoted `latest`) are retained because GHCR deletes a whole
-  package version, not one tag.
+  their PR is closed without merge or they are at least 14 days old, unless a
+  default-branch or open `renovate/*` Dockerfile still pins that digest. `latest` is not
+  durable. Persist `pinned-<sha7>` on the digest main pins; the sweeper never treats
+  `pinned-*` versions as candidates and does not prune old pinned tags. GHCR deletes a
+  whole package version, not one tag.
 - **Digest-lag diagnostics** — `verify-manifest-tools.py` reports the tool, expected
   version, and lagging image tag/digest with the actionable `digest-bump required`
   message. It deliberately does not invent a PR number: the verifier runs inside an

@@ -25,6 +25,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
         "scripts/ci/is-infra-flake-failure.sh",
         "scripts/ci/resolve-docker-rolling-tags.sh",
         "scripts/ci/promote-ci-docker-images.sh",
+        "scripts/ci/tag-pinned-tools-digest.sh",
         "scripts/ci/check-tools-manifest-staleness.sh",
         "scripts/ci/cosign-sign-images.sh",
         "scripts/ci/testing/pull-ci-docker-images.sh",
@@ -280,7 +281,7 @@ def test_resolve_docker_rolling_tags_fails_closed_on_invalid_inputs(
 
 @pytest.mark.parametrize(
     "missing",
-    ["SOURCE_IMAGE", "CI_TAG", "TAGS"],
+    ["SOURCE_IMAGE", "TAGS"],
 )
 def test_promote_ci_docker_images_requires_env(missing: str) -> None:
     """promote-ci-docker-images.sh should fail fast on missing env vars."""
@@ -300,6 +301,26 @@ def test_promote_ci_docker_images_requires_env(missing: str) -> None:
     )
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains(f"{missing} is required")
+
+
+def test_promote_ci_docker_images_requires_ci_tag_or_source_digest() -> None:
+    """A promote without CI_TAG or SOURCE_DIGEST must fail closed."""
+    script_path = (_REPO_ROOT / "scripts/ci/promote-ci-docker-images.sh").resolve()
+    result = subprocess.run(  # nosec B603 - fixed argv run against a repo script
+        [str(script_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ.copy(),
+            "SOURCE_IMAGE": "ghcr.io/example/app",
+            "CI_TAG": "",
+            "SOURCE_DIGEST": "",
+            "TAGS": "ghcr.io/example/app:main",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(2)
+    assert_that(result.stderr).contains("CI_TAG or SOURCE_DIGEST is required")
 
 
 def test_promote_ci_docker_images_promotes_by_digest(tmp_path: Path) -> None:
