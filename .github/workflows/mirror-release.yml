@@ -53,7 +53,7 @@ concurrency:
 jobs:
   mirror-bump:
     name: Bump lintro-pre-commit mirror
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     # 50 min covers the configured step budgets: PyPI wheel wait ~20
     # (30 x (30s curl + 10s sleep)), wheel verify/download ~6 (300s
     # download + metadata + bundle), mint/commit/PR 1-2, merge poll 15

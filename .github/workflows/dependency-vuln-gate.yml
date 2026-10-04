@@ -53,7 +53,7 @@ concurrency:
 jobs:
   dependency-vuln-scan:
     name: 🔐 Dependency Vulnerability Gate
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 20
     permissions:
       # read: checkout only. Unlike the release gate this job uploads no SARIF
