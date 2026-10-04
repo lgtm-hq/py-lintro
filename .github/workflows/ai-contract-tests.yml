@@ -62,7 +62,7 @@ concurrency:
 jobs:
   tier1-flag-surface:
     name: 🧾 AI CLI Flag Surface (Tier 1)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the contract suite and the image pin
       packages: read # pull the pinned lintro-ai-tools image from GHCR
@@ -110,7 +110,7 @@ jobs:
     # Gated on the free tier: there is no point spending quota to discover a
     # problem `--help` already proved.
     needs: [tier1-flag-surface]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the contract suite and the image pin
       packages: read # pull the pinned lintro-ai-tools image from GHCR

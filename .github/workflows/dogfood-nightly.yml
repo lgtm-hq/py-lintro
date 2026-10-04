@@ -48,7 +48,7 @@ jobs:
   # is skipped, and classify-failure pings the tracker for the lost night.
   resolve-image:
     name: 🏷️ Resolve Dogfood Image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the resolver script
       packages: read # read GHCR manifests/labels (no image pull)
@@ -181,7 +181,7 @@ jobs:
     # reported from 2026-09-10 on. Kept in the nightly (not the required
     # docker-ci gate) so drift surfaces loudly without wedging every PR.
     needs: [resolve-image]
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # checkout the verifier script + manifest
       packages: read # anonymous/authenticated GHCR pull of the resolved image
@@ -238,7 +238,7 @@ jobs:
       always() &&
       !cancelled() &&
       needs.resolve-image.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # pull the resolved image from GHCR
@@ -336,7 +336,7 @@ jobs:
         needs.dogfood-skip-gate.result == 'cancelled'
       ) &&
       needs.dogfood-skip-gate.outputs.status == ''
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: read # pull the resolved image from GHCR
@@ -432,7 +432,7 @@ jobs:
       - dogfood-skip-gate
       - dogfood_skip_gate_retry
     if: always() && !cancelled()
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     permissions:
       contents: read # sparse checkout of the classifier scripts below
     timeout-minutes: 5
