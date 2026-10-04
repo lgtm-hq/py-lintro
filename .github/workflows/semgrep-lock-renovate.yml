@@ -85,7 +85,7 @@ jobs:
         # Append mode never moves the ref and fails cleanly if Renovate pushed
         # again after this run started; that newer push starts its own run.
         # yamllint disable-line rule:line-length
-        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@234e84901ae4ac14f2d44f02fad517d95712cec3 # v0.75.0
+        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
         with:
           token: ${{ steps.digest-app.outputs.token }}
           branch: ${{ github.ref_name }}
