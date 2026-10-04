@@ -311,12 +311,12 @@ jobs:
         # an install flake must not silently skip the GHCR promotion.
         id: setup-uv
         continue-on-error: true
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: ${{ env.UV_VERSION }}
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
           version: ${{ env.UV_VERSION }}
       - name: Check semgrep lockfile drift
@@ -419,7 +419,7 @@ jobs:
           needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork == 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           driver: docker
       - name: Set up Docker Buildx
@@ -427,7 +427,7 @@ jobs:
           needs.changes.outputs.pipeline != 'false' &&
           steps.fork-check.outputs.is-fork != 'true'
         # yamllint disable-line rule:line-length
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to GitHub Container Registry
         if: >-
           needs.changes.outputs.pipeline != 'false' &&
