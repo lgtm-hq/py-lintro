@@ -519,6 +519,18 @@
       ],
       "datasourceTemplate": "github-tags",
       "depNameTemplate": "lgtm-hq/lgtm-ci"
+    },
+    {
+      "description": "Keep the html-validate pin stamped in docs/configuration.md in lockstep with package.json (test_documentation.py asserts the stamp; #2842)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^docs/configuration\\.md$/"
+      ],
+      "matchStrings": [
+        "the pinned html-validate \\(currently `(?<currentValue>[^`]+)`\\)"
+      ],
+      "depNameTemplate": "html-validate",
+      "datasourceTemplate": "npm"
     }
   ]
 }

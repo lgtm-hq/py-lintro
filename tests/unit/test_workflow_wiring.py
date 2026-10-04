@@ -2075,6 +2075,53 @@ def test_renovate_does_not_automerge_golangci_lint_pin() -> None:
     ).is_not_empty()
 
 
+def test_renovate_manages_html_validate_docs_pin() -> None:
+    """A Renovate customManager must match the docs html-validate pin (#2842).
+
+    ``test_html_validate_docs_pin_matches_manifest`` requires
+    ``docs/configuration.md`` to stamp ``(currently `<pin>`)``. Without a
+    regex manager whose pattern matches that line, every html-validate bump
+    PR fails the test until the docs are edited by hand.
+    """
+    from lintro._tool_versions import get_tool_version
+
+    config = json.loads((_REPO_ROOT / "renovate.json").read_text(encoding="utf-8"))
+    config_doc = (_REPO_ROOT / "docs" / "configuration.md").read_text(
+        encoding="utf-8",
+    )
+
+    matching = [
+        manager
+        for manager in config["customManagers"]
+        if "/^docs/configuration\\.md$/" in manager.get("managerFilePatterns", [])
+    ]
+    assert_that(matching).described_as(
+        "exactly one Renovate customManager must target docs/configuration.md",
+    ).is_length(1)
+
+    manager = matching[0]
+    assert_that(manager.get("depNameTemplate")).described_as(
+        "the docs-pin manager must share the html-validate depName so it lands in "
+        "the same branch and the linting-tools group as the package.json bump",
+    ).is_equal_to("html-validate")
+    assert_that(manager.get("datasourceTemplate")).is_equal_to("npm")
+
+    pin = get_tool_version(tool_name="html-validate")
+    assert_that(pin).is_not_none()
+    captured = []
+    for match_string in manager.get("matchStrings", []):
+        # Renovate uses JS named groups, `(?<name>...)`; Python wants
+        # `(?P<name>...)`.
+        pattern = re.sub(r"\(\?<(\w+)>", r"(?P<\1>", match_string)
+        found = re.search(pattern, config_doc)
+        if found and "currentValue" in found.groupdict():
+            captured.append(found.group("currentValue"))
+    assert_that(captured).described_as(
+        "no matchString of the docs-pin manager captures the stamped pin in "
+        "docs/configuration.md",
+    ).contains(pin)
+
+
 def test_build_binary_retries_setup_uv_on_failure() -> None:
     """Each setup-uv job keeps a continue-on-error + retry pair (#1513)."""
     workflow = _load_workflow(name=_BUILD_BINARY_WORKFLOW)
