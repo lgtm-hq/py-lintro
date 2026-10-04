@@ -23,7 +23,8 @@ This file is a library: source it, do not run it.
 Provides:
   semgrep_lock_project_root   Echo the repository root.
   semgrep_lock_require_inputs Fail unless requirements-semgrep.in and uv exist.
-  semgrep_lock_compile <out>  Resolve requirements-semgrep.in into <out>
+  semgrep_lock_compile <out> [--upgrade]
+                              Resolve requirements-semgrep.in into <out>
                               (hash-pinned, Python 3.11 floor).
   semgrep_lock_strip_header <file>
                               Echo <file> without uv's generated header
@@ -63,8 +64,10 @@ semgrep_lock_require_inputs() {
 #
 # Arguments:
 #   $1 - Output path (absolute, or relative to the repository root).
+#   $2 - Optional --upgrade to refresh compatible transitive pins.
 semgrep_lock_compile() {
 	local output_file="$1"
+	shift
 	local project_root
 	project_root="$(semgrep_lock_project_root)"
 	(
@@ -74,6 +77,7 @@ semgrep_lock_compile() {
 			--generate-hashes \
 			--python-version 3.11 \
 			--output-file "${output_file}" \
+			"$@" \
 			requirements-semgrep.in
 	)
 }

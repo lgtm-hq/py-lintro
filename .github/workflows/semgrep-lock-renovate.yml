@@ -1,0 +1,96 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Dependencies - Renovate Semgrep Lock
+
+# Branch matching includes weekly maintenance even when no semgrep input changed.
+# The canonical-repository and actor guards keep forks and other writers out.
+'on':
+  push:
+    branches: ['renovate/semgrep-*', 'renovate/lock-file-maintenance']
+
+permissions: {}
+
+concurrency:
+  group: semgrep-lock-renovate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regenerate:
+    name: Regenerate semgrep lockfile
+    if: >-
+      github.repository == 'lgtm-hq/py-lintro' &&
+      github.actor == 'renovate[bot]'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    timeout-minutes: 15
+    steps:
+      - name: Harden Runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
+            github-releases.githubusercontent.com:443
+            astral.sh:443
+            releases.astral.sh:443
+            pypi.org:443
+            files.pythonhosted.org:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout Renovate branch
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Read uv version from tools image
+        id: uv-version
+        run: scripts/ci/read-tools-uv-version.sh
+      - name: Install uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          # Resolve with the same uv version as the drift gate.
+          version: ${{ steps.uv-version.outputs.version }}
+      - name: Compile semgrep lockfile
+        id: compile
+        run: >-
+          scripts/ci/compile-semgrep-lock.sh
+          ${{ github.ref_name == 'renovate/lock-file-maintenance'
+          && '--upgrade' || '' }}
+      - name: Check lockfile diff
+        if: steps.compile.outputs.changed == 'true'
+        run: git diff --check
+      - name: Mint lgtm-digest-bump token
+        if: steps.compile.outputs.changed == 'true'
+        id: digest-app
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.DIGEST_APP_ID }}
+          private-key: ${{ secrets.DIGEST_APP_PRIVATE_KEY }}
+          permission-contents: write
+      - name: Create signed semgrep lock commit
+        if: steps.compile.outputs.changed == 'true'
+        # GitHub creates and signs the commit (createCommitOnBranch), so it
+        # satisfies main's required_signatures once the PR squash-merges.
+        # Append mode never moves the ref and fails cleanly if Renovate pushed
+        # again after this run started; that newer push starts its own run.
+        # yamllint disable-line rule:line-length
+        uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@22bb159287eb23a812d533090615525eccb839ac # v0.75.1
+        with:
+          token: ${{ steps.digest-app.outputs.token }}
+          branch: ${{ github.ref_name }}
+          mode: append
+          expected-head: ${{ github.sha }}
+          message: 'chore(deps): regenerate semgrep lockfile'
+          files: |
+            requirements-semgrep.txt

@@ -4,10 +4,9 @@ set -euo pipefail
 # check-semgrep-lock.sh - Fail when requirements-semgrep.txt no longer
 # matches requirements-semgrep.in (#2436).
 #
-# Nothing recompiles the isolated semgrep lockfile automatically: the
-# Mend-hosted Renovate app does not execute post-upgrade commands, so a
-# semgrep bump used to ship a stale lockfile and turn every downstream job
-# red for unrelated-looking reasons. This gate resolves the .in pin into a
+# The semgrep-lock-renovate workflow recompiles on Renovate pushes (#2841).
+# The Mend-hosted app does not execute post-upgrade commands; this gate also
+# catches stale locks from manual pin changes. It resolves the .in pin into a
 # temporary file through the same helper compile-semgrep-lock.sh uses, diffs
 # it against the committed lockfile, and names the one command that fixes it.
 
