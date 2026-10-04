@@ -21,6 +21,20 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.171.3] - 2026-10-04
+
+### Changed
+
+- **deps**: update ai agent clis (#2822) (59b74fb)
+- **deps**: regenerate semgrep locks on Renovate branches (#2844) (308f819)
+- **renovate**: bump the html-validate docs pin in the same PR as the tool (#2843)
+  (136eade)
+- **deps**: update dependency lgtm-hq/lgtm-ci to v0.75.1 (patch) (#2857) (f8a52cd)
+
+### Fixed
+
+- **ci**: keep pinned lintro-tools digests from being swept (#2855) (dbb0d36)
+
 ## [0.171.2] - 2026-10-03
 
 ### Changed
