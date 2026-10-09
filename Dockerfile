@@ -69,11 +69,17 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 # New binaries land in docker/tools.Dockerfile, but this app image still
 # FROMs a digest-pinned tools image that will not contain them until the
 # next published digest. Bridge typos, spectral, buf, import-linter, pylint,
-# cppcheck and checkov here so dogfood and the manifest-vs-image gate run
-# them instead of failing with binary_missing. No-op once the digest already
-# has them on PATH.
-RUN chmod +x /app/scripts/utils/install-tools.sh && \
-    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov && \
+# cppcheck, checkov and rubocop here so dogfood and the manifest-vs-image
+# gate run them instead of failing with binary_missing. No-op once the digest
+# already has them on PATH. rubocop is a Ruby gem, so the ruby runtime the
+# pinned digest predates has to come along with it.
+# hadolint ignore=DL3008
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    (command -v gem >/dev/null || (apt-get update && \
+    apt-get install -y --no-install-recommends ruby ruby-dev)) && \
+    chmod +x /app/scripts/utils/install-tools.sh && \
+    /app/scripts/utils/install-tools.sh --docker --tools typos,spectral,buf,import-linter,pylint,cppcheck,checkov,rubocop && \
     rm -rf /var/lib/apt/lists/*
 
 # hadolint ignore=DL3008

@@ -180,6 +180,7 @@ def get_install_hints() -> dict[str, str]:
         "pylint": (
             "Install via: pip install 'pylint>={version}' or uv add 'pylint>={version}'"
         ),
+        "rubocop": "Install via: gem install rubocop -v {version}",
         "ruff": ("Install via: pip install ruff>={version} or uv add ruff>={version}"),
         "yamllint": (
             "Install via: pip install yamllint>={version} or uv add yamllint>={version}"

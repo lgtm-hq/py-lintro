@@ -97,6 +97,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "tools/pydoclint": ("pydoclint", "python"),
     "tools/pylint": ("pylint", "python"),
     "tools/pytest": ("pytest", "python"),
+    "tools/rubocop": ("rubocop", "ruby"),
     "tools/ruff": ("ruff", "python"),
     "tools/spectral": ("spectral", "config"),
     "tools/svelte-check": ("svelte-check", "frameworks"),

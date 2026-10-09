@@ -128,6 +128,7 @@ order and for what changed.
   `apt-get install cppcheck`)
 - `golangci-lint` - Go meta-linter running 100+ linters (`brew install golangci-lint` or
   <https://golangci-lint.run/welcome/install/>; requires the Go toolchain)
+- `rubocop` - Ruby linter and formatter (`gem install rubocop`)
 - `shellcheck` - Shell script analyzer (`brew install shellcheck` or GitHub releases)
 - `shfmt` - Shell script formatter (`brew install shfmt` or GitHub releases)
 - `dotenv-linter` - `.env` file linter and fixer (`brew install dotenv-linter`,

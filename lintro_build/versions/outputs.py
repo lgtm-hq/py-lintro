@@ -11,8 +11,9 @@ from .seed import Seed
 
 # Install types that resolve from ``binary_versions`` parsed out of
 # ``lintro/_tool_versions.py``. Update this set when the manifest schema gains a
-# new binary-like installer such as ``binary``, ``cargo``, or ``rustup``.
-BINARY_INSTALL_TYPES = frozenset({"binary", "cargo", "rustup"})
+# new binary-like installer such as ``binary``, ``cargo``, ``gem`` or
+# ``rustup``.
+BINARY_INSTALL_TYPES = frozenset({"binary", "cargo", "gem", "rustup"})
 
 GENERATED_HEADER = '''\
 """Auto-generated tool versions. Do not edit by hand.
