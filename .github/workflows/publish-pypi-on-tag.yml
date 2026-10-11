@@ -66,7 +66,7 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -202,7 +202,7 @@ jobs:
         # Artifact service hops for download/upload-artifact, the GitHub API
         # for the attestations, and the sigstore TUF root gh verifies with.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -237,27 +237,27 @@ jobs:
         run: scripts/ci/release-fault.sh fail-build
       - name: Download Python distribution
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: python-dist
           path: gate/dist
       - name: Download macOS binaries
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: lintro-macos-*
           merge-multiple: true
           path: gate/binaries
       - name: Download Linux binaries
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: lintro-linux-*
           merge-multiple: true
           path: gate/binaries
       - name: Download man page
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: lintro-man-page
           path: gate/man
@@ -285,7 +285,7 @@ jobs:
         run: python3 scripts/ci/release-gate/write_manifest.py
       - name: Upload release assets
         # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-assets
           path: release-assets/
@@ -295,7 +295,7 @@ jobs:
           retention-days: 90
       - name: Upload release manifest
         # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-manifest
           path: release-manifest.json
@@ -323,7 +323,7 @@ jobs:
     steps:
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: block
           # lgtm-ci workflow-contract.md § PyPI upload (OIDC)
@@ -636,7 +636,7 @@ jobs:
         # same entry release-gate carries; S1 of #2633 (v0.160.3rc1) died in
         # "Verify attestations on the staging digests" without it.
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: block
           allowed-endpoints: >

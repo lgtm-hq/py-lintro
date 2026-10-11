@@ -39,7 +39,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -62,18 +62,18 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.14'
+          python-version: '3.15'
 
       - name: Install uv
         id: setup-uv
         continue-on-error: true
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: ${{ env.UV_VERSION }}
 
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -87,7 +87,7 @@ jobs:
         run: uv run python scripts/generate-man-page.py --output dist/lintro.1
 
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: lintro-man-page
           path: dist/lintro.1
@@ -133,7 +133,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: 'block'
           # The sigstore hosts and token.actions.githubusercontent.com serve
@@ -167,12 +167,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.14'
+          python-version: '3.15'
 
       - name: Install uv
         id: setup-uv
         continue-on-error: true
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -181,7 +181,7 @@ jobs:
       # one retry runs on a warm network path. See #1513 / #1487.
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -251,7 +251,7 @@ jobs:
 
       - name: Upload memory diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: memory-diagnostics-macos-${{ matrix.arch }}
           path: |
@@ -309,7 +309,7 @@ jobs:
       # is not a conflict — run 33996465351 carries two `sha256-linux-x64`
       # artifacts, one per attempt, and the reuse check reads them by run id.
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: lintro-macos-${{ matrix.arch }}
           path: dist/nuitka/lintro-macos-${{ matrix.arch }}
@@ -327,7 +327,7 @@ jobs:
           echo "$SHA256" > "sha256-$BUILD_ARCH.txt"
 
       - name: Upload SHA256 file
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sha256-${{ matrix.arch }}
           path: sha256-${{ matrix.arch }}.txt
@@ -376,7 +376,7 @@ jobs:
         # The sigstore hosts and token.actions.githubusercontent.com serve
         # the attest step (OIDC token, Fulcio certificate, Rekor entry).
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
           egress-policy: 'block'
           allowed-endpoints: >
@@ -408,12 +408,12 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
         with:
-          python-version: '3.14'
+          python-version: '3.15'
 
       - name: Install uv
         id: setup-uv
         continue-on-error: true
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -422,7 +422,7 @@ jobs:
       # one retry runs on a warm network path. See #1513 / #1487.
       - name: Install uv (retry)
         if: steps.setup-uv.outcome == 'failure'
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           version: ${{ env.UV_VERSION }}
 
@@ -477,7 +477,7 @@ jobs:
 
       - name: Upload memory diagnostics
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: memory-diagnostics-linux-${{ matrix.arch }}
           path: |
@@ -527,7 +527,7 @@ jobs:
       # Ungated on reuse and `overwrite:`-free for the same reason as the macOS
       # job above (#2435).
       - name: Upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: lintro-linux-${{ matrix.arch }}
           path: dist/nuitka/lintro-linux-${{ matrix.arch }}
@@ -543,7 +543,7 @@ jobs:
           echo "$SHA256" > sha256-linux-${{ matrix.arch }}.txt
 
       - name: Upload SHA256 file
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: sha256-linux-${{ matrix.arch }}
           path: sha256-linux-${{ matrix.arch }}.txt
