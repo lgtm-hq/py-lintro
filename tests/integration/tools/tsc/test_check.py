@@ -397,8 +397,7 @@ def test_check_js_path_use_project_files_finds_ts_errors(
         tmp_path: Pytest fixture providing a temporary directory.
     """
     (tmp_path / "tsconfig.json").write_text(
-        '{"compilerOptions": {"strict": true, "noEmit": true}, '
-        '"include": ["*.ts"]}',
+        '{"compilerOptions": {"strict": true, "noEmit": true}, ' '"include": ["*.ts"]}',
     )
     (tmp_path / "error.ts").write_text(
         "const y: number = 'string';\nexport { y };\n",

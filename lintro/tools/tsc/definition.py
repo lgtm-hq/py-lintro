@@ -187,32 +187,34 @@ def _js_file_has_ts_check(*, filepath: str) -> bool:
     in_block = False
     for raw_line in header.splitlines():
         stripped = raw_line.strip()
-        if in_block:
-            if "@ts-nocheck" in stripped:
-                return False
-            if "@ts-check" in stripped:
-                saw_check = True
-            if "*/" in stripped:
-                in_block = False
-            continue
-        if not stripped or stripped.startswith("#!"):
-            continue
-        if stripped.startswith("/*"):
-            if "@ts-nocheck" in stripped:
-                return False
-            if "@ts-check" in stripped:
-                saw_check = True
-            if "*/" not in stripped:
-                in_block = True
-            continue
-        if stripped.startswith("//"):
-            if "@ts-nocheck" in stripped:
-                return False
-            if "@ts-check" in stripped:
-                saw_check = True
-            continue
-        break
+        if not in_block:
+            if not stripped or stripped.startswith("#!"):
+                continue
+            if not stripped.startswith(("/*", "//")):
+                break
+        pragma = _ts_check_pragma(line=stripped)
+        if pragma is False:
+            return False
+        saw_check = saw_check or bool(pragma)
+        if in_block or stripped.startswith("/*"):
+            in_block = "*/" not in stripped
     return saw_check
+
+
+def _ts_check_pragma(*, line: str) -> bool | None:
+    """Classify a header comment line by its ``@ts-check`` pragma.
+
+    Args:
+        line: Stripped comment line from the JavaScript file header.
+
+    Returns:
+        ``False`` for ``@ts-nocheck``, ``True`` for ``@ts-check``, else ``None``.
+    """
+    if "@ts-nocheck" in line:
+        return False
+    if "@ts-check" in line:
+        return True
+    return None
 
 
 def _drop_uncheckable_js(
