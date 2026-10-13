@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING
 import pytest
 from assertpy import assert_that
 
-from lintro.tools.definitions.prettier import PRETTIER_TEST_MODE_ENV
+from lintro.tools.prettier.definition import PRETTIER_TEST_MODE_ENV
 
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from lintro.tools.definitions.prettier import PrettierPlugin
+    from lintro.tools.prettier.definition import PrettierPlugin
 
 
 def test_isolation_args_empty_outside_test_mode(
