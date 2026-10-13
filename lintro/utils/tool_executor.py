@@ -78,7 +78,6 @@ __all__ = [
 ]
 
 
-
 def _finalize_template_aware_result(
     tool: BaseToolPlugin,
     result: ToolResult,

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 from assertpy import assert_that
 
 from lintro.config.template_aware_config import TemplateAwareConfig
 from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.ruff.ruff_issue import RuffIssue
+from lintro.plugins.base import BaseToolPlugin
 from lintro.template_aware import prepare_templates_for_tool
 from lintro.utils.tool_executor import _finalize_template_aware_result
 
@@ -55,12 +57,18 @@ def test_finalize_tool_result_with_metadata_remaps_files(
     )
     tool = SimpleNamespace(_template_aware_session=session)
 
-    finalized = _finalize_template_aware_result(tool=tool, result=result)
+    finalized = _finalize_template_aware_result(
+        tool=cast(BaseToolPlugin, tool),
+        result=result,
+    )
 
+    assert finalized.issues is not None
     assert_that(finalized.issues).is_length(1)
-    assert_that(finalized.issues[0].file).is_equal_to(str(template.resolve()))
-    assert_that(finalized.issues[0].line).is_equal_to(2)
-    assert_that(finalized.issues[0].end_line).is_equal_to(2)
+    issue = finalized.issues[0]
+    assert isinstance(issue, RuffIssue)
+    assert_that(issue.file).is_equal_to(str(template.resolve()))
+    assert_that(issue.line).is_equal_to(2)
+    assert_that(issue.end_line).is_equal_to(2)
     assert_that(finalized.metadata).is_equal_to(metadata)
     assert_that(finalized.timed_out).is_false()
     assert_that(hasattr(finalized, "ai_metadata")).is_false()

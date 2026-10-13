@@ -27,10 +27,10 @@ template_aware:
 lintro check --tools ruff
 ```
 
-Template-aware mode is **check-only**. `lintro fmt` / `lintro format` does not
-rewrite `*.jinja` sources in this release: formatters would write the stub-rendered
-temp file, which is then deleted. Format of `*.jinja` is skipped (the original
-template is left unchanged). Use `lintro check` to lint templates.
+Template-aware mode is **check-only**. `lintro fmt` / `lintro format` does not rewrite
+`*.jinja` sources in this release: formatters would write the stub-rendered temp file,
+which is then deleted. Format of `*.jinja` is skipped (the original template is left
+unchanged). Use `lintro check` to lint templates.
 
 With the defaults, `*.py.jinja` files under the scanned paths are stub-rendered to
 temporary `.py` files, checked with ruff, and issues are reported against the original

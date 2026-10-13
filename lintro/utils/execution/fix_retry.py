@@ -39,6 +39,7 @@ def run_fix_with_retry(
         ToolResult: Merged result across all passes.
     """
     from loguru import logger
+
     from lintro.utils.tool_executor import _finalize_template_aware_result
 
     result = _finalize_template_aware_result(

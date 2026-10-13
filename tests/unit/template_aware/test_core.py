@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from assertpy import assert_that
@@ -448,6 +449,7 @@ def test_translate_result_preserves_metadata_and_timed_out(
 
         translated = session.translate_result(result)
 
+        assert translated.issues is not None
         assert_that(translated.issues).is_length(1)
         assert_that(translated.issues[0].file).ends_with("svc.py.jinja")
         assert_that(translated.metadata).is_equal_to(metadata)
@@ -476,8 +478,8 @@ def test_prepare_templates_cleans_temp_dir_on_unexpected_error(
     real_td = tempfile.TemporaryDirectory
 
     def _tracking_temporary_directory(
-        *args: object,
-        **kwargs: object,
+        *args: Any,
+        **kwargs: Any,
     ) -> tempfile.TemporaryDirectory[str]:
         temp_dir = real_td(*args, **kwargs)
         created.append(temp_dir.name)
