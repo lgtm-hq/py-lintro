@@ -55,7 +55,7 @@ def fetch_licenses_json() -> dict[str, Any]:
         headers={"User-Agent": "lintro-spdx-codegen/1.0"},
     )
     try:
-        with urllib.request.urlopen(  # noqa: S310 — fixed HTTPS SPDX URL  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
+        with urllib.request.urlopen(  # nosemgrep: dynamic-urllib-use-detected  # nosec B310
             request,
             timeout=_FETCH_TIMEOUT_SECONDS,
         ) as response:
