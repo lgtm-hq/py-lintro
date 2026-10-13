@@ -144,6 +144,9 @@ order and for what changed.
   `typos.toml`, `.typos.toml` or `_typos.toml` exists at a scan root. `--tools typos`
   and an unscoped Lintro config still run it; after `lintro init`, add it to
   `execution.enabled_tools` (the recommended profile's language allowlist omits it)
+- `terraform` - Terraform formatter (`terraform fmt`) and validator
+  (`terraform validate`) (`brew install hashicorp/tap/terraform` or
+  [HashiCorp releases](https://releases.hashicorp.com/terraform))
 - `vale` - Prose/documentation linter (`brew install vale` or GitHub releases); requires
   a `.vale.ini`, otherwise lintro skips it as a non-error
 - `cargo-audit` - Rust dependency vulnerability scanner (`cargo install cargo-audit`)

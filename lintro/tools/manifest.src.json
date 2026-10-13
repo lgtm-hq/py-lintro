@@ -54,7 +54,7 @@
     "protobuf": ["buf"],
     "shell": ["shellcheck", "shfmt"],
     "docker": ["hadolint"],
-    "terraform": ["checkov"],
+    "terraform": ["checkov", "terraform"],
     "yaml": ["yamllint"],
     "markdown": ["markdownlint", "vale"],
     "html": ["html_validate"],
@@ -529,6 +529,17 @@
       "version_command": ["taplo", "--version"],
       "languages": ["toml"],
       "tags": ["linter", "formatter"]
+    },
+    {
+      "name": "terraform",
+      "install": {
+        "type": "binary"
+      },
+      "tier": "tools",
+      "category": "external",
+      "version_command": ["terraform", "version"],
+      "languages": ["terraform"],
+      "tags": ["linter", "formatter", "infrastructure"]
     },
     {
       "name": "trufflehog",

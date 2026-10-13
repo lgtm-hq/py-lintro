@@ -74,6 +74,7 @@ export const NAV_GROUP_BY_ID: Partial<Record<string, string>> = {
   'tools/import-linter': 'python',
   'tools/pylint': 'python',
   'tools/checkov': 'security',
+  'tools/terraform': 'ci-ops',
   'tools/osv-scanner': 'security',
   'tools/pip-audit': 'security',
   'tools/trufflehog': 'security',

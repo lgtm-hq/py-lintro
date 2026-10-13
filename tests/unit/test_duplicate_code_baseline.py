@@ -86,6 +86,7 @@ GATE_PACKAGES: tuple[str, ...] = (
     "lintro/tools/stylelint",
     "lintro/tools/svelte_check",
     "lintro/tools/taplo",
+    "lintro/tools/terraform",
     "lintro/tools/trufflehog",
     "lintro/tools/ts_checker",
     "lintro/tools/tsc",

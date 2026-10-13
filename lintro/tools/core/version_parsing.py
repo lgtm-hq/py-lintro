@@ -70,6 +70,7 @@ TOOLS_WITH_SIMPLE_VERSION_PATTERN: set[ToolName] = {
     ToolName.STYLELINT,
     ToolName.SVELTE_CHECK,
     ToolName.TAPLO,
+    ToolName.TERRAFORM,
     ToolName.TRUFFLEHOG,
     ToolName.TYPOS,
     ToolName.VALE,

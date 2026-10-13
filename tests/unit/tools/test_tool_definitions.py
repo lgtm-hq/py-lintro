@@ -58,6 +58,13 @@ TOOL_SPECS = [
         False,
     ),
     (ToolName.BANDIT, "lintro.tools.bandit.definition", "BanditPlugin", 90, False),
+    (
+        ToolName.TERRAFORM,
+        "lintro.tools.terraform.definition",
+        "TerraformPlugin",
+        60,
+        True,
+    ),
 ]
 
 
