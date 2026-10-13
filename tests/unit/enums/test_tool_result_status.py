@@ -5,9 +5,9 @@ from __future__ import annotations
 from assertpy import assert_that
 
 from lintro.enums.action import Action
-from lintro.enums.tool_result_status import ToolResultStatus, status_for_tool_result
+from lintro.enums.tool_result_status import ToolResultStatus
 from lintro.models.core.tool_result import ToolResult
-from lintro.utils.json_output import serialize_tool_result
+from lintro.utils.json_output import serialize_tool_result, status_for_tool_result
 
 
 def test_tool_result_status_values() -> None:

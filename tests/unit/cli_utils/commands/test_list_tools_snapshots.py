@@ -33,8 +33,14 @@ def _snapshot(
     )
 
 
-def test_list_tools_json_missing_snapshot_reports_unknown_not_unavailable() -> None:
-    """Missing snapshots omit ``available`` and use ``status: unknown``."""
+def test_list_tools_json_missing_snapshot_reports_unknown_not_unavailable(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Missing snapshots omit ``available`` and use ``status: unknown``.
+
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
+    """
     from lintro.cli_utils.commands.list_tools import list_tools
 
     plugin = MagicMock()
@@ -60,21 +66,25 @@ def test_list_tools_json_missing_snapshot_reports_unknown_not_unavailable() -> N
             "lintro.tools.core.snapshots.probe_all_tools",
             return_value={},
         ),
-        patch("lintro.cli_utils.commands.list_tools.click.echo") as mock_echo,
     ):
         list_tools(
             output=None,
-            show_conflicts=False,
             json_output=True,
         )
 
-    payload = json.loads(mock_echo.call_args[0][0])
+    payload = json.loads(capsys.readouterr().out)
     assert_that(payload["ruff"]).does_not_contain_key("available")
     assert_that(payload["ruff"]["status"]).is_equal_to(ToolResultStatus.UNKNOWN)
 
 
-def test_list_tools_json_available_without_version_reports_unknown() -> None:
-    """An available tool with no parsed version shows ``unknown``, not ``ok (?)``."""
+def test_list_tools_json_available_without_version_reports_unknown(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An available tool with no parsed version shows ``unknown``, not ``ok (?)``.
+
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
+    """
     from lintro.cli_utils.commands.list_tools import list_tools
 
     plugin = MagicMock()
@@ -102,22 +112,26 @@ def test_list_tools_json_available_without_version_reports_unknown() -> None:
             "lintro.tools.core.snapshots.probe_all_tools",
             return_value={"idiom-review": snap},
         ),
-        patch("lintro.cli_utils.commands.list_tools.click.echo") as mock_echo,
     ):
         list_tools(
             output=None,
-            show_conflicts=False,
             json_output=True,
         )
 
-    payload = json.loads(mock_echo.call_args[0][0])
+    payload = json.loads(capsys.readouterr().out)
     assert_that(payload["idiom-review"]["available"]).is_true()
     assert_that(payload["idiom-review"]["status"]).is_equal_to(ToolResultStatus.UNKNOWN)
     assert_that(payload["idiom-review"]["version"]).is_none()
 
 
-def test_list_tools_json_unavailable_snapshot_sets_status_and_available() -> None:
-    """Unavailable snapshots keep ``available: false`` and remediation hints."""
+def test_list_tools_json_unavailable_snapshot_sets_status_and_available(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unavailable snapshots keep ``available: false`` and remediation hints.
+
+    Args:
+        capsys: Pytest stdout/stderr capture fixture.
+    """
     from lintro.cli_utils.commands.list_tools import list_tools
 
     plugin = MagicMock()
@@ -145,15 +159,13 @@ def test_list_tools_json_unavailable_snapshot_sets_status_and_available() -> Non
             "lintro.tools.core.snapshots.probe_all_tools",
             return_value={"hadolint": snap},
         ),
-        patch("lintro.cli_utils.commands.list_tools.click.echo") as mock_echo,
     ):
         list_tools(
             output=None,
-            show_conflicts=False,
             json_output=True,
         )
 
-    payload = json.loads(mock_echo.call_args[0][0])
+    payload = json.loads(capsys.readouterr().out)
     assert_that(payload["hadolint"]["available"]).is_false()
     assert_that(payload["hadolint"]["status"]).is_equal_to(
         ToolResultStatus.UNAVAILABLE,

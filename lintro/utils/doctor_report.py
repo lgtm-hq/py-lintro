@@ -145,6 +145,85 @@ def tool_status_for_versions(
         return ToolStatus.UNKNOWN
 
 
+def _check_tool_from_snapshot(
+    *,
+    tool: ManifestTool,
+    snapshot: object,
+    hint: str,
+    upgrade_hint: str,
+) -> ToolCheckResult:
+    """Build a tool check result from a cached capability snapshot.
+
+    Args:
+        tool: Manifest tool entry.
+        snapshot: ToolSnapshot from the shared probe cache.
+        hint: Install hint for the tool.
+        upgrade_hint: Upgrade hint for the tool.
+
+    Returns:
+        ToolCheckResult with status and details.
+    """
+    available = bool(getattr(snapshot, "available", False))
+    version = getattr(snapshot, "version", None)
+    binary_path = getattr(snapshot, "binary_path", "") or None
+    probe_error = getattr(snapshot, "probe_error", None)
+    remediation = getattr(snapshot, "remediation_hint", None) or hint
+    if not available:
+        return ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.MISSING,
+            error="probe_failed",
+            details=probe_error or "unavailable",
+            path=binary_path,
+            install_hint=remediation,
+            upgrade_hint=upgrade_hint,
+        )
+    if not version:
+        return ToolCheckResult(
+            tool=tool,
+            status=ToolStatus.UNKNOWN,
+            error="no_version",
+            details=probe_error or "no version",
+            path=binary_path,
+            install_hint=hint,
+            upgrade_hint=upgrade_hint,
+        )
+    status = tool_status_for_versions(
+        installed=version,
+        recommended=tool.version,
+        minimum=tool.min_version,
+    )
+    advisory = None
+    if status in (ToolStatus.OUTDATED, ToolStatus.INCOMPATIBLE):
+        channel_path = resolve_channel_binary_path(
+            tool_name=tool.name,
+            install_bin=tool.install_bin,
+            install_component=tool.install_component,
+            probe_path=binary_path,
+            which=shutil.which,
+        )
+        advisory = build_outdated_version_advisory(
+            tool=tool.name,
+            installed=version,
+            latest_known=tool.version,
+            binary_path=(
+                str(channel_path) if channel_path is not None else binary_path
+            ),
+            install_package=tool.install_package,
+            install_type=tool.install_type,
+            channel_override=tool.update_channel,
+        )
+    return ToolCheckResult(
+        tool=tool,
+        status=status,
+        installed_version=version,
+        path=binary_path,
+        install_hint=hint,
+        upgrade_hint=upgrade_hint,
+        advisory=advisory,
+    )
+
+
 def check_tool(
     *,
     tool: ManifestTool,
@@ -183,42 +262,10 @@ def check_tool(
         upgrade_hint = f"Upgrade {tool.name} manually"
 
     if snapshot is not None:
-        available = bool(getattr(snapshot, "available", False))
-        version = getattr(snapshot, "version", None)
-        binary_path = getattr(snapshot, "binary_path", "") or None
-        probe_error = getattr(snapshot, "probe_error", None)
-        remediation = getattr(snapshot, "remediation_hint", None) or hint
-        if not available:
-            return ToolCheckResult(
-                tool=tool,
-                status=ToolStatus.MISSING,
-                error="probe_failed",
-                details=probe_error or "unavailable",
-                path=binary_path,
-                install_hint=remediation,
-                upgrade_hint=upgrade_hint,
-            )
-        if not version:
-            return ToolCheckResult(
-                tool=tool,
-                status=ToolStatus.UNKNOWN,
-                error="no_version",
-                details=probe_error or "no version",
-                path=binary_path,
-                install_hint=hint,
-                upgrade_hint=upgrade_hint,
-            )
-        status = tool_status_for_versions(
-            installed=version,
-            recommended=tool.version,
-            minimum=tool.min_version,
-        )
-        return ToolCheckResult(
+        return _check_tool_from_snapshot(
             tool=tool,
-            status=status,
-            installed_version=version,
-            path=binary_path,
-            install_hint=hint,
+            snapshot=snapshot,
+            hint=hint,
             upgrade_hint=upgrade_hint,
         )
 

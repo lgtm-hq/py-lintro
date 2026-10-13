@@ -237,12 +237,12 @@ def test_is_registered_returns_correct_boolean(tool_name: str, expected: bool) -
 
 
 def test_is_registered_and_get_origin_resolve_underscore_alias(
-    clean_registry: None,
+    empty_registry: None,
 ) -> None:
     """Hyphenated registry keys are visible via underscore aliases.
 
     Args:
-        clean_registry: Fixture to ensure clean registry state.
+        empty_registry: Fixture to ensure clean registry state.
     """
     plugin_class = create_fake_plugin(name="alias-origin-tool")
     ToolRegistry.register(plugin_class=plugin_class, origin="testdist")

@@ -933,8 +933,13 @@ def test_doctor_post_fix_blocks_only_non_retryable_outcomes() -> None:
 
 def test_doctor_fix_clears_snapshot_cache_after_install() -> None:
     """``--fix`` clears the capability cache before re-probing tools."""
+    from lintro.tools.core import snapshots
+
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
+    cache_file = snapshots._cache_file_path()
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text("{}", encoding="utf-8")
 
     with (
         p1,
@@ -948,13 +953,10 @@ def test_doctor_fix_clears_snapshot_cache_after_install() -> None:
             "lintro.cli_utils.commands.doctor._run_fix",
             return_value=[],
         ),
-        patch(
-            "lintro.tools.core.snapshots.clear_snapshot_cache",
-        ) as mock_clear,
     ):
         runner.invoke(doctor_command, ["--fix"])
 
-    mock_clear.assert_called_once()
+    assert_that(cache_file.exists()).is_false()
 
 
 def test_doctor_post_fix_quick_fix_skips_tools_that_did_not_resolve() -> None:

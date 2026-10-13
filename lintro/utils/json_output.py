@@ -17,7 +17,8 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from lintro.enums.action import Action, normalize_action
-from lintro.enums.tool_result_status import status_for_tool_result
+from lintro.enums.tool_result_status import ToolResultStatus
+from lintro.enums.tool_run_status import ToolRunStatus, tool_run_status
 from lintro.formatters.formatter import merge_detected_and_remaining
 from lintro.models.core.severity_counts import SeverityCounts, SeverityDelta
 from lintro.models.core.tool_result import ToolResult
@@ -26,6 +27,48 @@ from lintro.utils.tool_metadata import normalize_tool_metadata
 
 if TYPE_CHECKING:
     from lintro.parsers.base_issue import BaseIssue
+
+
+_RUN_STATUS_TO_RESULT_STATUS: dict[ToolRunStatus, ToolResultStatus] = {
+    ToolRunStatus.PASSED: ToolResultStatus.OK,
+    ToolRunStatus.ISSUES: ToolResultStatus.FAILED,
+    ToolRunStatus.SKIPPED: ToolResultStatus.SKIPPED,
+    ToolRunStatus.TIMED_OUT: ToolResultStatus.FAILED,
+    ToolRunStatus.ERRORED: ToolResultStatus.FAILED,
+}
+
+
+def status_for_tool_result(
+    result: ToolResult,
+    *,
+    issue_count: int | None = None,
+) -> ToolResultStatus:
+    """Derive the JSON ``status`` field for a completed tool result.
+
+    Classification follows :func:`~lintro.enums.tool_run_status.tool_run_status`
+    so timeouts and issue counts are not collapsed into ``ok``/``failed``
+    incorrectly. ``unavailable`` is checked first because it is outside the run
+    status vocabulary.
+
+    Args:
+        result: Tool result from a check/format/test run.
+        issue_count: Optional precomputed issue count. When omitted, merged
+            initial and remaining issues are counted like
+            :func:`~lintro.utils.json_output.serialize_tool_result`.
+
+    Returns:
+        ToolResultStatus: ``unavailable``, ``skipped``, ``ok``, or ``failed``.
+    """
+    if getattr(result, "unavailable", False):
+        return ToolResultStatus.UNAVAILABLE
+    if issue_count is None:
+        merged_issues = merge_detected_and_remaining(
+            getattr(result, "initial_issues", None),
+            getattr(result, "issues", None),
+        )
+        issue_count = len(merged_issues)
+    run_status = tool_run_status(result=result, issue_count=issue_count)
+    return _RUN_STATUS_TO_RESULT_STATUS[run_status]
 
 
 def serialize_issue(issue: "BaseIssue") -> dict[str, Any]:

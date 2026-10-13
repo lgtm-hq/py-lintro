@@ -393,15 +393,47 @@ def generated_version_artifacts(
 
 
 @pytest.fixture(autouse=True)
-def _clear_tool_snapshot_cache() -> Generator[None]:
-    """Clear capability-probe caches so tests do not share stale snapshots."""
-    from lintro.tools.core.snapshots import clear_snapshot_cache, set_force_fresh_probes
+def _clear_tool_snapshot_cache(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path_factory: pytest.TempPathFactory,
+) -> Generator[None]:
+    """Clear capability-probe caches so tests do not share stale snapshots.
 
-    clear_snapshot_cache(include_disk=False)
-    set_force_fresh_probes(False)
+    The on-disk cache defaults to ``<cwd>/.lintro-cache``, which every xdist
+    worker shares when tests run from the repository root. A snapshot probed
+    for real by one test would then satisfy a later test that mocks the probe,
+    so the default root is pointed at a per-worker temp directory and wiped
+    around each test. Calls passing an explicit ``cache_root`` are unaffected.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+        tmp_path_factory: Per-worker temporary directory factory.
+
+    Yields:
+        None: Clears the snapshot caches after the test.
+    """
+    from lintro.tools.core import snapshots
+
+    # Resolved once here: tests that patch ``Path.resolve`` must not break the
+    # cache clear in this fixture's teardown.
+    default_cache_file = (
+        tmp_path_factory.getbasetemp().resolve()
+        / "tool-snapshot-cache"
+        / snapshots.SNAPSHOT_CACHE_RELPATH
+    )
+    original_cache_file_path = snapshots._cache_file_path
+
+    def _isolated_cache_file_path(*, cache_root: Path | None = None) -> Path:
+        if cache_root is None:
+            return default_cache_file
+        return original_cache_file_path(cache_root=cache_root)
+
+    monkeypatch.setattr(snapshots, "_cache_file_path", _isolated_cache_file_path)
+    snapshots.clear_snapshot_cache()
+    snapshots.set_force_fresh_probes(False)
     yield
-    clear_snapshot_cache(include_disk=False)
-    set_force_fresh_probes(False)
+    snapshots.clear_snapshot_cache()
+    snapshots.set_force_fresh_probes(False)
 
 
 """Shared fixtures used across tests in this repository."""

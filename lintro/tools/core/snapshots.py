@@ -697,7 +697,7 @@ def _probe_all_fresh(
             name = futures[future]
             try:
                 results[name.lower()] = future.result()
-            except Exception as exc:  # noqa: BLE001 - keep probing other tools
+            except Exception as exc:
                 logger.debug("Probe failed for {}: {}", name, exc)
                 results[name.lower()] = _unavailable_snapshot(
                     name.lower(),
@@ -732,6 +732,20 @@ def _memory_hits_for(
     return hits
 
 
+def _configured_max_workers() -> int:
+    """Return the configured probe parallelism.
+
+    Returns:
+        ``execution.max_workers`` from config, or 8 when config is unavailable.
+    """
+    try:
+        from lintro.config.config_loader import get_config
+
+        return get_config().execution.max_workers
+    except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
+        return 8
+
+
 def probe_all_tools(
     *,
     force: bool = False,
@@ -756,16 +770,10 @@ def probe_all_tools(
     discover_all_tools()
     names = tool_names if tool_names is not None else ToolRegistry.get_names()
     names = [n.lower() for n in names]
-    root = cache_root if cache_root is not None else Path.cwd()
-    cache_file = _cache_file_path(cache_root=root)
+    cache_file = _cache_file_path(cache_root=cache_root)
     ttl = get_snapshot_ttl()
 
-    try:
-        from lintro.config.config_loader import get_config
-
-        max_workers = get_config().execution.max_workers
-    except (ImportError, OSError, ValueError, AttributeError, RuntimeError):
-        max_workers = 8
+    max_workers = _configured_max_workers()
 
     force_effective = False
     with _cache_lock:
@@ -814,7 +822,11 @@ def probe_all_tools(
                 _memory_probed_at = time.time()
                 return disk_hits
 
-    fresh = _probe_all_fresh(names, search_root=root, max_workers=max_workers)
+    fresh = _probe_all_fresh(
+        names,
+        search_root=cache_root if cache_root is not None else Path.cwd(),
+        max_workers=max_workers,
+    )
 
     with _cache_lock:
         if _memory_cache_path != cache_file:
