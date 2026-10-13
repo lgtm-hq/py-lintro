@@ -276,7 +276,7 @@ install_html_validate() {
 		# Read html-validate version from _tool_versions.py (single source of truth)
 		HTML_VALIDATE_VERSION=$(get_tool_version "html-validate") || exit 1
 
-		if [ $DRY_RUN -eq 1 ]; then
+		if [ "$DRY_RUN" -eq 1 ]; then
 			log_info "[DRY-RUN] Would install html-validate@${HTML_VALIDATE_VERSION} globally via bun"
 		elif bun add -g "html-validate@${HTML_VALIDATE_VERSION}"; then
 			echo -e "${GREEN}✓ html-validate@${HTML_VALIDATE_VERSION} installed successfully${NC}"
@@ -287,6 +287,35 @@ install_html_validate() {
 	fi # html-validate
 }
 
+install_spectral() {
+	local SPECTRAL_VERSION
+	if should_install "spectral"; then
+		# Install spectral via bun (OpenAPI/AsyncAPI/JSON Schema linting)
+		echo -e "${BLUE}Installing spectral...${NC}"
+
+		# Read spectral version from _tool_versions.py (single source of truth)
+		# Uses package alias: "@stoplight/spectral-cli" -> ToolName.SPECTRAL
+		SPECTRAL_VERSION=$(get_tool_version "@stoplight/spectral-cli") || exit 1
+
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log_info "[DRY-RUN] Would install @stoplight/spectral-cli@${SPECTRAL_VERSION} globally via bun"
+		elif command -v spectral &>/dev/null; then
+			echo -e "${GREEN}✓ spectral already installed${NC}"
+		else
+			# Ensure bun is available (should already be installed for prettier)
+			if ! ensure_bun_installed; then
+				exit 1
+			fi
+			if bun add -g "@stoplight/spectral-cli@${SPECTRAL_VERSION}"; then
+				echo -e "${GREEN}✓ @stoplight/spectral-cli@${SPECTRAL_VERSION} installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to install spectral${NC}"
+				exit 1
+			fi
+		fi
+	fi # spectral
+}
+
 install_node_tools() {
 	# Ensure bun once up front when any node tool is requested.
 	if should_install "commitlint" || should_install "prettier" ||
@@ -295,7 +324,7 @@ install_node_tools() {
 		should_install "oxlint" || should_install "oxfmt" ||
 		should_install "stylelint" || should_install "tsc" ||
 		should_install "astro" || should_install "svelte-check" ||
-		should_install "vue-tsc"; then
+		should_install "vue-tsc" || should_install "spectral"; then
 		if ! ensure_bun_installed; then
 			exit 1
 		fi
@@ -312,6 +341,7 @@ install_node_tools() {
 	install_astro
 	install_svelte_check
 	install_vue_tsc
+	install_spectral
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
@@ -320,7 +350,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 Usage: node-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
                      [--tools tool1,tool2,...]
 Install Node/bun ecosystem tools (prettier, markdownlint-cli2, html-validate,
-oxlint, oxfmt, stylelint, tsc, astro, svelte-check, vue-tsc, commitlint).
+oxlint, oxfmt, stylelint, tsc, astro, svelte-check, vue-tsc, commitlint,
+spectral).
 
 Respects env: DRY_RUN, TOOL_FILTER, BIN_DIR, INSTALL_MODE, VERBOSE.
 Usually invoked via scripts/utils/install-tools.sh.

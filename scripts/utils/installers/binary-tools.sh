@@ -650,7 +650,7 @@ install_golangci_lint() {
 			return 0
 		}
 
-		if [ $DRY_RUN -eq 1 ]; then
+		if [ "$DRY_RUN" -eq 1 ]; then
 			log_info "[DRY-RUN] Would install golangci-lint v${GOLANGCI_LINT_VERSION}"
 		elif command -v golangci-lint &>/dev/null; then
 			# Honor the pinned version: a stale binary (notably a v1 binary that
@@ -687,7 +687,7 @@ install_trufflehog() {
 	if should_install "trufflehog"; then
 		echo -e "${BLUE}Installing trufflehog...${NC}"
 		TRUFFLEHOG_VERSION=$(get_tool_version "trufflehog") || exit 1
-		if [ $DRY_RUN -eq 1 ]; then
+		if [ "$DRY_RUN" -eq 1 ]; then
 			log_info "[DRY-RUN] Would install trufflehog v${TRUFFLEHOG_VERSION}"
 		elif command -v trufflehog &>/dev/null; then
 			echo -e "${GREEN}✓ trufflehog already installed${NC}"
@@ -745,6 +745,160 @@ install_trufflehog() {
 	fi # trufflehog
 }
 
+install_buf() {
+	local BUF_VERSION buf_needs_install installed_version os arch tmpdir asset binary_url checksum_url expected actual
+	if should_install "buf"; then
+		# Install buf (Protocol Buffer linter and formatter)
+		echo -e "${BLUE}Installing buf...${NC}"
+		BUF_VERSION=$(get_tool_version "buf") || exit 1
+		# An already-present buf only counts when it satisfies the pinned
+		# version; a stale binary would otherwise fail lintro's min_version
+		# check at runtime.
+		buf_needs_install=1
+		if [ "$DRY_RUN" -eq 0 ] && command -v buf &>/dev/null; then
+			# A failed buf binary or unparseable --version must not abort
+			# the installer under set -euo pipefail; treat that as "not
+			# installed" so the download branch still runs.
+			installed_version=$(
+				buf --version 2>/dev/null |
+					grep -oE '[0-9]+\.[0-9]+\.[0-9]+' |
+					head -1 || true
+			)
+			if [ -n "$installed_version" ] && version_ge "$installed_version" "$BUF_VERSION"; then
+				echo -e "${GREEN}✓ buf v${installed_version} already installed (>= v${BUF_VERSION})${NC}"
+				buf_needs_install=0
+			else
+				echo -e "${YELLOW}⚠ Installing buf v${BUF_VERSION}...${NC}"
+			fi
+		fi
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log_info "[DRY-RUN] Would install buf v${BUF_VERSION}"
+		elif [ $buf_needs_install -eq 1 ]; then
+			# buf release assets are named buf-$(uname -s)-$(uname -m), e.g.
+			# buf-Linux-x86_64, buf-Linux-aarch64, buf-Darwin-arm64.
+			os=$(uname -s)
+			arch=$(uname -m)
+			case "$arch" in
+			amd64) arch="x86_64" ;;
+			esac
+			tmpdir=$(mktemp -d)
+			asset="buf-${os}-${arch}"
+			binary_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/${asset}"
+			checksum_url="https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/sha256.txt"
+			if download_with_retries "$binary_url" "$tmpdir/buf" 3; then
+				# Require checksum verification before installing
+				if ! download_with_retries "$checksum_url" "$tmpdir/sha256.txt" 3; then
+					echo -e "${RED}✗ Failed to download checksum file for buf${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${BLUE}Verifying checksum for buf...${NC}"
+				expected=$(grep " ${asset}$" "$tmpdir/sha256.txt" | awk '{print $1}')
+				if [ -z "$expected" ]; then
+					echo -e "${RED}✗ No checksum entry for ${asset}${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if command -v sha256sum >/dev/null 2>&1; then
+					actual=$(sha256sum "$tmpdir/buf" | awk '{print $1}')
+				elif command -v shasum >/dev/null 2>&1; then
+					actual=$(shasum -a 256 "$tmpdir/buf" | awk '{print $1}')
+				else
+					echo -e "${RED}✗ No sha256sum or shasum available for checksum verification${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				if [ "$expected" != "$actual" ]; then
+					echo -e "${RED}✗ Checksum mismatch for buf (expected: $expected, got: $actual)${NC}"
+					rm -rf "$tmpdir"
+					exit 1
+				fi
+				echo -e "${GREEN}✓ Checksum verified${NC}"
+				mv "$tmpdir/buf" "$BIN_DIR/buf"
+				chmod +x "$BIN_DIR/buf"
+				echo -e "${GREEN}✓ buf installed successfully${NC}"
+			else
+				echo -e "${RED}✗ Failed to download buf${NC}"
+				rm -rf "$tmpdir"
+				exit 1
+			fi
+			rm -rf "$tmpdir"
+		fi
+	fi # buf
+}
+
+install_cppcheck() {
+	# Install cppcheck (C/C++ static analysis) via system package manager.
+	# cppcheck ships no portable single binary; it is provided by Homebrew
+	# (macOS) and apt (Debian/Ubuntu). In Docker it is pre-installed via the
+	# Dockerfile apt layer, so the already-installed branch short-circuits.
+	#
+	# Because every path installs whatever the package manager ships, the
+	# version cannot be pinned at install time. It is therefore verified
+	# afterwards against the manifest ``min_version`` floor: below it lintro
+	# skips the tool at runtime, so accepting it here would let setup finish
+	# green while C/C++ analysis silently never runs.
+	local CPPCHECK_MIN_VERSION cppcheck_needs_verify cppcheck_apt cppcheck_installed
+	if should_install "cppcheck"; then
+		echo -e "${BLUE}Installing cppcheck...${NC}"
+		CPPCHECK_MIN_VERSION=$(get_tool_min_version "cppcheck") || exit 1
+		cppcheck_needs_verify=1
+		if [ "$DRY_RUN" -eq 1 ]; then
+			# No version is pinned at install time: brew and apt supply
+			# whatever the distribution ships, and the floor is enforced
+			# afterwards. Saying "would install v<pin>" would misdescribe it.
+			log_info "[DRY-RUN] Would install the cppcheck package provided by brew/apt (unpinned)"
+			log_info "[DRY-RUN] Would verify cppcheck >= v${CPPCHECK_MIN_VERSION}"
+			cppcheck_needs_verify=0
+		elif command -v cppcheck &>/dev/null; then
+			echo -e "${GREEN}✓ cppcheck already installed${NC}"
+		elif command -v brew &>/dev/null; then
+			if brew install cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via Homebrew${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via Homebrew${NC}"
+				exit 1
+			fi
+		elif command -v apt-get &>/dev/null; then
+			cppcheck_apt="apt-get"
+			if [ "$(id -u)" -ne 0 ]; then
+				if command -v sudo &>/dev/null; then
+					cppcheck_apt="sudo apt-get"
+				else
+					echo -e "${RED}✗ cppcheck needs apt-get but sudo is unavailable${NC}"
+					exit 1
+				fi
+			fi
+			if $cppcheck_apt update && $cppcheck_apt install -y --no-install-recommends cppcheck; then
+				echo -e "${GREEN}✓ cppcheck installed successfully via apt${NC}"
+			else
+				echo -e "${RED}✗ Failed to install cppcheck via apt${NC}"
+				exit 1
+			fi
+		else
+			echo -e "${RED}✗ Cannot install cppcheck automatically; install via your package manager.${NC}"
+			exit 1
+		fi
+
+		if [ $cppcheck_needs_verify -eq 1 ]; then
+			# "Cppcheck 2.17.1" -> "2.17.1"
+			# `|| true`: grep exits 1 on no match, which under `set -e`/pipefail
+			# would abort the script before the explicit error below.
+			cppcheck_installed=$(cppcheck --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1 || true)
+			if [ -z "$cppcheck_installed" ]; then
+				echo -e "${RED}✗ Could not determine cppcheck version${NC}"
+				exit 1
+			elif version_ge "$cppcheck_installed" "$CPPCHECK_MIN_VERSION"; then
+				echo -e "${GREEN}✓ cppcheck v${cppcheck_installed} (>= v${CPPCHECK_MIN_VERSION})${NC}"
+			else
+				echo -e "${RED}✗ cppcheck v${cppcheck_installed} is older than the required v${CPPCHECK_MIN_VERSION}${NC}"
+				echo -e "${RED}  Your distribution's package is too old; install a newer cppcheck from Homebrew or upstream.${NC}"
+				exit 1
+			fi
+		fi
+	fi # cppcheck
+}
+
 install_binary_tools() {
 	install_hadolint
 	install_gitleaks
@@ -757,6 +911,8 @@ install_binary_tools() {
 	install_shellcheck
 	install_dotenv_linter
 	install_taplo
+	install_buf
+	install_cppcheck
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
@@ -765,7 +921,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 Usage: binary-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
                        [--tools tool1,tool2,...]
 Install prebuilt binary tools (hadolint, gitleaks, golangci-lint, osv-scanner,
-trufflehog, actionlint, shfmt, vale, shellcheck, dotenv-linter, taplo).
+trufflehog, actionlint, shfmt, vale, shellcheck, dotenv-linter, taplo, buf,
+cppcheck).
 
 Respects env: DRY_RUN, TOOL_FILTER, BIN_DIR, INSTALL_MODE, VERBOSE.
 Usually invoked via scripts/utils/install-tools.sh.

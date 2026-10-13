@@ -40,9 +40,13 @@ This script installs:
   - html-validate (HTML linter)
   - Yamllint (YAML linter)
   - Hadolint (Dockerfile linter)
+  - Import-linter (Python import-contract checker)
+  - Pylint (Python static analyser; duplicate-code)
   - Actionlint (GitHub Actions workflow linter)
   - Bandit (Python security linter)
   - Mypy (Python static type checker)
+  - Cppcheck (C/C++ static analysis)
+  - Checkov (Terraform Infrastructure-as-Code security scanner)
   - Clippy (Rust linter; requires Rust toolchain)
   - Rustfmt (Rust formatter; requires Rust toolchain)
   - Cargo-audit (Rust dependency vulnerability scanner; requires Rust toolchain)
@@ -53,6 +57,7 @@ This script installs:
   - Semgrep (Security scanner)
   - ShellCheck (Shell script linter)
   - shfmt (Shell script formatter)
+  - Spectral (OpenAPI/AsyncAPI/JSON Schema linter)
   - dotenv-linter (.env file linter and fixer)
   - SQLFluff (SQL linter and formatter)
   - Taplo (TOML linter and formatter)
@@ -119,11 +124,17 @@ set -- "${POSITIONAL[@]:-}"
 
 # Supported tool names for --tools validation.
 # Kept in sync with the should_install blocks and tools_to_verify array.
+# Note: a few tools are filtered under one name and verified under another.
+# markdownlint lists both names here, so --tools markdownlint-cli2 is valid.
+# import-linter lists only the filter name, so --tools lint-imports is
+# rejected by the validation below; the verification loop reconnects
+# import-linter to lint-imports with an explicit alias branch.
 SUPPORTED_TOOLS=(
-	"actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny"
-	"clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
-	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep"
-	"shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc"
+	"actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny"
+	"checkov" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "import-linter" "markdownlint" "markdownlint-cli2" "mypy" "osv-scanner"
+	"oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep"
+	"shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo"
+	"trufflehog" "tsc" "typos"
 	"vale" "vue-tsc" "yamllint"
 )
 
@@ -189,8 +200,13 @@ if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
 	echo -e "${YELLOW}Installing tools system-wide for Docker environment${NC}"
 else
 	echo -e "${YELLOW}Installing tools locally to $BIN_DIR${NC}"
-	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH${NC}"
+	echo -e "${YELLOW}Make sure $BIN_DIR is in your PATH:${NC}"
+	echo -e "${YELLOW}    export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
 fi
+
+# Make freshly installed binaries in $BIN_DIR visible to later install steps
+# and the verification loop for the rest of this run.
+add_bin_dir_to_path
 
 # Main installation process
 main() {
@@ -217,15 +233,19 @@ main() {
 		["actionlint"]="GitHub Actions linting"
 		["astro"]="Astro type checking"
 		["bandit"]="Python security checks"
+		["buf"]="Protocol Buffer linting and formatting"
 		["black"]="Python formatting"
 		["cargo-audit"]="Rust dependency vulnerability scanning"
 		["cargo-deny"]="Rust dependency license/advisory checking"
+		["checkov"]="Terraform Infrastructure-as-Code security scanning"
 		["clippy"]="Rust linting"
+		["cppcheck"]="C/C++ static analysis"
 		["dotenv-linter"]=".env file linting and fixing"
 		["gitleaks"]="Secret detection"
 		["golangci-lint"]="Go meta-linter (requires the Go toolchain)"
 		["html-validate"]="HTML validation"
 		["hadolint"]="Docker linting"
+		["import-linter"]="Python import-contract checking"
 		["markdownlint"]="Markdown linting"
 		["mypy"]="Python type checking"
 		["osv-scanner"]="Multi-ecosystem vulnerability scanning"
@@ -234,17 +254,20 @@ main() {
 		["pip-audit"]="Python dependency vulnerability scanning"
 		["prettier"]="JavaScript/JSON formatting"
 		["pydoclint"]="Python docstring validation"
+		["pylint"]="Python static analysis (duplicate-code)"
 		["ruff"]="Python linting and formatting"
 		["rustfmt"]="Rust formatting"
 		["semgrep"]="Security scanning"
 		["shellcheck"]="Shell script linting"
 		["shfmt"]="Shell script formatting"
+		["spectral"]="OpenAPI/AsyncAPI/JSON Schema linting"
 		["sqlfluff"]="SQL linting and formatting"
 		["stylelint"]="CSS/SCSS/Less linting"
 		["svelte-check"]="Svelte type checking"
 		["taplo"]="TOML linting and formatting"
 		["trufflehog"]="Secret detection with verification"
 		["tsc"]="TypeScript type checking"
+		["typos"]="Source-code spell checking"
 		["vue-tsc"]="Vue TypeScript type checking"
 		["yamllint"]="YAML linting"
 	)
@@ -260,7 +283,7 @@ main() {
 	echo -e "${YELLOW}Verifying installations...${NC}"
 
 	local tools_to_verify
-	tools_to_verify=("actionlint" "astro" "bandit" "black" "cargo-audit" "cargo-deny" "clippy" "commitlint" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "vale" "vue-tsc" "yamllint")
+	tools_to_verify=("actionlint" "astro" "bandit" "black" "buf" "cargo-audit" "cargo-deny" "checkov" "clippy" "commitlint" "cppcheck" "dotenv-linter" "gitleaks" "golangci-lint" "hadolint" "html-validate" "lint-imports" "markdownlint-cli2" "mypy" "osv-scanner" "oxfmt" "oxlint" "pip-audit" "prettier" "pydoclint" "pylint" "ruff" "rustfmt" "semgrep" "shellcheck" "shfmt" "spectral" "sqlfluff" "stylelint" "svelte-check" "taplo" "trufflehog" "tsc" "typos" "vale" "vue-tsc" "yamllint")
 
 	# Filter verification list when --tools is set.
 	# Map aliases so e.g. --tools markdownlint verifies markdownlint-cli2.
@@ -273,6 +296,9 @@ main() {
 			# markdownlint alias → markdownlint-cli2 verification
 			elif [[ "$tool" == "markdownlint-cli2" ]] && should_install "markdownlint"; then
 				filtered+=("$tool")
+			# import-linter alias → lint-imports verification
+			elif [[ "$tool" == "lint-imports" ]] && should_install "import-linter"; then
+				filtered+=("$tool")
 			fi
 		done
 		tools_to_verify=("${filtered[@]}")
@@ -280,6 +306,12 @@ main() {
 
 	local version
 	for tool in "${tools_to_verify[@]}"; do
+		# Dry-run simulates the entire installer, including verification. A real
+		# PATH probe here would falsely report every not-yet-installed tool.
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log_info "[DRY-RUN] Would verify $tool is available"
+			continue
+		fi
 		if [ "$tool" = "clippy" ]; then
 			# Clippy is invoked through cargo
 			if command -v cargo &>/dev/null && cargo clippy --version &>/dev/null; then

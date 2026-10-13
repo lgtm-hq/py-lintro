@@ -202,15 +202,140 @@ install_sqlfluff() {
 	fi
 }
 
+install_import_linter() {
+	local IMPORT_LINTER_VERSION IMPORT_LINTER_BIN
+	if should_install "import-linter"; then
+		# Install import-linter (Python import-contract checker; binary: lint-imports)
+		echo -e "${BLUE}Installing import-linter...${NC}"
+		IMPORT_LINTER_VERSION=$(get_tool_version "import-linter") || exit 1
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log_info "[DRY-RUN] Would install import-linter==${IMPORT_LINTER_VERSION}"
+		elif install_python_package "import-linter" "$IMPORT_LINTER_VERSION"; then
+			# The import-linter distribution installs a console script named
+			# lint-imports, so install_python_package (which stages by package
+			# name) cannot copy it into BIN_DIR. Stage it here by binary name.
+			# A successful pip install that yields no console script means the
+			# tool was not delivered, so fail instead of reporting success.
+			IMPORT_LINTER_BIN=$(command -v lint-imports 2>/dev/null || true)
+			if [ -z "$IMPORT_LINTER_BIN" ] || [ ! -f "$IMPORT_LINTER_BIN" ]; then
+				echo -e "${RED}✗ import-linter installed but lint-imports is not on PATH${NC}"
+				exit 1
+			fi
+			if [ "$IMPORT_LINTER_BIN" != "$BIN_DIR/lint-imports" ]; then
+				cp "$IMPORT_LINTER_BIN" "$BIN_DIR/lint-imports"
+				chmod +x "$BIN_DIR/lint-imports"
+				echo -e "${YELLOW}Copied lint-imports to $BIN_DIR${NC}"
+			fi
+			echo -e "${GREEN}✓ import-linter installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install import-linter${NC}"
+			exit 1
+		fi
+	fi # import-linter
+}
+
+install_checkov() {
+	# Install checkov (Terraform IaC security scanner) into its own venv.
+	# checkov pins `packaging>=23.0,<24.0` while lintro pins `packaging>=25.0`,
+	# so the two cannot share an environment: `uv pip install checkov` next to
+	# lintro either fails to resolve or silently downgrades packaging. `uv tool
+	# install` builds an isolated venv and drops only the console script on
+	# PATH. The version is the exact TOOL_VERSIONS pin, so the manifest-vs-image
+	# gate (which requires equality) stays satisfiable. A requirements file was
+	# rejected on purpose: osv-scanner resolves requirements*.txt transitively,
+	# so declaring checkov's tree here would fail this repo's own security gate.
+	local CHECKOV_VERSION CHECKOV_TOOL_DIR
+	if should_install "checkov"; then
+		echo -e "${BLUE}Installing checkov...${NC}"
+		CHECKOV_VERSION=$(get_tool_version "checkov") || exit 1
+		# UV_TOOL_DIR holds the venv the shim in BIN_DIR points into. In Docker
+		# the script runs as root but the container runs as `lintro`, so the
+		# default (/root/.local/share/uv/tools) would leave every non-root
+		# invocation with an unreadable interpreter behind a shim that is on
+		# PATH. Put it under /opt like semgrep's venv, world-readable.
+		if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+			CHECKOV_TOOL_DIR="/opt/uv-tools"
+		else
+			CHECKOV_TOOL_DIR="${UV_TOOL_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/uv/tools}"
+		fi
+		# --force is deliberate: without it `uv tool install` reports an
+		# already-installed tool and leaves the old version in place, so a
+		# Renovate pin bump would never take effect and the manifest-vs-image
+		# equality gate would fail against a stale binary.
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log_info "[DRY-RUN] Would run uv tool install checkov==${CHECKOV_VERSION}"
+			log_info "[DRY-RUN] Would place the venv under ${CHECKOV_TOOL_DIR}"
+		elif ! command -v uv &>/dev/null; then
+			# Docker always ships uv, so its absence there is an image bug and
+			# must stop the build. Locally every other Python tool degrades to
+			# pip/brew when uv is missing, and aborting here would cancel the
+			# dozen install blocks that follow, so warn and move on: the
+			# verification loop still reports checkov as not found.
+			if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+				echo -e "${RED}✗ checkov needs uv, which the image must provide${NC}"
+				exit 1
+			fi
+			# A caller who named checkov asked for this tool specifically, so
+			# reporting success after skipping it would be a false contract.
+			# An unfiltered run only wanted "everything installable", so it
+			# warns and lets the ~15 later blocks finish.
+			if [ -n "$TOOL_FILTER" ]; then
+				echo -e "${RED}✗ checkov needs uv; install uv first${NC}"
+				exit 1
+			fi
+			echo -e "${YELLOW}⚠ Skipping checkov: uv is required for an isolated install${NC}"
+		elif UV_TOOL_DIR="$CHECKOV_TOOL_DIR" UV_TOOL_BIN_DIR="$BIN_DIR" \
+			uv tool install --force "checkov==${CHECKOV_VERSION}"; then
+			# Docker builds as root and runs as `lintro`, so the venv this
+			# install just created has to be world-traversable. Scoped to
+			# checkov's own venv: CHECKOV_TOOL_DIR is the shared uv tool root,
+			# and locally that is the user's own, holding venvs this installer
+			# never created. A failure here leaves an unusable image, so it is
+			# not swallowed.
+			if [ "$INSTALL_MODE" = "--docker" ] || [ "$INSTALL_MODE" = "docker" ]; then
+				chmod -R a+rX "$CHECKOV_TOOL_DIR/checkov" || {
+					echo -e "${RED}✗ Could not make the checkov venv world-readable${NC}"
+					exit 1
+				}
+			fi
+			echo -e "${GREEN}✓ checkov installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install checkov${NC}"
+			exit 1
+		fi
+	fi # checkov
+}
+
+install_pylint() {
+	local PYLINT_VERSION
+	if should_install "pylint"; then
+		# Install pylint (Python static analyser; duplicate-code checker)
+		echo -e "${BLUE}Installing pylint...${NC}"
+		PYLINT_VERSION=$(get_tool_version "pylint") || exit 1
+
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log_info "[DRY-RUN] Would install pylint==${PYLINT_VERSION}"
+		elif install_python_package "pylint" "$PYLINT_VERSION"; then
+			echo -e "${GREEN}✓ pylint installed successfully${NC}"
+		else
+			echo -e "${RED}✗ Failed to install pylint${NC}"
+			exit 1
+		fi
+	fi # pylint
+}
+
 install_python_tools() {
 	install_ruff
 	install_black
 	install_bandit
 	install_mypy
 	install_semgrep
+	install_import_linter
 	install_pip_audit
+	install_checkov
 	install_yamllint
 	install_pydoclint
+	install_pylint
 	install_sqlfluff
 }
 
@@ -220,7 +345,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 Usage: python-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
                        [--tools tool1,tool2,...]
 Install Python ecosystem tools (ruff, black, bandit, mypy, semgrep,
-pip-audit, yamllint, pydoclint, sqlfluff).
+import-linter, pip-audit, checkov, yamllint, pydoclint, pylint, sqlfluff).
 
 Respects env: DRY_RUN, TOOL_FILTER, BIN_DIR, INSTALL_MODE, VERBOSE.
 Usually invoked via scripts/utils/install-tools.sh.

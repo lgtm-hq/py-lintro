@@ -127,7 +127,9 @@ def _pull_request_files(*, repository: str, pr_number: int) -> set[str]:
 def _has_build_path(paths: set[str]) -> bool:
     """Return whether changed files can affect the tools image build."""
     return any(
-        path in BUILD_PATHS or path.startswith("lintro_build/") for path in paths
+        path in BUILD_PATHS
+        or path.startswith(("lintro_build/", "scripts/utils/installers/"))
+        for path in paths
     )
 
 

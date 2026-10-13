@@ -57,6 +57,28 @@ else:
 	echo "$version"
 }
 
+# Get a tool's minimum *compatible* version (manifest ``min_version``), which is
+# the floor lintro enforces at runtime. Distro-packaged tools install whatever
+# the package manager ships, so the install path compares against this rather
+# than the recommended pin.
+get_tool_min_version() {
+	local tool_name="$1"
+	local version
+	version=$(python3 -c "
+import runpy
+import sys
+
+sys.path.insert(0, '$PROJECT_ROOT')
+mod = runpy.run_path('$PROJECT_ROOT/lintro/_tool_versions.py')
+print(mod['get_min_version'](mod['ToolName']('$tool_name')))
+" 2>/dev/null)
+	if [ -z "$version" ]; then
+		echo "ERROR: Minimum version for '$tool_name' not found" >&2
+		return 1
+	fi
+	echo "$version"
+}
+
 # Tool filter: when --tools is set, only install the listed tools.
 # Accepts comma-separated names matching the install block identifiers
 # (e.g., osv-scanner, hadolint, ruff). Normalizes underscores to hyphens.
@@ -184,16 +206,19 @@ install_python_package() {
 		full_package="$package==$version"
 	fi
 
-	# Prefer uv pip when available
+	# Prefer uv pip when available. Do not use `uv run` to locate the
+	# binary: `uv run` syncs this repo's pyproject.toml ranges
+	# (ruff>=0.15.9 → latest) and would copy the floated pin into
+	# BIN_DIR (#2220).
 	if command -v uv &>/dev/null; then
 		if uv pip install "$full_package"; then
-			# Copy the executable to target directory if it exists in uv environment
-			local uv_path
-			uv_path=$(uv run which "$package" 2>/dev/null || echo "")
-			if [ -n "$uv_path" ] && [ -f "$uv_path" ]; then
-				cp "$uv_path" "$BIN_DIR/$package"
+			local installed_path
+			installed_path=$(command -v "$package" 2>/dev/null || true)
+			if [ -n "$installed_path" ] && [ -f "$installed_path" ] &&
+				[ "$installed_path" != "$BIN_DIR/$package" ]; then
+				cp "$installed_path" "$BIN_DIR/$package"
 				chmod +x "$BIN_DIR/$package"
-				echo -e "${YELLOW}Copied $package from uv environment to $BIN_DIR${NC}"
+				echo -e "${YELLOW}Copied $package to $BIN_DIR${NC}"
 			fi
 			return 0
 		fi
@@ -396,6 +421,19 @@ ensure_bin_dir() {
 		mkdir -p "$BIN_DIR"
 	fi
 	export BIN_DIR
+	add_bin_dir_to_path
+}
+
+# Tools installed into $BIN_DIR must be reachable for the rest of this run:
+# later install steps probe with `command -v`, and so does the verification
+# loop. Without this a freshly installed binary would be reported missing (and
+# reinstalled) purely because the caller's shell has not been reloaded. This
+# only affects this process; the user still needs BIN_DIR on their own PATH.
+add_bin_dir_to_path() {
+	case ":$PATH:" in
+	*":$BIN_DIR:"*) ;;
+	*) export PATH="$BIN_DIR:$PATH" ;;
+	esac
 }
 
 # Parse common CLI flags when a group installer is executed directly.

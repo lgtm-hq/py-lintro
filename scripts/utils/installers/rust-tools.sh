@@ -15,8 +15,9 @@ ensure_rust_toolchain() {
 
 	if [ -z "${RUST_TOOLCHAIN_VERSION:-}" ]; then
 		# Clippy versions match Rust release versions (clippy 1.94.0 = Rust 1.94.0).
-		# Use the highest version among rustc and clippy so that Renovate PRs
-		# that bump clippy independently install the correct toolchain.
+		# rustfmt/clippy pins bump only alongside rustc (#2205). Take
+		# max(rustc, clippy) so a drifted pair still installs a toolchain
+		# that can provide both components.
 		local _rustc_ver _clippy_ver
 		_rustc_ver=$(get_tool_version "rustc" 2>/dev/null || echo "")
 		_clippy_ver=$(get_tool_version "clippy" 2>/dev/null || echo "")
@@ -68,7 +69,8 @@ ensure_rust_toolchain() {
 		# Justification: Official rustup installer from trusted source (rustup.rs)
 		# nosemgrep: curl-pipe-bash
 		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-			--default-toolchain "$RUST_TOOLCHAIN_VERSION" --component "$component"
+			--default-toolchain "$RUST_TOOLCHAIN_VERSION" \
+			--profile minimal --component "$component"
 		# Source cargo environment (respect CARGO_HOME if set)
 		local cargo_env
 		cargo_env="${CARGO_HOME:-$HOME/.cargo}/env"
@@ -83,7 +85,7 @@ ensure_rust_toolchain() {
 			rustup update stable
 			rustup component add "$component"
 		else
-			rustup toolchain install "$RUST_TOOLCHAIN_VERSION"
+			rustup toolchain install "$RUST_TOOLCHAIN_VERSION" --profile minimal
 			rustup default "$RUST_TOOLCHAIN_VERSION"
 			rustup component add "$component" --toolchain "$RUST_TOOLCHAIN_VERSION"
 		fi
@@ -241,11 +243,90 @@ install_cargo_deny() {
 	fi
 }
 
+install_typos() {
+	local TYPOS_VERSION typos_installed tmpdir os arch target tgz_url cargo_bin
+	if should_install "typos"; then
+		# Install typos (source-code spell checker; crate "typos-cli", binary "typos")
+		# Prefer pre-built binary from cargo-quickinstall to avoid long compile times
+		echo -e "${BLUE}Installing typos...${NC}"
+		TYPOS_VERSION=$(get_tool_version "typos") || exit 1
+		if [ "$DRY_RUN" -eq 1 ]; then
+			log_info "[DRY-RUN] Would install typos-cli==${TYPOS_VERSION}"
+		elif command -v typos &>/dev/null; then
+			echo -e "${GREEN}✓ typos already installed${NC}"
+		else
+			typos_installed=false
+			# Try pre-built binary from cargo-quickinstall first (much faster than cargo install)
+			tmpdir=$(mktemp -d)
+			os=$(uname -s | tr '[:upper:]' '[:lower:]')
+			arch=$(uname -m)
+			case "$arch" in
+			x86_64 | amd64) target="x86_64-unknown-linux-gnu" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-gnu" ;;
+			*) target="" ;;
+			esac
+			# cargo-quickinstall only provides linux binaries
+			if [[ "$os" == "linux" ]] && [[ -n "$target" ]]; then
+				tgz_url="https://github.com/cargo-bins/cargo-quickinstall/releases/download/typos-cli-${TYPOS_VERSION}/typos-cli-${TYPOS_VERSION}-${target}.tar.gz"
+				echo -e "${YELLOW}Trying pre-built binary from cargo-quickinstall...${NC}"
+				if download_with_retries "$tgz_url" "$tmpdir/typos.tar.gz" 3; then
+					tar -xzf "$tmpdir/typos.tar.gz" -C "$tmpdir"
+					if [ -f "$tmpdir/typos" ]; then
+						cp "$tmpdir/typos" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+						echo -e "${GREEN}✓ typos installed from pre-built binary${NC}"
+						typos_installed=true
+					fi
+				fi
+			fi
+			rm -rf "$tmpdir"
+
+			# Fallback to cargo install if pre-built binary not available
+			if [ "$typos_installed" = false ] && command -v cargo &>/dev/null; then
+				echo -e "${YELLOW}Pre-built binary not available, falling back to cargo install...${NC}"
+				if cargo install typos-cli --locked --version "$TYPOS_VERSION"; then
+					# cargo install writes to $CARGO_HOME/bin; copy into BIN_DIR
+					# so later verification via command -v / PATH finds it.
+					cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin/typos"
+					if [ -x "$cargo_bin" ]; then
+						cp "$cargo_bin" "$BIN_DIR/typos"
+						chmod +x "$BIN_DIR/typos"
+					fi
+					if command -v typos &>/dev/null || [ -x "$BIN_DIR/typos" ]; then
+						echo -e "${GREEN}✓ typos installed via cargo${NC}"
+						typos_installed=true
+					else
+						echo -e "${YELLOW}⚠ cargo install succeeded but typos not on PATH${NC}"
+					fi
+				fi
+			fi
+
+			# Homebrew fallback for macOS hosts without a Rust toolchain.
+			if [ "$typos_installed" = false ] && command -v brew &>/dev/null; then
+				echo -e "${YELLOW}Falling back to Homebrew...${NC}"
+				if brew install typos-cli; then
+					echo -e "${GREEN}✓ typos installed via Homebrew${NC}"
+					typos_installed=true
+				fi
+			fi
+
+			if [ "$typos_installed" = false ]; then
+				# typos is part of the default toolset; a silent miss would
+				# leave every subsequent lintro run degraded and the
+				# verification step reporting a missing tool.
+				echo -e "${RED}✗ Failed to install typos (pre-built binary, cargo, and brew all unavailable)${NC}"
+				exit 1
+			fi
+		fi
+	fi # typos
+}
+
 install_rust_tools() {
 	install_rustfmt
 	install_clippy
 	install_cargo_audit
 	install_cargo_deny
+	install_typos
 }
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
@@ -253,7 +334,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
 		cat <<'EOF'
 Usage: rust-tools.sh [--help] [--dry-run] [--verbose] [--local|--docker]
                      [--tools tool1,tool2,...]
-Install Rust toolchain tools (rustfmt, clippy, cargo-audit, cargo-deny).
+Install Rust toolchain tools (rustfmt, clippy, cargo-audit, cargo-deny, typos).
 
 Respects env: DRY_RUN, TOOL_FILTER, BIN_DIR, INSTALL_MODE, VERBOSE.
 Usually invoked via scripts/utils/install-tools.sh.

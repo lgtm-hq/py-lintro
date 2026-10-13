@@ -44,7 +44,7 @@ def _run(
     }
     if env:
         base_env.update(env)
-    return subprocess.run(  # nosec B603 - fixed argv, shell=False
+    return subprocess.run(  # nosec B603 B607 - fixed argv, shell=False
         [str(script), *(args or [])],
         cwd=_REPO_ROOT,
         capture_output=True,
@@ -72,7 +72,7 @@ def test_helpers_module_exists() -> None:
 def test_installer_bash_syntax(name: str) -> None:
     """Installer bash sources must pass bash -n syntax checking."""
     path = _INSTALLERS / name
-    result = subprocess.run(  # nosec B603 - fixed argv, shell=False
+    result = subprocess.run(  # nosec B603 B607 - fixed argv, shell=False
         ["bash", "-n", str(path)],
         capture_output=True,
         text=True,
@@ -137,7 +137,9 @@ def test_helpers_defer_bin_dir_to_ensure_bin_dir() -> None:
         "get_tool_version()",
         maxsplit=1,
     )[0]
-    assert_that(defaults_block).does_not_contain('BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"')
+    assert_that(defaults_block).does_not_contain(
+        'BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"',
+    )
     assert_that(text).contains("parse_group_installer_args")
     assert_that(text).contains("ensure_bin_dir()")
 
@@ -152,7 +154,10 @@ def test_hadolint_checksum_is_fail_closed() -> None:
 def test_rust_clippy_uses_toolchain_helper() -> None:
     """Clippy install must route through ensure_rust_toolchain for version pins."""
     text = (_INSTALLERS / "rust-tools.sh").read_text(encoding="utf-8")
-    install_clippy = text.split("install_clippy() {", maxsplit=1)[1].split("\n}\n", maxsplit=1)[0]
+    install_clippy = text.split("install_clippy() {", maxsplit=1)[1].split(
+        "\n}\n",
+        maxsplit=1,
+    )[0]
     assert_that(install_clippy).contains('ensure_rust_toolchain "clippy"')
     assert_that(install_clippy).does_not_contain("cargo clippy --version")
 

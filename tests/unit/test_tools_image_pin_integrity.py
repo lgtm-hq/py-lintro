@@ -15,6 +15,8 @@ from assertpy import assert_that
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
+_RUST_INSTALLER = _REPO_ROOT / "scripts" / "utils" / "installers" / "rust-tools.sh"
+_INSTALL_HELPERS = _REPO_ROOT / "scripts" / "utils" / "installers" / "_helpers.sh"
 
 
 def _executable_lines(text: str) -> str:
@@ -53,7 +55,7 @@ def test_install_tools_uses_minimal_profile_for_pinned_rustc() -> None:
     paper over that by installing ``stable`` with ``--profile minimal``
     and making it the default — which floated rustc.
     """
-    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    text = _RUST_INSTALLER.read_text(encoding="utf-8")
 
     assert_that(text).contains("--profile minimal --component")
     assert_that(text).contains(
@@ -68,7 +70,7 @@ def test_install_python_package_does_not_use_uv_run_which() -> None:
     from the repo root resolves ``ruff>=0.15.9`` to latest and copies
     that binary into ``BIN_DIR``.
     """
-    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    text = _INSTALL_HELPERS.read_text(encoding="utf-8")
 
     assert_that(text).does_not_contain("uv run which")
     assert_that(text).contains('full_package="$package==$version"')
