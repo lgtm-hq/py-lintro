@@ -453,6 +453,7 @@ include = [
   "lintro/tools/stylelint",
   "lintro/tools/svelte_check",
   "lintro/tools/taplo",
+  "lintro/tools/terraform",
   "lintro/tools/trufflehog",
   "lintro/tools/ts_checker",
   "lintro/tools/tsc",
@@ -821,6 +822,9 @@ ignore_imports = [
   "lintro.tools.taplo.definition -> lintro.plugins.base",                           # owned by #2410
   "lintro.tools.taplo.definition -> lintro.plugins.protocol",                       # owned by #2410
   "lintro.tools.taplo.definition -> lintro.plugins.registry",                       # owned by #2410
+  "lintro.tools.terraform.definition -> lintro.plugins.base",                       # owned by #2410
+  "lintro.tools.terraform.definition -> lintro.plugins.protocol",                   # owned by #2410
+  "lintro.tools.terraform.definition -> lintro.plugins.registry",                   # owned by #2410
   "lintro.tools.trufflehog.definition -> lintro.plugins.base",                      # owned by #2410
   "lintro.tools.trufflehog.definition -> lintro.plugins.protocol",                  # owned by #2410
   "lintro.tools.trufflehog.definition -> lintro.plugins.registry",                  # owned by #2410
@@ -974,6 +978,7 @@ markers = [
   "yamllint: mark test as yamllint specific",
   "ruff: mark test as ruff specific",
   "actionlint: mark test as actionlint specific",
+  "terraform: mark test as terraform specific",
   "pytest: mark test as pytest specific",
   # Tiered AI CLI contract tests (issue #1614). Tier 1 reads only --version
   # and --help, so it is free and can gate every change; tier 2 makes a real

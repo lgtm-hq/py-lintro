@@ -100,6 +100,7 @@ DOC_NAV: dict[str, tuple[str, str | None]] = {
     "tools/ruff": ("ruff", "python"),
     "tools/spectral": ("spectral", "config"),
     "tools/svelte-check": ("svelte-check", "frameworks"),
+    "tools/terraform": ("terraform", "ci-ops"),
     "tools/trufflehog": ("trufflehog", "security"),
     "tools/tsc": ("tsc", "js-ts"),
     "tools/typos": ("typos", "config"),
