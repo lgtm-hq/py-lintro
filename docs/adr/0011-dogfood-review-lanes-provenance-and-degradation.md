@@ -105,10 +105,10 @@ default model, the allowed models, and the cost basis its figures carry.
   resolved lane id. Secrets are never indexed dynamically.
 - The wrapper refuses to run when the lane's credential is absent, when a competing
   credential is present, or when `ANTHROPIC_BASE_URL` differs from the lane endpoint.
-- The initial manifest declares `claude-subscription` (default), `codex-subscription`,
-  `cursor` and `zai-glm-gateway`. The last is `first_party: false`, binds
-  `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and becomes active only by a merged
-  manifest diff placing it first in `chain`.
+- The initial manifest declares `claude-subscription` (the sole initial `chain` entry),
+  `codex-subscription`, `cursor` and `zai-glm-gateway`. The last is
+  `first_party: false`, binds `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and
+  becomes active only by a merged manifest diff placing it first in `chain`.
 
 Because the manifest and the resolver land before the workflow reads them (the two-PR
 bootstrap the workflow header already requires for anything evaluated under
@@ -127,7 +127,7 @@ A run record reports where its requests went and what answered, not what was con
   `credential` (the kind actually forwarded: `claude_oauth`, `zai_token`, `codex_oauth`,
   `cursor_api_key`), `reported_models` (every model named by the CLI envelope's
   `modelUsage`, with its `canonicalModel` and `provider`), `lane`, and
-  `model_verification` with exactly four states:
+  `model_verification` with exactly five states:
   - `verified`: the reported model equals the requested model on a first-party endpoint.
   - `mismatch`: the reported model differs from the requested one on a first-party
     endpoint.
@@ -153,11 +153,14 @@ A run record reports where its requests went and what answered, not what was con
   figure and never as zero, and the cumulative history discloses that some rounds
   contributed no priced cost.
 - Review-reuse validity includes the lane: a stored round from one lane is not reused as
-  if it were produced by another. A stored round with no lane field predates this ADR
-  and is read as the active lane for reuse, so the first run after
-  [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) resumes rather than
-  re-reviewing every open PR; its `model_verification` is `legacy` and its history row
-  says so.
+  if it were produced by another. A stored round with no lane field predates this ADR,
+  and the Context section establishes that such rounds were answered by GLM through
+  Z.ai, so it is **not** reused for lane validity. It is kept in the cumulative history
+  with `model_verification == legacy` and labelled "predates ADR-0011", and it never
+  contributes to a live verdict. The first run after
+  [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) therefore re-reviews each
+  open PR once on the active lane; that one-time cost is accepted in preference to a
+  green check built on rounds of unknown provenance.
 
 Delivered by: [#2867](https://github.com/lgtm-hq/py-lintro/issues/2867) (run record
 fields and `CostBasis` values),
@@ -174,7 +177,7 @@ display rendering).
 | `model_verification == mismatch` on a first-party lane         | red, `status=model-mismatch`                                                                                                                                                     |
 | `model_verification == unverifiable` on a non-first-party lane | verdict unchanged; `::warning::` naming lane and endpoint                                                                                                                        |
 | `model_verification == unreported` on a first-party lane       | red, `status=model-unreported`: a first-party CLI envelope always carries `modelUsage`, so its absence is a transport defect. Applies only to rounds produced by the current run |
-| `model_verification == legacy`                                 | verdict unchanged; labelled "predates ADR-0011" on the sticky; never red                                                                                                         |
+| `model_verification == legacy`                                 | history rows only; such a round is never reused, so it never reaches the verdict                                                                                                 |
 | `model_verification == unreported` on a non-first-party lane   | verdict unchanged; labelled like `unverifiable`                                                                                                                                  |
 | `model_verification == verified`                               | verdict unchanged; no label                                                                                                                                                      |
 | Authentication failure                                         | labelled by the recorded credential kind, not a fixed label                                                                                                                      |
@@ -232,15 +235,16 @@ Delivered by: [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870).
   delivered for credential, credit and quota exhaustion by decisions B to D here. Its
   **Reliability** row's "a green check means a complete review" now also means a review
   whose endpoint matches its lane and whose model is verified on a first-party lane or
-  labelled unverifiable on a declared non-first-party one.
+  labelled unverifiable on a declared non-first-party one; a `legacy` round can never be
+  part of such a check because it is never reused.
 - [ADR-0008](0008-ai-review-architecture-invariants.md) invariant 2 (every provider call
   goes through `call_ai`) is the seam the fallback loop in decision D sits above: the
   chain is walked by the wrapper, per attempt, not by a second dispatch path inside the
   review.
 - [ADR-0007](0007-review-resume-and-artifact-state.md): a stored review state produced
-  without the decision B fields is read as `model_verification == legacy` on the active
-  lane, as decision B states; the verdict table leaves `legacy` unchanged, so resume
-  survives the rollout without a red.
+  without the decision B fields is read as `model_verification == legacy` and excluded
+  from reuse, as decision B states. The resume model is unchanged for rounds that carry
+  the fields; only pre-ADR rounds are re-reviewed, once.
 - [ADR-0009](0009-ai-provider-plugin-contract.md): reading `modelUsage` is a transport
   concern of the Anthropic CLI adapter, not a new provider-contract field. Providers
   whose transport reports no model usage record `unreported`.
