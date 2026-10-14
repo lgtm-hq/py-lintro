@@ -2278,6 +2278,11 @@ Lintro prefers the project's own `node_modules/.bin/spectral`, then a binary on 
 then a version-pinned `bunx`/`npx` fetch. See
 [Node.js Tool Resolution](#nodejs-tool-resolution).
 
+**Node runtime requirement:** the pinned Spectral CLI (currently `6.17.0`) declares
+`engines: { "node": "^22.0 || >= 24.0" }`. Any consumer that installs it, or that
+reaches the `bunx`/`npx` fallback, needs a Node runtime satisfying that range — Node 18,
+20, and 21 are not supported. Size your CI matrix accordingly.
+
 **File:** `.spectral.yaml`
 
 ```yaml
