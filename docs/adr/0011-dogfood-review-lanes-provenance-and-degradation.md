@@ -2,9 +2,10 @@
 
 ## Status
 
-Accepted. The decisions are in effect as the acceptance criteria of epic
-[#2874](https://github.com/lgtm-hq/py-lintro/issues/2874); each "Delivered by" line
-names the issue that lands it, and the interim measure in Consequences applies until
+Accepted, implementation pending under epic
+[#2874](https://github.com/lgtm-hq/py-lintro/issues/2874). The decisions are the
+acceptance criteria of that epic's issues; each "Delivered by" line names the issue that
+lands it, and the interim measure in Consequences applies until
 [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) merges.
 
 ## Context
@@ -83,12 +84,14 @@ default model, the allowed models, and the cost basis its figures carry.
 
 - The manifest is the **only** place an endpoint, a credential binding or an egress host
   may be defined. No workflow expression derives any of them from the `vars` context.
-- The manifest's `lane` field names the active lane. It is the only routing input: no
+- The manifest's ordered `chain` of lane ids is the only routing input: its first entry
+  is the active lane, and the rest are the fallback order of decision D. There is no
+  separate selector field, so the active lane and the chain cannot disagree. No
   variable, at any scope, selects, enables or shapes a lane. Switching lanes is a
   reviewed one-line diff to the manifest, which takes effect on merge because the
-  resolver reads the manifest at the base commit. A `lane` value that does not name a
-  declared row fails closed, before a secret is exposed, with the allowed lane list in
-  the error.
+  resolver reads the manifest at the base commit. An empty chain, or an entry that does
+  not name a declared row, fails closed before a secret is exposed, with the allowed
+  lane list in the error.
 - The existing `vars.LINTRO_AI_PROVIDER`, `vars.LINTRO_AI_TRANSPORT` and
   `vars.LINTRO_AI_MODEL` reads in the dogfood jobs are removed; provider, transport and
   model come from the lane row. Budget overlays remain variables because they shape
@@ -104,8 +107,8 @@ default model, the allowed models, and the cost basis its figures carry.
   credential is present, or when `ANTHROPIC_BASE_URL` differs from the lane endpoint.
 - The initial manifest declares `claude-subscription` (default), `codex-subscription`,
   `cursor` and `zai-glm-gateway`. The last is `first_party: false`, binds
-  `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and is selected only by a merged
-  manifest diff setting `"lane": "zai-glm-gateway"`.
+  `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and becomes active only by a merged
+  manifest diff placing it first in `chain`.
 
 Because the manifest and the resolver land before the workflow reads them (the two-PR
 bootstrap the workflow header already requires for anything evaluated under
@@ -131,6 +134,8 @@ A run record reports where its requests went and what answered, not what was con
   - `unverifiable`: the endpoint is not first-party, so the reported model cannot be
     trusted to describe what answered.
   - `unreported`: the transport returned no model usage at all.
+  - `legacy`: the round was stored before this ADR and carries none of these fields.
+    Only the state reader assigns it; a run in the current workflow never produces it.
 - `auth_mode` is no longer derived from the `--bare` policy; it follows `credential`.
 - No renderer prints a configured model without the endpoint host beside it and the
   verification state. The sticky header, the badges, the cumulative history and the
@@ -149,10 +154,10 @@ A run record reports where its requests went and what answered, not what was con
   contributed no priced cost.
 - Review-reuse validity includes the lane: a stored round from one lane is not reused as
   if it were produced by another. A stored round with no lane field predates this ADR
-  and is read as the manifest default lane for reuse, so the first run after
+  and is read as the active lane for reuse, so the first run after
   [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) resumes rather than
-  re-reviewing every open PR; its `model_verification` is `unreported` and its history
-  row says so.
+  re-reviewing every open PR; its `model_verification` is `legacy` and its history row
+  says so.
 
 Delivered by: [#2867](https://github.com/lgtm-hq/py-lintro/issues/2867) (run record
 fields and `CostBasis` values),
@@ -163,15 +168,16 @@ display rendering).
 
 `scripts/ci/classify_review_outcome.py` reads the new fields and applies:
 
-| Condition                                                      | Verdict                                                                                                                      |
-| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Recorded endpoint differs from the resolved lane's endpoint    | red, `status=endpoint-mismatch`                                                                                              |
-| `model_verification == mismatch` on a first-party lane         | red, `status=model-mismatch`                                                                                                 |
-| `model_verification == unverifiable` on a non-first-party lane | verdict unchanged; `::warning::` naming lane and endpoint                                                                    |
-| `model_verification == unreported` on a first-party lane       | red, `status=model-unreported`: a first-party CLI envelope always carries `modelUsage`, so its absence is a transport defect |
-| `model_verification == unreported` on a non-first-party lane   | verdict unchanged; labelled like `unverifiable`                                                                              |
-| `model_verification == verified`                               | verdict unchanged; no label                                                                                                  |
-| Authentication failure                                         | labelled by the recorded credential kind, not a fixed label                                                                  |
+| Condition                                                      | Verdict                                                                                                                                                                          |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recorded endpoint differs from the resolved lane's endpoint    | red, `status=endpoint-mismatch`                                                                                                                                                  |
+| `model_verification == mismatch` on a first-party lane         | red, `status=model-mismatch`                                                                                                                                                     |
+| `model_verification == unverifiable` on a non-first-party lane | verdict unchanged; `::warning::` naming lane and endpoint                                                                                                                        |
+| `model_verification == unreported` on a first-party lane       | red, `status=model-unreported`: a first-party CLI envelope always carries `modelUsage`, so its absence is a transport defect. Applies only to rounds produced by the current run |
+| `model_verification == legacy`                                 | verdict unchanged; labelled "predates ADR-0011" on the sticky; never red                                                                                                         |
+| `model_verification == unreported` on a non-first-party lane   | verdict unchanged; labelled like `unverifiable`                                                                                                                                  |
+| `model_verification == verified`                               | verdict unchanged; no label                                                                                                                                                      |
+| Authentication failure                                         | labelled by the recorded credential kind, not a fixed label                                                                                                                      |
 
 A lane declared `first_party: false` is allowed to answer with an unverifiable model.
 That is the price of opting into a gateway, and it is disclosed on the sticky rather
@@ -181,7 +187,7 @@ Delivered by: [#2871](https://github.com/lgtm-hq/py-lintro/issues/2871).
 
 ### D. Degradation
 
-The manifest declares an ordered `chain` of lane ids. The initial chain is
+The manifest's `chain` (decision A) is also the fallback order. The initial chain is
 `["claude-subscription"]`; adding a second entry is a reviewed change to the manifest.
 
 - The wrapper tries lanes in chain order. It advances only on a provider-unavailable
@@ -232,8 +238,9 @@ Delivered by: [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870).
   chain is walked by the wrapper, per attempt, not by a second dispatch path inside the
   review.
 - [ADR-0007](0007-review-resume-and-artifact-state.md): a stored review state produced
-  without the decision B fields is read as `model_verification == unreported` on the
-  manifest default lane, as decision B states, so resume survives the rollout.
+  without the decision B fields is read as `model_verification == legacy` on the active
+  lane, as decision B states; the verdict table leaves `legacy` unchanged, so resume
+  survives the rollout without a red.
 - [ADR-0009](0009-ai-provider-plugin-contract.md): reading `modelUsage` is a transport
   concern of the Anthropic CLI adapter, not a new provider-contract field. Providers
   whose transport reports no model usage record `unreported`.
