@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Accepted. The decisions are in effect as the acceptance criteria of epic
+[#2874](https://github.com/lgtm-hq/py-lintro/issues/2874); each "Delivered by" line
+names the issue that lands it, and the interim measure in Consequences applies until
+[#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) merges.
 
 ## Context
 
@@ -59,7 +62,10 @@ Two independent design reviews (Claude Opus 5.5 and GPT-6.1 Sol, 2026-10-13) con
 on the same shape. The owner decided the four remaining points the same day:
 
 1. Unblock by rescoping the organisation variable's visibility, not by code.
-2. A repository variable selects a declared lane; it never supplies an endpoint.
+2. A repository variable selects a declared lane; it never supplies an endpoint. Revised
+   on review of this ADR: the `vars` context cannot prove a variable is
+   repository-scoped, so a selector variable would be inheritable in exactly the way
+   `ZAI_BASE_URL` was. The selection therefore lives in the manifest (decision A).
 3. Degradation follows a declared, ordered fallback chain.
 4. The Z.ai lane is kept as an explicit opt-in, not removed.
 
@@ -77,10 +83,17 @@ default model, the allowed models, and the cost basis its figures carry.
 
 - The manifest is the **only** place an endpoint, a credential binding or an egress host
   may be defined. No workflow expression derives any of them from the `vars` context.
-- An organisation-inherited variable may not select, enable or shape a lane. The only
-  routing input is the repository-scoped `LINTRO_DOGFOOD_LANE`, which names a declared
-  row. Unset means the manifest default. Any other value fails closed, before a secret
-  is exposed, with the allowed lane list in the error.
+- The manifest's `lane` field names the active lane. It is the only routing input: no
+  variable, at any scope, selects, enables or shapes a lane. Switching lanes is a
+  reviewed one-line diff to the manifest, which takes effect on merge because the
+  resolver reads the manifest at the base commit. A `lane` value that does not name a
+  declared row fails closed, before a secret is exposed, with the allowed lane list in
+  the error.
+- The existing `vars.LINTRO_AI_PROVIDER`, `vars.LINTRO_AI_TRANSPORT` and
+  `vars.LINTRO_AI_MODEL` reads in the dogfood jobs are removed; provider, transport and
+  model come from the lane row. Budget overlays remain variables because they shape
+  spend, not routing. A structural test asserts that no dogfood job reads a routing
+  value from `vars`.
 - A separate secret-free job resolves the lane from the manifest at the base commit and
   publishes its fields as job outputs. The review job consumes only those outputs.
 - Egress for the review job is the manifest row's host list plus the static GitHub
@@ -91,8 +104,8 @@ default model, the allowed models, and the cost basis its figures carry.
   credential is present, or when `ANTHROPIC_BASE_URL` differs from the lane endpoint.
 - The initial manifest declares `claude-subscription` (default), `codex-subscription`,
   `cursor` and `zai-glm-gateway`. The last is `first_party: false`, binds
-  `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and is selected only by setting
-  `LINTRO_DOGFOOD_LANE=zai-glm-gateway` on this repository.
+  `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and is selected only by a merged
+  manifest diff setting `"lane": "zai-glm-gateway"`.
 
 Because the manifest and the resolver land before the workflow reads them (the two-PR
 bootstrap the workflow header already requires for anything evaluated under
@@ -124,13 +137,22 @@ A run record reports where its requests went and what answered, not what was con
   terminal display all follow this rule. When the state is not `verified`, a line at the
   top of the sticky body, outside any collapsible section, names the lane, the endpoint
   and the state.
-- Every cost figure carries its basis. `CostBasis` gains `LIST_PRICE_SHADOW` (a
-  first-party subscription run priced at list for information) and `UNKNOWN` (a
-  third-party endpoint whose pricing the run cannot know). An `UNKNOWN` basis renders as
-  "n/a (third-party gateway)", never as a dollar figure and never as zero, and the
-  cumulative history discloses that some rounds contributed no priced cost.
+- Every cost figure carries its basis. `CostBasis` (`lintro/ai/enums/cost_basis.py`)
+  keeps `BILLED`, `ESTIMATED` and `UNPRICEABLE` and gains two values that split what
+  `UNPRICEABLE` used to cover on the CLI path: `LIST_PRICE_SHADOW` (a first-party
+  subscription run whose CLI envelope reports a list-price figure, shown for
+  information) and `UNKNOWN` (a non-first-party endpoint, where the envelope's figure is
+  priced on the wrong table and is discarded). `UNPRICEABLE` remains the value for a CLI
+  run that reports no figure at all, and stored rounds carrying it render as they do
+  today. An `UNKNOWN` basis renders as "n/a (third-party gateway)", never as a dollar
+  figure and never as zero, and the cumulative history discloses that some rounds
+  contributed no priced cost.
 - Review-reuse validity includes the lane: a stored round from one lane is not reused as
-  if it were produced by another.
+  if it were produced by another. A stored round with no lane field predates this ADR
+  and is read as the manifest default lane for reuse, so the first run after
+  [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) resumes rather than
+  re-reviewing every open PR; its `model_verification` is `unreported` and its history
+  row says so.
 
 Delivered by: [#2867](https://github.com/lgtm-hq/py-lintro/issues/2867) (run record
 fields and `CostBasis` values),
@@ -141,12 +163,15 @@ display rendering).
 
 `scripts/ci/classify_review_outcome.py` reads the new fields and applies:
 
-| Condition                                                      | Verdict                                                     |
-| -------------------------------------------------------------- | ----------------------------------------------------------- |
-| Recorded endpoint differs from the resolved lane's endpoint    | red, `status=endpoint-mismatch`                             |
-| `model_verification == mismatch` on a first-party lane         | red, `status=model-mismatch`                                |
-| `model_verification == unverifiable` on a non-first-party lane | verdict unchanged; `::warning::` naming lane and endpoint   |
-| Authentication failure                                         | labelled by the recorded credential kind, not a fixed label |
+| Condition                                                      | Verdict                                                                                                                      |
+| -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Recorded endpoint differs from the resolved lane's endpoint    | red, `status=endpoint-mismatch`                                                                                              |
+| `model_verification == mismatch` on a first-party lane         | red, `status=model-mismatch`                                                                                                 |
+| `model_verification == unverifiable` on a non-first-party lane | verdict unchanged; `::warning::` naming lane and endpoint                                                                    |
+| `model_verification == unreported` on a first-party lane       | red, `status=model-unreported`: a first-party CLI envelope always carries `modelUsage`, so its absence is a transport defect |
+| `model_verification == unreported` on a non-first-party lane   | verdict unchanged; labelled like `unverifiable`                                                                              |
+| `model_verification == verified`                               | verdict unchanged; no label                                                                                                  |
+| Authentication failure                                         | labelled by the recorded credential kind, not a fixed label                                                                  |
 
 A lane declared `first_party: false` is allowed to answer with an unverifiable model.
 That is the price of opting into a gateway, and it is disclosed on the sticky rather
@@ -164,15 +189,21 @@ The manifest declares an ordered `chain` of lane ids. The initial chain is
   `insufficient_credits`, quota or rate-limit exhaustion), and only when no chunk call
   of the current attempt has completed. A review that has produced findings is never
   restarted on another lane.
-- Each attempt runs with only its own lane's credential in the environment. The workflow
-  forwards the union of the chain's credentials, each still by its literal gated
-  expression, and egress covers the union of the chain's hosts.
+- The workflow forwards every credential in the chain, each by its own literal
+  expression gated on chain membership, and egress covers the union of the chain's
+  hosts. The wrapper then builds each attempt's environment by unsetting every
+  credential that is not the current lane's before it runs the competing-credential
+  check of decision A, so that check holds per attempt rather than per job.
 - A fallback is labelled: the sticky leads with the fallback line, the job summary
   carries a `::warning::`, and one deduplicated tracker issue labelled
   `ai-review-lane-down` is opened or updated for the dead lane through the minted App
   token.
 - When every lane in the chain is unavailable the check is red with
   `status=provider-unavailable`.
+- The chain covers the provider-unavailable class only: dead or expired credential,
+  exhausted balance, exhausted quota or rate limit. A provider that answers with errors
+  mid-review, or an endpoint that is reachable but slow, is not a fallback trigger and
+  is handled by the existing timeout and degradation rules.
 
 Delivered by: [#2872](https://github.com/lgtm-hq/py-lintro/issues/2872).
 
@@ -192,33 +223,36 @@ Delivered by: [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870).
 
 - [ADR-0010](0010-review-shape-and-protocol.md) **Robustness** row ("a provider outage,
   a 429 storm and a token expiry each produce a documented, user-visible outcome") is
-  delivered for endpoint and vendor outages by decisions B to D here. Its
+  delivered for credential, credit and quota exhaustion by decisions B to D here. Its
   **Reliability** row's "a green check means a complete review" now also means a review
-  whose endpoint and model match its lane.
+  whose endpoint matches its lane and whose model is verified on a first-party lane or
+  labelled unverifiable on a declared non-first-party one.
 - [ADR-0008](0008-ai-review-architecture-invariants.md) invariant 2 (every provider call
   goes through `call_ai`) is the seam the fallback loop in decision D sits above: the
   chain is walked by the wrapper, per attempt, not by a second dispatch path inside the
   review.
 - [ADR-0007](0007-review-resume-and-artifact-state.md): a stored review state produced
-  without the decision B fields is read as `model_verification == unreported` with an
-  unknown lane, and is not reused across lanes.
+  without the decision B fields is read as `model_verification == unreported` on the
+  manifest default lane, as decision B states, so resume survives the rollout.
 - [ADR-0009](0009-ai-provider-plugin-contract.md): reading `modelUsage` is a transport
   concern of the Anthropic CLI adapter, not a new provider-contract field. Providers
   whose transport reports no model usage record `unreported`.
 
 ## Consequences
 
-The next lane switch is a diff to a committed JSON file plus a repository variable, both
-visible in the repository and both printed on every sticky. An inherited organisation
-variable can no longer change where a review goes. A reader of a sticky sees the lane,
-the endpoint host, whether the model claim is verified, and what the cost figure is
-based on; the sticky cannot again say Opus while GLM answers.
+The next lane switch is a reviewed diff to a committed JSON file, visible in the
+repository and printed on every sticky. No variable at any scope is read for routing, so
+an inherited organisation variable cannot change where a review goes. The price of that
+guarantee is that an emergency switch is a merged one-line PR rather than a settings
+click. A reader of a sticky sees the lane, the endpoint host, whether the model claim is
+verified, and what the cost figure is based on; the sticky cannot again say Opus while
+GLM answers.
 
 The cost is one more committed artifact to keep in step with the secrets that exist, a
 resolver job on every review, and a two-PR landing for any change the workflow must
 read. Adding a lane now requires a manifest row, a smoke row and a credential binding
 rather than a variable. The Z.ai lane is retained but honest: it reports an unverifiable
-model and no dollar figure, and selecting it is an explicit repository setting. A chain
+model and no dollar figure, and selecting it is an explicit manifest change. A chain
 with a non-first-party lane in it means a fallback review may be produced by an
 unverifiable model; that is permitted by decision C, labelled by decision D, and is a
 deliberate owner choice when the chain is edited.
