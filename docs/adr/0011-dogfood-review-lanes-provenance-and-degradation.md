@@ -237,9 +237,11 @@ Delivered by: [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870).
   a 429 storm and a token expiry each produce a documented, user-visible outcome") is
   delivered for credential, credit and quota exhaustion by decisions B to D here. Its
   **Reliability** row's "a green check means a complete review" now also means a review
-  whose endpoint matches its lane and whose model is verified on a first-party lane or
-  labelled unverifiable on a declared non-first-party one; a `legacy` round can never be
-  part of such a check because it is never reused.
+  whose endpoint matches its lane and whose model is one of: verified on a first-party
+  lane whose transport reports model usage, labelled unverified-by-transport on a
+  first-party lane declared `reports_model_usage: false`, or labelled unverifiable on a
+  declared non-first-party one. A `legacy` round can never be part of such a check
+  because it is never reused.
 - [ADR-0008](0008-ai-review-architecture-invariants.md) invariant 2 (every provider call
   goes through `call_ai`) is the seam the fallback loop in decision D sits above: the
   chain is walked by the wrapper, per attempt, not by a second dispatch path inside the
