@@ -1111,7 +1111,7 @@ def test_docker_ci_dogfood_skip_gate_consumes_authoritative_lint_report() -> Non
         "needs.changes.outputs.lint-scope != 'changed'",
     )
     assert_that(download["uses"]).contains(
-        "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+        "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
     )
     assert_that(download["with"]).is_equal_to(
         {"name": "linting-json-report", "path": ".lintro/artifacts/json"},
