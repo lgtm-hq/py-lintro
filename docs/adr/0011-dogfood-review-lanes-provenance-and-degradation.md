@@ -154,12 +154,15 @@ A run record reports where its requests went and what answered, not what was con
   figure and never as zero, and the cumulative history discloses that some rounds
   contributed no priced cost.
 - Review-reuse validity includes the lane: a stored round from one lane is not reused as
-  if it were produced by another. A stored round with no lane field predates this ADR
-  and records no endpoint, so nothing can say which lane produced it; from 2026-09-09
-  until the interim measure in Consequences, such rounds were answered by GLM through
-  Z.ai. It is therefore **not** reused for lane validity. It is kept in the cumulative
-  history with `model_verification == legacy` and labelled "predates ADR-0011", and it
-  never contributes to a live verdict. The first run after
+  if it were produced by another. A stored round whose lane declares
+  `reports_model_usage: true` but whose state is `unreported` is not reused either: its
+  transport should have said what answered and did not, so it is re-reviewed rather than
+  carried into a green check. A stored round with no lane field predates this ADR and
+  records no endpoint, so nothing can say which lane produced it; from 2026-09-09 until
+  the interim measure in Consequences, such rounds were answered by GLM through Z.ai. It
+  is therefore **not** reused for lane validity. It is kept in the cumulative history
+  with `model_verification == legacy` and labelled "predates ADR-0011", and it never
+  contributes to a live verdict. The first run after
   [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) therefore re-reviews each
   open PR once on the active lane; that one-time cost is accepted in preference to a
   green check built on rounds of unknown provenance.
@@ -249,7 +252,9 @@ Delivered by: [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870).
 - [ADR-0007](0007-review-resume-and-artifact-state.md): a stored review state produced
   without the decision B fields is read as `model_verification == legacy` and excluded
   from reuse, as decision B states. The resume model is unchanged for rounds that carry
-  the fields; only pre-ADR rounds are re-reviewed, once.
+  the fields and a verifiable or declared-unverifiable state; the two exclusions in
+  decision B's reuse bullet (pre-ADR rounds, and `unreported` on a lane that reports
+  model usage) are re-reviewed rather than resumed.
 - [ADR-0009](0009-ai-provider-plugin-contract.md): reading `modelUsage` is a transport
   concern of the Anthropic CLI adapter, not a new provider-contract field. Providers
   whose transport reports no model usage record `unreported`.
