@@ -154,7 +154,7 @@ def test_candidate_workflow_preserves_digest_push_security_contract() -> None:
     assert_that(mint_index).is_equal_to(commit_index - 1)
     assert_that(mint["if"]).is_equal_to("steps.update.outputs.changed == 'true'")
     assert_that(mint["uses"]).is_equal_to(
-        "actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1",
+        "actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510",
     )
     assert_that(mint["with"]).is_equal_to(
         {
