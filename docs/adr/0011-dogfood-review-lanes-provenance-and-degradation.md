@@ -79,8 +79,9 @@ ADR is its design record and the acceptance criterion for each sub-issue.
 
 A **lane** is a named row in the committed manifest `scripts/ci/ai_review_lanes.json`. A
 row declares the provider, transport, endpoint, whether the endpoint is first-party for
-that provider, the name of the credential it binds, the exact egress hosts it needs, the
-default model, the allowed models, and the cost basis its figures carry.
+that provider, whether the transport reports model usage (`reports_model_usage`), the
+name of the credential it binds, the exact egress hosts it needs, the default model, the
+allowed models, and the cost basis its figures carry.
 
 - The manifest is the **only** place an endpoint, a credential binding or an egress host
   may be defined. No workflow expression derives any of them from the `vars` context.
@@ -153,11 +154,12 @@ A run record reports where its requests went and what answered, not what was con
   figure and never as zero, and the cumulative history discloses that some rounds
   contributed no priced cost.
 - Review-reuse validity includes the lane: a stored round from one lane is not reused as
-  if it were produced by another. A stored round with no lane field predates this ADR,
-  and the Context section establishes that such rounds were answered by GLM through
-  Z.ai, so it is **not** reused for lane validity. It is kept in the cumulative history
-  with `model_verification == legacy` and labelled "predates ADR-0011", and it never
-  contributes to a live verdict. The first run after
+  if it were produced by another. A stored round with no lane field predates this ADR
+  and records no endpoint, so nothing can say which lane produced it; from 2026-09-09
+  until the interim measure in Consequences, such rounds were answered by GLM through
+  Z.ai. It is therefore **not** reused for lane validity. It is kept in the cumulative
+  history with `model_verification == legacy` and labelled "predates ADR-0011", and it
+  never contributes to a live verdict. The first run after
   [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) therefore re-reviews each
   open PR once on the active lane; that one-time cost is accepted in preference to a
   green check built on rounds of unknown provenance.
@@ -171,16 +173,17 @@ display rendering).
 
 `scripts/ci/classify_review_outcome.py` reads the new fields and applies:
 
-| Condition                                                      | Verdict                                                                                                                                                                          |
-| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recorded endpoint differs from the resolved lane's endpoint    | red, `status=endpoint-mismatch`                                                                                                                                                  |
-| `model_verification == mismatch` on a first-party lane         | red, `status=model-mismatch`                                                                                                                                                     |
-| `model_verification == unverifiable` on a non-first-party lane | verdict unchanged; `::warning::` naming lane and endpoint                                                                                                                        |
-| `model_verification == unreported` on a first-party lane       | red, `status=model-unreported`: a first-party CLI envelope always carries `modelUsage`, so its absence is a transport defect. Applies only to rounds produced by the current run |
-| `model_verification == legacy`                                 | history rows only; such a round is never reused, so it never reaches the verdict                                                                                                 |
-| `model_verification == unreported` on a non-first-party lane   | verdict unchanged; labelled like `unverifiable`                                                                                                                                  |
-| `model_verification == verified`                               | verdict unchanged; no label                                                                                                                                                      |
-| Authentication failure                                         | labelled by the recorded credential kind, not a fixed label                                                                                                                      |
+| Condition                                                                                                | Verdict                                                                                                                                                                     |
+| -------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recorded endpoint differs from the resolved lane's endpoint                                              | red, `status=endpoint-mismatch`                                                                                                                                             |
+| `model_verification == mismatch` on a first-party lane                                                   | red, `status=model-mismatch`                                                                                                                                                |
+| `model_verification == unverifiable` on a non-first-party lane                                           | verdict unchanged; `::warning::` naming lane and endpoint                                                                                                                   |
+| `model_verification == unreported` on a first-party lane whose row declares `reports_model_usage: true`  | red, `status=model-unreported`: the transport is declared to report what answered, so its absence is a transport defect. Applies only to rounds produced by the current run |
+| `model_verification == unreported` on a first-party lane whose row declares `reports_model_usage: false` | verdict unchanged; the sticky prints the requested model as unverified by the transport                                                                                     |
+| `model_verification == legacy`                                                                           | history rows only; such a round is never reused, so it never reaches the verdict                                                                                            |
+| `model_verification == unreported` on a non-first-party lane                                             | verdict unchanged; labelled like `unverifiable`                                                                                                                             |
+| `model_verification == verified`                                                                         | verdict unchanged; no label                                                                                                                                                 |
+| Authentication failure                                                                                   | labelled by the recorded credential kind, not a fixed label                                                                                                                 |
 
 A lane declared `first_party: false` is allowed to answer with an unverifiable model.
 That is the price of opting into a gateway, and it is disclosed on the sticky rather
