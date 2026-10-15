@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # =============================================================================
 # Lintro AI Tools Base Image
 # =============================================================================
@@ -26,7 +26,7 @@
 # =============================================================================
 
 # yamllint / hadolint: pin is immutable by digest; tag is informational.
-FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:c3b686a26ee4b33531c6ddd874bf6fd1e058ad4fee75cf314b34b9a9334d5b91 AS ai-tools
+FROM ghcr.io/lgtm-hq/lintro-tools:latest@sha256:5ba0df58d93b3eb9c1173783550b8bb4f86c757ed7d0387742a1faa8c6575f56 AS ai-tools
 
 # Renovate: npm datasource for the two published CLIs, node-version for the
 # runtime. CURSOR_AGENT_VERSION has no Renovate datasource -- Cursor ships the
