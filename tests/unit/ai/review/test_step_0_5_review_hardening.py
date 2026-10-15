@@ -77,6 +77,7 @@ from lintro.ai.review.synthesis_narrative import (
 from lintro.config.review_config import ReviewSynthesisConfig
 from tests.unit.ai.review.review_fixtures import make_review_context
 from tests.unit.ai.review.test_cross_chunk_synthesis_2269 import (
+    _mock_provider,
     _outcome,
     _pr_context,
     _run,
@@ -526,12 +527,13 @@ def _prior_state_with_truncated_record(*, path: str) -> ReviewState:
     # The reuse gate (#2867) inherits coverage only from a run it can place
     # on the current lane and endpoint; detect them as the run does.
     provenance = detect_run_provenance(provider="anthropic", transport=AITransport.CLI)
+    provider = _mock_provider()
     return ReviewState(
         runs=(
             RunRecord(
                 identity=RunIdentity(
                     round=1,
-                    model="claude-sonnet-4-6",
+                    model=provider.model_name,
                     provider="anthropic",
                     transport="cli",
                     endpoint=provenance.endpoint,
