@@ -90,9 +90,13 @@ def test_each_verification_state_reads_as_itself() -> None:
     assert_that(provenance_banner(blank)).is_empty()
     no_host = replace(_VERIFIED, endpoint="", first_party=None)
     assert_that(endpoint_note(no_host)).is_equal_to(
-        f"verified on {UNRECORDED_ENDPOINT}",
+        f"verified, {UNRECORDED_ENDPOINT}",
     )
     assert_that(endpoint_note(no_host)).does_not_contain("``")
+    blank_reported = replace(_VERIFIED, verification="mismatch", reported=("", " "))
+    assert_that(endpoint_note(blank_reported)).is_equal_to(
+        "mismatch on `api.anthropic.com`",
+    )
 
 
 def test_only_a_verified_round_leads_without_a_banner() -> None:
@@ -106,6 +110,9 @@ def test_only_a_verified_round_leads_without_a_banner() -> None:
     assert_that(mismatch).starts_with("> ❌ **Model mismatch**")
     unreported = provenance_banner(replace(_VERIFIED, verification="unreported"))
     assert_that(unreported).starts_with("> ℹ️")
+    no_host = provenance_banner(replace(_GATEWAY, endpoint="", first_party=None))
+    assert_that(no_host).contains(f"lane `zai`, {UNRECORDED_ENDPOINT}:")
+    assert_that(no_host).does_not_contain("endpoint endpoint")
 
 
 def test_every_figure_carries_its_basis_and_a_gateway_shows_no_dollars() -> None:
@@ -138,7 +145,12 @@ def _run(
 ) -> RunRecord:
     return RunRecord(
         identity=RunIdentity(round=round_number, model="m"),
-        usage=RunUsage(cost=cost, cost_shadow=shadow, cost_basis=basis, estimated=True),
+        usage=RunUsage(
+            cost=cost,
+            cost_shadow=shadow,
+            cost_basis=basis,
+            estimated=basis != "billed",
+        ),
     )
 
 
@@ -156,6 +168,16 @@ def test_the_history_heading_discloses_rounds_the_gateway_left_unpriced() -> Non
     assert_that(history_cost_summary(runs[:1])).is_equal_to("~$0.5000 (estimated)")
     billed = (_run(1, basis="billed", cost=0.5), _run(2, basis="billed", cost=0.25))
     assert_that(history_cost_summary(billed)).is_equal_to("$0.7500 (billed)")
+    # A billed round beside an exact legacy figure is not an estimate.
+    exact_legacy = RunRecord(
+        identity=RunIdentity(round=3, model="m"),
+        usage=RunUsage(cost=0.25, cost_basis="", estimated=False),
+    )
+    assert_that(history_cost_summary((billed[0], exact_legacy))).is_equal_to("$0.7500")
+    subscription = (_run(1, basis="unpriceable", cost=0.4),)
+    assert_that(history_cost_summary(subscription)).is_equal_to(
+        "~$0.4000 (local estimate, subscription)",
+    )
     # A history with no priced round shows no dollars at all.
     gateway_only = (_run(1, basis="unknown", shadow=0.3), _run(2, basis="unknown"))
     assert_that(history_cost_summary(gateway_only)).is_equal_to(
@@ -321,12 +343,9 @@ def test_the_pr_budget_line_names_the_shadow_an_earlier_round_left_in_the_total(
             pr_budget_enforced=True,
         ),
     )
-    runs = (
-        _run(1, basis="unknown", shadow=0.5),
-        _run(2, basis="billed", cost=0.10),
-    )
-
-    line = _pr_budget_line(result, runs=runs)
+    # Cumulative, as the budget's own total is: the gateway round that left
+    # this shadow may have been pruned from the retained runs long ago.
+    line = _pr_budget_line(result, shadow_usd=0.5)
 
     assert_that(line).starts_with("PR budget: $0.60 of $2.00")
     assert_that(line).contains("includes $0.50 of shadow figures")

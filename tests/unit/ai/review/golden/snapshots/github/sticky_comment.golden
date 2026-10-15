@@ -91,7 +91,7 @@ Two blocking issues remain; the session fix landed.
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` · endpoint not recorded | api · api_key | ~$0.1101 (estimated) | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
+| `claude-sonnet-4-20250514` · predates ADR-0011 | api · api_key | ~$0.1101 (estimated) | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
 
 </details>
 

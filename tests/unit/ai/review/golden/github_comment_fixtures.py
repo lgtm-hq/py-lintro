@@ -160,6 +160,7 @@ def golden_prior_state() -> ReviewState:
                     provider="anthropic",
                     transport="api",
                     auth_mode="api_key",
+                    model_verification="legacy",
                     depth=2,
                     strictness="balanced",
                 ),

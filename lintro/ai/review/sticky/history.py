@@ -58,7 +58,7 @@ def _this_run_section(
     result: ReviewResult,
     transport: str,
     auth_mode: str,
-    runs: Sequence[RunRecord] = (),
+    shadow_usd: float = 0.0,
 ) -> str:
     """Render the single badge table describing the current run.
 
@@ -72,8 +72,8 @@ def _this_run_section(
         result: Current review result.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
-        runs: Every retained run record, this round's last, so the PR-budget
-            line can name the shadow figures its total includes (#2868).
+        shadow_usd: The PR's cumulative shadow figure, so the PR-budget line
+            can name what its total includes that is not spend (#2868).
 
     Returns:
         The ``This run`` section.
@@ -128,20 +128,21 @@ def _this_run_section(
             ),
             *(
                 ["", budget_line]
-                if (budget_line := _pr_budget_line(result, runs=runs))
+                if (budget_line := _pr_budget_line(result, shadow_usd=shadow_usd))
                 else []
             ),
         ],
     )
 
 
-def _pr_budget_line(result: ReviewResult, *, runs: Sequence[RunRecord] = ()) -> str:
+def _pr_budget_line(result: ReviewResult, *, shadow_usd: float = 0.0) -> str:
     """Render ``PR budget: $X of $Y`` for a PR with a review budget (#2796).
 
     Args:
         result: Current review result.
-        runs: Every retained run record; their shadow figures are part of
-            the total and are named as such (ADR-0011 B).
+        shadow_usd: The PR's cumulative shadow figure; it is part of the
+            total and is named as such (ADR-0011 B). Cumulative, not summed
+            over the retained runs, which pruning caps.
 
     Returns:
         The line, or an empty string when ``ai.review_pr_budget_usd`` is unset.
@@ -160,7 +161,7 @@ def _pr_budget_line(result: ReviewResult, *, runs: Sequence[RunRecord] = ()) -> 
         notes.append(RUNTIME_BOUND_NOTE)
     # The cap settles on shadow figures that are never spend (ADR-0011 B);
     # an earlier gateway round's shadow stays in the total after a billed one.
-    shadow = sum(run.usage.cost_shadow for run in runs)
+    shadow = shadow_usd
     if not shadow and metadata.cost_basis in SHADOW_BASES:
         shadow = metadata.cost_estimate_usd
     if shadow:

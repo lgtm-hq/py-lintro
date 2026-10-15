@@ -174,20 +174,24 @@ def endpoint_note(view: ProvenanceView, *, plain: bool = False) -> str:
     if view.is_legacy:
         return LEGACY_LABEL
     state = view.verification
-    if not state and not view.endpoint:
-        return UNRECORDED_ENDPOINT
+    if not view.endpoint:
+        # No host to stand beside the state: say so, in plain words.
+        return f"{state}, {UNRECORDED_ENDPOINT}" if state else UNRECORDED_ENDPOINT
+    host = _host(view, plain=plain)
     if state == ModelVerification.VERIFIED.value:
-        return f"verified on {_host(view, plain=plain)}"
+        return f"verified on {host}"
     if state == ModelVerification.MISMATCH.value:
-        reported = ", ".join(_code(m, limit=60, plain=plain) for m in view.reported)
+        reported = ", ".join(
+            _code(m, limit=60, plain=plain) for m in view.reported if m.strip()
+        )
         answered = f" (reported {reported})" if reported else ""
-        return f"mismatch on {_host(view, plain=plain)}{answered}"
+        return f"mismatch on {host}{answered}"
     if state == ModelVerification.UNVERIFIABLE.value:
-        return f"answered via {_host(view, plain=plain)}, model unverifiable"
+        return f"answered via {host}, model unverifiable"
     if state == ModelVerification.UNREPORTED.value:
-        return f"unverified by the transport on {_host(view, plain=plain)}"
+        return f"unverified by the transport on {host}"
     # An endpoint was recorded but no call completed: nothing to verify.
-    return f"on {_host(view, plain=plain)}, no call completed"
+    return f"on {host}, no call completed"
 
 
 def model_label(
@@ -235,7 +239,11 @@ def provenance_banner(view: ProvenanceView) -> str:
         return ""
     lane = f"lane `{sanitize_comment_text(view.lane, limit=40)}`, " if view.lane else ""
     model = f"`{sanitize_comment_text(view.model or 'unknown', limit=60)}`"
-    where = f"{lane}endpoint {_host(view, plain=False)}"
+    where = (
+        f"{lane}endpoint {_host(view, plain=False)}"
+        if view.endpoint
+        else f"{lane}{UNRECORDED_ENDPOINT}"
+    )
     if state == ModelVerification.MISMATCH.value:
         reported = ", ".join(
             f"`{sanitize_comment_text(m, limit=60)}`" for m in view.reported
@@ -319,12 +327,18 @@ def history_cost_summary(runs: Sequence[RunRecord]) -> str:
     parts: list[str] = []
     if priced_runs:
         priced = sum(run.usage.cost for run in priced_runs)
-        all_billed = all(
-            run.usage.cost_basis == CostBasis.BILLED.value for run in priced_runs
+        bases = {run.usage.cost_basis for run in priced_runs}
+        locally_priced = any(
+            run.usage.estimated
+            or run.usage.cost_basis
+            in (CostBasis.ESTIMATED.value, CostBasis.UNPRICEABLE.value)
+            for run in priced_runs
         )
-        if all_billed:
+        if bases == {CostBasis.BILLED.value}:
             parts.append(f"${priced:.4f} (billed)")
-        elif any(run.usage.cost_basis or run.usage.estimated for run in priced_runs):
+        elif bases == {CostBasis.UNPRICEABLE.value}:
+            parts.append(f"~${priced:.4f} (local estimate, subscription)")
+        elif locally_priced:
             parts.append(f"~${priced:.4f} (estimated)")
         else:
             parts.append(f"${priced:.4f}")

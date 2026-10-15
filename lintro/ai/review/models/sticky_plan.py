@@ -42,6 +42,9 @@ class StickyPlan:
         pr_number: Pull request number used for the same links.
         posting_policy: Policy the findings were marked under, so the
             notes block can name the confidence floor it rendered at.
+        pr_shadow_usd: The PR's cumulative shadow figure after this
+            round (#2868): what the cap counted that is not spend, kept
+            across pruning so the budget line can name it.
     """
 
     match: FindingMatchResult
@@ -58,3 +61,4 @@ class StickyPlan:
     repo: str = ""
     pr_number: int | None = None
     posting_policy: PostingPolicy | None = None
+    pr_shadow_usd: float = 0.0

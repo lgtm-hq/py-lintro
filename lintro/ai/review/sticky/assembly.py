@@ -226,6 +226,12 @@ def _round_plan(*, request: StickyRequest, outcome: RoundOutcome) -> StickyPlan:
         repo=request.repo,
         pr_number=request.pr_number,
         posting_policy=request.posting_policy,
+        # Cumulative, like the spend the budget line shows (#2868): the
+        # retained runs are capped, the PR's shadow total is not.
+        pr_shadow_usd=(
+            (request.prior_state.review_shadow_usd if request.prior_state else 0.0)
+            + outcome.run.usage.cost_shadow
+        ),
     )
 
 
