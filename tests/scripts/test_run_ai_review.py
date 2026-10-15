@@ -1170,7 +1170,7 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
                 *(step.get("with") or {}).values(),
             )
         )
-        for reference in re.findall(r"secrets\\.[A-Za-z_][A-Za-z0-9_]*", blob):
+        for reference in re.findall(r"secrets\.[A-Za-z_][A-Za-z0-9_]*", blob):
             assert_that(reference).described_as(f"step {step.get('name')!r}").is_in(
                 "secrets.GITHUB_TOKEN",
                 "secrets.LINTRO_REVIEW_APP_ID",
@@ -1178,6 +1178,13 @@ def test_workflow_secret_scoped_to_review_step_only() -> None:
                 *(f"secrets.{secret}" for secret in CHAIN_CREDENTIALS.values()),
             )
     assert_that(json.dumps(loaded["jobs"]["lane"])).does_not_contain("secrets.")
+    # The scan above guards something only if it sees the chain secrets.
+    review_blob = " ".join(str(value) for value in review_step["env"].values())
+    assert_that(
+        set(re.findall(r"secrets\.[A-Za-z_][A-Za-z0-9_]*", review_blob)),
+    ).contains(
+        *(f"secrets.{secret}" for secret in CHAIN_CREDENTIALS.values()),
+    )
 
 
 def test_workflow_reviews_pr_via_gh_not_working_tree() -> None:

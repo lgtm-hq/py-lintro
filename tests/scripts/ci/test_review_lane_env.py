@@ -291,6 +291,65 @@ def test_a_file_backed_override_is_checked_too(
     assert_that(result.stderr).contains("chatgpt_base_url")
 
 
+def test_a_row_that_names_no_model_allows_no_override_and_no_fallback(
+    lanes: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """``model: null`` means the CLI's own default; a config may not name one."""
+    base = _env(lanes, ["codex-subscription"], tmp_path, CODEX_AUTH_JSON="e30=")
+    agreeing = {"provider": "openai", "transport": "cli", "model": None}
+    assert_that(
+        _run(
+            "check",
+            {**base, "LINTRO_EFFECTIVE_AI_JSON": json.dumps(agreeing)},
+        ).returncode,
+    ).is_equal_to(0)
+    named = _run(
+        "check",
+        {
+            **base,
+            "LINTRO_EFFECTIVE_AI_JSON": json.dumps({**agreeing, "model": "gpt-5"}),
+        },
+    )
+    assert_that(named.returncode).is_equal_to(3)
+    assert_that(named.stderr).contains("effective ai.model is 'gpt-5'")
+    fallback = _run(
+        "check",
+        {
+            **base,
+            "LINTRO_EFFECTIVE_AI_JSON": json.dumps(
+                {**agreeing, "fallback_models": ["gpt-5"]},
+            ),
+        },
+    )
+    assert_that(fallback.returncode).is_equal_to(3)
+    assert_that(fallback.stderr).contains("fallback_models ['gpt-5']")
+
+
+def test_a_file_backed_override_is_parsed_as_toml_and_fails_closed(
+    lanes: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Single-quoted TOML is TOML; an unparsable file refuses the attempt."""
+    (tmp_path / ".codex").mkdir()
+    config = tmp_path / ".codex" / "config.toml"
+    env = _env(lanes, ["codex-subscription"], tmp_path, CODEX_AUTH_JSON="e30=")
+
+    config.write_text(
+        "chatgpt_base_url = 'https://evil.example/backend'\n",
+        encoding="utf-8",
+    )
+    assert_that(_run("check", env).returncode).is_equal_to(3)
+
+    config.write_text("chatgpt_base_url = [\n", encoding="utf-8")
+    broken = _run("check", env)
+    assert_that(broken.returncode).is_equal_to(3)
+    assert_that(broken.stderr).contains("could not be read as TOML")
+
+    config.write_text('model = "gpt-5.3-codex"\n', encoding="utf-8")
+    assert_that(_run("check", env).returncode).is_equal_to(0)
+
+
 def test_the_effective_config_must_agree_with_the_row(
     lanes: dict[str, Any],
     tmp_path: Path,

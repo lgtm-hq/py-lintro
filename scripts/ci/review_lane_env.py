@@ -41,6 +41,7 @@ import json
 import os
 import re
 import sys
+import tomllib
 from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlsplit
@@ -253,14 +254,40 @@ def _check_base_url(
         key = str(entry.get("key", ""))
         if not path.is_file() or not key:
             continue
-        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-            match = re.match(rf'^\s*{re.escape(key)}\s*=\s*"([^"]*)"', line)
-            if match and _host(match.group(1)) != _host(endpoint):
-                msg = (
-                    f"lane {lane_id!r}: {path} sets {key} to {match.group(1)!r}, "
-                    f"not the lane endpoint {endpoint!r}"
-                )
-                raise LaneRefusalError(msg)
+        value = _toml_value(lane_id, path, key)
+        if value is not None and _host(value) != _host(endpoint):
+            msg = (
+                f"lane {lane_id!r}: {path} sets {key} to {value!r}, not the lane "
+                f"endpoint {endpoint!r}"
+            )
+            raise LaneRefusalError(msg)
+
+
+def _toml_value(lane_id: str, path: Path, key: str) -> str | None:
+    """Read one dotted key from a TOML file the CLI reads, failing closed.
+
+    Args:
+        lane_id: The lane, for the refusal message.
+        path: The file.
+        key: A dotted key path.
+
+    Returns:
+        The value as a string, or ``None`` when the key is absent.
+
+    Raises:
+        LaneRefusalError: When the file is not valid TOML: a file the CLI
+            would read and this gate cannot is not a file to run beside.
+    """
+    try:
+        document: Any = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        msg = f"lane {lane_id!r}: {path} could not be read as TOML ({exc})"
+        raise LaneRefusalError(msg) from exc
+    for part in key.split("."):
+        if not isinstance(document, dict) or part not in document:
+            return None
+        document = document[part]
+    return str(document) if document is not None else None
 
 
 def _check_config(lane_id: str, row: dict[str, Any], env: dict[str, str]) -> None:
@@ -285,7 +312,9 @@ def _check_config(lane_id: str, row: dict[str, Any], env: dict[str, str]) -> Non
     }
     for field, want in expected.items():
         have = effective.get(field)
-        if want is not None and have != want:
+        # A row that names no model means the CLI's own default, unnamed: the
+        # effective config may then name none either.
+        if (have or None) != want:
             msg = (
                 f"lane {lane_id!r}: effective ai.{field} is {have!r}, the row "
                 f"says {want!r}"
@@ -307,7 +336,9 @@ def _check_config(lane_id: str, row: dict[str, Any], env: dict[str, str]) -> Non
         raise LaneRefusalError(msg)
     allowed = set(row.get("models") or [])
     fallbacks = effective.get("fallback_models") or []
-    outside = [m for m in fallbacks if allowed and m not in allowed]
+    # Every fallback must be an allowed model; a row that allows none allows
+    # no fallback at all.
+    outside = [m for m in fallbacks if m not in allowed]
     if outside:
         msg = (
             f"lane {lane_id!r}: fallback_models {outside} are outside the lane's "

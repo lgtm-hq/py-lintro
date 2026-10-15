@@ -5685,14 +5685,14 @@ _REVIEW_LANES_MANIFEST = _REPO_ROOT / "scripts" / "ci" / "ai_review_lanes.json"
 #: chain the secret-free lane job published (#2870). Tier 2 has no provider to
 #: select, so it joins its own trusted-event gate to the same clause.
 _CHAIN_MEMBERSHIP_RE = re.compile(
-    r"contains\\(fromJSON\\(needs\\.lane\\.outputs\\.chain\\), '[a-z0-9-]+'\\)",
+    r"contains\(fromJSON\(needs\.lane\.outputs\.chain\), '[a-z0-9-]+'\)",
 )
 
 #: Routing variables no dogfood job may read (ADR-0011 A): a variable at any
 #: scope could otherwise redirect a PR's credentials and diff. Budget overlays
 #: shape spend, not routing, and stay variables.
 _ROUTING_VARS_RE = re.compile(
-    r"vars\\.(LINTRO_AI_PROVIDER|LINTRO_AI_TRANSPORT|LINTRO_AI_MODEL|ZAI_BASE_URL)\\b",
+    r"vars\.(LINTRO_AI_PROVIDER|LINTRO_AI_TRANSPORT|LINTRO_AI_MODEL|ZAI_BASE_URL)\b",
 )
 #: Names of the CLI-behaviour flags the review pins for the agent binaries.
 #: Matched by shape rather than listed, so a fourth flag is mirrored without
@@ -5894,11 +5894,16 @@ def _tier2_expression_from_dogfood(expression: str) -> str:
     match = _CHAIN_MEMBERSHIP_RE.search(expression)
     assert_that(match).described_as(expression).is_not_none()
     assert match is not None  # narrow for mypy
-    return expression.replace(
-        match.group(0),
-        f"(env.{_AI_CONTRACT_GATE_ENV} == 'true' && {match.group(0)})",
-        1,
-    )
+    gate = f"env.{_AI_CONTRACT_GATE_ENV} == 'true'"
+    # The two anthropic credentials keep their chain clause: the claude CLI
+    # takes one of them, and the chain says which. Every other lane's
+    # credential is forwarded whenever the gate allows, because Tier 2
+    # drives every lane in one job.
+    if "'claude-subscription'" in match.group(0) or "'zai-glm-gateway'" in match.group(
+        0,
+    ):
+        return expression.replace(match.group(0), f"({gate} && {match.group(0)})", 1)
+    return expression.replace(match.group(0), gate, 1)
 
 
 def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> None:
@@ -6040,6 +6045,21 @@ def test_tier2_binds_the_gateway_token_from_the_lane_row() -> None:
     assert_that(tier2_env).does_not_contain_key("LINTRO_AI_MODEL")
 
 
+def test_the_structural_regexes_match_what_they_guard() -> None:
+    """A regex that matches nothing guards nothing: pin each on a live sample."""
+    dogfood_env = _dogfood_review_step_env()
+    assert_that(
+        _CHAIN_MEMBERSHIP_RE.search(dogfood_env["CLAUDE_CODE_OAUTH_TOKEN"]),
+    ).is_not_none()
+    assert_that(_ROUTING_VARS_RE.findall("x ${{ vars.ZAI_BASE_URL }} y")).is_equal_to(
+        ["ZAI_BASE_URL"],
+    )
+    assert_that(
+        _ROUTING_VARS_RE.findall("${{ vars.LINTRO_AI_MAX_COST_USD }}"),
+    ).is_empty()
+    assert_that(_EGRESS_ENDPOINT_RE.fullmatch("api.anthropic.com:443")).is_not_none()
+
+
 @pytest.mark.parametrize("workflow", [_AI_REVIEW_WORKFLOW, _AI_CONTRACT_WORKFLOW])
 def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     """No variable at any scope may select, enable or shape a lane (ADR-0011 A).
@@ -6052,7 +6072,7 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     )
     assert_that(_ROUTING_VARS_RE.findall(text)).described_as(workflow).is_empty()
     allowed = {"vars.LINTRO_AI_MAX_COST_USD", "vars.LINTRO_AI_REVIEW_PR_BUDGET_USD"}
-    reads = set(re.findall(r"\\bvars\\.[A-Za-z_][A-Za-z0-9_]*", text))
+    reads = set(re.findall(r"\bvars\.[A-Za-z_][A-Za-z0-9_]*", text))
     assert_that(reads - allowed).described_as(f"{workflow} vars reads").is_empty()
 
 

@@ -138,7 +138,9 @@ def test_the_manifest_binds_no_secret_value(manifest: dict[str, Any]) -> None:
 
 def _lane_job(workflow: str) -> dict[str, Any]:
     loaded = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
-    return loaded["jobs"]["lane"]
+    job = loaded["jobs"]["lane"]
+    assert isinstance(job, dict)
+    return job
 
 
 @pytest.mark.parametrize("workflow", ["ai-review.yml", "ai-contract-tests.yml"])
