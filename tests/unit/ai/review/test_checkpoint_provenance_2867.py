@@ -183,18 +183,25 @@ def test_a_checkpoint_record_does_not_advance_the_round_counter(
     assert_that(loaded.next_round).is_equal_to(1)
 
 
-def test_a_gateway_checkpoint_prices_its_shadow_on_tokens_not_the_envelope(
+def test_a_gateway_checkpoint_books_the_in_run_shadow_figure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On ``unknown`` the checkpoint discards the envelope figure (ADR-0011 B)."""
+    """On ``unknown`` the checkpoint books what the budget charged (ADR-0011 B).
+
+    Every call was shadow-priced as it returned, so the budget's figure
+    already carries charges the finished chunks' tokens cannot see: a
+    dropped partial, a turn-limited call. The checkpoint must not price
+    the tokens again and book less.
+    """
     loaded = _checkpoint(
         tmp_path,
         monkeypatch,
         prior=None,
         stamp=CheckpointStamp(
             pr_number=_PR,
-            round_spend_usd=99.0,
+            # $18 of shadow-priced finished chunks plus a $2 dropped charge.
+            round_spend_usd=20.0,
             identity=_IDENTITY,
             cost_basis="unknown",
             shadow_price_model="claude-sonnet-4-20250514",
@@ -202,9 +209,8 @@ def test_a_gateway_checkpoint_prices_its_shadow_on_tokens_not_the_envelope(
         collected=[_partial(input_tokens=1_000_000, output_tokens=1_000_000)],
     )
 
-    # Sonnet's list table: $3 per million in, $15 per million out.
-    assert_that(loaded.runs[0].usage.cost_shadow).is_close_to(18.0, 1e-9)
-    assert_that(loaded.review_shadow_usd).is_close_to(18.0, 1e-9)
+    assert_that(loaded.runs[0].usage.cost_shadow).is_equal_to(20.0)
+    assert_that(loaded.review_shadow_usd).is_equal_to(20.0)
     assert_that(loaded.review_spend_usd).is_equal_to(0.0)
 
 
@@ -241,9 +247,9 @@ def test_a_gateway_checkpoint_records_its_figure_as_a_shadow(
 
     assert_that([run.identity.round for run in loaded.runs]).is_equal_to([1, 2])
     assert_that(loaded.runs[1].usage.cost).is_equal_to(0.0)
-    assert_that(loaded.runs[1].usage.cost_shadow).is_close_to(3.0, 1e-9)
+    assert_that(loaded.runs[1].usage.cost_shadow).is_equal_to(0.25)
     assert_that(loaded.review_spend_usd).is_equal_to(0.5)
-    assert_that(loaded.review_shadow_usd).is_close_to(4.0, 1e-9)
+    assert_that(loaded.review_shadow_usd).is_close_to(1.25, 1e-9)
 
 
 def test_a_checkpoint_without_an_identity_writes_no_run(

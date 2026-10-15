@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums.cost_basis import SHADOW_COST_BASES, CostBasis
 from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.coverage import inherit_same_round_paths
@@ -185,7 +184,6 @@ def write_incremental_coverage_part(
     # as spend, as its final record will.
     snapshot = stamp.verify() if stamp.verify is not None else LedgerSnapshot()
     basis, round_figure = _checkpoint_figure(
-        collected=collected,
         stamp=stamp,
         snapshot=snapshot,
     )
@@ -231,14 +229,18 @@ def write_incremental_coverage_part(
 
 def _checkpoint_figure(
     *,
-    collected: list[ChunkReviewPartial],
     stamp: CheckpointStamp,
     snapshot: LedgerSnapshot,
 ) -> tuple[str, float]:
     """Resolve the basis and figure a checkpoint books for the round so far.
 
+    The figure is always what the round's budget has charged: off the
+    provider's host every call was priced on the shadow model as it returned
+    (the model ledger, ADR-0011 B), so the checkpoint, the final record and
+    the PR budget book one figure, dropped partials and turn-limited calls
+    included.
+
     Args:
-        collected: Chunks finished so far in this run.
         stamp: The checkpoint stamp with the profile's basis.
         snapshot: What the open ledger established so far.
 
@@ -246,38 +248,10 @@ def _checkpoint_figure(
         The basis the partial record carries and the figure it books.
     """
     if stamp.cost_basis == CostBasis.UNKNOWN.value:
-        return CostBasis.UNKNOWN.value, _token_priced_shadow(
-            collected=collected,
-            stamp=stamp,
-        )
+        return CostBasis.UNKNOWN.value, stamp.round_spend_usd
     if stamp.cost_basis == CostBasis.UNPRICEABLE.value and snapshot.cost_reported:
         return CostBasis.LIST_PRICE_SHADOW.value, stamp.round_spend_usd
     return stamp.cost_basis, stamp.round_spend_usd
-
-
-def _token_priced_shadow(
-    *,
-    collected: list[ChunkReviewPartial],
-    stamp: CheckpointStamp,
-) -> float:
-    """Price the finished chunks' tokens on the shadow model (ADR-0011 B).
-
-    Args:
-        collected: Chunks finished so far in this run.
-        stamp: The checkpoint stamp naming the shadow price model.
-
-    Returns:
-        The shadow figure for the round so far.
-    """
-    model = stamp.shadow_price_model or (
-        stamp.identity.model if stamp.identity is not None else ""
-    )
-    # Floored: a zero-rate shadow model must not make the enforced caps a no-op.
-    return estimate_cost_with_floor(
-        model,
-        sum(partial.input_tokens for partial in collected),
-        sum(partial.output_tokens for partial in collected),
-    )
 
 
 def _runs_with_checkpoint(
