@@ -182,11 +182,12 @@ def reusable_rounds_for(*, options: ReviewSessionOptions) -> frozenset[int] | No
     if not prior.runs:
         return frozenset()
     workspace = options.workspace_root
+    cwd = str(workspace) if workspace is not None else None
     provenance = detect_run_provenance(
         provider=options.provider.name,
         transport=options.ai_config.transport,
-        bare=cli_bare_billing(options.ai_config),
-        cwd=str(workspace) if workspace is not None else None,
+        bare=cli_bare_billing(options.ai_config, cwd=cwd),
+        cwd=cwd,
         configured_base_url=options.ai_config.api_base_url,
     )
     return reusable_rounds(

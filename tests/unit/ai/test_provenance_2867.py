@@ -921,3 +921,29 @@ def test_project_settings_outrank_user_settings_for_the_base_url(
 
     assert_that(provenance.endpoint).is_equal_to("api.z.ai")
     assert_that(provenance.first_party).is_false()
+
+
+def test_bare_billing_finds_a_project_level_key_helper_in_the_workspace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The workspace, not the process directory, is where the run reads settings."""
+    from lintro.ai.transport import cli_bare_billing
+
+    for name, value in _env(tmp_path).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("LINTRO_CLI_BARE", raising=False)
+    workspace = tmp_path / "repo"
+    (workspace / ".claude").mkdir(parents=True)
+    (workspace / ".claude" / "settings.json").write_text(
+        json.dumps({"apiKeyHelper": "/bin/echo key"}),
+        encoding="utf-8",
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    config = AIConfig(transport=AITransport.CLI, provider=AIProvider.ANTHROPIC)
+
+    assert_that(cli_bare_billing(config, cwd=str(workspace))).is_true()
+    assert_that(cli_bare_billing(config)).is_false()

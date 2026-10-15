@@ -97,7 +97,7 @@ def _auth_mode(*, credential: CredentialKind, bare_billing: bool) -> AuthMode:
     return "subscription"
 
 
-def cli_bare_billing(ai_config: AIConfig) -> bool:
+def cli_bare_billing(ai_config: AIConfig, *, cwd: str | None = None) -> bool:
     """Return whether the ``claude`` CLI will be sent ``--bare`` for *ai_config*.
 
     Under ``--bare`` the call bills the API key, not the subscription; the
@@ -105,6 +105,8 @@ def cli_bare_billing(ai_config: AIConfig) -> bool:
 
     Args:
         ai_config: AI configuration.
+        cwd: Working directory the CLI subprocess runs in, so a project-level
+            ``apiKeyHelper`` is found where the run finds it.
 
     Returns:
         True for the Anthropic provider when its bare-mode policy resolves to
@@ -112,6 +114,7 @@ def cli_bare_billing(ai_config: AIConfig) -> bool:
     """
     return ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
         configured=anthropic_settings(ai_config).cli_bare,
+        cwd=cwd,
     )
 
 
@@ -178,7 +181,7 @@ def resolve_transport_settings(
         # (CliBareMode.AUTO, #1859): the call then bills the key, not the
         # subscription, so report api_key/estimated instead of claiming
         # subscription/unpriceable (#1923 cost provenance).
-        bare_billing = cli_bare_billing(ai_config)
+        bare_billing = cli_bare_billing(ai_config, cwd=cwd)
         # The credential present decides auth_mode, not the --bare policy:
         # a gateway token must not read as a subscription (#2867). A
         # subscription run pointed off the provider's host is priced on the

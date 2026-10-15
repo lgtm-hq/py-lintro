@@ -55,11 +55,12 @@ def in_run_shadow_model(*, options: ReviewSessionOptions) -> str:
 def _provenance_for(options: ReviewSessionOptions) -> RunProvenance:
     """Detect the run's provenance from its session options."""
     workspace = options.workspace_root
+    cwd = str(workspace) if workspace is not None else None
     return detect_run_provenance(
         provider=options.provider.name,
         transport=options.ai_config.transport,
-        bare=cli_bare_billing(options.ai_config),
-        cwd=str(workspace) if workspace is not None else None,
+        bare=cli_bare_billing(options.ai_config, cwd=cwd),
+        cwd=cwd,
         configured_base_url=options.ai_config.api_base_url,
     )
 

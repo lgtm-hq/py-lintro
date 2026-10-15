@@ -354,3 +354,51 @@ def test_a_later_checkpoint_keeps_an_inherited_attempts_model_evidence(
     assert_that([m.name for m in loaded.runs[0].identity.reported_models]).is_equal_to(
         ["claude-sonnet-4-6", "claude-opus-5-5"],
     )
+
+
+def test_the_error_board_shows_only_finished_rounds() -> None:
+    """A killed round's checkpoint is neither the latest round nor the one shown."""
+    from lintro.ai.exceptions import AIProviderError
+    from lintro.ai.review.github_errors import format_error_comment
+
+    prior = ReviewState(
+        runs=(
+            RunRecord(identity=RunIdentity(round=1, model="claude-opus-5-5")),
+            RunRecord(
+                identity=RunIdentity(round=2, model="claude-opus-5-5"),
+                coverage=RunCoverage(partial=True, checkpoint=True),
+            ),
+        ),
+    )
+
+    body = format_error_comment(
+        error=AIProviderError("boom"),
+        provider="anthropic",
+        prior_state=prior,
+    )
+
+    assert_that(body).contains("showing round 1 results")
+    assert_that(body).does_not_contain("showing round 2 results")
+
+
+def test_the_error_only_surface_appears_when_only_a_checkpoint_is_stored() -> None:
+    """With no finished round there is no board to re-render under a banner."""
+    from lintro.ai.exceptions import AIProviderError
+    from lintro.ai.review.github_errors import format_error_comment
+
+    prior = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, model="claude-opus-5-5"),
+                coverage=RunCoverage(partial=True, checkpoint=True),
+            ),
+        ),
+    )
+
+    body = format_error_comment(
+        error=AIProviderError("boom"),
+        provider="anthropic",
+        prior_state=prior,
+    )
+
+    assert_that(body).does_not_contain("showing round")
