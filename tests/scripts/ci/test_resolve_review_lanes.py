@@ -137,7 +137,10 @@ def test_the_manifest_binds_no_secret_value(manifest: dict[str, Any]) -> None:
 
 def test_no_workflow_invokes_the_resolver_yet() -> None:
     """This PR lands the manifest inert; #2870 wires it (staged rollout)."""
-    for workflow in WORKFLOWS.glob("*.yml"):
+    github = ROOT / ".github"
+    definitions = [*github.rglob("*.yml"), *github.rglob("*.yaml")]
+    assert_that(definitions).is_not_empty()
+    for workflow in definitions:
         text = workflow.read_text(encoding="utf-8")
         assert_that(text).does_not_contain("resolve_review_lanes")
         assert_that(text).does_not_contain("ai_review_lanes")
@@ -165,19 +168,18 @@ def test_a_gateway_row_carries_an_unknown_basis_and_a_credential_its_form(
     manifest: dict[str, Any],
 ) -> None:
     """Decision B fixes the gateway basis; a credential kind fixes its form."""
+    pristine = copy.deepcopy(manifest)
     manifest["lanes"]["zai-glm-gateway"]["cost_basis"] = "billed"
     _refuses(resolver, manifest, "cost basis must be 'unknown'")
-    manifest = copy.deepcopy(manifest)
+    manifest = copy.deepcopy(pristine)
     codex = manifest["lanes"]["codex-subscription"]
     codex["credential_form"] = "env"
     codex["credential_env"] = "CODEX_AUTH_JSON"
     _refuses(resolver, manifest, "takes the 'file' form")
-    manifest = copy.deepcopy(manifest)
-    manifest["lanes"]["codex-subscription"]["credential_form"] = "file"
+    manifest = copy.deepcopy(pristine)
     manifest["lanes"]["codex-subscription"]["credential_env"] = "CODEX_AUTH_JSON"
     _refuses(resolver, manifest, "carries ['credential_env']")
-    manifest = copy.deepcopy(manifest)
-    del manifest["lanes"]["codex-subscription"]["credential_env"]
+    manifest = copy.deepcopy(pristine)
     manifest["lanes"]["cursor"]["credential_file"] = "$HOME/x"
     _refuses(resolver, manifest, "carries ['credential_file']")
 
@@ -225,8 +227,12 @@ def test_egress_hosts_are_compared_case_insensitively_and_ports_are_ascii(
     )
     row["egress"] = ["api.anthropic.com:\u00b2"]
     _refuses(resolver, manifest, "host:port")
-    row["egress"] = ["evil,x.com:443", "api.anthropic.com:443"]
-    _refuses(resolver, manifest, "is not a hostname")
+    for host in ("evil,x.com", "a..b", "-a.example.com", "a-.example.com", "a_b.com"):
+        row["egress"] = [f"{host}:443", "api.anthropic.com:443"]
+        _refuses(resolver, manifest, "is not a hostname")
+    row["egress"] = ["api.anthropic.com:443"]
+    row["endpoint"] = "https://[api.anthropic.com/"
+    _refuses(resolver, manifest, "not a valid URL")
 
 
 # --- fail-closed paths -------------------------------------------------------------

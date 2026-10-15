@@ -123,8 +123,9 @@ TRANSPORTS: Final[frozenset[str]] = frozenset({"cli", "api"})
 #: commit-status context and an output without escaping.
 _LANE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
-#: An egress host: a DNS name, lowercased.
-_HOST_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
+#: One DNS label of an egress host, lowercased: no empty label, no label
+#: starting or ending with a hyphen, at most 63 characters.
+_LABEL_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
 #: An environment-variable or secret name.
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
@@ -406,6 +407,13 @@ def _check_credential(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) 
             )
 
 
+def _is_hostname(host: str) -> bool:
+    """Return whether *host* is a DNS name: dot-separated valid labels."""
+    return 0 < len(host) <= 253 and all(
+        _LABEL_RE.fullmatch(label) for label in host.split(".")
+    )
+
+
 def _check_first_party(
     lane_id: str,
     row: dict[str, Any],
@@ -441,7 +449,10 @@ def _check_endpoint(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) ->
     The endpoint's host *and port* (443 when the URL names none) must appear
     in the row's egress list; an allowed host on another port cannot reach it.
     """
-    parts = urlsplit(row["endpoint"])
+    try:
+        parts = urlsplit(row["endpoint"])
+    except ValueError:
+        _fail(f"lane {lane_id!r} endpoint is not a valid URL", lanes)
     if parts.scheme != "https" or not parts.hostname:
         _fail(f"lane {lane_id!r} endpoint must be an https URL", lanes)
     try:
@@ -470,7 +481,7 @@ def _check_endpoint(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) ->
                 f"lane {lane_id!r} declares a wildcard egress host {host!r}",
                 lanes,
             )
-        if not _HOST_RE.fullmatch(host):
+        if not _is_hostname(host):
             _fail(f"lane {lane_id!r} egress host {host!r} is not a hostname", lanes)
         hosts.append(f"{host}:{int(port)}")
     # The normalised entries are what the chain's egress union publishes.
