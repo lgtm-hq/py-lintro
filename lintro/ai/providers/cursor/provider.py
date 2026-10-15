@@ -368,10 +368,14 @@ class CursorProvider(BaseAIProvider):
             auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
         )
         response, session_id = self._cli.parse_stdout(result.stdout)
-        response = self._estimate_usage(
-            prompt=combined_prompt,
+        response = replace(
+            self._estimate_usage(
+                prompt=combined_prompt,
+                model=effective_model,
+                response=response,
+            ),
+            # The call asked for ``effective_model``; say so (#2867).
             model=effective_model,
-            response=response,
         )
 
         if not use_one_shot and self._durable_repo_root is not None and session_id:

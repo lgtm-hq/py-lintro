@@ -120,7 +120,10 @@ catalogue is per-account and renames often, so lintro defers to codex's own defa
 rather than pinning a slug that would break on the next rename. Set `ai.model` (or
 `LINTRO_AI_MODEL`) to override; an explicit model is always honoured. The credential is
 detected from `$CODEX_HOME/auth.json` — `CODEX_HOME`, not `$HOME`, because CI restores
-the session outside the home directory.
+the session outside the home directory. The run record's `credential` follows the same
+precedence: `CODEX_API_KEY` records `api_key`, a session file carrying an embedded key
+records `api_key`, a plan session records `codex_oauth`, and `OPENAI_API_KEY` alone
+records nothing, because codex never reads it.
 
 ## CI support levels per transport
 
@@ -164,9 +167,46 @@ rather than proving vendor output. Re-record whenever a pin in
 ## Reported numbers
 
 Per-run sticky state records `transport`, `auth_mode`, and `cost_basis` (`billed` /
-`estimated` / `unpriceable`). Under subscription CLI, any `~$` figure is unpriceable —
-not a bill. Live `api` runs always record `billed` (usage is provider-reported);
-`estimated` appears only for bare-billed CLI runs and for legacy records whose basis is
-derived from `auth_mode` + locally estimated token usage.
+`estimated` / `unpriceable` / `list_price_shadow` / `unknown`). Under subscription CLI a
+`~$` figure is not a bill: it is recorded as `list_price_shadow` when the CLI envelope
+reported a list-price figure for a first-party endpoint, and as `unpriceable` when it
+reported none. A run pointed at a non-first-party endpoint records `unknown`: the
+envelope's figure is priced on the wrong table and is never shown as dollars. On both
+shadow bases the record's `cost` is zero and the figure lives in `cost_shadow`, which
+still settles `ai.max_cost_usd` and the PR budget (ADR-0011, decision B). Live `api`
+runs always record `billed` (usage is provider-reported); `estimated` appears only for
+CLI runs on a metered key (bare-billed, `CODEX_API_KEY`, a codex session with an
+embedded key, or `ANTHROPIC_API_KEY` under `cli_bare: never`) and for legacy records
+whose basis is derived from `auth_mode` + locally estimated token usage.
+
+Each run also records where its requests went (#2867): `endpoint` (host only),
+`first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `codex_oauth`,
+`cursor_api_key`), `reported_models` (the Claude CLI envelope's `modelUsage`), `lane`,
+and `model_verification` (`verified`, `mismatch`, `unverifiable`, `unreported`; a record
+from before these fields reads as `legacy`). `auth_mode` follows `credential`, so a
+gateway token reads `gateway_token`, not `subscription`. In CI the review-lanes wrapper
+exports the resolved lane row as `LINTRO_REVIEW_LANE`, `LINTRO_REVIEW_ENDPOINT`,
+`LINTRO_REVIEW_FIRST_PARTY` and `LINTRO_REVIEW_ALLOWED_MODELS`, and those win; outside
+CI the provider's base-URL override (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the
+Claude settings files' `env` block) and the provider's own host decide. The credential
+kinds add `api_key` (a metered vendor key, or the API transport) and `unknown` to the
+four lane bindings so a local run can be described too. The Claude credential follows
+Claude Code's documented precedence: the bearer token, then the API key or helper, then
+the OAuth token, which bare mode never reads. A run off the provider's host prices its
+shadow figure on `LINTRO_REVIEW_SHADOW_PRICE_MODEL`, or on the requested model's own
+table when no lane row names one.
+
+Reuse follows provenance (ADR-0011, decision B): a stored round's coverage is inherited
+only when the round is not `legacy` or `mismatch`, is not `unreported` on a lane whose
+transport reports model usage (`LINTRO_REVIEW_REPORTS_MODEL_USAGE`, defaulting to true
+for the Claude CLI and every API transport), and its `lane`, `endpoint` and, on a
+first-party lane, its reported models still match the current lane. Coverage that no
+stored run record can place on a lane is not inherited. A mid-run checkpoint writes a
+partial run record carrying the round's lane and endpoint, so a round killed after a
+checkpoint leaves coverage the gate can place. Outside a lane row the allowed models are
+the default model, its declared fallbacks and the custom agents' `model` overrides; a
+local Claude CLI run whose envelope names an auxiliary model outside that set reads
+`mismatch`, as the ADR requires. The first run after this lands therefore re-reviews
+each open PR once.
 
 See also `docs/ai-features.md` and the dogfood workflow helpers under `scripts/ci/`.

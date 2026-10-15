@@ -15,6 +15,7 @@ import os
 import threading
 from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 from loguru import logger
@@ -52,6 +53,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.providers.reported_model import parse_model_usage
 from lintro.ai.rate_limit import retry_after_from_exception
 from lintro.ai.raw_response import (
     CLI_ENVELOPE_STAGE,
@@ -279,11 +281,12 @@ class _AnthropicCliTransport(CliTransport):
         output_tokens = int(
             usage.get("output_tokens", usage.get("outputTokens", 0)),
         )
-        cost = data.get("total_cost_usd")
-        if cost is None:
+        raw_cost = data.get("total_cost_usd")
+        cost_reported = raw_cost is not None
+        if raw_cost is None:
             cost = estimate_cost(self._model, input_tokens, output_tokens)
         else:
-            cost = float(cost)
+            cost = float(raw_cost)
 
         session_id = data.get("session_id")
         if isinstance(session_id, str) and session_id.strip():
@@ -312,6 +315,10 @@ class _AnthropicCliTransport(CliTransport):
                 cost_estimate=cost,
                 provider=AIProvider.ANTHROPIC,
                 turns=turns,
+                # What answered, as the envelope says, next to what was asked
+                # for (#2867).
+                reported_models=parse_model_usage(data.get("modelUsage")),
+                cost_reported=cost_reported,
             ),
             session_id,
         )
@@ -626,6 +633,10 @@ class AnthropicProvider(ApiStreamingProvider):
             result.stdout,
             max_turns=sent_limit,
         )
+        # The envelope parser only knows the primary model; a fallback call
+        # ran as ``--model <fallback>`` and must say so, or its provenance
+        # check compares the wrong request (#2867).
+        response = replace(response, model=effective_model)
         if not use_one_shot and session_id is not None:
             with self._session_lock:
                 self._session_id = session_id
@@ -711,6 +722,7 @@ class AnthropicProvider(ApiStreamingProvider):
             output_tokens = response.usage.output_tokens
             cost = estimate_cost(effective_model, input_tokens, output_tokens)
 
+            served = getattr(response, "model", None)
             return finish_api_completion(
                 provider=AIProvider.ANTHROPIC,
                 model=effective_model,
@@ -718,6 +730,7 @@ class AnthropicProvider(ApiStreamingProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost=cost,
+                served_model=served if isinstance(served, str) else None,
             )
 
     async def _stream_api(

@@ -27,9 +27,13 @@ class RunUsage:
             cancelled at a budget stop, a turn-limited call).
         estimated: True when token counts were estimated locally.
         cost_basis: How ``cost`` should be read (``billed``, ``estimated``,
-            or ``unpriceable``) (#1923).
+            ``unpriceable``, ``list_price_shadow`` or ``unknown``) (#1923,
+            #2867).
         context: Prompt tokens spent on the read-only repository context
             (#2714), a subset of ``prompt``; serialized only when non-zero.
+        cost_shadow: The figure a ``list_price_shadow`` or ``unknown`` round
+            settled the caps on (#2867, ADR-0011 B). On those bases ``cost``
+            is zero, so spend never carries a number nobody was billed.
     """
 
     duration: float = 0.0
@@ -40,3 +44,4 @@ class RunUsage:
     estimated: bool = False
     cost_basis: str = ""
     context: int = 0
+    cost_shadow: float = 0.0

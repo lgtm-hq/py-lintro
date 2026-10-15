@@ -629,6 +629,7 @@ class OpenAIProvider(ApiStreamingProvider):
 
             cost = estimate_cost(effective_model, input_tokens, output_tokens)
 
+            served = getattr(response, "model", None)
             return finish_api_completion(
                 provider=AIProvider.OPENAI,
                 model=effective_model,
@@ -636,6 +637,7 @@ class OpenAIProvider(ApiStreamingProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost=cost,
+                served_model=served if isinstance(served, str) else None,
             )
 
     async def _stream_api(

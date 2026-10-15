@@ -228,6 +228,7 @@ def decode_state(*, body: str) -> ReviewState:
         truncated=bool(payload.get("truncated", False)),
         # So the sticky fallback never re-seeds spend from <= 30 runs (#2796).
         pr_spend_usd=spend_from_payload(payload),
+        pr_shadow_usd=spend_from_payload(payload, key="pr_shadow_usd"),
     )
 
 

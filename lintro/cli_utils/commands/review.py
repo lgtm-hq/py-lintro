@@ -992,7 +992,10 @@ def _finish_review(
     # its tree), the removal itself when the round never ran (a converged
     # skip, a state-load or provider error).
     with RemoveOnError(prepared.context.head_worktree):
-        resolved_profile = resolve_transport_settings(prepared.ai_config)
+        resolved_profile = resolve_transport_settings(
+            prepared.ai_config,
+            cwd=str(prepared.workspace_root),
+        )
         logger.info(
             "AI review transport profile: {}",
             format_resolved_profile_log(resolved_profile),
@@ -1217,36 +1220,56 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
         ReviewResult: The result with provenance-complete metadata.
     """
     from lintro.ai.enums.cost_basis import CostBasis
+    from lintro.ai.provenance import auth_mode_for, recorded_cost_basis
 
-    effective_basis = stamp.profile.cost_basis
-    if result.metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
+    metadata = result.metadata
+    # A subscription CLI figure is read by where the run went and whether the
+    # envelope reported one (#2867, ADR-0011 B); the pre-run profile can only
+    # say ``unpriceable``.
+    effective_basis = recorded_cost_basis(
+        configured=stamp.profile.cost_basis,
+        first_party=metadata.first_party is not False,
+        cost_reported=metadata.cost_reported,
+    )
+    if metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
         effective_basis = CostBasis.ESTIMATED
+    # Off the provider's host every call was already priced on the shadow
+    # model as it returned (the model ledger, ADR-0011 B), and the round's
+    # figure is the larger of those calls' sum and what the budget charged,
+    # dropped partials and turn-limited calls included. The stamp keeps
+    # that one figure rather than repricing the token totals, so the in-run
+    # cap, the record and the PR budget cannot disagree.
+    cost = metadata.cost_estimate_usd
     return replace(
         result,
         metadata=replace(
-            result.metadata,
+            metadata,
+            cost_estimate_usd=cost,
             transport=stamp.profile.transport.value,
-            auth_mode=stamp.profile.auth_mode,
+            # The credential actually forwarded decides the auth mode; the
+            # profile's policy-derived label is the fallback when no call
+            # recorded one (#2867).
+            auth_mode=auth_mode_for(metadata.credential) or stamp.profile.auth_mode,
             cost_basis=effective_basis.value,
             provider_source=stamp.resolved_ai.source_of("provider").value,
             model_source=stamp.resolved_ai.source_of("model").value,
             transport_source=stamp.resolved_ai.source_of("transport").value,
             max_cost_usd=stamp.cap,
             max_cost_usd_source=stamp.cap_source.value,
-            **_pr_budget_fields(result=result, pr_budget=stamp.pr_budget),
+            **_pr_budget_fields(cost=cost, pr_budget=stamp.pr_budget),
         ),
     )
 
 
 def _pr_budget_fields(
     *,
-    result: ReviewResult,
+    cost: float,
     pr_budget: PrBudget | None,
 ) -> dict[str, Any]:
     """Return the PR-budget metadata fields for this round (#2796).
 
     Args:
-        result: The completed review.
+        cost: The figure this round records, as stamped.
         pr_budget: The PR's review budget, or None when unset.
 
     Returns:
@@ -1256,9 +1279,7 @@ def _pr_budget_fields(
         return {}
     return {
         "pr_budget_usd": pr_budget.budget_usd,
-        "pr_budget_spent_usd": (
-            pr_budget.prior_spend_usd + result.metadata.cost_estimate_usd
-        ),
+        "pr_budget_spent_usd": pr_budget.prior_spend_usd + cost,
         "pr_budget_enforced": pr_budget.enforced,
     }
 
@@ -1482,9 +1503,10 @@ def _post_review(
             checklist_display=render.checklist_display,
             question_map=render.question_map,
             transport=resolved_profile.transport.value,
-            auth_mode=resolved_profile.auth_mode,
-            # metadata carries the post-run reconciled basis (estimated when
-            # the provider reported no usage), not the pre-run profile value.
+            # metadata carries the post-run reconciled auth mode and basis
+            # (the credential that was present; estimated when the provider
+            # reported no usage), not the pre-run profile values.
+            auth_mode=result.metadata.auth_mode or resolved_profile.auth_mode,
             cost_basis=result.metadata.cost_basis,
             auto_resolve=lintro_config.review.auto_resolve,
             posting_policy=posting_policy,

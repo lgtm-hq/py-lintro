@@ -36,6 +36,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.round_outcome import RoundOutcome
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.reuse_gate import evidence_carries_over
 from lintro.ai.review.run_record_factory import (
     RoundTotals,
     run_record_from_result,
@@ -119,7 +120,35 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
             convergence_score=score_records(records=match.records),
         ),
     )
-    combined_runs = [*state.runs, current]
+    # The round's final record replaces the checkpoint record a killed
+    # attempt at the same round left behind. The models that attempt
+    # reported stay on the record only when its coverage could have been
+    # inherited (a verified or unverifiable state); a mismatched attempt was
+    # re-reviewed, and its evidence must not contradict the clean record or
+    # bar it from reuse (#2867).
+    checkpoints = [
+        run
+        for run in state.runs
+        if run.coverage.checkpoint and run.identity.round == round_number
+    ]
+    if checkpoints:
+        seen = {model.name: model for model in current.identity.reported_models}
+        for run in checkpoints:
+            if not evidence_carries_over(
+                earlier=run.identity,
+                current=current.identity,
+            ):
+                continue
+            for model in run.identity.reported_models:
+                seen.setdefault(model.name, model)
+        current = replace(
+            current,
+            identity=replace(current.identity, reported_models=tuple(seen.values())),
+        )
+    combined_runs = [
+        *(run for run in state.runs if run not in checkpoints),
+        current,
+    ]
     return RoundOutcome(
         prior=state,
         round_number=round_number,
@@ -168,6 +197,7 @@ def advance_review_state(*, request: StickyRequest) -> ReviewState:
         truncated=outcome.truncated,
         # Cumulative, so pruning ``runs`` never drops spend (#2796).
         pr_spend_usd=state.review_spend_usd + outcome.run.usage.cost,
+        pr_shadow_usd=state.review_shadow_usd + outcome.run.usage.cost_shadow,
     )
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from lintro.ai.review.errors_taxonomy import (
     KIND_COPY,
@@ -84,7 +85,16 @@ def format_error_comment(
     """
     resolved_provider = provider or (metadata.provider if metadata else "") or ""
     kind = classify_provider_error(provider=resolved_provider, error=error)
-    state = prior_state
+    # A checkpoint record is not a finished round to show: the board and its
+    # banner see only the rounds that finished (#2867).
+    state = (
+        replace(
+            prior_state,
+            runs=tuple(run for run in prior_state.runs if not run.coverage.checkpoint),
+        )
+        if prior_state is not None
+        else None
+    )
 
     if state is not None and state.runs:
         return render_state_sticky(

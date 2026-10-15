@@ -18,6 +18,8 @@ from typing import Any
 from loguru import logger
 
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.enums.model_verification import ModelVerification
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models._coerce import coerce_float, coerce_int
 from lintro.ai.review.models.run_coverage import RunCoverage
@@ -130,8 +132,22 @@ class RunRecord:
             ("cost_basis", usage.cost_basis),
             ("context", usage.context),
             ("merge_base", identity.merge_base),
+            # Provenance (#2867). ``first_party`` is written beside
+            # ``endpoint`` below because a recorded False must survive.
+            ("lane", identity.lane),
+            ("endpoint", identity.endpoint),
+            ("credential", identity.credential),
+            (
+                "reported_models",
+                [_reported_model_payload(model) for model in identity.reported_models],
+            ),
+            ("model_verification", identity.model_verification),
+            ("cost_shadow", round(usage.cost_shadow, 6)),
+            ("checkpoint", coverage.checkpoint),
         )
         payload.update({key: value for key, value in optional if value})
+        if identity.first_party is not None:
+            payload["first_party"] = identity.first_party
         if outcome.resolved is not None:
             payload["resolved"] = outcome.resolved
         if outcome.open_after is not None:
@@ -193,7 +209,95 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         depth=coerce_int(payload.get("depth")),
         strictness=str(payload.get("strictness", "")),
         merge_base=str(payload.get("merge_base", "") or ""),
+        endpoint=str(payload.get("endpoint", "") or ""),
+        first_party=_optional_bool(payload.get("first_party")),
+        credential=str(payload.get("credential", "") or ""),
+        reported_models=_reported_models(payload.get("reported_models")),
+        lane=str(payload.get("lane", "") or ""),
+        model_verification=_parse_verification(payload=payload),
     )
+
+
+#: Longest unrecognised ``model_verification`` value kept on parse.
+_UNRECOGNISED_STATE_LIMIT = 32
+
+#: The keys decision B of ADR-0011 added. A stored record carrying none of
+#: them was written before the ADR, and its model claim is ``legacy``.
+_PROVENANCE_KEYS = (
+    "endpoint",
+    "first_party",
+    "credential",
+    "reported_models",
+    "lane",
+    "model_verification",
+)
+
+
+def _parse_verification(*, payload: dict[str, Any]) -> str:
+    """Parse the stored verification state, assigning ``legacy`` by absence.
+
+    Args:
+        payload: Decoded JSON mapping for one run.
+
+    Returns:
+        The canonical state value; ``legacy`` for a pre-ADR-0011 record;
+        empty for a record that carries provenance but recorded no state (a
+        round that completed no call). An unrecognised value is kept, in a
+        bounded form, rather than blanked: blank reads as "no state", which
+        the reuse gate accepts, and a corrupt or newer value must not.
+    """
+    if not any(key in payload for key in _PROVENANCE_KEYS):
+        return ModelVerification.LEGACY.value
+    raw = payload.get("model_verification")
+    if raw is None or raw == "":
+        return ""
+    normalized = str(raw).strip().lower()
+    try:
+        return ModelVerification(normalized).value
+    except ValueError:
+        logger.debug(f"Unrecognized model_verification in state blob: {raw!r}")
+        return normalized[:_UNRECOGNISED_STATE_LIMIT] or "unrecognized"
+
+
+def _optional_bool(value: Any) -> bool | None:
+    """Return *value* when it is a real bool, else ``None``."""
+    return value if isinstance(value, bool) else None
+
+
+def _reported_model_payload(model: ReportedModel) -> dict[str, str]:
+    """Serialize one reported model; empty attributes are omitted."""
+    payload = {"model": model.model}
+    if model.canonical and model.canonical != model.model:
+        payload["canonical"] = model.canonical
+    if model.provider:
+        payload["provider"] = model.provider
+    return payload
+
+
+def _reported_models(value: Any) -> tuple[ReportedModel, ...]:
+    """Parse the stored reported models, accepting bare names too."""
+    if not isinstance(value, list):
+        return ()
+    parsed: list[ReportedModel] = []
+    for item in value:
+        if isinstance(item, str) and item:
+            parsed.append(ReportedModel(model=item, canonical=item))
+        elif isinstance(item, dict) and isinstance(item.get("model"), str):
+            name = str(item["model"])
+            if not name:
+                continue
+            canonical = item.get("canonical")
+            provider = item.get("provider")
+            parsed.append(
+                ReportedModel(
+                    model=name,
+                    canonical=(
+                        canonical if isinstance(canonical, str) and canonical else name
+                    ),
+                    provider=provider if isinstance(provider, str) else "",
+                ),
+            )
+    return tuple(parsed)
 
 
 def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
@@ -221,6 +325,7 @@ def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
         questions_diff_trimmed=_strict_bool(payload.get("questions_diff_trimmed")),
         delta_since=str(payload.get("delta_since", "") or ""),
         delta_reason=str(payload.get("delta_reason", "") or ""),
+        checkpoint=_strict_bool(payload.get("checkpoint")),
     )
 
 
@@ -256,6 +361,7 @@ def _usage_from_payload(*, payload: dict[str, Any]) -> RunUsage:
         estimated=estimated,
         cost_basis=cost_basis,
         context=coerce_int(payload.get("context")),
+        cost_shadow=coerce_float(payload.get("cost_shadow")),
     )
 
 

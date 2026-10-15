@@ -22,6 +22,8 @@ from lintro.ai.review.models.review_chunk import ReviewChunk
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.orchestrator import run_review
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.resume import plan_resume
@@ -82,6 +84,31 @@ def _provider() -> MagicMock:
     return provider
 
 
+def _vouching_runs(*, round_number: int = 1) -> tuple[RunRecord, ...]:
+    """Return the run record that lets a prior's coverage be inherited (#2867).
+
+    The reuse gate places coverage on the lane and endpoint of the run that
+    produced it; the fake provider has no endpoint, so an identity naming
+    its model on a verified round is enough.
+
+    Args:
+        round_number: The round the coverage records carry.
+
+    Returns:
+        One verified run record for that round.
+    """
+    return (
+        RunRecord(
+            identity=RunIdentity(
+                round=round_number,
+                model="fake-model",
+                provider="fake",
+                model_verification="verified",
+            ),
+        ),
+    )
+
+
 def _run(
     *,
     context: ReviewContext,
@@ -139,7 +166,7 @@ def test_quiet_rereview_makes_zero_provider_calls() -> None:
     assert_that(first_coverage.complete).is_true()
     assert_that(first.coverage_records).is_not_empty()
 
-    prior = ReviewState(coverage=first.coverage_records)
+    prior = ReviewState(coverage=first.coverage_records, runs=_vouching_runs())
     second_calls: list[int] = []
     second = _run(context=context, prior=prior, calls=second_calls)
     second_coverage = _require_coverage(second)
@@ -173,6 +200,7 @@ def test_content_identical_rebase_keeps_coverage() -> None:
                 patch_hash=normalized_patch_hash(left),
             ),
         ),
+        runs=_vouching_runs(),
     )
     context = ReviewContext(
         base_ref="main",
@@ -342,6 +370,7 @@ def test_unserved_model_flag_stays_queued_after_capped_round() -> None:
     context = _context("a.py", extras)
     prior = ReviewState(
         coverage=(CoverageRecord(extras, extras_hash, round=1),),
+        runs=_vouching_runs(),
         flagged_files=(FlaggedFile(extras, "re-check contract", extras_hash),),
     )
     calls: list[int] = []

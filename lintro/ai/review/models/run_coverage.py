@@ -51,6 +51,10 @@ class RunCoverage:
             empty on a full round.
         delta_reason: Why the round was a delta or a full read; empty on a
             record written before delta rounds existed.
+        checkpoint: True on the partial record a mid-run checkpoint writes
+            (#2867): the round had not finished when it was written. Such a
+            record never advances the round counter and is replaced by the
+            round's final record.
     """
 
     files_reviewed: int = 0
@@ -66,3 +70,4 @@ class RunCoverage:
     questions_diff_trimmed: bool = False
     delta_since: str = ""
     delta_reason: str = ""
+    checkpoint: bool = False

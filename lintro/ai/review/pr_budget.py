@@ -52,6 +52,14 @@ PR_BUDGET_REASON_PREFIX = "PR budget"
 #: subscription CLI transport the dollars are a runtime bound, not a bill.
 RUNTIME_BOUND_NOTE = "runtime bound on the cli transport"
 
+#: Bases on which a PR-budget figure is a shadow rather than a bill: the
+#: subscription CLI with or without a list-price figure, and a gateway whose
+#: figure is priced on a stand-in table. Enforcement is decided apart from
+#: the label by :func:`~lintro.ai.review.cost_cap.cap_is_enforced` (#2867).
+RUNTIME_BOUND_BASES: frozenset[CostBasis] = frozenset(
+    {CostBasis.UNPRICEABLE, CostBasis.LIST_PRICE_SHADOW, CostBasis.UNKNOWN},
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PrBudget:
@@ -60,10 +68,12 @@ class PrBudget:
     Attributes:
         budget_usd: The configured ``ai.review_pr_budget_usd``.
         prior_spend_usd: The PR's cumulative review spend before this round
-            (:attr:`ReviewState.review_spend_usd`).
+            (:attr:`ReviewState.review_spend_usd`) plus its shadow figure
+            (:attr:`ReviewState.review_shadow_usd`, #2867).
         enforced: Whether reaching the budget stops the round.
         unpriceable: Whether spend is a runtime bound rather than dollars
-            (the subscription CLI transport).
+            (the subscription CLI transport, with or without a list-price
+            shadow).
     """
 
     budget_usd: float
@@ -99,11 +109,15 @@ def resolve_pr_budget(
         return None
     return PrBudget(
         budget_usd=budget_usd,
+        # Spend plus the shadow figure: a shadow round is not billed, but it
+        # still counts against the PR's budget (#2867, ADR-0011 B).
         prior_spend_usd=(
-            prior_state.review_spend_usd if prior_state is not None else 0.0
+            prior_state.review_spend_usd + prior_state.review_shadow_usd
+            if prior_state is not None
+            else 0.0
         ),
         enforced=cap_is_enforced(source=source, basis=basis),
-        unpriceable=basis is CostBasis.UNPRICEABLE,
+        unpriceable=basis in RUNTIME_BOUND_BASES,
     )
 
 

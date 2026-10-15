@@ -37,6 +37,7 @@ from lintro.ai.review.run_finalize import (
     gate_built_in_findings,
     merge_partials,
 )
+from lintro.ai.review.run_provenance import checkpoint_stamp
 from lintro.ai.review.session import (
     ChunkRunPlan,
     is_cost_cap_stop,
@@ -45,6 +46,7 @@ from lintro.ai.review.session import (
     timeout_reason,
 )
 from lintro.ai.review.timings import ReviewPhase
+from lintro.ai.transport import resolve_transport_settings
 
 if TYPE_CHECKING:
     from lintro.ai.review.custom_agent_runner import CustomAgentPassResult
@@ -183,6 +185,17 @@ async def run_passes(
                 policy=plan.policy,
                 round_spend=lambda: plan.budget.spent,
                 state_pr=options.state_pr,
+                stamp=checkpoint_stamp(
+                    options=options,
+                    cost_basis=resolve_transport_settings(
+                        options.ai_config,
+                        cwd=(
+                            str(options.workspace_root)
+                            if options.workspace_root is not None
+                            else None
+                        ),
+                    ).cost_basis.value,
+                ),
             ),
         )
     if plan.resume.queue:

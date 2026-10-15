@@ -231,3 +231,29 @@ def test_find_claude_found() -> None:
     """Return the claude path when shutil.which finds it."""
     with patch("shutil.which", return_value="/usr/local/bin/claude"):
         assert_that(_find_claude()).is_equal_to("/usr/local/bin/claude")
+
+
+async def test_claude_cli_response_names_the_model_the_call_asked_for(
+    _mock_claude_on_path: None,
+) -> None:
+    """A fallback call runs as ``--model <fallback>`` and its response says so (#2867)."""
+    provider = AnthropicProvider(
+        model="claude-sonnet-4-6",
+        transport=AITransport.CLI,
+        cli_bare=CliBareMode.ALWAYS,
+    )
+    stdout = _cli_json(result='{"summary": "ok"}')
+    with patch_cli_exec(help_text=CLAUDE_HELP) as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+        )
+        response = await provider.complete("Review this diff", model="claude-haiku-4-5")
+
+    assert_that(response.model).is_equal_to("claude-haiku-4-5")
+    assert_that(mock_run.transport_calls[-1].cmd).contains(
+        "--model",
+        "claude-haiku-4-5",
+    )

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from lintro.ai.enums.cost_basis import SHADOW_COST_BASES
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.github_badges import severity_counts
 from lintro.ai.review.models.review_finding import Severity
@@ -118,6 +119,12 @@ def _identity(
         depth=metadata.depth,
         strictness=metadata.strictness,
         merge_base=metadata.merge_base,
+        endpoint=metadata.endpoint,
+        first_party=metadata.first_party,
+        credential=metadata.credential,
+        reported_models=tuple(metadata.reported_models),
+        lane=metadata.lane,
+        model_verification=metadata.model_verification,
     )
 
 
@@ -160,19 +167,24 @@ def _usage(*, request: StickyRequest, auth_mode: str) -> RunUsage:
     """
     metadata = request.result.metadata
     tokens = metadata.token_usage
+    basis = _cost_basis(
+        metadata=metadata,
+        requested=request.cost_basis,
+        auth_mode=auth_mode,
+    )
+    # A shadow-basis figure settles the caps but is not money anyone was
+    # billed, so it is recorded apart from spend (#2867, ADR-0011 B).
+    shadow = basis in {value.value for value in SHADOW_COST_BASES}
     return RunUsage(
         duration=metadata.duration_seconds,
         prompt=int(tokens.get("prompt", 0)),
         completion=int(tokens.get("completion", 0)),
         total=int(tokens.get("total", 0)),
         context=int(tokens.get("context", 0)),
-        cost=metadata.cost_estimate_usd,
+        cost=0.0 if shadow else metadata.cost_estimate_usd,
+        cost_shadow=metadata.cost_estimate_usd if shadow else 0.0,
         estimated=bool(metadata.token_usage_estimated),
-        cost_basis=_cost_basis(
-            metadata=metadata,
-            requested=request.cost_basis,
-            auth_mode=auth_mode,
-        ),
+        cost_basis=basis,
     )
 
 

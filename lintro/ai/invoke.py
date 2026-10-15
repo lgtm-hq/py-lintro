@@ -17,6 +17,7 @@ from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.provenance import record_response, shadow_cost, shadow_priced
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
 
@@ -95,7 +96,7 @@ async def call_ai(
             The provider response.
         """
         with bound_cli_call(cli_options):
-            return await complete_with_fallback(
+            response = await complete_with_fallback(
                 provider,
                 user_prompt,
                 fallback_models=list(ai_config.fallback_models),
@@ -106,6 +107,9 @@ async def call_ai(
                 use_one_shot=use_one_shot,
                 cli_schema=cli_schema,
             )
+        # Off the provider's host the figure is repriced on the lane's shadow
+        # model before the budget sees it (#2867, ADR-0011 B).
+        return shadow_priced(response)
 
     async def _budgeted_call() -> AIResponse:
         """Perform one call, recording its cost against the budget.
@@ -125,19 +129,33 @@ async def call_ai(
                     input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
                     output_tokens=tokens,
                 )
-                return await budget.execute(
+                response = await budget.execute(
                     _call_once,
                     cost_of=lambda response: response.cost_estimate,
                     estimate=estimate,
                 )
+                # ``execute`` settled the budget; only the ledger is left.
+                record_response(response)
+                return response
             response = await _call_once()
         except AITurnLimitError as exc:
-            # The stopped call still spent its turns; charge them (#2685).
+            # The stopped call still spent its turns; charge them (#2685),
+            # priced on the shadow model off-host like a completed call. The
+            # error carries the same figure on, so the budget, the round
+            # record and the PR budget never disagree (#2867).
+            exc.cost_estimate = shadow_cost(
+                input_tokens=exc.input_tokens,
+                output_tokens=exc.output_tokens,
+                reported=exc.cost_estimate,
+            )
             if budget is not None and exc.cost_estimate:
                 budget.record(exc.cost_estimate)
             raise
         if budget is not None:
             budget.record(response.cost_estimate)
+        # The one seam every provider call crosses (ADR-0008, invariant 2),
+        # so the run's model ledger sees each completed call once (#2867).
+        record_response(response)
         return response
 
     call_with_retry = with_retry(

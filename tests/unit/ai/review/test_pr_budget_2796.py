@@ -626,12 +626,12 @@ def test_the_cli_stamps_spend_including_this_round() -> None:
     this_round = result.metadata.cost_estimate_usd
     budget = PrBudget(budget_usd=40.0, prior_spend_usd=17.66, enforced=True)
 
-    fields = _pr_budget_fields(result=result, pr_budget=budget)
+    fields = _pr_budget_fields(cost=this_round, pr_budget=budget)
 
     assert_that(fields["pr_budget_usd"]).is_equal_to(40.0)
     assert_that(fields["pr_budget_spent_usd"]).is_close_to(17.66 + this_round, 1e-9)
     assert_that(fields["pr_budget_enforced"]).is_true()
-    assert_that(_pr_budget_fields(result=result, pr_budget=None)).is_empty()
+    assert_that(_pr_budget_fields(cost=this_round, pr_budget=None)).is_empty()
 
 
 def test_an_unset_budget_has_no_sticky_line() -> None:

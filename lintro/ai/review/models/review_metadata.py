@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.diff_gate import DiffGateCounts
 from lintro.ai.review.enums.coverage_degradation_reason import (
     NARRATIVE_DEGRADATION_REASONS,
@@ -123,6 +124,25 @@ class ReviewMetadata:
             run never reached the completed path (a stopped run) or the
             result predates the pass. Surfaces render nothing for ``None``
             and nothing for a pass that selected no finding.
+        endpoint (str): Host the transport was pointed at (#2867, ADR-0011
+            B). Empty on legacy records and on a run that made no call.
+        first_party (bool | None): Whether ``endpoint`` is the provider's
+            own. ``None`` when not recorded.
+        credential (str): The credential kind actually forwarded
+            (:class:`~lintro.ai.enums.credential_kind.CredentialKind`).
+        reported_models (tuple[ReportedModel, ...]): Every model the
+            transport named as having answered, with its canonical name and
+            reported provider, in first-seen order.
+        model_verification (str): The
+            :class:`~lintro.ai.enums.model_verification.ModelVerification`
+            state; empty when no call completed.
+        lane (str): The review lane the CI wrapper exported, if any.
+        shadow_price_model (str): The first-party model whose list table
+            prices a non-first-party run's shadow figure; empty means the
+            requested model's own table.
+        cost_reported (bool): Whether the transport reported a cost figure
+            of its own, so ``list_price_shadow`` can be told from
+            ``unpriceable``.
         lint_facts_note (str): Why the run had no linter facts to cite when
             a saved report was requested with ``--lint-report`` but could
             not be used — missing, oversized, or malformed (#2571). Rendered
@@ -180,6 +200,14 @@ class ReviewMetadata:
     )
     synthesis: SynthesisOutcome | None = None
     verification: VerificationSummary | None = None
+    endpoint: str = ""
+    first_party: bool | None = None
+    credential: str = ""
+    reported_models: tuple[ReportedModel, ...] = field(default_factory=tuple)
+    model_verification: str = ""
+    lane: str = ""
+    shadow_price_model: str = ""
+    cost_reported: bool = False
     lint_facts_note: str = ""
 
     @property

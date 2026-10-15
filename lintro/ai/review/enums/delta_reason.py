@@ -33,6 +33,9 @@ class DeltaReason(StrEnum):
         NO_TREE: The run has no repository to compute a range in
             (:attr:`~lintro.ai.review.enums.review_checkout.ReviewCheckout.NONE`).
         EXPLICIT_FULL: ``--full`` asked for the whole diff.
+        PRIOR_NOT_REUSABLE: The last finished round's coverage may not be
+            inherited (ADR-0011 B, #2867), so its head cannot anchor a
+            delta: the hunks it read are re-read in full.
     """
 
     DELTA = auto()
@@ -45,3 +48,4 @@ class DeltaReason(StrEnum):
     NOT_ANCESTOR = auto()
     NO_TREE = auto()
     EXPLICIT_FULL = auto()
+    PRIOR_NOT_REUSABLE = auto()

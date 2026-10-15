@@ -3,8 +3,9 @@
 Flag and env overlays are operator intent for this run and enforce on
 every cost basis, including subscription CLI. Committed YAML is repo
 policy and is transport-unaware: it enforces when real money is at
-stake (``billed`` or ``estimated``) and is display-only on
-``unpriceable``. Unset stays uncapped. Shadow pricing (``~$``) is
+stake (``billed``, ``estimated`` or a gateway's ``unknown``) and is
+display-only on ``unpriceable`` and ``list_price_shadow``. Unset stays
+uncapped. Shadow pricing (``~$``) is
 unchanged — measurement is not enforcement.
 """
 
@@ -30,7 +31,10 @@ def cap_is_enforced(*, source: ConfigSource, basis: CostBasis) -> bool:
     if source in (ConfigSource.FLAG, ConfigSource.ENV):
         return True
     if source is ConfigSource.CONFIG:
-        return basis in (CostBasis.BILLED, CostBasis.ESTIMATED)
+        # ``unknown`` is a gateway that bills real money, so repo policy
+        # enforces on it; ``list_price_shadow`` is a subscription figure and
+        # stays advisory like ``unpriceable`` (#2867, ADR-0011 B).
+        return basis in (CostBasis.BILLED, CostBasis.ESTIMATED, CostBasis.UNKNOWN)
     return False
 
 
