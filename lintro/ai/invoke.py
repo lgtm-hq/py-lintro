@@ -140,15 +140,16 @@ async def call_ai(
             response = await _call_once()
         except AITurnLimitError as exc:
             # The stopped call still spent its turns; charge them (#2685),
-            # priced on the shadow model off-host like a completed call.
+            # priced on the shadow model off-host like a completed call. The
+            # error carries the same figure on, so the budget, the round
+            # record and the PR budget never disagree (#2867).
+            exc.cost_estimate = shadow_cost(
+                input_tokens=exc.input_tokens,
+                output_tokens=exc.output_tokens,
+                reported=exc.cost_estimate,
+            )
             if budget is not None and exc.cost_estimate:
-                budget.record(
-                    shadow_cost(
-                        input_tokens=exc.input_tokens,
-                        output_tokens=exc.output_tokens,
-                        reported=exc.cost_estimate,
-                    ),
-                )
+                budget.record(exc.cost_estimate)
             raise
         if budget is not None:
             budget.record(response.cost_estimate)

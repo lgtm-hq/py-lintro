@@ -967,6 +967,40 @@ async def test_a_turn_limited_gateway_call_is_charged_on_the_shadow_model() -> N
     budget = CostBudget(max_cost_usd=100.0)
 
     with model_ledger(shadow_price_model="claude-sonnet-4-20250514"):
+        with pytest.raises(AITurnLimitError) as raised:
+            await call_ai(
+                provider=provider,
+                ai_config=config,
+                user_prompt="hello",
+                system_prompt=None,
+                budget=budget,
+            )
+
+    # Sonnet's list table: $3 per million in; one figure on both sides.
+    assert_that(budget.spent).is_close_to(3.0, 1e-9)
+    assert_that(raised.value.cost_estimate).is_close_to(3.0, 1e-9)
+
+
+async def test_a_turn_limited_gateway_call_with_no_envelope_figure_is_still_charged() -> (
+    None
+):
+    """A gateway that reports no figure cannot make a stopped call free."""
+    from lintro.ai.exceptions import AITurnLimitError
+
+    provider = MagicMock()
+    provider.model_name = "claude-sonnet-4-20250514"
+    provider.complete = AsyncMock(
+        side_effect=AITurnLimitError(
+            "stopped",
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cost_estimate=0.0,
+        ),
+    )
+    config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
+    budget = CostBudget(max_cost_usd=100.0)
+
+    with model_ledger(shadow_price_model="claude-sonnet-4-20250514"):
         with pytest.raises(AITurnLimitError):
             await call_ai(
                 provider=provider,
@@ -976,5 +1010,4 @@ async def test_a_turn_limited_gateway_call_is_charged_on_the_shadow_model() -> N
                 budget=budget,
             )
 
-    # Sonnet's list table: $3 per million in.
     assert_that(budget.spent).is_close_to(3.0, 1e-9)

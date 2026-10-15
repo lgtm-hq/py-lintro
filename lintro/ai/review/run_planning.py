@@ -390,10 +390,11 @@ def plan_run(
     # Resume planning hashes every file patch and walks importers over the
     # post-image set, so its cost scales with the diff; it gets its own span
     # rather than hiding in the gap between the phase sum and the total.
-    # The reuse gate (#2867) bounds both what coverage this round inherits
-    # and which prior head may anchor a delta read.
-    reusable = reusable_rounds_for(options=options)
     with timings.phase(name=ReviewPhase.RESUME_PLANNING):
+        # The reuse gate (#2867) bounds both what coverage this round
+        # inherits and which prior head may anchor a delta read; its
+        # provenance detection belongs to this span, not the gap.
+        reusable = reusable_rounds_for(options=options)
         resume = plan_resume(
             context=context,
             prior=options.prior_state,
