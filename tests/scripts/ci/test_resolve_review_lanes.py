@@ -21,6 +21,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 from assertpy import assert_that
 
 from lintro.ai.registry import model_pricing
@@ -135,15 +136,46 @@ def test_the_manifest_binds_no_secret_value(manifest: dict[str, Any]) -> None:
                 assert_that(value).matches(r"^[A-Z][A-Z0-9_]+$")
 
 
-def test_no_workflow_invokes_the_resolver_yet() -> None:
-    """This PR lands the manifest inert; #2870 wires it (staged rollout)."""
-    github = ROOT / ".github"
-    definitions = [*github.rglob("*.yml"), *github.rglob("*.yaml")]
-    assert_that(definitions).is_not_empty()
-    for workflow in definitions:
-        text = workflow.read_text(encoding="utf-8")
-        assert_that(text).does_not_contain("resolve_review_lanes")
-        assert_that(text).does_not_contain("ai_review_lanes")
+def _lane_job(workflow: str) -> dict[str, Any]:
+    loaded = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
+    return loaded["jobs"]["lane"]
+
+
+@pytest.mark.parametrize("workflow", ["ai-review.yml", "ai-contract-tests.yml"])
+def test_the_lane_job_runs_the_resolver_secret_free(workflow: str) -> None:
+    """Both consumers resolve the chain in a job that holds no secret (#2870).
+
+    The review workflow reads the manifest at ``github.workflow_sha``, the
+    default-branch commit that supplied the definition (ADR-0011 A); the
+    contract-tests workflow reads it from the dispatched ref.
+
+    Args:
+        workflow: The workflow file under test.
+    """
+    job = _lane_job(workflow)
+    blob = json.dumps(job)
+    assert_that(blob).does_not_contain("secrets.")
+    assert_that(job["permissions"]).is_equal_to({"contents": "read"})
+    checkout = next(
+        step
+        for step in job["steps"]
+        if str(step.get("uses", "")).startswith("actions/checkout@")
+    )
+    sparse = str(checkout["with"]["sparse-checkout"]).split()
+    assert_that(sparse).is_equal_to(
+        ["scripts/ci/ai_review_lanes.json", "scripts/ci/resolve_review_lanes.py"],
+    )
+    assert_that(checkout["with"]["persist-credentials"]).is_false()
+    if workflow == "ai-review.yml":
+        assert_that(checkout["with"]["ref"]).is_equal_to("${{ github.workflow_sha }}")
+    resolve = next(step for step in job["steps"] if step.get("id") == "resolve")
+    assert_that(str(resolve["run"]).strip()).is_equal_to(
+        "python3 -I scripts/ci/resolve_review_lanes.py --format github",
+    )
+    for output in ("chain", "lane"):
+        assert_that(job["outputs"][output]).is_equal_to(
+            f"${{{{ steps.resolve.outputs.{output} }}}}",
+        )
 
 
 def test_first_party_must_agree_with_the_endpoint(
@@ -445,6 +477,12 @@ def test_outputs_are_single_line_and_carry_the_whole_chain(
     )
     assert_that(values["egress"]).is_equal_to(
         "api.anthropic.com:443 api.openai.com:443 auth.openai.com:443 chatgpt.com:443",
+    )
+    # Every declared row's hosts, for the job that drives every lane at once.
+    assert_that(values["egress_all"].split()).contains(
+        "api.anthropic.com:443",
+        "api.cursor.com:443",
+        "api.z.ai:443",
     )
     assert_that(set(json.loads(values["lanes"]))).is_equal_to(
         {"claude-subscription", "codex-subscription"},

@@ -5677,10 +5677,22 @@ _AI_CONTRACT_TIER2_JOB = "tier2-invocation-smoke"
 _AI_REVIEW_WORKFLOW = "ai-review.yml"
 _AI_REVIEW_JOB = "ai-review"
 _AI_CONTRACT_GATE_ENV = "AI_CONTRACT_SECRETS_ALLOWED"
-#: The clause the dogfood review uses to select its anthropic lane. Tier 2
-#: has no provider variable, so its expressions carry the gate here instead.
-_DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE = (
-    "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+#: The committed review-lanes manifest (ADR-0011 A, #2869): the only place
+#: a dogfood provider host, credential binding or endpoint is defined.
+_REVIEW_LANES_MANIFEST = _REPO_ROOT / "scripts" / "ci" / "ai_review_lanes.json"
+
+#: The clause the dogfood review gates each credential on: membership of the
+#: chain the secret-free lane job published (#2870). Tier 2 has no provider to
+#: select, so it joins its own trusted-event gate to the same clause.
+_CHAIN_MEMBERSHIP_RE = re.compile(
+    r"contains\\(fromJSON\\(needs\\.lane\\.outputs\\.chain\\), '[a-z0-9-]+'\\)",
+)
+
+#: Routing variables no dogfood job may read (ADR-0011 A): a variable at any
+#: scope could otherwise redirect a PR's credentials and diff. Budget overlays
+#: shape spend, not routing, and stay variables.
+_ROUTING_VARS_RE = re.compile(
+    r"vars\\.(LINTRO_AI_PROVIDER|LINTRO_AI_TRANSPORT|LINTRO_AI_MODEL|ZAI_BASE_URL)\\b",
 )
 #: Names of the CLI-behaviour flags the review pins for the agent binaries.
 #: Matched by shape rather than listed, so a fourth flag is mirrored without
@@ -5715,6 +5727,16 @@ _DOGFOOD_ONLY_ENV = {
     # Review-state artifact upload (#2173); the smoke persists nothing.
     "ACTIONS_RUNTIME_TOKEN",
     "ACTIONS_RESULTS_URL",
+    # The resolved chain and rows; Tier 2 drives every lane and binds none.
+    "LINTRO_REVIEW_CHAIN",
+    "LINTRO_REVIEW_LANES",
+    # The codex session secret: Tier 2 restores it in its own step and the
+    # runner mounts the directory; the smoke step never sees the secret.
+    "CODEX_AUTH_JSON",
+    # The z.ai token travels under its secret name to the dogfood wrapper,
+    # which binds it to ANTHROPIC_AUTH_TOKEN for the attempt; Tier 2 binds
+    # it to ANTHROPIC_AUTH_TOKEN directly (asserted below).
+    "ZAI_AUTH_TOKEN",
 }
 #: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
 #: the dogfood job's per-provider egress expressions.
@@ -5795,22 +5817,19 @@ def _harden_runner_endpoints(*, job: dict[str, Any]) -> set[str]:
 
 
 def _dogfood_provider_egress() -> set[str]:
-    """Return every host the dogfood review's per-provider egress vars carry.
+    """Return every provider host any declared review lane can reach.
 
-    Derived from the ``AI_REVIEW_*_EGRESS`` job-level expressions rather than
-    from a literal list, so a new provider lane cannot be added to the review
-    without the Tier 2 assertion below noticing.
+    Derived from the committed manifest, the only place a lane host is
+    defined (ADR-0011 A), so a new lane cannot be declared without the Tier 2
+    assertion below noticing.
 
     Returns:
-        The union of the per-provider ``host:port`` endpoints.
+        The union of every lane row's ``host:port`` endpoints.
     """
-    review = _load_workflow(name=_AI_REVIEW_WORKFLOW)
-    env = review["jobs"][_AI_REVIEW_JOB]["env"]
+    manifest = json.loads(_REVIEW_LANES_MANIFEST.read_text(encoding="utf-8"))
     endpoints: set[str] = set()
-    for name, value in env.items():
-        if not str(name).endswith("_EGRESS"):
-            continue
-        endpoints.update(_EGRESS_ENDPOINT_RE.findall(str(value)))
+    for row in manifest["lanes"].values():
+        endpoints.update(row["egress"])
     return endpoints
 
 
@@ -5859,14 +5878,12 @@ def _mirrored_dogfood_env(env: dict[str, str]) -> dict[str, str]:
 
 
 def _tier2_expression_from_dogfood(expression: str) -> str:
-    """Rewrite a dogfood anthropic expression into its Tier 2 equivalent.
+    """Rewrite a dogfood chain-gated expression into its Tier 2 equivalent.
 
-    The dogfood review chooses between its anthropic configurations on a
-    provider variable Tier 2 does not have — Tier 2 always drives every lane —
-    so the provider clause is the one and only difference: Tier 2 puts its
-    trusted-event gate there instead. Everything else, in particular the
-    ``ZAI_BASE_URL`` selection between the subscription token and the gateway
-    token, must survive the rewrite untouched.
+    The dogfood review gates each credential on membership of the resolved
+    chain (#2870). Tier 2 always drives every lane and has no provider to
+    select, so the one and only difference is its trusted-event gate joined
+    to that same clause. The secret reference must survive untouched.
 
     Args:
         expression: The normalised dogfood expression.
@@ -5874,9 +5891,13 @@ def _tier2_expression_from_dogfood(expression: str) -> str:
     Returns:
         The normalised expression Tier 2 must carry for the same variable.
     """
+    match = _CHAIN_MEMBERSHIP_RE.search(expression)
+    assert_that(match).described_as(expression).is_not_none()
+    assert match is not None  # narrow for mypy
     return expression.replace(
-        _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
-        f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
+        match.group(0),
+        f"(env.{_AI_CONTRACT_GATE_ENV} == 'true' && {match.group(0)})",
+        1,
     )
 
 
@@ -5901,9 +5922,19 @@ def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> Non
 
     dogfood = _dogfood_provider_egress()
     assert_that(dogfood).described_as("dogfood per-provider egress").is_not_empty()
-    assert_that(_harden_runner_endpoints(job=job)).described_as(
-        "Tier 2 egress must cover every dogfood provider lane",
-    ).contains(*sorted(dogfood))
+    # Tier 2 takes the union of every declared lane's hosts from the lane
+    # job, which derives it from the manifest with the dogfood resolver; no
+    # provider host is written into this workflow (ADR-0011 A).
+    tier2_endpoints = _harden_runner_endpoints(job=job)
+    assert_that(tier2_endpoints).contains("needs.lane.outputs.egress-all")
+    for endpoint in tier2_endpoints:
+        if _EGRESS_ENDPOINT_RE.fullmatch(endpoint):
+            assert_that(endpoint).described_as(endpoint).is_not_in(*sorted(dogfood))
+    lane_job = _load_workflow(name=_AI_CONTRACT_WORKFLOW)["jobs"]["lane"]
+    assert_that(lane_job["outputs"]["egress-all"]).is_equal_to(
+        "${{ steps.resolve.outputs.egress_all }}",
+    )
+    assert_that(job["needs"]).contains("lane")
 
     # Exact, not substring: an added `|| github.event_name == 'push'` would
     # slip past independent contains() checks while widening what can read a
@@ -5967,13 +5998,8 @@ def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() ->
         tier2_value = _normalize_github_expr(str(tier2_env[name]))
         normalized = _normalize_github_expr(dogfood_value)
 
-        if _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE in normalized:
+        if _CHAIN_MEMBERSHIP_RE.search(normalized):
             expected = _tier2_expression_from_dogfood(normalized)
-            # The rewrite must have found the provider clause; otherwise the
-            # comparison would silently assert dogfood equals itself.
-            assert_that(expected).described_as(name).does_not_contain(
-                _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
-            )
             assert_that(tier2_value).described_as(name).is_equal_to(expected)
         elif "${{" not in normalized:
             assert_that(tier2_value).described_as(name).is_equal_to(normalized)
@@ -5983,6 +6009,51 @@ def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() ->
             assert_that(tier2_value).described_as(name).contains(
                 f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
             )
+
+
+def test_tier2_binds_the_gateway_token_from_the_lane_row() -> None:
+    """Tier 2 carries the z.ai token as ANTHROPIC_AUTH_TOKEN, from the chain.
+
+    The dogfood wrapper binds ``ZAI_AUTH_TOKEN`` to ``ANTHROPIC_AUTH_TOKEN``
+    for the attempt; Tier 2 has no wrapper, so its workflow binds the same
+    secret to the same variable, gated on the gateway lane being in the
+    chain, and takes the gateway endpoint from the lane row rather than a
+    variable (ADR-0011 A, #2870).
+    """
+    tier2_env = next(
+        step["env"]
+        for step in _ai_contract_tier2_job()["steps"]
+        if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+    token = _normalize_github_expr(str(tier2_env["ANTHROPIC_AUTH_TOKEN"]))
+    assert_that(token).is_equal_to(
+        f"${{{{ (env.{_AI_CONTRACT_GATE_ENV} == 'true'"
+        " && contains(fromJSON(needs.lane.outputs.chain), 'zai-glm-gateway'))"
+        " && secrets.ZAI_AUTH_TOKEN || '' }}",
+    )
+    base_url = _normalize_github_expr(str(tier2_env["ANTHROPIC_BASE_URL"]))
+    assert_that(base_url).is_equal_to(
+        f"${{{{ (env.{_AI_CONTRACT_GATE_ENV} == 'true'"
+        " && needs.lane.outputs.first-party == 'false')"
+        " && needs.lane.outputs.endpoint || '' }}",
+    )
+    assert_that(tier2_env).does_not_contain_key("LINTRO_AI_MODEL")
+
+
+@pytest.mark.parametrize("workflow", [_AI_REVIEW_WORKFLOW, _AI_CONTRACT_WORKFLOW])
+def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
+    """No variable at any scope may select, enable or shape a lane (ADR-0011 A).
+
+    Args:
+        workflow: The workflow file under test.
+    """
+    text = (_REPO_ROOT / ".github" / "workflows" / workflow).read_text(
+        encoding="utf-8",
+    )
+    assert_that(_ROUTING_VARS_RE.findall(text)).described_as(workflow).is_empty()
+    allowed = {"vars.LINTRO_AI_MAX_COST_USD", "vars.LINTRO_AI_REVIEW_PR_BUDGET_USD"}
+    reads = set(re.findall(r"\\bvars\\.[A-Za-z_][A-Za-z0-9_]*", text))
+    assert_that(reads - allowed).described_as(f"{workflow} vars reads").is_empty()
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

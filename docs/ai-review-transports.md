@@ -101,14 +101,28 @@ credential:
 (#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out
 of scope so the subscription token is actually used.
 
-The dogfood job can also run two further CLI lanes without an API key (#2472): provider
-`anthropic` against a gateway such as z.ai's GLM Coding Plan by forwarding
-`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` to the pinned `claude` binary, and
-provider `openai` on a restored `~/.codex/auth.json` subscription session (org secret
-`CODEX_AUTH_JSON`; `CODEX_API_KEY` would bill metered API credits, not the plan) — the
-workflow resolves the Renovate-pinned codex version, installs it and decodes the secret
-into the session file before the review step; with the secret unset the run fails
-visibly at the credential gate.
+Where the dogfood review goes is a named **lane**: a row in the committed manifest
+`scripts/ci/ai_review_lanes.json`, and nowhere else (ADR-0011 decision A, #2869/#2870).
+The manifest's ordered `chain` is the only routing input; `chain[0]` is the active lane.
+A secret-free `lane` job in `ai-review.yml` resolves the chain with
+`scripts/ci/resolve_review_lanes.py` at `github.workflow_sha` and publishes every row; the
+review job's egress is the union of the chain's hosts, each credential is forwarded under
+its secret name by one literal expression gated on chain membership, and
+`scripts/ci/run-ai-review.sh` binds the attempt through `scripts/ci/review_lane_env.py`:
+provider, transport and model are exported from the row, exactly one credential is in
+scope under the variable its CLI reads (the z.ai token fills `ANTHROPIC_AUTH_TOKEN`; the
+Codex session is decoded from `CODEX_AUTH_JSON` into `~/.codex/auth.json` for the
+attempt and deleted at its end), the provider's base-URL override is exported to the
+row's endpoint off-host and must be unset on-host, and a competing credential, an
+override naming another host, or an effective `ai.*` config that disagrees with the row
+refuses the run before any provider call. An absent credential is red with
+`status=no-credential`, never a fallback. No variable at any scope selects a lane:
+`vars.*` reads in the dogfood jobs are budget overlays only. The declared rows are
+`claude-subscription` (active), `codex-subscription`, `cursor` and `zai-glm-gateway`
+(non-first-party, an explicit opt-in). Switching lanes is a one-line diff to `chain`
+and reaches every open PR on its next run; a rerun keeps its run's `workflow_sha` and
+manifest, so after a switch the recovery step for a red PR is an `@lintro review`
+comment, which starts a new run.
 
 On that lane lintro sends **no** `--model` unless one is configured (#2537). The two
 codex credentials do not accept the same models: an API key reaches the OpenAI API

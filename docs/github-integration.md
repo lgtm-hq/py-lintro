@@ -95,20 +95,20 @@ workflow runs an AI diff review and prints the JSON result to the job log.
   the PR's changes are reviewed as data and never executed with the secret. Trade-off: a
   PR that breaks the review code itself isn't caught by this job — that is covered by
   the unit tests.
-- 🔑 **Bring-your-own credential** — runs the `cli` transport. Provider and model come
-  from the `LINTRO_AI_PROVIDER` / `LINTRO_AI_MODEL` Actions variables. When those
-  variables are unset, `ai-review.yml` still passes `LINTRO_AI_PROVIDER: anthropic` and
-  `run-ai-review.sh` falls back the same way (`${LINTRO_AI_PROVIDER:-anthropic}`), and
-  that env overlay wins over the committed `.lintro-config.yaml`, so the workflow — not
-  the config — makes the choice. Those two CI-side literals are the deliberate
-  exceptions to #2143's no-default rule, which governs the shipped product; #2143's
-  workflow restructure removes both. Operators can set the variables to `cursor` and
-  `cursor-grok-4.6-high` for current dogfood. Cursor uses `CURSOR_API_KEY`; Anthropic
-  uses the pinned `claude` CLI authenticated by `CLAUDE_CODE_OAUTH_TOKEN` (a Claude
-  subscription session). `ANTHROPIC_API_KEY` is deliberately **not** in scope, and
-  `LINTRO_CLI_BARE: never` keeps `--bare` off the command line so an OAuth session is
-  actually used (#1838). CLI versions are pinned in `docker/ai-tools.Dockerfile` and
-  installed from npm at those exact versions.
+- 🔑 **A declared lane, not a variable (ADR-0011)** — runs the `cli` transport on the
+  lane the committed manifest `scripts/ci/ai_review_lanes.json` names first in its
+  `chain`. Provider, transport, model, endpoint, egress and the credential binding all
+  come from that row: a secret-free `lane` job resolves it, the review job's allowlist
+  and credentials follow from the outputs, and `run-ai-review.sh` exports the row's
+  values over the committed `.lintro-config.yaml` and refuses when the effective
+  config, a competing credential or a base-URL override disagrees with the row. No
+  Actions variable selects a provider or model; `LINTRO_AI_MAX_COST_USD` and
+  `LINTRO_AI_REVIEW_PR_BUDGET_USD` remain variables because they shape spend, not
+  routing. The active lane is the Claude subscription: the pinned `claude` CLI
+  authenticated by `CLAUDE_CODE_OAUTH_TOKEN`. `ANTHROPIC_API_KEY` is deliberately
+  **not** in scope, and `LINTRO_CLI_BARE: never` keeps `--bare` off the command line
+  so an OAuth session is actually used (#1838). CLI versions are pinned in
+  `docker/ai-tools.Dockerfile` and installed from npm at those exact versions.
 - 💸 **Operator-set spend ceiling (advisory under the CLI transport)** — the trusted
   base config ships **no** `ai.max_cost_usd`, so there is no committed default cap. A PR
   still cannot raise spend: the workflow installs lintro from the base ref and forwards
@@ -129,11 +129,13 @@ workflow runs an AI diff review and prints the JSON result to the job log.
 - ⏭️ **Skipped, not failed, where it cannot run** — draft PRs and fork PRs (which cannot
   read secrets) never start the job at all.
 
-To activate it, add the matching secret (**Settings → Secrets and variables →
-Actions**): `CURSOR_API_KEY` plus `LINTRO_AI_PROVIDER=cursor` (and optionally
-`LINTRO_AI_MODEL` / `LINTRO_AI_MAX_COST_USD=uncapped`) for Cursor, or
-`CLAUDE_CODE_OAUTH_TOKEN` (mint with `claude setup-token`) for Anthropic. Because
-reviews run using lintro from the trusted base branch, the credential is safe to enable.
+To activate it, add the secret the active lane's row binds (**Settings → Secrets and
+variables → Actions**): `CLAUDE_CODE_OAUTH_TOKEN` (mint with `claude setup-token`) for
+the Claude subscription lane, `CURSOR_API_KEY` for the Cursor lane, `CODEX_AUTH_JSON`
+for the Codex lane. To switch lanes, change `chain` in the manifest in a reviewed pull
+request; the switch reaches every open PR on its next run. Optionally set
+`LINTRO_AI_MAX_COST_USD=uncapped`. Because reviews run using lintro from the
+default-branch commit that supplied the workflow, the credential is safe to enable.
 
 #### Activation precondition (security audit #1317)
 
@@ -293,13 +295,10 @@ alike. It is unset by default: there is no check and no sticky line.
     it is.
   - Coverage carried from earlier rounds is complete: every file is already covered at
     the head, so the check is green (exit 0), like any complete review.
-- **Choosing a figure:** on #2806, the round on the second head cost
-  **$10.03** and the
-  round on the third **$7.63**, so two rounds cost about
-  $17.66. A budget that stops a
+- **Choosing a figure:** on #2806, the round on the second head cost **$10.03** and the
+  round on the third **$7.63**, so two rounds cost about $17.66. A budget that stops a
   runaway pull request without cutting off a normal three-to-four-round one sits around
-  **$40–60**.
-  Unset keeps today's behaviour.
+  **$40–60**. Unset keeps today's behaviour.
 
 ### 5. Docker Image Publishing
 

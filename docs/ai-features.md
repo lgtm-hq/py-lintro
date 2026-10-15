@@ -1968,16 +1968,16 @@ developer's login.
   because `--bare` disables OAuth session login (see the `--bare` note above). Set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
   binary's egress and version predictable under an egress allowlist.
-- **Two more subscription lanes (#2472).** With provider `anthropic` (the default) and
-  the `ZAI_BASE_URL` variable set, the pinned `claude` binary is pointed at a gateway
-  (e.g. z.ai's GLM Coding Plan endpoint) via `ANTHROPIC_BASE_URL` +
-  `ANTHROPIC_AUTH_TOKEN` — the CLI transport forwards `os.environ` to the subprocess, so
-  no product code is involved. `LINTRO_AI_PROVIDER=openai` runs the version-pinned
-  `codex` CLI on a ChatGPT-plan session: the workflow resolves the Renovate-pinned
-  version, installs the CLI and decodes an org secret into `~/.codex/auth.json` (Codex
-  has no OAuth-token env var; `CODEX_API_KEY` is metered API billing, not the
-  subscription) before the review step; with the secret unset the run fails visibly at
-  the credential gate.
+- **Lanes, not variables (ADR-0011).** Where the review goes is a named row in the
+  committed manifest `scripts/ci/ai_review_lanes.json`; its ordered `chain` is the only
+  routing input, and no Actions variable selects a provider, model or endpoint. The
+  declared rows are the Claude subscription (active), the Codex ChatGPT-plan session
+  (decoded from the `CODEX_AUTH_JSON` secret into `~/.codex/auth.json` for the attempt;
+  `CODEX_API_KEY` is metered API billing, not the subscription), Cursor, and a declared
+  z.ai GLM gateway row that is an explicit opt-in. A secret-free job resolves the chain,
+  the review job's egress and credentials follow from it, and the wrapper refuses a
+  competing credential or an override that names another host. See
+  `docs/ai-review-transports.md` for the binding rules.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing

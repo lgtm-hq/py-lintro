@@ -190,6 +190,10 @@ def ai_config_json(config: LintroConfig) -> dict[str, Any]:
             ai_config.transport.value if ai_config.transport is not None else None
         ),
         "model": ai_config.model,
+        # What the dogfood wrapper checks a lane binding against (ADR-0011 A).
+        "api_base_url": ai_config.api_base_url,
+        "api_key_env": ai_config.api_key_env,
+        "fallback_models": list(ai_config.fallback_models),
         "sources": {
             field: str(resolved.sources[field])
             for field in ("provider", "transport", "model")

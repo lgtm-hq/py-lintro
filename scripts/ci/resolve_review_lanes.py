@@ -39,6 +39,8 @@ or to stdout when it is unset; ``--format json`` prints one object):
     chain                 JSON list of lane ids, active lane first
     lane                  the active lane id (``chain[0]``)
     egress                space-separated union of the chain's egress hosts
+    egress_all            the same union over every declared row, for a job
+                          that drives every lane (the Tier 2 contract smoke)
     lanes                 JSON object: every chain lane's row, keyed by id
     provider, transport, endpoint, first_party, reports_model_usage,
     credential, credential_secret, credential_form, credential_env,
@@ -199,11 +201,14 @@ class ResolvedChain:
         chain: Lane ids, active lane first.
         lanes: The chain's rows, keyed by id, in chain order.
         egress: The union of the chain's egress hosts, in first-seen order.
+        egress_all: The union of every declared row's egress hosts, for a
+            job that drives every lane at once (the Tier 2 contract smoke).
     """
 
     chain: list[str]
     lanes: dict[str, dict[str, Any]]
     egress: list[str]
+    egress_all: list[str]
 
     @property
     def active(self) -> dict[str, Any]:
@@ -605,7 +610,12 @@ def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
         rows[lane_id] = checked
     chain = _check_chain(document.get("chain"), rows)
     lanes = {entry: rows[entry] for entry in chain}
-    return ResolvedChain(chain=chain, lanes=lanes, egress=_egress_union(chain, lanes))
+    return ResolvedChain(
+        chain=chain,
+        lanes=lanes,
+        egress=_egress_union(chain, lanes),
+        egress_all=_egress_union(list(rows), rows),
+    )
 
 
 def _output_value(value: Any) -> str:
@@ -633,6 +643,7 @@ def outputs_for(resolved: ResolvedChain) -> dict[str, str]:
         "chain": _output_value(resolved.chain),
         "lane": resolved.chain[0],
         "egress": " ".join(resolved.egress),
+        "egress_all": " ".join(resolved.egress_all),
         "lanes": _output_value(resolved.lanes),
     }
     for field in _LANE_OUTPUTS:

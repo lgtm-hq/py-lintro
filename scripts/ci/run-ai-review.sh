@@ -27,15 +27,14 @@ set -euo pipefail
 # lintro's own machine-readable error envelope — the failure taxonomy is not
 # re-implemented in shell.
 #
-# Default transport is `cli` (workflow fallback when LINTRO_AI_TRANSPORT is
-# unset). The credential depends on LINTRO_AI_PROVIDER (#1971): anthropic uses
-# CLAUDE_CODE_OAUTH_TOKEN (the `claude` CLI OAuth session, not ANTHROPIC_API_KEY
-# whose account has no balance — #1894), or ANTHROPIC_AUTH_TOKEN in gateway
-# mode (#2472, e.g. a z.ai GLM Coding Plan endpoint wired through
-# ANTHROPIC_BASE_URL); cursor uses CURSOR_API_KEY; openai uses the
-# ~/.codex/auth.json Codex subscription session (#2472). Checking the wrong
-# variable would report "no credential" on a perfectly authenticated run, and
-# vice versa.
+# Lane binding (ADR-0011, #2870): the secret-free `lane` job of ai-review.yml
+# resolves the chain from scripts/ci/ai_review_lanes.json and publishes the
+# rows; this script binds one attempt to its lane. Provider, transport and
+# model come from the row, not from variables; the attempt sees exactly its
+# own lane's credential, under the variable its CLI reads; the provider's
+# base-URL override is set to the row's endpoint off-host and must be unset
+# on-host; a competing credential, a config that disagrees with the row, or
+# an absent credential refuses the run before any provider call.
 #
 # Trusted install: the workflow checks out the PR's BASE ref (main) before
 # invoking this script, so the lintro that runs with the provider credential is
@@ -58,30 +57,22 @@ set -euo pipefail
 # genuinely missing — a visible failure, not a skip.
 #
 # Usage:
-#   PR_NUMBER=<n> CLAUDE_CODE_OAUTH_TOKEN=<token> GH_TOKEN=<token> \
+#   PR_NUMBER=<n> LINTRO_REVIEW_CHAIN='["claude-subscription"]' \
+#     LINTRO_REVIEW_LANES='{...}' CLAUDE_CODE_OAUTH_TOKEN=<token> GH_TOKEN=<token> \
 #     scripts/ci/run-ai-review.sh
 #   scripts/ci/run-ai-review.sh <pr-number>
 #
 # Environment:
-#   CLAUDE_CODE_OAUTH_TOKEN Claude Code OAuth token used by the `claude` CLI.
-#                           Required when LINTRO_AI_PROVIDER is anthropic
-#                           (the default), unless gateway mode supplies
-#                           ANTHROPIC_AUTH_TOKEN. Empty otherwise => visible
-#                           failure.
-#   ANTHROPIC_AUTH_TOKEN    Gateway auth token for the anthropic lane (#2472).
-#                           Satisfies the credential gate on its own; pair
-#                           with ANTHROPIC_BASE_URL (e.g. a z.ai GLM Coding
-#                           Plan endpoint) so the token is presented to the
-#                           gateway, not api.anthropic.com.
-#   ANTHROPIC_BASE_URL      Gateway endpoint forwarded to the `claude`
-#                           subprocess. Lintro never reads it; the CLI does.
-#   CURSOR_API_KEY          Cursor CLI key. Required when LINTRO_AI_PROVIDER
-#                           is cursor. Empty => visible failure.
-#   (openai)                No credential variable: the gate requires the
-#                           ~/.codex/auth.json subscription session the
-#                           workflow restores (or a local `codex login`
-#                           created). CODEX_API_KEY is deliberately not
-#                           accepted — it bills metered API credits.
+#   LINTRO_REVIEW_CHAIN     JSON list of lane ids, active lane first, from the
+#                           lane job (scripts/ci/resolve_review_lanes.py).
+#   LINTRO_REVIEW_LANES     JSON object of the chain's rows, keyed by lane id.
+#   LINTRO_REVIEW_ATTEMPT   Index into the chain for this attempt (default 0).
+#   <credential secrets>    Each chain credential under its SECRET name
+#                           (CLAUDE_CODE_OAUTH_TOKEN, ZAI_AUTH_TOKEN,
+#                           CURSOR_API_KEY, CODEX_AUTH_JSON), gated by the
+#                           workflow on chain membership. Captured, unset, and
+#                           re-armed for the active lane only. Empty for the
+#                           active lane => visible no-credential failure.
 #   PR_NUMBER               Pull request number (alternative to the argument).
 #   GH_TOKEN                Token used by `gh` to fetch the PR diff.
 #   GITHUB_TOKEN            Token used by lintro's `--post` to write comments.
@@ -96,12 +87,15 @@ set -euo pipefail
 #   GITHUB_RUN_ID           Current Actions run; excluded from prior-state lookup.
 #   GITHUB_OUTPUT           When set, --locate-prior-state writes run-id=.
 #   LINTRO_AI_ENABLED       Master switch; the workflow sets this to 1.
-#   LINTRO_AI_PROVIDER      Optional overlay (workflow default: anthropic).
-#   LINTRO_AI_MODEL         Optional overlay (empty = provider/config default).
+#   LINTRO_AI_PROVIDER      Set from the lane row; a value passed in is replaced.
+#   LINTRO_AI_MODEL         Set from the lane row (empty = the CLI's own default).
 #   LINTRO_AI_MAX_COST_USD  Optional spend ceiling overlay (empty = config default).
 #   LINTRO_AI_REVIEW_PR_BUDGET_USD  Optional per-PR review budget overlay
 #                           (#2796; empty = config default, unset = off).
-#   LINTRO_AI_TRANSPORT     Optional overlay (workflow default: cli).
+#   LINTRO_AI_TRANSPORT     Set from the lane row.
+#   LINTRO_EFFECTIVE_AI_JSON  The effective ai.* config as JSON, when the caller
+#                           already read it (tests); otherwise read through
+#                           `uv run lintro config --json`.
 #   LINTRO_REVIEW_STATE_DIR Directory for coverage artifacts (default:
 #                           ai-review-state). The workflow downloads prior
 #                           state here. This script uploads checkpoints
@@ -175,39 +169,153 @@ report_not_invoked() {
 pr_number="${1:-${PR_NUMBER:-}}"
 
 # bash-3.2-safe (macOS system bash): `${var,,}` is bash 4+ only (#2025).
-provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-anthropic}" | tr '[:upper:]' '[:lower:]')"
-transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
-# The credential depends on the provider (#1971/#2472). anthropic is satisfied
-# by the `claude` OAuth token, or in gateway mode (e.g. z.ai's GLM Coding
-# Plan, which the workflow wires via ANTHROPIC_BASE_URL) by
-# ANTHROPIC_AUTH_TOKEN; cursor by CURSOR_API_KEY; openai by the
-# ~/.codex/auth.json session the workflow restores (or a local `codex login`
-# created) — Codex has no token env var, and CODEX_API_KEY would bill metered
-# API credits instead of the subscription. Checking the wrong variable would
-# report "no credential" on a perfectly authenticated run, and vice versa.
-if [[ "$provider" == "cursor" ]]; then
-	credential="${CURSOR_API_KEY:-}"
-elif [[ "$provider" == "openai" ]]; then
-	credential=""
-	if [[ -f "${HOME:-}/.codex/auth.json" ]]; then
-		credential="codex-session"
-	fi
-else
-	credential="${CLAUDE_CODE_OAUTH_TOKEN:-}"
-	# Gateway mode needs BOTH halves, and the endpoint must be https:
-	# a token without ANTHROPIC_BASE_URL would be forwarded to the default
-	# api.anthropic.com endpoint, and a cleartext endpoint would carry the
-	# gateway credential in a header over http — either way the credential
-	# reaches an unintended destination, so the gate fails visibly (#2472).
-	if [[ -z "$credential" && -n "${ANTHROPIC_AUTH_TOKEN:-}" &&
-		"${ANTHROPIC_BASE_URL:-}" == https://* ]]; then
-		credential="anthropic-gateway"
-	fi
+#
+# LANE BINDING (ADR-0011 decisions A and D, #2870). The secret-free `lane`
+# job resolved the chain from the committed manifest and published every
+# chain row (LINTRO_REVIEW_LANES) and the order (LINTRO_REVIEW_CHAIN). This
+# step holds every chain credential under its SECRET name and nothing else
+# may route the run: no variable selects a lane, provider, transport, model
+# or endpoint. One attempt (LINTRO_REVIEW_ATTEMPT, index into the chain;
+# the chain walk of decision D is #2872) sees exactly its own lane's
+# credential, under the variable its CLI reads, and the row's facts.
+if [[ -z "${LINTRO_REVIEW_CHAIN:-}" || -z "${LINTRO_REVIEW_LANES:-}" ]]; then
+	transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+	report_not_invoked "No resolved review lane: LINTRO_REVIEW_CHAIN and LINTRO_REVIEW_LANES are unset (the lane job did not publish them)."
 fi
-if [[ -z "$credential" ]]; then
+
+# Capture every credential a lane could bind into non-exported shell state
+# and unset it, so the environment the CLI transport forwards to its
+# subprocess holds one credential: the active lane's, re-armed below.
+_LANE_CREDENTIAL_NAMES="CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN ZAI_AUTH_TOKEN CURSOR_API_KEY CODEX_AUTH_JSON"
+for _name in $_LANE_CREDENTIAL_NAMES; do
+	eval "_captured_${_name}=\"\${${_name}:-}\""
+	unset "$_name"
+done
+
+# Export lines come from the stdlib gate script, one validated NAME=value
+# per line; never `eval`'d as shell.
+_apply_lane_exports() {
+	local line name value
+	while IFS= read -r line; do
+		[[ -z "$line" ]] && continue
+		name="${line%%=*}"
+		value="${line#*=}"
+		if [[ ! "$name" =~ ^[A-Z][A-Z0-9_]{0,127}$ ]]; then
+			echo "::error::review lane: refusing export line with an invalid name" >&2
+			exit 1
+		fi
+		printf -v "$name" '%s' "$value"
+		# shellcheck disable=SC2163  # the name is validated above
+		export "$name"
+	done
+}
+
+export LINTRO_REVIEW_ATTEMPT="${LINTRO_REVIEW_ATTEMPT:-0}"
+_lane_env_file="$(mktemp)"
+if ! python3 -I "${script_dir}/review_lane_env.py" --phase env >"$_lane_env_file"; then
+	rm -f "$_lane_env_file"
+	transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+	report_not_invoked "The resolved review lane could not be bound; see the error above."
+fi
+_apply_lane_exports <"$_lane_env_file"
+rm -f "$_lane_env_file"
+# Provider, transport and model now come from the row (ADR-0011 A).
+transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+echo "[ai-review] lane ${LINTRO_REVIEW_LANE:-?}: provider ${provider}, transport ${transport}, endpoint ${LINTRO_REVIEW_ENDPOINT:-?}"
+
+# Re-arm only the active lane's credential. An env-form credential is bound
+# under the variable its CLI reads (the z.ai token fills
+# ANTHROPIC_AUTH_TOKEN); a file-form one re-arms the source variable the
+# restore script decodes. Both come from the capture above, by name.
+if [[ "${LANE_CREDENTIAL_FORM:-}" == "env" ]]; then
+	eval "_lane_secret_value=\"\${_captured_${LANE_CREDENTIAL_SECRET}:-}\""
+	if [[ -n "$_lane_secret_value" ]]; then
+		printf -v "$LANE_CREDENTIAL_ENV" '%s' "$_lane_secret_value"
+		# shellcheck disable=SC2163  # a manifest name, validated by the gate
+		export "$LANE_CREDENTIAL_ENV"
+	fi
+	unset _lane_secret_value
+elif [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
+	eval "_lane_source_value=\"\${_captured_${LANE_CREDENTIAL_SOURCE_ENV}:-}\""
+	if [[ -n "$_lane_source_value" ]]; then
+		printf -v "$LANE_CREDENTIAL_SOURCE_ENV" '%s' "$_lane_source_value"
+		# shellcheck disable=SC2163  # a manifest name, validated by the gate
+		export "$LANE_CREDENTIAL_SOURCE_ENV"
+	fi
+	unset _lane_source_value
+fi
+# The provider's base-URL override is exported to the row's endpoint on a
+# non-first-party lane and left alone on a first-party one, where any set
+# value is a refusal below; nothing else sets it (ADR-0011 A).
+if [[ -n "${LANE_BASE_URL_ENV:-}" && -n "${LANE_BASE_URL_VALUE:-}" ]]; then
+	printf -v "$LANE_BASE_URL_ENV" '%s' "$LANE_BASE_URL_VALUE"
+	# shellcheck disable=SC2163  # a manifest name, validated by the gate
+	export "$LANE_BASE_URL_ENV"
+fi
+
+# The committed config and its LINTRO_AI_* overlays are not a second source:
+# the effective ai.* must agree with the row. Read through lintro itself; in
+# Actions a config that cannot be read is a refusal, elsewhere (a developer
+# shell without the synced environment) the check is skipped with a note.
+# LINTRO_EFFECTIVE_AI_JSON, when already set, is used as is (the wrapper's
+# tests supply it); the workflow never sets it, so in Actions it is read
+# through lintro itself.
+effective_ai_json="${LINTRO_EFFECTIVE_AI_JSON:-}"
+if [[ -z "$effective_ai_json" ]] && command -v uv >/dev/null 2>&1; then
+	effective_ai_json="$(uv run --no-sync lintro config --json 2>/dev/null | python3 -I -c '
+import json, sys
+value = json.load(sys.stdin)
+print(json.dumps(value.get("ai", value) if isinstance(value, dict) else {}))
+' 2>/dev/null || true)"
+fi
+if [[ -z "$effective_ai_json" ]]; then
+	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+		report_not_invoked "The effective ai config could not be read (lintro config --json), so the lane binding cannot be verified."
+	fi
+	echo "[ai-review] effective-config check skipped: lintro config --json is unavailable here"
+fi
+
+# Refuse before any provider call: an absent credential is red with
+# status=no-credential, never a fallback trigger; a competing credential, a
+# base-URL override naming another host, or a config that disagrees with
+# the row is a refusal with its reason.
+set +e
+LINTRO_EFFECTIVE_AI_JSON="$effective_ai_json" \
+	python3 -I "${script_dir}/review_lane_env.py" --phase check
+_lane_check_status=$?
+set -e
+case "$_lane_check_status" in
+0) ;;
+2)
 	exec python3 "${script_dir}/classify_review_outcome.py" \
 		--status "$NO_CREDENTIAL_STATUS" \
 		--transport "$transport"
+	;;
+*)
+	report_not_invoked "The resolved review lane refused to run; see the error above."
+	;;
+esac
+
+# A file-form credential is materialised for the length of this attempt and
+# deleted at its end (ADR-0011 D). The restore script owns the decoding.
+_lane_credential_path=""
+_lane_cleanup() {
+	if [[ -n "$_lane_credential_path" ]]; then
+		rm -f -- "$_lane_credential_path"
+	fi
+}
+trap '_lane_cleanup' EXIT
+if [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
+	_lane_credential_path="${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}"
+	if ! "${script_dir}/restore-codex-session.sh"; then
+		report_not_invoked "The lane's file credential could not be materialised; see the error above."
+	fi
+	if [[ ! -s "$_lane_credential_path" ]]; then
+		exec python3 "${script_dir}/classify_review_outcome.py" \
+			--status "$NO_CREDENTIAL_STATUS" \
+			--transport "$transport"
+	fi
 fi
 
 if [[ -z "$pr_number" ]]; then
@@ -373,6 +481,7 @@ _cleanup_review() {
 	rm -rf "$lint_report_dir"
 	kill -KILL "${heartbeat_pid:-}" 2>/dev/null || true
 	kill -KILL "${log_pid:-}" 2>/dev/null || true
+	_lane_cleanup
 }
 trap '_cleanup_review' EXIT
 # Forward SIGTERM to lintro (runner may signal only this shell) and keep
