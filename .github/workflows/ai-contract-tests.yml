@@ -259,7 +259,7 @@ jobs:
           # tests/unit/test_workflow_wiring.py derives them from ai-review.yml
           # and the manifest and fails if they drift.
           # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && contains(fromJSON(needs.lane.outputs.chain), 'claude-subscription')) && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.lane == 'claude-subscription') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # yamllint disable-line rule:line-length
           ANTHROPIC_BASE_URL: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.first-party == 'false') && needs.lane.outputs.endpoint || '' }}
           # yamllint disable-line rule:line-length

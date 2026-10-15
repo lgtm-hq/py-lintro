@@ -152,6 +152,16 @@ def test_a_row_whose_name_fields_are_not_names_is_refused(
     tmp_path: Path,
 ) -> None:
     """The wrapper looks variables up by these names; the gate validates them."""
+    # Pinned beside the loop: dropping a field from the production tuple
+    # must fail here, not silently narrow the probe.
+    assert_that(set(gate._NAME_VALUED_FIELDS)).is_equal_to(
+        {
+            "credential_secret",
+            "credential_env",
+            "credential_source_env",
+            "base_url_env",
+        },
+    )
     for field in gate._NAME_VALUED_FIELDS:
         hostile = copy.deepcopy(lanes)
         hostile["claude-subscription"][

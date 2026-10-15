@@ -8,6 +8,7 @@ one provider's nested block rather than a flat table like every other section.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit, urlunsplit
 
 from rich.table import Table
 
@@ -126,13 +127,10 @@ def print_ai_config(
     )
     # The routing state the dogfood lane gate checks (ADR-0011 A): shown
     # here as ``--json`` reports it, so the two outputs cannot drift.
+    base_url = displayable_base_url(ai_config.api_base_url)
     table.add_row(
         "api_base_url",
-        (
-            escape(ai_config.api_base_url)
-            if ai_config.api_base_url
-            else "[dim]unset[/dim]"
-        ),
+        escape(base_url) if base_url else "[dim]unset[/dim]",
     )
     table.add_row(
         "api_key_env",
@@ -177,6 +175,31 @@ def print_ai_config(
     console.print()
 
 
+def displayable_base_url(url: str | None) -> str | None:
+    """Return a base URL with any credential-bearing parts removed.
+
+    A URL may carry a password in its userinfo or a token in its query; the
+    reports print the scheme, host, port and path only. The lane gate
+    compares host and port, so nothing it checks is lost.
+
+    Args:
+        url: The configured ``ai.api_base_url``.
+
+    Returns:
+        The URL without userinfo, query or fragment, or ``None`` when unset.
+    """
+    if not url:
+        return None
+    parts = urlsplit(url)
+    if not parts.scheme or not parts.hostname:
+        return url
+    host = parts.hostname
+    if ":" in host:
+        host = f"[{host}]"
+    netloc = f"{host}:{parts.port}" if parts.port else host
+    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+
+
 def ai_config_json(config: LintroConfig) -> dict[str, Any]:
     """Return the AI section of ``lintro config --json``.
 
@@ -213,7 +236,7 @@ def ai_config_json(config: LintroConfig) -> dict[str, Any]:
         ),
         "model": ai_config.model,
         # What the dogfood wrapper checks a lane binding against (ADR-0011 A).
-        "api_base_url": ai_config.api_base_url,
+        "api_base_url": displayable_base_url(ai_config.api_base_url),
         "api_key_env": ai_config.api_key_env,
         "fallback_models": list(ai_config.fallback_models),
         "sources": {

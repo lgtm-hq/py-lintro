@@ -20,6 +20,7 @@ backends. A knob only one vendor understands lives on that provider's own
 
 from __future__ import annotations
 
+import re
 import warnings
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -33,6 +34,7 @@ from pydantic import (
     Field,
     SerializeAsAny,
     ValidationError,
+    field_validator,
     model_validator,
 )
 
@@ -55,6 +57,10 @@ from lintro.ai.provider_config import (
 from lintro.ai.provider_enum import accepted_provider_values
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
+
+#: What ``ai.api_key_env`` may hold: a variable name, so the reports that
+#: print it can never print a key.
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 __all__ = [
     "AIBudgetConfig",
@@ -219,7 +225,13 @@ class AIConfig(BaseModel):
         ),
     )
     model: str | None = None
-    api_key_env: str | None = None
+    api_key_env: str | None = Field(
+        default=None,
+        description=(
+            "Name of the environment variable holding the API key. A name, "
+            "never the key: the value is reported by `lintro config`."
+        ),
+    )
     api_base_url: str | None = Field(
         default=None,
         description=(
@@ -618,6 +630,32 @@ class AIConfig(BaseModel):
                 ) from exc
         migrated["providers"] = blocks
         return migrated
+
+    @field_validator("api_key_env")
+    @classmethod
+    def _api_key_env_is_a_name(cls, value: str | None) -> str | None:
+        """Refuse an ``api_key_env`` that is not an environment-variable name.
+
+        The field names where the key lives; ``lintro config`` prints it. A
+        key pasted here by mistake would otherwise be printed in clear.
+
+        Args:
+            value: The configured value.
+
+        Returns:
+            The value, when it is a variable name or unset.
+
+        Raises:
+            ValueError: When the value is not a variable name.
+        """
+        if value is None or _ENV_NAME_RE.fullmatch(value):
+            return value
+        msg = (
+            "ai.api_key_env must be the NAME of an environment variable "
+            "(letters, digits and underscores, not starting with a digit), "
+            "never the key itself"
+        )
+        raise ValueError(msg)
 
     @model_validator(mode="after")
     def _apply_legacy_enabled_default(self) -> AIConfig:

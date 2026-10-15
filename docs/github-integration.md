@@ -155,8 +155,9 @@ all four controls (also asserted in `tests/scripts/test_run_ai_review.py`):
    gated on its lane being in the resolved chain, never by a variable's presence.
 
 These controls landed with #1074; #1317 verified them against current `main`. A
-dedicated GitHub Environment with required reviewers is optional once (1–3) hold. Re-run
-the audit if the checkout ref, job guard, or secret injection site changes.
+dedicated GitHub Environment with required reviewers is optional once (1–4) hold. Re-run
+the audit if the checkout ref, job guard, secret injection site, or the chain-gated
+credential-forwarding expressions change.
 
 #### JSON error contract
 

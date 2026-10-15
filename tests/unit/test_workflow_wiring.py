@@ -5881,9 +5881,11 @@ def _tier2_expression_from_dogfood(expression: str) -> str:
     """Rewrite a dogfood chain-gated expression into its Tier 2 equivalent.
 
     The dogfood review gates each credential on membership of the resolved
-    chain (#2870). Tier 2 always drives every lane and has no provider to
-    select, so the one and only difference is its trusted-event gate joined
-    to that same clause. The secret reference must survive untouched.
+    chain (#2870): its wrapper binds one per attempt. Tier 2 has no wrapper,
+    so the two anthropic credentials, which the claude CLI reads directly,
+    key on the *active* lane instead; every other lane's credential is
+    forwarded whenever its trusted-event gate allows. The secret reference
+    must survive untouched.
 
     Args:
         expression: The normalised dogfood expression.
@@ -5895,13 +5897,15 @@ def _tier2_expression_from_dogfood(expression: str) -> str:
     assert_that(match).described_as(expression).is_not_none()
     assert match is not None  # narrow for mypy
     gate = f"env.{_AI_CONTRACT_GATE_ENV} == 'true'"
-    # The subscription token keeps its chain clause: the claude CLI takes
-    # it only when that lane is in play. (The gateway token is bound under
-    # another name and keyed on the active lane; it is not mirrored here.)
-    # Every other lane's credential is forwarded whenever the gate allows,
-    # because Tier 2 drives every lane in one job.
+    # The subscription token keys on the active lane, like the gateway
+    # token and endpoint: a chain that lists the subscription as a fallback
+    # behind the gateway must not hand the claude CLI both credentials.
+    # (The gateway token is bound under another name; it is not mirrored
+    # here.) Every other lane's credential is forwarded whenever the gate
+    # allows, because Tier 2 drives every lane in one job.
     if "'claude-subscription'" in match.group(0):
-        return expression.replace(match.group(0), f"({gate} && {match.group(0)})", 1)
+        active = "needs.lane.outputs.lane == 'claude-subscription'"
+        return expression.replace(match.group(0), f"({gate} && {active})", 1)
     return expression.replace(match.group(0), gate, 1)
 
 

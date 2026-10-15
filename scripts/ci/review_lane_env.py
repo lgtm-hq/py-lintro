@@ -131,9 +131,6 @@ def _value(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
-#: Row fields whose value the wrapper uses as a variable NAME. The resolver
-#: validated them at workflow_sha; the gate validates them again, so the
-#: wrapper's trust in these names is enforced by the script it trusts.
 #: The keys ``lintro config --json`` must report under ``ai`` for the
 #: binding to be verifiable; the check refuses when any is absent.
 _EFFECTIVE_KEYS: Final[tuple[str, ...]] = (
@@ -144,6 +141,9 @@ _EFFECTIVE_KEYS: Final[tuple[str, ...]] = (
     "api_key_env",
     "fallback_models",
 )
+#: Row fields whose value the wrapper uses as a variable NAME. The resolver
+#: validated them at workflow_sha; the gate validates them again, so the
+#: wrapper's trust in these names is enforced by the script it trusts.
 _NAME_VALUED_FIELDS: Final[tuple[str, ...]] = (
     "credential_secret",
     "credential_env",
