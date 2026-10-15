@@ -13,7 +13,7 @@
 
 ---
 
-### 🕘 History · 1 previous run · 1 fixed · $0.2251 · 26.8k tokens
+### 🕘 History · 1 previous run · 1 fixed · ~$0.2251 (estimated) · 26.8k tokens
 
 <details><summary>Run-by-run history</summary>
 
@@ -21,11 +21,11 @@
 |:-:|:-:|:-:|:-:|
 | **1** | **0** | **0** | **1** |
 
-<details><summary><b>Round 1</b> · <code>1111111</code> · ⛔ blocked · 0 fixed, 2 left open · $0.1101 · 38s</summary>
+<details><summary><b>Round 1</b> · <code>1111111</code> · ⛔ blocked · 0 fixed, 2 left open · ~$0.1101 (estimated) · 38s</summary>
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api_key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
+| `claude-sonnet-4-20250514` · predates ADR-0011 | api · api_key | ~$0.1101 (estimated) | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
 
 </details>
 

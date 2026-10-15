@@ -30,7 +30,6 @@ from lintro.ai.review.coverage_degradation import (
 from lintro.ai.review.enums.cross_chunk_contradiction import CrossChunkContradiction
 from lintro.ai.review.enums.inline_post_failure_kind import InlinePostFailureKind
 from lintro.ai.review.github_badges import (
-    format_cost,
     format_int,
     format_tokens,
 )
@@ -38,6 +37,11 @@ from lintro.ai.review.models.convergence_decision import ConvergenceDecision
 from lintro.ai.review.models.inline_post_failure import InlinePostFailure
 from lintro.ai.review.models.review_finding import ReviewFinding
 from lintro.ai.review.models.review_metadata import ReviewMetadata
+from lintro.ai.review.provenance_display import (
+    cost_label,
+    model_label,
+    view_from_metadata,
+)
 from lintro.ai.review.sanitize import sanitize_comment_text
 from lintro.ai.review.severity_gate import (
     describe_cross_chunk_contradictions,
@@ -409,11 +413,9 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
     completion_tokens = int(metadata.token_usage.get("completion", 0))
     source = "estimated" if estimated else "provider-reported"
     parts = [
-        "**Model:** "
-        + format_sourced_value(
-            f"`{sanitize_comment_text(metadata.model, limit=60)}`",
-            metadata.model_source or None,
-        ),
+        # The endpoint and verification state stand beside the model, and
+        # the figure below names its basis (#2868, ADR-0011 B).
+        "**Model:** " + model_label(view_from_metadata(metadata)),
         "**Provider:** "
         + format_sourced_value(
             f"`{sanitize_comment_text(metadata.provider, limit=40)}`",
@@ -445,8 +447,12 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
                 f"out {format_int(completion_tokens)}, "
                 f"{source})"
             ),
-            f"**Est. cost:** "
-            f"{format_cost(metadata.cost_estimate_usd, estimated=estimated)}",
+            "**Est. cost:** "
+            + cost_label(
+                cost=metadata.cost_estimate_usd,
+                basis=metadata.cost_basis,
+                estimated=estimated,
+            ),
             f"**Duration:** {metadata.duration_seconds:.1f}s",
         ],
     )

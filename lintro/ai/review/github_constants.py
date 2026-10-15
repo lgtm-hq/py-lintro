@@ -49,8 +49,8 @@ _SEVERITY_EMOJI: dict[Severity, str] = {
 
 _FOOTER = (
     "<sub>🤖 Automated review by lintro · not a substitute for human review · "
-    "`~` = approximate (estimated locally; provider did not report token "
-    "usage)</sub>"
+    "`~` = approximate (priced locally, or a list-price shadow the provider "
+    "did not bill)</sub>"
 )
 
 #: One-line footer of the v5 sticky comment (#1909). Names where finding detail

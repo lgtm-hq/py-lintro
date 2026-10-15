@@ -742,7 +742,9 @@ def test_terminal_review_annotates_provider_model_transport() -> None:
     """Terminal output shows provider, model, transport, and max cost with sources."""
     console = Console(record=True)
     render_review_terminal(result=_review_result_with_sources(), console=console)
-    text = console.export_text()
+    # Rich wraps the header at the console width; the facts, not the line
+    # breaks, are what this asserts.
+    text = " ".join(console.export_text().split())
 
     assert_that(text).contains("Model: cursor-grok-4.6-high (flag)")
     assert_that(text).contains("Provider: cursor (env)")
