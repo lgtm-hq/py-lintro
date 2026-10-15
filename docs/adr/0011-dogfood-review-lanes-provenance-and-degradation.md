@@ -124,8 +124,10 @@ models, and the cost basis its figures carry.
   With the YAML and the scripts taken from one commit, the two-PR bootstrap the workflow
   header requires is no longer needed for anything the workflow reads;
   [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) retires that header text.
-  `ai-contract-tests.yml` runs on `pull_request` and reads the manifest from the PR tree
-  on purpose, so a manifest change is exercised before it merges.
+  The credential-bearing Tier 2 job of `ai-contract-tests.yml` runs only on
+  `workflow_dispatch` and reads the manifest from the dispatched ref. Its egress list is
+  derived from the manifest's lane hosts by the same resolver, so the manifest stays the
+  only place a host is defined; the structural test covers that job too.
 - Egress for the review job is the union of the chain's host lists plus the static
   GitHub and toolchain hosts the job already allows. No lane may declare a wildcard
   host; the resolver fails closed on one.
@@ -134,15 +136,21 @@ models, and the cost basis its figures carry.
 - The wrapper refuses to run when the lane's credential is absent, when a competing
   credential is present in the environment or on disk, or when the provider's base-URL
   override names anything other than the lane endpoint. Each row declares that override
-  variable (`base_url_env`: `ANTHROPIC_BASE_URL` for the Anthropic lanes, or `null` for
-  a CLI that has none, in which case the check is that the lane endpoint is the CLI's
-  built-in one). An unset override equals the provider's first-party endpoint, so on a
-  first-party lane any set value is a refusal. An absent credential is a configuration
-  error, red with `status=no-credential`, never a fallback trigger: the manifest
-  promised a binding the secrets do not hold. The committed config and its `LINTRO_AI_*`
-  overlays are not a second source either: the wrapper also refuses when the effective
-  `ai.api_base_url` or `ai.api_key_env` is set and differs from the lane row, and when a
-  configured `fallback_models` entry is outside the lane's allowed models.
+  variable (`base_url_env`): `ANTHROPIC_BASE_URL` for the Anthropic lanes,
+  `OPENAI_BASE_URL` for the Codex lane, and `null` only for a CLI that reads no such
+  variable (Cursor), in which case the check is that the lane endpoint is the CLI's
+  built-in one. The wrapper itself exports `base_url_env` to the row's endpoint at the
+  start of each attempt on a non-first-party lane, and leaves it unset on a first-party
+  one; nothing else sets it. An unset override equals the provider's first-party
+  endpoint, so on a first-party lane any set value is a refusal. An absent credential is
+  a configuration error, red with `status=no-credential`, never a fallback trigger: the
+  manifest promised a binding the secrets do not hold. The committed config and its
+  `LINTRO_AI_*` overlays are not a second source either: the wrapper also refuses when
+  the effective `ai.api_base_url` or `ai.api_key_env` is set and differs from the lane
+  row, and when a configured `fallback_models` entry is outside the lane's allowed
+  models. Provider, transport and model are exported from the row as the `LINTRO_AI_*`
+  overlays, and the wrapper refuses when the effective `ai.provider`, `ai.transport` or
+  `ai.model` still differs from the row.
 - The initial manifest declares `claude-subscription` (the sole initial `chain` entry),
   `codex-subscription`, `cursor` and `zai-glm-gateway`. The last is
   `first_party: false`, binds `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and
@@ -207,11 +215,16 @@ A run record reports where its requests went and what answered, not what was con
   figure and never as zero, and the cumulative history discloses that some rounds
   contributed no priced cost. Reporting and enforcement are separate: ADR-0007 rule 3
   enforces flag and environment caps on every cost basis, so a round on `UNKNOWN` or
-  `LIST_PRICE_SHADOW` still settles `CostBudget` and the PR budget, using the envelope's
-  token counts priced on the requested model's first-party list table as a shadow
-  figure. That figure is stored as `cost_shadow_usd`, accumulates across rounds and
-  fallback attempts for enforcement only, is labelled a shadow wherever cap progress is
-  shown, and is never rendered as spend. The PR budget's prior spend is
+  `LIST_PRICE_SHADOW` still settles `CostBudget` and the PR budget on a shadow figure.
+  On `LIST_PRICE_SHADOW` that figure is the envelope's own list-price number, so the
+  sticky and the cap use one value; on `UNKNOWN` it is the envelope's token counts
+  priced on the lane's `shadow_price_model` list table. The figure is stored per PR as
+  `cost_shadow_usd`, which never decreases, accumulates across rounds and fallback
+  attempts for enforcement only, is labelled a shadow wherever cap progress is shown,
+  and is never rendered as spend. On these two bases `usage.cost` is recorded as `0`, so
+  `review_spend_usd` holds only billed and estimated money and `cost_shadow_usd` is the
+  only place shadow cost accumulates; stored rounds from before this ADR keep their
+  figure where it is. The PR budget's prior spend is
   `review_spend_usd + cost_shadow_usd`. A committed YAML cap, which ADR-0007 rule 3
   enforces on `billed` and `estimated` and treats as advisory on `unpriceable`, enforces
   on `UNKNOWN`, because a gateway bills real money, and is advisory on
@@ -227,12 +240,17 @@ A run record reports where its requests went and what answered, not what was con
   transport should have said what answered and did not, so it is re-reviewed rather than
   carried into a green check. A stored round in `mismatch` is not reused for the same
   reason: its coverage was produced by a model the lane does not allow, and a later
-  unchanged round must not inherit it into a green check. A stored round with no lane
-  field predates this ADR and records no endpoint, so nothing can say which lane
-  produced it; from 2026-09-09 until the interim measure in Consequences, such rounds
-  were answered by GLM through Z.ai. It is therefore **not** reused for lane validity.
-  It is kept in the cumulative history with `model_verification == legacy` and labelled
-  "predates ADR-0011", and it never contributes to a live verdict. The first run after
+  unchanged round must not inherit it into a green check. The stored state is not taken
+  on trust either: before coverage is inherited, every stored round's `endpoint` and
+  `reported_models` are re-checked against the current manifest row for its `lane`, and
+  a round whose endpoint or models the row no longer allows is excluded as if it were
+  `mismatch`, so tightening a lane's allowed models re-reviews what those models
+  covered. Historical cost figures are kept. A stored round with no lane field predates
+  this ADR and records no endpoint, so nothing can say which lane produced it; from
+  2026-09-09 until the interim measure in Consequences, such rounds were answered by GLM
+  through Z.ai. It is therefore **not** reused for lane validity. It is kept in the
+  cumulative history with `model_verification == legacy` and labelled "predates
+  ADR-0011", and it never contributes to a live verdict. The first run after
   [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) therefore re-reviews each
   open PR once on the active lane; that one-time cost is accepted in preference to a
   green check built on rounds of unknown provenance.
@@ -250,6 +268,8 @@ display rendering).
 | -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Recorded `lane` is not in the resolved chain, or the recorded endpoint differs from the manifest endpoint of the recorded `lane` | red, `status=endpoint-mismatch`                                                                                                                                                                                                                                                 |
 | Recorded `lane` is in the chain but is not `chain[0]` (a fallback succeeded)                                                     | verdict unchanged; `::warning::` and the sticky fallback line of decision D                                                                                                                                                                                                     |
+| Every lane of a chain with two or more entries was tried and found unavailable                                                   | red, `status=lanes-exhausted`                                                                                                                                                                                                                                                   |
+| The only lane of a single-entry chain is unavailable, or a lane became unavailable after a chunk call completed                  | red, `status=provider-unavailable`                                                                                                                                                                                                                                              |
 | `model_verification == mismatch` on a first-party lane                                                                           | red, `status=model-mismatch`; a stored round in this state is not reused, so an unchanged rerun re-reviews rather than inherits it                                                                                                                                              |
 | `model_verification == unverifiable` on a non-first-party lane                                                                   | verdict unchanged; `::warning::` naming lane and endpoint                                                                                                                                                                                                                       |
 | `model_verification == unreported` on a first-party lane whose row declares `reports_model_usage: true`                          | red, `status=model-unreported`: the transport is declared to report what answered, so its absence is a transport defect. Applies to rounds produced by the current run; a stored round in this state is not reused, so it is re-reviewed rather than carried into a green check |
@@ -276,9 +296,10 @@ The manifest's `chain` (decision A) is also the fallback order. The initial chai
   has completed. That set is a strict subset of `UNAVAILABLE_KINDS` in
   `lintro/ai/review/error_contract.py`; the chain walk keys on the error kind, never on
   the envelope's `provider_unavailable` flag, which is also true for `RATE_LIMITED`,
-  `SERVER_ERROR`, `TIMEOUT` and `PROVIDER_UNAVAILABLE`. Those four are transient and
-  stay with the existing retry; they never advance the chain. A review that has produced
-  findings is never restarted on another lane.
+  `SERVER_ERROR`, `TIMEOUT` and `PROVIDER_UNAVAILABLE`. The first three are transient
+  and stay with the existing retry (`RETRYABLE_KINDS`); `PROVIDER_UNAVAILABLE` means no
+  provider is configured, a configuration failure that neither retries nor advances the
+  chain. A review that has produced findings is never restarted on another lane.
 - When the provider-unavailable class occurs after a chunk call has completed, the
   attempt stops, the partial round is persisted under ADR-0007 for a resume on the same
   lane, no other lane is tried in that run, and the check is red with
@@ -291,7 +312,8 @@ The manifest's `chain` (decision A) is also the fallback order. The initial chai
   hosts. Because one job then holds every credential in the chain and can reach every
   host in it, every lane in a chain must carry the same `first_party` value as
   `chain[0]`: a non-first-party lane may be active only as a single-entry chain, and the
-  resolver rejects a mixed chain. The wrapper isolates each attempt: before the first
+  resolver rejects a mixed chain and a chain whose first entry is non-first-party and
+  that has more than one entry. The wrapper isolates each attempt: before the first
   attempt it captures every chain credential, including `CODEX_AUTH_JSON`, into
   non-exported shell state and unsets them, then for each attempt exports only the
   current lane's, so the environment the CLI transport forwards to its subprocess holds
@@ -304,9 +326,11 @@ The manifest's `chain` (decision A) is also the fallback order. The initial chai
   carries a `::warning::`, and one deduplicated tracker issue labelled
   `ai-review-lane-down` is opened or updated for the dead lane through the minted App
   token.
-- When every lane in the chain is unavailable the check is red with
-  `status=lanes-exhausted`, distinct from the existing `provider-unavailable`, which
-  keeps its meaning of a single provider failure (including the mid-review case above).
+- When the chain has two or more entries and every one of them was tried and found
+  unavailable, the check is red with `status=lanes-exhausted`. A single-entry chain
+  whose lane is unavailable, and the mid-review case above, keep the existing
+  `status=provider-unavailable`: nothing fell back, so nothing is exhausted. The
+  decision C table carries the same split.
 - The chain covers the provider-unavailable class only: dead or expired credential,
   exhausted balance, or exhausted quota. An absent credential, a rate limit, a provider
   that answers with errors mid-review, or an endpoint that is reachable but slow, is not
@@ -347,7 +371,10 @@ Delivered by: [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870).
   from reuse, as decision B states. The resume model is unchanged for rounds that carry
   the fields and a verifiable or declared-unverifiable state; the three exclusions in
   decision B's reuse bullet (pre-ADR rounds, `unreported` on a lane that reports model
-  usage, and `mismatch`) are re-reviewed rather than resumed.
+  usage, and `mismatch`) are re-reviewed rather than resumed. Its rule 3 is extended,
+  not changed: `cap_is_enforced` learns the two new bases, with a committed YAML cap
+  enforcing on `UNKNOWN` and advisory on `LIST_PRICE_SHADOW`, and flag and environment
+  caps enforce on both as they do on every basis.
 - [ADR-0009](0009-ai-provider-plugin-contract.md): reading `modelUsage` is a transport
   concern of the Anthropic CLI adapter, not a new provider-contract field. Providers
   whose transport reports no model usage record `unreported`.
