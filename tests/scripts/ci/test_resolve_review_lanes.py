@@ -91,7 +91,9 @@ def test_the_committed_manifest_declares_every_initial_lane(
     )
     zai = manifest["lanes"]["zai-glm-gateway"]
     assert_that(zai["first_party"]).is_false()
-    assert_that(zai["credential_env"]).is_equal_to("ZAI_AUTH_TOKEN")
+    # The secret is one thing, the variable the CLI reads another (#2899).
+    assert_that(zai["credential_secret"]).is_equal_to("ZAI_AUTH_TOKEN")
+    assert_that(zai["credential_env"]).is_equal_to("ANTHROPIC_AUTH_TOKEN")
     assert_that(zai["egress"]).is_equal_to(["api.z.ai:443"])
     assert_that(manifest["chain"]).does_not_contain("zai-glm-gateway")
 
@@ -126,7 +128,8 @@ def test_the_manifests_priced_models_match_lintros_list_price_tables(
 def test_the_manifest_binds_no_secret_value(manifest: dict[str, Any]) -> None:
     """Credential fields name variables and files, never values."""
     for row in manifest["lanes"].values():
-        for field in ("credential_env", "credential_source_env"):
+        assert_that(row["credential_secret"]).matches(r"^[A-Z][A-Z0-9_]+$")
+        for field in ("credential_env", "credential_source_env", "base_url_env"):
             value = row.get(field)
             if value is not None:
                 assert_that(value).matches(r"^[A-Z][A-Z0-9_]+$")
@@ -135,9 +138,80 @@ def test_the_manifest_binds_no_secret_value(manifest: dict[str, Any]) -> None:
 def test_no_workflow_invokes_the_resolver_yet() -> None:
     """This PR lands the manifest inert; #2870 wires it (staged rollout)."""
     for workflow in WORKFLOWS.glob("*.yml"):
-        assert_that(workflow.read_text(encoding="utf-8")).does_not_contain(
-            "resolve_review_lanes",
-        )
+        text = workflow.read_text(encoding="utf-8")
+        assert_that(text).does_not_contain("resolve_review_lanes")
+        assert_that(text).does_not_contain("ai_review_lanes")
+
+
+def test_first_party_must_agree_with_the_endpoint(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+) -> None:
+    """A gateway cannot be declared first-party, nor the provider's host a gateway."""
+    pristine = copy.deepcopy(manifest)
+    claude = manifest["lanes"]["claude-subscription"]
+    claude["endpoint"] = "https://api.z.ai/api/anthropic"
+    claude["egress"] = ["api.z.ai:443"]
+    _refuses(resolver, manifest, "first_party must be False")
+    manifest = pristine
+    zai = manifest["lanes"]["zai-glm-gateway"]
+    zai["endpoint"] = "https://api.anthropic.com"
+    zai["egress"] = ["api.anthropic.com:443"]
+    _refuses(resolver, manifest, "first_party must be True")
+
+
+def test_a_gateway_row_carries_an_unknown_basis_and_a_credential_its_form(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+) -> None:
+    """Decision B fixes the gateway basis; a credential kind fixes its form."""
+    manifest["lanes"]["zai-glm-gateway"]["cost_basis"] = "billed"
+    _refuses(resolver, manifest, "cost basis must be 'unknown'")
+    manifest = copy.deepcopy(manifest)
+    codex = manifest["lanes"]["codex-subscription"]
+    codex["credential_form"] = "env"
+    codex["credential_env"] = "CODEX_AUTH_JSON"
+    _refuses(resolver, manifest, "takes the 'file' form")
+
+
+def test_duplicate_and_unknown_keys_are_refused(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """A repeated lane or a stray key is a mistake a reviewer must see."""
+    manifest["default"] = "cursor"
+    _refuses(resolver, manifest, "unknown keys ['default']")
+    manifest = copy.deepcopy(manifest)
+    del manifest["default"]
+    manifest["lanes"]["cursor"]["selector"] = True
+    _refuses(resolver, manifest, "unknown fields ['selector']")
+    duplicated = tmp_path / "lanes.json"
+    text = MANIFEST.read_text(encoding="utf-8")
+    lanes_at = text.index('"lanes": {')
+    duplicated.write_text(
+        text[: lanes_at + len('"lanes": {')]
+        + '\n    "cursor": {},'
+        + text[lanes_at + len('"lanes": {') :],
+        encoding="utf-8",
+    )
+    with pytest.raises(resolver.LaneError) as caught:
+        resolver.load_manifest(duplicated)
+    assert_that(str(caught.value)).contains("duplicate key 'cursor'")
+
+
+def test_egress_hosts_are_compared_case_insensitively_and_ports_are_ascii(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+) -> None:
+    """An upper-case host is the same host; a Unicode digit is not a port."""
+    row = manifest["lanes"]["claude-subscription"]
+    row["egress"] = ["API.anthropic.com:443"]
+    assert_that(_resolve(resolver, manifest).egress).is_equal_to(
+        ["api.anthropic.com:443"],
+    )
+    row["egress"] = ["api.anthropic.com:\u00b2"]
+    _refuses(resolver, manifest, "host:port")
 
 
 # --- fail-closed paths -------------------------------------------------------------
@@ -190,12 +264,51 @@ def test_a_wildcard_or_malformed_egress_host_is_refused(
     resolver: ModuleType,
     manifest: dict[str, Any],
 ) -> None:
-    """No lane may declare a wildcard host."""
+    """No lane may declare a wildcard host, and every port must be a real one."""
     row = manifest["lanes"]["claude-subscription"]
     row["egress"] = ["*.anthropic.com:443", "api.anthropic.com:443"]
     _refuses(resolver, manifest, "wildcard")
     row["egress"] = ["api.anthropic.com"]
     _refuses(resolver, manifest, "host:port")
+    row["egress"] = ["api.anthropic.com:99999"]
+    _refuses(resolver, manifest, "host:port")
+
+
+def test_the_endpoint_port_must_be_in_the_lanes_egress(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+) -> None:
+    """An allowed host on another port cannot reach the endpoint."""
+    row = manifest["lanes"]["claude-subscription"]
+    row["egress"] = ["api.anthropic.com:444"]
+    _refuses(resolver, manifest, "api.anthropic.com:443 is missing")
+    row["egress"] = ["api.anthropic.com:443"]
+    row["endpoint"] = "https://api.anthropic.com:8443"
+    _refuses(resolver, manifest, "api.anthropic.com:8443 is missing")
+    row["egress"] = ["api.anthropic.com:8443"]
+    assert_that(_resolve(resolver, manifest).egress).is_equal_to(
+        ["api.anthropic.com:8443"],
+    )
+
+
+def test_a_lane_id_or_variable_name_cannot_carry_a_second_output_line(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+) -> None:
+    """Ids and names become step outputs; a line break in one is refused."""
+    hostile = copy.deepcopy(manifest)
+    hostile["lanes"]["claude-subscription\nprovider=cursor"] = hostile["lanes"].pop(
+        "claude-subscription",
+    )
+    hostile["chain"] = ["claude-subscription\nprovider=cursor"]
+    _refuses(resolver, hostile, "lane ids must be")
+    for field in ("credential_env", "credential_secret", "base_url_env"):
+        bad = copy.deepcopy(manifest)
+        bad["lanes"]["claude-subscription"][field] = "ANTHROPIC_BASE_URL\nX=y"
+        _refuses(resolver, bad, "must be a variable name")
+    # The writer refuses a multi-line value even if one were ever built.
+    with pytest.raises(resolver.LaneError):
+        resolver._write_outputs({"lane": "a\nb"})
 
 
 def test_a_model_outside_the_allowed_list_is_refused(

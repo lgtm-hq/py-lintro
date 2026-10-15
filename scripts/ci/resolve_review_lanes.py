@@ -12,9 +12,18 @@ before any secret is exposed, on:
 
 - an empty chain, a duplicate entry, or an entry naming no declared row;
 - a row missing a required field or carrying one of the wrong shape;
-- a non-``https`` endpoint, an endpoint host missing from the row's own egress
-  list, or a wildcard egress host;
-- a model outside the row's allowed list;
+- a lane id or a variable name of the wrong shape (they become step outputs
+  and job names, so a line break or a shell metacharacter in one must never
+  reach the workflow);
+- a non-``https`` endpoint, an endpoint host and port missing from the row's
+  own egress list, an egress port out of range, or a wildcard egress host;
+- a model outside the row's allowed list, or a row that reports model usage
+  and names no model (``model: null`` with ``models: []`` means the CLI's
+  own default, unnamed, and is allowed only where nothing reports usage);
+- a ``first_party`` flag that disagrees with the endpoint host (each
+  provider is first-party on exactly one host), a non-first-party row whose
+  cost basis is not ``unknown``, or a credential bound in the wrong form;
+- a duplicate or unknown key, in the manifest or in a row;
 - a chain mixing ``first_party`` values, or a chain with more than one entry
   whose first entry is non-first-party (decision D);
 - a non-first-party row without ``shadow_price_model``, or any row whose
@@ -32,7 +41,8 @@ or to stdout when it is unset; ``--format json`` prints one object):
     egress                space-separated union of the chain's egress hosts
     lanes                 JSON object: every chain lane's row, keyed by id
     provider, transport, endpoint, first_party, reports_model_usage,
-    credential, credential_form, credential_env, credential_file,
+    credential, credential_secret, credential_form, credential_env,
+    credential_file,
     credential_source_env, base_url_env, base_url_files, model, models,
     shadow_price_model, cost_basis
                           the active lane's fields (lists and objects as JSON,
@@ -44,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,7 +85,54 @@ CREDENTIALS: Final[frozenset[str]] = frozenset(
 
 #: Providers and transports lintro runs the dogfood review on.
 PROVIDERS: Final[frozenset[str]] = frozenset({"anthropic", "openai", "cursor"})
+
+#: Each provider's own host. ``first_party`` must agree with the endpoint:
+#: decision D's chain shape and decision B's verification states both rest
+#: on it, so a row cannot simply assert it.
+FIRST_PARTY_HOSTS: Final[dict[str, str]] = {
+    "anthropic": "api.anthropic.com",
+    "openai": "api.openai.com",
+    "cursor": "api2.cursor.sh",
+}
+
+#: The form each credential kind takes.
+BINDING_FORMS: Final[dict[str, str]] = {
+    "claude_oauth": "env",
+    "api_key": "env",
+    "zai_token": "env",  # nosec B105 - a form name, not a secret
+    "codex_oauth": "file",
+    "cursor_api_key": "env",
+}
+
+#: Keys a manifest and a row may carry; anything else is a mistake a reader
+#: could take for routing (the issue's original ``default`` key, say).
+TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
+    {"$comment", "chain", "priced_models", "lanes"},
+)
+OPTIONAL_ROW_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "credential_env",
+        "credential_file",
+        "credential_source_env",
+        "shadow_price_model",
+    },
+)
 TRANSPORTS: Final[frozenset[str]] = frozenset({"cli", "api"})
+
+#: A lane id: lowercase, digits and hyphens, so it can name a job, a
+#: commit-status context and an output without escaping.
+_LANE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+#: An environment-variable or secret name.
+_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+
+#: Fields whose value must be a variable or secret name when present.
+_NAME_FIELDS: Final[tuple[str, ...]] = (
+    "credential_secret",
+    "credential_env",
+    "credential_source_env",
+    "base_url_env",
+)
 
 #: Fields every row must carry, with the type each must have.
 _REQUIRED: Final[dict[str, type | tuple[type, ...]]] = {
@@ -84,6 +142,7 @@ _REQUIRED: Final[dict[str, type | tuple[type, ...]]] = {
     "first_party": bool,
     "reports_model_usage": bool,
     "credential": str,
+    "credential_secret": str,
     "credential_form": str,
     "base_url_env": (str, type(None)),
     "base_url_files": list,
@@ -101,6 +160,7 @@ _LANE_OUTPUTS: Final[tuple[str, ...]] = (
     "first_party",
     "reports_model_usage",
     "credential",
+    "credential_secret",
     "credential_form",
     "credential_env",
     "credential_file",
@@ -160,7 +220,10 @@ def load_manifest(path: Path) -> dict[str, Any]:
         LaneError: When the file is missing, not JSON, or not an object.
     """
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_no_duplicate_keys,
+        )
     except FileNotFoundError as exc:
         msg = f"lanes manifest not found: {path}"
         raise LaneError(msg) from exc
@@ -171,6 +234,30 @@ def load_manifest(path: Path) -> dict[str, Any]:
         msg = f"lanes manifest must be a JSON object: {path}"
         raise LaneError(msg)
     return document
+
+
+def _no_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build an object, refusing a key that appears twice.
+
+    ``json.loads`` keeps the last of two same-named lanes silently; a
+    duplicate is a manifest mistake a reviewer must see.
+
+    Args:
+        pairs: The object's key/value pairs in document order.
+
+    Returns:
+        The object.
+
+    Raises:
+        ValueError: When a key repeats.
+    """
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            msg = f"duplicate key {key!r}"
+            raise ValueError(msg)
+        result[key] = value
+    return result
 
 
 def _allowed(lanes: dict[str, Any]) -> str:
@@ -196,6 +283,9 @@ def _check_shape(lane_id: str, row: Any, lanes: dict[str, Any]) -> dict[str, Any
     """Check a row carries every required field with the right shape."""
     if not isinstance(row, dict):
         _fail(f"lane {lane_id!r} must be a JSON object", lanes)
+    unknown = sorted(set(row) - set(_REQUIRED) - OPTIONAL_ROW_KEYS)
+    if unknown:
+        _fail(f"lane {lane_id!r} carries unknown fields {unknown}", lanes)
     for field, kind in _REQUIRED.items():
         if field not in row:
             _fail(f"lane {lane_id!r} is missing {field!r}", lanes)
@@ -206,6 +296,12 @@ def _check_shape(lane_id: str, row: Any, lanes: dict[str, Any]) -> dict[str, Any
     for field in ("egress", "models"):
         if not all(isinstance(item, str) and item for item in row[field]):
             _fail(f"lane {lane_id!r} field {field!r} must list strings", lanes)
+    _check_names(lane_id, row, lanes)
+    return row
+
+
+def _check_names(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> None:
+    """Check the row's enumerated values and the shape of its variable names."""
     if row["provider"] not in PROVIDERS:
         _fail(
             f"lane {lane_id!r} names unknown provider {row['provider']!r}",
@@ -226,12 +322,24 @@ def _check_shape(lane_id: str, row: Any, lanes: dict[str, Any]) -> dict[str, Any
             f"lane {lane_id!r} declares unknown cost basis {row['cost_basis']!r}",
             lanes,
         )
-    return row
+    for field in _NAME_FIELDS:
+        value = row.get(field)
+        if value is not None and (
+            not isinstance(value, str) or not _NAME_RE.match(value)
+        ):
+            _fail(f"lane {lane_id!r} field {field!r} must be a variable name", lanes)
 
 
 def _check_credential(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> None:
     """Check the credential's declared form names where it comes from."""
     form = row["credential_form"]
+    expected = BINDING_FORMS[row["credential"]]
+    if form != expected:
+        _fail(
+            f"lane {lane_id!r} credential {row['credential']!r} takes the "
+            f"{expected!r} form, not {form!r}",
+            lanes,
+        )
     if form == "env":
         if not isinstance(row.get("credential_env"), str) or not row["credential_env"]:
             _fail(
@@ -259,28 +367,74 @@ def _check_credential(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) 
             )
 
 
+def _check_first_party(
+    lane_id: str,
+    row: dict[str, Any],
+    hostname: str,
+    lanes: dict[str, Any],
+) -> None:
+    """Check ``first_party`` agrees with the endpoint, and the basis with it.
+
+    Decision D's chain shape and decision B's verification states both rest
+    on ``first_party``, so a row cannot simply assert it: each provider is
+    first-party on exactly one host, and a non-first-party row's figures are
+    priced on the wrong table, so its basis is ``unknown``.
+    """
+    own_host = FIRST_PARTY_HOSTS[row["provider"]]
+    if row["first_party"] != (hostname == own_host):
+        _fail(
+            f"lane {lane_id!r} first_party must be {hostname == own_host} for "
+            f"endpoint host {hostname!r} ({row['provider']} is first-party only "
+            f"on {own_host!r})",
+            lanes,
+        )
+    if not row["first_party"] and row["cost_basis"] != "unknown":
+        _fail(
+            f"lane {lane_id!r} is not first-party, so its cost basis must be "
+            f"'unknown', not {row['cost_basis']!r}",
+            lanes,
+        )
+
+
 def _check_endpoint(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> None:
-    """Check the endpoint is https and reachable through the row's own egress."""
+    """Check the endpoint is https and reachable through the row's own egress.
+
+    The endpoint's host *and port* (443 when the URL names none) must appear
+    in the row's egress list; an allowed host on another port cannot reach it.
+    """
     parts = urlsplit(row["endpoint"])
     if parts.scheme != "https" or not parts.hostname:
         _fail(f"lane {lane_id!r} endpoint must be an https URL", lanes)
+    try:
+        endpoint_port = parts.port or 443
+    except ValueError:
+        _fail(f"lane {lane_id!r} endpoint port is out of range", lanes)
+    _check_first_party(lane_id, row, parts.hostname, lanes)
     hosts: list[str] = []
     for entry in row["egress"]:
         host, sep, port = entry.rpartition(":")
-        if not sep or not host or not port.isdigit():
+        host = host.lower()
+        if (
+            not sep
+            or not host
+            or not (port.isascii() and port.isdigit())
+            or not 1 <= int(port) <= 65535
+        ):
             _fail(
                 f"lane {lane_id!r} egress entry {entry!r} must be host:port",
                 lanes,
             )
-        if "*" in host:
+        if "*" in host or any(c.isspace() for c in host):
             _fail(
                 f"lane {lane_id!r} declares a wildcard egress host {host!r}",
                 lanes,
             )
-        hosts.append(host)
-    if parts.hostname not in hosts:
+        hosts.append(f"{host}:{int(port)}")
+    # The normalised entries are what the chain's egress union publishes.
+    row["egress"] = hosts
+    if f"{parts.hostname}:{endpoint_port}" not in hosts:
         _fail(
-            f"lane {lane_id!r} endpoint host {parts.hostname!r} is "
+            f"lane {lane_id!r} endpoint {parts.hostname}:{endpoint_port} is "
             "missing from its egress",
             lanes,
         )
@@ -366,6 +520,10 @@ def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
     Raises:
         LaneError: On any of the refusals in the module docstring.
     """
+    stray = sorted(set(document) - TOP_LEVEL_KEYS)
+    if stray:
+        msg = f"manifest carries unknown keys {stray}; declared lanes: (not read)"
+        raise LaneError(msg)
     lanes_raw = document.get("lanes")
     if not isinstance(lanes_raw, dict) or not lanes_raw:
         raise LaneError(
@@ -379,8 +537,8 @@ def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
     priced = set(priced_raw)
     rows: dict[str, dict[str, Any]] = {}
     for lane_id, row in lanes_raw.items():
-        if not isinstance(lane_id, str) or not lane_id:
-            _fail("lane ids must be non-empty strings", lanes_raw)
+        if not isinstance(lane_id, str) or not _LANE_ID_RE.match(lane_id):
+            _fail("lane ids must be lowercase letters, digits and hyphens", lanes_raw)
         checked = _check_shape(lane_id, row, lanes_raw)
         _check_credential(lane_id, checked, lanes_raw)
         _check_endpoint(lane_id, checked, lanes_raw)
@@ -424,7 +582,23 @@ def outputs_for(resolved: ResolvedChain) -> dict[str, str]:
 
 
 def _write_outputs(values: dict[str, str]) -> None:
-    """Append step outputs; every value is single-line by construction."""
+    """Append step outputs; every value is single-line by construction.
+
+    Args:
+        values: Output names and values.
+
+    Raises:
+        LaneError: When a value carries a line break, which would let it
+            inject a second output; the shape checks make this unreachable
+            from a manifest, and the guard keeps it so.
+    """
+    for name, value in values.items():
+        if "\n" in value or "\r" in value:
+            msg = (
+                f"output {name!r} would span more than one line; "
+                "declared lanes: (refused)"
+            )
+            raise LaneError(msg)
     lines = "".join(f"{name}={value}\n" for name, value in values.items())
     output = os.environ.get("GITHUB_OUTPUT")
     if output:
@@ -463,10 +637,14 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"::error::review lanes: {exc}\n")
         return 1
     values = outputs_for(resolved)
-    if args.format == "json":
-        sys.stdout.write(json.dumps(values, indent=2) + "\n")
-    else:
-        _write_outputs(values)
+    try:
+        if args.format == "json":
+            sys.stdout.write(json.dumps(values, indent=2) + "\n")
+        else:
+            _write_outputs(values)
+    except LaneError as exc:
+        sys.stderr.write(f"::error::review lanes: {exc}\n")
+        return 1
     sys.stderr.write(
         f"review lanes: active {resolved.chain[0]!r}, chain {resolved.chain}, "
         f"egress {resolved.egress}\n",
