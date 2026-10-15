@@ -28,10 +28,11 @@ import os
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from lintro.ai.cost import estimate_cost
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.enums.credential_kind import CredentialKind
@@ -71,6 +72,7 @@ __all__ = [
     "model_ledger",
     "record_response",
     "recorded_cost_basis",
+    "shadow_priced",
     "verify_models",
 ]
 
@@ -452,10 +454,15 @@ class ModelLedger:
         cost_reported: Whether any call's transport reported a cost figure
             of its own, which decides ``list_price_shadow`` against
             ``unpriceable`` on the subscription CLI.
+        shadow_price_model: On a run off the provider's host, the model
+            whose list table prices every call's shadow figure before the
+            budget settles it; empty on a first-party run, whose figures
+            stand as reported (ADR-0011 B).
     """
 
     calls: list[LedgerCall] = field(default_factory=list)
     cost_reported: bool = False
+    shadow_price_model: str = ""
 
     def record(self, response: AIResponse) -> None:
         """Record one completed call.
@@ -495,13 +502,18 @@ def current_model_ledger() -> ModelLedger | None:
 
 
 @contextmanager
-def model_ledger() -> Iterator[ModelLedger]:
+def model_ledger(*, shadow_price_model: str = "") -> Iterator[ModelLedger]:
     """Open a ledger that every :func:`call_ai` inside the block reports to.
+
+    Args:
+        shadow_price_model: The model whose list table prices each call's
+            shadow figure on a run off the provider's host; empty on a
+            first-party run.
 
     Yields:
         ModelLedger: The ledger; read it after the block.
     """
-    ledger = ModelLedger()
+    ledger = ModelLedger(shadow_price_model=shadow_price_model)
     token = _LEDGER.set(ledger)
     try:
         yield ledger
@@ -518,6 +530,34 @@ def record_response(response: AIResponse) -> None:
     ledger = _LEDGER.get()
     if ledger is not None:
         ledger.record(response)
+
+
+def shadow_priced(response: AIResponse) -> AIResponse:
+    """Return *response* priced on the open ledger's shadow model, if any.
+
+    Off the provider's host the envelope's figure is priced on the wrong
+    table and is discarded (ADR-0011 B): the call's token counts priced on
+    the lane's shadow model are what the budget settles, what the round
+    records and what the PR budget carries, so the three never disagree.
+
+    Args:
+        response: The provider response as the transport built it.
+
+    Returns:
+        The response with ``cost_estimate`` replaced by the shadow figure,
+        or *response* itself when no ledger names a shadow model.
+    """
+    ledger = _LEDGER.get()
+    if ledger is None or not ledger.shadow_price_model:
+        return response
+    return replace(
+        response,
+        cost_estimate=estimate_cost(
+            ledger.shadow_price_model,
+            response.input_tokens,
+            response.output_tokens,
+        ),
+    )
 
 
 def _normalize(name: str) -> str:

@@ -411,7 +411,11 @@ def test_the_final_record_keeps_the_checkpoints_model_evidence(
     prior = ReviewState(
         runs=(
             RunRecord(
-                identity=RunIdentity(round=1, reported_models=(haiku,)),
+                identity=RunIdentity(
+                    round=1,
+                    reported_models=(haiku,),
+                    model_verification="verified",
+                ),
                 coverage=RunCoverage(partial=True, checkpoint=True),
             ),
         ),

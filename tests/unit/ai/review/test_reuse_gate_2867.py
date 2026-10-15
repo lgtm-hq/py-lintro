@@ -159,13 +159,15 @@ def test_no_prior_state_gates_nothing() -> None:
     assert_that(reusable_rounds(prior=None, provenance=_CURRENT, allowed=())).is_empty()
 
 
-def test_a_state_with_no_run_records_is_not_gated() -> None:
-    """A coverage-only ledger carries no provenance claim, so nothing is excluded."""
+def test_coverage_with_no_run_record_to_place_it_is_not_inherited() -> None:
+    """A coverage-only prior predates the gate or was hand-built: re-review."""
     options = MagicMock()
     options.prior_state = ReviewState(
         coverage=(CoverageRecord("a.py", "h1", round=1),),
     )
 
+    assert_that(reusable_rounds_for(options=options)).is_equal_to(frozenset())
+    options.prior_state = None
     assert_that(reusable_rounds_for(options=options)).is_none()
 
 

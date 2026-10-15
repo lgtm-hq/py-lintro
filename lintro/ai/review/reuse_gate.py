@@ -25,11 +25,19 @@ if TYPE_CHECKING:
     from lintro.ai.review.session import ReviewSessionOptions
 
 __all__ = [
+    "INHERITED_EVIDENCE_STATES",
     "agent_model_overrides",
     "allowed_models_for",
     "reusable_rounds",
     "reusable_rounds_for",
 ]
+
+#: Checkpoint states whose coverage a resumed attempt may have inherited, and
+#: whose model evidence therefore stays on the round's record when a later
+#: checkpoint or the final record replaces it.
+INHERITED_EVIDENCE_STATES: frozenset[str] = frozenset(
+    {ModelVerification.VERIFIED.value, ModelVerification.UNVERIFIABLE.value},
+)
 
 
 def allowed_models_for(
@@ -162,14 +170,17 @@ def reusable_rounds_for(*, options: ReviewSessionOptions) -> frozenset[int] | No
             provider and the AI configuration.
 
     Returns:
-        The reusable round numbers, or ``None`` when there is nothing to
-        gate: no prior state, or a state that stores no run records at all
-        (a hand-built or coverage-only ledger, which carries no provenance
-        claim to check). A stored artifact always carries its runs, so a
-        coverage record whose run was pruned is then not inherited.
+        The reusable round numbers, or ``None`` when there is no prior state
+        and nothing to gate. A prior that stores coverage but no run records
+        cannot place that coverage on any lane, so none of it is inherited:
+        such a state predates this gate or was hand-built, and missing
+        provenance fails toward more review (ADR-0007, ADR-0011 B).
     """
-    if options.prior_state is None or not options.prior_state.runs:
+    prior = options.prior_state
+    if prior is None:
         return None
+    if not prior.runs:
+        return frozenset()
     workspace = options.workspace_root
     provenance = detect_run_provenance(
         provider=options.provider.name,

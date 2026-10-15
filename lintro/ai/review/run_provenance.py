@@ -29,9 +29,27 @@ if TYPE_CHECKING:
 
 __all__ = [
     "checkpoint_stamp",
+    "in_run_shadow_model",
     "run_provenance_fields",
     "stamp_run_provenance",
 ]
+
+
+def in_run_shadow_model(*, options: ReviewSessionOptions) -> str:
+    """Return the model that prices this run's calls, if it is off-host.
+
+    Args:
+        options: Session options naming the provider and transport.
+
+    Returns:
+        The lane row's shadow price model, or the requested model when the
+        row names none, on a run off the provider's host; empty on a
+        first-party run, whose figures stand as reported.
+    """
+    provenance = _provenance_for(options)
+    if provenance.first_party:
+        return ""
+    return provenance.shadow_price_model or options.provider.model_name
 
 
 def _provenance_for(options: ReviewSessionOptions) -> RunProvenance:

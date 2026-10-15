@@ -32,6 +32,7 @@ from lintro.ai.review.models.run_outcome import RunOutcome
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.resume import records_for_reviewed
+from lintro.ai.review.reuse_gate import INHERITED_EVIDENCE_STATES
 from lintro.ai.review.sensitivity import filter_findings_by_policy
 from lintro.ai.review.severity_gate import apply_severity_gates
 from lintro.ai.review.state_store import state_dir, write_state_part
@@ -306,12 +307,23 @@ def _runs_with_checkpoint(
     """
     if stamp.identity is None:
         return history, False
+    # An earlier attempt at this round whose coverage this one may have
+    # inherited keeps its model evidence on the record (#2867).
+    seen = {model.name: model for model in snapshot.reported_models}
+    for run in history:
+        if (
+            run.coverage.checkpoint
+            and run.identity.round == round_number
+            and run.identity.model_verification in INHERITED_EVIDENCE_STATES
+        ):
+            for model in run.identity.reported_models:
+                seen.setdefault(model.name, model)
     partial = RunRecord(
         identity=replace(
             stamp.identity,
             round=round_number,
             model_verification=snapshot.state,
-            reported_models=snapshot.reported_models,
+            reported_models=tuple(seen.values()),
         ),
         coverage=RunCoverage(partial=True, checkpoint=True),
         usage=RunUsage(

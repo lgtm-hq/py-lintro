@@ -41,7 +41,7 @@ from lintro.ai.review.result_assembly import (
 )
 from lintro.ai.review.run_execution import execute_run
 from lintro.ai.review.run_planning import plan_run
-from lintro.ai.review.run_provenance import stamp_run_provenance
+from lintro.ai.review.run_provenance import in_run_shadow_model, stamp_run_provenance
 from lintro.ai.review.session import ReviewSession, ReviewSessionOptions
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
@@ -199,7 +199,9 @@ async def _run_review_steps(
     plan = plan_run(context=context, options=options, timings=timings)
     # Every provider call of the run reports what answered to one ledger, so
     # the result can say which models the round was produced by (#2867).
-    with model_ledger() as ledger:
+    with model_ledger(
+        shadow_price_model=in_run_shadow_model(options=options),
+    ) as ledger:
         outcome = await execute_run(
             context=context,
             options=options,

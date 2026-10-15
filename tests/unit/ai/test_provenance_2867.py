@@ -848,3 +848,76 @@ def test_a_dated_snapshot_of_the_requested_alias_is_the_same_model(
             else ModelVerification.MISMATCH
         ),
     )
+
+
+async def test_a_gateway_runs_calls_are_priced_on_the_shadow_model_before_the_budget() -> (
+    None
+):
+    """The budget settles the shadow figure, not the envelope's (ADR-0011 B)."""
+    provider = MagicMock()
+    provider.model_name = "claude-sonnet-4-20250514"
+    provider.complete = AsyncMock(
+        return_value=AIResponse(
+            content="ok",
+            model="claude-sonnet-4-20250514",
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            cost_estimate=0.02,
+            cost_reported=True,
+        ),
+    )
+    config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
+    budget = CostBudget(max_cost_usd=100.0)
+
+    with model_ledger(shadow_price_model="claude-sonnet-4-20250514"):
+        response = await call_ai(
+            provider=provider,
+            ai_config=config,
+            user_prompt="hello",
+            system_prompt=None,
+            budget=budget,
+        )
+
+    # Sonnet's list table: $3 per million in, $15 per million out.
+    assert_that(response.cost_estimate).is_close_to(18.0, 1e-9)
+    assert_that(budget.spent).is_close_to(18.0, 1e-9)
+
+
+async def test_a_first_party_runs_figures_stand_as_reported() -> None:
+    """Without a shadow model the ledger leaves the figure alone."""
+    provider = _ledger_provider()
+    config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
+
+    with model_ledger():
+        response = await call_ai(
+            provider=provider,
+            ai_config=config,
+            user_prompt="hello",
+            system_prompt=None,
+            budget=None,
+        )
+
+    assert_that(response.cost_estimate).is_equal_to(0.01)
+
+
+def test_project_settings_outrank_user_settings_for_the_base_url(
+    tmp_path: Path,
+) -> None:
+    """Claude Code's precedence: the project file overrides the user file."""
+    env = _env(tmp_path)
+    user_dir = Path(env["CLAUDE_CONFIG_DIR"])
+    (user_dir / "settings.json").write_text(
+        json.dumps({"env": {ANTHROPIC_BASE_URL_ENV: "https://api.anthropic.com"}}),
+        encoding="utf-8",
+    )
+    project_dir = tmp_path / ".claude"
+    project_dir.mkdir()
+    (project_dir / "settings.json").write_text(
+        json.dumps({"env": {ANTHROPIC_BASE_URL_ENV: "https://api.z.ai/api/anthropic"}}),
+        encoding="utf-8",
+    )
+
+    provenance = _detect(tmp_path)
+
+    assert_that(provenance.endpoint).is_equal_to("api.z.ai")
+    assert_that(provenance.first_party).is_false()

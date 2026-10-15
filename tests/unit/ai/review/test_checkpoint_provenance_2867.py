@@ -26,6 +26,7 @@ from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.run_usage import RunUsage
@@ -314,3 +315,42 @@ def test_a_full_round_checkpoint_keeps_the_stored_history(
     assert_that([run.identity.round for run in loaded.runs]).is_equal_to([4, 5])
     assert_that(loaded.runs[1].coverage.checkpoint).is_true()
     assert_that(loaded.next_round).is_equal_to(5)
+
+
+def test_a_later_checkpoint_keeps_an_inherited_attempts_model_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated interruptions do not erase the models whose coverage survived."""
+    earlier = ReportedModel(model="claude-opus-5-5", canonical="claude-opus-5-5")
+    later = ReportedModel(model="claude-sonnet-4-6", canonical="claude-sonnet-4-6")
+    prior = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(
+                    round=1,
+                    reported_models=(earlier,),
+                    model_verification="verified",
+                ),
+                coverage=RunCoverage(partial=True, checkpoint=True),
+            ),
+        ),
+        repo=_REPO,
+        pr_number=_PR,
+    )
+
+    loaded = _checkpoint(
+        tmp_path,
+        monkeypatch,
+        prior=prior,
+        stamp=CheckpointStamp(
+            pr_number=_PR,
+            identity=_IDENTITY,
+            verify=lambda: LedgerSnapshot(state="verified", reported_models=(later,)),
+        ),
+    )
+
+    assert_that([run.identity.round for run in loaded.runs]).is_equal_to([1])
+    assert_that([m.name for m in loaded.runs[0].identity.reported_models]).is_equal_to(
+        ["claude-sonnet-4-6", "claude-opus-5-5"],
+    )

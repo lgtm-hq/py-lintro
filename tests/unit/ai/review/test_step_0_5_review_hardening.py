@@ -26,6 +26,7 @@ from lintro.ai.config import AIConfig
 from lintro.ai.config_overrides import apply_env_overrides
 from lintro.ai.enums import AITransport
 from lintro.ai.exceptions import AICostBudgetExceededError, AIProviderError
+from lintro.ai.provenance import detect_run_provenance
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.registry import AIProvider
 from lintro.ai.retry import with_retry
@@ -53,6 +54,8 @@ from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import ReviewFinding, Severity
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.models.synthesis_outcome import SynthesisOutcome
 from lintro.ai.review.posting_policy import PostingPolicy, apply_posting_policy
@@ -520,7 +523,24 @@ def _prior_state_with_truncated_record(*, path: str) -> ReviewState:
     hashes = hashes_for_diffs(
         diffs=split_unified_diff_by_file(unified_diff=context.unified_diff),
     )
+    # The reuse gate (#2867) inherits coverage only from a run it can place
+    # on the current lane and endpoint; detect them as the run does.
+    provenance = detect_run_provenance(provider="anthropic", transport=AITransport.CLI)
     return ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(
+                    round=1,
+                    model="claude-sonnet-4-6",
+                    provider="anthropic",
+                    transport="cli",
+                    endpoint=provenance.endpoint,
+                    first_party=provenance.first_party,
+                    lane=provenance.lane,
+                    model_verification="verified",
+                ),
+            ),
+        ),
         coverage=(
             CoverageRecord(
                 path=path,

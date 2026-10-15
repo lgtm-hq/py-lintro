@@ -36,6 +36,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.round_outcome import RoundOutcome
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.models.sticky_request import StickyRequest
+from lintro.ai.review.reuse_gate import INHERITED_EVIDENCE_STATES
 from lintro.ai.review.run_record_factory import (
     RoundTotals,
     run_record_from_result,
@@ -120,8 +121,11 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
         ),
     )
     # The round's final record replaces the checkpoint record a killed
-    # attempt at the same round left behind, keeping the models that attempt
-    # reported: its coverage was inherited, so its evidence stays (#2867).
+    # attempt at the same round left behind. The models that attempt
+    # reported stay on the record only when its coverage could have been
+    # inherited (a verified or unverifiable state); a mismatched attempt was
+    # re-reviewed, and its evidence must not contradict the clean record or
+    # bar it from reuse (#2867).
     checkpoints = [
         run
         for run in state.runs
@@ -130,6 +134,8 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
     if checkpoints:
         seen = {model.name: model for model in current.identity.reported_models}
         for run in checkpoints:
+            if run.identity.model_verification not in INHERITED_EVIDENCE_STATES:
+                continue
             for model in run.identity.reported_models:
                 seen.setdefault(model.name, model)
         current = replace(

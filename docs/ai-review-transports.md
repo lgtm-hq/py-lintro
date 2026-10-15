@@ -196,12 +196,13 @@ Reuse follows provenance (ADR-0011, decision B): a stored round's coverage is in
 only when the round is not `legacy` or `mismatch`, is not `unreported` on a lane whose
 transport reports model usage (`LINTRO_REVIEW_REPORTS_MODEL_USAGE`, defaulting to true
 for the Claude CLI and every API transport), and its `lane`, `endpoint` and, on a
-first-party lane, its reported models still match the current lane. A mid-run checkpoint
-writes a partial run record carrying the round's lane and endpoint, so a round killed
-after a checkpoint leaves coverage the gate can place. Outside a lane row the allowed
-models are the default model, its declared fallbacks and the custom agents' `model`
-overrides; a local Claude CLI run whose envelope names an auxiliary model outside that
-set reads `mismatch`, as the ADR requires. The first run after this lands therefore
-re-reviews each open PR once.
+first-party lane, its reported models still match the current lane. Coverage that no
+stored run record can place on a lane is not inherited. A mid-run checkpoint writes a
+partial run record carrying the round's lane and endpoint, so a round killed after a
+checkpoint leaves coverage the gate can place. Outside a lane row the allowed models are
+the default model, its declared fallbacks and the custom agents' `model` overrides; a
+local Claude CLI run whose envelope names an auxiliary model outside that set reads
+`mismatch`, as the ADR requires. The first run after this lands therefore re-reviews
+each open PR once.
 
 See also `docs/ai-features.md` and the dogfood workflow helpers under `scripts/ci/`.

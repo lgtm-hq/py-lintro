@@ -17,7 +17,7 @@ from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.provenance import record_response
+from lintro.ai.provenance import record_response, shadow_priced
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
 
@@ -96,7 +96,7 @@ async def call_ai(
             The provider response.
         """
         with bound_cli_call(cli_options):
-            return await complete_with_fallback(
+            response = await complete_with_fallback(
                 provider,
                 user_prompt,
                 fallback_models=list(ai_config.fallback_models),
@@ -107,6 +107,9 @@ async def call_ai(
                 use_one_shot=use_one_shot,
                 cli_schema=cli_schema,
             )
+        # Off the provider's host the figure is repriced on the lane's shadow
+        # model before the budget sees it (#2867, ADR-0011 B).
+        return shadow_priced(response)
 
     async def _budgeted_call() -> AIResponse:
         """Perform one call, recording its cost against the budget.

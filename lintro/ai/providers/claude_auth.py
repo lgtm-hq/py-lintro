@@ -197,7 +197,8 @@ def claude_settings_env_value(
 
     A settings file's ``env`` block is applied to the ``claude`` process, so a
     base URL set there routes a run exactly as the environment variable would
-    (#2867). The first candidate file declaring *name* wins.
+    (#2867). The highest-precedence file declaring *name* wins: managed,
+    then project-local, project, user.
 
     Args:
         name: The variable name to look up in the ``env`` blocks.
@@ -208,7 +209,12 @@ def claude_settings_env_value(
         The non-empty string value, or ``None`` when no file sets it.
     """
     environment: Mapping[str, str] = os.environ if env is None else env
-    for candidate in _settings_candidates(cwd=cwd, env=environment):
+    candidates = _settings_candidates(cwd=cwd, env=environment)
+    # Claude Code's effective precedence: the managed file, then the
+    # project-local file, the project file and the user file. The
+    # candidates tuple ends with user, project, local, in that order.
+    ordered = (*candidates[:-3], *reversed(candidates[-3:]))
+    for candidate in ordered:
         text = _read_settings(candidate)
         if text is None:
             continue
