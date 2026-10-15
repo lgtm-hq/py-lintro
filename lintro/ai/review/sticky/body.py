@@ -254,6 +254,7 @@ def round_sections(
                 result=result,
                 transport=plan.transport,
                 auth_mode=plan.auth_mode,
+                runs=plan.runs,
             ),
         ),
         *_history_sections(plan=plan, limits=limits, archive_only=archive_history),

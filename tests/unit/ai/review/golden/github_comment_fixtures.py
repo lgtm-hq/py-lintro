@@ -91,7 +91,7 @@ def golden_review_result() -> ReviewResult:
             checklist_items=2,
             token_usage={"prompt": 12_000, "completion": 2_400, "total": 14_400},
             cost_estimate_usd=0.1234,
-            cost_basis="estimated",
+            cost_basis="billed",
             base_ref="main",
             head_ref="feature/contract",
             timestamp="2026-09-05T10:00:00+00:00",

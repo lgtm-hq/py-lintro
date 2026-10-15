@@ -58,6 +58,7 @@ def _this_run_section(
     result: ReviewResult,
     transport: str,
     auth_mode: str,
+    runs: Sequence[RunRecord] = (),
 ) -> str:
     """Render the single badge table describing the current run.
 
@@ -71,6 +72,8 @@ def _this_run_section(
         result: Current review result.
         transport: Provider transport used for this round.
         auth_mode: Authentication mode used by the transport.
+        runs: Every retained run record, this round's last, so the PR-budget
+            line can name the shadow figures its total includes (#2868).
 
     Returns:
         The ``This run`` section.
@@ -123,16 +126,22 @@ def _this_run_section(
                 if (timings_note := format_timings_note(metadata=metadata))
                 else []
             ),
-            *(["", budget_line] if (budget_line := _pr_budget_line(result)) else []),
+            *(
+                ["", budget_line]
+                if (budget_line := _pr_budget_line(result, runs=runs))
+                else []
+            ),
         ],
     )
 
 
-def _pr_budget_line(result: ReviewResult) -> str:
+def _pr_budget_line(result: ReviewResult, *, runs: Sequence[RunRecord] = ()) -> str:
     """Render ``PR budget: $X of $Y`` for a PR with a review budget (#2796).
 
     Args:
         result: Current review result.
+        runs: Every retained run record; their shadow figures are part of
+            the total and are named as such (ADR-0011 B).
 
     Returns:
         The line, or an empty string when ``ai.review_pr_budget_usd`` is unset.
@@ -149,9 +158,13 @@ def _pr_budget_line(result: ReviewResult) -> str:
         notes.append("display only: not enforced on this cost basis")
     if metadata.cost_basis in {basis.value for basis in RUNTIME_BOUND_BASES}:
         notes.append(RUNTIME_BOUND_NOTE)
-    if metadata.cost_basis in SHADOW_BASES:
-        # The cap settles on a shadow figure that is never spend (ADR-0011 B).
-        notes.append("includes this round's shadow figure, counted for the cap")
+    # The cap settles on shadow figures that are never spend (ADR-0011 B);
+    # an earlier gateway round's shadow stays in the total after a billed one.
+    shadow = sum(run.usage.cost_shadow for run in runs)
+    if not shadow and metadata.cost_basis in SHADOW_BASES:
+        shadow = metadata.cost_estimate_usd
+    if shadow:
+        notes.append(f"includes ${shadow:.2f} of shadow figures, counted for the cap")
     return f"{line} ({'; '.join(notes)})" if notes else line
 
 

@@ -211,7 +211,7 @@ def test_sticky_this_run_section_renders_two_badge_tables(
                 "",
                 _STICKY_THIS_RUN_HEADER,
                 "| --- | --- | --- | --- |:-:|:-:|:-:|---|",
-                "| `claude-sonnet-4-20250514` | cli · subscription | "
+                "| `claude-sonnet-4-20250514` · endpoint not recorded | cli · subscription | "
                 "~$0.0500 | 1,000 / 200 | 2 | 3 | 3 | 0s |",
             ],
         ),
@@ -233,6 +233,6 @@ def test_sticky_this_run_tables_keep_the_estimated_prefix(
     sticky = _sticky(result=result)
 
     assert_that(_value_row(text=sticky, header=_STICKY_THIS_RUN_HEADER)).is_equal_to(
-        "| `claude-sonnet-4-20250514` | cli · subscription | "
+        "| `claude-sonnet-4-20250514` · endpoint not recorded | cli · subscription | "
         "~$0.0500 | ~1,000 / ~200 | 2 | 3 | 3 | 0s |",
     )

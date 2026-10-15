@@ -30,6 +30,7 @@ __all__ = [
     "GATEWAY_COST_LABEL",
     "LEGACY_LABEL",
     "SHADOW_BASES",
+    "UNRECORDED_ENDPOINT",
     "ProvenanceView",
     "cost_label",
     "endpoint_note",
@@ -51,13 +52,16 @@ LEGACY_LABEL = "predates ADR-0011"
 #: Bases whose figure is a shadow for cap enforcement, never spend.
 SHADOW_BASES = frozenset({CostBasis.LIST_PRICE_SHADOW.value, CostBasis.UNKNOWN.value})
 
-#: Verification states that lead the sticky with a banner.
+#: What stands in for the host when a run recorded no endpoint.
+UNRECORDED_ENDPOINT = "endpoint not recorded"
+
+#: Verification states that lead the sticky with a banner. ``legacy`` is a
+#: history-row label (ADR-0011 C) and never tops a board.
 _BANNER_STATES = frozenset(
     {
         ModelVerification.MISMATCH.value,
         ModelVerification.UNVERIFIABLE.value,
         ModelVerification.UNREPORTED.value,
-        ModelVerification.LEGACY.value,
     },
 )
 
@@ -119,20 +123,16 @@ def view_from_identity(identity: RunIdentity) -> ProvenanceView:
         identity: The stored run identity.
 
     Returns:
-        The provenance facts the renderers read. A stored record from before
-        ADR-0011 carries no endpoint and no state and reads as ``legacy``;
-        a live round that recorded nothing is not a stored record and makes
-        no such claim.
+        The provenance facts the renderers read. The record reader assigns
+        ``legacy`` to a round stored before ADR-0011 (by key absence); a
+        post-ADR round that recorded no endpoint is not relabelled here.
     """
-    verification = identity.model_verification
-    if not verification and not identity.endpoint:
-        verification = ModelVerification.LEGACY.value
     return ProvenanceView(
         model=identity.model,
         endpoint=identity.endpoint,
         first_party=identity.first_party,
         lane=identity.lane,
-        verification=verification,
+        verification=identity.model_verification,
         reported=tuple(m.canonical or m.model for m in identity.reported_models),
     )
 
@@ -144,7 +144,14 @@ def _code(text: str, *, limit: int, plain: bool) -> str:
 
 
 def _host(view: ProvenanceView, *, plain: bool) -> str:
-    """Render the endpoint host, naming a gateway as one."""
+    """Render the endpoint host, naming a gateway as one.
+
+    A run that recorded no host says so rather than printing an empty code
+    span: a provider outside the first-party table with no lane row exporting
+    an endpoint leaves the field empty.
+    """
+    if not view.endpoint:
+        return UNRECORDED_ENDPOINT
     host = _code(view.endpoint, limit=80, plain=plain)
     if view.first_party is False:
         return f"{host} (third-party gateway)"
@@ -161,15 +168,14 @@ def endpoint_note(view: ProvenanceView, *, plain: bool = False) -> str:
     Returns:
         A short clause, for example ``verified on `api.anthropic.com```,
         ``answered via `api.z.ai` (third-party gateway), model
-        unverifiable``, or :data:`LEGACY_LABEL`; empty when the round made
-        no call and recorded nothing.
+        unverifiable``, or :data:`LEGACY_LABEL`. Never empty: a round that
+        recorded nothing says :data:`UNRECORDED_ENDPOINT`.
     """
     if view.is_legacy:
         return LEGACY_LABEL
     state = view.verification
     if not state and not view.endpoint:
-        # Nothing was recorded at all: there is nothing to stand beside.
-        return ""
+        return UNRECORDED_ENDPOINT
     if state == ModelVerification.VERIFIED.value:
         return f"verified on {_host(view, plain=plain)}"
     if state == ModelVerification.MISMATCH.value:
@@ -198,13 +204,16 @@ def model_label(
         plain: Render without Markdown code spans, for the terminal.
 
     Returns:
-        ``` `model` (source) · <endpoint note> ```; the note is never omitted.
+        ``` `model` (source) · <endpoint note> · lane `x` ```; the note is
+        never omitted, and the lane follows whenever one is known.
     """
     model = _code(view.model or "unknown", limit=limit, plain=plain)
     if view.model_source:
         model = f"{model} ({sanitize_comment_text(view.model_source, limit=40)})"
-    note = endpoint_note(view, plain=plain)
-    return f"{model} · {note}" if note else model
+    parts = [model, endpoint_note(view, plain=plain)]
+    if view.lane:
+        parts.append(f"lane {_code(view.lane, limit=40, plain=plain)}")
+    return " · ".join(parts)
 
 
 def provenance_banner(view: ProvenanceView) -> str:
@@ -226,11 +235,6 @@ def provenance_banner(view: ProvenanceView) -> str:
         return ""
     lane = f"lane `{sanitize_comment_text(view.lane, limit=40)}`, " if view.lane else ""
     model = f"`{sanitize_comment_text(view.model or 'unknown', limit=60)}`"
-    if state == ModelVerification.LEGACY.value:
-        return (
-            f"> ℹ️ **Provenance unknown** — this round {LEGACY_LABEL}: it records "
-            f"no endpoint, so nothing can say which lane answered for {model}."
-        )
     where = f"{lane}endpoint {_host(view, plain=False)}"
     if state == ModelVerification.MISMATCH.value:
         reported = ", ".join(
@@ -300,24 +304,39 @@ def history_cost_summary(runs: Sequence[RunRecord]) -> str:
         runs: The stored rounds.
 
     Returns:
-        The priced total, then the shadow total when any, then how many
-        rounds contributed no priced cost; a complete-looking total is never
-        shown over rounds the gateway left unpriced (ADR-0011 B).
+        The priced total with its basis, then the shadow total when any,
+        then how many rounds contributed no priced cost. A history with no
+        priced round shows no dollars at all, and a complete-looking total
+        is never shown over rounds the gateway left unpriced (ADR-0011 B).
     """
-    priced = sum(run.usage.cost for run in runs)
-    estimated = any(run.usage.estimated for run in runs)
+    priced_runs = [run for run in runs if run.usage.cost_basis not in SHADOW_BASES]
     shadow = sum(
         run.usage.cost_shadow
         for run in runs
         if run.usage.cost_basis == CostBasis.LIST_PRICE_SHADOW.value
     )
     unpriced = sum(1 for run in runs if run.usage.cost_basis == CostBasis.UNKNOWN.value)
-    parts = [f"{'~' if estimated else ''}${priced:.4f}"]
+    parts: list[str] = []
+    if priced_runs:
+        priced = sum(run.usage.cost for run in priced_runs)
+        all_billed = all(
+            run.usage.cost_basis == CostBasis.BILLED.value for run in priced_runs
+        )
+        if all_billed:
+            parts.append(f"${priced:.4f} (billed)")
+        elif any(run.usage.cost_basis or run.usage.estimated for run in priced_runs):
+            parts.append(f"~${priced:.4f} (estimated)")
+        else:
+            parts.append(f"${priced:.4f}")
     if shadow:
         parts.append(f"${shadow:.4f} shadow")
     if unpriced:
         noun = "round" if unpriced == 1 else "rounds"
         parts.append(f"{unpriced} {noun} unpriced (gateway)")
+    if not parts:
+        return GATEWAY_COST_LABEL
+    if not priced_runs and not shadow:
+        return f"{GATEWAY_COST_LABEL} · {parts[-1]}"
     return " · ".join(parts)
 
 
@@ -328,8 +347,8 @@ def terminal_cost_info(metadata: ReviewMetadata) -> str:
         metadata: Review run metadata.
 
     Returns:
-        The tokens and the labelled figure, or an empty string when there is
-        neither a figure nor a gateway to disclose.
+        The tokens and the labelled figure. Empty only for a legacy round
+        with no basis and no figure, which keeps its old rendering.
     """
     tokens = format_token_count(
         int(metadata.token_usage.get("prompt", 0))
@@ -337,7 +356,7 @@ def terminal_cost_info(metadata: ReviewMetadata) -> str:
     )
     if metadata.cost_basis == CostBasis.UNKNOWN.value:
         return f"   {tokens} tokens, cost {GATEWAY_COST_LABEL}"
-    if metadata.cost_estimate_usd <= 0:
+    if not metadata.cost_basis and metadata.cost_estimate_usd <= 0:
         return ""
     label = cost_label(
         cost=metadata.cost_estimate_usd,

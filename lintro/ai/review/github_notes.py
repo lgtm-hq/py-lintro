@@ -416,11 +416,6 @@ def format_run_mechanics(*, metadata: ReviewMetadata) -> str:
         # The endpoint and verification state stand beside the model, and
         # the figure below names its basis (#2868, ADR-0011 B).
         "**Model:** " + model_label(view_from_metadata(metadata)),
-        *(
-            [f"**Lane:** `{sanitize_comment_text(metadata.lane, limit=40)}`"]
-            if metadata.lane
-            else []
-        ),
         "**Provider:** "
         + format_sourced_value(
             f"`{sanitize_comment_text(metadata.provider, limit=40)}`",
