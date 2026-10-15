@@ -98,10 +98,17 @@ class ReviewState:
 
     @property
     def next_round(self) -> int:
-        """Return the round number the next review run should record."""
-        if not self.runs:
+        """Return the round number the next review run should record.
+
+        A checkpoint record (#2867) is a round that did not finish; the run
+        that resumes it keeps its number, so such records do not count.
+        """
+        finished = [
+            run.identity.round for run in self.runs if not run.coverage.checkpoint
+        ]
+        if not finished:
             return 1
-        return max(run.identity.round for run in self.runs) + 1
+        return max(finished) + 1
 
     @property
     def open_findings(self) -> tuple[FindingRecord, ...]:

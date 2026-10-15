@@ -111,6 +111,11 @@ def _round_is_reusable(
     if identity.lane != provenance.lane or identity.endpoint != provenance.endpoint:
         return False
     if provenance.first_party:
+        # A record that reported no models is vouched for by what it asked
+        # for, so a row that has since narrowed its list cannot be met
+        # vacuously.
+        if not identity.reported_models:
+            return _normalize(identity.model) in allowed
         return all(
             _normalize(model.name) in allowed for model in identity.reported_models
         )

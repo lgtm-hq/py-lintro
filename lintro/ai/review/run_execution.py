@@ -24,10 +24,7 @@ from lintro.ai.review.custom_agent_runner import (
     run_custom_agent_passes,
 )
 from lintro.ai.review.exceptions import ReviewExecutionError
-from lintro.ai.review.incremental_coverage import (
-    CheckpointStamp,
-    checkpoint_writer,
-)
+from lintro.ai.review.incremental_coverage import checkpoint_writer
 from lintro.ai.review.interrupt import install_review_interrupt
 from lintro.ai.review.pr_budget import cost_stop_reason, round_cap
 from lintro.ai.review.question_pass import RunQuestions, run_question_pass
@@ -40,7 +37,7 @@ from lintro.ai.review.run_finalize import (
     gate_built_in_findings,
     merge_partials,
 )
-from lintro.ai.review.run_provenance import checkpoint_identity
+from lintro.ai.review.run_provenance import checkpoint_stamp
 from lintro.ai.review.session import (
     ChunkRunPlan,
     is_cost_cap_stop,
@@ -188,8 +185,8 @@ async def run_passes(
                 policy=plan.policy,
                 round_spend=lambda: plan.budget.spent,
                 state_pr=options.state_pr,
-                stamp=CheckpointStamp(
-                    identity=checkpoint_identity(options=options),
+                stamp=checkpoint_stamp(
+                    options=options,
                     cost_basis=resolve_transport_settings(
                         options.ai_config,
                         cwd=(

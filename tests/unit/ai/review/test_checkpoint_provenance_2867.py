@@ -13,12 +13,15 @@ from pathlib import Path
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.provenance import LedgerCall, RunProvenance
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.incremental_coverage import (
     CheckpointStamp,
     write_incremental_coverage_part,
 )
+from lintro.ai.review.merge import ChunkReviewPartial
 from lintro.ai.review.models.changed_file import ChangedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_state import ReviewState
@@ -26,6 +29,7 @@ from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.resume import plan_resume
+from lintro.ai.review.reuse_gate import reusable_rounds
 from lintro.ai.review.sensitivity import resolve_sensitivity_policy
 from lintro.ai.review.state_store import load_ci_state
 
@@ -54,18 +58,29 @@ def _context() -> ReviewContext:
     )
 
 
+def _partial(*, input_tokens: int, output_tokens: int) -> ChunkReviewPartial:
+    return ChunkReviewPartial(
+        findings=(),
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_estimate=0.0,
+        files=(),
+    )
+
+
 def _checkpoint(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
     prior: ReviewState | None,
     stamp: CheckpointStamp,
+    collected: list[ChunkReviewPartial] | None = None,
 ) -> ReviewState:
     monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
     monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
     context = _context()
     write_incremental_coverage_part(
-        collected=[],
+        collected=collected or [],
         resume=plan_resume(context=context, prior=prior),
         context=context,
         prior_state=prior,
@@ -107,11 +122,92 @@ def test_a_checkpoint_writes_a_partial_run_with_the_rounds_provenance(
     assert_that(loaded.review_shadow_usd).is_equal_to(0.0)
 
 
+def test_a_checkpoint_carries_the_verification_of_the_calls_so_far(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A round killed after a mismatch is excluded from reuse like a finished one."""
+    mismatch = LedgerCall(
+        requested="claude-opus-5-5",
+        reported=(ReportedModel(model="glm-5", canonical="glm-5"),),
+    )
+    loaded = _checkpoint(
+        tmp_path,
+        monkeypatch,
+        prior=None,
+        stamp=CheckpointStamp(
+            pr_number=_PR,
+            identity=_IDENTITY,
+            cost_basis="unpriceable",
+            verify=lambda: ("mismatch", mismatch.reported),
+        ),
+    )
+
+    partial = loaded.runs[0]
+    assert_that(partial.identity.model_verification).is_equal_to("mismatch")
+    assert_that([m.name for m in partial.identity.reported_models]).is_equal_to(
+        ["glm-5"],
+    )
+    assert_that(
+        reusable_rounds(
+            prior=loaded,
+            provenance=RunProvenance(
+                endpoint="api.anthropic.com",
+                first_party=True,
+                lane="claude-subscription",
+            ),
+            allowed=("claude-opus-5-5",),
+        ),
+    ).is_empty()
+
+
+def test_a_checkpoint_record_does_not_advance_the_round_counter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The run that resumes a killed round keeps its number (ADR-0007)."""
+    loaded = _checkpoint(
+        tmp_path,
+        monkeypatch,
+        prior=None,
+        stamp=CheckpointStamp(pr_number=_PR, identity=_IDENTITY),
+    )
+
+    assert_that(loaded.runs[0].coverage.checkpoint).is_true()
+    assert_that(loaded.runs[0].to_dict()["checkpoint"]).is_true()
+    assert_that(loaded.next_round).is_equal_to(1)
+
+
+def test_a_gateway_checkpoint_prices_its_shadow_on_tokens_not_the_envelope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On ``unknown`` the checkpoint discards the envelope figure (ADR-0011 B)."""
+    loaded = _checkpoint(
+        tmp_path,
+        monkeypatch,
+        prior=None,
+        stamp=CheckpointStamp(
+            pr_number=_PR,
+            round_spend_usd=99.0,
+            identity=_IDENTITY,
+            cost_basis="unknown",
+            shadow_price_model="claude-sonnet-4-20250514",
+        ),
+        collected=[_partial(input_tokens=1_000_000, output_tokens=1_000_000)],
+    )
+
+    # Sonnet's list table: $3 per million in, $15 per million out.
+    assert_that(loaded.runs[0].usage.cost_shadow).is_close_to(18.0, 1e-9)
+    assert_that(loaded.review_shadow_usd).is_close_to(18.0, 1e-9)
+    assert_that(loaded.review_spend_usd).is_equal_to(0.0)
+
+
 def test_a_gateway_checkpoint_records_its_figure_as_a_shadow(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """On ``unknown`` the checkpointed spend is a shadow, on top of the prior."""
+    """On ``unknown`` the checkpointed figure is a shadow, on top of the prior."""
     prior = ReviewState(
         runs=(
             RunRecord(
@@ -133,14 +229,16 @@ def test_a_gateway_checkpoint_records_its_figure_as_a_shadow(
             round_spend_usd=0.25,
             identity=_IDENTITY,
             cost_basis="unknown",
+            shadow_price_model="claude-sonnet-4-20250514",
         ),
+        collected=[_partial(input_tokens=1_000_000, output_tokens=0)],
     )
 
     assert_that([run.identity.round for run in loaded.runs]).is_equal_to([1, 2])
     assert_that(loaded.runs[1].usage.cost).is_equal_to(0.0)
-    assert_that(loaded.runs[1].usage.cost_shadow).is_equal_to(0.25)
+    assert_that(loaded.runs[1].usage.cost_shadow).is_close_to(3.0, 1e-9)
     assert_that(loaded.review_spend_usd).is_equal_to(0.5)
-    assert_that(loaded.review_shadow_usd).is_close_to(1.25, 1e-9)
+    assert_that(loaded.review_shadow_usd).is_close_to(4.0, 1e-9)
 
 
 def test_a_checkpoint_without_an_identity_writes_no_run(

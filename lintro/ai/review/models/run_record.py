@@ -143,6 +143,7 @@ class RunRecord:
             ),
             ("model_verification", identity.model_verification),
             ("cost_shadow", round(usage.cost_shadow, 6)),
+            ("checkpoint", coverage.checkpoint),
         )
         payload.update({key: value for key, value in optional if value})
         if identity.first_party is not None:
@@ -324,6 +325,7 @@ def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
         questions_diff_trimmed=_strict_bool(payload.get("questions_diff_trimmed")),
         delta_since=str(payload.get("delta_since", "") or ""),
         delta_reason=str(payload.get("delta_reason", "") or ""),
+        checkpoint=_strict_bool(payload.get("checkpoint")),
     )
 
 

@@ -119,7 +119,16 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
             convergence_score=score_records(records=match.records),
         ),
     )
-    combined_runs = [*state.runs, current]
+    # The round's final record replaces the checkpoint record a killed
+    # attempt at the same round left behind (#2867).
+    combined_runs = [
+        *(
+            run
+            for run in state.runs
+            if not (run.coverage.checkpoint and run.identity.round == round_number)
+        ),
+        current,
+    ]
     return RoundOutcome(
         prior=state,
         round_number=round_number,

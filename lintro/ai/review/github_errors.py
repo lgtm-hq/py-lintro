@@ -86,7 +86,8 @@ def format_error_comment(
     kind = classify_provider_error(provider=resolved_provider, error=error)
     state = prior_state
 
-    if state is not None and state.runs:
+    # A checkpoint record is not a finished round to show (#2867).
+    if state is not None and any(not run.coverage.checkpoint for run in state.runs):
         return render_state_sticky(
             state=state,
             banner=_failure_banner(

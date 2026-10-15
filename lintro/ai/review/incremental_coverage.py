@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.cost import estimate_cost
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.coverage import inherit_same_round_paths
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import match_findings
@@ -59,13 +61,21 @@ class CheckpointStamp:
             leaves coverage the reuse gate can place on a lane and endpoint.
             ``None`` writes no run record.
         cost_basis: The basis the transport profile resolved for the round.
-            On ``unknown`` the checkpointed spend is a shadow, not money.
+            On ``unknown`` the checkpointed figure is a shadow, not money,
+            and it is the finished chunks' token counts priced on
+            ``shadow_price_model``, never the envelope's figure.
+        shadow_price_model: The model whose list table prices a shadow.
+        verify: Reads the verification state and reported models of the
+            calls completed so far, so the partial record carries them;
+            ``None`` records neither.
     """
 
     pr_number: int | None = None
     round_spend_usd: float = 0.0
     identity: RunIdentity | None = None
     cost_basis: str = ""
+    shadow_price_model: str = ""
+    verify: Callable[[], tuple[str, tuple[ReportedModel, ...]]] | None = None
 
 
 _NO_STAMP = CheckpointStamp()
@@ -153,6 +163,11 @@ def write_incremental_coverage_part(
     # will report one, so its checkpoint stays spend and the final write
     # reconciles it.
     shadow_basis = stamp.cost_basis == CostBasis.UNKNOWN.value
+    round_figure = (
+        _token_priced_shadow(collected=collected, stamp=stamp)
+        if shadow_basis
+        else stamp.round_spend_usd
+    )
     prior_spend = prior_state.review_spend_usd if prior_state is not None else 0.0
     prior_shadow = prior_state.review_shadow_usd if prior_state is not None else 0.0
     write_state_part(
@@ -162,6 +177,7 @@ def write_incremental_coverage_part(
                 seed=seed,
                 stamp=stamp,
                 round_number=round_number,
+                round_figure=round_figure,
                 shadow_basis=shadow_basis,
             ),
             findings=match.records,
@@ -177,13 +193,36 @@ def write_incremental_coverage_part(
             run_id=os.environ.get("GITHUB_RUN_ID", "") or seed.run_id,
             # From the prior state, not ``seed``: a ``--full`` seed is empty,
             # and a full round must not reset the PR's spend.
-            pr_spend_usd=prior_spend + (0.0 if shadow_basis else stamp.round_spend_usd),
-            pr_shadow_usd=prior_shadow
-            + (stamp.round_spend_usd if shadow_basis else 0.0),
+            pr_spend_usd=prior_spend + (0.0 if shadow_basis else round_figure),
+            pr_shadow_usd=prior_shadow + (round_figure if shadow_basis else 0.0),
         ),
         directory=state_dir(ci=True),
         sequence=sequence,
         final=True,
+    )
+
+
+def _token_priced_shadow(
+    *,
+    collected: list[ChunkReviewPartial],
+    stamp: CheckpointStamp,
+) -> float:
+    """Price the finished chunks' tokens on the shadow model (ADR-0011 B).
+
+    Args:
+        collected: Chunks finished so far in this run.
+        stamp: The checkpoint stamp naming the shadow price model.
+
+    Returns:
+        The shadow figure for the round so far.
+    """
+    model = stamp.shadow_price_model or (
+        stamp.identity.model if stamp.identity is not None else ""
+    )
+    return estimate_cost(
+        model,
+        sum(partial.input_tokens for partial in collected),
+        sum(partial.output_tokens for partial in collected),
     )
 
 
@@ -192,15 +231,17 @@ def _runs_with_checkpoint(
     seed: ReviewState,
     stamp: CheckpointStamp,
     round_number: int,
+    round_figure: float,
     shadow_basis: bool,
 ) -> tuple[RunRecord, ...]:
-    """Return the seed's runs plus this round's partial record, when stamped.
+    """Return the seed's runs plus this round's checkpoint record, when stamped.
 
     Args:
         seed: The state the checkpoint is written on top of.
         stamp: The checkpoint stamp; ``identity`` may be ``None``.
         round_number: The round being checkpointed.
-        shadow_basis: Whether the round's spend is a shadow figure.
+        round_figure: What the round has spent, or its shadow, so far.
+        shadow_basis: Whether the round's figure is a shadow.
 
     Returns:
         The runs to persist. Without an identity the seed's runs are kept
@@ -208,12 +249,18 @@ def _runs_with_checkpoint(
     """
     if stamp.identity is None:
         return seed.runs
+    state, reported = stamp.verify() if stamp.verify is not None else ("", ())
     partial = RunRecord(
-        identity=replace(stamp.identity, round=round_number),
-        coverage=RunCoverage(partial=True),
+        identity=replace(
+            stamp.identity,
+            round=round_number,
+            model_verification=state,
+            reported_models=reported,
+        ),
+        coverage=RunCoverage(partial=True, checkpoint=True),
         usage=RunUsage(
-            cost=0.0 if shadow_basis else stamp.round_spend_usd,
-            cost_shadow=stamp.round_spend_usd if shadow_basis else 0.0,
+            cost=0.0 if shadow_basis else round_figure,
+            cost_shadow=round_figure if shadow_basis else 0.0,
             cost_basis=stamp.cost_basis,
         ),
         outcome=RunOutcome(verdict=ReviewVerdict.INCOMPLETE),

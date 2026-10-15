@@ -55,6 +55,7 @@ def _run(
     return RunRecord(
         identity=RunIdentity(
             round=round_number,
+            model="claude-opus-5-5",
             lane=lane,
             endpoint=endpoint,
             first_party=endpoint == "api.anthropic.com",
@@ -278,3 +279,14 @@ def test_a_stored_alias_cannot_vouch_for_a_different_canonical_model() -> None:
     alias = ReportedModel(model="claude-opus-5-5", canonical="glm-5")
 
     assert_that(_rounds(_run(1, reported=(alias,)))).is_empty()
+
+
+def test_a_record_with_no_reported_models_is_vouched_for_by_its_request() -> None:
+    """A narrowed allowed list cannot be met vacuously by an empty report."""
+    assert_that(_rounds(_run(1, reported=()))).is_equal_to(frozenset({1}))
+    narrowed = reusable_rounds(
+        prior=ReviewState(runs=(_run(1, reported=()),)),
+        provenance=_CURRENT,
+        allowed=("claude-sonnet-4-6",),
+    )
+    assert_that(narrowed).is_empty()
