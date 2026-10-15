@@ -36,7 +36,7 @@ from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.round_outcome import RoundOutcome
 from lintro.ai.review.models.sticky_plan import StickyPlan
 from lintro.ai.review.models.sticky_request import StickyRequest
-from lintro.ai.review.reuse_gate import INHERITED_EVIDENCE_STATES
+from lintro.ai.review.reuse_gate import evidence_carries_over
 from lintro.ai.review.run_record_factory import (
     RoundTotals,
     run_record_from_result,
@@ -134,7 +134,10 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
     if checkpoints:
         seen = {model.name: model for model in current.identity.reported_models}
         for run in checkpoints:
-            if run.identity.model_verification not in INHERITED_EVIDENCE_STATES:
+            if not evidence_carries_over(
+                earlier=run.identity,
+                current=current.identity,
+            ):
                 continue
             for model in run.identity.reported_models:
                 seen.setdefault(model.name, model)

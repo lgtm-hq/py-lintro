@@ -21,12 +21,14 @@ from lintro.ai.transport import cli_bare_billing
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.models.run_identity import RunIdentity
     from lintro.ai.review.models.run_record import RunRecord
     from lintro.ai.review.session import ReviewSessionOptions
 
 __all__ = [
     "INHERITED_EVIDENCE_STATES",
     "agent_model_overrides",
+    "evidence_carries_over",
     "allowed_models_for",
     "reusable_rounds",
     "reusable_rounds_for",
@@ -101,6 +103,27 @@ _REUSABLE_STATES = frozenset(
 def _normalize(name: str) -> str:
     """Normalise a model name for comparison."""
     return name.strip().lower()
+
+
+def evidence_carries_over(*, earlier: RunIdentity, current: RunIdentity) -> bool:
+    """Return whether an earlier attempt's reported models stay on the record.
+
+    They stay only when that attempt's coverage could have been inherited:
+    its state is one the gate accepts and it ran on the same lane and
+    endpoint as the attempt replacing it (#2867).
+
+    Args:
+        earlier: Identity of the checkpoint record being replaced.
+        current: Identity of the record replacing it.
+
+    Returns:
+        True when the earlier attempt's models belong on the new record.
+    """
+    return (
+        earlier.model_verification in INHERITED_EVIDENCE_STATES
+        and earlier.lane == current.lane
+        and earlier.endpoint == current.endpoint
+    )
 
 
 def _round_is_reusable(

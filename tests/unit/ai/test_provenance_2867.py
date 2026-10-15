@@ -947,3 +947,34 @@ def test_bare_billing_finds_a_project_level_key_helper_in_the_workspace(
 
     assert_that(cli_bare_billing(config, cwd=str(workspace))).is_true()
     assert_that(cli_bare_billing(config)).is_false()
+
+
+async def test_a_turn_limited_gateway_call_is_charged_on_the_shadow_model() -> None:
+    """The stopped call's tokens are priced like a completed call's (ADR-0011 B)."""
+    from lintro.ai.exceptions import AITurnLimitError
+
+    provider = MagicMock()
+    provider.model_name = "claude-sonnet-4-20250514"
+    provider.complete = AsyncMock(
+        side_effect=AITurnLimitError(
+            "stopped",
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cost_estimate=0.02,
+        ),
+    )
+    config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
+    budget = CostBudget(max_cost_usd=100.0)
+
+    with model_ledger(shadow_price_model="claude-sonnet-4-20250514"):
+        with pytest.raises(AITurnLimitError):
+            await call_ai(
+                provider=provider,
+                ai_config=config,
+                user_prompt="hello",
+                system_prompt=None,
+                budget=budget,
+            )
+
+    # Sonnet's list table: $3 per million in.
+    assert_that(budget.spent).is_close_to(3.0, 1e-9)

@@ -436,3 +436,47 @@ def test_the_final_record_keeps_the_checkpoints_model_evidence(
     ).is_equal_to(
         ["glm-5.3-flash", "claude-haiku-4-5"],
     )
+
+
+def test_an_attempt_on_another_lane_leaves_no_evidence_on_the_record(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A verified checkpoint from a different lane was not inherited either."""
+    from lintro.ai.review.models.run_coverage import RunCoverage
+    from lintro.ai.review.sticky.assembly import advance_review_state
+
+    other_lane = ReportedModel(model="gpt-5", canonical="gpt-5")
+    prior = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(
+                    round=1,
+                    lane="codex-subscription",
+                    endpoint="api.openai.com",
+                    reported_models=(other_lane,),
+                    model_verification="verified",
+                ),
+                coverage=RunCoverage(partial=True, checkpoint=True),
+            ),
+        ),
+    )
+    result = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            lane="claude-subscription",
+            endpoint="api.anthropic.com",
+            reported_models=(_GLM,),
+            model_verification="verified",
+        ),
+    )
+
+    advanced = advance_review_state(
+        request=StickyRequest(result=result, prior_state=prior, head_sha="abc"),
+    )
+
+    assert_that(
+        [m.name for m in advanced.runs[0].identity.reported_models],
+    ).is_equal_to(
+        ["glm-5.3-flash"],
+    )

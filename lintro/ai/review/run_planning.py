@@ -390,6 +390,9 @@ def plan_run(
     # Resume planning hashes every file patch and walks importers over the
     # post-image set, so its cost scales with the diff; it gets its own span
     # rather than hiding in the gap between the phase sum and the total.
+    # The reuse gate (#2867) bounds both what coverage this round inherits
+    # and which prior head may anchor a delta read.
+    reusable = reusable_rounds_for(options=options)
     with timings.phase(name=ReviewPhase.RESUME_PLANNING):
         resume = plan_resume(
             context=context,
@@ -397,7 +400,7 @@ def plan_run(
             extra_skips=chunk_skips,
             groups=tuple(tuple(chunk.files) for chunk in chunks),
             force_full=options.force_full,
-            reusable_rounds=reusable_rounds_for(options=options),
+            reusable_rounds=reusable,
         )
         if resume.queue:
             chunks = filter_chunks(chunks=chunks, queue=resume.queue)
@@ -411,6 +414,7 @@ def plan_run(
         context=context,
         repo_root=repo_root,
         force_full=options.force_full,
+        reusable_rounds=reusable,
     )
     reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
     if delta.is_delta and chunks:

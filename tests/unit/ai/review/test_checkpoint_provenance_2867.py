@@ -329,6 +329,8 @@ def test_a_later_checkpoint_keeps_an_inherited_attempts_model_evidence(
             RunRecord(
                 identity=RunIdentity(
                     round=1,
+                    lane=_IDENTITY.lane,
+                    endpoint=_IDENTITY.endpoint,
                     reported_models=(earlier,),
                     model_verification="verified",
                 ),

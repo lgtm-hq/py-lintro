@@ -72,6 +72,7 @@ __all__ = [
     "model_ledger",
     "record_response",
     "recorded_cost_basis",
+    "shadow_cost",
     "shadow_priced",
     "verify_models",
 ]
@@ -532,6 +533,24 @@ def record_response(response: AIResponse) -> None:
         ledger.record(response)
 
 
+def shadow_cost(*, input_tokens: int, output_tokens: int, reported: float) -> float:
+    """Return the figure the budget charges for a call's tokens.
+
+    Args:
+        input_tokens: Prompt tokens the call consumed.
+        output_tokens: Completion tokens the call produced.
+        reported: The figure the transport reported or lintro priced.
+
+    Returns:
+        The tokens priced on the open ledger's shadow model when one is set,
+        otherwise *reported* unchanged.
+    """
+    ledger = _LEDGER.get()
+    if ledger is None or not ledger.shadow_price_model:
+        return reported
+    return estimate_cost(ledger.shadow_price_model, input_tokens, output_tokens)
+
+
 def shadow_priced(response: AIResponse) -> AIResponse:
     """Return *response* priced on the open ledger's shadow model, if any.
 
@@ -552,10 +571,10 @@ def shadow_priced(response: AIResponse) -> AIResponse:
         return response
     return replace(
         response,
-        cost_estimate=estimate_cost(
-            ledger.shadow_price_model,
-            response.input_tokens,
-            response.output_tokens,
+        cost_estimate=shadow_cost(
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            reported=response.cost_estimate,
         ),
     )
 

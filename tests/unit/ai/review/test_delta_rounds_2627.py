@@ -859,3 +859,42 @@ def test_the_scope_note_is_absent_on_a_full_round() -> None:
     assert_that(
         delta_scope_note(chunk=replace(chunk, read_diff="x", read_since="b" * 40)),
     ).contains("`bbbbbbbbbbbb`")
+
+
+def test_an_excluded_prior_round_cannot_anchor_a_delta(scratch: dict[str, Any]) -> None:
+    """The hunks a round the gate rejected read must be read again (#2867)."""
+    plan = plan_delta(
+        prior=_state(sha=scratch["a"]),
+        context=_ctx(head=scratch["b"], base=scratch["a"]),
+        repo_root=str(scratch["repo"]),
+        force_full=False,
+        reusable_rounds=frozenset(),
+    )
+
+    assert_that(plan.is_delta).is_false()
+    assert_that(plan.reason).is_equal_to(DeltaReason.PRIOR_NOT_REUSABLE)
+
+
+def test_a_checkpoint_record_never_anchors_a_delta(scratch: dict[str, Any]) -> None:
+    """The last finished round, not a killed attempt's checkpoint, is the anchor."""
+    from lintro.ai.review.models.run_coverage import RunCoverage
+
+    prior = ReviewState(
+        runs=(
+            RunRecord(identity=RunIdentity(round=1, sha=scratch["b"])),
+            RunRecord(
+                identity=RunIdentity(round=2),
+                coverage=RunCoverage(partial=True, checkpoint=True),
+            ),
+        ),
+    )
+
+    plan = plan_delta(
+        prior=prior,
+        context=_ctx(head=scratch["b"], base=scratch["a"]),
+        repo_root=str(scratch["repo"]),
+        force_full=False,
+        reusable_rounds=frozenset({1, 2}),
+    )
+
+    assert_that(plan.reason).is_equal_to(DeltaReason.SAME_HEAD)

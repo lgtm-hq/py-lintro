@@ -17,7 +17,7 @@ from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
-from lintro.ai.provenance import record_response, shadow_priced
+from lintro.ai.provenance import record_response, shadow_cost, shadow_priced
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
 
@@ -139,9 +139,16 @@ async def call_ai(
                 return response
             response = await _call_once()
         except AITurnLimitError as exc:
-            # The stopped call still spent its turns; charge them (#2685).
+            # The stopped call still spent its turns; charge them (#2685),
+            # priced on the shadow model off-host like a completed call.
             if budget is not None and exc.cost_estimate:
-                budget.record(exc.cost_estimate)
+                budget.record(
+                    shadow_cost(
+                        input_tokens=exc.input_tokens,
+                        output_tokens=exc.output_tokens,
+                        reported=exc.cost_estimate,
+                    ),
+                )
             raise
         if budget is not None:
             budget.record(response.cost_estimate)
