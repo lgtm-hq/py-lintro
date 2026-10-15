@@ -393,6 +393,11 @@ def test_shell_materialises_the_codex_session_for_the_attempt(tmp_path: Path) ->
     assert_that(result.stdout).does_not_contain("no provider credential")
     assert_that(result.stdout).contains("Codex session restored")
     assert_that((tmp_path / ".codex" / "auth.json").exists()).is_false()
+    # The subprocess holds one copy of the credential: the file, not the
+    # source variable (ADR-0011 D).
+    assert_that(SHELL_SCRIPT.read_text(encoding="utf-8")).contains(
+        'unset "$LANE_CREDENTIAL_SOURCE_ENV"',
+    )
 
 
 def test_shell_binds_the_gateway_token_on_the_zai_lane() -> None:
@@ -454,6 +459,40 @@ def test_shell_fails_visibly_without_the_gateway_token_on_the_zai_lane() -> None
     assert_that(result.returncode).is_equal_to(1)
     assert_that(result.stdout).contains("no provider credential")
     assert_that(result.stdout).does_not_contain("never invoked")
+
+
+def test_shell_looks_credentials_up_by_name_never_by_eval(tmp_path: Path) -> None:
+    """A hostile manifest name reaches no shell evaluation (defence in depth).
+
+    The rows come from the resolver at ``workflow_sha``, which validates
+    every name; the gate validates them again and the wrapper expands them
+    indirectly, so even a row that slipped through could only be looked
+    up, never run.
+    """
+    shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
+    # The only evals left are the capture loop over a literal name list.
+    evals = [line for line in shell_text.splitlines() if "eval " in line]
+    assert_that(evals).is_length(1)
+    assert_that(evals[0]).contains("_captured_${_name}")
+    marker = tmp_path / "x"
+    hostile = json.loads(MANIFEST.read_text(encoding="utf-8"))["lanes"][
+        "claude-subscription"
+    ]
+    hostile["credential_secret"] = (
+        f'CLAUDE_CODE_OAUTH_TOKEN}}"; touch {marker}; : "${{X'
+    )
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            "LINTRO_REVIEW_CHAIN": json.dumps(["claude-subscription"]),
+            "LINTRO_REVIEW_LANES": json.dumps({"claude-subscription": hostile}),
+            CREDENTIAL_ENV: "dummy-claude-token",
+            "PR_NUMBER": "123",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("could not be bound")
+    assert_that(marker.exists()).is_false()
 
 
 def test_shell_refuses_a_base_url_override_on_a_first_party_lane() -> None:

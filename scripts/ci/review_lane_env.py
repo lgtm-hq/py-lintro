@@ -131,8 +131,31 @@ def _value(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"))
 
 
+#: Row fields whose value the wrapper uses as a variable NAME. The resolver
+#: validated them at workflow_sha; the gate validates them again, so the
+#: wrapper's trust in these names is enforced by the script it trusts.
+_NAME_VALUED_FIELDS: Final[tuple[str, ...]] = (
+    "credential_secret",
+    "credential_env",
+    "credential_source_env",
+    "base_url_env",
+)
+
+
+def _check_names(lane_id: str, row: dict[str, Any]) -> None:
+    """Refuse a row whose name-valued fields are not variable names."""
+    for field in _NAME_VALUED_FIELDS:
+        value = row.get(field)
+        if value is not None and (
+            not isinstance(value, str) or not _NAME_RE.fullmatch(value)
+        ):
+            msg = f"lane {lane_id!r} field {field!r} is not a variable name"
+            raise LaneRefusalError(msg)
+
+
 def _exports(lane_id: str, row: dict[str, Any]) -> dict[str, str]:
     """Return the ``--phase env`` lines for a row."""
+    _check_names(lane_id, row)
     non_first_party = row.get("first_party") is False
     return {
         "LINTRO_REVIEW_LANE": lane_id,
@@ -376,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.phase == "env":
             _print(_exports(lane_id, row))
             return 0
+        _check_names(lane_id, row)
         _check_credential(row, env)
         _check_competing(lane_id, row, env, home)
         _check_base_url(lane_id, row, env, home)

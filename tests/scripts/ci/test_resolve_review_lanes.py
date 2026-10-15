@@ -170,6 +170,12 @@ def test_the_lane_job_runs_the_resolver_secret_free(workflow: str) -> None:
     assert_that(checkout["with"]["persist-credentials"]).is_false()
     if workflow == "ai-review.yml":
         assert_that(checkout["with"]["ref"]).is_equal_to("${{ github.workflow_sha }}")
+        # A comment that cannot be a review request spends no runner.
+        condition = " ".join(str(job["if"]).split())
+        assert_that(condition).contains("github.event_name == 'pull_request_target'")
+        assert_that(condition).contains(
+            "startsWith(github.event.comment.body, '@lintro review')",
+        )
     resolve = next(step for step in job["steps"] if step.get("id") == "resolve")
     assert_that(str(resolve["run"]).strip()).is_equal_to(
         "python3 -I scripts/ci/resolve_review_lanes.py --format github",

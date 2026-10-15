@@ -36,7 +36,8 @@ set -euo pipefail
 # on-host; a competing credential, a config that disagrees with the row, or
 # an absent credential refuses the run before any provider call.
 #
-# Trusted install: the workflow checks out the PR's BASE ref (main) before
+# Trusted install: the workflow checks out github.workflow_sha, the
+# default-branch commit that supplied the workflow and the manifest, before
 # invoking this script, so the lintro that runs with the provider credential is
 # trusted code — never the PR head. The PR diff is fetched independently by
 # `lintro review --pr` via `gh` (GitHub API), so the PR's changes are reviewed
@@ -228,22 +229,25 @@ echo "[ai-review] lane ${LINTRO_REVIEW_LANE:-?}: provider ${provider}, transport
 # under the variable its CLI reads (the z.ai token fills
 # ANTHROPIC_AUTH_TOKEN); a file-form one re-arms the source variable the
 # restore script decodes. Both come from the capture above, by name.
+# Indirect expansion, never eval: the names come from the manifest through
+# the gate, which validates them as variable names, and even a name that
+# slipped through could only be looked up, not executed.
 if [[ "${LANE_CREDENTIAL_FORM:-}" == "env" ]]; then
-	eval "_lane_secret_value=\"\${_captured_${LANE_CREDENTIAL_SECRET}:-}\""
-	if [[ -n "$_lane_secret_value" ]]; then
-		printf -v "$LANE_CREDENTIAL_ENV" '%s' "$_lane_secret_value"
+	_lane_capture_name="_captured_${LANE_CREDENTIAL_SECRET}"
+	if [[ -n "${!_lane_capture_name:-}" ]]; then
+		printf -v "$LANE_CREDENTIAL_ENV" '%s' "${!_lane_capture_name}"
 		# shellcheck disable=SC2163  # a manifest name, validated by the gate
 		export "$LANE_CREDENTIAL_ENV"
 	fi
-	unset _lane_secret_value
+	unset _lane_capture_name
 elif [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
-	eval "_lane_source_value=\"\${_captured_${LANE_CREDENTIAL_SOURCE_ENV}:-}\""
-	if [[ -n "$_lane_source_value" ]]; then
-		printf -v "$LANE_CREDENTIAL_SOURCE_ENV" '%s' "$_lane_source_value"
+	_lane_capture_name="_captured_${LANE_CREDENTIAL_SOURCE_ENV}"
+	if [[ -n "${!_lane_capture_name:-}" ]]; then
+		printf -v "$LANE_CREDENTIAL_SOURCE_ENV" '%s' "${!_lane_capture_name}"
 		# shellcheck disable=SC2163  # a manifest name, validated by the gate
 		export "$LANE_CREDENTIAL_SOURCE_ENV"
 	fi
-	unset _lane_source_value
+	unset _lane_capture_name
 fi
 # The provider's base-URL override is exported to the row's endpoint on a
 # non-first-party lane and left alone on a first-party one, where any set
@@ -258,10 +262,14 @@ fi
 # the effective ai.* must agree with the row. Read through lintro itself; in
 # Actions a config that cannot be read is a refusal, elsewhere (a developer
 # shell without the synced environment) the check is skipped with a note.
-# LINTRO_EFFECTIVE_AI_JSON, when already set, is used as is (the wrapper's
-# tests supply it); the workflow never sets it, so in Actions it is read
-# through lintro itself.
+# LINTRO_EFFECTIVE_AI_JSON, when already set outside Actions, is used as is
+# (the wrapper's tests supply it). In Actions it is ignored: the config is
+# read through lintro itself, so nothing set earlier in the job can stand
+# in for it.
 effective_ai_json="${LINTRO_EFFECTIVE_AI_JSON:-}"
+if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+	effective_ai_json=""
+fi
 if [[ -z "$effective_ai_json" ]] && command -v uv >/dev/null 2>&1; then
 	effective_ai_json="$(uv run --no-sync lintro config --json 2>/dev/null | python3 -I -c '
 import json, sys
@@ -311,6 +319,8 @@ if [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
 	if ! "${script_dir}/restore-codex-session.sh"; then
 		report_not_invoked "The lane's file credential could not be materialised; see the error above."
 	fi
+	# The file is the credential now; the subprocess holds one copy of it.
+	unset "$LANE_CREDENTIAL_SOURCE_ENV"
 	if [[ ! -s "$_lane_credential_path" ]]; then
 		exec python3 "${script_dir}/classify_review_outcome.py" \
 			--status "$NO_CREDENTIAL_STATUS" \

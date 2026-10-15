@@ -146,6 +146,25 @@ def test_the_attempt_index_selects_the_lane_and_is_bounded(
     assert_that(beyond.stderr).contains("::error::review lane:")
 
 
+def test_a_row_whose_name_fields_are_not_names_is_refused(
+    lanes: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """The wrapper looks variables up by these names; the gate validates them."""
+    for field in ("credential_secret", "credential_env", "base_url_env"):
+        hostile = copy.deepcopy(lanes)
+        hostile["claude-subscription"][
+            field
+        ] = 'CLAUDE_CODE_OAUTH_TOKEN}"; touch /tmp/x; : "${X'
+        for phase in ("env", "check"):
+            result = _run(phase, _env(hostile, ["claude-subscription"], tmp_path))
+            assert_that(result.returncode).described_as(f"{field}/{phase}").is_equal_to(
+                3,
+            )
+            assert_that(result.stderr).contains("is not a variable name")
+            assert_that(result.stdout).is_empty()
+
+
 def test_missing_or_malformed_lane_outputs_refuse(tmp_path: Path) -> None:
     """Without the lane job's outputs there is nothing to bind to."""
     result = _run("env", {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)})

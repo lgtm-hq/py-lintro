@@ -139,9 +139,15 @@ jobs:
     # Secret-free. Reads the committed manifest at the default-branch commit
     # that supplied this workflow (github.workflow_sha) and publishes the
     # chain and every chain row; the review job consumes only these outputs
-    # (ADR-0011 A). Runs on both events: the on-request path needs the lane
-    # as much as a push does, and the request job's own refusals leave this
+    # (ADR-0011 A). Runs on pull-request events and on comments that could be
+    # a review request (the request job's own prefilter), so a comment that
+    # is not one spends no runner; the request job's refusals then leave this
     # job's result unused.
+    if: >-
+      github.event_name == 'pull_request_target'
+      || (github.event_name == 'issue_comment'
+        && github.event.issue.pull_request
+        && startsWith(github.event.comment.body, '@lintro review'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read # sparse checkout of the manifest and the resolver
