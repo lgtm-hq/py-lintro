@@ -16,7 +16,6 @@
     "wrapper at credential_file from credential_source_env, the variable the",
     "secret is injected into, for the length of one attempt. Nothing in this",
     "file is a secret.",
-    "credential_file from credential_source_env for the length of one attempt.",
     "base_url_env is the provider override the CLI reads; null means the CLI",
     "reads none, and the lane endpoint must then be the CLI's built-in one.",
     "model null with models [] means the CLI's own default, unnamed: the row",

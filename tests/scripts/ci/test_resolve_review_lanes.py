@@ -172,6 +172,14 @@ def test_a_gateway_row_carries_an_unknown_basis_and_a_credential_its_form(
     codex["credential_form"] = "env"
     codex["credential_env"] = "CODEX_AUTH_JSON"
     _refuses(resolver, manifest, "takes the 'file' form")
+    manifest = copy.deepcopy(manifest)
+    manifest["lanes"]["codex-subscription"]["credential_form"] = "file"
+    manifest["lanes"]["codex-subscription"]["credential_env"] = "CODEX_AUTH_JSON"
+    _refuses(resolver, manifest, "carries ['credential_env']")
+    manifest = copy.deepcopy(manifest)
+    del manifest["lanes"]["codex-subscription"]["credential_env"]
+    manifest["lanes"]["cursor"]["credential_file"] = "$HOME/x"
+    _refuses(resolver, manifest, "carries ['credential_file']")
 
 
 def test_duplicate_and_unknown_keys_are_refused(
@@ -212,6 +220,8 @@ def test_egress_hosts_are_compared_case_insensitively_and_ports_are_ascii(
     )
     row["egress"] = ["api.anthropic.com:\u00b2"]
     _refuses(resolver, manifest, "host:port")
+    row["egress"] = ["evil,x.com:443", "api.anthropic.com:443"]
+    _refuses(resolver, manifest, "is not a hostname")
 
 
 # --- fail-closed paths -------------------------------------------------------------
@@ -289,6 +299,30 @@ def test_the_endpoint_port_must_be_in_the_lanes_egress(
     assert_that(_resolve(resolver, manifest).egress).is_equal_to(
         ["api.anthropic.com:8443"],
     )
+    # An explicit port zero is not "the default port".
+    row["endpoint"] = "https://api.anthropic.com:0"
+    _refuses(resolver, manifest, "port is out of range")
+    row["endpoint"] = "https://api.anthropic.com:443"
+    row["egress"] = ["api.anthropic.com:443"]
+    assert_that(_resolve(resolver, manifest).chain).is_equal_to(["claude-subscription"])
+
+
+def test_free_form_fields_carry_no_whitespace_or_control_character(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+) -> None:
+    """Every published string is read by a shell; none may carry a break or space."""
+    for field, value in (
+        ("endpoint", "https://api.anthropic.com/\n"),
+        ("model", "claude-opus-5-5 x"),
+        ("shadow_price_model", "claude-opus-4-20250514\t"),
+    ):
+        bad = copy.deepcopy(manifest)
+        bad["lanes"]["claude-subscription"][field] = value
+        _refuses(resolver, bad, "no whitespace or control character")
+    bad = copy.deepcopy(manifest)
+    bad["lanes"]["claude-subscription"]["models"].append("claude\rsonnet")
+    _refuses(resolver, bad, "no whitespace or control character")
 
 
 def test_a_lane_id_or_variable_name_cannot_carry_a_second_output_line(
@@ -306,6 +340,18 @@ def test_a_lane_id_or_variable_name_cannot_carry_a_second_output_line(
         bad = copy.deepcopy(manifest)
         bad["lanes"]["claude-subscription"][field] = "ANTHROPIC_BASE_URL\nX=y"
         _refuses(resolver, bad, "must be a variable name")
+    # A trailing line break is not an id either (``$`` would have let it by).
+    trailing = copy.deepcopy(manifest)
+    trailing["lanes"]["claude-subscription\n"] = trailing["lanes"].pop(
+        "claude-subscription",
+    )
+    trailing["chain"] = ["claude-subscription\n"]
+    _refuses(resolver, trailing, "lane ids must be")
+    trailing = copy.deepcopy(manifest)
+    trailing["lanes"]["claude-subscription"][
+        "credential_env"
+    ] = "CLAUDE_CODE_OAUTH_TOKEN\n"
+    _refuses(resolver, trailing, "must be a variable name")
     # The writer refuses a multi-line value even if one were ever built.
     with pytest.raises(resolver.LaneError):
         resolver._write_outputs({"lane": "a\nb"})

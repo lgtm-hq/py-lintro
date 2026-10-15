@@ -123,8 +123,20 @@ TRANSPORTS: Final[frozenset[str]] = frozenset({"cli", "api"})
 #: commit-status context and an output without escaping.
 _LANE_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 
+#: An egress host: a DNS name, lowercased.
+_HOST_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$")
+
 #: An environment-variable or secret name.
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+
+#: Free-form string fields: published flat and read by a shell, so no
+#: whitespace or control character may appear in them.
+_TOKEN_FIELDS: Final[tuple[str, ...]] = (
+    "endpoint",
+    "credential_file",
+    "model",
+    "shadow_price_model",
+)
 
 #: Fields whose value must be a variable or secret name when present.
 _NAME_FIELDS: Final[tuple[str, ...]] = (
@@ -325,9 +337,20 @@ def _check_names(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> No
     for field in _NAME_FIELDS:
         value = row.get(field)
         if value is not None and (
-            not isinstance(value, str) or not _NAME_RE.match(value)
+            not isinstance(value, str) or not _NAME_RE.fullmatch(value)
         ):
             _fail(f"lane {lane_id!r} field {field!r} must be a variable name", lanes)
+    tokens = [(field, row.get(field)) for field in _TOKEN_FIELDS]
+    tokens += [("models", m) for m in row["models"]]
+    for field, value in tokens:
+        if isinstance(value, str) and (
+            not value or any(c.isspace() or not c.isprintable() for c in value)
+        ):
+            _fail(
+                f"lane {lane_id!r} field {field!r} may carry no whitespace or "
+                "control character",
+                lanes,
+            )
 
 
 def _check_credential(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> None:
@@ -338,6 +361,16 @@ def _check_credential(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) 
         _fail(
             f"lane {lane_id!r} credential {row['credential']!r} takes the "
             f"{expected!r} form, not {form!r}",
+            lanes,
+        )
+    stray = {
+        "env": ("credential_file", "credential_source_env"),
+        "file": ("credential_env",),
+    }
+    present = [field for field in stray.get(form, ()) if field in row]
+    if present:
+        _fail(
+            f"lane {lane_id!r} binds a {form!r} credential but carries {present}",
             lanes,
         )
     if form == "env":
@@ -406,8 +439,10 @@ def _check_endpoint(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) ->
     if parts.scheme != "https" or not parts.hostname:
         _fail(f"lane {lane_id!r} endpoint must be an https URL", lanes)
     try:
-        endpoint_port = parts.port or 443
+        endpoint_port = 443 if parts.port is None else parts.port
     except ValueError:
+        _fail(f"lane {lane_id!r} endpoint port is out of range", lanes)
+    if not 1 <= endpoint_port <= 65535:
         _fail(f"lane {lane_id!r} endpoint port is out of range", lanes)
     _check_first_party(lane_id, row, parts.hostname, lanes)
     hosts: list[str] = []
@@ -424,11 +459,13 @@ def _check_endpoint(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) ->
                 f"lane {lane_id!r} egress entry {entry!r} must be host:port",
                 lanes,
             )
-        if "*" in host or any(c.isspace() for c in host):
+        if "*" in host:
             _fail(
                 f"lane {lane_id!r} declares a wildcard egress host {host!r}",
                 lanes,
             )
+        if not _HOST_RE.fullmatch(host):
+            _fail(f"lane {lane_id!r} egress host {host!r} is not a hostname", lanes)
         hosts.append(f"{host}:{int(port)}")
     # The normalised entries are what the chain's egress union publishes.
     row["egress"] = hosts
@@ -522,7 +559,10 @@ def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
     """
     stray = sorted(set(document) - TOP_LEVEL_KEYS)
     if stray:
-        msg = f"manifest carries unknown keys {stray}; declared lanes: (not read)"
+        msg = (
+            f"manifest carries unknown keys {stray}; declared lanes: "
+            f"{', '.join(sorted(document.get('lanes') or {})) or '(none)'}"
+        )
         raise LaneError(msg)
     lanes_raw = document.get("lanes")
     if not isinstance(lanes_raw, dict) or not lanes_raw:
@@ -537,7 +577,7 @@ def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
     priced = set(priced_raw)
     rows: dict[str, dict[str, Any]] = {}
     for lane_id, row in lanes_raw.items():
-        if not isinstance(lane_id, str) or not _LANE_ID_RE.match(lane_id):
+        if not isinstance(lane_id, str) or not _LANE_ID_RE.fullmatch(lane_id):
             _fail("lane ids must be lowercase letters, digits and hyphens", lanes_raw)
         checked = _check_shape(lane_id, row, lanes_raw)
         _check_credential(lane_id, checked, lanes_raw)
@@ -589,8 +629,8 @@ def _write_outputs(values: dict[str, str]) -> None:
 
     Raises:
         LaneError: When a value carries a line break, which would let it
-            inject a second output; the shape checks make this unreachable
-            from a manifest, and the guard keeps it so.
+            inject a second output; the shape checks refuse such a value
+            earlier, and this guard keeps that true whatever is added later.
     """
     for name, value in values.items():
         if "\n" in value or "\r" in value:
