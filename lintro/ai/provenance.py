@@ -264,10 +264,14 @@ def _anthropic_cli_credential(
     )
     if auth_token:
         return CredentialKind.ZAI_TOKEN
-    if env.get(CLAUDE_API_KEY_ENV, "").strip() or claude_api_key_available(
-        cwd=cwd,
+    api_key = _cli_env_value(
+        CLAUDE_API_KEY_ENV,
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.CLI,
         env=env,
-    ):
+        cwd=cwd,
+    )
+    if api_key or claude_api_key_available(cwd=cwd, env=env):
         return CredentialKind.API_KEY
     if not bare and env.get(CLAUDE_OAUTH_TOKEN_ENV, "").strip():
         return CredentialKind.CLAUDE_OAUTH
@@ -371,12 +375,15 @@ def detect_run_provenance(
     declared = host_of(environment.get(REVIEW_ENDPOINT_ENV, ""))
     endpoint = override_host or declared or canonical
     lane = environment.get(REVIEW_LANE_ENV, "").strip()
+    host_is_canonical = not override_host or override_host == canonical
     first_party = _env_bool(environment.get(REVIEW_FIRST_PARTY_ENV))
     if first_party is None:
         # A lane row that does not say is not trusted to be first-party.
-        first_party = (
-            False if lane else (not override_host or override_host == canonical)
-        )
+        first_party = False if lane else host_is_canonical
+    elif first_party and canonical and not host_is_canonical:
+        # A row may declare a gateway first-party only by naming a host
+        # lintro cannot place; a known provider pointed elsewhere is not.
+        first_party = False
     return RunProvenance(
         endpoint=endpoint,
         first_party=first_party,

@@ -776,3 +776,33 @@ def test_the_api_transport_honours_the_sdks_own_base_url_variable(
     assert_that(provenance.endpoint).is_equal_to("gateway.invalid")
     assert_that(provenance.first_party).is_false()
     assert_that(provenance.credential).is_equal_to(CredentialKind.ZAI_TOKEN)
+
+
+def test_a_first_party_claim_cannot_override_a_contradicting_host(
+    tmp_path: Path,
+) -> None:
+    """A lane row saying first-party while the CLI points at a gateway fails closed."""
+    provenance = _detect(
+        tmp_path,
+        **{
+            REVIEW_LANE_ENV: "claude-subscription",
+            REVIEW_FIRST_PARTY_ENV: "true",
+            ANTHROPIC_BASE_URL_ENV: "https://api.z.ai/api/anthropic",
+        },
+    )
+
+    assert_that(provenance.first_party).is_false()
+
+
+def test_an_api_key_in_the_settings_env_block_is_a_key(tmp_path: Path) -> None:
+    """The key is read where the CLI reads it, like the token and the base URL."""
+    settings_dir = tmp_path / ".claude"
+    settings_dir.mkdir()
+    (settings_dir / "settings.json").write_text(
+        json.dumps({"env": {"ANTHROPIC_API_KEY": "sk-ant"}}),
+        encoding="utf-8",
+    )
+
+    provenance = _detect(tmp_path, **{CLAUDE_OAUTH_TOKEN_ENV: "tok"})
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
