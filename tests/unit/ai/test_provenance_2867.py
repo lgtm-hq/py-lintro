@@ -1011,3 +1011,32 @@ async def test_a_turn_limited_gateway_call_with_no_envelope_figure_is_still_char
             )
 
     assert_that(budget.spent).is_close_to(3.0, 1e-9)
+
+
+async def test_a_zero_rate_shadow_model_cannot_make_the_cap_free() -> None:
+    """Cursor's ``auto`` carries zero rates; the shadow falls back to the default table."""
+    provider = MagicMock()
+    provider.model_name = "auto"
+    provider.complete = AsyncMock(
+        return_value=AIResponse(
+            content="ok",
+            model="auto",
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cost_estimate=0.5,
+        ),
+    )
+    config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
+    budget = CostBudget(max_cost_usd=100.0)
+
+    with model_ledger(shadow_price_model="auto"):
+        response = await call_ai(
+            provider=provider,
+            ai_config=config,
+            user_prompt="hello",
+            system_prompt=None,
+            budget=budget,
+        )
+
+    assert_that(response.cost_estimate).is_greater_than(0.0)
+    assert_that(budget.spent).is_equal_to(response.cost_estimate)

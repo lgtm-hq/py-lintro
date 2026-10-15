@@ -32,7 +32,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from lintro.ai.cost import estimate_cost
+from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums import AITransport
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.enums.credential_kind import CredentialKind
@@ -543,12 +543,18 @@ def shadow_cost(*, input_tokens: int, output_tokens: int, reported: float) -> fl
 
     Returns:
         The tokens priced on the open ledger's shadow model when one is set,
-        otherwise *reported* unchanged.
+        otherwise *reported* unchanged. A shadow model with no price table,
+        or a zero-rate one, is priced at the default table: a shadow that
+        settles the enforced caps must never be free.
     """
     ledger = _LEDGER.get()
     if ledger is None or not ledger.shadow_price_model:
         return reported
-    return estimate_cost(ledger.shadow_price_model, input_tokens, output_tokens)
+    return estimate_cost_with_floor(
+        ledger.shadow_price_model,
+        input_tokens,
+        output_tokens,
+    )
 
 
 def shadow_priced(response: AIResponse) -> AIResponse:

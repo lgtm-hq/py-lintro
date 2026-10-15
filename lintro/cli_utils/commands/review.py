@@ -1239,10 +1239,10 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
         # wrong table and is discarded: the shadow is the token counts priced
         # on the lane's shadow model, or the requested model's own table
         # until a lane row names one (ADR-0011 B).
-        from lintro.ai.cost import estimate_cost
+        from lintro.ai.cost import estimate_cost_with_floor
 
         tokens = metadata.token_usage
-        cost = estimate_cost(
+        cost = estimate_cost_with_floor(
             metadata.shadow_price_model or metadata.model,
             int(tokens.get("prompt", 0)),
             int(tokens.get("completion", 0)),

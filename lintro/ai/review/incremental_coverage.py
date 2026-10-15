@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from lintro.ai.cost import estimate_cost
+from lintro.ai.cost import estimate_cost_with_floor
 from lintro.ai.enums.cost_basis import SHADOW_COST_BASES, CostBasis
 from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.coverage import inherit_same_round_paths
@@ -272,7 +272,8 @@ def _token_priced_shadow(
     model = stamp.shadow_price_model or (
         stamp.identity.model if stamp.identity is not None else ""
     )
-    return estimate_cost(
+    # Floored: a zero-rate shadow model must not make the enforced caps a no-op.
+    return estimate_cost_with_floor(
         model,
         sum(partial.input_tokens for partial in collected),
         sum(partial.output_tokens for partial in collected),
