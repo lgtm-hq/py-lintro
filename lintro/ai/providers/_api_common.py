@@ -15,6 +15,7 @@ This module imports no vendor SDK.
 
 from __future__ import annotations
 
+import re
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 
@@ -87,11 +88,36 @@ def finish_api_completion(
         # Evidence is what the vendor's response says it served, never the
         # request echoed back; a response naming none stays unreported.
         reported_models=(
-            (ReportedModel(model=served, canonical=served, provider="api"),)
-            if served
-            else ()
+            (served_model_evidence(requested=model, served=served),) if served else ()
         ),
     )
+
+
+#: A vendor's dated snapshot id for an undated alias: ``gpt-5-2026-01-01``
+#: or ``claude-sonnet-4-20250514`` for ``gpt-5`` / ``claude-sonnet-4``.
+_DATED_SNAPSHOT = re.compile(r"^(?P<base>.+?)-(?:\d{4}-\d{2}-\d{2}|\d{8})$")
+
+
+def served_model_evidence(*, requested: str, served: str) -> ReportedModel:
+    """Describe the model a vendor's response names, keyed by what was asked.
+
+    An undated alias is answered by its dated snapshot (OpenAI and Anthropic
+    both do this). The snapshot is the same model, so the evidence keeps the
+    served id and names the alias as its canonical form; otherwise the
+    served id is both (#2867).
+
+    Args:
+        requested: The model the call asked for.
+        served: The model id the vendor's response carries.
+
+    Returns:
+        The reported model, with ``provider`` set to ``api``.
+    """
+    match = _DATED_SNAPSHOT.match(served)
+    canonical = (
+        requested if match is not None and match.group("base") == requested else served
+    )
+    return ReportedModel(model=served, canonical=canonical, provider="api")
 
 
 class ApiStreamingProvider(BaseAIProvider):

@@ -806,3 +806,45 @@ def test_an_api_key_in_the_settings_env_block_is_a_key(tmp_path: Path) -> None:
     provenance = _detect(tmp_path, **{CLAUDE_OAUTH_TOKEN_ENV: "tok"})
 
     assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
+
+
+@pytest.mark.parametrize(
+    ("requested", "served", "canonical"),
+    [
+        ("gpt-5", "gpt-5-2026-01-01", "gpt-5"),
+        ("claude-sonnet-4", "claude-sonnet-4-20250514", "claude-sonnet-4"),
+        ("gpt-5", "gpt-5-mini-2026-01-01", "gpt-5-mini-2026-01-01"),
+        ("claude-opus-5-5", "claude-opus-5-5", "claude-opus-5-5"),
+    ],
+)
+def test_a_dated_snapshot_of_the_requested_alias_is_the_same_model(
+    requested: str,
+    served: str,
+    canonical: str,
+) -> None:
+    """A vendor answering ``gpt-5`` with ``gpt-5-<date>`` served what was asked."""
+    response = finish_api_completion(
+        provider=AIProvider.OPENAI,
+        model=requested,
+        content="",
+        input_tokens=1,
+        output_tokens=1,
+        cost=0.0,
+        served_model=served,
+    )
+
+    assert_that(response.reported_models[0].model).is_equal_to(served)
+    assert_that(response.reported_models[0].canonical).is_equal_to(canonical)
+    assert_that(
+        verify_models(
+            requested=requested,
+            calls=[LedgerCall(requested=requested, reported=response.reported_models)],
+            first_party=True,
+        ),
+    ).is_equal_to(
+        (
+            ModelVerification.VERIFIED
+            if canonical == requested
+            else ModelVerification.MISMATCH
+        ),
+    )
