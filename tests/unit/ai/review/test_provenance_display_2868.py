@@ -108,6 +108,11 @@ def test_only_a_verified_round_leads_without_a_banner() -> None:
     assert_that(banner).contains("`api.z.ai` (third-party gateway)")
     mismatch = provenance_banner(replace(_VERIFIED, verification="mismatch"))
     assert_that(mismatch).starts_with("> ❌ **Model mismatch**")
+    blank = provenance_banner(
+        replace(_VERIFIED, verification="mismatch", reported=("", "glm-4.6")),
+    )
+    assert_that(blank).contains("reported `glm-4.6`.")
+    assert_that(blank).does_not_contain("``")
     unreported = provenance_banner(replace(_VERIFIED, verification="unreported"))
     assert_that(unreported).starts_with("> ℹ️")
     no_host = provenance_banner(replace(_GATEWAY, endpoint="", first_party=None))
@@ -349,3 +354,41 @@ def test_the_pr_budget_line_names_the_shadow_an_earlier_round_left_in_the_total(
 
     assert_that(line).starts_with("PR budget: $0.60 of $2.00")
     assert_that(line).contains("includes $0.50 of shadow figures")
+
+
+def test_the_board_names_shadow_a_pruned_gateway_round_left_in_the_total(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The plan carries the PR's cumulative shadow, not a sum over retained runs."""
+    prior = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=31, model="claude-opus-5-5"),
+                usage=RunUsage(cost=0.10, cost_basis="billed"),
+            ),
+        ),
+        # The gateway round that left this shadow was pruned long ago.
+        pr_spend_usd=3.0,
+        pr_shadow_usd=0.5,
+    )
+    result = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            cost_basis="billed",
+            cost_estimate_usd=0.10,
+            endpoint="api.anthropic.com",
+            first_party=True,
+            model_verification="verified",
+            pr_budget_usd=10.0,
+            pr_budget_spent_usd=3.60,
+            pr_budget_enforced=True,
+        ),
+    )
+
+    primary, _archive = build_sticky_bodies(
+        request=StickyRequest(result=result, prior_state=prior, head_sha="abc1234"),
+    )
+
+    assert_that(primary).contains("PR budget: $3.60 of $10.00")
+    assert_that(primary).contains("includes $0.50 of shadow figures")
