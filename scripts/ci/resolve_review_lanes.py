@@ -342,6 +342,12 @@ def _check_names(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> No
             _fail(f"lane {lane_id!r} field {field!r} must be a variable name", lanes)
     tokens = [(field, row.get(field)) for field in _TOKEN_FIELDS]
     tokens += [("models", m) for m in row["models"]]
+    tokens += [
+        ("base_url_files", entry.get(key))
+        for entry in row["base_url_files"]
+        if isinstance(entry, dict)
+        for key in ("path", "key")
+    ]
     for field, value in tokens:
         if isinstance(value, str) and (
             not value or any(c.isspace() or not c.isprintable() for c in value)
@@ -559,9 +565,11 @@ def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
     """
     stray = sorted(set(document) - TOP_LEVEL_KEYS)
     if stray:
+        declared = document.get("lanes")
+        names = sorted(declared) if isinstance(declared, dict) else []
         msg = (
             f"manifest carries unknown keys {stray}; declared lanes: "
-            f"{', '.join(sorted(document.get('lanes') or {})) or '(none)'}"
+            f"{', '.join(names) or '(none)'}"
         )
         raise LaneError(msg)
     lanes_raw = document.get("lanes")

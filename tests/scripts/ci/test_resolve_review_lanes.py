@@ -190,6 +190,11 @@ def test_duplicate_and_unknown_keys_are_refused(
     """A repeated lane or a stray key is a mistake a reviewer must see."""
     manifest["default"] = "cursor"
     _refuses(resolver, manifest, "unknown keys ['default']")
+    # The message is built before ``lanes`` is checked, so a malformed one
+    # must not turn the refusal into a traceback.
+    malformed = copy.deepcopy(manifest)
+    malformed["lanes"] = 5
+    _refuses(resolver, malformed, "unknown keys ['default']", "(none)")
     manifest = copy.deepcopy(manifest)
     del manifest["default"]
     manifest["lanes"]["cursor"]["selector"] = True
@@ -322,6 +327,9 @@ def test_free_form_fields_carry_no_whitespace_or_control_character(
         _refuses(resolver, bad, "no whitespace or control character")
     bad = copy.deepcopy(manifest)
     bad["lanes"]["claude-subscription"]["models"].append("claude\rsonnet")
+    _refuses(resolver, bad, "no whitespace or control character")
+    bad = copy.deepcopy(manifest)
+    bad["lanes"]["codex-subscription"]["base_url_files"][0]["key"] = "chatgpt base_url"
     _refuses(resolver, bad, "no whitespace or control character")
 
 
