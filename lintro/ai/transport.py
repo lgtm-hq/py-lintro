@@ -192,9 +192,14 @@ def resolve_transport_settings(
             bare=bare_billing,
             cwd=cwd,
         )
+        # A metered key bills the API whichever way it reached the CLI: the
+        # Anthropic ``--bare`` policy, ``CODEX_API_KEY``, a codex session
+        # with an embedded key, or ``ANTHROPIC_API_KEY`` under
+        # ``cli_bare: never``. The basis must agree with the auth mode.
+        metered = bare_billing or provenance.credential is CredentialKind.API_KEY
         if not provenance.first_party:
             basis = CostBasis.UNKNOWN
-        elif bare_billing:
+        elif metered:
             basis = CostBasis.ESTIMATED
         else:
             basis = CostBasis.UNPRICEABLE

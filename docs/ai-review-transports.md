@@ -175,8 +175,9 @@ envelope's figure is priced on the wrong table and is never shown as dollars. On
 shadow bases the record's `cost` is zero and the figure lives in `cost_shadow`, which
 still settles `ai.max_cost_usd` and the PR budget (ADR-0011, decision B). Live `api`
 runs always record `billed` (usage is provider-reported); `estimated` appears only for
-bare-billed CLI runs and for legacy records whose basis is derived from `auth_mode` +
-locally estimated token usage.
+CLI runs on a metered key (bare-billed, `CODEX_API_KEY`, a codex session with an
+embedded key, or `ANTHROPIC_API_KEY` under `cli_bare: never`) and for legacy records
+whose basis is derived from `auth_mode` + locally estimated token usage.
 
 Each run also records where its requests went (#2867): `endpoint` (host only),
 `first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `codex_oauth`,

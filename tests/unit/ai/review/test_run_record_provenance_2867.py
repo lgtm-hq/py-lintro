@@ -246,10 +246,17 @@ def test_the_stamp_upgrades_a_reported_subscription_figure_to_a_shadow(
     )
 
 
-def test_the_stamp_prices_a_gateway_run_on_the_shadow_model_not_the_envelope(
+def test_the_stamp_keeps_a_gateway_runs_in_run_shadow_figure(
     sample_review_result: ReviewResult,
 ) -> None:
-    """Off the provider's host the envelope's figure is discarded (ADR-0011 B)."""
+    """Off the provider's host the calls were shadow-priced as they returned.
+
+    The round's figure already includes charges the token totals cannot see
+    (a dropped partial, a turn-limited call), so the stamp keeps it and the
+    PR budget reads the same number (ADR-0011 B).
+    """
+    from lintro.ai.review.pr_budget import PrBudget
+
     result = replace(
         sample_review_result,
         metadata=replace(
@@ -257,7 +264,9 @@ def test_the_stamp_prices_a_gateway_run_on_the_shadow_model_not_the_envelope(
             first_party=False,
             credential="zai_token",
             cost_reported=True,
-            cost_estimate_usd=99.0,
+            # The in-run figure: $18 of shadow-priced calls plus a $2 charge
+            # for a call whose partial was dropped.
+            cost_estimate_usd=20.0,
             shadow_price_model="claude-sonnet-4-20250514",
             token_usage={
                 "prompt": 1_000_000,
@@ -266,13 +275,17 @@ def test_the_stamp_prices_a_gateway_run_on_the_shadow_model_not_the_envelope(
             },
         ),
     )
+    stamp = replace(
+        _stamp(CostBasis.UNPRICEABLE),
+        pr_budget=PrBudget(budget_usd=50.0, prior_spend_usd=5.0, enforced=True),
+    )
 
-    stamped = _stamp_metadata(result=result, stamp=_stamp(CostBasis.UNPRICEABLE))
+    stamped = _stamp_metadata(result=result, stamp=stamp)
 
     assert_that(stamped.metadata.cost_basis).is_equal_to("unknown")
     assert_that(stamped.metadata.auth_mode).is_equal_to("gateway_token")
-    # Sonnet's list table: $3 per million in, $15 per million out.
-    assert_that(stamped.metadata.cost_estimate_usd).is_close_to(18.0, 1e-9)
+    assert_that(stamped.metadata.cost_estimate_usd).is_equal_to(20.0)
+    assert_that(stamped.metadata.pr_budget_spent_usd).is_close_to(25.0, 1e-9)
 
 
 def test_the_stamp_falls_back_to_the_profile_when_no_credential_was_recorded(

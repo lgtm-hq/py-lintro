@@ -1156,3 +1156,36 @@ def test_a_session_file_that_is_not_an_object_is_no_credential(tmp_path: Path) -
     )
 
     assert_that(provenance.credential).is_equal_to(CredentialKind.UNKNOWN)
+
+
+@pytest.mark.usefixtures("_isolated_profile_env")
+def test_a_codex_api_key_resolves_a_metered_cli_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The basis agrees with the auth mode: a metered key is estimated, not unpriceable."""
+    from lintro.ai.providers.openai.codex_auth import CODEX_API_KEY_ENV
+
+    monkeypatch.setenv(CODEX_API_KEY_ENV, "sk-metered")
+
+    resolved = resolve_transport_settings(
+        AIConfig(transport=AITransport.CLI, provider=AIProvider.OPENAI),
+    )
+
+    assert_that(resolved.auth_mode).is_equal_to("api_key")
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.ESTIMATED)
+
+
+@pytest.mark.usefixtures("_isolated_profile_env")
+def test_an_anthropic_key_under_cli_bare_never_is_still_metered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``cli_bare: never`` keeps the tool surface; the key still bills the API."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.setenv("LINTRO_CLI_BARE", "never")
+
+    resolved = resolve_transport_settings(
+        AIConfig(transport=AITransport.CLI, provider=AIProvider.ANTHROPIC),
+    )
+
+    assert_that(resolved.auth_mode).is_equal_to("api_key")
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.ESTIMATED)

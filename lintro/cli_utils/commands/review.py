@@ -1233,20 +1233,13 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
     )
     if metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
         effective_basis = CostBasis.ESTIMATED
+    # Off the provider's host every call was already priced on the shadow
+    # model as it returned (the model ledger, ADR-0011 B), and the round's
+    # figure is the larger of those calls' sum and what the budget charged,
+    # dropped partials and turn-limited calls included. The stamp keeps
+    # that one figure rather than repricing the token totals, so the in-run
+    # cap, the record and the PR budget cannot disagree.
     cost = metadata.cost_estimate_usd
-    if effective_basis is CostBasis.UNKNOWN:
-        # Off the provider's host the envelope's figure is priced on the
-        # wrong table and is discarded: the shadow is the token counts priced
-        # on the lane's shadow model, or the requested model's own table
-        # until a lane row names one (ADR-0011 B).
-        from lintro.ai.cost import estimate_cost_with_floor
-
-        tokens = metadata.token_usage
-        cost = estimate_cost_with_floor(
-            metadata.shadow_price_model or metadata.model,
-            int(tokens.get("prompt", 0)),
-            int(tokens.get("completion", 0)),
-        )
     return replace(
         result,
         metadata=replace(
@@ -1263,20 +1256,20 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
             transport_source=stamp.resolved_ai.source_of("transport").value,
             max_cost_usd=stamp.cap,
             max_cost_usd_source=stamp.cap_source.value,
-            **_pr_budget_fields(result=result, pr_budget=stamp.pr_budget),
+            **_pr_budget_fields(cost=cost, pr_budget=stamp.pr_budget),
         ),
     )
 
 
 def _pr_budget_fields(
     *,
-    result: ReviewResult,
+    cost: float,
     pr_budget: PrBudget | None,
 ) -> dict[str, Any]:
     """Return the PR-budget metadata fields for this round (#2796).
 
     Args:
-        result: The completed review.
+        cost: The figure this round records, as stamped.
         pr_budget: The PR's review budget, or None when unset.
 
     Returns:
@@ -1286,9 +1279,7 @@ def _pr_budget_fields(
         return {}
     return {
         "pr_budget_usd": pr_budget.budget_usd,
-        "pr_budget_spent_usd": (
-            pr_budget.prior_spend_usd + result.metadata.cost_estimate_usd
-        ),
+        "pr_budget_spent_usd": pr_budget.prior_spend_usd + cost,
         "pr_budget_enforced": pr_budget.enforced,
     }
 
