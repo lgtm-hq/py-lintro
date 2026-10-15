@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from lintro.ai.providers.reported_model import ReportedModel
+
 __all__ = ["RunIdentity"]
 
 
@@ -37,7 +39,8 @@ class RunIdentity:
         credential: The credential kind actually forwarded
             (:class:`~lintro.ai.enums.credential_kind.CredentialKind`).
         reported_models: Every model the transport named as having
-            answered, in first-seen order.
+            answered, with its canonical name and reported provider, in
+            first-seen order.
         lane: The review lane the CI wrapper exported, or empty.
         model_verification: The
             :class:`~lintro.ai.enums.model_verification.ModelVerification`
@@ -58,6 +61,6 @@ class RunIdentity:
     endpoint: str = ""
     first_party: bool | None = None
     credential: str = ""
-    reported_models: tuple[str, ...] = ()
+    reported_models: tuple[ReportedModel, ...] = ()
     lane: str = ""
     model_verification: str = ""

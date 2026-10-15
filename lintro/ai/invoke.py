@@ -126,11 +126,14 @@ async def call_ai(
                     input_tokens=input_chars // _CHARS_PER_TOKEN_ESTIMATE,
                     output_tokens=tokens,
                 )
-                return await budget.execute(
+                response = await budget.execute(
                     _call_once,
                     cost_of=lambda response: response.cost_estimate,
                     estimate=estimate,
                 )
+                # ``execute`` settled the budget; only the ledger is left.
+                record_response(response)
+                return response
             response = await _call_once()
         except AITurnLimitError as exc:
             # The stopped call still spent its turns; charge them (#2685).

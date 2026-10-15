@@ -43,6 +43,7 @@ def finish_api_completion(
     input_tokens: int,
     output_tokens: int,
     cost: float,
+    served_model: str | None = None,
 ) -> AIResponse:
     """Record the API response transcript event and build the response.
 
@@ -57,10 +58,13 @@ def finish_api_completion(
         input_tokens: Prompt tokens reported by the vendor.
         output_tokens: Completion tokens reported by the vendor.
         cost: Estimated cost in USD.
+        served_model: The model the vendor's response names, when it names
+            one (#2867). ``None`` records no model evidence.
 
     Returns:
         AIResponse: The completed response with usage metadata.
     """
+    served = (served_model or "").strip()
     log_transcript_event(
         provider=provider.value,
         transport=AITransport.API.value,
@@ -80,9 +84,13 @@ def finish_api_completion(
         output_tokens=output_tokens,
         cost_estimate=cost,
         provider=provider,
-        # An SDK call names its model in the request and the vendor serves
-        # exactly that or rejects it, so the effective model is what answered.
-        reported_models=(ReportedModel(model=model, canonical=model, provider="api"),),
+        # Evidence is what the vendor's response says it served, never the
+        # request echoed back; a response naming none stays unreported.
+        reported_models=(
+            (ReportedModel(model=served, canonical=served, provider="api"),)
+            if served
+            else ()
+        ),
     )
 
 

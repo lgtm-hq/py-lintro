@@ -52,11 +52,12 @@ PR_BUDGET_REASON_PREFIX = "PR budget"
 #: subscription CLI transport the dollars are a runtime bound, not a bill.
 RUNTIME_BOUND_NOTE = "runtime bound on the cli transport"
 
-#: Bases on which a PR-budget figure is a runtime bound rather than a bill:
-#: the subscription CLI, whether or not its envelope reported a list price.
-#: ``unknown`` is not among them: a gateway bills real money (#2867).
+#: Bases on which a PR-budget figure is a shadow rather than a bill: the
+#: subscription CLI with or without a list-price figure, and a gateway whose
+#: figure is priced on a stand-in table. Enforcement is decided apart from
+#: the label by :func:`~lintro.ai.review.cost_cap.cap_is_enforced` (#2867).
 RUNTIME_BOUND_BASES: frozenset[CostBasis] = frozenset(
-    {CostBasis.UNPRICEABLE, CostBasis.LIST_PRICE_SHADOW},
+    {CostBasis.UNPRICEABLE, CostBasis.LIST_PRICE_SHADOW, CostBasis.UNKNOWN},
 )
 
 

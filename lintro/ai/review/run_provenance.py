@@ -12,6 +12,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from lintro.ai.provenance import ModelLedger, detect_run_provenance, verify_models
+from lintro.ai.review.reuse_gate import allowed_models_for
 from lintro.ai.transport import cli_bare_billing
 
 if TYPE_CHECKING:
@@ -62,7 +63,8 @@ def run_provenance_fields(
     Returns:
         Keyword arguments for ``ReviewMetadata``: the endpoint host, whether
         it is first-party, the credential kind, the reported models, the
-        verification state, the lane and whether a cost was reported.
+        verification state, the lane, the shadow price model and whether a
+        cost was reported.
     """
     workspace = options.workspace_root
     provenance = detect_run_provenance(
@@ -70,13 +72,18 @@ def run_provenance_fields(
         transport=options.ai_config.transport,
         bare=cli_bare_billing(options.ai_config),
         cwd=str(workspace) if workspace is not None else None,
+        configured_base_url=options.ai_config.api_base_url,
     )
     calls = ledger.calls if ledger is not None else []
     verification = verify_models(
         requested=options.provider.model_name,
         calls=calls,
         first_party=provenance.first_party,
-        allowed=provenance.allowed_models,
+        allowed=allowed_models_for(
+            provenance=provenance,
+            requested=options.provider.model_name,
+            fallback_models=options.ai_config.fallback_models,
+        ),
     )
     return {
         "endpoint": provenance.endpoint,
@@ -85,5 +92,6 @@ def run_provenance_fields(
         "reported_models": ledger.reported_models if ledger is not None else (),
         "model_verification": verification.value if verification is not None else "",
         "lane": provenance.lane,
+        "shadow_price_model": provenance.shadow_price_model,
         "cost_reported": ledger.cost_reported if ledger is not None else False,
     }

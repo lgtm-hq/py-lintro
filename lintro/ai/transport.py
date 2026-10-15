@@ -136,15 +136,26 @@ def _profile_max_cost(ai_config: AIConfig) -> float | None:
     return profiles.api.max_cost_usd
 
 
-def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings:
+def resolve_transport_settings(
+    ai_config: AIConfig,
+    *,
+    cwd: str | None = None,
+) -> ResolvedTransportSettings:
     """Resolve timeout and cost for the config's active transport.
 
     Precedence: transport profile → legacy scalar → built-in default.
+
+    The auth mode and cost basis read the credential and endpoint the run
+    will use (#2867), which means the Claude settings files and the Codex
+    session file on disk: a dry run and CI can therefore resolve differently
+    when their disks differ, and the profile log says which was found.
 
     Args:
         ai_config: AI configuration (transport may be None; defaults to api
             for resolution when unset — callers should still require transport
             for enabled AI features).
+        cwd: Working directory the CLI subprocess runs in, so project-level
+            settings files are read from the same place the run reads them.
 
     Returns:
         Resolved settings for logging, budgets, and provider timeouts.
@@ -176,11 +187,12 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
             provider=ai_config.provider,
             transport=transport,
             bare=bare_billing,
+            cwd=cwd,
         )
-        if bare_billing:
-            basis = CostBasis.ESTIMATED
-        elif not provenance.first_party:
+        if not provenance.first_party:
             basis = CostBasis.UNKNOWN
+        elif bare_billing:
+            basis = CostBasis.ESTIMATED
         else:
             basis = CostBasis.UNPRICEABLE
         return ResolvedTransportSettings(
@@ -202,13 +214,23 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
     )
     profile_cap = _profile_max_cost(ai_config)
     max_cost = profile_cap if profile_cap is not None else ai_config.max_cost_usd
+    # ``ai.api_base_url`` can point an SDK call at a gateway; its figures are
+    # then priced on the wrong table and the key is a gateway token (#2867).
+    api_provenance = detect_run_provenance(
+        provider=ai_config.provider,
+        transport=transport,
+        cwd=cwd,
+        configured_base_url=ai_config.api_base_url,
+    )
     return ResolvedTransportSettings(
         transport=transport,
         timeout=timeout if timeout is not None else DEFAULT_API_TIMEOUT,
         max_cost_usd=max_cost,
         cost_is_advisory=False,
-        auth_mode="api_key",
-        cost_basis=CostBasis.BILLED,
+        auth_mode=_auth_mode(credential=api_provenance.credential, bare_billing=True),
+        cost_basis=(
+            CostBasis.BILLED if api_provenance.first_party else CostBasis.UNKNOWN
+        ),
     )
 
 

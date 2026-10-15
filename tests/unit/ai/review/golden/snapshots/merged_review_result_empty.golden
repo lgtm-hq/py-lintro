@@ -58,6 +58,7 @@
     "reported_models": [],
     "model_verification": "",
     "lane": "",
+    "shadow_price_model": "",
     "cost_reported": false,
     "lint_facts_note": ""
   },

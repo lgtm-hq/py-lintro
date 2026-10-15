@@ -3,7 +3,8 @@
 ADR-0011 decision B says a run record reports where its requests went and
 what answered, not what was configured. These tests pin the detection rules,
 the fixed order the verification states are assigned in, the ledger seam
-through ``call_ai``, and how a finished run's cost figure is read.
+through ``call_ai``, how a finished run's cost figure is read, and what the
+transport profile resolves before the run.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from assertpy import assert_that
 
+from lintro.ai.budget import CostBudget
 from lintro.ai.config import AIConfig
 from lintro.ai.enums import AITransport, CostBasis, CredentialKind, ModelVerification
 from lintro.ai.invoke import call_ai
@@ -28,7 +30,11 @@ from lintro.ai.provenance import (
     REVIEW_ENDPOINT_ENV,
     REVIEW_FIRST_PARTY_ENV,
     REVIEW_LANE_ENV,
+    REVIEW_REPORTS_MODEL_USAGE_ENV,
+    REVIEW_SHADOW_PRICE_MODEL_ENV,
+    LedgerCall,
     ModelLedger,
+    RunProvenance,
     auth_mode_for,
     current_model_ledger,
     detect_run_provenance,
@@ -38,9 +44,11 @@ from lintro.ai.provenance import (
     verify_models,
 )
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers._api_common import finish_api_completion
 from lintro.ai.providers.anthropic.metadata import ANTHROPIC_MANAGED_SETTINGS_ENV
 from lintro.ai.providers.reported_model import ReportedModel, parse_model_usage
 from lintro.ai.providers.response import AIResponse
+from lintro.ai.transport import resolve_transport_settings
 
 _FIXTURE = (
     Path(__file__).resolve().parents[2]
@@ -54,6 +62,10 @@ _FIXTURE = (
 
 def _reported(*names: str) -> tuple[ReportedModel, ...]:
     return tuple(ReportedModel(model=name, canonical=name) for name in names)
+
+
+def _call(requested: str, *reported: str) -> LedgerCall:
+    return LedgerCall(requested=requested, reported=_reported(*reported))
 
 
 def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
@@ -76,6 +88,16 @@ def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
     }
 
 
+def _detect(tmp_path: Path, **extra: str) -> RunProvenance:
+    return detect_run_provenance(
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.CLI,
+        env=_env(tmp_path, **extra),
+        home=tmp_path,
+        cwd=str(tmp_path),
+    )
+
+
 # --- host_of -----------------------------------------------------------------
 
 
@@ -84,6 +106,7 @@ def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
     [
         ("https://api.z.ai/api/anthropic", "api.z.ai"),
         ("https://API.Anthropic.com:443/v1?x=1", "api.anthropic.com"),
+        ("https://proxy.example:8443/v1", "proxy.example"),
         ("api.openai.com", "api.openai.com"),
         ("   ", ""),
         ("", ""),
@@ -94,39 +117,28 @@ def test_host_of_keeps_only_the_lowercase_host(url: str, host: str) -> None:
     assert_that(host_of(url)).is_equal_to(host)
 
 
-# --- detect_run_provenance ---------------------------------------------------
+# --- endpoint and first-party -------------------------------------------------
 
 
 def test_unset_override_is_the_providers_own_endpoint(tmp_path: Path) -> None:
     """No base-URL override means the first-party host, with the OAuth session."""
-    provenance = detect_run_provenance(
-        provider=AIProvider.ANTHROPIC,
-        transport=AITransport.CLI,
-        env=_env(tmp_path, **{CLAUDE_OAUTH_TOKEN_ENV: "tok"}),
-        home=tmp_path,
-        cwd=str(tmp_path),
-    )
+    provenance = _detect(tmp_path, **{CLAUDE_OAUTH_TOKEN_ENV: "tok"})
 
     assert_that(provenance.endpoint).is_equal_to("api.anthropic.com")
     assert_that(provenance.first_party).is_true()
     assert_that(provenance.credential).is_equal_to(CredentialKind.CLAUDE_OAUTH)
     assert_that(provenance.lane).is_empty()
+    assert_that(provenance.reports_model_usage).is_true()
 
 
 def test_a_gateway_override_is_not_first_party(tmp_path: Path) -> None:
     """The incident shape: a Z.ai base URL with a gateway token (ADR-0011)."""
-    provenance = detect_run_provenance(
-        provider="anthropic",
-        transport=AITransport.CLI,
-        env=_env(
-            tmp_path,
-            **{
-                ANTHROPIC_BASE_URL_ENV: "https://api.z.ai/api/anthropic",
-                ANTHROPIC_AUTH_TOKEN_ENV: "zai-token",
-            },
-        ),
-        home=tmp_path,
-        cwd=str(tmp_path),
+    provenance = _detect(
+        tmp_path,
+        **{
+            ANTHROPIC_BASE_URL_ENV: "https://api.z.ai/api/anthropic",
+            ANTHROPIC_AUTH_TOKEN_ENV: "zai-token",
+        },
     )
 
     assert_that(provenance.endpoint).is_equal_to("api.z.ai")
@@ -138,82 +150,118 @@ def test_an_override_naming_the_canonical_host_stays_first_party(
     tmp_path: Path,
 ) -> None:
     """Spelling the provider's own host out is not a lane switch."""
-    provenance = detect_run_provenance(
-        provider=AIProvider.ANTHROPIC,
-        transport=AITransport.CLI,
-        env=_env(tmp_path, **{ANTHROPIC_BASE_URL_ENV: "https://api.anthropic.com"}),
-        home=tmp_path,
-        cwd=str(tmp_path),
+    provenance = _detect(
+        tmp_path,
+        **{ANTHROPIC_BASE_URL_ENV: "https://api.anthropic.com"},
     )
 
     assert_that(provenance.first_party).is_true()
 
 
-def test_the_lane_row_exports_win_over_the_host_comparison(tmp_path: Path) -> None:
+def test_the_lane_row_decides_first_party_and_what_is_allowed(tmp_path: Path) -> None:
     """In CI the manifest row, not a host comparison, decides (ADR-0011 A)."""
-    provenance = detect_run_provenance(
-        provider=AIProvider.ANTHROPIC,
-        transport=AITransport.CLI,
-        env=_env(
-            tmp_path,
-            **{
-                ANTHROPIC_BASE_URL_ENV: "https://api.anthropic.com",
-                REVIEW_LANE_ENV: "zai-glm-gateway",
-                REVIEW_ENDPOINT_ENV: "https://api.z.ai/api/anthropic",
-                REVIEW_FIRST_PARTY_ENV: "false",
-                REVIEW_ALLOWED_MODELS_ENV: "glm-5.3-flash, glm-5",
-            },
-        ),
-        home=tmp_path,
-        cwd=str(tmp_path),
+    provenance = _detect(
+        tmp_path,
+        **{
+            REVIEW_LANE_ENV: "zai-glm-gateway",
+            REVIEW_ENDPOINT_ENV: "https://api.z.ai/api/anthropic",
+            REVIEW_FIRST_PARTY_ENV: "false",
+            REVIEW_ALLOWED_MODELS_ENV: "glm-5.3-flash, glm-5",
+            REVIEW_REPORTS_MODEL_USAGE_ENV: "false",
+            REVIEW_SHADOW_PRICE_MODEL_ENV: "claude-sonnet-4-6",
+        },
     )
 
     assert_that(provenance.lane).is_equal_to("zai-glm-gateway")
     assert_that(provenance.endpoint).is_equal_to("api.z.ai")
     assert_that(provenance.first_party).is_false()
     assert_that(provenance.allowed_models).is_equal_to(("glm-5.3-flash", "glm-5"))
+    assert_that(provenance.reports_model_usage).is_false()
+    assert_that(provenance.shadow_price_model).is_equal_to("claude-sonnet-4-6")
+
+
+def test_the_actual_override_is_recorded_over_the_declared_endpoint(
+    tmp_path: Path,
+) -> None:
+    """A lane row declaring Anthropic cannot hide a Z.ai override (ADR-0011 B)."""
+    provenance = _detect(
+        tmp_path,
+        **{
+            REVIEW_LANE_ENV: "claude-subscription",
+            REVIEW_ENDPOINT_ENV: "https://api.anthropic.com",
+            REVIEW_FIRST_PARTY_ENV: "true",
+            ANTHROPIC_BASE_URL_ENV: "https://api.z.ai/api/anthropic",
+        },
+    )
+
+    assert_that(provenance.endpoint).is_equal_to("api.z.ai")
+
+
+def test_a_lane_row_that_does_not_say_is_not_first_party(tmp_path: Path) -> None:
+    """A lane without ``LINTRO_REVIEW_FIRST_PARTY`` fails closed."""
+    provenance = _detect(tmp_path, **{REVIEW_LANE_ENV: "claude-subscription"})
+
+    assert_that(provenance.first_party).is_false()
 
 
 def test_a_claude_settings_env_block_routes_like_the_variable(tmp_path: Path) -> None:
-    """A base URL in a settings file's ``env`` block is read as an override."""
+    """A base URL or bearer token in a settings ``env`` block is read as set."""
     settings_dir = tmp_path / ".claude"
     settings_dir.mkdir()
     (settings_dir / "settings.json").write_text(
         json.dumps(
-            {"env": {ANTHROPIC_BASE_URL_ENV: "https://proxy.example/anthropic"}},
+            {
+                "env": {
+                    ANTHROPIC_BASE_URL_ENV: "https://proxy.example/anthropic",
+                    ANTHROPIC_AUTH_TOKEN_ENV: "bearer",
+                },
+            },
         ),
         encoding="utf-8",
     )
 
-    provenance = detect_run_provenance(
-        provider=AIProvider.ANTHROPIC,
-        transport=AITransport.CLI,
-        env=_env(tmp_path),
-        home=tmp_path,
-        cwd=str(tmp_path),
-    )
+    provenance = _detect(tmp_path)
 
     assert_that(provenance.endpoint).is_equal_to("proxy.example")
     assert_that(provenance.first_party).is_false()
+    assert_that(provenance.credential).is_equal_to(CredentialKind.ZAI_TOKEN)
 
 
-def test_bare_billing_is_an_api_key_whatever_session_is_present(
-    tmp_path: Path,
-) -> None:
-    """Under ``--bare`` the call bills the key, so the credential is the key."""
+# --- credential precedence ----------------------------------------------------
+
+
+def test_the_bearer_token_outranks_the_oauth_token(tmp_path: Path) -> None:
+    """Claude Code's documented precedence: bearer, then key, then OAuth."""
+    provenance = _detect(
+        tmp_path,
+        **{CLAUDE_OAUTH_TOKEN_ENV: "tok", ANTHROPIC_AUTH_TOKEN_ENV: "bearer"},
+    )
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.ZAI_TOKEN)
+
+
+def test_the_api_key_outranks_the_oauth_token(tmp_path: Path) -> None:
+    """An API key present beside the OAuth token is what the CLI sends."""
+    provenance = _detect(
+        tmp_path,
+        **{CLAUDE_OAUTH_TOKEN_ENV: "tok", "ANTHROPIC_API_KEY": "sk-ant"},
+    )
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
+
+
+def test_bare_mode_never_reads_the_oauth_token(tmp_path: Path) -> None:
+    """Under ``--bare`` an OAuth token alone is no credential at all."""
     provenance = detect_run_provenance(
         provider=AIProvider.ANTHROPIC,
         transport=AITransport.CLI,
         bare=True,
-        env=_env(
-            tmp_path,
-            **{CLAUDE_OAUTH_TOKEN_ENV: "tok", "ANTHROPIC_API_KEY": "sk-ant"},
-        ),
+        env=_env(tmp_path, **{CLAUDE_OAUTH_TOKEN_ENV: "tok"}),
         home=tmp_path,
         cwd=str(tmp_path),
     )
 
-    assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
+    assert_that(provenance.credential).is_equal_to(CredentialKind.UNKNOWN)
 
 
 def test_the_codex_session_file_is_the_openai_cli_credential(tmp_path: Path) -> None:
@@ -232,6 +280,7 @@ def test_the_codex_session_file_is_the_openai_cli_credential(tmp_path: Path) -> 
 
     assert_that(provenance.credential).is_equal_to(CredentialKind.CODEX_OAUTH)
     assert_that(provenance.endpoint).is_equal_to("api.openai.com")
+    assert_that(provenance.reports_model_usage).is_false()
 
 
 @pytest.mark.parametrize(
@@ -261,16 +310,27 @@ def test_each_cli_credential_is_named_by_its_binding(
     assert_that(provenance.credential).is_equal_to(credential)
 
 
-def test_the_api_transport_is_always_an_api_key(tmp_path: Path) -> None:
-    """An SDK call has no session to bill; the key is the credential."""
-    provenance = detect_run_provenance(
+def test_the_api_transport_reads_its_endpoint_from_the_config(tmp_path: Path) -> None:
+    """``ai.api_base_url`` pointed at a gateway makes the key a gateway token."""
+    first_party = detect_run_provenance(
         provider=AIProvider.ANTHROPIC,
         transport=AITransport.API,
         env=_env(tmp_path, **{CLAUDE_OAUTH_TOKEN_ENV: "tok"}),
         home=tmp_path,
     )
+    gateway = detect_run_provenance(
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.API,
+        env=_env(tmp_path),
+        home=tmp_path,
+        configured_base_url="https://api.z.ai/api/anthropic",
+    )
 
-    assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
+    assert_that(first_party.credential).is_equal_to(CredentialKind.API_KEY)
+    assert_that(first_party.endpoint).is_equal_to("api.anthropic.com")
+    assert_that(gateway.credential).is_equal_to(CredentialKind.ZAI_TOKEN)
+    assert_that(gateway.endpoint).is_equal_to("api.z.ai")
+    assert_that(gateway.first_party).is_false()
 
 
 def test_an_unknown_provider_records_nothing_it_cannot_know(tmp_path: Path) -> None:
@@ -309,7 +369,7 @@ def test_auth_mode_follows_the_credential(
     assert_that(auth_mode_for(credential)).is_equal_to(auth_mode)
 
 
-# --- parse_model_usage -------------------------------------------------------
+# --- parse_model_usage and the API path ----------------------------------------
 
 
 def test_the_pinned_envelope_names_the_model_that_answered() -> None:
@@ -341,6 +401,32 @@ def test_an_alias_key_keeps_its_canonical_name() -> None:
     )
 
 
+def test_the_api_path_reports_the_served_model_not_the_request() -> None:
+    """Evidence is what the vendor says it served; no answer is no evidence."""
+    served = finish_api_completion(
+        provider=AIProvider.ANTHROPIC,
+        model="sonnet",
+        content="",
+        input_tokens=1,
+        output_tokens=1,
+        cost=0.0,
+        served_model="claude-sonnet-4-6",
+    )
+    silent = finish_api_completion(
+        provider=AIProvider.ANTHROPIC,
+        model="sonnet",
+        content="",
+        input_tokens=1,
+        output_tokens=1,
+        cost=0.0,
+    )
+
+    assert_that([model.name for model in served.reported_models]).is_equal_to(
+        ["claude-sonnet-4-6"],
+    )
+    assert_that(silent.reported_models).is_empty()
+
+
 # --- verify_models -----------------------------------------------------------
 
 
@@ -355,20 +441,25 @@ def test_a_non_first_party_endpoint_is_unverifiable_whatever_it_reported() -> No
     """Off the provider's host the envelope is not evidence; precedence holds."""
     state = verify_models(
         requested="claude-opus-5-5",
-        calls=[_reported("claude-opus-5-5"), ()],
+        calls=[_call("claude-opus-5-5", "claude-opus-5-5"), _call("claude-opus-5-5")],
         first_party=False,
     )
 
     assert_that(state).is_equal_to(ModelVerification.UNVERIFIABLE)
 
 
-def test_every_call_reporting_the_requested_model_is_verified() -> None:
+def test_every_call_reporting_its_requested_model_is_verified() -> None:
     """Aliases normalise to the canonical name before comparison."""
     state = verify_models(
         requested="claude-sonnet-4-6",
         calls=[
-            (ReportedModel(model="sonnet", canonical="claude-sonnet-4-6"),),
-            _reported("CLAUDE-SONNET-4-6"),
+            LedgerCall(
+                requested="claude-sonnet-4-6",
+                reported=(
+                    ReportedModel(model="sonnet", canonical="claude-sonnet-4-6"),
+                ),
+            ),
+            _call("claude-sonnet-4-6", "CLAUDE-SONNET-4-6"),
         ],
         first_party=True,
     )
@@ -376,11 +467,41 @@ def test_every_call_reporting_the_requested_model_is_verified() -> None:
     assert_that(state).is_equal_to(ModelVerification.VERIFIED)
 
 
-def test_a_call_that_answered_with_another_model_is_a_mismatch() -> None:
-    """One call off the requested model fails the round."""
+def test_a_declared_fallback_is_verified_against_its_own_request() -> None:
+    """A fallback or custom-agent call asks for another allowed model."""
     state = verify_models(
         requested="claude-opus-5-5",
-        calls=[_reported("claude-opus-5-5"), _reported("glm-5.3-flash")],
+        calls=[
+            _call("claude-opus-5-5", "claude-opus-5-5"),
+            _call("claude-sonnet-4-6", "claude-sonnet-4-6"),
+        ],
+        first_party=True,
+        allowed=("claude-opus-5-5", "claude-sonnet-4-6"),
+    )
+
+    assert_that(state).is_equal_to(ModelVerification.VERIFIED)
+
+
+def test_a_call_requesting_a_model_the_lane_forbids_is_a_mismatch() -> None:
+    """The lane's allowed list bounds what may be asked for, not only answered."""
+    state = verify_models(
+        requested="claude-opus-5-5",
+        calls=[_call("claude-sonnet-4-6", "claude-sonnet-4-6")],
+        first_party=True,
+        allowed=("claude-opus-5-5",),
+    )
+
+    assert_that(state).is_equal_to(ModelVerification.MISMATCH)
+
+
+def test_a_call_that_answered_with_another_model_is_a_mismatch() -> None:
+    """One call off its requested model fails the round."""
+    state = verify_models(
+        requested="claude-opus-5-5",
+        calls=[
+            _call("claude-opus-5-5", "claude-opus-5-5"),
+            _call("claude-opus-5-5", "glm-5.3-flash"),
+        ],
         first_party=True,
     )
 
@@ -391,7 +512,7 @@ def test_a_helper_model_outside_the_allowed_list_is_a_mismatch() -> None:
     """Every reported model must be one the lane allows."""
     state = verify_models(
         requested="claude-opus-5-5",
-        calls=[_reported("claude-opus-5-5", "claude-haiku-4-5")],
+        calls=[_call("claude-opus-5-5", "claude-opus-5-5", "claude-haiku-4-5")],
         first_party=True,
     )
 
@@ -402,9 +523,9 @@ def test_an_allowed_helper_model_keeps_the_round_verified() -> None:
     """The lane row's allowed models widen what a call may report."""
     state = verify_models(
         requested="claude-opus-5-5",
-        calls=[_reported("claude-opus-5-5", "claude-haiku-4-5")],
+        calls=[_call("claude-opus-5-5", "claude-opus-5-5", "claude-haiku-4-5")],
         first_party=True,
-        allowed=("claude-haiku-4-5",),
+        allowed=("claude-opus-5-5", "claude-haiku-4-5"),
     )
 
     assert_that(state).is_equal_to(ModelVerification.VERIFIED)
@@ -414,12 +535,12 @@ def test_mismatch_outranks_unreported_which_outranks_verified() -> None:
     """The states are assigned in the ADR's fixed order over every call."""
     unreported = verify_models(
         requested="claude-opus-5-5",
-        calls=[_reported("claude-opus-5-5"), ()],
+        calls=[_call("claude-opus-5-5", "claude-opus-5-5"), _call("claude-opus-5-5")],
         first_party=True,
     )
     mismatch = verify_models(
         requested="claude-opus-5-5",
-        calls=[(), _reported("glm-5.3-flash")],
+        calls=[_call("claude-opus-5-5"), _call("claude-opus-5-5", "glm-5.3-flash")],
         first_party=True,
     )
 
@@ -430,7 +551,7 @@ def test_mismatch_outranks_unreported_which_outranks_verified() -> None:
 # --- ledger ------------------------------------------------------------------
 
 
-def test_the_ledger_collects_models_in_first_seen_order_without_repeats() -> None:
+def test_the_ledger_keeps_each_calls_request_and_distinct_models() -> None:
     """``reported_models`` is a set in order; ``cost_reported`` is sticky."""
     ledger = ModelLedger()
     ledger.record(
@@ -439,16 +560,20 @@ def test_the_ledger_collects_models_in_first_seen_order_without_repeats() -> Non
     ledger.record(
         AIResponse(
             content="",
-            model="m",
+            model="fallback",
             reported_models=_reported("b", "c"),
             cost_reported=True,
         ),
     )
     ledger.record(AIResponse(content="", model="m"))
 
-    assert_that(ledger.reported_models).is_equal_to(("a", "b", "c"))
-    assert_that(ledger.calls).is_length(3)
-    assert_that(ledger.calls[2]).is_empty()
+    assert_that([model.name for model in ledger.reported_models]).is_equal_to(
+        ["a", "b", "c"],
+    )
+    assert_that([call.requested for call in ledger.calls]).is_equal_to(
+        ["m", "fallback", "m"],
+    )
+    assert_that(ledger.calls[2].reported).is_empty()
     assert_that(ledger.cost_reported).is_true()
 
 
@@ -460,38 +585,47 @@ def test_no_ledger_is_open_outside_the_scope() -> None:
     assert_that(current_model_ledger()).is_none()
 
 
-async def test_call_ai_reports_each_completed_call_to_the_open_ledger() -> None:
-    """The one seam every provider call crosses feeds the ledger."""
+def _ledger_provider() -> MagicMock:
     provider = MagicMock()
+    provider.model_name = "claude-sonnet-4-6"
     provider.complete = AsyncMock(
         return_value=AIResponse(
             content="ok",
             model="claude-sonnet-4-6",
+            cost_estimate=0.01,
             reported_models=_reported("claude-sonnet-4-6"),
             cost_reported=True,
         ),
     )
+    return provider
+
+
+@pytest.mark.parametrize("capped", [False, True])
+async def test_call_ai_reports_each_completed_call_to_the_open_ledger(
+    capped: bool,
+) -> None:
+    """The one seam every provider call crosses feeds the ledger, capped or not."""
+    provider = _ledger_provider()
     config = AIConfig(enabled=True, transport=AITransport.API, max_retries=0)
+    budget = CostBudget(max_cost_usd=1.0) if capped else None
 
     with model_ledger() as ledger:
-        await call_ai(
-            provider=provider,
-            ai_config=config,
-            user_prompt="hello",
-            system_prompt=None,
-            budget=None,
-        )
-        await call_ai(
-            provider=provider,
-            ai_config=config,
-            user_prompt="again",
-            system_prompt=None,
-            budget=None,
-        )
+        for prompt in ("hello", "again"):
+            await call_ai(
+                provider=provider,
+                ai_config=config,
+                user_prompt=prompt,
+                system_prompt=None,
+                budget=budget,
+            )
 
     assert_that(ledger.calls).is_length(2)
-    assert_that(ledger.reported_models).is_equal_to(("claude-sonnet-4-6",))
+    assert_that([model.name for model in ledger.reported_models]).is_equal_to(
+        ["claude-sonnet-4-6"],
+    )
     assert_that(ledger.cost_reported).is_true()
+    if budget is not None:
+        assert_that(budget.spent).is_close_to(0.02, 1e-9)
 
 
 # --- recorded_cost_basis -----------------------------------------------------
@@ -501,7 +635,9 @@ async def test_call_ai_reports_each_completed_call_to_the_open_ledger() -> None:
     ("configured", "first_party", "cost_reported", "expected"),
     [
         (CostBasis.BILLED, True, False, CostBasis.BILLED),
-        (CostBasis.ESTIMATED, False, True, CostBasis.ESTIMATED),
+        (CostBasis.BILLED, False, False, CostBasis.UNKNOWN),
+        (CostBasis.ESTIMATED, False, True, CostBasis.UNKNOWN),
+        (CostBasis.ESTIMATED, True, True, CostBasis.ESTIMATED),
         (CostBasis.UNPRICEABLE, True, True, CostBasis.LIST_PRICE_SHADOW),
         (CostBasis.UNPRICEABLE, True, False, CostBasis.UNPRICEABLE),
         (CostBasis.UNPRICEABLE, False, True, CostBasis.UNKNOWN),
@@ -515,7 +651,7 @@ def test_the_recorded_basis_follows_the_endpoint_and_the_envelope(
     cost_reported: bool,
     expected: CostBasis,
 ) -> None:
-    """A subscription figure is a shadow on the provider's host, unknown off it."""
+    """Off the provider's host every figure is unknown; on it, the envelope decides."""
     basis = recorded_cost_basis(
         configured=configured,
         first_party=first_party,
@@ -523,3 +659,84 @@ def test_the_recorded_basis_follows_the_endpoint_and_the_envelope(
     )
 
     assert_that(basis).is_equal_to(expected)
+
+
+# --- transport profile --------------------------------------------------------
+
+
+@pytest.fixture
+def _isolated_profile_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Point every provenance input the profile reads at the test's temp dir."""
+    for name in (
+        "ANTHROPIC_API_KEY",
+        "LINTRO_CLI_BARE",
+        ANTHROPIC_AUTH_TOKEN_ENV,
+        ANTHROPIC_BASE_URL_ENV,
+        CLAUDE_OAUTH_TOKEN_ENV,
+        REVIEW_LANE_ENV,
+        REVIEW_ENDPOINT_ENV,
+        REVIEW_FIRST_PARTY_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    for name, value in _env(tmp_path).items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    return tmp_path
+
+
+@pytest.mark.usefixtures("_isolated_profile_env")
+def test_a_gateway_cli_run_resolves_an_enforced_unknown_basis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The profile says where a subscription run is going before it starts."""
+    monkeypatch.setenv(ANTHROPIC_BASE_URL_ENV, "https://api.z.ai/api/anthropic")
+    monkeypatch.setenv(ANTHROPIC_AUTH_TOKEN_ENV, "zai-token")
+
+    resolved = resolve_transport_settings(
+        AIConfig(transport=AITransport.CLI, provider=AIProvider.ANTHROPIC),
+    )
+
+    assert_that(resolved.auth_mode).is_equal_to("gateway_token")
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.UNKNOWN)
+    assert_that(resolved.cost_is_advisory).is_false()
+
+
+@pytest.mark.usefixtures("_isolated_profile_env")
+def test_a_bare_run_off_the_providers_host_is_unknown_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An API key billed through a proxy is priced on the wrong table as well."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant")
+    monkeypatch.setenv(ANTHROPIC_BASE_URL_ENV, "https://proxy.example/anthropic")
+
+    resolved = resolve_transport_settings(
+        AIConfig(transport=AITransport.CLI, provider=AIProvider.ANTHROPIC),
+    )
+
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.UNKNOWN)
+
+
+@pytest.mark.usefixtures("_isolated_profile_env")
+def test_an_api_transport_gateway_is_unknown_with_a_gateway_token() -> None:
+    """``ai.api_base_url`` is the API transport's lane switch."""
+    resolved = resolve_transport_settings(
+        AIConfig(
+            transport=AITransport.API,
+            provider=AIProvider.ANTHROPIC,
+            api_base_url="https://api.z.ai/api/anthropic",
+        ),
+    )
+
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.UNKNOWN)
+    assert_that(resolved.auth_mode).is_equal_to("gateway_token")
+
+
+@pytest.mark.usefixtures("_isolated_profile_env")
+def test_a_first_party_api_transport_stays_billed() -> None:
+    """The default API path is unchanged."""
+    resolved = resolve_transport_settings(
+        AIConfig(transport=AITransport.API, provider=AIProvider.ANTHROPIC),
+    )
+
+    assert_that(resolved.cost_basis).is_equal_to(CostBasis.BILLED)
+    assert_that(resolved.auth_mode).is_equal_to("api_key")

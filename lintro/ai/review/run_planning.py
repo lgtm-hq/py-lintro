@@ -46,6 +46,7 @@ from lintro.ai.review.pr_budget import run_cost_ceiling
 from lintro.ai.review.progress import NullReviewProgress
 from lintro.ai.review.prompts import estimate_prompt_overhead
 from lintro.ai.review.resume import filter_chunks, plan_resume
+from lintro.ai.review.reuse_gate import reusable_rounds_for
 from lintro.ai.review.sensitivity import (
     ReviewSensitivityPolicy,
     format_strictness_prompt_section,
@@ -396,6 +397,7 @@ def plan_run(
             extra_skips=chunk_skips,
             groups=tuple(tuple(chunk.files) for chunk in chunks),
             force_full=options.force_full,
+            reusable_rounds=reusable_rounds_for(options=options),
         )
         if resume.queue:
             chunks = filter_chunks(chunks=chunks, queue=resume.queue)

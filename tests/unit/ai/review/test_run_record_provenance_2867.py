@@ -12,8 +12,11 @@ from dataclasses import replace
 import pytest
 from assertpy import assert_that
 
-from lintro.ai.enums import CostBasis, ModelVerification
+from lintro.ai.config import AIConfig
+from lintro.ai.enums import AITransport, CostBasis, ModelVerification
 from lintro.ai.enums.config_source import ConfigSource
+from lintro.ai.providers.reported_model import ReportedModel
+from lintro.ai.resolved_ai_config import ResolvedAIConfig
 from lintro.ai.review.cost_cap import cap_is_enforced
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models.review_result import ReviewResult
@@ -26,6 +29,10 @@ from lintro.ai.review.pr_budget import resolve_pr_budget
 from lintro.ai.review.review_state_codec import decode_state, leftover_state_block
 from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
 from lintro.ai.review.state_store import union_states
+from lintro.ai.transport import ResolvedTransportSettings
+from lintro.cli_utils.commands.review import _MetadataStamp, _stamp_metadata
+
+_GLM = ReportedModel(model="glm-5.3-flash", canonical="glm-5.3-flash", provider="zai")
 
 # --- flat codec ---------------------------------------------------------------
 
@@ -38,7 +45,7 @@ def test_provenance_fields_round_trip_through_the_flat_payload() -> None:
             endpoint="api.z.ai",
             first_party=False,
             credential="zai_token",
-            reported_models=("glm-5.3-flash",),
+            reported_models=(_GLM,),
             lane="zai-glm-gateway",
             model_verification="unverifiable",
         ),
@@ -49,9 +56,22 @@ def test_provenance_fields_round_trip_through_the_flat_payload() -> None:
     restored = RunRecord.from_dict(payload)
 
     assert_that(payload["first_party"]).is_false()
-    assert_that(payload["reported_models"]).is_equal_to(["glm-5.3-flash"])
+    assert_that(payload["reported_models"]).is_equal_to(
+        [{"model": "glm-5.3-flash", "provider": "zai"}],
+    )
     assert_that(payload["cost_shadow"]).is_equal_to(0.42)
     assert_that(restored).is_equal_to(record)
+
+
+def test_a_bare_name_in_a_stored_model_list_still_parses() -> None:
+    """A list of names, as an earlier build wrote it, reads as models."""
+    restored = RunRecord.from_dict(
+        {"round": 1, "reported_models": ["claude-opus-5-5", 3, {"model": ""}]},
+    )
+
+    assert_that(restored.identity.reported_models).is_equal_to(
+        (ReportedModel(model="claude-opus-5-5", canonical="claude-opus-5-5"),),
+    )
 
 
 def test_a_record_from_before_the_adr_reads_as_legacy() -> None:
@@ -83,19 +103,20 @@ def test_an_unrecognised_state_is_dropped_not_guessed(raw: object) -> None:
     assert_that(restored.identity.model_verification).is_empty()
 
 
-def test_a_live_record_never_writes_the_legacy_state_by_default() -> None:
-    """A default record writes no provenance keys at all."""
+def test_a_default_record_writes_no_provenance_keys() -> None:
+    """A default record writes none of the new keys at all."""
     payload = RunRecord().to_dict()
 
     for key in ("endpoint", "first_party", "model_verification", "cost_shadow"):
         assert_that(payload).does_not_contain_key(key)
 
 
-def test_first_party_is_written_only_beside_an_endpoint() -> None:
-    """Without an endpoint there is nothing for ``first_party`` to describe."""
+def test_first_party_is_written_whenever_it_was_recorded() -> None:
+    """A lane row can say first-party without naming an endpoint (Cursor)."""
     payload = RunRecord(identity=RunIdentity(first_party=True)).to_dict()
 
-    assert_that(payload).does_not_contain_key("first_party")
+    assert_that(payload["first_party"]).is_true()
+    assert_that(RunRecord.from_dict(payload).identity.first_party).is_true()
 
 
 # --- factory ------------------------------------------------------------------
@@ -124,6 +145,11 @@ def test_the_factory_copies_provenance_from_the_metadata(
     sample_review_result: ReviewResult,
 ) -> None:
     """What the run stamped on its metadata is what the record carries."""
+    sonnet = ReportedModel(
+        model="claude-sonnet-4-20250514",
+        canonical="claude-sonnet-4-20250514",
+        provider="firstParty",
+    )
     result = replace(
         sample_review_result,
         metadata=replace(
@@ -131,7 +157,7 @@ def test_the_factory_copies_provenance_from_the_metadata(
             endpoint="api.anthropic.com",
             first_party=True,
             credential="claude_oauth",
-            reported_models=("claude-sonnet-4-20250514",),
+            reported_models=(sonnet,),
             lane="claude-subscription",
             model_verification="verified",
         ),
@@ -142,7 +168,7 @@ def test_the_factory_copies_provenance_from_the_metadata(
     assert_that(identity.endpoint).is_equal_to("api.anthropic.com")
     assert_that(identity.first_party).is_true()
     assert_that(identity.credential).is_equal_to("claude_oauth")
-    assert_that(identity.reported_models).is_equal_to(("claude-sonnet-4-20250514",))
+    assert_that(identity.reported_models).is_equal_to((sonnet,))
     assert_that(identity.lane).is_equal_to("claude-subscription")
     assert_that(identity.model_verification).is_equal_to("verified")
 
@@ -172,6 +198,91 @@ def test_a_priced_or_unpriced_basis_keeps_the_figure_as_spend(
 
     assert_that(usage.cost).is_equal_to(sample_review_result.metadata.cost_estimate_usd)
     assert_that(usage.cost_shadow).is_equal_to(0.0)
+
+
+# --- the post-run stamp ---------------------------------------------------------
+
+
+def _stamp(basis: CostBasis, auth_mode: str = "subscription") -> _MetadataStamp:
+    config = AIConfig(enabled=True, transport=AITransport.CLI)
+    return _MetadataStamp(
+        profile=ResolvedTransportSettings(
+            transport=AITransport.CLI,
+            timeout=60.0,
+            max_cost_usd=None,
+            cost_is_advisory=True,
+            auth_mode=auth_mode,  # type: ignore[arg-type]
+            cost_basis=basis,
+        ),
+        resolved_ai=ResolvedAIConfig(config=config, sources={}),
+        cap=None,
+        cap_source=ConfigSource.DEFAULT,
+    )
+
+
+def test_the_stamp_upgrades_a_reported_subscription_figure_to_a_shadow(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A first-party CLI run that reported a figure records ``list_price_shadow``."""
+    result = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            first_party=True,
+            credential="claude_oauth",
+            cost_reported=True,
+        ),
+    )
+
+    stamped = _stamp_metadata(result=result, stamp=_stamp(CostBasis.UNPRICEABLE))
+
+    assert_that(stamped.metadata.cost_basis).is_equal_to("list_price_shadow")
+    assert_that(stamped.metadata.auth_mode).is_equal_to("subscription")
+    assert_that(stamped.metadata.cost_estimate_usd).is_equal_to(
+        sample_review_result.metadata.cost_estimate_usd,
+    )
+
+
+def test_the_stamp_prices_a_gateway_run_on_the_shadow_model_not_the_envelope(
+    sample_review_result: ReviewResult,
+) -> None:
+    """Off the provider's host the envelope's figure is discarded (ADR-0011 B)."""
+    result = replace(
+        sample_review_result,
+        metadata=replace(
+            sample_review_result.metadata,
+            first_party=False,
+            credential="zai_token",
+            cost_reported=True,
+            cost_estimate_usd=99.0,
+            shadow_price_model="claude-sonnet-4-20250514",
+            token_usage={
+                "prompt": 1_000_000,
+                "completion": 1_000_000,
+                "total": 2_000_000,
+            },
+        ),
+    )
+
+    stamped = _stamp_metadata(result=result, stamp=_stamp(CostBasis.UNPRICEABLE))
+
+    assert_that(stamped.metadata.cost_basis).is_equal_to("unknown")
+    assert_that(stamped.metadata.auth_mode).is_equal_to("gateway_token")
+    # Sonnet's list table: $3 per million in, $15 per million out.
+    assert_that(stamped.metadata.cost_estimate_usd).is_close_to(18.0, 1e-9)
+
+
+def test_the_stamp_falls_back_to_the_profile_when_no_credential_was_recorded(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A run that made no call keeps the policy-derived auth mode."""
+    stamped = _stamp_metadata(
+        result=sample_review_result,
+        stamp=_stamp(CostBasis.UNPRICEABLE, auth_mode="api_key"),
+    )
+
+    assert_that(stamped.metadata.auth_mode).is_equal_to("api_key")
+    assert_that(stamped.metadata.cost_basis).is_equal_to("unpriceable")
 
 
 # --- state accounting ---------------------------------------------------------
@@ -254,8 +365,8 @@ def test_prior_spend_adds_the_shadow_to_the_spend() -> None:
     assert_that(budget.unpriceable).is_true()
 
 
-def test_a_gateway_basis_is_real_money_not_a_runtime_bound() -> None:
-    """``unknown`` bills a gateway, so it is neither unpriceable nor advisory."""
+def test_a_gateway_basis_is_enforced_by_repo_policy_but_labelled_a_shadow() -> None:
+    """``unknown`` bills a gateway, so YAML enforces; its figure is still a shadow."""
     budget = resolve_pr_budget(
         budget_usd=10.0,
         source=ConfigSource.CONFIG,
@@ -264,7 +375,7 @@ def test_a_gateway_basis_is_real_money_not_a_runtime_bound() -> None:
     )
 
     assert budget is not None
-    assert_that(budget.unpriceable).is_false()
+    assert_that(budget.unpriceable).is_true()
     assert_that(budget.enforced).is_true()
 
 

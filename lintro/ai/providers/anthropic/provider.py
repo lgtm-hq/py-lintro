@@ -717,6 +717,7 @@ class AnthropicProvider(ApiStreamingProvider):
             output_tokens = response.usage.output_tokens
             cost = estimate_cost(effective_model, input_tokens, output_tokens)
 
+            served = getattr(response, "model", None)
             return finish_api_completion(
                 provider=AIProvider.ANTHROPIC,
                 model=effective_model,
@@ -724,6 +725,7 @@ class AnthropicProvider(ApiStreamingProvider):
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 cost=cost,
+                served_model=served if isinstance(served, str) else None,
             )
 
     async def _stream_api(

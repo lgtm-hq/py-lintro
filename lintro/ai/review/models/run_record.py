@@ -19,6 +19,7 @@ from loguru import logger
 
 from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.enums.model_verification import ModelVerification
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models._coerce import coerce_float, coerce_int
 from lintro.ai.review.models.run_coverage import RunCoverage
@@ -136,12 +137,15 @@ class RunRecord:
             ("lane", identity.lane),
             ("endpoint", identity.endpoint),
             ("credential", identity.credential),
-            ("reported_models", list(identity.reported_models)),
+            (
+                "reported_models",
+                [_reported_model_payload(model) for model in identity.reported_models],
+            ),
             ("model_verification", identity.model_verification),
             ("cost_shadow", round(usage.cost_shadow, 6)),
         )
         payload.update({key: value for key, value in optional if value})
-        if identity.endpoint and identity.first_party is not None:
+        if identity.first_party is not None:
             payload["first_party"] = identity.first_party
         if outcome.resolved is not None:
             payload["resolved"] = outcome.resolved
@@ -207,7 +211,7 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         endpoint=str(payload.get("endpoint", "") or ""),
         first_party=_optional_bool(payload.get("first_party")),
         credential=str(payload.get("credential", "") or ""),
-        reported_models=_string_tuple(payload.get("reported_models")),
+        reported_models=_reported_models(payload.get("reported_models")),
         lane=str(payload.get("lane", "") or ""),
         model_verification=_parse_verification(payload=payload),
     )
@@ -253,11 +257,40 @@ def _optional_bool(value: Any) -> bool | None:
     return value if isinstance(value, bool) else None
 
 
-def _string_tuple(value: Any) -> tuple[str, ...]:
-    """Return the non-empty strings of a stored list, in order."""
+def _reported_model_payload(model: ReportedModel) -> dict[str, str]:
+    """Serialize one reported model; empty attributes are omitted."""
+    payload = {"model": model.model}
+    if model.canonical and model.canonical != model.model:
+        payload["canonical"] = model.canonical
+    if model.provider:
+        payload["provider"] = model.provider
+    return payload
+
+
+def _reported_models(value: Any) -> tuple[ReportedModel, ...]:
+    """Parse the stored reported models, accepting bare names too."""
     if not isinstance(value, list):
         return ()
-    return tuple(item for item in value if isinstance(item, str) and item)
+    parsed: list[ReportedModel] = []
+    for item in value:
+        if isinstance(item, str) and item:
+            parsed.append(ReportedModel(model=item, canonical=item))
+        elif isinstance(item, dict) and isinstance(item.get("model"), str):
+            name = str(item["model"])
+            if not name:
+                continue
+            canonical = item.get("canonical")
+            provider = item.get("provider")
+            parsed.append(
+                ReportedModel(
+                    model=name,
+                    canonical=(
+                        canonical if isinstance(canonical, str) and canonical else name
+                    ),
+                    provider=provider if isinstance(provider, str) else "",
+                ),
+            )
+    return tuple(parsed)
 
 
 def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:

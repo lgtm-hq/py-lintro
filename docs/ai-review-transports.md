@@ -184,6 +184,19 @@ gateway token reads `gateway_token`, not `subscription`. In CI the review-lanes 
 exports the resolved lane row as `LINTRO_REVIEW_LANE`, `LINTRO_REVIEW_ENDPOINT`,
 `LINTRO_REVIEW_FIRST_PARTY` and `LINTRO_REVIEW_ALLOWED_MODELS`, and those win; outside
 CI the provider's base-URL override (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the
-Claude settings files' `env` block) and the provider's own host decide.
+Claude settings files' `env` block) and the provider's own host decide. The credential
+kinds add `api_key` (a metered vendor key, or the API transport) and `unknown` to the
+four lane bindings so a local run can be described too. The Claude credential follows
+Claude Code's documented precedence: the bearer token, then the API key or helper, then
+the OAuth token, which bare mode never reads. A run off the provider's host prices its
+shadow figure on `LINTRO_REVIEW_SHADOW_PRICE_MODEL`, or on the requested model's own
+table when no lane row names one.
+
+Reuse follows provenance (ADR-0011, decision B): a stored round's coverage is inherited
+only when the round is not `legacy` or `mismatch`, is not `unreported` on a lane whose
+transport reports model usage (`LINTRO_REVIEW_REPORTS_MODEL_USAGE`, defaulting to true
+for the Claude CLI and every API transport), and its `lane`, `endpoint` and, on a
+first-party lane, its reported models still match the current lane. The first run after
+this lands therefore re-reviews each open PR once.
 
 See also `docs/ai-features.md` and the dogfood workflow helpers under `scripts/ci/`.

@@ -75,6 +75,7 @@ def plan_resume(
     extra_skips: Sequence[SkippedFile] = (),
     groups: Sequence[Sequence[str]] = (),
     force_full: bool = False,
+    reusable_rounds: Collection[int] | None = None,
 ) -> ResumePlan:
     """Classify the current diff against prior coverage.
 
@@ -84,6 +85,9 @@ def plan_resume(
         extra_skips: Chunker / agent-scope skips.
         groups: Semantic groups from this round's chunker.
         force_full: Discard carried coverage (``--full``).
+        reusable_rounds: Round numbers whose coverage may be inherited
+            (ADR-0011 B, #2867); ``None`` inherits every record. A record
+            from any other round is re-reviewed.
 
     Returns:
         Queue and hashes for this round.
@@ -95,6 +99,10 @@ def plan_resume(
         skipped=(*context.skipped_files, *extra_skips),
     )
     coverage = () if prior is None or force_full else prior.coverage
+    if reusable_rounds is not None:
+        coverage = tuple(
+            record for record in coverage if record.round in reusable_rounds
+        )
     flags = () if prior is None or force_full else prior.flagged_files
     pending = () if prior is None or force_full else prior.pending_invalidations
     consumed = () if prior is None or force_full else prior.consumed_flags

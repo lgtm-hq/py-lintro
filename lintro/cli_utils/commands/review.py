@@ -992,7 +992,10 @@ def _finish_review(
     # its tree), the removal itself when the round never ran (a converged
     # skip, a state-load or provider error).
     with RemoveOnError(prepared.context.head_worktree):
-        resolved_profile = resolve_transport_settings(prepared.ai_config)
+        resolved_profile = resolve_transport_settings(
+            prepared.ai_config,
+            cwd=str(prepared.workspace_root),
+        )
         logger.info(
             "AI review transport profile: {}",
             format_resolved_profile_log(resolved_profile),
@@ -1230,10 +1233,25 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
     )
     if metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
         effective_basis = CostBasis.ESTIMATED
+    cost = metadata.cost_estimate_usd
+    if effective_basis is CostBasis.UNKNOWN:
+        # Off the provider's host the envelope's figure is priced on the
+        # wrong table and is discarded: the shadow is the token counts priced
+        # on the lane's shadow model, or the requested model's own table
+        # until a lane row names one (ADR-0011 B).
+        from lintro.ai.cost import estimate_cost
+
+        tokens = metadata.token_usage
+        cost = estimate_cost(
+            metadata.shadow_price_model or metadata.model,
+            int(tokens.get("prompt", 0)),
+            int(tokens.get("completion", 0)),
+        )
     return replace(
         result,
         metadata=replace(
             metadata,
+            cost_estimate_usd=cost,
             transport=stamp.profile.transport.value,
             # The credential actually forwarded decides the auth mode; the
             # profile's policy-derived label is the fallback when no call
