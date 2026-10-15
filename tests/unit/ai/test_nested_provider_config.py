@@ -904,6 +904,43 @@ def test_lintro_config_json_carries_the_same_block(
     assert_that(payload["other_provider_blocks"]).is_equal_to(1)
 
 
+def test_lintro_config_json_reports_the_routing_state_the_lane_gate_checks(
+    isolated_project: Path,
+) -> None:
+    """``--json`` carries ``api_base_url``, ``api_key_env``, ``fallback_models``.
+
+    The dogfood lane gate (``scripts/ci/review_lane_env.py``) compares these
+    against the lane row and refuses when any is missing, so the producer
+    must emit them with the configured values (ADR-0011 A, #2870).
+
+    Args:
+        isolated_project: Empty project directory with the user tier isolated.
+    """
+    (isolated_project / ".lintro-config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "ai": {
+                    "provider": "anthropic",
+                    "api_base_url": "https://proxy.example/anthropic",
+                    "api_key_env": "MY_ANTHROPIC_KEY",
+                    "fallback_models": ["claude-sonnet-5-5"],
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+
+    result = CliRunner().invoke(cli, ["config", "--json"])
+
+    clear_config_cache()
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)["ai"]
+    assert_that(payload["api_base_url"]).is_equal_to("https://proxy.example/anthropic")
+    assert_that(payload["api_key_env"]).is_equal_to("MY_ANTHROPIC_KEY")
+    assert_that(payload["fallback_models"]).is_equal_to(["claude-sonnet-5-5"])
+
+
 def test_lintro_config_nudges_a_legacy_key_once(
     isolated_project: Path,
     caplog: pytest.LogCaptureFixture,

@@ -87,17 +87,6 @@ def _lane(lane_id: str = "claude-subscription", **row_overrides: Any) -> dict[st
     }
 
 
-_OPENAI_EGRESS_HOSTS = (
-    "api.openai.com:443",
-    "auth.openai.com:443",
-    "chatgpt.com:443",
-)
-_ZAI_EGRESS_HOSTS = ("api.z.ai:443",)
-#: Derived from the workflow files (#2432) so a Renovate action bump cannot
-#: fail these tests on its own: Renovate rewrites `uses:` refs and cannot see
-#: a literal in a test module.
-
-
 def test_the_job_pr_number_comes_from_the_event_or_the_validated_request() -> None:
     """``AI_REVIEW_PR`` is the event's PR number or the request job's output.
 
@@ -136,13 +125,6 @@ _GH_PR_CHECKOUT_RE = re.compile(
 )
 _PULL_HEAD_REF_RE = re.compile(r"pull/\S*/head")
 _CHECKOUT_LIKE_RE = re.compile(r"checkout")
-_CURSOR_EGRESS_HOSTS = (
-    "downloads.cursor.com:443",
-    "api2.cursor.sh:443",
-    "api3.cursor.sh:443",
-    "agentn.global.api5.cursor.sh:443",
-    "repo42.cursor.sh:443",
-)
 
 
 def _executable_run_text(run_block: str) -> str:
@@ -188,16 +170,18 @@ def _run_shell(
     Returns:
         The completed subprocess result.
     """
-    # A fresh HOME: the lane gate also looks for a competing session on disk.
-    env = {"PATH": os.environ.get("PATH", ""), "HOME": tempfile.mkdtemp()}
-    env.update(_lane())
-    env.update(env_overrides)
-    return subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
-        [str(SHELL_SCRIPT), *args],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    # A fresh HOME, removed afterwards: the lane gate also looks for a
+    # competing session on disk.
+    with tempfile.TemporaryDirectory() as home:
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": home}
+        env.update(_lane())
+        env.update(env_overrides)
+        return subprocess.run(  # nosec B603 - fixed argv run against a real binary in a controlled test; shell=False, no user shell input
+            [str(SHELL_SCRIPT), *args],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
 
 
 def test_patch_script_is_gone() -> None:
@@ -398,6 +382,32 @@ def test_shell_materialises_the_codex_session_for_the_attempt(tmp_path: Path) ->
     assert_that(SHELL_SCRIPT.read_text(encoding="utf-8")).contains(
         'unset "$LANE_CREDENTIAL_SOURCE_ENV"',
     )
+
+
+def test_shell_never_overwrites_a_session_it_does_not_own(tmp_path: Path) -> None:
+    """A file already at the credential path is refused, not replaced.
+
+    The exit trap deletes the file this attempt materialised; a developer's
+    own ``codex login`` session at the same path must survive a local run,
+    so the wrapper refuses before restoring and never registers it for
+    deletion.
+    """
+    (tmp_path / ".codex").mkdir()
+    session = tmp_path / ".codex" / "auth.json"
+    session.write_text('{"mine": true}\n', encoding="utf-8")
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            **_lane("codex-subscription"),
+            "HOME": str(tmp_path),
+            CREDENTIAL_ENV: "",
+            CODEX_SESSION_ENV: EMPTY_CODEX_SESSION,
+            "PR_NUMBER": "",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("already exists")
+    assert_that(session.read_text(encoding="utf-8")).is_equal_to('{"mine": true}\n')
 
 
 def test_shell_binds_the_gateway_token_on_the_zai_lane() -> None:

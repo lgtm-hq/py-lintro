@@ -5,8 +5,8 @@
 The committed manifest resolves; every refusal the ADR lists fails closed and
 names the declared lanes; the outputs are single-line step outputs; and the
 manifest's own claims about lintro (which models carry a list-price table)
-are pinned to the package. Nothing in the workflows invokes the resolver yet:
-this PR lands it inert, and #2870 wires it.
+are pinned to the package. Both lane jobs (``ai-review.yml`` and
+``ai-contract-tests.yml``) invoke the resolver secret-free (#2870).
 """
 
 from __future__ import annotations

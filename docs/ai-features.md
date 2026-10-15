@@ -1956,10 +1956,10 @@ developer's login.
 - **Never default an unset secret.** Forwarding `${{ secrets.X }}` unset lets the run
   report a visible skip naming the missing credential; substituting a placeholder turns
   it into a false pass.
-- **Trusted install.** Lintro installs itself from the PR's _base_ ref before the step
-  that holds the provider credential, so PR-controlled code never executes with the
-  secret in scope. The PR is reviewed as data (the diff is fetched through the GitHub
-  API).
+- **Trusted install.** Lintro installs itself from the default-branch commit that
+  supplied the workflow (`github.workflow_sha`) before the step that holds the provider
+  credential, so PR-controlled code never executes with the secret in scope. The PR is
+  reviewed as data (the diff is fetched through the GitHub API).
 - **A subscription works in CI, on the `cli` transport.** Lintro's own `ai-review.yml`
   runs `ai.transport: cli` against a version-pinned `claude` CLI
   (`npm install -g @anthropic-ai/claude-code@<pin>`) authenticated by a

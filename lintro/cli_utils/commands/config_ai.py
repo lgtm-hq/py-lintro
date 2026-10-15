@@ -124,6 +124,28 @@ def print_ai_config(
             resolved.sources.get("model"),
         ),
     )
+    # The routing state the dogfood lane gate checks (ADR-0011 A): shown
+    # here as ``--json`` reports it, so the two outputs cannot drift.
+    table.add_row(
+        "api_base_url",
+        (
+            escape(ai_config.api_base_url)
+            if ai_config.api_base_url
+            else "[dim]unset[/dim]"
+        ),
+    )
+    table.add_row(
+        "api_key_env",
+        escape(ai_config.api_key_env) if ai_config.api_key_env else "[dim]unset[/dim]",
+    )
+    table.add_row(
+        "fallback_models",
+        (
+            escape(", ".join(ai_config.fallback_models))
+            if ai_config.fallback_models
+            else "[dim]none[/dim]"
+        ),
+    )
 
     if provider is not None:
         settings = ai_config.provider_settings(provider)

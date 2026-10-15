@@ -147,11 +147,12 @@ def test_the_attempt_index_selects_the_lane_and_is_bounded(
 
 
 def test_a_row_whose_name_fields_are_not_names_is_refused(
+    gate: ModuleType,
     lanes: dict[str, Any],
     tmp_path: Path,
 ) -> None:
     """The wrapper looks variables up by these names; the gate validates them."""
-    for field in ("credential_secret", "credential_env", "base_url_env"):
+    for field in gate._NAME_VALUED_FIELDS:
         hostile = copy.deepcopy(lanes)
         hostile["claude-subscription"][
             field
@@ -289,6 +290,21 @@ def test_the_base_url_override_must_name_the_lane_endpoint(
     )
     assert_that(matching.returncode).is_equal_to(0)
 
+    # The same host over cleartext is not the lane endpoint: the scheme is
+    # part of what the row names.
+    cleartext = _run(
+        "check",
+        _env(
+            lanes,
+            ["zai-glm-gateway"],
+            tmp_path,
+            ANTHROPIC_AUTH_TOKEN=_TOKEN,
+            ANTHROPIC_BASE_URL="http://api.z.ai/api/anthropic",
+        ),
+    )
+    assert_that(cleartext.returncode).is_equal_to(3)
+    assert_that(cleartext.stderr).contains("not the lane endpoint")
+
 
 def test_a_file_backed_override_is_checked_too(
     lanes: dict[str, Any],
@@ -316,7 +332,14 @@ def test_a_row_that_names_no_model_allows_no_override_and_no_fallback(
 ) -> None:
     """``model: null`` means the CLI's own default; a config may not name one."""
     base = _env(lanes, ["codex-subscription"], tmp_path, CODEX_AUTH_JSON="e30=")
-    agreeing = {"provider": "openai", "transport": "cli", "model": None}
+    agreeing: dict[str, Any] = {
+        "provider": "openai",
+        "transport": "cli",
+        "model": None,
+        "api_base_url": None,
+        "api_key_env": None,
+        "fallback_models": [],
+    }
     assert_that(
         _run(
             "check",
@@ -390,6 +413,12 @@ def test_the_effective_config_must_agree_with_the_row(
     }
     ok = _run("check", {**base, "LINTRO_EFFECTIVE_AI_JSON": json.dumps(agreeing)})
     assert_that(ok.returncode).is_equal_to(0)
+
+    for key in agreeing:
+        lacking = {k: v for k, v in agreeing.items() if k != key}
+        short = _run("check", {**base, "LINTRO_EFFECTIVE_AI_JSON": json.dumps(lacking)})
+        assert_that(short.returncode).described_as(key).is_equal_to(3)
+        assert_that(short.stderr).contains(f"lacks ['{key}']")
 
     for field, value, fragment in (
         ("provider", "openai", "effective ai.provider"),

@@ -134,6 +134,16 @@ def _value(value: Any) -> str:
 #: Row fields whose value the wrapper uses as a variable NAME. The resolver
 #: validated them at workflow_sha; the gate validates them again, so the
 #: wrapper's trust in these names is enforced by the script it trusts.
+#: The keys ``lintro config --json`` must report under ``ai`` for the
+#: binding to be verifiable; the check refuses when any is absent.
+_EFFECTIVE_KEYS: Final[tuple[str, ...]] = (
+    "provider",
+    "transport",
+    "model",
+    "api_base_url",
+    "api_key_env",
+    "fallback_models",
+)
 _NAME_VALUED_FIELDS: Final[tuple[str, ...]] = (
     "credential_secret",
     "credential_env",
@@ -237,14 +247,21 @@ def _check_competing(
 
 
 def _host(url: str) -> str:
-    """Return ``host:port`` of a URL, with the https default port."""
-    parts = urlsplit(url.strip())
-    host = (parts.hostname or "").lower()
+    """Return the ``host:port`` an https URL names, or the raw value.
+
+    Only an https URL reduces to its host and port (443 by default); a
+    cleartext, schemeless or unparsable value is returned as written, so it
+    never equals a lane endpoint, which the resolver requires to be https.
+    """
+    value = url.strip()
+    parts = urlsplit(value)
+    if parts.scheme.lower() != "https" or not parts.hostname:
+        return value
     try:
         port = parts.port
     except ValueError:
-        return url.strip()
-    return f"{host}:{port or 443}"
+        return value
+    return f"{parts.hostname.lower()}:{port or 443}"
 
 
 def _check_base_url(
@@ -327,6 +344,12 @@ def _check_config(lane_id: str, row: dict[str, Any], env: dict[str, str]) -> Non
         raise LaneRefusalError("LINTRO_EFFECTIVE_AI_JSON must be an object")
     if "error" in effective:
         msg = f"the effective ai config could not be read: {effective['error']}"
+        raise LaneRefusalError(msg)
+    # Every compared key must be present: an absent key is not agreement,
+    # it is a report this gate does not understand.
+    missing = [key for key in _EFFECTIVE_KEYS if key not in effective]
+    if missing:
+        msg = f"lane {lane_id!r}: effective ai config lacks {missing}"
         raise LaneRefusalError(msg)
     expected = {
         "provider": row.get("provider"),

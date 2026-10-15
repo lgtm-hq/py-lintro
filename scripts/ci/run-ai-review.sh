@@ -306,7 +306,9 @@ case "$_lane_check_status" in
 esac
 
 # A file-form credential is materialised for the length of this attempt and
-# deleted at its end (ADR-0011 D). The restore script owns the decoding.
+# deleted at its end (ADR-0011 D). The restore script owns the decoding. A
+# file already at that path is somebody's session, not this attempt's: it is
+# neither overwritten nor deleted, and the attempt is refused.
 _lane_credential_path=""
 _lane_cleanup() {
 	if [[ -n "$_lane_credential_path" ]]; then
@@ -315,6 +317,9 @@ _lane_cleanup() {
 }
 trap '_lane_cleanup' EXIT
 if [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
+	if [[ -e "${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}" ]]; then
+		report_not_invoked "The lane's credential file already exists at ${LANE_CREDENTIAL_FILE}; this attempt would overwrite a session it does not own."
+	fi
 	_lane_credential_path="${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}"
 	if ! "${script_dir}/restore-codex-session.sh"; then
 		report_not_invoked "The lane's file credential could not be materialised; see the error above."

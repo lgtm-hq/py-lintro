@@ -88,13 +88,13 @@ workflow runs an AI diff review and prints the JSON result to the job log.
 **Features:**
 
 - 🤖 **AI diff review** via `lintro review --pr <n> --depth 1 --output json`
-- 🛡️ **Trusted install** — lintro is installed from the PR's **base ref** (`main`, via
-  `pull_request.base.sha`), never the PR head. The code that runs with the credential is
-  always trusted, so a PR cannot substitute its own `lintro/**` to exfiltrate it. The PR
-  is still reviewed: `lintro review --pr` fetches the diff through `gh` (GitHub API), so
-  the PR's changes are reviewed as data and never executed with the secret. Trade-off: a
-  PR that breaks the review code itself isn't caught by this job — that is covered by
-  the unit tests.
+- 🛡️ **Trusted install** — lintro is installed from the **default-branch commit that
+  supplied the workflow** (`github.workflow_sha`), never the PR head. The code that runs
+  with the credential is always trusted, so a PR cannot substitute its own `lintro/**`
+  to exfiltrate it. The PR is still reviewed: `lintro review --pr` fetches the diff
+  through `gh` (GitHub API), so the PR's changes are reviewed as data and never executed
+  with the secret. Trade-off: a PR that breaks the review code itself isn't caught by
+  this job — that is covered by the unit tests.
 - 🔑 **A declared lane, not a variable (ADR-0011)** — runs the `cli` transport on the
   lane the committed manifest `scripts/ci/ai_review_lanes.json` names first in its
   `chain`. Provider, transport, model, endpoint, egress and the credential binding all
@@ -111,9 +111,9 @@ workflow runs an AI diff review and prints the JSON result to the job log.
   `docker/ai-tools.Dockerfile` and installed from npm at those exact versions.
 - 💸 **Operator-set spend ceiling (advisory under the CLI transport)** — the trusted
   base config ships **no** `ai.max_cost_usd`, so there is no committed default cap. A PR
-  still cannot raise spend: the workflow installs lintro from the base ref and forwards
-  `LINTRO_AI_MAX_COST_USD` from the repository Actions variable. Operators set that
-  variable to a positive USD cap or to `uncapped` (overlay `0` is rejected as
+  still cannot raise spend: the workflow installs lintro from `github.workflow_sha` and
+  forwards `LINTRO_AI_MAX_COST_USD` from the repository Actions variable. Operators set
+  that variable to a positive USD cap or to `uncapped` (overlay `0` is rejected as
   ambiguous). It prices only the tokens lintro billed itself, so on the `cli` transport
   — where the call bills the subscription — it bounds lintro's own accounting rather
   than enforcing spend. Setting a cap does **not** serialize provider calls: the budget
@@ -140,16 +140,19 @@ default-branch commit that supplied the workflow, the credential is safe to enab
 #### Activation precondition (security audit #1317)
 
 Before enabling the provider credential, confirm the dogfood workflow still satisfies
-all three controls (also asserted in `tests/scripts/test_run_ai_review.py`):
+all four controls (also asserted in `tests/scripts/test_run_ai_review.py`):
 
 1. **Same-repo only** — the job `if` guard requires
    `pull_request.head.repo.full_name == github.repository` (fork PRs never run).
-2. **Trusted install** — the checkout step uses `pull_request.base.sha`, never the PR
-   head, so code that runs with the credential is always from the trusted base ref. The
-   `claude` CLI is installed at a version pinned in that same trusted checkout.
-3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN` and `CURSOR_API_KEY` are injected
-   only into the final review step's `env`, after checkout, the CLI install, and
-   dependency install.
+2. **Trusted install** — the checkout step uses `github.workflow_sha`, never the PR
+   head, so code that runs with the credential is always the default-branch commit that
+   supplied the workflow. The `claude` CLI is installed at a version pinned in that same
+   trusted checkout.
+3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`
+   and `ZAI_AUTH_TOKEN` are injected only into the final review step's `env`, after
+   checkout, the CLI install, and dependency install.
+4. **Lane-selected credentials** — each secret is forwarded by one literal expression
+   gated on its lane being in the resolved chain, never by a variable's presence.
 
 These controls landed with #1074; #1317 verified them against current `main`. A
 dedicated GitHub Environment with required reviewers is optional once (1–3) hold. Re-run

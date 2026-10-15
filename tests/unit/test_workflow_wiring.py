@@ -5895,13 +5895,12 @@ def _tier2_expression_from_dogfood(expression: str) -> str:
     assert_that(match).described_as(expression).is_not_none()
     assert match is not None  # narrow for mypy
     gate = f"env.{_AI_CONTRACT_GATE_ENV} == 'true'"
-    # The two anthropic credentials keep their chain clause: the claude CLI
-    # takes one of them, and the chain says which. Every other lane's
-    # credential is forwarded whenever the gate allows, because Tier 2
-    # drives every lane in one job.
-    if "'claude-subscription'" in match.group(0) or "'zai-glm-gateway'" in match.group(
-        0,
-    ):
+    # The subscription token keeps its chain clause: the claude CLI takes
+    # it only when that lane is in play. (The gateway token is bound under
+    # another name and keyed on the active lane; it is not mirrored here.)
+    # Every other lane's credential is forwarded whenever the gate allows,
+    # because Tier 2 drives every lane in one job.
+    if "'claude-subscription'" in match.group(0):
         return expression.replace(match.group(0), f"({gate} && {match.group(0)})", 1)
     return expression.replace(match.group(0), gate, 1)
 
@@ -6017,13 +6016,14 @@ def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() ->
 
 
 def test_tier2_binds_the_gateway_token_from_the_lane_row() -> None:
-    """Tier 2 carries the z.ai token as ANTHROPIC_AUTH_TOKEN, from the chain.
+    """Tier 2 carries the z.ai token as ANTHROPIC_AUTH_TOKEN, from the lane.
 
     The dogfood wrapper binds ``ZAI_AUTH_TOKEN`` to ``ANTHROPIC_AUTH_TOKEN``
     for the attempt; Tier 2 has no wrapper, so its workflow binds the same
-    secret to the same variable, gated on the gateway lane being in the
-    chain, and takes the gateway endpoint from the lane row rather than a
-    variable (ADR-0011 A, #2870).
+    secret to the same variable. Both the token and the endpoint key on the
+    *active* lane: a chain that lists the gateway as a fallback must not put
+    its bearer token in front of the subscription CLI, which would send it
+    to api.anthropic.com (ADR-0011 A, #2870).
     """
     tier2_env = next(
         step["env"]
@@ -6033,7 +6033,7 @@ def test_tier2_binds_the_gateway_token_from_the_lane_row() -> None:
     token = _normalize_github_expr(str(tier2_env["ANTHROPIC_AUTH_TOKEN"]))
     assert_that(token).is_equal_to(
         f"${{{{ (env.{_AI_CONTRACT_GATE_ENV} == 'true'"
-        " && contains(fromJSON(needs.lane.outputs.chain), 'zai-glm-gateway'))"
+        " && needs.lane.outputs.lane == 'zai-glm-gateway')"
         " && secrets.ZAI_AUTH_TOKEN || '' }}",
     )
     base_url = _normalize_github_expr(str(tier2_env["ANTHROPIC_BASE_URL"]))

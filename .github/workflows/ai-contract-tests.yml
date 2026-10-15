@@ -263,7 +263,7 @@ jobs:
           # yamllint disable-line rule:line-length
           ANTHROPIC_BASE_URL: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.first-party == 'false') && needs.lane.outputs.endpoint || '' }}
           # yamllint disable-line rule:line-length
-          ANTHROPIC_AUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && contains(fromJSON(needs.lane.outputs.chain), 'zai-glm-gateway')) && secrets.ZAI_AUTH_TOKEN || '' }}
+          ANTHROPIC_AUTH_TOKEN: ${{ (env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && needs.lane.outputs.lane == 'zai-glm-gateway') && secrets.ZAI_AUTH_TOKEN || '' }}
           LINTRO_CLI_BARE: 'never'
           # Keep the claude CLI's egress to api.anthropic.com only, and keep
           # the image's pinned CLI pinned — an autoupdate would swap the very
