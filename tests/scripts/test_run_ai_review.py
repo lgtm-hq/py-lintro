@@ -516,6 +516,41 @@ def test_shell_refuses_a_base_url_override_on_a_first_party_lane() -> None:
     assert_that(result.stderr).contains("must be unset")
 
 
+def test_shell_ignores_a_preset_effective_config_inside_actions(
+    tmp_path: Path,
+) -> None:
+    """In Actions the effective config is read through lintro, never pre-set.
+
+    Outside Actions a pre-set ``LINTRO_EFFECTIVE_AI_JSON`` stands in for
+    ``lintro config --json`` (the tests supply it). Inside Actions it is
+    ignored, so nothing set earlier in the job can vouch for the binding:
+    with a ``uv`` that cannot run lintro the read fails and the attempt is
+    refused, while the same environment outside Actions honours the JSON,
+    never calls ``uv`` and gets past the gate (next failure: the missing PR
+    number).
+    """
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    uv_stub = bin_dir / "uv"
+    uv_stub.write_text("#!/usr/bin/env bash\nexit 1\n", encoding="utf-8")
+    uv_stub.chmod(0o755)
+    base = {
+        "PATH": f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+        CREDENTIAL_ENV: "dummy-claude-token",
+        "PR_NUMBER": "",
+    }
+
+    inside = _run_shell(args=[], env_overrides={**base, "GITHUB_ACTIONS": "true"})
+    outside = _run_shell(args=[], env_overrides=base)
+
+    assert_that(inside.returncode).is_equal_to(1)
+    assert_that(inside.stdout).contains("never invoked")
+    assert_that(inside.stdout).contains("could not be read")
+    assert_that(outside.returncode).is_equal_to(1)
+    assert_that(outside.stdout).does_not_contain("could not be read")
+    assert_that(outside.stdout).contains("PR_NUMBER")
+
+
 def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
     """The wrapper restores auth.json where the manifest and the gate say.
 
