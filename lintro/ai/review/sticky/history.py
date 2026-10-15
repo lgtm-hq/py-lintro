@@ -165,7 +165,7 @@ def _pr_budget_line(result: ReviewResult, *, shadow_usd: float = 0.0) -> str:
     if not shadow and metadata.cost_basis in SHADOW_BASES:
         shadow = metadata.cost_estimate_usd
     if shadow:
-        notes.append(f"includes ${shadow:.2f} of shadow figures, counted for the cap")
+        notes.append(f"includes ~${shadow:.2f} of shadow figures, counted for the cap")
     return f"{line} ({'; '.join(notes)})" if notes else line
 
 
@@ -281,7 +281,9 @@ def _model_cell(*, label: str) -> str:
     Returns:
         The label with pipes escaped.
     """
-    return label.replace("|", "\\|")
+    # Backslashes first, as the badge table does, so an escaped pipe in the
+    # value cannot come back as a delimiter.
+    return label.replace("\\", "\\\\").replace("|", "\\|")
 
 
 def _run_cost_label(*, run: RunRecord) -> str:

@@ -114,6 +114,10 @@ def test_only_a_verified_round_leads_without_a_banner() -> None:
     )
     assert_that(blank).contains("reported `glm-4.6`.")
     assert_that(blank).does_not_contain("``")
+    tick = provenance_banner(
+        replace(_VERIFIED, verification="mismatch", reported=("glm`4.6",)),
+    )
+    assert_that(tick).contains("reported `glm4.6`.")
     unreported = provenance_banner(replace(_VERIFIED, verification="unreported"))
     assert_that(unreported).starts_with("> ℹ️")
     no_host = provenance_banner(replace(_GATEWAY, endpoint="", first_party=None))
@@ -327,6 +331,13 @@ def test_a_hostile_reported_name_cannot_shear_a_history_row() -> None:
     row = _history_row(run=run, latest=True)
 
     assert_that(row).contains("`glm\\|4.6 next`")
+    escaped = _history_row(
+        run=RunRecord(identity=RunIdentity(round=2, model="a\\|b")),
+        latest=False,
+    )
+    # A pre-escaped pipe is not read back as a delimiter: the backslash is
+    # doubled before the pipe is escaped, as the badge table does.
+    assert_that(escaped).contains("`a\\\\\\|b`")
     assert_that(row).does_not_contain("\n`")
     assert_that(row.count("\n")).is_equal_to(0)
 
@@ -367,7 +378,7 @@ def test_the_pr_budget_line_names_the_shadow_an_earlier_round_left_in_the_total(
     line = _pr_budget_line(result, shadow_usd=0.5)
 
     assert_that(line).starts_with("PR budget: $0.60 of $2.00")
-    assert_that(line).contains("includes $0.50 of shadow figures")
+    assert_that(line).contains("includes ~$0.50 of shadow figures")
 
 
 def test_the_board_names_shadow_a_pruned_gateway_round_left_in_the_total(
@@ -405,4 +416,4 @@ def test_the_board_names_shadow_a_pruned_gateway_round_left_in_the_total(
     )
 
     assert_that(primary).contains("PR budget: $3.60 of $10.00")
-    assert_that(primary).contains("includes $0.50 of shadow figures")
+    assert_that(primary).contains("includes ~$0.50 of shadow figures")

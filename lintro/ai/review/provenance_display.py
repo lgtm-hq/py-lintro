@@ -253,9 +253,7 @@ def provenance_banner(view: ProvenanceView) -> str:
     )
     if state == ModelVerification.MISMATCH.value:
         reported = ", ".join(
-            f"`{sanitize_comment_text(m, limit=60)}`"
-            for m in view.reported
-            if m.strip()
+            _code(m, limit=60, plain=False) for m in view.reported if m.strip()
         )
         answered = f" The transport reported {reported}." if reported else ""
         return (
