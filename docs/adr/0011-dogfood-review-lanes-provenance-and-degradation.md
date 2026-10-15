@@ -41,7 +41,10 @@ through Z.ai. Nothing in the repository recorded that a lane switch had happened
 - The provider sets `AIResponse.model` to the model it was asked for
   (`lintro/ai/providers/anthropic/provider.py`). The CLI envelope's `modelUsage` block,
   which names the model that actually answered with its `canonicalModel` and `provider`,
-  is not read (fixture `tests/fixtures/ai/cli_replay/claude/2.1.286.jsonl`).
+  is not read (fixture `tests/fixtures/ai/cli_replay/claude/2.1.286.jsonl`). The
+  `provider` value in that block is what the CLI reports, not evidence of which endpoint
+  served the request; decision B takes `first_party` from the manifest only and stores
+  the envelope's `provider` for information.
 - Cost was the CLI's `total_cost_usd`, priced on Anthropic's list price for a request
   Anthropic never served.
 - The weekly provider smoke's `zai-api` row exercises Z.ai's OpenAI-protocol endpoint
@@ -52,11 +55,12 @@ through Z.ai. Nothing in the repository recorded that a lane switch had happened
 
 The incident surfaced on 2026-10-12 when the Z.ai balance ran out and every review went
 red with `insufficient_credits`, holding eleven Renovate pull requests. The workflow
-header and `scripts/ci/run-ai-review.sh` both state that "the check is deliberately NOT
-required, so a billing condition is loud without blocking a merge". The check is indeed
-not a required status on `main`, but the owner merges under a no-failing-checks rule, so
-in practice a red dogfood review does block. The premise that red is free is false and
-has been false since the no-silent-skip change in
+header states that "a billing condition is loud but never blocks a merge", and
+`scripts/ci/run-ai-review.sh` that "the check is deliberately NOT required, so a billing
+condition is loud without blocking a merge". The check is indeed not a required status
+on `main`, but the owner merges under a no-failing-checks rule, so in practice a red
+dogfood review does block. The premise that red is free is false and has been false
+since the no-silent-skip change in
 [#1826](https://github.com/lgtm-hq/py-lintro/issues/1826).
 
 Two independent design reviews (Claude Opus 5.5 and GPT-6.1 Sol, 2026-10-13) converged
@@ -80,8 +84,10 @@ ADR is its design record and the acceptance criterion for each sub-issue.
 A **lane** is a named row in the committed manifest `scripts/ci/ai_review_lanes.json`. A
 row declares the provider, transport, endpoint, whether the endpoint is first-party for
 that provider, whether the transport reports model usage (`reports_model_usage`), the
-name of the credential it binds, the exact egress hosts it needs, the default model, the
-allowed models, and the cost basis its figures carry.
+name of the credential it binds and its form (an environment variable, or a file the
+wrapper materialises: the Codex session is `$HOME/.codex/auth.json`, decoded from
+`CODEX_AUTH_JSON`), the exact egress hosts it needs, the default model, the allowed
+models, and the cost basis its figures carry.
 
 - The manifest is the **only** place an endpoint, a credential binding or an egress host
   may be defined. No workflow expression derives any of them from the `vars` context.
@@ -89,23 +95,37 @@ allowed models, and the cost basis its figures carry.
   is the active lane, and the rest are the fallback order of decision D. There is no
   separate selector field, so the active lane and the chain cannot disagree. No
   variable, at any scope, selects, enables or shapes a lane. Switching lanes is a
-  reviewed one-line diff to the manifest, which takes effect on merge because the
-  resolver reads the manifest at the base commit. An empty chain, or an entry that does
-  not name a declared row, fails closed before a secret is exposed, with the allowed
-  lane list in the error.
+  reviewed one-line diff to the manifest, which takes effect on merge for every open
+  pull request because the resolver reads the manifest at `github.workflow_sha`, the
+  protected default-branch commit that supplied the workflow definition, and not at
+  `pull_request.base.sha`, which is the base as of the PR's last sync and can lag
+  `main`. An empty chain, an entry that does not name a declared row, a row that
+  declares a wildcard host, or a chain that mixes `first_party` values (decision D)
+  fails closed in the resolver before a secret is exposed, with the allowed lane list in
+  the error.
 - The existing `vars.LINTRO_AI_PROVIDER`, `vars.LINTRO_AI_TRANSPORT` and
   `vars.LINTRO_AI_MODEL` reads in the dogfood jobs are removed; provider, transport and
   model come from the lane row. Budget overlays remain variables because they shape
-  spend, not routing. A structural test asserts that no dogfood job reads a routing
-  value from `vars`.
-- A separate secret-free job resolves the lane from the manifest at the base commit and
-  publishes its fields as job outputs. The review job consumes only those outputs.
+  spend, not routing. A structural test asserts that no job in `ai-review.yml` or
+  `ai-contract-tests.yml` reads a routing value from `vars`. The Tier 2 contract-tests
+  job today reads `vars.ZAI_BASE_URL` to route and to pick its credential, and
+  `tests/unit/test_workflow_wiring.py` derives those expressions from `ai-review.yml`,
+  so both workflows are rewired together and that test is re-pointed at the manifest.
+- A separate secret-free job checks out `github.workflow_sha`, resolves the chain from
+  the manifest there and publishes the chain and each lane's fields as job outputs. The
+  review job consumes only those outputs. A structural test pins the resolver's checkout
+  ref.
 - Egress for the review job is the manifest row's host list plus the static GitHub
-  infrastructure hosts. No lane may declare a wildcard host.
+  infrastructure hosts. No lane may declare a wildcard host; the resolver fails closed
+  on one.
 - Each credential is forwarded by one literal `secrets.<NAME>` expression, gated on the
   resolved lane id. Secrets are never indexed dynamically.
 - The wrapper refuses to run when the lane's credential is absent, when a competing
-  credential is present, or when `ANTHROPIC_BASE_URL` differs from the lane endpoint.
+  credential is present in the environment or on disk, or when the provider's base-URL
+  override (`ANTHROPIC_BASE_URL` for the Anthropic lanes, the corresponding variable for
+  the Codex and Cursor CLIs) names anything other than the lane endpoint. An unset
+  override equals the provider's first-party endpoint, so on a first-party lane any set
+  value is a refusal.
 - The initial manifest declares `claude-subscription` (the sole initial `chain` entry),
   `codex-subscription`, `cursor` and `zai-glm-gateway`. The last is
   `first_party: false`, binds `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and
@@ -129,14 +149,27 @@ A run record reports where its requests went and what answered, not what was con
   `cursor_api_key`), `reported_models` (every model named by the CLI envelope's
   `modelUsage`, with its `canonicalModel` and `provider`), `lane`, and
   `model_verification` with exactly five states:
-  - `verified`: the reported model equals the requested model on a first-party endpoint.
-  - `mismatch`: the reported model differs from the requested one on a first-party
-    endpoint.
+  - `verified`: on a first-party endpoint, every completed call reported model usage,
+    the requested model is among the reported models once aliases are normalised to
+    `canonicalModel`, and every reported model is in the lane's allowed models.
+  - `mismatch`: on a first-party endpoint, a completed call reported model usage and the
+    requested model is absent from it, or a reported model is outside the lane's allowed
+    models.
   - `unverifiable`: the endpoint is not first-party, so the reported model cannot be
     trusted to describe what answered.
   - `unreported`: the transport returned no model usage at all.
   - `legacy`: the round was stored before this ADR and carries none of these fields.
     Only the state reader assigns it; a run in the current workflow never produces it.
+
+  The requested model of a call is the one the run asked for: the lane default, or a
+  declared fallback or custom-agent override, each of which must be in the lane's
+  allowed models. States are assigned in a fixed order so that no round qualifies for
+  two: `legacy` by the state reader; then `unverifiable` whenever the endpoint is not
+  first-party, whatever the envelope carried; then, over every completed call of the
+  round, `mismatch` if any call is a mismatch, else `unreported` if any call carried no
+  model usage, else `verified`. A non-first-party round that reports no model usage is
+  therefore `unverifiable`, never `unreported`.
+
 - `auth_mode` is no longer derived from the `--bare` policy; it follows `credential`.
 - No renderer prints a configured model without the endpoint host beside it and the
   verification state. The sticky header, the badges, the cumulative history and the
@@ -152,7 +185,13 @@ A run record reports where its requests went and what answered, not what was con
   run that reports no figure at all, and stored rounds carrying it render as they do
   today. An `UNKNOWN` basis renders as "n/a (third-party gateway)", never as a dollar
   figure and never as zero, and the cumulative history discloses that some rounds
-  contributed no priced cost.
+  contributed no priced cost. Reporting and enforcement are separate: ADR-0007 rule 3
+  enforces flag and environment caps on every cost basis, so a round on `UNKNOWN` or
+  `LIST_PRICE_SHADOW` still settles `CostBudget` and the PR budget, using the envelope's
+  token counts priced on the requested model's first-party list table as a shadow
+  figure. That figure is stored as `cost_shadow_usd`, accumulates across rounds and
+  fallback attempts for enforcement only, is labelled a shadow wherever cap progress is
+  shown, and is never rendered as spend.
 - Review-reuse validity includes the lane: a stored round from one lane is not reused as
   if it were produced by another. A stored round whose lane declares
   `reports_model_usage: true` but whose state is `unreported` is not reused either: its
@@ -176,17 +215,17 @@ display rendering).
 
 `scripts/ci/classify_review_outcome.py` reads the new fields and applies:
 
-| Condition                                                                                                | Verdict                                                                                                                                                                                                                                                                         |
-| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Recorded endpoint differs from the resolved lane's endpoint                                              | red, `status=endpoint-mismatch`                                                                                                                                                                                                                                                 |
-| `model_verification == mismatch` on a first-party lane                                                   | red, `status=model-mismatch`                                                                                                                                                                                                                                                    |
-| `model_verification == unverifiable` on a non-first-party lane                                           | verdict unchanged; `::warning::` naming lane and endpoint                                                                                                                                                                                                                       |
-| `model_verification == unreported` on a first-party lane whose row declares `reports_model_usage: true`  | red, `status=model-unreported`: the transport is declared to report what answered, so its absence is a transport defect. Applies to rounds produced by the current run; a stored round in this state is not reused, so it is re-reviewed rather than carried into a green check |
-| `model_verification == unreported` on a first-party lane whose row declares `reports_model_usage: false` | verdict unchanged; the sticky prints the requested model as unverified by the transport                                                                                                                                                                                         |
-| `model_verification == legacy`                                                                           | history rows only; such a round is never reused, so it never reaches the verdict                                                                                                                                                                                                |
-| `model_verification == unreported` on a non-first-party lane                                             | verdict unchanged; labelled like `unverifiable`                                                                                                                                                                                                                                 |
-| `model_verification == verified`                                                                         | verdict unchanged; no label                                                                                                                                                                                                                                                     |
-| Authentication failure                                                                                   | labelled by the recorded credential kind, not a fixed label                                                                                                                                                                                                                     |
+| Condition                                                                                                                        | Verdict                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Recorded `lane` is not in the resolved chain, or the recorded endpoint differs from the manifest endpoint of the recorded `lane` | red, `status=endpoint-mismatch`                                                                                                                                                                                                                                                 |
+| Recorded `lane` is in the chain but is not `chain[0]` (a fallback succeeded)                                                     | verdict unchanged; `::warning::` and the sticky fallback line of decision D                                                                                                                                                                                                     |
+| `model_verification == mismatch` on a first-party lane                                                                           | red, `status=model-mismatch`                                                                                                                                                                                                                                                    |
+| `model_verification == unverifiable` on a non-first-party lane                                                                   | verdict unchanged; `::warning::` naming lane and endpoint                                                                                                                                                                                                                       |
+| `model_verification == unreported` on a first-party lane whose row declares `reports_model_usage: true`                          | red, `status=model-unreported`: the transport is declared to report what answered, so its absence is a transport defect. Applies to rounds produced by the current run; a stored round in this state is not reused, so it is re-reviewed rather than carried into a green check |
+| `model_verification == unreported` on a first-party lane whose row declares `reports_model_usage: false`                         | verdict unchanged; the sticky prints the requested model as unverified by the transport                                                                                                                                                                                         |
+| `model_verification == legacy`                                                                                                   | history rows only; such a round is never reused, so it never reaches the verdict                                                                                                                                                                                                |
+| `model_verification == verified`                                                                                                 | verdict unchanged; no label                                                                                                                                                                                                                                                     |
+| Authentication failure                                                                                                           | labelled by the recorded credential kind, not a fixed label                                                                                                                                                                                                                     |
 
 A lane declared `first_party: false` is allowed to answer with an unverifiable model.
 That is the price of opting into a gateway, and it is disclosed on the sticky rather
@@ -199,16 +238,30 @@ Delivered by: [#2871](https://github.com/lgtm-hq/py-lintro/issues/2871).
 The manifest's `chain` (decision A) is also the fallback order. The initial chain is
 `["claude-subscription"]`; adding a second entry is a reviewed change to the manifest.
 
-- The wrapper tries lanes in chain order. It advances only on a provider-unavailable
-  class from the existing failure taxonomy and `lintro.ai.liveness` (`auth_failed`,
-  `insufficient_credits`, quota or rate-limit exhaustion), and only when no chunk call
-  of the current attempt has completed. A review that has produced findings is never
-  restarted on another lane.
+- The wrapper tries lanes in chain order. It advances only on the provider-unavailable
+  class, which is exactly `ReviewErrorKind.AUTH_FAILED`, `INSUFFICIENT_CREDITS` and
+  `QUOTA_EXCEEDED` from `lintro/ai/review/errors_taxonomy.py` and their
+  `lintro.ai.liveness` equivalents, and only when no chunk call of the current attempt
+  has completed. `RATE_LIMITED` is transient and stays with the existing retry; it never
+  advances the chain. A review that has produced findings is never restarted on another
+  lane.
+- When the provider-unavailable class occurs after a chunk call has completed, the
+  attempt stops, the partial round is persisted under ADR-0007 for a resume on the same
+  lane, no other lane is tried in that run, and the check is red with
+  `status=provider-unavailable`. A rerun walks the chain from `chain[0]` again; if it
+  falls back, the partial round from the dead lane is not reused on the new lane
+  (decision B).
 - The workflow forwards every credential in the chain, each by its own literal
   expression gated on chain membership, and egress covers the union of the chain's
-  hosts. The wrapper then builds each attempt's environment by unsetting every
-  credential that is not the current lane's before it runs the competing-credential
-  check of decision A, so that check holds per attempt rather than per job.
+  hosts. Because one job then holds every credential in the chain and can reach every
+  host in it, every lane in a chain must carry the same `first_party` value as
+  `chain[0]`: a non-first-party lane may be active only as a single-entry chain, and the
+  resolver rejects a mixed chain. The wrapper isolates each attempt: it unsets every
+  environment credential that is not the current lane's, and a file-backed credential is
+  materialised at the start of its own lane's attempt and deleted at its end, so the
+  Codex session restore moves from a job step into the wrapper. The competing-credential
+  check of decision A runs after that isolation, covers environment and file-backed
+  credentials, and so holds per attempt rather than per job.
 - A fallback is labelled: the sticky leads with the fallback line, the job summary
   carries a `::warning::`, and one deduplicated tracker issue labelled
   `ai-review-lane-down` is opened or updated for the dead lane through the minted App
@@ -216,9 +269,9 @@ The manifest's `chain` (decision A) is also the fallback order. The initial chai
 - When every lane in the chain is unavailable the check is red with
   `status=provider-unavailable`.
 - The chain covers the provider-unavailable class only: dead or expired credential,
-  exhausted balance, exhausted quota or rate limit. A provider that answers with errors
-  mid-review, or an endpoint that is reachable but slow, is not a fallback trigger and
-  is handled by the existing timeout and degradation rules.
+  exhausted balance, or exhausted quota. A rate limit, a provider that answers with
+  errors mid-review, or an endpoint that is reachable but slow, is not a fallback
+  trigger and is handled by the existing retry, timeout and degradation rules.
 
 Delivered by: [#2872](https://github.com/lgtm-hq/py-lintro/issues/2872).
 
@@ -273,10 +326,10 @@ The cost is one more committed artifact to keep in step with the secrets that ex
 resolver job on every review, and a two-PR landing for any change the workflow must
 read. Adding a lane now requires a manifest row, a smoke row and a credential binding
 rather than a variable. The Z.ai lane is retained but honest: it reports an unverifiable
-model and no dollar figure, and selecting it is an explicit manifest change. A chain
-with a non-first-party lane in it means a fallback review may be produced by an
-unverifiable model; that is permitted by decision C, labelled by decision D, and is a
-deliberate owner choice when the chain is edited.
+model and no dollar figure, and selecting it is an explicit manifest change. A
+non-first-party lane cannot sit in a chain with a first-party one (decision D), so a
+fallback review is never produced by an unverifiable model; opting into the gateway
+means making it the sole lane, a deliberate owner choice when the chain is edited.
 
 Until [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) lands, the organisation
 variable still exists and the gateway lane still activates on it. The interim measure
