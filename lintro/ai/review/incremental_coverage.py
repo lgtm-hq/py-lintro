@@ -18,11 +18,12 @@ from typing import TYPE_CHECKING
 from loguru import logger
 
 from lintro.ai.cost import estimate_cost
-from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.enums.cost_basis import SHADOW_COST_BASES, CostBasis
 from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.coverage import inherit_same_round_paths
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import match_findings
+from lintro.ai.review.github_constants import MAX_STORED_RUNS
 from lintro.ai.review.merge import truncated_paths
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_coverage import RunCoverage
@@ -65,9 +66,11 @@ class CheckpointStamp:
             and it is the finished chunks' token counts priced on
             ``shadow_price_model``, never the envelope's figure.
         shadow_price_model: The model whose list table prices a shadow.
-        verify: Reads the verification state and reported models of the
-            calls completed so far, so the partial record carries them;
-            ``None`` records neither.
+        verify: Reads what the calls completed so far established: the
+            verification state, the reported models and whether a cost
+            figure was reported, so the partial record carries them and a
+            subscription figure is booked as the shadow it is; ``None``
+            records none of it.
     """
 
     pr_number: int | None = None
@@ -75,7 +78,23 @@ class CheckpointStamp:
     identity: RunIdentity | None = None
     cost_basis: str = ""
     shadow_price_model: str = ""
-    verify: Callable[[], tuple[str, tuple[ReportedModel, ...]]] | None = None
+    verify: Callable[[], LedgerSnapshot] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerSnapshot:
+    """What the open ledger had established when a checkpoint was written.
+
+    Attributes:
+        state: The verification state over the calls completed so far, or
+            empty when none completed.
+        reported_models: The models those calls reported.
+        cost_reported: Whether any of them reported a cost figure.
+    """
+
+    state: str = ""
+    reported_models: tuple[ReportedModel, ...] = ()
+    cost_reported: bool = False
 
 
 _NO_STAMP = CheckpointStamp()
@@ -158,28 +177,35 @@ def write_incremental_coverage_part(
         # A delta round (#2627) resolves only what it re-read, mid-run too.
         reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
     )
-    # A gateway's figure is a shadow, never spend (#2867, ADR-0011 B); the
-    # subscription CLI's profile basis cannot say yet whether the envelope
-    # will report one, so its checkpoint stays spend and the final write
-    # reconciles it.
-    shadow_basis = stamp.cost_basis == CostBasis.UNKNOWN.value
-    round_figure = (
-        _token_priced_shadow(collected=collected, stamp=stamp)
-        if shadow_basis
-        else stamp.round_spend_usd
+    # A shadow figure is never spend (#2867, ADR-0011 B): a gateway's is
+    # the finished chunks' tokens on the shadow table, and a subscription
+    # figure the envelope reported is the list-price shadow. Only a
+    # subscription round that reported no figure keeps its local estimate
+    # as spend, as its final record will.
+    snapshot = stamp.verify() if stamp.verify is not None else LedgerSnapshot()
+    basis, round_figure = _checkpoint_figure(
+        collected=collected,
+        stamp=stamp,
+        snapshot=snapshot,
     )
+    shadow_basis = basis in {value.value for value in SHADOW_COST_BASES}
     prior_spend = prior_state.review_spend_usd if prior_state is not None else 0.0
     prior_shadow = prior_state.review_shadow_usd if prior_state is not None else 0.0
+    runs, truncated = _runs_with_checkpoint(
+        # History, not coverage: a ``--full`` round keeps earlier rounds.
+        history=prior_state.runs if prior_state is not None else (),
+        stamp=stamp,
+        snapshot=snapshot,
+        round_number=round_number,
+        basis=basis,
+        round_figure=round_figure,
+        shadow_basis=shadow_basis,
+    )
     write_state_part(
         state=replace(
             seed,
-            runs=_runs_with_checkpoint(
-                seed=seed,
-                stamp=stamp,
-                round_number=round_number,
-                round_figure=round_figure,
-                shadow_basis=shadow_basis,
-            ),
+            runs=runs,
+            truncated=seed.truncated or truncated,
             findings=match.records,
             coverage=records,
             repo=os.environ.get("GITHUB_REPOSITORY", "") or seed.repo,
@@ -200,6 +226,32 @@ def write_incremental_coverage_part(
         sequence=sequence,
         final=True,
     )
+
+
+def _checkpoint_figure(
+    *,
+    collected: list[ChunkReviewPartial],
+    stamp: CheckpointStamp,
+    snapshot: LedgerSnapshot,
+) -> tuple[str, float]:
+    """Resolve the basis and figure a checkpoint books for the round so far.
+
+    Args:
+        collected: Chunks finished so far in this run.
+        stamp: The checkpoint stamp with the profile's basis.
+        snapshot: What the open ledger established so far.
+
+    Returns:
+        The basis the partial record carries and the figure it books.
+    """
+    if stamp.cost_basis == CostBasis.UNKNOWN.value:
+        return CostBasis.UNKNOWN.value, _token_priced_shadow(
+            collected=collected,
+            stamp=stamp,
+        )
+    if stamp.cost_basis == CostBasis.UNPRICEABLE.value and snapshot.cost_reported:
+        return CostBasis.LIST_PRICE_SHADOW.value, stamp.round_spend_usd
+    return stamp.cost_basis, stamp.round_spend_usd
 
 
 def _token_priced_shadow(
@@ -228,47 +280,52 @@ def _token_priced_shadow(
 
 def _runs_with_checkpoint(
     *,
-    seed: ReviewState,
+    history: tuple[RunRecord, ...],
     stamp: CheckpointStamp,
+    snapshot: LedgerSnapshot,
     round_number: int,
+    basis: str,
     round_figure: float,
     shadow_basis: bool,
-) -> tuple[RunRecord, ...]:
-    """Return the seed's runs plus this round's checkpoint record, when stamped.
+) -> tuple[tuple[RunRecord, ...], bool]:
+    """Return the stored history plus this round's checkpoint record, when stamped.
 
     Args:
-        seed: The state the checkpoint is written on top of.
+        history: The runs stored before this round.
         stamp: The checkpoint stamp; ``identity`` may be ``None``.
+        snapshot: What the open ledger established so far.
         round_number: The round being checkpointed.
+        basis: The basis the partial record carries.
         round_figure: What the round has spent, or its shadow, so far.
         shadow_basis: Whether the round's figure is a shadow.
 
     Returns:
-        The runs to persist. Without an identity the seed's runs are kept
-        as they are.
+        The runs to persist, capped like the sticky's history, and whether
+        the cap dropped any. Without an identity the history is kept as it
+        is.
     """
     if stamp.identity is None:
-        return seed.runs
-    state, reported = stamp.verify() if stamp.verify is not None else ("", ())
+        return history, False
     partial = RunRecord(
         identity=replace(
             stamp.identity,
             round=round_number,
-            model_verification=state,
-            reported_models=reported,
+            model_verification=snapshot.state,
+            reported_models=snapshot.reported_models,
         ),
         coverage=RunCoverage(partial=True, checkpoint=True),
         usage=RunUsage(
             cost=0.0 if shadow_basis else round_figure,
             cost_shadow=round_figure if shadow_basis else 0.0,
-            cost_basis=stamp.cost_basis,
+            cost_basis=basis,
         ),
         outcome=RunOutcome(verdict=ReviewVerdict.INCOMPLETE),
     )
-    return (
-        *(run for run in seed.runs if run.identity.round != round_number),
+    combined = [
+        *(run for run in history if run.identity.round != round_number),
         partial,
-    )
+    ]
+    return tuple(combined[-MAX_STORED_RUNS:]), len(combined) > MAX_STORED_RUNS
 
 
 def _checkpoint_pr(

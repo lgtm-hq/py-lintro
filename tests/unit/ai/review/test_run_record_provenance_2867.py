@@ -398,3 +398,37 @@ def test_yaml_caps_enforce_on_unknown_and_stay_advisory_on_the_shadow(
 ) -> None:
     """ADR-0007 rule 3 extended: the new bases follow the money (ADR-0011 F)."""
     assert_that(cap_is_enforced(source=source, basis=basis)).is_equal_to(enforced)
+
+
+def test_the_final_record_keeps_the_checkpoints_model_evidence(
+    sample_review_result: ReviewResult,
+) -> None:
+    """A resumed round's record lists the models of the attempt it inherited from."""
+    from lintro.ai.review.models.run_coverage import RunCoverage
+    from lintro.ai.review.sticky.assembly import advance_review_state
+
+    haiku = ReportedModel(model="claude-haiku-4-5", canonical="claude-haiku-4-5")
+    prior = ReviewState(
+        runs=(
+            RunRecord(
+                identity=RunIdentity(round=1, reported_models=(haiku,)),
+                coverage=RunCoverage(partial=True, checkpoint=True),
+            ),
+        ),
+    )
+    result = replace(
+        sample_review_result,
+        metadata=replace(sample_review_result.metadata, reported_models=(_GLM,)),
+    )
+
+    advanced = advance_review_state(
+        request=StickyRequest(result=result, prior_state=prior, head_sha="abc"),
+    )
+
+    assert_that([run.identity.round for run in advanced.runs]).is_equal_to([1])
+    assert_that(advanced.runs[0].coverage.checkpoint).is_false()
+    assert_that(
+        [m.name for m in advanced.runs[0].identity.reported_models],
+    ).is_equal_to(
+        ["glm-5.3-flash", "claude-haiku-4-5"],
+    )

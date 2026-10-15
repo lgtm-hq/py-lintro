@@ -18,8 +18,7 @@ from lintro.ai.provenance import (
     detect_run_provenance,
     verify_models,
 )
-from lintro.ai.providers.reported_model import ReportedModel
-from lintro.ai.review.incremental_coverage import CheckpointStamp
+from lintro.ai.review.incremental_coverage import CheckpointStamp, LedgerSnapshot
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.reuse_gate import agent_model_overrides, allowed_models_for
 from lintro.ai.transport import cli_bare_billing
@@ -86,17 +85,21 @@ def checkpoint_stamp(
     transport = options.ai_config.transport
     requested = options.provider.model_name
 
-    def _verify() -> tuple[str, tuple[ReportedModel, ...]]:
+    def _verify() -> LedgerSnapshot:
         ledger = current_model_ledger()
         if ledger is None:
-            return "", ()
+            return LedgerSnapshot()
         state = verify_models(
             requested=requested,
             calls=ledger.calls,
             first_party=provenance.first_party,
             allowed=allowed,
         )
-        return (state.value if state is not None else "", ledger.reported_models)
+        return LedgerSnapshot(
+            state=state.value if state is not None else "",
+            reported_models=ledger.reported_models,
+            cost_reported=ledger.cost_reported,
+        )
 
     return CheckpointStamp(
         identity=RunIdentity(

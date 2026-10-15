@@ -52,6 +52,11 @@ class ResumePlan:
             planner after the delta is applied so the mid-run checkpoints
             and the final round match on the same inputs. Empty on a full
             round.
+        coverage: The prior coverage records this round may inherit, after
+            the reuse gate (#2867). Persistence merges onto these, never
+            onto the raw prior, so a record from an excluded round is
+            dropped rather than carried under a round number the resumed
+            round reuses.
     """
 
     classified: tuple[ClassifiedFile, ...]
@@ -59,6 +64,7 @@ class ResumePlan:
     hashes: dict[str, str]
     eligible: tuple[str, ...]
     reviewed_ranges: tuple[tuple[str, int, int], ...] = ()
+    coverage: tuple[CoverageRecord, ...] = ()
 
     def counts(self, *, reviewed_now: Sequence[str]) -> CoverageCounts:
         """Return counters after the provider finished *reviewed_now*."""
@@ -135,6 +141,7 @@ def plan_resume(
         queue=queue_paths(classified=classified),
         hashes=hashes,
         eligible=eligible,
+        coverage=tuple(coverage),
     )
 
 
@@ -200,7 +207,9 @@ def records_for_reviewed(
     }
     merged: dict[tuple[str, str], CoverageRecord] = {}
     if prior is not None:
-        for record in prior.coverage:
+        # The plan's coverage, not the prior's: the reuse gate has already
+        # dropped what this round may not inherit (#2867).
+        for record in plan.coverage:
             merged[record.identity] = record
     reviewed = set(reviewed_paths)
     for item in plan.classified:

@@ -120,13 +120,24 @@ def _round_outcome(*, request: StickyRequest) -> RoundOutcome:
         ),
     )
     # The round's final record replaces the checkpoint record a killed
-    # attempt at the same round left behind (#2867).
+    # attempt at the same round left behind, keeping the models that attempt
+    # reported: its coverage was inherited, so its evidence stays (#2867).
+    checkpoints = [
+        run
+        for run in state.runs
+        if run.coverage.checkpoint and run.identity.round == round_number
+    ]
+    if checkpoints:
+        seen = {model.name: model for model in current.identity.reported_models}
+        for run in checkpoints:
+            for model in run.identity.reported_models:
+                seen.setdefault(model.name, model)
+        current = replace(
+            current,
+            identity=replace(current.identity, reported_models=tuple(seen.values())),
+        )
     combined_runs = [
-        *(
-            run
-            for run in state.runs
-            if not (run.coverage.checkpoint and run.identity.round == round_number)
-        ),
+        *(run for run in state.runs if run not in checkpoints),
         current,
     ]
     return RoundOutcome(

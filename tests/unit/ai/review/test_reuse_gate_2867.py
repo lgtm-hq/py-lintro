@@ -290,3 +290,25 @@ def test_a_record_with_no_reported_models_is_vouched_for_by_its_request() -> Non
         allowed=("claude-sonnet-4-6",),
     )
     assert_that(narrowed).is_empty()
+
+
+def test_excluded_coverage_is_dropped_at_persistence_not_only_at_planning() -> None:
+    """Coverage from an excluded round must not survive under a reused number."""
+    from lintro.ai.review.resume import records_for_reviewed
+
+    plan = plan_resume(
+        context=_context(),
+        prior=_prior(),
+        reusable_rounds=frozenset({2}),
+    )
+
+    persisted = records_for_reviewed(
+        plan=plan,
+        reviewed_paths=(),
+        head_sha="feature",
+        round_number=1,
+        prior=_prior(),
+    )
+
+    assert_that(plan.coverage).is_empty()
+    assert_that(persisted).is_empty()

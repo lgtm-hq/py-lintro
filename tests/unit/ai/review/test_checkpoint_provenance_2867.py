@@ -19,6 +19,7 @@ from lintro.ai.review.enums.review_strictness import ReviewStrictness
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.incremental_coverage import (
     CheckpointStamp,
+    LedgerSnapshot,
     write_incremental_coverage_part,
 )
 from lintro.ai.review.merge import ChunkReviewPartial
@@ -139,7 +140,10 @@ def test_a_checkpoint_carries_the_verification_of_the_calls_so_far(
             pr_number=_PR,
             identity=_IDENTITY,
             cost_basis="unpriceable",
-            verify=lambda: ("mismatch", mismatch.reported),
+            verify=lambda: LedgerSnapshot(
+                state="mismatch",
+                reported_models=mismatch.reported,
+            ),
         ),
     )
 
@@ -255,3 +259,58 @@ def test_a_checkpoint_without_an_identity_writes_no_run(
 
     assert_that(loaded.runs).is_empty()
     assert_that(loaded.review_spend_usd).is_close_to(0.1, 1e-9)
+
+
+def test_a_reported_subscription_figure_is_checkpointed_as_a_shadow(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A killed subscription round never books its list price as spend."""
+    loaded = _checkpoint(
+        tmp_path,
+        monkeypatch,
+        prior=None,
+        stamp=CheckpointStamp(
+            pr_number=_PR,
+            round_spend_usd=0.3,
+            identity=_IDENTITY,
+            cost_basis="unpriceable",
+            verify=lambda: LedgerSnapshot(state="verified", cost_reported=True),
+        ),
+    )
+
+    assert_that(loaded.runs[0].usage.cost_basis).is_equal_to("list_price_shadow")
+    assert_that(loaded.runs[0].usage.cost).is_equal_to(0.0)
+    assert_that(loaded.runs[0].usage.cost_shadow).is_close_to(0.3, 1e-9)
+    assert_that(loaded.review_spend_usd).is_equal_to(0.0)
+    assert_that(loaded.review_shadow_usd).is_close_to(0.3, 1e-9)
+
+
+def test_a_full_round_checkpoint_keeps_the_stored_history(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--full`` drops coverage, not rounds; the counter does not restart."""
+    prior = ReviewState(
+        runs=(RunRecord(identity=RunIdentity(round=4)),),
+        repo=_REPO,
+        pr_number=_PR,
+    )
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", _REPO)
+    context = _context()
+    write_incremental_coverage_part(
+        collected=[],
+        resume=plan_resume(context=context, prior=prior, force_full=True),
+        context=context,
+        prior_state=prior,
+        force_full=True,
+        sequence=1,
+        policy=resolve_sensitivity_policy(strictness=ReviewStrictness.BALANCED),
+        stamp=CheckpointStamp(pr_number=_PR, identity=_IDENTITY),
+    )
+    loaded = load_ci_state(directory=tmp_path, repo=_REPO, pr_number=_PR)
+
+    assert_that([run.identity.round for run in loaded.runs]).is_equal_to([4, 5])
+    assert_that(loaded.runs[1].coverage.checkpoint).is_true()
+    assert_that(loaded.next_round).is_equal_to(5)

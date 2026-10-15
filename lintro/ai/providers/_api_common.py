@@ -104,7 +104,9 @@ def served_model_evidence(*, requested: str, served: str) -> ReportedModel:
     An undated alias is answered by its dated snapshot (OpenAI and Anthropic
     both do this). The snapshot is the same model, so the evidence keeps the
     served id and names the alias as its canonical form; otherwise the
-    served id is both (#2867).
+    served id is both (#2867). A ``-latest`` alias is not folded: its served
+    id does not start with the alias, so it fails closed as a mismatch
+    unless the lane allows the dated id.
 
     Args:
         requested: The model the call asked for.
