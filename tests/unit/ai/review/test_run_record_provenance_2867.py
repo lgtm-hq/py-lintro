@@ -96,11 +96,14 @@ def test_a_record_with_provenance_but_no_state_is_not_legacy() -> None:
 
 
 @pytest.mark.parametrize("raw", ["bogus", 3, ["verified"]])
-def test_an_unrecognised_state_is_dropped_not_guessed(raw: object) -> None:
-    """A corrupt state value reads as unknown rather than as a valid state."""
+def test_an_unrecognised_state_is_kept_visible_not_blanked(raw: object) -> None:
+    """A corrupt state must not read as "no state", which reuse would accept."""
     restored = RunRecord.from_dict({"round": 1, "model_verification": raw})
 
-    assert_that(restored.identity.model_verification).is_empty()
+    state = restored.identity.model_verification
+    assert_that(state).is_not_empty()
+    assert_that(state).is_not_in(*(member.value for member in ModelVerification))
+    assert_that(len(state)).is_less_than_or_equal_to(32)
 
 
 def test_a_default_record_writes_no_provenance_keys() -> None:

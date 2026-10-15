@@ -17,10 +17,17 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.review.coverage import inherit_same_round_paths
+from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.finding_matcher import match_findings
 from lintro.ai.review.merge import truncated_paths
 from lintro.ai.review.models.review_state import ReviewState
+from lintro.ai.review.models.run_coverage import RunCoverage
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.models.run_outcome import RunOutcome
+from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.run_usage import RunUsage
 from lintro.ai.review.resume import records_for_reviewed
 from lintro.ai.review.sensitivity import filter_findings_by_policy
 from lintro.ai.review.severity_gate import apply_severity_gates
@@ -47,10 +54,18 @@ class CheckpointStamp:
             CLI's ``state_pr``: ``--pr`` or the CI event, #2814). None falls
             back to ``PR_NUMBER``, then to the prior state's PR.
         round_spend_usd: What this round has spent so far (#2796).
+        identity: The round's identity, less its number (#2867): written as
+            a partial run record so a round killed after this checkpoint
+            leaves coverage the reuse gate can place on a lane and endpoint.
+            ``None`` writes no run record.
+        cost_basis: The basis the transport profile resolved for the round.
+            On ``unknown`` the checkpointed spend is a shadow, not money.
     """
 
     pr_number: int | None = None
     round_spend_usd: float = 0.0
+    identity: RunIdentity | None = None
+    cost_basis: str = ""
 
 
 _NO_STAMP = CheckpointStamp()
@@ -96,11 +111,12 @@ def write_incremental_coverage_part(
         eligible_paths=resume.eligible,
         current_hashes=resume.hashes,
     )
+    round_number = prior_state.next_round if prior_state is not None else 1
     records = records_for_reviewed(
         plan=resume,
         reviewed_paths=covered_now,
         head_sha=context.head_ref,
-        round_number=prior_state.next_round if prior_state is not None else 1,
+        round_number=round_number,
         prior=None if force_full else prior_state,
         truncated_paths=truncated_paths(partials=collected),
     )
@@ -132,9 +148,22 @@ def write_incremental_coverage_part(
         # A delta round (#2627) resolves only what it re-read, mid-run too.
         reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
     )
+    # A gateway's figure is a shadow, never spend (#2867, ADR-0011 B); the
+    # subscription CLI's profile basis cannot say yet whether the envelope
+    # will report one, so its checkpoint stays spend and the final write
+    # reconciles it.
+    shadow_basis = stamp.cost_basis == CostBasis.UNKNOWN.value
+    prior_spend = prior_state.review_spend_usd if prior_state is not None else 0.0
+    prior_shadow = prior_state.review_shadow_usd if prior_state is not None else 0.0
     write_state_part(
         state=replace(
             seed,
+            runs=_runs_with_checkpoint(
+                seed=seed,
+                stamp=stamp,
+                round_number=round_number,
+                shadow_basis=shadow_basis,
+            ),
             findings=match.records,
             coverage=records,
             repo=os.environ.get("GITHUB_REPOSITORY", "") or seed.repo,
@@ -148,14 +177,50 @@ def write_incremental_coverage_part(
             run_id=os.environ.get("GITHUB_RUN_ID", "") or seed.run_id,
             # From the prior state, not ``seed``: a ``--full`` seed is empty,
             # and a full round must not reset the PR's spend.
-            pr_spend_usd=(
-                (prior_state.review_spend_usd if prior_state is not None else 0.0)
-                + stamp.round_spend_usd
-            ),
+            pr_spend_usd=prior_spend + (0.0 if shadow_basis else stamp.round_spend_usd),
+            pr_shadow_usd=prior_shadow
+            + (stamp.round_spend_usd if shadow_basis else 0.0),
         ),
         directory=state_dir(ci=True),
         sequence=sequence,
         final=True,
+    )
+
+
+def _runs_with_checkpoint(
+    *,
+    seed: ReviewState,
+    stamp: CheckpointStamp,
+    round_number: int,
+    shadow_basis: bool,
+) -> tuple[RunRecord, ...]:
+    """Return the seed's runs plus this round's partial record, when stamped.
+
+    Args:
+        seed: The state the checkpoint is written on top of.
+        stamp: The checkpoint stamp; ``identity`` may be ``None``.
+        round_number: The round being checkpointed.
+        shadow_basis: Whether the round's spend is a shadow figure.
+
+    Returns:
+        The runs to persist. Without an identity the seed's runs are kept
+        as they are.
+    """
+    if stamp.identity is None:
+        return seed.runs
+    partial = RunRecord(
+        identity=replace(stamp.identity, round=round_number),
+        coverage=RunCoverage(partial=True),
+        usage=RunUsage(
+            cost=0.0 if shadow_basis else stamp.round_spend_usd,
+            cost_shadow=stamp.round_spend_usd if shadow_basis else 0.0,
+            cost_basis=stamp.cost_basis,
+        ),
+        outcome=RunOutcome(verdict=ReviewVerdict.INCOMPLETE),
+    )
+    return (
+        *(run for run in seed.runs if run.identity.round != round_number),
+        partial,
     )
 
 
@@ -189,6 +254,7 @@ def checkpoint_writer(
     policy: ReviewSensitivityPolicy,
     round_spend: Callable[[], float] | None = None,
     state_pr: int | None = None,
+    stamp: CheckpointStamp = _NO_STAMP,
 ) -> Callable[[list[ChunkReviewPartial]], None]:
     """Build the per-chunk callback that writes the run's coverage parts.
 
@@ -205,6 +271,10 @@ def checkpoint_writer(
         round_spend: Reads what the round has spent so far (its
             ``CostBudget.spent``), or None to record no spend.
         state_pr: The PR the final write keys this run's state on, or None.
+        stamp: The round's identity for the partial run record each
+            checkpoint writes and the round's cost basis (#2867). Its
+            ``pr_number`` and ``round_spend_usd`` are filled from
+            ``state_pr`` and ``round_spend`` at each checkpoint.
 
     Returns:
         A callback the chunk fan-out invokes with everything completed so far.
@@ -228,7 +298,8 @@ def checkpoint_writer(
                 force_full=force_full,
                 sequence=next_sequence,
                 policy=policy,
-                stamp=CheckpointStamp(
+                stamp=replace(
+                    stamp,
                     pr_number=state_pr,
                     round_spend_usd=round_spend() if round_spend is not None else 0.0,
                 ),

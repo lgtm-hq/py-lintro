@@ -222,8 +222,12 @@ def _base_url_override(
     cwd: str | None,
     configured_base_url: str | None,
 ) -> str:
-    """Return the base-URL override the provider's transport would honour."""
-    if transport is AITransport.API:
+    """Return the base-URL override the provider's transport would honour.
+
+    On the API transport ``ai.api_base_url`` wins, and when it is unset the
+    SDK itself reads the provider's base-URL variable, so that counts too.
+    """
+    if transport is AITransport.API and (configured_base_url or "").strip():
         return (configured_base_url or "").strip()
     if provider is None:
         return ""
@@ -517,9 +521,11 @@ def _normalize(name: str) -> str:
 def _call_matches(*, call: LedgerCall, allowed: frozenset[str]) -> bool:
     """Return whether one completed call's evidence is consistent.
 
-    The call's own requested model must be allowed, the reported models
-    must name it (aliases normalised to the canonical name), and every
-    reported model must be allowed.
+    The call's own requested model must be allowed; the reported models
+    must name it, by the key the transport used or by canonical name; and
+    every reported model's canonical name must be allowed. Only the
+    canonical name counts for the allowed check, so an allowed alias cannot
+    vouch for a different model behind it.
     """
     wanted = _normalize(call.requested)
     if wanted not in allowed:
@@ -529,10 +535,7 @@ def _call_matches(*, call: LedgerCall, allowed: frozenset[str]) -> bool:
     }
     if wanted not in names:
         return False
-    return all(
-        _normalize(model.name) in allowed or _normalize(model.model) in allowed
-        for model in call.reported
-    )
+    return all(_normalize(model.name) in allowed for model in call.reported)
 
 
 def verify_models(

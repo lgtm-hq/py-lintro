@@ -37,6 +37,29 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.idiom_review.idiom_review_issue import IdiomReviewIssue
 
 
+@pytest.fixture(autouse=True)
+def _isolate_provenance_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep a developer's gateway variables out of the stamped provenance.
+
+    Since #2867 the transport profile reads the provider's base-URL override
+    and bearer token to say where a run goes; a shell routing through a proxy
+    would turn every ``api_key``/``billed`` expectation into
+    ``gateway_token``/``unknown``.
+
+    Args:
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    for name in (
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
+        "OPENAI_BASE_URL",
+        "LINTRO_REVIEW_LANE",
+        "LINTRO_REVIEW_ENDPOINT",
+        "LINTRO_REVIEW_FIRST_PARTY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 def _empty_result() -> ReviewResult:
     return ReviewResult(
         metadata=ReviewMetadata(

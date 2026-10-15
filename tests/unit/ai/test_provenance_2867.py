@@ -740,3 +740,39 @@ def test_a_first_party_api_transport_stays_billed() -> None:
 
     assert_that(resolved.cost_basis).is_equal_to(CostBasis.BILLED)
     assert_that(resolved.auth_mode).is_equal_to("api_key")
+
+
+# --- round-two review findings ------------------------------------------------
+
+
+def test_an_allowed_alias_cannot_vouch_for_a_different_canonical_model() -> None:
+    """Only the canonical name counts for the allowed check (ADR-0011 B)."""
+    state = verify_models(
+        requested="claude-opus-5-5",
+        calls=[
+            LedgerCall(
+                requested="claude-opus-5-5",
+                reported=(ReportedModel(model="claude-opus-5-5", canonical="glm-5"),),
+            ),
+        ],
+        first_party=True,
+        allowed=("claude-opus-5-5",),
+    )
+
+    assert_that(state).is_equal_to(ModelVerification.MISMATCH)
+
+
+def test_the_api_transport_honours_the_sdks_own_base_url_variable(
+    tmp_path: Path,
+) -> None:
+    """Without ``ai.api_base_url`` the SDK reads the provider's variable itself."""
+    provenance = detect_run_provenance(
+        provider=AIProvider.ANTHROPIC,
+        transport=AITransport.API,
+        env=_env(tmp_path, **{ANTHROPIC_BASE_URL_ENV: "https://gateway.invalid/v1"}),
+        home=tmp_path,
+    )
+
+    assert_that(provenance.endpoint).is_equal_to("gateway.invalid")
+    assert_that(provenance.first_party).is_false()
+    assert_that(provenance.credential).is_equal_to(CredentialKind.ZAI_TOKEN)

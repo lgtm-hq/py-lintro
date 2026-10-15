@@ -24,7 +24,12 @@ if TYPE_CHECKING:
     from lintro.ai.review.models.run_record import RunRecord
     from lintro.ai.review.session import ReviewSessionOptions
 
-__all__ = ["allowed_models_for", "reusable_rounds", "reusable_rounds_for"]
+__all__ = [
+    "agent_model_overrides",
+    "allowed_models_for",
+    "reusable_rounds",
+    "reusable_rounds_for",
+]
 
 
 def allowed_models_for(
@@ -32,6 +37,7 @@ def allowed_models_for(
     provenance: RunProvenance,
     requested: str,
     fallback_models: Iterable[str] = (),
+    agent_models: Iterable[str] = (),
 ) -> tuple[str, ...]:
     """Return the models this run may request or be answered by.
 
@@ -39,18 +45,49 @@ def allowed_models_for(
         provenance: The run's provenance; its lane row's allowed list wins.
         requested: The run's default model.
         fallback_models: Declared fallbacks, allowed outside a lane row.
+        agent_models: Custom-agent ``model`` overrides, allowed outside a
+            lane row.
 
     Returns:
-        The lane row's allowed models, or outside CI the default model and
-        its declared fallbacks.
+        The lane row's allowed models, or outside CI the default model, its
+        declared fallbacks and the custom agents' overrides.
     """
     if provenance.allowed_models:
         return provenance.allowed_models
     names: dict[str, None] = {requested: None}
-    for name in fallback_models:
+    for name in (*fallback_models, *agent_models):
         if name.strip():
             names.setdefault(name, None)
     return tuple(names)
+
+
+def agent_model_overrides(options: ReviewSessionOptions) -> tuple[str, ...]:
+    """Return the distinct ``model`` overrides the run's custom agents declare.
+
+    Args:
+        options: The run's session options.
+
+    Returns:
+        The overrides, in agent order, without repeats.
+    """
+    seen: dict[str, None] = {}
+    for agent in options.custom_agents:
+        if agent.model:
+            seen.setdefault(agent.model, None)
+    return tuple(seen)
+
+
+#: Stored states a round may carry and still vouch for its coverage. Anything
+#: else, including a value this build does not recognise, is excluded: a
+#: corrupt or newer state means more review, not less.
+_REUSABLE_STATES = frozenset(
+    {
+        "",
+        ModelVerification.VERIFIED.value,
+        ModelVerification.UNVERIFIABLE.value,
+        ModelVerification.UNREPORTED.value,
+    },
+)
 
 
 def _normalize(name: str) -> str:
@@ -67,7 +104,7 @@ def _round_is_reusable(
     """Return whether one stored round passes every reuse rule."""
     identity = record.identity
     state = identity.model_verification
-    if state in (ModelVerification.LEGACY.value, ModelVerification.MISMATCH.value):
+    if state not in _REUSABLE_STATES:
         return False
     if state == ModelVerification.UNREPORTED.value and provenance.reports_model_usage:
         return False
@@ -75,8 +112,7 @@ def _round_is_reusable(
         return False
     if provenance.first_party:
         return all(
-            _normalize(model.name) in allowed or _normalize(model.model) in allowed
-            for model in identity.reported_models
+            _normalize(model.name) in allowed for model in identity.reported_models
         )
     return True
 
@@ -144,5 +180,6 @@ def reusable_rounds_for(*, options: ReviewSessionOptions) -> frozenset[int] | No
             provenance=provenance,
             requested=options.provider.model_name,
             fallback_models=options.ai_config.fallback_models,
+            agent_models=agent_model_overrides(options),
         ),
     )

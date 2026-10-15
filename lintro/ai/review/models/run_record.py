@@ -217,6 +217,9 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
     )
 
 
+#: Longest unrecognised ``model_verification`` value kept on parse.
+_UNRECOGNISED_STATE_LIMIT = 32
+
 #: The keys decision B of ADR-0011 added. A stored record carrying none of
 #: them was written before the ADR, and its model claim is ``legacy``.
 _PROVENANCE_KEYS = (
@@ -238,18 +241,21 @@ def _parse_verification(*, payload: dict[str, Any]) -> str:
     Returns:
         The canonical state value; ``legacy`` for a pre-ADR-0011 record;
         empty for a record that carries provenance but recorded no state (a
-        round that completed no call) or an unrecognised value.
+        round that completed no call). An unrecognised value is kept, in a
+        bounded form, rather than blanked: blank reads as "no state", which
+        the reuse gate accepts, and a corrupt or newer value must not.
     """
     if not any(key in payload for key in _PROVENANCE_KEYS):
         return ModelVerification.LEGACY.value
     raw = payload.get("model_verification")
     if raw is None or raw == "":
         return ""
+    normalized = str(raw).strip().lower()
     try:
-        return ModelVerification(str(raw).strip().lower()).value
+        return ModelVerification(normalized).value
     except ValueError:
         logger.debug(f"Unrecognized model_verification in state blob: {raw!r}")
-        return ""
+        return normalized[:_UNRECOGNISED_STATE_LIMIT] or "unrecognized"
 
 
 def _optional_bool(value: Any) -> bool | None:

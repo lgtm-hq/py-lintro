@@ -15,6 +15,7 @@ import os
 import threading
 from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Any
 
 from loguru import logger
@@ -632,6 +633,10 @@ class AnthropicProvider(ApiStreamingProvider):
             result.stdout,
             max_turns=sent_limit,
         )
+        # The envelope parser only knows the primary model; a fallback call
+        # ran as ``--model <fallback>`` and must say so, or its provenance
+        # check compares the wrong request (#2867).
+        response = replace(response, model=effective_model)
         if not use_one_shot and session_id is not None:
             with self._session_lock:
                 self._session_id = session_id

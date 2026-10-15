@@ -26,6 +26,7 @@ from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.resume import plan_resume
 from lintro.ai.review.reuse_gate import (
+    agent_model_overrides,
     allowed_models_for,
     reusable_rounds,
     reusable_rounds_for,
@@ -235,3 +236,45 @@ def test_coverage_from_a_reusable_round_is_still_inherited() -> None:
     )
 
     assert_that(plan.queue).is_empty()
+
+
+# --- round-two review findings ------------------------------------------------
+
+
+def test_an_unrecognised_stored_state_is_not_reused() -> None:
+    """A corrupt or newer state means more review, not less."""
+    assert_that(_rounds(_run(1, state="bogus"), _run(2))).is_equal_to(frozenset({2}))
+
+
+def test_custom_agent_overrides_are_allowed_outside_a_lane_row() -> None:
+    """A custom agent's ``model`` is a legitimate requested model (ADR-0011 B)."""
+    allowed = allowed_models_for(
+        provenance=RunProvenance(),
+        requested="claude-opus-5-5",
+        fallback_models=(),
+        agent_models=("claude-sonnet-4-6", "claude-sonnet-4-6"),
+    )
+
+    assert_that(allowed).is_equal_to(("claude-opus-5-5", "claude-sonnet-4-6"))
+
+
+def test_agent_model_overrides_are_read_from_the_session_options() -> None:
+    """Distinct overrides, in agent order; agents without one add nothing."""
+    options = MagicMock()
+    options.custom_agents = (
+        MagicMock(model="claude-sonnet-4-6"),
+        MagicMock(model=""),
+        MagicMock(model="claude-haiku-4-5"),
+        MagicMock(model="claude-sonnet-4-6"),
+    )
+
+    assert_that(agent_model_overrides(options)).is_equal_to(
+        ("claude-sonnet-4-6", "claude-haiku-4-5"),
+    )
+
+
+def test_a_stored_alias_cannot_vouch_for_a_different_canonical_model() -> None:
+    """The reuse re-check uses canonical names only, like live verification."""
+    alias = ReportedModel(model="claude-opus-5-5", canonical="glm-5")
+
+    assert_that(_rounds(_run(1, reported=(alias,)))).is_empty()

@@ -12,14 +12,55 @@ from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from lintro.ai.provenance import ModelLedger, detect_run_provenance, verify_models
-from lintro.ai.review.reuse_gate import allowed_models_for
+from lintro.ai.review.models.run_identity import RunIdentity
+from lintro.ai.review.reuse_gate import agent_model_overrides, allowed_models_for
 from lintro.ai.transport import cli_bare_billing
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.review_result import ReviewResult
     from lintro.ai.review.session import ReviewSessionOptions
 
-__all__ = ["run_provenance_fields", "stamp_run_provenance"]
+__all__ = [
+    "checkpoint_identity",
+    "run_provenance_fields",
+    "stamp_run_provenance",
+]
+
+
+def checkpoint_identity(*, options: ReviewSessionOptions) -> RunIdentity:
+    """Return the identity a mid-run checkpoint records for the round (#2867).
+
+    A round killed after a checkpoint leaves coverage behind; the identity
+    says which lane and endpoint produced it, so the reuse gate has
+    something to vouch for that coverage. The round number is filled in by
+    the checkpoint writer and the verification state stays empty: the
+    round has not finished, so it has no state of its own.
+
+    Args:
+        options: Session options naming the provider and transport.
+
+    Returns:
+        The identity, less the round number.
+    """
+    workspace = options.workspace_root
+    provenance = detect_run_provenance(
+        provider=options.provider.name,
+        transport=options.ai_config.transport,
+        bare=cli_bare_billing(options.ai_config),
+        cwd=str(workspace) if workspace is not None else None,
+        configured_base_url=options.ai_config.api_base_url,
+    )
+    transport = options.ai_config.transport
+    return RunIdentity(
+        model=options.provider.model_name,
+        provider=str(options.provider.name),
+        transport=transport.value if transport is not None else "",
+        depth=options.depth,
+        endpoint=provenance.endpoint,
+        first_party=provenance.first_party,
+        credential=provenance.credential.value,
+        lane=provenance.lane,
+    )
 
 
 def stamp_run_provenance(
@@ -83,6 +124,7 @@ def run_provenance_fields(
             provenance=provenance,
             requested=options.provider.model_name,
             fallback_models=options.ai_config.fallback_models,
+            agent_models=agent_model_overrides(options),
         ),
     )
     return {
