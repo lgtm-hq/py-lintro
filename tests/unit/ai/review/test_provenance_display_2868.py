@@ -32,6 +32,7 @@ from lintro.ai.review.provenance_display import (
     provenance_banner,
     terminal_cost_info,
     view_from_identity,
+    view_from_metadata,
 )
 from lintro.ai.review.sticky.assembly import build_sticky_bodies
 
@@ -168,7 +169,7 @@ def test_the_history_heading_discloses_rounds_the_gateway_left_unpriced() -> Non
     )
 
     assert_that(history_cost_summary(runs)).is_equal_to(
-        "~$0.5000 (estimated) · $0.2000 shadow · 1 round unpriced (gateway)",
+        "~$0.5000 (estimated) · ~$0.2000 shadow · 1 round unpriced (gateway)",
     )
     assert_that(history_cost_summary(runs[:1])).is_equal_to("~$0.5000 (estimated)")
     billed = (_run(1, basis="billed", cost=0.5), _run(2, basis="billed", cost=0.25))
@@ -299,22 +300,35 @@ def test_the_terminal_header_carries_the_basis_and_no_gateway_dollars(
     result = _gateway_result(sample_review_result)
 
     info = terminal_cost_info(result.metadata)
-    plain = model_label(
-        ProvenanceView(
-            model=result.metadata.model,
-            endpoint=result.metadata.endpoint,
-            first_party=False,
-            verification="unverifiable",
-        ),
-        plain=True,
-    )
+    plain = model_label(view_from_metadata(result.metadata), plain=True)
 
     assert_that(info).contains(GATEWAY_COST_LABEL)
     assert_that(info).does_not_contain("$")
     assert_that(plain).is_equal_to(
-        "claude-opus-5-5 · answered via api.z.ai (third-party gateway), "
-        "model unverifiable",
+        "claude-opus-5-5 (env) · answered via api.z.ai (third-party gateway), "
+        "model unverifiable · lane zai",
     )
+
+
+def test_a_hostile_reported_name_cannot_shear_a_history_row() -> None:
+    """Backticks and line breaks are stripped; the pipe is escaped in the row."""
+    from lintro.ai.review.sticky.history import _history_row
+
+    run = RunRecord(
+        identity=RunIdentity(
+            round=1,
+            model="glm|4.6`\nnext",
+            endpoint="api.z.ai",
+            first_party=False,
+            model_verification="unverifiable",
+        ),
+    )
+
+    row = _history_row(run=run, latest=True)
+
+    assert_that(row).contains("`glm\\|4.6 next`")
+    assert_that(row).does_not_contain("\n`")
+    assert_that(row.count("\n")).is_equal_to(0)
 
 
 def test_a_zero_figure_with_a_basis_keeps_its_basis_in_the_terminal(

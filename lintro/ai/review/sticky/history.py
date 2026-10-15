@@ -83,7 +83,7 @@ def _this_run_section(
     prefix = "~" if metadata.token_usage_estimated else ""
     # The model never stands without its endpoint, and the figure names
     # its basis (#2868, ADR-0011 B).
-    model_cell = model_label(view_from_metadata(metadata), limit=80)
+    model_cell = _model_cell(label=model_label(view_from_metadata(metadata), limit=80))
     cost_cell = cost_label(
         cost=metadata.cost_estimate_usd,
         basis=metadata.cost_basis,
@@ -269,6 +269,21 @@ def _open_after(*, run: RunRecord) -> int:
     return outcome.p1 + outcome.p2 + outcome.p3
 
 
+def _model_cell(*, label: str) -> str:
+    """Make a model label safe inside a hand-built table row (#2868).
+
+    ``model_label`` strips backticks and line breaks; the pipe is the table
+    renderer's to escape, and these rows are built by hand.
+
+    Args:
+        label: The rendered model label.
+
+    Returns:
+        The label with pipes escaped.
+    """
+    return label.replace("|", "\\|")
+
+
 def _run_cost_label(*, run: RunRecord) -> str:
     """Render a stored round's figure with its basis (#2868, ADR-0011 B)."""
     return cost_label(
@@ -305,7 +320,7 @@ def _history_row(*, run: RunRecord, latest: bool) -> str:
         f"| {identity.round}{' (latest)' if latest else ''} "
         f"| {f'`{short}`' if short else '—'} "
         f"| {VERDICT_EMOJI[outcome.verdict]} {verdict} "
-        f"| {model_label(view_from_identity(identity))} "
+        f"| {_model_cell(label=model_label(view_from_identity(identity)))} "
         f"| {_open_after(run=run)} "
         f"| {fixed} "
         f"| {prefix}{format_int(usage.prompt)} / "
@@ -395,7 +410,7 @@ def _round_expander(
             "| files | checks | duration |",
             "| --- | --- | --- | --- |:-:|:-:|:-:|---|",
             (
-                f"| {model_label(view_from_identity(identity))} "
+                f"| {_model_cell(label=model_label(view_from_identity(identity)))} "
                 f"| {transport} "
                 f"| {_run_cost_label(run=run)} "
                 f"| {prefix}{format_int(usage.prompt)} / "

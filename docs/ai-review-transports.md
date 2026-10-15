@@ -181,13 +181,15 @@ whose basis is derived from `auth_mode` + locally estimated token usage.
 
 Every surface that names the model names the endpoint beside it (#2868): the sticky's
 `This run` row, the badges, the run-by-run history, the review body footer and the
-terminal header read ``requested `model` (source) · verified on `host` ``, or
-``answered via `host` (third-party gateway), model unverifiable``. When the state is not
-`verified`, a line at the top of the sticky, outside every collapsible, names the lane,
-the endpoint and the state. Every dollar figure carries its basis: `unknown` reads
-`n/a (third-party gateway)`, never a figure and never zero; a list-price shadow is
-labelled a shadow; a round from before ADR-0011 is labelled `predates ADR-0011`; and the
-history heading discloses how many rounds contributed no priced cost.
+terminal header read ``requested `model` (source) · verified on `host` · lane `x` ``, or
+``answered via `host` (third-party gateway), model unverifiable``; stored history rows
+carry no `(source)`. When the state is `mismatch`, `unverifiable` or `unreported`, a
+line at the top of the sticky, outside every collapsible, names the lane, the endpoint
+and the state; a `legacy` round never tops a board (ADR-0011 C). Every dollar figure
+carries its basis: `unknown` reads `n/a (third-party gateway)`, never a figure and never
+zero; a list-price shadow is labelled a shadow; a round from before ADR-0011 is labelled
+`predates ADR-0011`; and the history heading discloses how many rounds contributed no
+priced cost.
 
 Each run also records where its requests went (#2867): `endpoint` (host only),
 `first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `codex_oauth`,

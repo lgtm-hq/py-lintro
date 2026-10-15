@@ -138,8 +138,15 @@ def view_from_identity(identity: RunIdentity) -> ProvenanceView:
 
 
 def _code(text: str, *, limit: int, plain: bool) -> str:
-    """Quote *text* as a code span unless rendering plain terminal text."""
+    """Quote *text* as a code span unless rendering plain terminal text.
+
+    A value a third-party gateway reported can carry anything; a backtick
+    would end the span early and a line break would end a table row, so both
+    are removed. Pipes are left to the table renderer, which escapes its
+    cells (and would double an escape applied here).
+    """
     safe = sanitize_comment_text(text, limit=limit)
+    safe = safe.replace("`", "").replace("\r", " ").replace("\n", " ").strip()
     return safe if plain else f"`{safe}`"
 
 
@@ -345,7 +352,9 @@ def history_cost_summary(runs: Sequence[RunRecord]) -> str:
         else:
             parts.append(f"${priced:.4f}")
     if shadow:
-        parts.append(f"${shadow:.4f} shadow")
+        # A shadow carries the tilde like every other figure the provider
+        # did not bill (the footer legend).
+        parts.append(f"~${shadow:.4f} shadow")
     if unpriced:
         noun = "round" if unpriced == 1 else "rounds"
         parts.append(f"{unpriced} {noun} unpriced (gateway)")
