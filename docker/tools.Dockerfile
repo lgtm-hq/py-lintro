@@ -24,7 +24,7 @@ FROM python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6
 
 ARG BUN_VERSION=1.4.2
 ARG UV_VERSION=0.12.19
-ARG GO_VERSION=1.27.1
+ARG GO_VERSION=1.27.2
 
 LABEL maintainer="lgtm-hq"
 LABEL org.opencontainers.image.source="https://github.com/lgtm-hq/py-lintro"
