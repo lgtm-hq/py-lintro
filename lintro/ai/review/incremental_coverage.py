@@ -62,10 +62,11 @@ class CheckpointStamp:
             leaves coverage the reuse gate can place on a lane and endpoint.
             ``None`` writes no run record.
         cost_basis: The basis the transport profile resolved for the round.
-            On ``unknown`` the checkpointed figure is a shadow, not money,
-            and it is the finished chunks' token counts priced on
-            ``shadow_price_model``, never the envelope's figure.
-        shadow_price_model: The model whose list table prices a shadow.
+            On ``unknown`` the checkpointed figure is a shadow, not money:
+            what the budget charged, priced per call on the shadow model
+            as each returned, never the envelope's figure.
+        shadow_price_model: The model whose list table priced the shadow;
+            recorded for the reader, it drives no arithmetic here.
         verify: Reads what the calls completed so far established: the
             verification state, the reported models and whether a cost
             figure was reported, so the partial record carries them and a
@@ -178,8 +179,8 @@ def write_incremental_coverage_part(
         reviewed_ranges=ranges_by_path(reviewed_ranges=resume.reviewed_ranges),
     )
     # A shadow figure is never spend (#2867, ADR-0011 B): a gateway's is
-    # the finished chunks' tokens on the shadow table, and a subscription
-    # figure the envelope reported is the list-price shadow. Only a
+    # what the budget charged, priced per call on the shadow model, and a
+    # subscription figure the envelope reported is the list-price shadow. Only a
     # subscription round that reported no figure keeps its local estimate
     # as spend, as its final record will.
     snapshot = stamp.verify() if stamp.verify is not None else LedgerSnapshot()
