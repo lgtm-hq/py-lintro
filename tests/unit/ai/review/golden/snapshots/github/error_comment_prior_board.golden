@@ -4,6 +4,8 @@
 
 > ⚠️ **Round 3 could not complete** — `anthropic` the review could not be completed: provider refused the request · showing round 2 results below. See the cause above and the workflow logs; retry if it looks transient.
 
+> ℹ️ **Provenance unknown** — this round predates ADR-0011: it records no endpoint, so nothing can say which lane answered for `claude-sonnet-4-20250514`.
+
 ### Findings · Round 2 · `1111111` · coverage n/a · 1 open · 1 fixed this round
 
 | Δ | Sev | Finding | Where | Since |
@@ -21,11 +23,11 @@
 |:-:|:-:|:-:|:-:|
 | **1** | **0** | **0** | **1** |
 
-<details><summary><b>Round 1</b> · <code>1111111</code> · ⛔ blocked · 0 fixed, 2 left open · $0.1101 · 38s</summary>
+<details><summary><b>Round 1</b> · <code>1111111</code> · ⛔ blocked · 0 fixed, 2 left open · ~$0.1101 (estimated) · 38s</summary>
 
 | model | transport | est. cost | tokens in / out | depth | files | checks | duration |
 | --- | --- | --- | --- |:-:|:-:|:-:|---|
-| `claude-sonnet-4-20250514` | api · api_key | $0.1101 | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
+| `claude-sonnet-4-20250514` · predates ADR-0011 | api · api_key | ~$0.1101 (estimated) | 11,000 / 2,100 | 2 | 3 | 2 | 38s |
 
 </details>
 

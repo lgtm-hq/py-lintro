@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from lintro.ai.review.enums.finding_status import FindingStatus
-from lintro.ai.review.github_badges import format_cost, format_int
+from lintro.ai.review.github_badges import format_int
 from lintro.ai.review.github_constants import (
     ARCHIVE_MARKER,
     MAX_COMMENT_CHARS,
@@ -21,12 +21,21 @@ from lintro.ai.review.github_notes import (
     format_timings_note,
     format_verification_note_line,
 )
-from lintro.ai.review.github_render import Section, assemble, sanitize_comment_text
+from lintro.ai.review.github_render import Section, assemble
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.run_outcome import NARRATIVE_LIMIT
 from lintro.ai.review.models.run_record import RunRecord
 from lintro.ai.review.pr_budget import RUNTIME_BOUND_BASES, RUNTIME_BOUND_NOTE
+from lintro.ai.review.provenance_display import (
+    SHADOW_BASES,
+    cost_label,
+    history_cost_summary,
+    model_label,
+    run_cost_figure,
+    view_from_identity,
+    view_from_metadata,
+)
 from lintro.ai.review.sticky.cells import (
     _cell,
     _fmt_compact,
@@ -69,9 +78,14 @@ def _this_run_section(
     metadata = result.metadata
     usage = metadata.token_usage
     prefix = "~" if metadata.token_usage_estimated else ""
-    model = sanitize_comment_text(metadata.model or "unknown", limit=80)
-    source = metadata.model_source
-    model_cell = f"`{model}`" + (f" ({source})" if source else "")
+    # The model never stands without its endpoint, and the figure names
+    # its basis (#2868, ADR-0011 B).
+    model_cell = model_label(view_from_metadata(metadata), limit=80)
+    cost_cell = cost_label(
+        cost=metadata.cost_estimate_usd,
+        basis=metadata.cost_basis,
+        estimated=True,
+    )
     return "\n".join(
         [
             "**This run**",
@@ -82,7 +96,7 @@ def _this_run_section(
             (
                 f"| {model_cell} "
                 f"| {_transport_label(transport=transport, auth_mode=auth_mode)} "
-                f"| {format_cost(metadata.cost_estimate_usd, estimated=True)} "
+                f"| {cost_cell} "
                 f"| {prefix}{format_int(int(usage.get('prompt', 0)))} / "
                 f"{prefix}{format_int(int(usage.get('completion', 0)))} "
                 f"| {metadata.depth} "
@@ -135,6 +149,9 @@ def _pr_budget_line(result: ReviewResult) -> str:
         notes.append("display only: not enforced on this cost basis")
     if metadata.cost_basis in {basis.value for basis in RUNTIME_BOUND_BASES}:
         notes.append(RUNTIME_BOUND_NOTE)
+    if metadata.cost_basis in SHADOW_BASES:
+        # The cap settles on a shadow figure that is never spend (ADR-0011 B).
+        notes.append("includes this round's shadow figure, counted for the cap")
     return f"{line} ({'; '.join(notes)})" if notes else line
 
 
@@ -169,7 +186,6 @@ def _history_section(
     if len(runs) < 2:
         return ""
 
-    total_cost = sum(run.usage.cost for run in runs)
     total_tokens = sum(run.usage.total for run in runs)
     estimated = any(run.usage.estimated for run in runs)
     prefix = "~" if estimated else ""
@@ -188,7 +204,7 @@ def _history_section(
         f"### 🕘 History · {previous} previous "
         f"{_plural(count=previous, noun='run')} · "
         f"{resolved_total} fixed · "
-        f"{format_cost(total_cost, estimated=estimated)} · "
+        f"{history_cost_summary(runs)} · "
         f"{prefix}{_fmt_compact(value=total_tokens)} tokens"
     )
     if archive_only:
@@ -239,6 +255,15 @@ def _open_after(*, run: RunRecord) -> int:
     return outcome.p1 + outcome.p2 + outcome.p3
 
 
+def _run_cost_label(*, run: RunRecord) -> str:
+    """Render a stored round's figure with its basis (#2868, ADR-0011 B)."""
+    return cost_label(
+        cost=run_cost_figure(run),
+        basis=run.usage.cost_basis,
+        estimated=run.usage.estimated,
+    )
+
+
 def _history_row(*, run: RunRecord, latest: bool) -> str:
     """Render one row of the per-run history table.
 
@@ -266,12 +291,12 @@ def _history_row(*, run: RunRecord, latest: bool) -> str:
         f"| {identity.round}{' (latest)' if latest else ''} "
         f"| {f'`{short}`' if short else '—'} "
         f"| {VERDICT_EMOJI[outcome.verdict]} {verdict} "
-        f"| `{_cell(text=identity.model or 'unknown', limit=60)}` "
+        f"| {model_label(view_from_identity(identity))} "
         f"| {_open_after(run=run)} "
         f"| {fixed} "
         f"| {prefix}{format_int(usage.prompt)} / "
         f"{prefix}{format_int(usage.completion)} "
-        f"| {format_cost(usage.cost, estimated=usage.estimated)} "
+        f"| {_run_cost_label(run=run)} "
         f"| {usage.duration:.0f}s |"
     )
 
@@ -311,7 +336,7 @@ def _round_expander(
         f"<b>Round {identity.round}</b>{sha_bit} · "
         f"{VERDICT_EMOJI[outcome.verdict]} {verdict} · "
         f"{fixed} fixed, {_open_after(run=run)} left open · "
-        f"{format_cost(usage.cost, estimated=usage.estimated)} · "
+        f"{_run_cost_label(run=run)} · "
         f"{usage.duration:.0f}s{limited}"
     )
     narrative = _DETAILS_TAG_RE.sub(
@@ -356,9 +381,9 @@ def _round_expander(
             "| files | checks | duration |",
             "| --- | --- | --- | --- |:-:|:-:|:-:|---|",
             (
-                f"| `{_cell(text=identity.model or 'unknown', limit=60)}` "
+                f"| {model_label(view_from_identity(identity))} "
                 f"| {transport} "
-                f"| {format_cost(usage.cost, estimated=usage.estimated)} "
+                f"| {_run_cost_label(run=run)} "
                 f"| {prefix}{format_int(usage.prompt)} / "
                 f"{prefix}{format_int(usage.completion)} "
                 f"| {identity.depth} "

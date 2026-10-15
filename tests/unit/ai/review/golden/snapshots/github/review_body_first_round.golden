@@ -35,7 +35,7 @@
 
 | model | est. cost | tokens in | tokens out |
 | --- | --- | --- | --- |
-| `claude-sonnet-4-20250514` | $0.1234 | 12,000 | 2,400 |
+| `claude-sonnet-4-20250514` · verified on `api.anthropic.com` | ~$0.1234 (estimated) | 12,000 | 2,400 |
 
 | transport | depth | strictness | files | checks | duration | lintro |
 | --- | --- | --- | --- | --- | --- | --- |
