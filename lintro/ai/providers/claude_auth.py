@@ -220,7 +220,8 @@ def claude_settings_env_value(
             continue
         try:
             data = json.loads(text)
-        except ValueError:
+        except (ValueError, RecursionError):
+            # A broken or hostile settings file must not fail a review.
             continue
         if not isinstance(data, dict):
             continue

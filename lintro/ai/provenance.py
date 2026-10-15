@@ -43,6 +43,7 @@ from lintro.ai.providers.claude_auth import (
     claude_api_key_available,
     claude_settings_env_value,
 )
+from lintro.ai.providers.openai.codex_auth import CODEX_HOME_ENV
 from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.providers.response import AIResponse
 
@@ -281,6 +282,25 @@ def _anthropic_cli_credential(
     return CredentialKind.UNKNOWN
 
 
+def _codex_session_file(*, env: Mapping[str, str], home: Path) -> Path:
+    """Return the file the codex CLI reads its stored session from.
+
+    ``CODEX_HOME`` wins when set and non-empty, as it does for ``codex``
+    itself: CI restores the session outside the home directory.
+
+    Args:
+        env: Environment the transport runs under.
+        home: Home directory the default location is resolved against.
+
+    Returns:
+        ``$CODEX_HOME/auth.json`` or ``<home>/.codex/auth.json``.
+    """
+    codex_home = env.get(CODEX_HOME_ENV, "").strip()
+    if codex_home:
+        return Path(codex_home) / CODEX_SESSION_FILE.name
+    return home / CODEX_SESSION_FILE
+
+
 def _credential(
     *,
     provider: AIProvider | None,
@@ -299,7 +319,7 @@ def _credential(
     if provider is AIProvider.ANTHROPIC:
         return _anthropic_cli_credential(bare=bare, env=env, cwd=cwd)
     if provider is AIProvider.OPENAI:
-        if (home / CODEX_SESSION_FILE).is_file():
+        if _codex_session_file(env=env, home=home).is_file():
             return CredentialKind.CODEX_OAUTH
         if env.get(OPENAI_API_KEY_ENV, "").strip():
             return CredentialKind.API_KEY

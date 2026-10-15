@@ -1040,3 +1040,48 @@ async def test_a_zero_rate_shadow_model_cannot_make_the_cap_free() -> None:
 
     assert_that(response.cost_estimate).is_greater_than(0.0)
     assert_that(budget.spent).is_equal_to(response.cost_estimate)
+
+
+def test_codex_home_locates_the_session_file_outside_the_home_directory(
+    tmp_path: Path,
+) -> None:
+    """CI restores the codex session under ``CODEX_HOME``, not ``~/.codex``."""
+    from lintro.ai.providers.openai.codex_auth import CODEX_HOME_ENV
+
+    codex_home = tmp_path / "restored-codex"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text("{}", encoding="utf-8")
+    home = tmp_path / "home"
+    home.mkdir()
+
+    provenance = detect_run_provenance(
+        provider=AIProvider.OPENAI,
+        transport=AITransport.CLI,
+        env=_env(tmp_path, **{CODEX_HOME_ENV: str(codex_home)}),
+        home=home,
+        cwd=str(tmp_path),
+    )
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.CODEX_OAUTH)
+    assert_that(auth_mode_for(provenance.credential)).is_equal_to("subscription")
+
+
+def test_a_deeply_nested_settings_file_does_not_fail_the_lookup(tmp_path: Path) -> None:
+    """The settings parser swallows a recursion blow-up like its sibling does."""
+    from lintro.ai.providers.claude_auth import claude_settings_env_value
+
+    workspace = tmp_path / "repo"
+    (workspace / ".claude").mkdir(parents=True)
+    depth = 100_000
+    (workspace / ".claude" / "settings.json").write_text(
+        "[" * depth + "]" * depth,
+        encoding="utf-8",
+    )
+
+    value = claude_settings_env_value(
+        "ANTHROPIC_BASE_URL",
+        cwd=str(workspace),
+        env=_env(tmp_path),
+    )
+
+    assert_that(value).is_none()
