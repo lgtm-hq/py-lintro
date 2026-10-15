@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Literal
 
 from lintro.ai.enums import AITransport, ConfigSource
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.enums.credential_kind import CredentialKind
+from lintro.ai.provenance import auth_mode_for, detect_run_provenance
 from lintro.ai.providers.anthropic.config import anthropic_settings
 from lintro.ai.providers.claude_auth import should_send_bare
 from lintro.ai.registry import AIProvider
@@ -29,7 +31,7 @@ __all__ = [
 DEFAULT_API_TIMEOUT = 60.0
 DEFAULT_CLI_TIMEOUT = 1800.0
 
-AuthMode = Literal["api_key", "subscription", "unknown"]
+AuthMode = Literal["api_key", "subscription", "gateway_token", "unknown"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +76,43 @@ def resolve_cost_basis(*, auth_mode: str, estimated: bool) -> CostBasis | None:
     if estimated:
         return CostBasis.ESTIMATED
     return None
+
+
+def _auth_mode(*, credential: CredentialKind, bare_billing: bool) -> AuthMode:
+    """Return the auth mode the credential implies, or the policy's label.
+
+    Args:
+        credential: The credential kind present in the environment.
+        bare_billing: Whether the CLI bills an API key under ``--bare``.
+
+    Returns:
+        ``gateway_token`` for a gateway token, otherwise ``api_key`` or
+        ``subscription`` as the credential or, failing that, the policy says.
+    """
+    derived = auth_mode_for(credential)
+    if derived == "gateway_token":
+        return "gateway_token"
+    if derived == "api_key" or (not derived and bare_billing):
+        return "api_key"
+    return "subscription"
+
+
+def cli_bare_billing(ai_config: AIConfig) -> bool:
+    """Return whether the ``claude`` CLI will be sent ``--bare`` for *ai_config*.
+
+    Under ``--bare`` the call bills the API key, not the subscription; the
+    provenance, auth mode and cost basis of a CLI run all follow from it.
+
+    Args:
+        ai_config: AI configuration.
+
+    Returns:
+        True for the Anthropic provider when its bare-mode policy resolves to
+        sending the flag; False for every other provider.
+    """
+    return ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
+        configured=anthropic_settings(ai_config).cli_bare,
+    )
 
 
 def _profile_max_cost(ai_config: AIConfig) -> float | None:
@@ -128,16 +167,32 @@ def resolve_transport_settings(ai_config: AIConfig) -> ResolvedTransportSettings
         # (CliBareMode.AUTO, #1859): the call then bills the key, not the
         # subscription, so report api_key/estimated instead of claiming
         # subscription/unpriceable (#1923 cost provenance).
-        bare_billing = ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
-            configured=anthropic_settings(ai_config).cli_bare,
+        bare_billing = cli_bare_billing(ai_config)
+        # The credential present decides auth_mode, not the --bare policy:
+        # a gateway token must not read as a subscription (#2867). A
+        # subscription run pointed off the provider's host is priced on the
+        # wrong table, so its figures are unknown, not unpriceable.
+        provenance = detect_run_provenance(
+            provider=ai_config.provider,
+            transport=transport,
+            bare=bare_billing,
         )
+        if bare_billing:
+            basis = CostBasis.ESTIMATED
+        elif not provenance.first_party:
+            basis = CostBasis.UNKNOWN
+        else:
+            basis = CostBasis.UNPRICEABLE
         return ResolvedTransportSettings(
             transport=transport,
             timeout=timeout,
             max_cost_usd=max_cost,
-            cost_is_advisory=True,
-            auth_mode="api_key" if bare_billing else "subscription",
-            cost_basis=(CostBasis.ESTIMATED if bare_billing else CostBasis.UNPRICEABLE),
+            cost_is_advisory=basis is not CostBasis.UNKNOWN,
+            auth_mode=_auth_mode(
+                credential=provenance.credential,
+                bare_billing=bare_billing,
+            ),
+            cost_basis=basis,
         )
 
     timeout = (

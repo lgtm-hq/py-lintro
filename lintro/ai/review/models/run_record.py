@@ -18,6 +18,7 @@ from typing import Any
 from loguru import logger
 
 from lintro.ai.enums.cost_basis import CostBasis
+from lintro.ai.enums.model_verification import ModelVerification
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models._coerce import coerce_float, coerce_int
 from lintro.ai.review.models.run_coverage import RunCoverage
@@ -130,8 +131,18 @@ class RunRecord:
             ("cost_basis", usage.cost_basis),
             ("context", usage.context),
             ("merge_base", identity.merge_base),
+            # Provenance (#2867). ``first_party`` is written beside
+            # ``endpoint`` below because a recorded False must survive.
+            ("lane", identity.lane),
+            ("endpoint", identity.endpoint),
+            ("credential", identity.credential),
+            ("reported_models", list(identity.reported_models)),
+            ("model_verification", identity.model_verification),
+            ("cost_shadow", round(usage.cost_shadow, 6)),
         )
         payload.update({key: value for key, value in optional if value})
+        if identity.endpoint and identity.first_party is not None:
+            payload["first_party"] = identity.first_party
         if outcome.resolved is not None:
             payload["resolved"] = outcome.resolved
         if outcome.open_after is not None:
@@ -193,7 +204,60 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         depth=coerce_int(payload.get("depth")),
         strictness=str(payload.get("strictness", "")),
         merge_base=str(payload.get("merge_base", "") or ""),
+        endpoint=str(payload.get("endpoint", "") or ""),
+        first_party=_optional_bool(payload.get("first_party")),
+        credential=str(payload.get("credential", "") or ""),
+        reported_models=_string_tuple(payload.get("reported_models")),
+        lane=str(payload.get("lane", "") or ""),
+        model_verification=_parse_verification(payload=payload),
     )
+
+
+#: The keys decision B of ADR-0011 added. A stored record carrying none of
+#: them was written before the ADR, and its model claim is ``legacy``.
+_PROVENANCE_KEYS = (
+    "endpoint",
+    "first_party",
+    "credential",
+    "reported_models",
+    "lane",
+    "model_verification",
+)
+
+
+def _parse_verification(*, payload: dict[str, Any]) -> str:
+    """Parse the stored verification state, assigning ``legacy`` by absence.
+
+    Args:
+        payload: Decoded JSON mapping for one run.
+
+    Returns:
+        The canonical state value; ``legacy`` for a pre-ADR-0011 record;
+        empty for a record that carries provenance but recorded no state (a
+        round that completed no call) or an unrecognised value.
+    """
+    if not any(key in payload for key in _PROVENANCE_KEYS):
+        return ModelVerification.LEGACY.value
+    raw = payload.get("model_verification")
+    if raw is None or raw == "":
+        return ""
+    try:
+        return ModelVerification(str(raw).strip().lower()).value
+    except ValueError:
+        logger.debug(f"Unrecognized model_verification in state blob: {raw!r}")
+        return ""
+
+
+def _optional_bool(value: Any) -> bool | None:
+    """Return *value* when it is a real bool, else ``None``."""
+    return value if isinstance(value, bool) else None
+
+
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    """Return the non-empty strings of a stored list, in order."""
+    if not isinstance(value, list):
+        return ()
+    return tuple(item for item in value if isinstance(item, str) and item)
 
 
 def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
@@ -256,6 +320,7 @@ def _usage_from_payload(*, payload: dict[str, Any]) -> RunUsage:
         estimated=estimated,
         cost_basis=cost_basis,
         context=coerce_int(payload.get("context")),
+        cost_shadow=coerce_float(payload.get("cost_shadow")),
     )
 
 

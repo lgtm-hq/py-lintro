@@ -33,6 +33,7 @@ import asyncio
 import time
 from typing import TYPE_CHECKING
 
+from lintro.ai.provenance import model_ledger
 from lintro.ai.review.pr_head import remove_pr_head
 from lintro.ai.review.result_assembly import (
     assemble_review_result,
@@ -40,6 +41,7 @@ from lintro.ai.review.result_assembly import (
 )
 from lintro.ai.review.run_execution import execute_run
 from lintro.ai.review.run_planning import plan_run
+from lintro.ai.review.run_provenance import stamp_run_provenance
 from lintro.ai.review.session import ReviewSession, ReviewSessionOptions
 from lintro.ai.review.synthesis_prompt import guarded_changed_paths
 from lintro.ai.review.timings import ReviewPhase, ReviewTimingRecorder
@@ -195,15 +197,19 @@ async def _run_review_steps(
     )
 
     plan = plan_run(context=context, options=options, timings=timings)
-    outcome = await execute_run(
-        context=context,
-        options=options,
-        plan=plan,
-        session=session,
-    )
-    return assemble_review_result(
+    # Every provider call of the run reports what answered to one ledger, so
+    # the result can say which models the round was produced by (#2867).
+    with model_ledger() as ledger:
+        outcome = await execute_run(
+            context=context,
+            options=options,
+            plan=plan,
+            session=session,
+        )
+    result = assemble_review_result(
         context=context,
         options=options,
         plan=plan,
         outcome=outcome,
     )
+    return stamp_run_provenance(result=result, options=options, ledger=ledger)

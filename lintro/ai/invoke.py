@@ -17,6 +17,7 @@ from lintro.ai.enums.ai_transport import AITransport
 from lintro.ai.exceptions import AITurnLimitError
 from lintro.ai.fallback import complete_with_fallback
 from lintro.ai.json_response import CliSchemaRequest
+from lintro.ai.provenance import record_response
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.retry import with_retry
 
@@ -138,6 +139,9 @@ async def call_ai(
             raise
         if budget is not None:
             budget.record(response.cost_estimate)
+        # The one seam every provider call crosses (ADR-0008, invariant 2),
+        # so the run's model ledger sees each completed call once (#2867).
+        record_response(response)
         return response
 
     call_with_retry = with_retry(

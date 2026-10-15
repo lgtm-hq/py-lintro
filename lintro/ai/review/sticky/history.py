@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.review.enums.finding_status import FindingStatus
 from lintro.ai.review.github_badges import format_cost, format_int
 from lintro.ai.review.github_constants import (
@@ -27,7 +26,7 @@ from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.run_outcome import NARRATIVE_LIMIT
 from lintro.ai.review.models.run_record import RunRecord
-from lintro.ai.review.pr_budget import RUNTIME_BOUND_NOTE
+from lintro.ai.review.pr_budget import RUNTIME_BOUND_BASES, RUNTIME_BOUND_NOTE
 from lintro.ai.review.sticky.cells import (
     _cell,
     _fmt_compact,
@@ -134,7 +133,7 @@ def _pr_budget_line(result: ReviewResult) -> str:
     notes = []
     if not metadata.pr_budget_enforced:
         notes.append("display only: not enforced on this cost basis")
-    if metadata.cost_basis == CostBasis.UNPRICEABLE.value:
+    if metadata.cost_basis in {basis.value for basis in RUNTIME_BOUND_BASES}:
         notes.append(RUNTIME_BOUND_NOTE)
     return f"{line} ({'; '.join(notes)})" if notes else line
 

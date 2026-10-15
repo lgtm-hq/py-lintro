@@ -30,6 +30,19 @@ class RunIdentity:
         merge_base: ``merge-base(base, head)`` at review time (#2627), so
             the next round can tell whether the base was merged in since;
             empty on a record written before it was recorded.
+        endpoint: Host the transport was pointed at (#2867, ADR-0011 B);
+            empty on a record that predates it.
+        first_party: Whether ``endpoint`` is the provider's own; ``None``
+            when not recorded.
+        credential: The credential kind actually forwarded
+            (:class:`~lintro.ai.enums.credential_kind.CredentialKind`).
+        reported_models: Every model the transport named as having
+            answered, in first-seen order.
+        lane: The review lane the CI wrapper exported, or empty.
+        model_verification: The
+            :class:`~lintro.ai.enums.model_verification.ModelVerification`
+            state. ``legacy`` is assigned only when a stored record carries
+            none of these fields; a live run never writes it.
     """
 
     round: int = 1
@@ -42,3 +55,9 @@ class RunIdentity:
     depth: int = 0
     strictness: str = ""
     merge_base: str = ""
+    endpoint: str = ""
+    first_party: bool | None = None
+    credential: str = ""
+    reported_models: tuple[str, ...] = ()
+    lane: str = ""
+    model_verification: str = ""

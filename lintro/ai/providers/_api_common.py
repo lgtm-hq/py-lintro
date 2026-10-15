@@ -24,6 +24,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.providers.response import AIResponse
 from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
@@ -79,6 +80,9 @@ def finish_api_completion(
         output_tokens=output_tokens,
         cost_estimate=cost,
         provider=provider,
+        # An SDK call names its model in the request and the vendor serves
+        # exactly that or rejects it, so the effective model is what answered.
+        reported_models=(ReportedModel(model=model, canonical=model, provider="api"),),
     )
 
 

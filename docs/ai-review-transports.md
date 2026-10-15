@@ -164,9 +164,26 @@ rather than proving vendor output. Re-record whenever a pin in
 ## Reported numbers
 
 Per-run sticky state records `transport`, `auth_mode`, and `cost_basis` (`billed` /
-`estimated` / `unpriceable`). Under subscription CLI, any `~$` figure is unpriceable —
-not a bill. Live `api` runs always record `billed` (usage is provider-reported);
-`estimated` appears only for bare-billed CLI runs and for legacy records whose basis is
-derived from `auth_mode` + locally estimated token usage.
+`estimated` / `unpriceable` / `list_price_shadow` / `unknown`). Under subscription CLI a
+`~$` figure is not a bill: it is recorded as `list_price_shadow` when the CLI envelope
+reported a list-price figure for a first-party endpoint, and as `unpriceable` when it
+reported none. A run pointed at a non-first-party endpoint records `unknown`: the
+envelope's figure is priced on the wrong table and is never shown as dollars. On both
+shadow bases the record's `cost` is zero and the figure lives in `cost_shadow`, which
+still settles `ai.max_cost_usd` and the PR budget (ADR-0011, decision B). Live `api`
+runs always record `billed` (usage is provider-reported); `estimated` appears only for
+bare-billed CLI runs and for legacy records whose basis is derived from `auth_mode` +
+locally estimated token usage.
+
+Each run also records where its requests went (#2867): `endpoint` (host only),
+`first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `codex_oauth`,
+`cursor_api_key`), `reported_models` (the Claude CLI envelope's `modelUsage`), `lane`,
+and `model_verification` (`verified`, `mismatch`, `unverifiable`, `unreported`; a record
+from before these fields reads as `legacy`). `auth_mode` follows `credential`, so a
+gateway token reads `gateway_token`, not `subscription`. In CI the review-lanes wrapper
+exports the resolved lane row as `LINTRO_REVIEW_LANE`, `LINTRO_REVIEW_ENDPOINT`,
+`LINTRO_REVIEW_FIRST_PARTY` and `LINTRO_REVIEW_ALLOWED_MODELS`, and those win; outside
+CI the provider's base-URL override (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the
+Claude settings files' `env` block) and the provider's own host decide.
 
 See also `docs/ai-features.md` and the dogfood workflow helpers under `scripts/ci/`.

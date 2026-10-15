@@ -123,6 +123,21 @@ class ReviewMetadata:
             run never reached the completed path (a stopped run) or the
             result predates the pass. Surfaces render nothing for ``None``
             and nothing for a pass that selected no finding.
+        endpoint (str): Host the transport was pointed at (#2867, ADR-0011
+            B). Empty on legacy records and on a run that made no call.
+        first_party (bool | None): Whether ``endpoint`` is the provider's
+            own. ``None`` when not recorded.
+        credential (str): The credential kind actually forwarded
+            (:class:`~lintro.ai.enums.credential_kind.CredentialKind`).
+        reported_models (tuple[str, ...]): Every model the transport named
+            as having answered, in first-seen order.
+        model_verification (str): The
+            :class:`~lintro.ai.enums.model_verification.ModelVerification`
+            state; empty when no call completed.
+        lane (str): The review lane the CI wrapper exported, if any.
+        cost_reported (bool): Whether the transport reported a cost figure
+            of its own, so ``list_price_shadow`` can be told from
+            ``unpriceable``.
         lint_facts_note (str): Why the run had no linter facts to cite when
             a saved report was requested with ``--lint-report`` but could
             not be used — missing, oversized, or malformed (#2571). Rendered
@@ -180,6 +195,13 @@ class ReviewMetadata:
     )
     synthesis: SynthesisOutcome | None = None
     verification: VerificationSummary | None = None
+    endpoint: str = ""
+    first_party: bool | None = None
+    credential: str = ""
+    reported_models: tuple[str, ...] = field(default_factory=tuple)
+    model_verification: str = ""
+    lane: str = ""
+    cost_reported: bool = False
     lint_facts_note: str = ""
 
     @property

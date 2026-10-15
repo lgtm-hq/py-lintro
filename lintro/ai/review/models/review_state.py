@@ -49,6 +49,10 @@ class ReviewState:
             round's cost, including a round interrupted after a checkpoint.
             Only ever grows; run pruning never lowers it. Read it through
             :attr:`review_spend_usd`.
+        pr_shadow_usd: The PR's cumulative shadow figure (#2867): what its
+            ``list_price_shadow`` and ``unknown`` rounds settled the caps on.
+            Monotonic like ``pr_spend_usd``; read it through
+            :attr:`review_shadow_usd`.
     """
 
     version: int = STATE_VERSION
@@ -68,6 +72,20 @@ class ReviewState:
     lintro_version: str = ""
     truncated: bool = False
     pr_spend_usd: float = 0.0
+    pr_shadow_usd: float = 0.0
+
+    @property
+    def review_shadow_usd(self) -> float:
+        """Return the PR's cumulative shadow figure, never below the runs' sum.
+
+        The shadow is what ``list_price_shadow`` and ``unknown`` rounds
+        settled the caps on; it joins the PR-budget prior spend but is never
+        rendered as spend (#2867, ADR-0011 B).
+        """
+        return max(
+            self.pr_shadow_usd,
+            sum(run.usage.cost_shadow for run in self.runs),
+        )
 
     @property
     def review_spend_usd(self) -> float:
@@ -117,6 +135,8 @@ class ReviewState:
             payload["truncated"] = True
         if self.review_spend_usd:
             payload["pr_spend_usd"] = self.review_spend_usd
+        if self.review_shadow_usd:
+            payload["pr_shadow_usd"] = self.review_shadow_usd
         return payload
 
     def to_artifact_dict(self) -> dict[str, Any]:
@@ -149,6 +169,7 @@ class ReviewState:
                 for path, patch_hash in self.consumed_flags
             ],
             "pr_spend_usd": self.review_spend_usd,
+            "pr_shadow_usd": self.review_shadow_usd,
         }
         if self.truncated:
             payload["truncated"] = True
@@ -213,22 +234,25 @@ class ReviewState:
             lintro_version=str(payload.get("lintro_version", "")),
             truncated=bool(payload.get("truncated", False)),
             pr_spend_usd=spend_from_payload(payload),
+            pr_shadow_usd=spend_from_payload(payload, key="pr_shadow_usd"),
         )
 
 
-def spend_from_payload(payload: dict[str, Any]) -> float:
-    """Return the stored cumulative spend, or 0.0 when absent or invalid.
+def spend_from_payload(payload: dict[str, Any], *, key: str = "pr_spend_usd") -> float:
+    """Return a stored cumulative figure, or 0.0 when absent or invalid.
 
     A v4 artifact has no ``pr_spend_usd``; :attr:`ReviewState.review_spend_usd`
-    then seeds the total from the runs that survived pruning.
+    then seeds the total from the runs that survived pruning. The same rule
+    reads ``pr_shadow_usd`` (#2867).
 
     Args:
         payload: Decoded artifact mapping.
+        key: Which cumulative figure to read.
 
     Returns:
         A finite, non-negative USD figure.
     """
-    raw = payload.get("pr_spend_usd")
+    raw = payload.get(key)
     if isinstance(raw, bool) or not isinstance(raw, int | float):
         return 0.0
     value = float(raw)

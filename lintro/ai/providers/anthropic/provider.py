@@ -52,6 +52,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_PER_CALL_MAX_TOKENS,
     DEFAULT_TIMEOUT,
 )
+from lintro.ai.providers.reported_model import parse_model_usage
 from lintro.ai.rate_limit import retry_after_from_exception
 from lintro.ai.raw_response import (
     CLI_ENVELOPE_STAGE,
@@ -279,11 +280,12 @@ class _AnthropicCliTransport(CliTransport):
         output_tokens = int(
             usage.get("output_tokens", usage.get("outputTokens", 0)),
         )
-        cost = data.get("total_cost_usd")
-        if cost is None:
+        raw_cost = data.get("total_cost_usd")
+        cost_reported = raw_cost is not None
+        if raw_cost is None:
             cost = estimate_cost(self._model, input_tokens, output_tokens)
         else:
-            cost = float(cost)
+            cost = float(raw_cost)
 
         session_id = data.get("session_id")
         if isinstance(session_id, str) and session_id.strip():
@@ -312,6 +314,10 @@ class _AnthropicCliTransport(CliTransport):
                 cost_estimate=cost,
                 provider=AIProvider.ANTHROPIC,
                 turns=turns,
+                # What answered, as the envelope says, next to what was asked
+                # for (#2867).
+                reported_models=parse_model_usage(data.get("modelUsage")),
+                cost_reported=cost_reported,
             ),
             session_id,
         )

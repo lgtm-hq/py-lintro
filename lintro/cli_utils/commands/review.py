@@ -1217,16 +1217,28 @@ def _stamp_metadata(*, result: ReviewResult, stamp: _MetadataStamp) -> ReviewRes
         ReviewResult: The result with provenance-complete metadata.
     """
     from lintro.ai.enums.cost_basis import CostBasis
+    from lintro.ai.provenance import auth_mode_for, recorded_cost_basis
 
-    effective_basis = stamp.profile.cost_basis
-    if result.metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
+    metadata = result.metadata
+    # A subscription CLI figure is read by where the run went and whether the
+    # envelope reported one (#2867, ADR-0011 B); the pre-run profile can only
+    # say ``unpriceable``.
+    effective_basis = recorded_cost_basis(
+        configured=stamp.profile.cost_basis,
+        first_party=metadata.first_party is not False,
+        cost_reported=metadata.cost_reported,
+    )
+    if metadata.token_usage_estimated and effective_basis is CostBasis.BILLED:
         effective_basis = CostBasis.ESTIMATED
     return replace(
         result,
         metadata=replace(
-            result.metadata,
+            metadata,
             transport=stamp.profile.transport.value,
-            auth_mode=stamp.profile.auth_mode,
+            # The credential actually forwarded decides the auth mode; the
+            # profile's policy-derived label is the fallback when no call
+            # recorded one (#2867).
+            auth_mode=auth_mode_for(metadata.credential) or stamp.profile.auth_mode,
             cost_basis=effective_basis.value,
             provider_source=stamp.resolved_ai.source_of("provider").value,
             model_source=stamp.resolved_ai.source_of("model").value,
@@ -1482,9 +1494,10 @@ def _post_review(
             checklist_display=render.checklist_display,
             question_map=render.question_map,
             transport=resolved_profile.transport.value,
-            auth_mode=resolved_profile.auth_mode,
-            # metadata carries the post-run reconciled basis (estimated when
-            # the provider reported no usage), not the pre-run profile value.
+            # metadata carries the post-run reconciled auth mode and basis
+            # (the credential that was present; estimated when the provider
+            # reported no usage), not the pre-run profile values.
+            auth_mode=result.metadata.auth_mode or resolved_profile.auth_mode,
             cost_basis=result.metadata.cost_basis,
             auto_resolve=lintro_config.review.auto_resolve,
             posting_policy=posting_policy,
