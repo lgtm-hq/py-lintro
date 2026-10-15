@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from lintro.ai.review.models.degradation_record import DegradationRecord
 
 __all__ = ["RunCoverage"]
 
@@ -51,6 +55,13 @@ class RunCoverage:
             empty on a full round.
         delta_reason: Why the round was a delta or a full read; empty on a
             record written before delta rounds existed.
+        degradations: Every coverage degradation the round recorded, with
+            its step, files and head (#2803, state v6). The next round reads
+            the latest round's records, keyed by each file's patch hash rather
+            than the head, to redo a failed step or re-emit a warning, so its
+            verdict matches the original attempt's while the files are
+            unchanged. Serialized only when non-empty; a v5 record loads with
+            none.
     """
 
     files_reviewed: int = 0
@@ -66,3 +77,4 @@ class RunCoverage:
     questions_diff_trimmed: bool = False
     delta_since: str = ""
     delta_reason: str = ""
+    degradations: tuple[DegradationRecord, ...] = ()

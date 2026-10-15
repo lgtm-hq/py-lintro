@@ -44,7 +44,10 @@ class CoverageDegradationReason(StrEnum):
             cross-file sweep is missing.
         GENERATED_QUESTIONS_FAILED: The once-per-run per-PR question pass
             failed, so every chunk was reviewed against the rubric alone
-            (#2720). Recorded once with the synthesis sentinel index.
+            (#2720). Recorded once with the synthesis sentinel index. A
+            narrative degradation (#2803): every file was still reviewed at
+            depth against the full generic rubric, so the review is less
+            sharpened, not less covered.
         VERIFICATION_FAILED: The verification pass (#2728) was enabled and
             had findings to check but did not produce a usable answer; the
             selected findings are kept unverified. A narrative degradation:
@@ -102,12 +105,14 @@ SYNTHESIS_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
 )
 
 #: Reasons that are not per-file coverage losses (#2702): the synthesis
-#: degradations and the delegated-diff fallback. They stay in
-#: ``coverage_degradations`` for the record but never make a review "partial"
-#: or its finding coverage incomplete.
+#: degradations, the failed per-PR question pass (#2803), the failed
+#: verification pass and the delegated-diff and no-tree fallbacks. They stay
+#: in ``coverage_degradations`` for the record but never make a review
+#: "partial" or its finding coverage incomplete; CI reports them as a warning.
 NARRATIVE_DEGRADATION_REASONS: frozenset[CoverageDegradationReason] = frozenset(
     {
         *SYNTHESIS_DEGRADATION_REASONS,
+        CoverageDegradationReason.GENERATED_QUESTIONS_FAILED,
         CoverageDegradationReason.VERIFICATION_FAILED,
         CoverageDegradationReason.DELEGATED_DIFF_EMBEDDED,
         CoverageDegradationReason.NO_TREE_FOR_AGENT,

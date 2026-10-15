@@ -196,7 +196,15 @@ async def review_chunk(
                 ),
             )
 
-    return partial
+    # Stamp the chunk's files on its degradations: chunk indices are not
+    # stable across rounds, so a rerun redoes a degraded chunk by path (#2803).
+    return replace(
+        partial,
+        coverage_degradations=tuple(
+            item if item.paths else replace(item, paths=tuple(chunk.files))
+            for item in partial.coverage_degradations
+        ),
+    )
 
 
 def _add_usage(
