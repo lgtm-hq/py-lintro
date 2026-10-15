@@ -26,6 +26,7 @@ from lintro.ai.provenance import (
     CLAUDE_OAUTH_TOKEN_ENV,
     CODEX_SESSION_FILE,
     CURSOR_API_KEY_ENV,
+    OPENAI_API_KEY_ENV,
     REVIEW_ALLOWED_MODELS_ENV,
     REVIEW_ENDPOINT_ENV,
     REVIEW_FIRST_PARTY_ENV,
@@ -288,7 +289,7 @@ def test_the_codex_session_file_is_the_openai_cli_credential(tmp_path: Path) -> 
     [
         (AIProvider.CURSOR, {CURSOR_API_KEY_ENV: "key"}, CredentialKind.CURSOR_API_KEY),
         (AIProvider.CURSOR, {}, CredentialKind.UNKNOWN),
-        (AIProvider.OPENAI, {"OPENAI_API_KEY": "sk"}, CredentialKind.API_KEY),
+        (AIProvider.OPENAI, {"CODEX_API_KEY": "sk"}, CredentialKind.API_KEY),
         (AIProvider.ANTHROPIC, {}, CredentialKind.UNKNOWN),
     ],
 )
@@ -1085,3 +1086,73 @@ def test_a_deeply_nested_settings_file_does_not_fail_the_lookup(tmp_path: Path) 
     )
 
     assert_that(value).is_none()
+
+
+def test_codex_api_key_wins_over_a_stored_plan_session(tmp_path: Path) -> None:
+    """Codex forwards CODEX_API_KEY before it looks at auth.json."""
+    from lintro.ai.providers.openai.codex_auth import CODEX_API_KEY_ENV
+
+    session = tmp_path / CODEX_SESSION_FILE
+    session.parent.mkdir()
+    session.write_text("{}", encoding="utf-8")
+
+    provenance = detect_run_provenance(
+        provider=AIProvider.OPENAI,
+        transport=AITransport.CLI,
+        env=_env(tmp_path, **{CODEX_API_KEY_ENV: "sk-metered"}),
+        home=tmp_path,
+        cwd=str(tmp_path),
+    )
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
+    assert_that(auth_mode_for(provenance.credential)).is_equal_to("api_key")
+
+
+def test_a_session_file_with_an_embedded_key_is_an_api_key_login(
+    tmp_path: Path,
+) -> None:
+    """An API-key login writes the key into auth.json; that bills the API."""
+    session = tmp_path / CODEX_SESSION_FILE
+    session.parent.mkdir()
+    session.write_text(json.dumps({"OPENAI_API_KEY": "sk-embedded"}), encoding="utf-8")
+
+    provenance = detect_run_provenance(
+        provider=AIProvider.OPENAI,
+        transport=AITransport.CLI,
+        env=_env(tmp_path),
+        home=tmp_path,
+        cwd=str(tmp_path),
+    )
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.API_KEY)
+
+
+def test_the_sdk_key_alone_is_not_a_codex_credential(tmp_path: Path) -> None:
+    """Codex never reads OPENAI_API_KEY, so it is not what the CLI forwards."""
+    provenance = detect_run_provenance(
+        provider=AIProvider.OPENAI,
+        transport=AITransport.CLI,
+        env=_env(tmp_path, **{OPENAI_API_KEY_ENV: "sk-sdk"}),
+        home=tmp_path,
+        cwd=str(tmp_path),
+    )
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.UNKNOWN)
+
+
+def test_a_session_file_that_is_not_an_object_is_no_credential(tmp_path: Path) -> None:
+    """A list or a hostile document is not a session codex could read."""
+    session = tmp_path / CODEX_SESSION_FILE
+    session.parent.mkdir()
+    depth = 100_000
+    session.write_text("[" * depth + "]" * depth, encoding="utf-8")
+
+    provenance = detect_run_provenance(
+        provider=AIProvider.OPENAI,
+        transport=AITransport.CLI,
+        env=_env(tmp_path),
+        home=tmp_path,
+        cwd=str(tmp_path),
+    )
+
+    assert_that(provenance.credential).is_equal_to(CredentialKind.UNKNOWN)

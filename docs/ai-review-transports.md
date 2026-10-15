@@ -120,7 +120,10 @@ catalogue is per-account and renames often, so lintro defers to codex's own defa
 rather than pinning a slug that would break on the next rename. Set `ai.model` (or
 `LINTRO_AI_MODEL`) to override; an explicit model is always honoured. The credential is
 detected from `$CODEX_HOME/auth.json` — `CODEX_HOME`, not `$HOME`, because CI restores
-the session outside the home directory.
+the session outside the home directory. The run record's `credential` follows the same
+precedence: `CODEX_API_KEY` records `api_key`, a session file carrying an embedded key
+records `api_key`, a plan session records `codex_oauth`, and `OPENAI_API_KEY` alone
+records nothing, because codex never reads it.
 
 ## CI support levels per transport
 
