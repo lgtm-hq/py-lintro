@@ -100,14 +100,14 @@ workflow runs an AI diff review and prints the JSON result to the job log.
   `chain`. Provider, transport, model, endpoint, egress and the credential binding all
   come from that row: a secret-free `lane` job resolves it, the review job's allowlist
   and credentials follow from the outputs, and `run-ai-review.sh` exports the row's
-  values over the committed `.lintro-config.yaml` and refuses when the effective
-  config, a competing credential or a base-URL override disagrees with the row. No
-  Actions variable selects a provider or model; `LINTRO_AI_MAX_COST_USD` and
+  values over the committed `.lintro-config.yaml` and refuses when the effective config,
+  a competing credential or a base-URL override disagrees with the row. No Actions
+  variable selects a provider or model; `LINTRO_AI_MAX_COST_USD` and
   `LINTRO_AI_REVIEW_PR_BUDGET_USD` remain variables because they shape spend, not
   routing. The active lane is the Claude subscription: the pinned `claude` CLI
   authenticated by `CLAUDE_CODE_OAUTH_TOKEN`. `ANTHROPIC_API_KEY` is deliberately
-  **not** in scope, and `LINTRO_CLI_BARE: never` keeps `--bare` off the command line
-  so an OAuth session is actually used (#1838). CLI versions are pinned in
+  **not** in scope, and `LINTRO_CLI_BARE: never` keeps `--bare` off the command line so
+  an OAuth session is actually used (#1838). CLI versions are pinned in
   `docker/ai-tools.Dockerfile` and installed from npm at those exact versions.
 - 💸 **Operator-set spend ceiling (advisory under the CLI transport)** — the trusted
   base config ships **no** `ai.max_cost_usd`, so there is no committed default cap. A PR
