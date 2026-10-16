@@ -6,7 +6,7 @@
 The release Version-PR generator (lgtm-ci ``reusable-release-version-pr``)
 accepts a single repo-side ``version-update-script`` that runs after the version
 is stamped and the ``CHANGELOG.md`` is written, but before the version PR is
-committed. This orchestrator runs the two repo-side finalizers in order:
+committed. This orchestrator runs the repo-side finalizers in order:
 
 1. Reflow ``CHANGELOG.md`` to lintro's 88-column markdown budget so the release
    PR passes dogfooding-lint (#1117), via
@@ -15,7 +15,9 @@ committed. This orchestrator runs the two repo-side finalizers in order:
    ``major.minor`` line so minor/major bumps do not go stale and break the
    unattended release PR (#1372), via
    :func:`update_security_support.main`.
-3. Point the pinned py-lintro release image at the newest published release so
+3. Sync the remaining release-sensitive docs — currently the ``rev:`` pins in
+   ``docs/pre-commit.md`` — via :func:`sync_release_docs.main` (#1319).
+4. Point the pinned py-lintro release image at the newest published release so
    the digest-lag gate cannot drift (#1590), via
    :func:`sync_pinned_release_image.main`. Deliberately last, and non-fatal:
    it reports problems as warnings and never blocks a release.
@@ -68,12 +70,16 @@ def main() -> int:
     """
     changelog = _load("format_changelog", "format-changelog.py")
     security = _load("update_security_support", "update-security-support.py")
+    release_docs = _load("sync_release_docs", "sync-release-docs.py")
     pin_sync = _load("sync_pinned_release_image", "sync-pinned-release-image.py")
 
     result = int(changelog.main([]))
     if result != 0:
         return result
     result = int(security.main([]))
+    if result != 0:
+        return result
+    result = int(release_docs.main([]))
     if result != 0:
         return result
     # Always 0 by design — the pin sync warns instead of failing, so a
