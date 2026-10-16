@@ -995,12 +995,13 @@ def test_the_config_reports_never_print_a_credential(
 
     # A port that is not a number, or is out of range, must not crash the
     # report, and must not print the rest of the URL either.
-    for noisy in (
-        "https://user:pw@proxy.example:abc/v1",
-        "https://proxy.example:99999/v1",
+    # Each value pairs with the fragment of it that must never be printed.
+    for noisy, secret in (
+        ("https://user:pw@proxy.example:abc/v1", "user:pw"),
+        ("https://proxy.example:99999/v1", "99999"),
         # No scheme: urlsplit reads the whole value as a path, userinfo and all.
-        "user:pw@proxy.example/v1",
-        "proxy.example/v1?token=pw",
+        ("user:pw@proxy.example/v1", "user:pw"),
+        ("proxy.example/v1?token=pw", "token=pw"),
     ):
         config_path.write_text(
             yaml.safe_dump({"ai": {"provider": "anthropic", "api_base_url": noisy}}),
@@ -1013,7 +1014,7 @@ def test_the_config_reports_never_print_a_credential(
         assert_that(json.loads(malformed.output)["ai"]["api_base_url"]).is_equal_to(
             "<unparsable url>",
         )
-        assert_that(malformed.output).does_not_contain("user:pw")
+        assert_that(malformed.output).described_as(noisy).does_not_contain(secret)
 
     config_path.write_text(
         yaml.safe_dump(

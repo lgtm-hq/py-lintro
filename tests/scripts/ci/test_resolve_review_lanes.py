@@ -156,7 +156,8 @@ def test_the_lane_job_runs_the_resolver_secret_free(workflow: str) -> None:
     """Both consumers resolve the chain in a job that holds no secret (#2870).
 
     The review workflow reads the manifest at ``github.workflow_sha``, the
-    default-branch commit that supplied the definition (ADR-0011 A); the
+    commit that supplied the definition (the PR's base-branch tip, or the
+    default branch on a comment-triggered run; ADR-0011 A); the
     contract-tests workflow reads it from the dispatched ref.
 
     Args:

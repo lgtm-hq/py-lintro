@@ -6110,13 +6110,22 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     )
     budget = {"LINTRO_AI_MAX_COST_USD", "LINTRO_AI_REVIEW_PR_BUDGET_USD"}
     selectors = {name.removeprefix("vars.") for name in _LANE_SELECTOR_VARS}
-    # Only expressions read the context; prose in comments does not.
-    expressions = " ".join(re.findall(r"\$\{\{(.*?)\}\}", text, re.S))
+    # Only expressions read the context; prose in comments does not. A job or
+    # step ``if:`` is an expression even without the ``${{ }}`` fence, so
+    # every one of those is scanned as well.
+    loaded = _load_workflow(name=workflow)
+    conditions = [
+        str(item.get("if", ""))
+        for job in loaded["jobs"].values()
+        for item in (job, *(job.get("steps") or []))
+    ]
+    expressions = " ".join(
+        [*re.findall(r"\$\{\{(.*?)\}\}", text, re.S), *conditions],
+    )
     reads = _vars_reads(expressions)
     assert_that(set(reads) - budget - selectors).described_as(
         f"{workflow} vars reads",
     ).is_empty()
-    loaded = _load_workflow(name=workflow)
     resolve = next(
         step for step in loaded["jobs"]["lane"]["steps"] if step.get("id") == "resolve"
     )
