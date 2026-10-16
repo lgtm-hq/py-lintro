@@ -71,7 +71,12 @@ set -euo pipefail
 #   LINTRO_REVIEW_CHAIN     JSON list of lane ids, active lane first, from the
 #                           lane job (scripts/ci/resolve_review_lanes.py).
 #   LINTRO_REVIEW_LANES     JSON object of the chain's rows, keyed by lane id.
-#   LINTRO_REVIEW_ATTEMPT   Index into the chain for this attempt (default 0).
+#   LINTRO_REVIEW_ATTEMPT   Index into the chain for the attempt being bound;
+#                           the wrapper walks the chain itself (#2872).
+#   LINTRO_REVIEW_LANES_DOWN  Exported by the wrapper: JSON list of lanes that
+#                           failed before any chunk completed, with the kind.
+#   LINTRO_REVIEW_FALLBACK_FROM / _REASON  Exported for a fallback attempt so
+#                           lintro's sticky leads with the dead lane.
 #   <credential secrets>    Each chain credential under its SECRET name
 #                           (CLAUDE_CODE_OAUTH_TOKEN, ZAI_AUTH_TOKEN,
 #                           KIMI_API_KEY, CURSOR_API_KEY, CODEX_AUTH_JSON), gated by the
@@ -185,8 +190,8 @@ pr_number="${1:-${PR_NUMBER:-}}"
 # step holds every chain credential under its SECRET name and nothing else
 # may route the run: the lane selector and the model override were applied
 # by the lane job, and no variable here supplies a lane, transport or
-# endpoint. One attempt (LINTRO_REVIEW_ATTEMPT, index into the chain;
-# the chain walk of decision D is #2872) sees exactly its own lane's
+# endpoint. Each attempt (LINTRO_REVIEW_ATTEMPT, index into the chain,
+# walked below per decision D, #2872) sees exactly its own lane's
 # credential, under the variable its CLI reads, and the row's facts.
 if [[ -z "${LINTRO_REVIEW_CHAIN:-}" || -z "${LINTRO_REVIEW_LANES:-}" ]]; then
 	transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
@@ -220,104 +225,11 @@ _apply_lane_exports() {
 	done
 }
 
-export LINTRO_REVIEW_ATTEMPT="${LINTRO_REVIEW_ATTEMPT:-0}"
-_lane_env_file="$(mktemp)"
-if ! python3 -I "${script_dir}/review_lane_env.py" --phase env >"$_lane_env_file"; then
-	rm -f "$_lane_env_file"
-	transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
-	report_not_invoked "The resolved review lane could not be bound; see the error above."
-fi
-_apply_lane_exports <"$_lane_env_file"
-rm -f "$_lane_env_file"
-# Provider, transport and model now come from the row (ADR-0011 A).
-transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
-provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
-echo "[ai-review] lane ${LINTRO_REVIEW_LANE:-?}: provider ${provider}, transport ${transport}, endpoint ${LINTRO_REVIEW_ENDPOINT:-?}"
-
-# Re-arm only the active lane's credential. An env-form credential is bound
-# under the variable its CLI reads (the z.ai token fills
-# ANTHROPIC_AUTH_TOKEN); a file-form one re-arms the source variable the
-# restore script decodes. Both come from the capture above, by name.
-# Indirect expansion, never eval: the names come from the manifest through
-# the gate, which validates them as variable names, and even a name that
-# slipped through could only be looked up, not executed.
-if [[ "${LANE_CREDENTIAL_FORM:-}" == "env" ]]; then
-	_lane_capture_name="_captured_${LANE_CREDENTIAL_SECRET}"
-	if [[ -n "${!_lane_capture_name:-}" ]]; then
-		printf -v "$LANE_CREDENTIAL_ENV" '%s' "${!_lane_capture_name}"
-		# shellcheck disable=SC2163  # a manifest name, validated by the gate
-		export "$LANE_CREDENTIAL_ENV"
-	fi
-	unset _lane_capture_name
-elif [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
-	_lane_capture_name="_captured_${LANE_CREDENTIAL_SOURCE_ENV}"
-	if [[ -n "${!_lane_capture_name:-}" ]]; then
-		printf -v "$LANE_CREDENTIAL_SOURCE_ENV" '%s' "${!_lane_capture_name}"
-		# shellcheck disable=SC2163  # a manifest name, validated by the gate
-		export "$LANE_CREDENTIAL_SOURCE_ENV"
-	fi
-	unset _lane_capture_name
-fi
-# The provider's base-URL override is exported to the row's endpoint on a
-# non-first-party lane and left alone on a first-party one, where any set
-# value is a refusal below; nothing else sets it (ADR-0011 A).
-if [[ -n "${LANE_BASE_URL_ENV:-}" && -n "${LANE_BASE_URL_VALUE:-}" ]]; then
-	printf -v "$LANE_BASE_URL_ENV" '%s' "$LANE_BASE_URL_VALUE"
-	# shellcheck disable=SC2163  # a manifest name, validated by the gate
-	export "$LANE_BASE_URL_ENV"
-fi
-
-# The committed config and its LINTRO_AI_* overlays are not a second source:
-# the effective ai.* must agree with the row. Read through lintro itself; in
-# Actions a config that cannot be read is a refusal, elsewhere (a developer
-# shell without the synced environment) the check is skipped with a note.
-# LINTRO_EFFECTIVE_AI_JSON, when already set outside Actions, is used as is
-# (the wrapper's tests supply it). In Actions it is ignored: the config is
-# read through lintro itself, so nothing set earlier in the job can stand
-# in for it.
-effective_ai_json="${LINTRO_EFFECTIVE_AI_JSON:-}"
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-	effective_ai_json=""
-fi
-if [[ -z "$effective_ai_json" ]] && command -v uv >/dev/null 2>&1; then
-	effective_ai_json="$(uv run --no-sync lintro config --json 2>/dev/null | python3 -I -c '
-import json, sys
-value = json.load(sys.stdin)
-print(json.dumps(value.get("ai", value) if isinstance(value, dict) else {}))
-' 2>/dev/null || true)"
-fi
-if [[ -z "$effective_ai_json" ]]; then
-	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-		report_not_invoked "The effective ai config could not be read (lintro config --json), so the lane binding cannot be verified."
-	fi
-	echo "[ai-review] effective-config check skipped: lintro config --json is unavailable here"
-fi
-
-# Refuse before any provider call: an absent credential is red with
-# status=no-credential, never a fallback trigger; a competing credential, a
-# base-URL override naming another host, or a config that disagrees with
-# the row is a refusal with its reason.
-set +e
-LINTRO_EFFECTIVE_AI_JSON="$effective_ai_json" \
-	python3 -I "${script_dir}/review_lane_env.py" --phase check
-_lane_check_status=$?
-set -e
-case "$_lane_check_status" in
-0) ;;
-2)
-	exec python3 "${script_dir}/classify_review_outcome.py" \
-		--status "$NO_CREDENTIAL_STATUS" \
-		--transport "$transport"
-	;;
-*)
-	report_not_invoked "The resolved review lane refused to run; see the error above."
-	;;
-esac
-
-# A file-form credential is materialised for the length of this attempt and
-# deleted at its end (ADR-0011 D). The restore script owns the decoding. A
-# file already at that path is somebody's session, not this attempt's: it is
-# neither overwritten nor deleted, and the attempt is refused.
+# One attempt of the chain (ADR-0011 D, #2872): bind lane $1, re-arm only its
+# credential, check it, materialise a file-form credential. The next attempt
+# first takes back what this one exported (_unbind_attempt).
+_bound_credential_env=""
+_bound_base_url_env=""
 _lane_credential_path=""
 _lane_cleanup() {
 	if [[ -n "$_lane_credential_path" ]]; then
@@ -325,22 +237,164 @@ _lane_cleanup() {
 	fi
 }
 trap '_lane_cleanup' EXIT
-if [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
-	if [[ -e "${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}" ]]; then
-		report_not_invoked "The lane's credential file already exists at ${LANE_CREDENTIAL_FILE}; this attempt would overwrite a session it does not own."
+_unbind_attempt() {
+	_lane_cleanup
+	_lane_credential_path=""
+	if [[ -n "$_bound_credential_env" ]]; then
+		unset "$_bound_credential_env"
+		_bound_credential_env=""
 	fi
-	_lane_credential_path="${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}"
-	if ! "${script_dir}/restore-codex-session.sh"; then
-		report_not_invoked "The lane's file credential could not be materialised; see the error above."
+	if [[ -n "$_bound_base_url_env" ]]; then
+		unset "$_bound_base_url_env"
+		_bound_base_url_env=""
 	fi
-	# The file is the credential now; the subprocess holds one copy of it.
-	unset "$LANE_CREDENTIAL_SOURCE_ENV"
-	if [[ ! -s "$_lane_credential_path" ]]; then
+}
+_bind_attempt() {
+	export LINTRO_REVIEW_ATTEMPT="$1"
+	_lane_env_file="$(mktemp)"
+	if ! python3 -I "${script_dir}/review_lane_env.py" --phase env >"$_lane_env_file"; then
+		rm -f "$_lane_env_file"
+		transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+		report_not_invoked "The resolved review lane could not be bound; see the error above."
+	fi
+	_apply_lane_exports <"$_lane_env_file"
+	rm -f "$_lane_env_file"
+	# Provider, transport and model now come from the row (ADR-0011 A).
+	transport="$(printf '%s' "${LINTRO_AI_TRANSPORT:-cli}" | tr '[:upper:]' '[:lower:]')"
+	provider="$(printf '%s' "${LINTRO_AI_PROVIDER:-}" | tr '[:upper:]' '[:lower:]')"
+	echo "[ai-review] lane ${LINTRO_REVIEW_LANE:-?}: provider ${provider}, transport ${transport}, endpoint ${LINTRO_REVIEW_ENDPOINT:-?}"
+
+	# Re-arm only the active lane's credential. An env-form credential is bound
+	# under the variable its CLI reads (the z.ai token fills
+	# ANTHROPIC_AUTH_TOKEN); a file-form one re-arms the source variable the
+	# restore script decodes. Both come from the capture above, by name.
+	# Indirect expansion, never eval: the names come from the manifest through
+	# the gate, which validates them as variable names, and even a name that
+	# slipped through could only be looked up, not executed.
+	if [[ "${LANE_CREDENTIAL_FORM:-}" == "env" ]]; then
+		_lane_capture_name="_captured_${LANE_CREDENTIAL_SECRET}"
+		if [[ -n "${!_lane_capture_name:-}" ]]; then
+			printf -v "$LANE_CREDENTIAL_ENV" '%s' "${!_lane_capture_name}"
+			# shellcheck disable=SC2163  # a manifest name, validated by the gate
+			export "$LANE_CREDENTIAL_ENV"
+			_bound_credential_env="$LANE_CREDENTIAL_ENV"
+		fi
+		unset _lane_capture_name
+	elif [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
+		_lane_capture_name="_captured_${LANE_CREDENTIAL_SOURCE_ENV}"
+		if [[ -n "${!_lane_capture_name:-}" ]]; then
+			printf -v "$LANE_CREDENTIAL_SOURCE_ENV" '%s' "${!_lane_capture_name}"
+			# shellcheck disable=SC2163  # a manifest name, validated by the gate
+			export "$LANE_CREDENTIAL_SOURCE_ENV"
+		fi
+		unset _lane_capture_name
+	fi
+	# The provider's base-URL override is exported to the row's endpoint on a
+	# non-first-party lane and left alone on a first-party one, where any set
+	# value is a refusal below; nothing else sets it (ADR-0011 A).
+	if [[ -n "${LANE_BASE_URL_ENV:-}" && -n "${LANE_BASE_URL_VALUE:-}" ]]; then
+		printf -v "$LANE_BASE_URL_ENV" '%s' "$LANE_BASE_URL_VALUE"
+		# shellcheck disable=SC2163  # a manifest name, validated by the gate
+		export "$LANE_BASE_URL_ENV"
+		_bound_base_url_env="$LANE_BASE_URL_ENV"
+	fi
+
+	# The committed config and its LINTRO_AI_* overlays are not a second source:
+	# the effective ai.* must agree with the row. Read through lintro itself; in
+	# Actions a config that cannot be read is a refusal, elsewhere (a developer
+	# shell without the synced environment) the check is skipped with a note.
+	# LINTRO_EFFECTIVE_AI_JSON, when already set outside Actions, is used as is
+	# (the wrapper's tests supply it). In Actions it is ignored: the config is
+	# read through lintro itself, so nothing set earlier in the job can stand
+	# in for it.
+	effective_ai_json="${LINTRO_EFFECTIVE_AI_JSON:-}"
+	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+		effective_ai_json=""
+	fi
+	if [[ -z "$effective_ai_json" ]] && command -v uv >/dev/null 2>&1; then
+		effective_ai_json="$(uv run --no-sync lintro config --json 2>/dev/null | python3 -I -c '
+import json, sys
+value = json.load(sys.stdin)
+print(json.dumps(value.get("ai", value) if isinstance(value, dict) else {}))
+' 2>/dev/null || true)"
+	fi
+	if [[ -z "$effective_ai_json" ]]; then
+		if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+			report_not_invoked "The effective ai config could not be read (lintro config --json), so the lane binding cannot be verified."
+		fi
+		echo "[ai-review] effective-config check skipped: lintro config --json is unavailable here"
+	fi
+
+	# Refuse before any provider call: an absent credential is red with
+	# status=no-credential, never a fallback trigger; a competing credential, a
+	# base-URL override naming another host, or a config that disagrees with
+	# the row is a refusal with its reason.
+	set +e
+	LINTRO_EFFECTIVE_AI_JSON="$effective_ai_json" \
+		python3 -I "${script_dir}/review_lane_env.py" --phase check
+	_lane_check_status=$?
+	set -e
+	case "$_lane_check_status" in
+	0) ;;
+	2)
 		exec python3 "${script_dir}/classify_review_outcome.py" \
 			--status "$NO_CREDENTIAL_STATUS" \
 			--transport "$transport"
+		;;
+	*)
+		report_not_invoked "The resolved review lane refused to run; see the error above."
+		;;
+	esac
+
+	# A file-form credential is materialised for the length of this attempt and
+	# deleted at its end (ADR-0011 D). The restore script owns the decoding. A
+	# file already at that path is somebody's session, not this attempt's: it is
+	# neither overwritten nor deleted, and the attempt is refused.
+	if [[ "${LANE_CREDENTIAL_FORM:-}" == "file" ]]; then
+		if [[ -e "${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}" ]]; then
+			report_not_invoked "The lane's credential file already exists at ${LANE_CREDENTIAL_FILE}; this attempt would overwrite a session it does not own."
+		fi
+		_lane_credential_path="${LANE_CREDENTIAL_FILE//\$HOME/${HOME:-}}"
+		if ! "${script_dir}/restore-codex-session.sh"; then
+			report_not_invoked "The lane's file credential could not be materialised; see the error above."
+		fi
+		# The file is the credential now; the subprocess holds one copy of it.
+		unset "$LANE_CREDENTIAL_SOURCE_ENV"
+		if [[ ! -s "$_lane_credential_path" ]]; then
+			exec python3 "${script_dir}/classify_review_outcome.py" \
+				--status "$NO_CREDENTIAL_STATUS" \
+				--transport "$transport"
+		fi
 	fi
-fi
+
+}
+_bind_attempt 0
+
+# One deduplicated tracker issue per dead lane, labelled ai-review-lane-down,
+# through the minted App token (ADR-0011 D). Best-effort: it never reddens
+# the review, and it never runs outside Actions.
+_track_lane_down() {
+	local lane="$1" kind="$2" title existing body
+	if [[ -z "${GITHUB_TOKEN:-}" || -z "${GITHUB_REPOSITORY:-}" || -z "${GITHUB_ACTIONS:-}" ]]; then
+		return 0
+	fi
+	title="AI review lane down: ${lane}"
+	body="Lane \`${lane}\` failed with \`${kind}\` before any chunk completed in run ${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID:-?} (PR #${pr_number:-?}); the review fell back to the next lane of the chain (ADR-0011 D). Close this issue once the lane's credential or balance is restored."
+	(
+		export GH_TOKEN="$GITHUB_TOKEN"
+		gh label create ai-review-lane-down --repo "$GITHUB_REPOSITORY" --color B60205 \
+			--description "A dogfood review lane failed before any chunk completed (ADR-0011 D)" \
+			--force >/dev/null 2>&1 || true
+		existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --label ai-review-lane-down \
+			--state open --search "\"${title}\" in:title" --json number --jq '.[0].number' 2>/dev/null || true)"
+		if [[ -n "$existing" ]]; then
+			gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "$body" >/dev/null
+		else
+			gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" \
+				--label ai-review-lane-down --body "$body" >/dev/null
+		fi
+	) || echo "::warning::lane-down tracker could not be updated for lane ${lane}"
+}
 
 if [[ -z "$pr_number" ]]; then
 	report_not_invoked "No PR number provided (set PR_NUMBER or pass it as an argument)."
@@ -626,40 +680,110 @@ else
 	echo "[ai-review] linter facts unavailable for this head: no linting-json-report for head ${lint_head_sha:-unknown} after ${lint_waited}s"
 	lint_report_arg=(--lint-report-missing "no linting-json-report for head ${lint_head_sha:-unknown} after ${lint_waited}s")
 fi
-# Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
-# ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.
-export PYTHONUNBUFFERED=1
-uv run lintro review --pr "${pr_number}" ${repo_arg[@]+"${repo_arg[@]}"} --depth 1 --post ${request_arg[@]+"${request_arg[@]}"} ${lint_report_arg[@]+"${lint_report_arg[@]}"} --output json >"$output_file" 2>&1 &
-lintro_pid=$!
-# --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
-# group signal left it ignoring TERM (``trap '' TERM``).
-(
-	trap '' TERM
-	tail --pid="$lintro_pid" -n +1 -f "$output_file"
-) &
-log_pid=$!
-wait "$lintro_pid"
-review_status=$?
-# A trap can interrupt wait while lintro is still persisting. Reap it.
-while kill -0 "$lintro_pid" 2>/dev/null; do
+_run_review_attempt() {
+	set +e
+	# Unbuffered Python. Write the envelope to a file (not a SIGTERM-fragile
+	# ``| tee`` pipe) and mirror it to the Actions log with a TERM-immune tail.
+	export PYTHONUNBUFFERED=1
+	uv run lintro review --pr "${pr_number}" ${repo_arg[@]+"${repo_arg[@]}"} --depth 1 --post ${request_arg[@]+"${request_arg[@]}"} ${lint_report_arg[@]+"${lint_report_arg[@]}"} --output json >"$output_file" 2>&1 &
+	lintro_pid=$!
+	# --pid makes tail exit when lintro is gone. SIGKILL reaps it if a
+	# group signal left it ignoring TERM (``trap '' TERM``).
+	(
+		trap '' TERM
+		tail --pid="$lintro_pid" -n +1 -f "$output_file"
+	) &
+	log_pid=$!
 	wait "$lintro_pid"
 	review_status=$?
-done
-# If wait returned 143 after lintro already exited, recover the real status.
-if ! kill -0 "$lintro_pid" 2>/dev/null; then
-	wait "$lintro_pid" 2>/dev/null
-	reaped=$?
-	if [[ "$reaped" -ne 127 ]]; then
-		review_status=$reaped
+	# A trap can interrupt wait while lintro is still persisting. Reap it.
+	while kill -0 "$lintro_pid" 2>/dev/null; do
+		wait "$lintro_pid"
+		review_status=$?
+	done
+	# If wait returned 143 after lintro already exited, recover the real status.
+	if ! kill -0 "$lintro_pid" 2>/dev/null; then
+		wait "$lintro_pid" 2>/dev/null
+		reaped=$?
+		if [[ "$reaped" -ne 127 ]]; then
+			review_status=$reaped
+		fi
 	fi
-fi
-# Let GNU tail --pid flush the envelope, then SIGKILL the TERM-immune mirror.
-for _ in 1 2 3 4; do
-	kill -0 "${log_pid:-}" 2>/dev/null || break
-	sleep 0.5
+	# Let GNU tail --pid flush the envelope, then SIGKILL the TERM-immune mirror.
+	for _ in 1 2 3 4; do
+		kill -0 "${log_pid:-}" 2>/dev/null || break
+		sleep 0.5
+	done
+	kill -KILL "${log_pid:-}" 2>/dev/null || true
+	wait "${log_pid:-}" 2>/dev/null || true
+}
+
+# The chain walk (ADR-0011 D, #2872). After each attempt the stdlib decider
+# says whether to advance: only the review error status, only the
+# dead-credential or exhausted-account kinds, only when no chunk of the
+# attempt completed (no checkpoint part newer than the attempt's marker),
+# and only while a lane is left. A dead lane is recorded for the
+# classifier (LINTRO_REVIEW_LANES_DOWN), tracked in one issue, and named
+# to lintro for the sticky's fallback line (LINTRO_REVIEW_FALLBACK_FROM).
+_chain_length="$(printf '%s' "$LINTRO_REVIEW_CHAIN" | python3 -I -c '
+import json, sys
+value = json.load(sys.stdin)
+print(len(value) if isinstance(value, list) else 0)
+' 2>/dev/null || echo 0)"
+_attempt=0
+export LINTRO_REVIEW_LANES_DOWN='[]'
+# Record a lane that failed before any chunk completed: on the list the
+# classifier reads, and in the lane-down tracker issue.
+_record_lane_down() {
+	local _lane="$1" _kind="$2" _next_down
+	if _next_down="$(python3 -I "${script_dir}/review_chain.py" lanes-down \
+		--current "$LINTRO_REVIEW_LANES_DOWN" --lane "$_lane" --kind "$_kind")"; then
+		export LINTRO_REVIEW_LANES_DOWN="$_next_down"
+	fi
+	_track_lane_down "$_lane" "$_kind"
+}
+
+while :; do
+	_attempt_marker="$(mktemp)"
+	_run_review_attempt
+	_decision="$(python3 -I "${script_dir}/review_chain.py" decide \
+		--status "$review_status" --output-file "$output_file" \
+		--state-dir "$LINTRO_REVIEW_STATE_DIR" --since "$_attempt_marker" \
+		--attempt "$_attempt" --chain-length "$_chain_length" 2>/dev/null || echo "stop decider failed")"
+	rm -f "$_attempt_marker"
+	case "$_decision" in
+	advance\ *)
+		_dead_kind="${_decision#advance }"
+		_dead_lane="${LINTRO_REVIEW_LANE:-?}"
+		echo "::warning::lane ${_dead_lane} unavailable (${_dead_kind}) before any chunk completed; falling back to the next lane (ADR-0011 D)"
+		_record_lane_down "$_dead_lane" "$_dead_kind"
+		_unbind_attempt
+		# The sticky names the primary lane: the first one that died, not
+		# whichever preceded the lane that finally answered.
+		if [[ -z "${LINTRO_REVIEW_FALLBACK_FROM:-}" ]]; then
+			export LINTRO_REVIEW_FALLBACK_FROM="$_dead_lane" LINTRO_REVIEW_FALLBACK_REASON="$_dead_kind"
+		fi
+		_attempt=$((_attempt + 1))
+		rm -f "$output_file"
+		output_file="$(mktemp)"
+		_bind_attempt "$_attempt"
+		;;
+	exhausted\ *)
+		# Dead before any chunk, but the last lane: record it like the
+		# others so the classifier can tell "every lane dead" from "the
+		# last lane died mid-review", then stop.
+		_dead_kind="${_decision#exhausted }"
+		_dead_lane="${LINTRO_REVIEW_LANE:-?}"
+		echo "[ai-review] chain: lane ${_dead_lane} unavailable (${_dead_kind}) before any chunk completed; no lane left"
+		_record_lane_down "$_dead_lane" "$_dead_kind"
+		break
+		;;
+	*)
+		echo "[ai-review] chain: ${_decision}"
+		break
+		;;
+	esac
 done
-kill -KILL "${log_pid:-}" 2>/dev/null || true
-wait "${log_pid:-}" 2>/dev/null || true
 trap - TERM INT
 set -e
 

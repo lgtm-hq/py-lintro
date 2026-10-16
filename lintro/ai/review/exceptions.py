@@ -87,3 +87,43 @@ class ReviewPreparationError(AIError):
     usage error for the CLI, a structured envelope for MCP) rather than the
     shared layer owning either policy.
     """
+
+
+#: Where :func:`annotate_completed_chunks` keeps the count on an exception
+#: that has no field of its own.
+COMPLETED_CHUNKS_ATTR = "lintro_completed_chunks"
+
+
+def annotate_completed_chunks(error: BaseException, *, completed: int) -> None:
+    """Record on *error* how many chunks the run had completed when it left.
+
+    A CI wrapper deciding whether to restart the review on another lane
+    (ADR-0011 D) must not infer that from checkpoint files, which are
+    best-effort and may have failed to write. The run boundary stamps the
+    count on whatever exception escapes, raw provider errors included.
+
+    Args:
+        error: The exception leaving the run.
+        completed: Chunks whose partial the run had collected.
+    """
+    setattr(error, COMPLETED_CHUNKS_ATTR, max(int(completed), 0))
+
+
+def completed_chunks_of(error: BaseException) -> int | None:
+    """Return how many chunks had completed when *error* left the run.
+
+    Args:
+        error: The exception the run raised.
+
+    Returns:
+        The larger of the execution error's own count and the run-boundary
+        annotation, or ``None`` when neither is present: the count is unknown
+        and a wrapper must not restart the review elsewhere.
+    """
+    counts: list[int] = []
+    if isinstance(error, ReviewExecutionError):
+        counts.append(max(int(error.completed_chunks), 0))
+    annotated = getattr(error, COMPLETED_CHUNKS_ATTR, None)
+    if isinstance(annotated, int) and not isinstance(annotated, bool):
+        counts.append(annotated)
+    return max(counts) if counts else None

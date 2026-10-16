@@ -46,6 +46,9 @@ class RunIdentity:
             :class:`~lintro.ai.enums.model_verification.ModelVerification`
             state. ``legacy`` is assigned only when a stored record carries
             none of these fields; a live run never writes it.
+        fallback_from: The lane that failed before any chunk completed and
+            handed this round to its lane (ADR-0011 D), or empty.
+        fallback_reason: The error kind that lane failed with, or empty.
     """
 
     round: int = 1
@@ -64,3 +67,5 @@ class RunIdentity:
     reported_models: tuple[ReportedModel, ...] = ()
     lane: str = ""
     model_verification: str = ""
+    fallback_from: str = ""
+    fallback_reason: str = ""

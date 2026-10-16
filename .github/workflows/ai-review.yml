@@ -23,7 +23,7 @@ name: AI Review - Dogfood
 # Both are read by the secret-free `lane` job only. It checks out
 # github.workflow_sha, runs scripts/ci/resolve_review_lanes.py, and
 # publishes the resolved `chain` (chain[0] is the active lane; the rest is
-# the fallback order of ADR-0011 decision D, walked by #2872) and every
+# the fallback order of ADR-0011 decision D, walked by the wrapper, #2872) and every
 # chain row as job outputs.
 # The review job consumes only those outputs: its harden-runner egress is the
 # union of the chain's hosts plus the static GitHub and toolchain hosts; each

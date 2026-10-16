@@ -36,6 +36,7 @@ __all__ = [
     "endpoint_note",
     "history_cost_summary",
     "model_label",
+    "fallback_banner",
     "provenance_banner",
     "run_cost_figure",
     "terminal_cost_info",
@@ -80,6 +81,9 @@ class ProvenanceView:
         verification: The :class:`ModelVerification` value as stored, or
             empty for a round that completed no call.
         reported: Models the transport reported answering, canonical first.
+        fallback_from: The lane that failed and handed the round to this
+            lane (ADR-0011 D), or empty.
+        fallback_reason: The error kind that lane failed with, or empty.
     """
 
     model: str = ""
@@ -89,6 +93,8 @@ class ProvenanceView:
     lane: str = ""
     verification: str = ""
     reported: tuple[str, ...] = ()
+    fallback_from: str = ""
+    fallback_reason: str = ""
 
     @property
     def is_legacy(self) -> bool:
@@ -113,6 +119,8 @@ def view_from_metadata(metadata: ReviewMetadata) -> ProvenanceView:
         lane=metadata.lane,
         verification=metadata.model_verification,
         reported=tuple(m.canonical or m.model for m in metadata.reported_models),
+        fallback_from=metadata.fallback_from,
+        fallback_reason=metadata.fallback_reason,
     )
 
 
@@ -134,6 +142,8 @@ def view_from_identity(identity: RunIdentity) -> ProvenanceView:
         lane=identity.lane,
         verification=identity.model_verification,
         reported=tuple(m.canonical or m.model for m in identity.reported_models),
+        fallback_from=identity.fallback_from,
+        fallback_reason=identity.fallback_reason,
     )
 
 
@@ -225,6 +235,30 @@ def model_label(
     if view.lane:
         parts.append(f"lane {_code(view.lane, limit=40, plain=plain)}")
     return " · ".join(parts)
+
+
+def fallback_banner(view: ProvenanceView) -> str:
+    """Render the line that leads the sticky when a fallback lane answered.
+
+    The primary lane failed before any chunk completed and the wrapper
+    walked the chain (ADR-0011 D); the reader must see that before the
+    review, outside every collapsible section.
+
+    Args:
+        view: The round's provenance facts.
+
+    Returns:
+        A blockquote, or an empty string when no fallback happened.
+    """
+    if not view.fallback_from:
+        return ""
+    primary = _code(view.fallback_from, limit=40, plain=False)
+    reason = _code(view.fallback_reason or "unavailable", limit=40, plain=False)
+    answered = _code(view.lane or "another lane", limit=40, plain=False)
+    return (
+        f"> ⚠️ **Fallback lane** — primary lane {primary} unavailable "
+        f"({reason}); reviewed by lane {answered}."
+    )
 
 
 def provenance_banner(view: ProvenanceView) -> str:

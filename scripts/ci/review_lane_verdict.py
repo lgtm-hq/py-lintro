@@ -11,14 +11,20 @@ persisted for this round (the last entry of ``runs`` in ``state.json``).
 Outside a lane run, where the wrapper exported nothing, there is nothing to
 contradict and the outcome is left alone.
 
-The rules are ADR-0011 decision C's verdict table, for the rows a single
-attempt can produce (decision D's chain-walk rows are #2872):
+The rules are ADR-0011 decision C's verdict table, with decision D's
+chain-walk rows read from ``LINTRO_REVIEW_LANES_DOWN`` (#2872):
 
 - the recorded ``lane`` is not in the resolved chain, or the recorded
   endpoint host differs from the manifest endpoint of the recorded lane:
   red, ``status=endpoint-mismatch``;
 - the recorded lane is in the chain but is not ``chain[0]``: verdict
-  unchanged, a ``::warning::`` names the fallback;
+  unchanged, a ``::warning::`` names the fallback and, when the wrapper
+  recorded why the primary lane died, that reason;
+- every lane of a chain with two or more entries failed before any chunk
+  completed: red, ``status=lanes-exhausted`` (applied by the classifier to
+  a provider-unavailable outcome; a lane that failed after a chunk
+  completed is never in the list, so that case keeps
+  ``provider-unavailable``);
 - ``model_verification == mismatch`` on a first-party lane: red,
   ``status=model-mismatch``;
 - ``model_verification == unverifiable`` on a non-first-party lane: verdict
@@ -54,6 +60,7 @@ from urllib.parse import urlsplit
 __all__ = [
     "AUTH_LABELS",
     "STATUS_ENDPOINT_MISMATCH",
+    "STATUS_LANES_EXHAUSTED",
     "STATUS_MODEL_MISMATCH",
     "STATUS_MODEL_UNREPORTED",
     "STATUS_PROVENANCE_UNRECORDED",
@@ -65,6 +72,7 @@ __all__ = [
 ]
 
 STATUS_ENDPOINT_MISMATCH: Final[str] = "endpoint-mismatch"
+STATUS_LANES_EXHAUSTED: Final[str] = "lanes-exhausted"
 STATUS_MODEL_MISMATCH: Final[str] = "model-mismatch"
 STATUS_MODEL_UNREPORTED: Final[str] = "model-unreported"
 STATUS_PROVENANCE_UNRECORDED: Final[str] = "provenance-unrecorded"
@@ -114,6 +122,9 @@ class LaneFacts:
         run_attempt: This run attempt (``GITHUB_RUN_ATTEMPT``); the state
             must name it too, because a rerun resumes its own earlier
             attempt's artifact, which carries the same run id.
+        lanes_down: The lanes that failed before any chunk completed in
+            this run, each with its error kind, in chain order
+            (``LINTRO_REVIEW_LANES_DOWN``, ADR-0011 D).
     """
 
     chain: tuple[str, ...]
@@ -122,6 +133,7 @@ class LaneFacts:
     state_file: Path | None
     run_id: str = ""
     run_attempt: str = ""
+    lanes_down: tuple[tuple[str, str], ...] = ()
 
     @property
     def active(self) -> str:
@@ -182,7 +194,53 @@ def lane_facts(env: Mapping[str, str]) -> LaneFacts | None:
         state_file=Path(state_dir) / STATE_FILENAME if state_dir else None,
         run_id=env.get("GITHUB_RUN_ID", "").strip(),
         run_attempt=env.get("GITHUB_RUN_ATTEMPT", "").strip(),
+        lanes_down=_lanes_down(env.get("LINTRO_REVIEW_LANES_DOWN", "")),
     )
+
+
+def _lanes_down(raw: str) -> tuple[tuple[str, str], ...]:
+    """Parse the dead-lane list the wrapper exported; malformed is empty."""
+    try:
+        decoded = json.loads(raw or "[]")
+    except ValueError:
+        return ()
+    if not isinstance(decoded, list):
+        return ()
+    entries: list[tuple[str, str]] = []
+    for item in decoded:
+        if not isinstance(item, Mapping):
+            continue
+        lane = str(item.get("lane") or "")
+        kind = str(item.get("kind") or "")
+        if lane:
+            entries.append((lane, kind))
+    return tuple(entries)
+
+
+def lanes_exhausted(facts: LaneFacts) -> str:
+    """Return the lanes-exhausted reason, or empty when the rule does not apply.
+
+    Decision D: red with ``status=lanes-exhausted`` only when the chain has
+    two or more entries and every one of them failed before any chunk call
+    completed. A lane that failed after a chunk completed is never recorded
+    as down, so that run keeps ``provider-unavailable``.
+
+    Args:
+        facts: The lane facts the wrapper exported.
+
+    Returns:
+        One line naming every dead lane and its kind, or empty.
+    """
+    if len(facts.chain) < 2:
+        return ""
+    down = dict(facts.lanes_down)
+    if not set(facts.chain) <= set(down):
+        return ""
+    named = ", ".join(
+        f"{_short(lane)} ({_short(down[lane]) or 'unavailable'})"
+        for lane in facts.chain
+    )
+    return f"every lane in the chain failed before any chunk completed: {named}"
 
 
 def latest_run_record(
@@ -347,10 +405,18 @@ def lane_verdict(
         )
     warnings: list[str] = []
     if lane != facts.active:
-        warnings.append(
-            f"fallback lane {lane} answered this round; the active lane "
-            f"{facts.active} did not (ADR-0011 D)",
-        )
+        down = dict(facts.lanes_down)
+        if facts.active in down:
+            warnings.append(
+                f"primary lane {facts.active} unavailable "
+                f"({_short(down[facts.active]) or 'unavailable'}); reviewed by "
+                f"{lane} (ADR-0011 D)",
+            )
+        else:
+            warnings.append(
+                f"fallback lane {lane} answered this round; the active lane "
+                f"{facts.active} did not (ADR-0011 D)",
+            )
     verification = str(record.get("model_verification") or "")
     reported = _reported(record)
     if bool(row.get("first_party")):
