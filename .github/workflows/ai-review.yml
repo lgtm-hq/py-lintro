@@ -5,8 +5,10 @@ name: AI Review - Dogfood
 
 # Dogfood `lintro review` on py-lintro's own pull requests.
 #
-# Trusted install: lintro is installed from the default-branch commit that
-# supplied this workflow definition (github.workflow_sha), never the PR head,
+# Trusted install: lintro is installed from the base-branch commit that
+# supplied this workflow definition (github.workflow_sha: the tip of the PR's
+# base branch, main for every dogfood PR, or the default branch on a
+# comment-triggered run), never the PR head,
 # so PR-controlled code never executes with a provider credential in scope.
 # The PR is still reviewed — `lintro review --pr <N>` fetches the diff through
 # `gh` (GitHub API), so the PR's lintro/** changes are reviewed as data, never
@@ -76,7 +78,7 @@ name: AI Review - Dogfood
 # following hold (structurally asserted in tests/scripts/test_run_ai_review.py):
 #   1. Job if-guard: non-draft, same-repository PRs only (fork PRs never run).
 #   2. Trusted install: the checkout ref is github.workflow_sha, the
-#      default-branch commit that supplied this definition and the manifest,
+#      base-branch commit that supplied this definition and the manifest,
 #      never the PR head and never older than the manifest it is handed.
 #   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN,
 #      CURSOR_API_KEY, ZAI_AUTH_TOKEN, KIMI_API_KEY and CODEX_AUTH_JSON) are
@@ -112,7 +114,7 @@ name: AI Review - Dogfood
 # text only ever reaches the request step through `env:`, never a `run:` line.
 # For issue_comment GitHub takes this file and GITHUB_SHA from the default
 # branch, and there is no pull_request.base.sha: the review job's checkout
-# falls back to github.workflow_sha, the protected default-branch commit that
+# falls back to github.workflow_sha, the protected base-branch commit that
 # supplied this definition. issue_comment is not affected by the 2026-11-02
 # pull_request_target restriction (#2793).
 'on':
@@ -143,7 +145,7 @@ concurrency:
 jobs:
   lane:
     name: Resolve review lane
-    # Secret-free. Reads the committed manifest at the default-branch commit
+    # Secret-free. Reads the committed manifest at the base-branch commit
     # that supplied this workflow (github.workflow_sha), applies the
     # LINTRO_AI_PROVIDER lane selector and the LINTRO_AI_MODEL override, and
     # publishes the chain and every chain row; the review job consumes only
@@ -183,7 +185,7 @@ jobs:
       - name: Checkout the manifest and the resolver
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The default-branch commit that supplied this workflow definition.
+          # The base-branch commit that supplied this workflow definition.
           ref: ${{ github.workflow_sha }}
           fetch-depth: 1
           persist-credentials: false
@@ -237,7 +239,7 @@ jobs:
       - name: Checkout the trusted gate script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # The default-branch commit that supplied this workflow definition.
+          # The base-branch commit that supplied this workflow definition.
           ref: ${{ github.workflow_sha }}
           fetch-depth: 1
           persist-credentials: false
@@ -339,7 +341,7 @@ jobs:
     # the keyed job only runs for same-repository pull requests.
     #
     # SECURITY: lintro is installed from github.workflow_sha, the trusted
-    # default-branch commit that supplied this definition and the manifest,
+    # base-branch commit that supplied this definition and the manifest,
     # never the PR head, so the code that runs with the provider credential
     # is always trusted — a PR cannot substitute its own lintro/** to
     # exfiltrate the token. Agent CLI versions are pinned in that commit's

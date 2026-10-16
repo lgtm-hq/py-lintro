@@ -967,7 +967,7 @@ def test_workflow_installs_from_base_ref_not_pr_head() -> None:
     # Same-commit scripts (ADR-0011 A): the two-PR bootstrap is retired.
     assert_that(workflow_text).does_not_contain("TWO-PR BOOTSTRAP")
     assert_that(workflow_text).contains("SAME-COMMIT SCRIPTS")
-    assert_that(workflow_text).contains("default-branch commit")
+    assert_that(workflow_text).contains("base-branch commit")
     assert_that(workflow_text).does_not_contain(
         "GitHub runs the workflow YAML from the PR",
     )
