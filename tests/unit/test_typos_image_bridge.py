@@ -9,6 +9,8 @@ from assertpy import assert_that
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
+_RUST_INSTALLER = _REPO_ROOT / "scripts" / "utils" / "installers" / "rust-tools.sh"
+_NODE_INSTALLER = _REPO_ROOT / "scripts" / "utils" / "installers" / "node-tools.sh"
 _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 
 
@@ -50,7 +52,7 @@ def test_ci_dockerfile_bridges_spectral_until_tools_digest_includes_it() -> None
 
 def test_install_tools_script_installs_typos() -> None:
     """The shared installer must have a typos block the Dockerfile can invoke."""
-    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    text = _RUST_INSTALLER.read_text(encoding="utf-8")
     assert_that(text).contains('should_install "typos"')
     assert_that(text).contains("typos-cli")
     tools_df = _TOOLS_DOCKERFILE.read_text(encoding="utf-8")
@@ -59,7 +61,7 @@ def test_install_tools_script_installs_typos() -> None:
 
 def test_install_tools_script_installs_spectral() -> None:
     """The shared installer must have a spectral block the Dockerfile can invoke."""
-    text = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    text = _NODE_INSTALLER.read_text(encoding="utf-8")
     assert_that(text).contains('should_install "spectral"')
     assert_that(text).contains("@stoplight/spectral-cli")
     skip_at = text.find("command -v spectral")

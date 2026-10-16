@@ -15,6 +15,7 @@ from lintro.enums.tool_name import ToolName
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
+_BINARY_INSTALLER = _REPO_ROOT / "scripts" / "utils" / "installers" / "binary-tools.sh"
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 
@@ -86,7 +87,7 @@ def test_install_block_checks_path_before_any_package_manager() -> None:
     the branches were reordered those tests could start invoking brew or apt
     on a developer machine or CI runner.
     """
-    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    script = _BINARY_INSTALLER.read_text(encoding="utf-8")
     block_at = script.find('if should_install "cppcheck"; then')
     block = script[block_at : script.find("fi # cppcheck", block_at)]
 
@@ -115,7 +116,7 @@ def test_supported_tools_lists_cppcheck() -> None:
 
 def test_install_block_fails_loudly() -> None:
     """Every failing install path in the cppcheck block exits non-zero."""
-    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    script = _BINARY_INSTALLER.read_text(encoding="utf-8")
     block_at = script.find('if should_install "cppcheck"; then')
     assert_that(block_at).is_not_equal_to(-1)
     block_end = script.find("fi # cppcheck", block_at)
@@ -135,7 +136,7 @@ def test_install_block_enforces_the_manifest_minimum() -> None:
     the floor lintro skips the tool at runtime, which would let setup finish
     green while C/C++ analysis never runs.
     """
-    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    script = _BINARY_INSTALLER.read_text(encoding="utf-8")
     block_at = script.find('if should_install "cppcheck"; then')
     block = script[block_at : script.find("fi # cppcheck", block_at)]
 

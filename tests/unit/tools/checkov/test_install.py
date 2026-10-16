@@ -23,6 +23,7 @@ from tests.integration._tools import (
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 _INSTALL_TOOLS = _REPO_ROOT / "scripts" / "utils" / "install-tools.sh"
+_PYTHON_INSTALLER = _REPO_ROOT / "scripts" / "utils" / "installers" / "python-tools.sh"
 _DOCKERFILE = _REPO_ROOT / "Dockerfile"
 _TOOLS_DOCKERFILE = _REPO_ROOT / "docker" / "tools.Dockerfile"
 _PYPROJECT = _REPO_ROOT / "pyproject.toml"
@@ -92,7 +93,7 @@ def _checkov_install_block() -> str:
     """Return the installer's checkov block, failing if it cannot be located.
 
     ``str.find`` returns -1 for a missing marker, and an unguarded slice on
-    that silently widens to the rest of the ~2000-line script — every
+    that silently widens to the rest of the installer — every
     ``contains`` below would then match text belonging to other tools' blocks
     and the ``exit 1`` count would clear its threshold trivially. Locating the
     block once, with both markers asserted, is what keeps these assertions
@@ -101,7 +102,7 @@ def _checkov_install_block() -> str:
     Returns:
         The text between ``if should_install "checkov"`` and ``fi # checkov``.
     """
-    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    script = _PYTHON_INSTALLER.read_text(encoding="utf-8")
     start = script.find('if should_install "checkov"; then')
     assert_that(start).described_as("checkov install block").is_not_equal_to(-1)
     end = script.find("fi # checkov", start)

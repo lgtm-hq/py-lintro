@@ -187,6 +187,9 @@ def test_spectral_is_config_selected_not_language_mapped(
 def test_installer_wires_spectral_through_every_sync_point() -> None:
     """Installer help, filtering, installation, and verification stay aligned."""
     script = Path("scripts/utils/install-tools.sh").read_text(encoding="utf-8")
+    node_installer = Path("scripts/utils/installers/node-tools.sh").read_text(
+        encoding="utf-8",
+    )
     verify_line = next(
         line
         for line in script.splitlines()
@@ -197,9 +200,11 @@ def test_installer_wires_spectral_through_every_sync_point() -> None:
     assert_that(script).contains(
         "- Spectral (OpenAPI/AsyncAPI/JSON Schema linter)",
         '"spectral" "sqlfluff"',
+        '["spectral"]="OpenAPI/AsyncAPI/JSON Schema linting"',
+    )
+    assert_that(node_installer).contains(
         'if should_install "spectral"; then',
         'get_tool_version "@stoplight/spectral-cli"',
-        '["spectral"]="OpenAPI/AsyncAPI/JSON Schema linting"',
     )
     assert_that(verify_line).contains('"spectral"')
     assert_that(dockerfile).contains("spectral --version")

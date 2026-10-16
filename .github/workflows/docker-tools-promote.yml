@@ -33,6 +33,7 @@ name: Promote - Lintro Tools Candidate
       - 'lintro/_tool_packages.py'
       - 'lintro_build/**'
       - 'scripts/utils/install-tools.sh'
+      - 'scripts/utils/installers/**'
       - 'scripts/utils/install-semgrep.sh'
       - 'scripts/utils/utils.sh'
       - 'package.json'

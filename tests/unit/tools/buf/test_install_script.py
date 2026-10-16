@@ -1,4 +1,4 @@
-"""Tests for the buf installer path in ``install-tools.sh``."""
+"""Tests for the buf installer path in ``installers/binary-tools.sh``."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 from assertpy import assert_that
 
-_INSTALL_TOOLS = Path("scripts/utils/install-tools.sh")
+_BINARY_INSTALLER = Path("scripts/utils/installers/binary-tools.sh")
 
 
 def test_buf_version_probe_survives_pipefail() -> None:
@@ -17,7 +17,7 @@ def test_buf_version_probe_survives_pipefail() -> None:
     hard exit. The probe has to yield an empty string so the download
     branch still runs.
     """
-    script = _INSTALL_TOOLS.read_text(encoding="utf-8")
+    script = _BINARY_INSTALLER.read_text(encoding="utf-8")
     assert_that(script).contains("head -1 || true")
 
     result = subprocess.run(  # nosec B603 B607 - fixed bash argv in a controlled test
