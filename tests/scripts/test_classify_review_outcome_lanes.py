@@ -398,6 +398,45 @@ def test_an_incomplete_or_impossible_record_is_red_as_unrecorded(
     assert_that(report.headline).contains(fragment)
 
 
+def test_a_lane_in_the_chain_without_a_published_row_is_unrecorded(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """In the chain but with no row to compare against is not a mismatch."""
+    env = _env(tmp_path, rows, ["anthropic"], record=_record())
+    env["LINTRO_REVIEW_LANES"] = json.dumps({})
+
+    report = classifier.classify(status=0, output="{}", env=env)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONTRADICTED)
+    assert_that(report.status).is_equal_to("provenance-unrecorded")
+    assert_that(report.headline).contains("no manifest row was published")
+
+
+def test_kill_and_drift_prose_outrank_the_credential_label(
+    classifier: ModuleType,
+) -> None:
+    """A thin envelope that says the runner killed the CLI is not an auth failure."""
+    killed = classifier.refine_failure_kind(
+        transport="cli",
+        kind="",
+        message="The operation was canceled; oauth session was open",
+        output="",
+        credential="zai_token",
+    )
+    drift = classifier.refine_failure_kind(
+        transport="cli",
+        kind="unknown",
+        message="unknown option --oauth",
+        output="",
+        credential="zai_token",
+    )
+
+    assert_that(killed).is_equal_to("killed_externally")
+    assert_that(drift).is_equal_to("cli_version_drift")
+
+
 def test_an_unreadable_chain_trusts_no_recorded_lane(
     classifier: ModuleType,
     rows: dict[str, Any],

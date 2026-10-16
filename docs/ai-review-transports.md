@@ -131,11 +131,13 @@ applies ADR-0011 decision C through `scripts/ci/review_lane_verdict.py` (#2871):
 recorded lane outside the chain or an endpoint off that lane's host is red with
 `status=endpoint-mismatch`; a first-party lane that answered with another model is red
 with `status=model-mismatch`, and one whose transport declares model usage but reported
-none is red with `status=model-unreported`; a review that persisted no run record is red
-with `status=provenance-unrecorded`; a fallback lane answering, or a gateway's
-unverifiable model, is a `::warning::` that leaves the verdict alone. An authentication
-failure is labelled by the credential kind the lane bound, so a gateway 401 is never
-blamed on the Claude session.
+none is red with `status=model-unreported`; a review whose run record cannot vouch for
+it (none persisted by this run and attempt, or a record missing an endpoint or carrying
+a verification state its lane cannot produce) is red with
+`status=provenance-unrecorded`; a fallback lane answering, or a gateway's unverifiable
+model, is a `::warning::` that leaves the verdict alone. An authentication failure is
+labelled by the credential kind the lane bound, so a gateway 401 is never blamed on the
+Claude session.
 
 The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
 `LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends

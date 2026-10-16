@@ -316,14 +316,21 @@ def lane_verdict(
             ),
         )
     lane = str(record.get("lane") or "")
-    row = facts.lanes.get(lane) if lane and lane in facts.chain else None
-    if row is None:
+    if not lane or lane not in facts.chain:
         return LaneVerdict(
             status=STATUS_ENDPOINT_MISMATCH,
             reason=(
                 f"recorded lane {_short(lane) or '(none)'!r} is not in the "
                 f"resolved chain {[_short(entry) for entry in facts.chain]}"
             ),
+        )
+    row = facts.lanes.get(lane)
+    if row is None:
+        # In the chain, but the lane job's rows did not reach here (or did
+        # not parse): nothing to compare the record against.
+        return LaneVerdict(
+            status=STATUS_PROVENANCE_UNRECORDED,
+            reason=f"no manifest row was published for the recorded lane {lane!r}",
         )
     incomplete = _incomplete(record, row)
     if incomplete:

@@ -850,16 +850,10 @@ def refine_failure_kind(
         A transport-aware kind label for CI summaries.
     """
     haystack = f"{message}\n{output}"
-    if credential in _lanes.AUTH_LABELS and (
-        kind == "auth_failed"
-        or (
-            kind in ("", "unknown")
-            and (_OAUTH_AUTH.search(haystack) or _API_KEY_AUTH.search(haystack))
-        )
-    ):
-        # The bound credential names the failure, for a concrete kind and
-        # for a thin envelope whose prose only says "authentication" alike.
-        return str(_lanes.AUTH_LABELS[credential])
+    bound_label = _lanes.AUTH_LABELS.get(credential)
+    if kind == "auth_failed" and bound_label:
+        # A concrete authentication failure is named by the bound credential.
+        return str(bound_label)
     if transport == "cli":
         # Prose patterns may only classify a *thin* envelope (no concrete
         # kind): a real envelope kind (insufficient_credits, timeout, ...)
@@ -876,8 +870,15 @@ def refine_failure_kind(
             if _API_KEY_AUTH.search(haystack) and not _OAUTH_AUTH.search(haystack):
                 return "auth_failed:key"
             return "auth_failed:oauth_session"
-        if thin_envelope and _OAUTH_AUTH.search(haystack):
-            return "auth_failed:oauth_session"
+        # A thin envelope whose prose only says "authentication": the bound
+        # credential names it when one is known, after the kill and drift
+        # patterns above, which describe a run that never reached auth.
+        auth_prose = _OAUTH_AUTH.search(haystack) or _API_KEY_AUTH.search(haystack)
+        if thin_envelope and auth_prose:
+            if bound_label:
+                return str(bound_label)
+            if _OAUTH_AUTH.search(haystack):
+                return "auth_failed:oauth_session"
         return _CLI_KIND_LABELS.get(kind, kind)
 
     if kind == "auth_failed":

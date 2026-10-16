@@ -17,7 +17,7 @@ from assertpy import assert_that
 from lintro.ai.review.lifecycle.state import persist_review_state
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.state_store import load_ci_state, union_states, write_state_part
-from tests.unit.ai.review.test_pr_spend_2796 import _context, _result
+from tests.unit.ai.review.test_pr_spend_2796 import _checkpoint, _context, _result
 
 
 def test_the_run_attempt_round_trips_through_the_artifact_dict() -> None:
@@ -46,14 +46,27 @@ def test_the_union_keeps_the_last_parts_attempt(tmp_path: Path) -> None:
     assert_that(written).contains('"run_attempt": "2"')
 
 
-def test_the_checkpoint_writer_stamps_the_attempt_from_the_environment() -> None:
-    """The checkpoint writer reads ``GITHUB_RUN_ATTEMPT`` next to ``GITHUB_RUN_ID``."""
-    source = Path("lintro/ai/review/incremental_coverage.py").read_text(
-        encoding="utf-8",
-    )
-    assert_that(source).contains(
-        'run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", "") or seed.run_attempt',
-    )
+def test_the_checkpoint_writer_stamps_this_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mid-round checkpoint names the run and attempt, like the final write.
+
+    A round killed after a checkpoint leaves only parts behind; the next
+    load, and the CI classifier, must see this attempt's stamp on them.
+
+    Args:
+        tmp_path: Scratch state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("GITHUB_RUN_ID", "38900000001")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+
+    resumed = _checkpoint(tmp_path=tmp_path, prior=None, round_spend=0.5)
+
+    assert_that(resumed.run_id).is_equal_to("38900000001")
+    assert_that(resumed.run_attempt).is_equal_to("2")
 
 
 def test_the_final_persist_stamps_this_attempt(
