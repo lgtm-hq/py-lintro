@@ -125,7 +125,17 @@ default lane), `openai` (the Codex session, `gpt-6.1-sol`), `cursor`
 (`cursor-grok-4.6-high`), `zai` (`glm-5.3-flash`) and `kimi` (`kimi-k3`), the last two
 non-first-party gateways. Switching lanes is a change to the variable and reaches every
 open PR on its next run; a rerun keeps its run's inputs, so after a switch the recovery
-step for a red PR is an `@lintro review` comment, which starts a new run.
+step for a red PR is an `@lintro review` comment, which starts a new run. After a review
+is produced, `scripts/ci/classify_review_outcome.py` reads this round's run record and
+applies ADR-0011 decision C through `scripts/ci/review_lane_verdict.py` (#2871): a
+recorded lane outside the chain or an endpoint off that lane's host is red with
+`status=endpoint-mismatch`; a first-party lane that answered with another model is red
+with `status=model-mismatch`, and one whose transport declares model usage but reported
+none is red with `status=model-unreported`; a review that persisted no run record is red
+with `status=provenance-unrecorded`; a fallback lane answering, or a gateway's
+unverifiable model, is a `::warning::` that leaves the verdict alone. An authentication
+failure is labelled by the credential kind the lane bound, so a gateway 401 is never
+blamed on the Claude session.
 
 The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
 `LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends
