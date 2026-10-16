@@ -21,6 +21,34 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Security
 
+## [0.171.4] - 2026-10-15
+
+### Changed
+
+- **adr**: add ADR-0011 dogfood review lanes, provenance and degradation (#2875)
+  (d9e1662)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 777fb0a
+  (#2888) (399c065)
+- **deps**: update dependency golang to 1.27.2 (patch) (#2885) (49102fc)
+- **deps**: update dependency golangci/golangci-lint to 2.14.0 (minor) (#2819) (1307233)
+- **deps**: update docker/dockerfile:1 docker digest to 4edf897 (#2879) (24b4968)
+- **deps**: update dependency @types/sanitize-html to 2.16.2 (patch) (#2884) (d94f999)
+- **deps**: update python:3.14-slim docker digest to a2b82f3 (#2883) (f2e0afd)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to f7e3c13
+  (#2881) (38d0f28)
+- **deps**: update dependency google/osv-scanner to 2.7.0 (minor) (#2776) (99514cc)
+- **deps**: update ghcr.io/lgtm-hq/lintro-ai-tools:latest docker digest to 378cdb3
+  (#2717) (fd6e664)
+- **deps**: update github-actions (#2779) (6825b04)
+- **deps**: update dependency checkov to 3.3.29 (patch) (#2769) (3199aa7)
+
+### Fixed
+
+- **deps**: update linting tools (#2493) (ace4e4e)
+- **deps**: update dependency @lgtm-hq/turbo-themes to 0.44.15 (minor) (#2492) (18ad07b)
+- **deps**: update smol-toml to 1.9.0 and patch npm advisories [security] (#2861)
+  (e33f35f)
+
 ## [0.171.3] - 2026-10-04
 
 ### Changed
