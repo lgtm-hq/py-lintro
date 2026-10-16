@@ -12,6 +12,7 @@ have expired.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import tomllib
 from pathlib import Path
 
@@ -35,20 +36,27 @@ def _osv_suppressions() -> list[dict[str, object]]:
     return [entry for entry in entries if isinstance(entry, dict)]
 
 
+def _names(entry: dict[str, object], vuln_id: str) -> bool:
+    """Return whether *entry* names *vuln_id* by id or as a whole-word alias."""
+    if entry.get("id") == vuln_id:
+        return True
+    reason = str(entry.get("reason", ""))
+    return re.search(rf"(?<![\w-]){re.escape(vuln_id)}(?![\w-])", reason) is not None
+
+
 def test_every_pip_audit_ignore_is_a_live_osv_suppression() -> None:
-    """An ignore with no matching, unexpired osv entry is a silent exemption."""
+    """An ignore with no matching, unexpired, reasoned osv entry is a silent exemption."""
     suppressions = _osv_suppressions()
     today = dt.date.today()
     for vuln_id in _ignored_by_pip_audit():
-        matching = [
-            entry
-            for entry in suppressions
-            if entry.get("id") == vuln_id or vuln_id in str(entry.get("reason", ""))
-        ]
+        matching = [entry for entry in suppressions if _names(entry, vuln_id)]
         assert_that(matching).described_as(
             f"{vuln_id}: no [[IgnoredVulns]] entry names it by id or as an alias",
         ).is_not_empty()
         for entry in matching:
+            assert_that(str(entry.get("reason", "")).strip()).described_as(
+                f"{vuln_id}: the osv entry carries no reason",
+            ).is_not_empty()
             until = entry.get("ignoreUntil")
             assert_that(until).described_as(f"{vuln_id}: ignoreUntil").is_instance_of(
                 dt.date,
@@ -58,3 +66,16 @@ def test_every_pip_audit_ignore_is_a_live_osv_suppression() -> None:
                 f"{vuln_id}: the osv entry expired on {until}; drop both ignores or "
                 "renew them with a fresh reason",
             ).is_true()
+
+
+def test_the_alias_match_is_whole_id_only() -> None:
+    """A prefix of an id, or a bare year, must not satisfy the pairing."""
+    entry: dict[str, object] = {
+        "id": "GHSA-84m7-p3x7-pcfv",
+        "reason": "mcp@1.29.0 (alias CVE-2026-59951): not reachable",
+    }
+    assert_that(_names(entry, "CVE-2026-59951")).is_true()
+    assert_that(_names(entry, "GHSA-84m7-p3x7-pcfv")).is_true()
+    assert_that(_names(entry, "CVE-2026-5995")).is_false()
+    assert_that(_names(entry, "CVE-2026")).is_false()
+    assert_that(_names(entry, "GHSA-84m7-p3x7")).is_false()
