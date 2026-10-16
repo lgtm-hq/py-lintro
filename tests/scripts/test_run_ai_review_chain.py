@@ -18,6 +18,7 @@ import subprocess  # nosec B404 - runs the repo's own script with a fixed argv
 from pathlib import Path
 from typing import Any
 
+import pytest
 from assertpy import assert_that
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -67,6 +68,7 @@ n=$(cat "$dir/attempts" 2>/dev/null || echo 0); n=$((n + 1)); printf '%s\\n' "$n
     printf 'anthropic_auth=%s\\n' "${ANTHROPIC_AUTH_TOKEN:+set}"
     printf 'codex_env=%s\\n' "${CODEX_AUTH_JSON:+set}"
     printf 'codex_file=%s\\n' "$([[ -s "$HOME/.codex/auth.json" ]] && echo present || echo absent)"
+    printf 'cursor=%s\\n' "${CURSOR_API_KEY:+set}"
     printf 'fallback_from=%s\\n' "${LINTRO_REVIEW_FALLBACK_FROM:-}"
     printf 'fallback_reason=%s\\n' "${LINTRO_REVIEW_FALLBACK_REASON:-}"
     printf 'lanes_down=%s\\n' "${LINTRO_REVIEW_LANES_DOWN:-}"
@@ -75,12 +77,20 @@ plan="$(sed -n "${n}p" "$dir/plan")"
 case "$plan" in
     fail:*)
         kind="${plan#fail:}"
+        count='"completed_chunks":0'
         if [[ "$kind" == *"+chunk" ]]; then
             kind="${kind%+chunk}"
+            count='"completed_chunks":1'
             sleep 1
             printf '{"version":5,"run_id":"%s","run_attempt":"%s","runs":[]}' "${GITHUB_RUN_ID:-}" "${GITHUB_RUN_ATTEMPT:-}" >"$LINTRO_REVIEW_STATE_DIR/part-0001.json"
+        elif [[ "$kind" == *"+counted" ]]; then
+            kind="${kind%+counted}"
+            count='"completed_chunks":1'
+        elif [[ "$kind" == *"+unknown" ]]; then
+            kind="${kind%+unknown}"
+            count='"completed_chunks":null'
         fi
-        printf '{"error":{"kind":"%s","provider":"%s","status":402,"retryable":false,"provider_unavailable":true,"message":"stub failure"}}\\n' "$kind" "${LINTRO_AI_PROVIDER:-}"
+        printf '{"error":{"kind":"%s","provider":"%s","status":402,"retryable":false,"provider_unavailable":true,"message":"stub failure",%s}}\\n' "$kind" "${LINTRO_AI_PROVIDER:-}" "$count"
         exit 2 ;;
     ok)
         host="${LINTRO_REVIEW_ENDPOINT#https://}"; host="${host%%/*}"
@@ -113,8 +123,10 @@ def _run_chain(
     Args:
         tmp_path: Per-test scratch directory.
         chain: The resolved chain of manifest lane ids.
-        plan: One entry per attempt: ``ok``, ``fail:<kind>`` or
-            ``fail:<kind>+chunk`` (a checkpoint part is written first).
+        plan: One entry per attempt: ``ok``, ``fail:<kind>`` (count 0),
+            ``fail:<kind>+chunk`` (count 1 and a checkpoint part written),
+            ``fail:<kind>+counted`` (count 1, no part: the checkpoint write
+            failed) or ``fail:<kind>+unknown`` (no count on the envelope).
         open_issue: An existing lane-down issue number the ``gh`` stub
             reports, or ``None`` for none.
 
@@ -152,6 +164,7 @@ def _run_chain(
         "LINTRO_REVIEW_CHAIN": json.dumps(chain),
         "LINTRO_REVIEW_LANES": json.dumps({lane: rows[lane] for lane in chain}),
         "CLAUDE_CODE_OAUTH_TOKEN": "dummy-claude-token",  # nosec B105 - test stand-in
+        "CURSOR_API_KEY": "dummy-cursor-key",  # nosec B105 - test stand-in
         "CODEX_AUTH_JSON": EMPTY_CODEX_SESSION,
         "LINT_REPORT_WAIT_SECONDS": "0",
         "LINT_REPORT_POLL_SECONDS": "1",
@@ -287,6 +300,61 @@ def test_a_lane_that_died_mid_review_is_not_retried_elsewhere(tmp_path: Path) ->
     assert_that(run["output"]).contains("after a chunk completed")
     assert_that(run["output"]).contains("provider unavailable")
     assert_that(run["output"]).does_not_contain("lanes-exhausted")
+
+
+@pytest.mark.parametrize("suffix", ["+counted", "+unknown"])
+def test_a_counted_or_uncounted_chunk_is_not_retried_elsewhere(
+    tmp_path: Path,
+    suffix: str,
+) -> None:
+    """The envelope's count is the witness; a lost checkpoint changes nothing.
+
+    ``+counted`` is a chunk whose checkpoint write failed: no part on disk,
+    count 1. ``+unknown`` is a failure with no count at all.
+    """
+    run = _run_chain(
+        tmp_path,
+        chain=["anthropic", "openai"],
+        plan=[f"fail:insufficient_credits{suffix}", "ok"],
+    )
+
+    assert_that(run["attempts"]).is_length(1)
+    assert_that(run["exit"]).is_equal_to(1)
+    assert_that(run["output"]).contains("provider unavailable")
+    assert_that(run["output"]).does_not_contain("lanes-exhausted")
+    assert_that([c for c in run["gh"] if c.startswith("issue ")]).is_empty()
+
+
+def test_a_three_lane_walk_names_the_first_dead_lane_as_primary(
+    tmp_path: Path,
+) -> None:
+    """Two dead lanes, the third answers: the sticky blames the primary."""
+    run = _run_chain(
+        tmp_path,
+        chain=["anthropic", "openai", "cursor"],
+        plan=["fail:insufficient_credits", "fail:auth_failed", "ok"],
+    )
+
+    assert_that(run["attempts"]).is_length(3)
+    third = run["attempts"][2]
+    assert_that(third["lane"]).is_equal_to("cursor")
+    assert_that(third["cursor"]).is_equal_to("set")
+    assert_that(third["claude"]).is_empty()
+    assert_that(third["codex_file"]).is_equal_to("absent")
+    assert_that(third["fallback_from"]).is_equal_to("anthropic")
+    assert_that(third["fallback_reason"]).is_equal_to("insufficient_credits")
+    assert_that(json.loads(third["lanes_down"])).is_equal_to(
+        [
+            {"lane": "anthropic", "kind": "insufficient_credits"},
+            {"lane": "openai", "kind": "auth_failed"},
+        ],
+    )
+    assert_that(run["exit"]).is_equal_to(0)
+    assert_that(run["output"]).contains(
+        "primary lane anthropic unavailable (insufficient_credits); reviewed by cursor",
+    )
+    creates = [c for c in run["gh"] if c.startswith("issue create ")]
+    assert_that(creates).is_length(2)
 
 
 def test_every_lane_dead_is_lanes_exhausted(tmp_path: Path) -> None:

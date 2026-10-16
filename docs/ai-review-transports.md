@@ -143,18 +143,19 @@ blamed on the Claude session.
 
 The chain is walked (ADR-0011 decision D, #2872). When an attempt exits with the review
 error status and its envelope names `auth_failed`, `insufficient_credits` or
-`quota_exceeded`, and no checkpoint part was written during the attempt, the wrapper
-takes back that lane's credential, binds the next lane in `chain` with only its own, and
-tries again; `scripts/ci/review_chain.py` makes that decision from the envelope's kind,
-never from its `provider_unavailable` flag. A rate limit, a server error or a timeout
-stays with the existing retry, and a lane that fails after a chunk completed is never
-retried elsewhere: the partial round is persisted for a same-lane resume and the check
-is red with `status=provider-unavailable`. A fallback round is green; the sticky leads
-with a line naming the dead lane, its error kind and the lane that answered, the job
-summary carries the same as a `::warning::`, and one issue labelled
-`ai-review-lane-down` is opened or updated per dead lane through the App token. When a
-chain of two or more lanes has every lane fail before any chunk completed, the check is
-red with `status=lanes-exhausted`.
+`quota_exceeded`, its `completed_chunks` is zero (a missing count refuses the walk) and
+no checkpoint part was written during the attempt, the wrapper takes back that lane's
+credential, binds the next lane in `chain` with only its own, and tries again;
+`scripts/ci/review_chain.py` makes that decision from the envelope's kind, never from
+its `provider_unavailable` flag. A rate limit, a server error or a timeout stays with
+the existing retry, and a lane that fails after a chunk completed is never retried
+elsewhere: the partial round is persisted for a same-lane resume and the check is red
+with `status=provider-unavailable`. A fallback round is green; the sticky leads with a
+line naming the dead lane, its error kind and the lane that answered, the job summary
+carries the same as a `::warning::`, and one issue labelled `ai-review-lane-down` is
+opened or updated per dead lane through the App token. When a chain of two or more lanes
+has every lane fail before any chunk completed, the check is red with
+`status=lanes-exhausted`.
 
 The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
 `LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends

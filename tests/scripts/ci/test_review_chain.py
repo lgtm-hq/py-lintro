@@ -44,17 +44,18 @@ def chain() -> ModuleType:
     return _load()
 
 
-def _envelope(kind: str) -> str:
-    payload = {
-        "error": {
-            "kind": kind,
-            "provider": "anthropic",
-            "status": 402,
-            "retryable": False,
-            "provider_unavailable": True,
-            "message": "balance too low",
-        },
+def _envelope(kind: str, completed: object = 0) -> str:
+    error: dict[str, object] = {
+        "kind": kind,
+        "provider": "anthropic",
+        "status": 402,
+        "retryable": False,
+        "provider_unavailable": True,
+        "message": "balance too low",
     }
+    if completed is not None:
+        error["completed_chunks"] = completed
+    payload = {"error": error}
     return f"log line\n{json.dumps(payload)}\ntrailing\n"
 
 
@@ -168,6 +169,52 @@ def test_a_completed_chunk_stops_the_walk(chain: ModuleType, tmp_path: Path) -> 
 
     assert_that(verb).is_equal_to(chain.STOP)
     assert_that(detail).contains("after a chunk completed")
+
+
+@pytest.mark.parametrize("completed", [1, 7])
+def test_a_counted_chunk_stops_even_without_a_part(
+    chain: ModuleType,
+    tmp_path: Path,
+    completed: int,
+) -> None:
+    """A chunk whose checkpoint write failed is still a completed chunk."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    verb, detail = chain.decide(
+        status=2,
+        output=_envelope("auth_failed", completed=completed),
+        state_dir=state_dir,
+        since=_marker(tmp_path),
+        attempt=0,
+        chain_length=2,
+    )
+
+    assert_that(verb).is_equal_to(chain.STOP)
+    assert_that(detail).contains("after a chunk completed")
+
+
+@pytest.mark.parametrize("completed", [None, "0", -1, True, 1.0])
+def test_an_unknown_count_refuses_the_walk(
+    chain: ModuleType,
+    tmp_path: Path,
+    completed: object,
+) -> None:
+    """No usable count (older lintro, a failure outside the run): stay."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+
+    verb, detail = chain.decide(
+        status=2,
+        output=_envelope("auth_failed", completed=completed),
+        state_dir=state_dir,
+        since=_marker(tmp_path),
+        attempt=0,
+        chain_length=2,
+    )
+
+    assert_that(verb).is_equal_to(chain.STOP)
+    assert_that(detail).contains("no completed-chunk count")
 
 
 def test_a_part_older_than_the_attempt_does_not_count(

@@ -248,7 +248,6 @@ _unbind_attempt() {
 		unset "$_bound_base_url_env"
 		_bound_base_url_env=""
 	fi
-	unset LINTRO_REVIEW_FALLBACK_FROM LINTRO_REVIEW_FALLBACK_REASON
 }
 _bind_attempt() {
 	export LINTRO_REVIEW_ATTEMPT="$1"
@@ -759,7 +758,11 @@ while :; do
 		echo "::warning::lane ${_dead_lane} unavailable (${_dead_kind}) before any chunk completed; falling back to the next lane (ADR-0011 D)"
 		_record_lane_down "$_dead_lane" "$_dead_kind"
 		_unbind_attempt
-		export LINTRO_REVIEW_FALLBACK_FROM="$_dead_lane" LINTRO_REVIEW_FALLBACK_REASON="$_dead_kind"
+		# The sticky names the primary lane: the first one that died, not
+		# whichever preceded the lane that finally answered.
+		if [[ -z "${LINTRO_REVIEW_FALLBACK_FROM:-}" ]]; then
+			export LINTRO_REVIEW_FALLBACK_FROM="$_dead_lane" LINTRO_REVIEW_FALLBACK_REASON="$_dead_kind"
+		fi
 		_attempt=$((_attempt + 1))
 		rm -f "$output_file"
 		output_file="$(mktemp)"

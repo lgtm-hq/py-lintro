@@ -13,10 +13,12 @@ chain advances only when all of these hold:
   rate limit, a server error or a timeout stays with the existing retry;
   ``provider_unavailable`` is a configuration failure. The decision keys on
   the kind, never on the envelope's ``provider_unavailable`` flag;
-- no chunk call of this attempt completed: lintro writes a checkpoint part
-  (``part-NNNN.json``) per completed chunk, so a part newer than the
-  attempt's start marker means the review had already produced something
-  and must not be restarted on another lane;
+- no chunk call of this attempt completed. The envelope's
+  ``completed_chunks`` is the evidence: lintro stamps it at the run boundary,
+  so it is present for every failure the run raised, and a missing or
+  non-zero count stops the walk. A checkpoint part (``part-NNNN.json``)
+  newer than the attempt's start marker stops it too, as a second witness,
+  but a part is best-effort and is never the only one;
 - a lane is left in the chain.
 
 A dead-lane kind on the last lane is ``exhausted``: nothing is left to walk
@@ -81,6 +83,23 @@ def _json_objects(text: str) -> Iterator[dict[str, Any]]:
         index = text.find("{", index + 1)
 
 
+def last_error(text: str) -> dict[str, Any]:
+    """Return the last review error envelope in *text*, or an empty dict.
+
+    Args:
+        text: The attempt's captured stdout and stderr.
+
+    Returns:
+        The ``error`` object of the last envelope naming a ``kind``.
+    """
+    found: dict[str, Any] = {}
+    for payload in _json_objects(text):
+        error = payload.get("error")
+        if isinstance(error, dict) and isinstance(error.get("kind"), str):
+            found = error
+    return found
+
+
 def error_kind(text: str) -> str:
     """Return the kind of the last review error envelope in *text*, or empty.
 
@@ -90,12 +109,23 @@ def error_kind(text: str) -> str:
     Returns:
         The envelope's ``error.kind``, or an empty string when none is found.
     """
-    kind = ""
-    for payload in _json_objects(text):
-        error = payload.get("error")
-        if isinstance(error, dict) and isinstance(error.get("kind"), str):
-            kind = error["kind"]
-    return kind
+    return str(last_error(text).get("kind", ""))
+
+
+def completed_chunks(error: dict[str, Any]) -> int | None:
+    """Return the envelope's completed-chunk count, or ``None`` when absent.
+
+    Args:
+        error: The ``error`` object of an envelope.
+
+    Returns:
+        A non-negative integer, or ``None`` when the envelope carries no
+        usable count (older lintro, a failure outside the run, or junk).
+    """
+    count = error.get("completed_chunks")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        return None
+    return count
 
 
 def chunk_completed(state_dir: Path, since: Path) -> bool:
@@ -147,10 +177,18 @@ def decide(
     """
     if status != REVIEW_STATUS_ERROR:
         return STOP, f"review exited {status}, not the error status"
-    kind = error_kind(output)
+    error = last_error(output)
+    kind = str(error.get("kind", ""))
     if kind not in FALLBACK_KINDS:
         return STOP, f"error kind {kind or '(none)'!r} is not a fallback trigger"
-    if chunk_completed(state_dir, since):
+    completed = completed_chunks(error)
+    if completed is None:
+        return (
+            STOP,
+            f"{kind} with no completed-chunk count on the envelope; "
+            "the round stays on this lane",
+        )
+    if completed > 0 or chunk_completed(state_dir, since):
         return (
             STOP,
             f"{kind} after a chunk completed; the partial round stays on this lane",
