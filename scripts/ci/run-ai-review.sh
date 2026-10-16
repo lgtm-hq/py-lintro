@@ -29,15 +29,19 @@ set -euo pipefail
 #
 # Lane binding (ADR-0011, #2870): the secret-free `lane` job of ai-review.yml
 # resolves the chain from scripts/ci/ai_review_lanes.json and publishes the
-# rows; this script binds one attempt to its lane. Provider, transport and
-# model come from the row, not from variables; the attempt sees exactly its
+# rows; this script binds one attempt to its lane. The lane job alone reads
+# the two routing variables (LINTRO_AI_PROVIDER names a declared row,
+# LINTRO_AI_MODEL overrides its default model) and resolves them into the
+# row, so here provider, transport and model come from the row; the
+# attempt sees exactly its
 # own lane's credential, under the variable its CLI reads; the provider's
 # base-URL override is set to the row's endpoint off-host and must be unset
 # on-host; a competing credential, a config that disagrees with the row, or
 # an absent credential refuses the run before any provider call.
 #
 # Trusted install: the workflow checks out github.workflow_sha, the
-# default-branch commit that supplied the workflow and the manifest, before
+# base-branch commit that supplied the workflow and the manifest (the
+# default branch on a comment run), before
 # invoking this script, so the lintro that runs with the provider credential is
 # trusted code — never the PR head. The PR diff is fetched independently by
 # `lintro review --pr` via `gh` (GitHub API), so the PR's changes are reviewed
@@ -179,8 +183,9 @@ pr_number="${1:-${PR_NUMBER:-}}"
 # job resolved the chain from the committed manifest and published every
 # chain row (LINTRO_REVIEW_LANES) and the order (LINTRO_REVIEW_CHAIN). This
 # step holds every chain credential under its SECRET name and nothing else
-# may route the run: no variable selects a lane, provider, transport, model
-# or endpoint. One attempt (LINTRO_REVIEW_ATTEMPT, index into the chain;
+# may route the run: the lane selector and the model override were applied
+# by the lane job, and no variable here supplies a lane, transport or
+# endpoint. One attempt (LINTRO_REVIEW_ATTEMPT, index into the chain;
 # the chain walk of decision D is #2872) sees exactly its own lane's
 # credential, under the variable its CLI reads, and the row's facts.
 if [[ -z "${LINTRO_REVIEW_CHAIN:-}" || -z "${LINTRO_REVIEW_LANES:-}" ]]; then
