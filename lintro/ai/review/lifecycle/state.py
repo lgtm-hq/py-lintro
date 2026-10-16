@@ -293,6 +293,7 @@ def persist_review_state(
         workflow=_WORKFLOW,
         event=os.environ.get("GITHUB_EVENT_NAME", ""),
         run_id=os.environ.get("GITHUB_RUN_ID", ""),
+        run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", ""),
         lintro_version=_lintro_version(pkg_version),
     )
     # A round on a shadow basis checkpointed its figure as spend when the

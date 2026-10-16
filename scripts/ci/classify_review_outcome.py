@@ -40,6 +40,14 @@ nothing (#1826). This module is the decision point that fixes that — it maps a
   blocking a merge.
 * **broken** -- lintro itself failed (bad flags, crash, unparseable output). Also
   red; the summary says so rather than blaming the provider.
+* **contradicted** -- a review was produced, but its recorded provenance
+  contradicts the lane the repository declared (ADR-0011 C, #2871): it went
+  to another endpoint, a first-party lane answered with another model or
+  reported none, or no run record was persisted at all. The findings stay
+  posted; the check goes red with ``status=<slug>`` so a review from
+  somewhere undeclared can never be green. The rules live in
+  ``scripts/ci/review_lane_verdict.py`` and apply only when the wrapper
+  exported lane facts.
 
 The "not reviewed" branch is the No-Silent-Skip rule applied to the reviewer
 itself: a check that could not do its job must never read as a pass.
@@ -67,20 +75,56 @@ Usage:
 
 Environment:
     GITHUB_STEP_SUMMARY  When set, the outcome is appended as Markdown.
+    LINTRO_REVIEW_CHAIN, LINTRO_REVIEW_LANES, LANE_CREDENTIAL,
+    LINTRO_REVIEW_STATE_DIR
+                         The lane facts the wrapper exported (#2871); absent
+                         outside a lane run, where no provenance is checked.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
 import sys
 from collections.abc import Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum, auto
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
+
+
+def _load_sibling(name: str) -> ModuleType:
+    """Load a stdlib-only sibling script by path.
+
+    The classifier runs as ``python3 scripts/ci/classify_review_outcome.py``
+    and is loaded by its tests through a file spec, so a sibling cannot be a
+    package import; it is loaded the same way the tests load this file.
+
+    Args:
+        name: The sibling's module name (its file name without ``.py``).
+
+    Returns:
+        The loaded module.
+
+    Raises:
+        RuntimeError: When no module spec can be built for the sibling.
+    """
+    path = Path(__file__).resolve().with_name(f"{name}.py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        msg = f"cannot load {path}"
+        raise RuntimeError(msg)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+_lanes = _load_sibling("review_lane_verdict")
 
 # Exit statuses `lintro review` uses. Kept in sync with
 # lintro.ai.review.error_contract.REVIEW_ERROR_EXIT_CODE and the
@@ -193,6 +237,8 @@ class ReviewOutcome(StrEnum):
         NO_CREDENTIAL: No provider credential was available to review with.
         PROVIDER_UNAVAILABLE: The credential, balance, or endpoint failed.
         BROKEN: lintro itself could not complete the review.
+        CONTRADICTED: A review was produced, but its recorded provenance
+            contradicts the declared lane (ADR-0011 C, #2871).
     """
 
     REVIEWED = auto()
@@ -203,6 +249,7 @@ class ReviewOutcome(StrEnum):
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
     BROKEN = auto()
+    CONTRADICTED = auto()
 
     @property
     def produced_review(self) -> bool:
@@ -276,6 +323,11 @@ class OutcomeReport:
         detail: Cause text from the provider, or an empty string.
         exit_code: Exit code the wrapper should terminate with.
         transport: Transport named on every outcome line.
+        status: The ``status=<slug>`` a red lane verdict carries (#2871), or
+            empty.
+        warnings: Lines surfaced as ``::warning::`` annotations beside the
+            outcome: a fallback lane answered, or a gateway's model cannot be
+            verified.
     """
 
     outcome: ReviewOutcome
@@ -283,6 +335,8 @@ class OutcomeReport:
     detail: str
     exit_code: int
     transport: str = DEFAULT_TRANSPORT
+    status: str = ""
+    warnings: tuple[str, ...] = ()
 
 
 def _payload_has_p1_findings(payload: Mapping[str, Any]) -> bool:
@@ -778,6 +832,7 @@ def refine_failure_kind(
     kind: str,
     message: str,
     output: str,
+    credential: str = "",
 ) -> str:
     """Map a canonical error kind onto the transport's failure vocabulary.
 
@@ -786,11 +841,19 @@ def refine_failure_kind(
         kind: Canonical kind from the review error envelope.
         message: Envelope message text.
         output: Full captured output (used when the envelope is thin).
+        credential: The credential kind the lane bound (``LANE_CREDENTIAL``),
+            when the wrapper exported one. An authentication failure is then
+            labelled by it, never by a fixed label (ADR-0011 C): a gateway
+            401 must not be blamed on the Claude session.
 
     Returns:
         A transport-aware kind label for CI summaries.
     """
     haystack = f"{message}\n{output}"
+    bound_label = _lanes.AUTH_LABELS.get(credential)
+    if kind == "auth_failed" and bound_label:
+        # A concrete authentication failure is named by the bound credential.
+        return str(bound_label)
     if transport == "cli":
         # Prose patterns may only classify a *thin* envelope (no concrete
         # kind): a real envelope kind (insufficient_credits, timeout, ...)
@@ -807,8 +870,15 @@ def refine_failure_kind(
             if _API_KEY_AUTH.search(haystack) and not _OAUTH_AUTH.search(haystack):
                 return "auth_failed:key"
             return "auth_failed:oauth_session"
-        if thin_envelope and _OAUTH_AUTH.search(haystack):
-            return "auth_failed:oauth_session"
+        # A thin envelope whose prose only says "authentication": the bound
+        # credential names it when one is known, after the kill and drift
+        # patterns above, which describe a run that never reached auth.
+        auth_prose = _OAUTH_AUTH.search(haystack) or _API_KEY_AUTH.search(haystack)
+        if thin_envelope and auth_prose:
+            if bound_label:
+                return str(bound_label)
+            if _OAUTH_AUTH.search(haystack):
+                return "auth_failed:oauth_session"
         return _CLI_KIND_LABELS.get(kind, kind)
 
     if kind == "auth_failed":
@@ -822,6 +892,7 @@ def classify(
     output: str,
     reason: str = "",
     transport: str = DEFAULT_TRANSPORT,
+    env: Mapping[str, str] | None = None,
 ) -> OutcomeReport:
     """Classify a review invocation into a CI-facing outcome.
 
@@ -832,9 +903,95 @@ def classify(
         output: Combined stdout/stderr captured from the run.
         reason: Wrapper-supplied explanation for a never-invoked run.
         transport: Active transport (``api`` or ``cli``); named on every line.
+        env: The environment holding the lane facts the wrapper exported
+            (#2871); the process environment when ``None``.
 
     Returns:
         The outcome, the copy to surface, and the exit code to terminate with.
+    """
+    facts = _lanes.lane_facts(os.environ if env is None else env)
+    report = _classify_run(
+        status=status,
+        output=output,
+        reason=reason,
+        transport=transport,
+        credential=facts.credential if facts is not None else "",
+    )
+    return _apply_lane_verdict(report=report, facts=facts)
+
+
+def _apply_lane_verdict(
+    *,
+    report: OutcomeReport,
+    facts: Any,
+) -> OutcomeReport:
+    """Redden a produced review whose provenance contradicts its lane.
+
+    Args:
+        report: The outcome classified from the exit status and the output.
+        facts: The lane facts (a ``review_lane_verdict.LaneFacts``), or
+            ``None`` outside a lane run.
+
+    Returns:
+        The report unchanged outside a lane run or when no review was
+        produced; otherwise the report with the verdict's warnings, or a
+        :attr:`ReviewOutcome.CONTRADICTED` report carrying its status.
+    """
+    if facts is None or not report.outcome.produced_review:
+        return report
+    record, missing = _lanes.latest_run_record(
+        facts.state_file,
+        run_id=facts.run_id,
+        run_attempt=facts.run_attempt,
+    )
+    verdict = _lanes.lane_verdict(facts, record, missing=missing)
+    if not verdict.status:
+        return replace(report, warnings=verdict.warnings)
+    if (
+        verdict.status == _lanes.STATUS_PROVENANCE_UNRECORDED
+        and report.outcome.partial_review
+    ):
+        # A partial review is already red with the reason a reader can act
+        # on (resume the files, raise the budget); a round the budget
+        # stopped before any call has no provenance to record, and the
+        # missing record must not bury that reason. It is still said.
+        return replace(
+            report,
+            warnings=(*verdict.warnings, f"provenance not verified: {verdict.reason}"),
+        )
+    return OutcomeReport(
+        outcome=ReviewOutcome.CONTRADICTED,
+        headline=_with_transport(
+            transport=report.transport,
+            headline=f"lane contradicted (status={verdict.status}) — {verdict.reason}",
+        ),
+        detail=f"the review itself: {report.headline}",
+        exit_code=1,
+        transport=report.transport,
+        status=verdict.status,
+        warnings=verdict.warnings,
+    )
+
+
+def _classify_run(
+    *,
+    status: int,
+    output: str,
+    reason: str,
+    transport: str,
+    credential: str,
+) -> OutcomeReport:
+    """Classify the run from its exit status and output alone.
+
+    Args:
+        status: Exit status from ``lintro review`` or a wrapper sentinel.
+        output: Combined stdout/stderr captured from the run.
+        reason: Wrapper-supplied explanation for a never-invoked run.
+        transport: Active transport (``api`` or ``cli``).
+        credential: The credential kind the lane bound, or empty.
+
+    Returns:
+        The outcome before the lane verdict is applied.
     """
     transport = _normalize_transport(transport)
 
@@ -925,6 +1082,7 @@ def classify(
         kind=kind,
         message=message,
         output=output,
+        credential=credential,
     )
 
     if status != REVIEW_STATUS_ERROR:
@@ -1055,8 +1213,21 @@ def render_summary(*, report: OutcomeReport) -> str:
                 "",
             ],
         )
+    if report.outcome is ReviewOutcome.CONTRADICTED:
+        lines.extend(
+            [
+                "A review was produced and its findings are posted, but the "
+                "run record says it did not come from the lane this "
+                "repository declared (ADR-0011): treat the posted review as "
+                "unverified. The check is red until a run on the declared "
+                "lane reviews the diff.",
+                "",
+            ],
+        )
     if report.detail:
         lines.extend(["> " + report.detail, ""])
+    for warning in report.warnings:
+        lines.extend([f"> ⚠️ {warning}", ""])
     if report.outcome.review_unavailable:
         lines.extend(
             [
@@ -1076,7 +1247,10 @@ def _emit(*, report: OutcomeReport) -> None:
     Args:
         report: The classified outcome.
     """
-    if report.outcome.review_unavailable:
+    if (
+        report.outcome.review_unavailable
+        or report.outcome is ReviewOutcome.CONTRADICTED
+    ):
         annotation = "error"
     elif report.outcome is ReviewOutcome.DEGRADED:
         # A warning, not a notice: the review is on the PR, but the check is
@@ -1092,6 +1266,9 @@ def _emit(*, report: OutcomeReport) -> None:
     # order -- escaping `%` last would re-escape the escapes.
     escaped = body.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
     print(f"::{annotation} title={title}::{escaped}")
+    for warning in report.warnings:
+        line = warning.replace("%", "%25").replace("\r", "%0D").replace("\n", " ")
+        print(f"::warning title={title}::{line}")
 
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary_path:

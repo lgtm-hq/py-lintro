@@ -6,16 +6,16 @@ and reported numbers mean different things. Configure them under `ai.transports.
 
 ## Decision table
 
-| Dimension           | `api`                                       | `cli`                                                                                 |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Credential          | the provider's API-key variable             | the provider's CLI login or CLI key (see the matrix below)                            |
-| Billing             | Metered API spend                           | Subscription / OAuth session                                                          |
-| Default timeout     | 60s (stream-sized per call)                 | 1800s (per CLI chunk)                                                                 |
-| Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                  |
-| Legacy fallback     | `ai.api_timeout`, `ai.max_cost_usd`         | `ai.max_cost_usd` for the advisory only                                               |
-| Auth mode recorded  | `api_key`                                   | `subscription`                                                                        |
-| Cost basis recorded | `billed`                                    | `unpriceable`                                                                         |
-| Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session`, `cli_version_drift`, `turn_timeout`, `killed_externally` |
+| Dimension           | `api`                                       | `cli`                                                                                                                                                  |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Credential          | the provider's API-key variable             | the provider's CLI login or CLI key (see the matrix below)                                                                                             |
+| Billing             | Metered API spend                           | Subscription / OAuth session                                                                                                                           |
+| Default timeout     | 60s (stream-sized per call)                 | 1800s (per CLI chunk)                                                                                                                                  |
+| Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                                                                                   |
+| Legacy fallback     | `ai.api_timeout`, `ai.max_cost_usd`         | `ai.max_cost_usd` for the advisory only                                                                                                                |
+| Auth mode recorded  | `api_key`                                   | `subscription`                                                                                                                                         |
+| Cost basis recorded | `billed`                                    | `unpriceable`                                                                                                                                          |
+| Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session` (or `:codex_session` / `:gateway_token` by the bound credential), `cli_version_drift`, `turn_timeout`, `killed_externally` |
 
 The credential row is deliberately generic: each provider declares its own variables,
 and lintro has no default provider. The full `(provider, transport)` matrix is below.
@@ -125,7 +125,21 @@ default lane), `openai` (the Codex session, `gpt-6.1-sol`), `cursor`
 (`cursor-grok-4.6-high`), `zai` (`glm-5.3-flash`) and `kimi` (`kimi-k3`), the last two
 non-first-party gateways. Switching lanes is a change to the variable and reaches every
 open PR on its next run; a rerun keeps its run's inputs, so after a switch the recovery
-step for a red PR is an `@lintro review` comment, which starts a new run.
+step for a red PR is an `@lintro review` comment, which starts a new run. After a review
+is produced, `scripts/ci/classify_review_outcome.py` reads this round's run record and
+applies ADR-0011 decision C through `scripts/ci/review_lane_verdict.py` (#2871): a
+recorded lane outside the chain or an endpoint off that lane's host is red with
+`status=endpoint-mismatch`; a first-party lane that answered with another model is red
+with `status=model-mismatch`, and one whose transport declares model usage but reported
+none is red with `status=model-unreported`; a review whose run record cannot vouch for
+it (none persisted by this run and attempt, a record missing an endpoint or carrying a
+verification state its lane cannot produce, or a recorded lane with no published
+manifest row) is red with `status=provenance-unrecorded`, except that a partial review
+(incomplete, budget-stopped or degraded) keeps its own red reason and carries the
+missing provenance as a `::warning::`; a fallback lane answering, or a gateway's
+unverifiable model, is a `::warning::` that leaves the verdict alone. An authentication
+failure is labelled by the credential kind the lane bound, so a gateway 401 is never
+blamed on the Claude session.
 
 The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
 `LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends
