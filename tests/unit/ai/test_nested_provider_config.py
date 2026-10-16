@@ -998,6 +998,9 @@ def test_the_config_reports_never_print_a_credential(
     for noisy in (
         "https://user:pw@proxy.example:abc/v1",
         "https://proxy.example:99999/v1",
+        # No scheme: urlsplit reads the whole value as a path, userinfo and all.
+        "user:pw@proxy.example/v1",
+        "proxy.example/v1?token=pw",
     ):
         config_path.write_text(
             yaml.safe_dump({"ai": {"provider": "anthropic", "api_base_url": noisy}}),

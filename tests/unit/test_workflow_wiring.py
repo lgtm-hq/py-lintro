@@ -6110,7 +6110,9 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     )
     budget = {"LINTRO_AI_MAX_COST_USD", "LINTRO_AI_REVIEW_PR_BUDGET_USD"}
     selectors = {name.removeprefix("vars.") for name in _LANE_SELECTOR_VARS}
-    reads = _vars_reads(text)
+    # Only expressions read the context; prose in comments does not.
+    expressions = " ".join(re.findall(r"\$\{\{(.*?)\}\}", text, re.S))
+    reads = _vars_reads(expressions)
     assert_that(set(reads) - budget - selectors).described_as(
         f"{workflow} vars reads",
     ).is_empty()
@@ -6130,10 +6132,15 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     assert_that(sorted(in_place)).described_as(
         f"{workflow}: every selector read sits in the lane job's resolve env",
     ).is_equal_to(sorted(selector_reads))
-    # The collector sees every spelling, so a banned name cannot hide.
+    # The collector sees every literal spelling, and any other use of the
+    # context (``toJSON(vars)``, ``vars[expr]``) is refused outright, so a
+    # banned name cannot hide behind a form the collector does not read.
     assert_that(_vars_reads("${{ vars['ZAI_BASE_URL'] }} ${{ vars.X }}")).is_equal_to(
         ["ZAI_BASE_URL", "X"],
     )
+    assert_that(len(re.findall(r"\bvars\b", expressions))).described_as(
+        f"{workflow}: every use of the vars context is a literal read",
+    ).is_equal_to(len(reads))
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

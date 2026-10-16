@@ -112,20 +112,20 @@ row; the review job's egress is the union of the chain's hosts, each credential 
 forwarded under its secret name by one literal expression gated on chain membership, and
 `scripts/ci/run-ai-review.sh` binds the attempt through `scripts/ci/review_lane_env.py`:
 provider, transport and model are exported from the row, exactly one credential is in
-scope under the variable its CLI reads (the z.ai token fills `ANTHROPIC_AUTH_TOKEN`; the
-Codex session is decoded from `CODEX_AUTH_JSON` into `~/.codex/auth.json` for the
-attempt and deleted at its end), the provider's base-URL override is exported to the
-row's endpoint off-host and must be unset on-host, and a competing credential, an
-override naming another host, or an effective `ai.*` config that disagrees with the row
-refuses the run before any provider call. An absent credential is red with
-`status=no-credential`, never a fallback. No variable supplies an endpoint, a credential
-binding or an egress host: a selector can only name a declared row. The declared rows
-and their default models are `anthropic` (`claude-opus-5-5`, the default lane), `openai`
-(the Codex session, `gpt-6.1-sol`), `cursor` (`cursor-grok-4.6-high`), `zai`
-(`glm-5.3-flash`) and `kimi` (`kimi-k3`), the last two non-first-party gateways.
-Switching lanes is a change to the variable and reaches every open PR on its next run; a
-rerun keeps its run's inputs, so after a switch the recovery step for a red PR is an
-`@lintro review` comment, which starts a new run.
+scope under the variable its CLI reads (the z.ai and Kimi tokens fill
+`ANTHROPIC_AUTH_TOKEN`; the Codex session is decoded from `CODEX_AUTH_JSON` into
+`~/.codex/auth.json` for the attempt and deleted at its end), the provider's base-URL
+override is exported to the row's endpoint off-host and must be unset on-host, and a
+competing credential, an override naming another host, or an effective `ai.*` config
+that disagrees with the row refuses the run before any provider call. An absent
+credential is red with `status=no-credential`, never a fallback. No variable supplies an
+endpoint, a credential binding or an egress host: a selector can only name a declared
+row. The declared rows and their default models are `anthropic` (`claude-opus-5-5`, the
+default lane), `openai` (the Codex session, `gpt-6.1-sol`), `cursor`
+(`cursor-grok-4.6-high`), `zai` (`glm-5.3-flash`) and `kimi` (`kimi-k3`), the last two
+non-first-party gateways. Switching lanes is a change to the variable and reaches every
+open PR on its next run; a rerun keeps its run's inputs, so after a switch the recovery
+step for a red PR is an `@lintro review` comment, which starts a new run.
 
 The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
 `LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends

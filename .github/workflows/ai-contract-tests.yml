@@ -276,8 +276,10 @@ jobs:
           DISABLE_AUTOUPDATER: '1'
           # No model overlay: the dogfood review takes its model from the lane
           # row (every row names one), and one value cannot serve the lanes
-          # this job drives in one container, so each smoke row names its own
-          # model in the contract suite.
+          # this job drives in one container. The contract suite sets no model
+          # either, so each smoke row runs on its provider's or CLI's own
+          # default; this tier proves the credential and the invocation, not
+          # the lane's declared model.
           # cursor: the same API key the dogfood cursor lane uses.
           # yamllint disable-line rule:line-length
           CURSOR_API_KEY: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && secrets.CURSOR_API_KEY || '' }}
