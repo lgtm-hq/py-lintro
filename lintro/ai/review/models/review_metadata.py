@@ -137,6 +137,9 @@ class ReviewMetadata:
             :class:`~lintro.ai.enums.model_verification.ModelVerification`
             state; empty when no call completed.
         lane (str): The review lane the CI wrapper exported, if any.
+        fallback_from (str): The lane that failed before any chunk completed
+            and handed this round to its lane (ADR-0011 D, #2872), or empty.
+        fallback_reason (str): The error kind that lane failed with, or empty.
         shadow_price_model (str): The first-party model whose list table
             prices a non-first-party run's shadow figure; empty means the
             requested model's own table.
@@ -206,6 +209,8 @@ class ReviewMetadata:
     reported_models: tuple[ReportedModel, ...] = field(default_factory=tuple)
     model_verification: str = ""
     lane: str = ""
+    fallback_from: str = ""
+    fallback_reason: str = ""
     shadow_price_model: str = ""
     cost_reported: bool = False
     lint_facts_note: str = ""

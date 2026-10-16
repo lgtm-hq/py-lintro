@@ -142,6 +142,8 @@ class RunRecord:
                 [_reported_model_payload(model) for model in identity.reported_models],
             ),
             ("model_verification", identity.model_verification),
+            ("fallback_from", identity.fallback_from),
+            ("fallback_reason", identity.fallback_reason),
             ("cost_shadow", round(usage.cost_shadow, 6)),
             ("checkpoint", coverage.checkpoint),
         )
@@ -215,6 +217,8 @@ def _identity_from_payload(*, payload: dict[str, Any]) -> RunIdentity:
         reported_models=_reported_models(payload.get("reported_models")),
         lane=str(payload.get("lane", "") or ""),
         model_verification=_parse_verification(payload=payload),
+        fallback_from=str(payload.get("fallback_from", "") or ""),
+        fallback_reason=str(payload.get("fallback_reason", "") or ""),
     )
 
 

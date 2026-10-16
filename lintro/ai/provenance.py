@@ -66,6 +66,8 @@ __all__ = [
     "REVIEW_FIRST_PARTY_ENV",
     "REVIEW_LANE_ENV",
     "REVIEW_REPORTS_MODEL_USAGE_ENV",
+    "REVIEW_FALLBACK_FROM_ENV",
+    "REVIEW_FALLBACK_REASON_ENV",
     "REVIEW_SHADOW_PRICE_MODEL_ENV",
     "LedgerCall",
     "ModelLedger",
@@ -90,6 +92,10 @@ REVIEW_FIRST_PARTY_ENV = "LINTRO_REVIEW_FIRST_PARTY"
 REVIEW_ALLOWED_MODELS_ENV = "LINTRO_REVIEW_ALLOWED_MODELS"
 REVIEW_REPORTS_MODEL_USAGE_ENV = "LINTRO_REVIEW_REPORTS_MODEL_USAGE"
 REVIEW_SHADOW_PRICE_MODEL_ENV = "LINTRO_REVIEW_SHADOW_PRICE_MODEL"
+#: Set by the wrapper for a fallback attempt (ADR-0011 D, #2872): the lane
+#: that failed before any chunk completed, and the error kind it failed with.
+REVIEW_FALLBACK_FROM_ENV = "LINTRO_REVIEW_FALLBACK_FROM"
+REVIEW_FALLBACK_REASON_ENV = "LINTRO_REVIEW_FALLBACK_REASON"
 
 CLAUDE_OAUTH_TOKEN_ENV = "CLAUDE_CODE_OAUTH_TOKEN"  # nosec B105 - a variable name
 ANTHROPIC_AUTH_TOKEN_ENV = "ANTHROPIC_AUTH_TOKEN"  # nosec B105 - a variable name
@@ -152,6 +158,9 @@ class RunProvenance:
         shadow_price_model: The first-party model whose list table prices a
             non-first-party run's shadow figure; empty means the requested
             model's own table.
+        fallback_from: The lane that failed before any chunk completed and
+            handed this run to its lane (ADR-0011 D), or empty.
+        fallback_reason: The error kind that lane failed with, or empty.
     """
 
     endpoint: str = ""
@@ -161,6 +170,8 @@ class RunProvenance:
     allowed_models: tuple[str, ...] = ()
     reports_model_usage: bool = True
     shadow_price_model: str = ""
+    fallback_from: str = ""
+    fallback_reason: str = ""
 
 
 def host_of(url: str) -> str:
@@ -444,6 +455,8 @@ def detect_run_provenance(
             env=environment,
         ),
         shadow_price_model=environment.get(REVIEW_SHADOW_PRICE_MODEL_ENV, "").strip(),
+        fallback_from=environment.get(REVIEW_FALLBACK_FROM_ENV, "").strip(),
+        fallback_reason=environment.get(REVIEW_FALLBACK_REASON_ENV, "").strip(),
     )
 
 

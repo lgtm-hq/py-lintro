@@ -937,7 +937,21 @@ def _apply_lane_verdict(
         produced; otherwise the report with the verdict's warnings, or a
         :attr:`ReviewOutcome.CONTRADICTED` report carrying its status.
     """
-    if facts is None or not report.outcome.produced_review:
+    if facts is None:
+        return report
+    if report.outcome is ReviewOutcome.PROVIDER_UNAVAILABLE:
+        exhausted = _lanes.lanes_exhausted(facts)
+        if exhausted:
+            return replace(
+                report,
+                headline=_with_transport(
+                    transport=report.transport,
+                    headline=f"{exhausted} (status={_lanes.STATUS_LANES_EXHAUSTED})",
+                ),
+                status=_lanes.STATUS_LANES_EXHAUSTED,
+            )
+        return report
+    if not report.outcome.produced_review:
         return report
     record, missing = _lanes.latest_run_record(
         facts.state_file,
