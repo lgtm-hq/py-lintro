@@ -74,6 +74,9 @@ extend-exclude = [
   "tests/integration/tools/typos/test_check.py",
   "tests/integration/tools/typos/test_fix.py",
   "test_samples/tools/spelling/typos/typos_violations.txt",
+  # Generated from the official SPDX license list; license names and IDs are
+  # proper nouns that typos reads as misspellings (#1306).
+  "lintro/licenses/_spdx_data.py",
   # Binary assets — typos reads command-line arguments as text regardless of
   # content, so exclude the formats that would otherwise emit pure noise.
   "*.png",

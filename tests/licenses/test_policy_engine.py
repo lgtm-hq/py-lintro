@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from assertpy import assert_that
 
 from lintro.config.licenses_config import LicensesConfig, PackageException
@@ -217,3 +218,67 @@ def test_get_preset_rules_custom_is_empty() -> None:
     allowed, denied = get_preset_rules("custom")
     assert_that(allowed).is_empty()
     assert_that(denied).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("license_id", "expected"),
+    [
+        ("GPL-3.0-only OR MIT", LicenseStatus.ALLOWED),
+        ("GPL-3.0-only OR AGPL-3.0-only", LicenseStatus.DENIED),
+    ],
+)
+def test_permissive_or_expression_any_branch(
+    license_id: str,
+    expected: LicenseStatus,
+) -> None:
+    """OR expressions pass when any branch is allowed and fail when all are denied.
+
+    Args:
+        license_id: SPDX OR expression under test.
+        expected: Expected policy status.
+    """
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="dual",
+        version="1",
+        license_id=license_id,
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(expected)
+
+
+def test_permissive_denies_and_expression_with_copyleft_branch() -> None:
+    """AND expressions fail permissive policy when any branch is denied."""
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="conj",
+        version="1",
+        license_id="MIT AND GPL-3.0-only",
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+
+
+def test_permissive_evaluates_with_as_base_license() -> None:
+    """WITH exceptions are evaluated as the base license only."""
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="classpath",
+        version="1",
+        license_id="GPL-2.0-only WITH Classpath-exception-2.0",
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.DENIED)
+    assert_that(result.reason).contains("GPL-2.0-only")
+
+
+def test_permissive_allows_parenthesized_or_expression() -> None:
+    """npm-style parenthesized OR expressions evaluate like bare OR."""
+    engine = LicensePolicyEngine(LicensesConfig(policy="permissive"))
+    package = PackageLicense(
+        name="npm-dual",
+        version="1",
+        license_id="(GPL-3.0-only OR MIT)",
+    )
+    result = engine.check(package)
+    assert_that(result.status).is_equal_to(LicenseStatus.ALLOWED)
