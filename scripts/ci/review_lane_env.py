@@ -171,6 +171,9 @@ def _exports(lane_id: str, row: dict[str, Any]) -> dict[str, str]:
         "LINTRO_REVIEW_LANE": lane_id,
         "LINTRO_REVIEW_ENDPOINT": _value(row.get("endpoint")),
         "LINTRO_REVIEW_FIRST_PARTY": _value(row.get("first_party")),
+        # Exported empty on purpose: the run verifies the requested model
+        # alone, and an inherited list could not widen that.
+        "LINTRO_REVIEW_ALLOWED_MODELS": "",
         "LINTRO_REVIEW_REPORTS_MODEL_USAGE": _value(row.get("reports_model_usage")),
         "LINTRO_REVIEW_SHADOW_PRICE_MODEL": _value(row.get("shadow_price_model")),
         "LINTRO_AI_PROVIDER": _value(row.get("provider")),

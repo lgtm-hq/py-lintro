@@ -219,6 +219,19 @@ def test_first_party_must_agree_with_the_endpoint(
     _refuses(resolver, manifest, "first_party must be True")
 
 
+def test_a_gateway_credential_kind_is_bound_to_its_host(
+    resolver: ModuleType,
+    manifest: dict[str, Any],
+) -> None:
+    """The run record names a bearer by host; a row may not pair them otherwise."""
+    swapped = copy.deepcopy(manifest)
+    swapped["lanes"]["zai"]["credential"] = "kimi_token"
+    _refuses(resolver, swapped, "binds 'kimi_token'", "'api.moonshot.ai'", "'api.z.ai'")
+    moved = copy.deepcopy(manifest)
+    moved["lanes"]["kimi"]["credential"] = "zai_token"
+    _refuses(resolver, moved, "binds 'zai_token'")
+
+
 def test_a_gateway_row_carries_an_unknown_basis_and_a_credential_its_form(
     resolver: ModuleType,
     manifest: dict[str, Any],
@@ -515,6 +528,16 @@ def test_the_model_variable_overrides_the_rows_default(
     )
     bracketed = resolver.resolve_chain(manifest, selector="kimi", model="kimi-k3[1m]")
     assert_that(bracketed.active["model"]).is_equal_to("kimi-k3[1m]")
+    # Decision B follows the model that runs: an unpriced override on a row
+    # without a shadow table is refused.
+    del manifest["lanes"]["anthropic"]["shadow_price_model"]
+    manifest["lanes"]["anthropic"]["model"] = "claude-sonnet-4-6"
+    assert_that(resolver.resolve_chain(manifest).active["model"]).is_equal_to(
+        "claude-sonnet-4-6",
+    )
+    with pytest.raises(resolver.LaneError) as caught:
+        resolver.resolve_chain(manifest, model="claude-opus-5-5")
+    assert_that(str(caught.value)).contains("unpriced model")
 
     for bad in ("x y", "gpt\n", "a;b", "$(id)", ""):
         if not bad:

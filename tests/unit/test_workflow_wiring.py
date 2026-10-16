@@ -6079,7 +6079,9 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     The lane selector and the model override are variables, read by the
     resolver step of the secret-free lane job and nowhere else: the resolver
     accepts only a declared lane id and a model id, so the worst an inherited
-    value can do is pick another declared row.
+    value can do is pick another declared row. Every mention of either name
+    in the file, in any ``vars`` spelling, is counted and must sit in that
+    step's ``env``.
 
     Args:
         workflow: The workflow file under test.
@@ -6093,28 +6095,37 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     assert_that(reads - budget - _LANE_SELECTOR_VARS).described_as(
         f"{workflow} vars reads",
     ).is_empty()
+    # Every spelling GitHub accepts: vars.NAME, vars['NAME'], vars["NAME"].
+    selector_names = {name.removeprefix("vars.") for name in _LANE_SELECTOR_VARS}
+    mention_re = re.compile(
+        r"\bvars(?:\.(?P<dot>[A-Za-z_][A-Za-z0-9_]*)"
+        r"|\[\s*['\"](?P<bracket>[A-Za-z_][A-Za-z0-9_]*)['\"]\s*\])",
+    )
+
+    def mentions(blob: str) -> list[str]:
+        return [
+            m.group("dot") or m.group("bracket")
+            for m in mention_re.finditer(blob)
+            if (m.group("dot") or m.group("bracket")) in selector_names
+        ]
+
+    total = mentions(text)
+    assert_that(set(total)).described_as(f"{workflow} selector reads").is_equal_to(
+        selector_names,
+    )
     loaded = _load_workflow(name=workflow)
-    seen: set[str] = set()
-    for job_name, job in loaded["jobs"].items():
-        for step in job.get("steps") or []:
-            for name, value in (step.get("env") or {}).items():
-                found = _LANE_SELECTOR_VARS & set(
-                    re.findall(r"\bvars\.[A-Za-z_][A-Za-z0-9_]*", str(value)),
-                )
-                if found:
-                    assert_that((job_name, step.get("id"))).described_as(
-                        f"{workflow}: {name} reads {sorted(found)}",
-                    ).is_equal_to(("lane", "resolve"))
-                    seen |= found
-        job_blob = json.dumps({k: v for k, v in job.items() if k != "steps"})
-        for variable in _LANE_SELECTOR_VARS:
-            assert_that(job_blob).described_as(
-                f"{workflow}: job {job_name}",
-            ).does_not_contain(
-                variable,
-            )
-    assert_that(seen).described_as(f"{workflow} lane job inputs").is_equal_to(
-        _LANE_SELECTOR_VARS,
+    resolve = next(
+        step for step in loaded["jobs"]["lane"]["steps"] if step.get("id") == "resolve"
+    )
+    in_place = mentions(json.dumps(resolve.get("env") or {}))
+    assert_that(sorted(in_place)).described_as(
+        f"{workflow}: every selector read sits in the lane job's resolve env",
+    ).is_equal_to(sorted(total))
+    assert_that(
+        _ROUTING_VARS_RE.search("x ${{ vars.LINTRO_AI_TRANSPORT }}"),
+    ).is_not_none()
+    assert_that(mentions("${{ vars['LINTRO_AI_MODEL'] }}")).is_equal_to(
+        ["LINTRO_AI_MODEL"],
     )
 
 

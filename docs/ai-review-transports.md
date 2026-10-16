@@ -209,21 +209,24 @@ zero; a list-price shadow is labelled a shadow; a round from before ADR-0011 is 
 priced cost.
 
 Each run also records where its requests went (#2867): `endpoint` (host only),
-`first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `codex_oauth`,
-`cursor_api_key`), `reported_models` (the Claude CLI envelope's `modelUsage`), `lane`,
-and `model_verification` (`verified`, `mismatch`, `unverifiable`, `unreported`; a record
-from before these fields reads as `legacy`). `auth_mode` follows `credential`, so a
-gateway token reads `gateway_token`, not `subscription`. In CI the review-lanes wrapper
-exports the resolved lane row as `LINTRO_REVIEW_LANE`, `LINTRO_REVIEW_ENDPOINT`,
-`LINTRO_REVIEW_FIRST_PARTY` and `LINTRO_REVIEW_ALLOWED_MODELS`, and those win; outside
-CI the provider's base-URL override (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the
-Claude settings files' `env` block) and the provider's own host decide. The credential
-kinds add `api_key` (a metered vendor key, or the API transport) and `unknown` to the
-four lane bindings so a local run can be described too. The Claude credential follows
-Claude Code's documented precedence: the bearer token, then the API key or helper, then
-the OAuth token, which bare mode never reads. A run off the provider's host prices its
-shadow figure on `LINTRO_REVIEW_SHADOW_PRICE_MODEL`, or on the requested model's own
-table when no lane row names one.
+`first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `kimi_token`,
+`codex_oauth`, `cursor_api_key`), `reported_models` (the Claude CLI envelope's
+`modelUsage`), `lane`, and `model_verification` (`verified`, `mismatch`, `unverifiable`,
+`unreported`; a record from before these fields reads as `legacy`). `auth_mode` follows
+`credential`, so a gateway token reads `gateway_token`, not `subscription`. In CI the
+review-lanes wrapper exports the resolved lane row as `LINTRO_REVIEW_LANE`,
+`LINTRO_REVIEW_ENDPOINT` and `LINTRO_REVIEW_FIRST_PARTY`, and those win; no
+allowed-model list travels, so on a lane `model_verification` accepts the requested
+model alone (a first-party call that reports another model is `mismatch` and its
+coverage is not reused). Outside CI the provider's base-URL override
+(`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the Claude settings files' `env` block) and
+the provider's own host decide. The credential kinds add `api_key` (a metered vendor
+key, or the API transport) and `unknown` to the four lane bindings so a local run can be
+described too. The Claude credential follows Claude Code's documented precedence: the
+bearer token, then the API key or helper, then the OAuth token, which bare mode never
+reads. A run off the provider's host prices its shadow figure on
+`LINTRO_REVIEW_SHADOW_PRICE_MODEL`, or on the requested model's own table when no lane
+row names one.
 
 Reuse follows provenance (ADR-0011, decision B): a stored round's coverage is inherited
 only when the round is not `legacy` or `mismatch`, is not `unreported` on a lane whose

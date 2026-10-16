@@ -122,6 +122,14 @@ FIRST_PARTY_HOSTS: Final[dict[str, str]] = {
     "cursor": "api2.cursor.sh",
 }
 
+#: The gateway host each gateway credential kind is bound to: the run record
+#: names a bearer by the host it goes to (``lintro.ai.provenance``), so a row
+#: may not pair a kind with another gateway's host.
+GATEWAY_HOSTS: Final[dict[str, str]] = {
+    "zai_token": "api.z.ai",  # nosec B105 - a hostname, not a secret
+    "kimi_token": "api.moonshot.ai",  # nosec B105 - a hostname, not a secret
+}
+
 #: The form each credential kind takes.
 BINDING_FORMS: Final[dict[str, str]] = {
     "claude_oauth": "env",
@@ -472,6 +480,13 @@ def _check_first_party(
             f"on {own_host!r})",
             lanes,
         )
+    gateway_host = GATEWAY_HOSTS.get(row["credential"])
+    if gateway_host is not None and hostname != gateway_host:
+        _fail(
+            f"lane {lane_id!r} binds {row['credential']!r}, which belongs to "
+            f"{gateway_host!r}, on endpoint host {hostname!r}",
+            lanes,
+        )
     if not row["first_party"] and row["cost_basis"] != "unknown":
         _fail(
             f"lane {lane_id!r} is not first-party, so its cost basis must be "
@@ -661,6 +676,8 @@ def resolve_chain(
         if not _MODEL_RE.fullmatch(model):
             _fail(f"{MODEL_ENV}={model!r} is not a model id", rows)
         rows[chain[0]] = {**rows[chain[0]], "model": model}
+        # Decision B's priced-or-shadow rule applies to the model that runs.
+        _check_models(chain[0], rows[chain[0]], priced, rows)
         model_source = "variable"
     lanes = {entry: rows[entry] for entry in chain}
     return ResolvedChain(

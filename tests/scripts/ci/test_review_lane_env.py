@@ -99,8 +99,9 @@ def test_the_env_phase_exports_the_rows_facts_and_overlays(
     )
     assert_that(exports["LINTRO_REVIEW_FIRST_PARTY"]).is_equal_to("true")
     # No allowed-model list travels: the operator chose the model, and the
-    # sticky reports what answered.
-    assert_that(exports).does_not_contain_key("LINTRO_REVIEW_ALLOWED_MODELS")
+    # sticky reports what answered. Exported empty so nothing inherited can
+    # widen verification.
+    assert_that(exports["LINTRO_REVIEW_ALLOWED_MODELS"]).is_empty()
     assert_that(exports["LINTRO_REVIEW_REPORTS_MODEL_USAGE"]).is_equal_to("true")
     assert_that(exports["LINTRO_AI_PROVIDER"]).is_equal_to("anthropic")
     assert_that(exports["LINTRO_AI_TRANSPORT"]).is_equal_to("cli")
