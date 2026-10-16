@@ -41,7 +41,7 @@ _VERIFIED = ProvenanceView(
     model_source="env",
     endpoint="api.anthropic.com",
     first_party=True,
-    lane="claude-subscription",
+    lane="anthropic",
     verification="verified",
 )
 _GATEWAY = replace(
@@ -57,7 +57,7 @@ def test_the_model_never_stands_without_its_endpoint() -> None:
     """The configured model is always followed by where it went."""
     assert_that(model_label(_VERIFIED)).is_equal_to(
         "`claude-opus-5-5` (env) · verified on `api.anthropic.com` "
-        "· lane `claude-subscription`",
+        "· lane `anthropic`",
     )
     assert_that(model_label(_GATEWAY)).is_equal_to(
         "`claude-opus-5-5` (env) · answered via `api.z.ai` (third-party gateway), "

@@ -103,11 +103,13 @@ of scope so the subscription token is actually used.
 
 Where the dogfood review goes is a named **lane**: a row in the committed manifest
 `scripts/ci/ai_review_lanes.json`, and nowhere else (ADR-0011 decision A, #2869/#2870).
-The manifest's ordered `chain` is the only routing input; `chain[0]` is the active lane.
-A secret-free `lane` job in `ai-review.yml` resolves the chain with
-`scripts/ci/resolve_review_lanes.py` at `github.workflow_sha` and publishes every row;
-the review job's egress is the union of the chain's hosts, each credential is forwarded
-under its secret name by one literal expression gated on chain membership, and
+The repository variable `LINTRO_AI_PROVIDER` selects the row (`anthropic`, `openai`,
+`cursor`, `zai` or `kimi`; unset means the manifest's `chain[0]`; anything else is red
+before a secret exists), and `LINTRO_AI_MODEL` overrides the row's default model. A
+secret-free `lane` job in `ai-review.yml` reads those two variables, resolves the chain
+with `scripts/ci/resolve_review_lanes.py` at `github.workflow_sha` and publishes every
+row; the review job's egress is the union of the chain's hosts, each credential is
+forwarded under its secret name by one literal expression gated on chain membership, and
 `scripts/ci/run-ai-review.sh` binds the attempt through `scripts/ci/review_lane_env.py`:
 provider, transport and model are exported from the row, exactly one credential is in
 scope under the variable its CLI reads (the z.ai token fills `ANTHROPIC_AUTH_TOKEN`; the
@@ -116,13 +118,14 @@ attempt and deleted at its end), the provider's base-URL override is exported to
 row's endpoint off-host and must be unset on-host, and a competing credential, an
 override naming another host, or an effective `ai.*` config that disagrees with the row
 refuses the run before any provider call. An absent credential is red with
-`status=no-credential`, never a fallback. No variable at any scope selects a lane:
-`vars.*` reads in the dogfood jobs are budget overlays only. The declared rows are
-`claude-subscription` (active), `codex-subscription`, `cursor` and `zai-glm-gateway`
-(non-first-party, an explicit opt-in). Switching lanes is a one-line diff to `chain` and
-reaches every open PR on its next run; a rerun keeps its run's `workflow_sha` and
-manifest, so after a switch the recovery step for a red PR is an `@lintro review`
-comment, which starts a new run.
+`status=no-credential`, never a fallback. No variable supplies an endpoint, a credential
+binding or an egress host: a selector can only name a declared row. The declared rows
+and their default models are `anthropic` (`claude-opus-5-5`, the default lane), `openai`
+(the Codex session, `gpt-6.1-sol`), `cursor` (`cursor-grok-4.6-high`), `zai`
+(`glm-5.3-flash`) and `kimi` (`kimi-k3`), the last two non-first-party gateways.
+Switching lanes is a change to the variable and reaches every open PR on its next run; a
+rerun keeps its run's inputs, so after a switch the recovery step for a red PR is an
+`@lintro review` comment, which starts a new run.
 
 On that lane lintro sends **no** `--model` unless one is configured (#2537). The two
 codex credentials do not accept the same models: an API key reaches the OpenAI API

@@ -171,7 +171,6 @@ def _exports(lane_id: str, row: dict[str, Any]) -> dict[str, str]:
         "LINTRO_REVIEW_LANE": lane_id,
         "LINTRO_REVIEW_ENDPOINT": _value(row.get("endpoint")),
         "LINTRO_REVIEW_FIRST_PARTY": _value(row.get("first_party")),
-        "LINTRO_REVIEW_ALLOWED_MODELS": _value(row.get("models")),
         "LINTRO_REVIEW_REPORTS_MODEL_USAGE": _value(row.get("reports_model_usage")),
         "LINTRO_REVIEW_SHADOW_PRICE_MODEL": _value(row.get("shadow_price_model")),
         "LINTRO_AI_PROVIDER": _value(row.get("provider")),
@@ -358,8 +357,9 @@ def _check_config(lane_id: str, row: dict[str, Any], env: dict[str, str]) -> Non
     }
     for field, want in expected.items():
         have = effective.get(field)
-        # A row that names no model means the CLI's own default, unnamed: the
-        # effective config may then name none either.
+        # Every row names a model (the default or the LINTRO_AI_MODEL
+        # override, resolved by the lane job), so an empty effective model
+        # is a disagreement too.
         if (have or None) != want:
             msg = (
                 f"lane {lane_id!r}: effective ai.{field} is {have!r}, the row "
@@ -380,15 +380,14 @@ def _check_config(lane_id: str, row: dict[str, Any], env: dict[str, str]) -> Non
             f"{row.get('credential_env')!r}"
         )
         raise LaneRefusalError(msg)
-    allowed = set(row.get("models") or [])
     fallbacks = effective.get("fallback_models") or []
-    # Every fallback must be an allowed model; a row that allows none allows
-    # no fallback at all.
-    outside = [m for m in fallbacks if m not in allowed]
-    if outside:
+    # The dogfood review falls back by lane (ADR-0011 D), never by model: a
+    # configured model fallback could name a model the lane's provider does
+    # not serve.
+    if fallbacks:
         msg = (
-            f"lane {lane_id!r}: fallback_models {outside} are outside the lane's "
-            "allowed models"
+            f"lane {lane_id!r}: fallback_models {fallbacks} are set; the review "
+            "falls back by lane, not by model"
         )
         raise LaneRefusalError(msg)
 

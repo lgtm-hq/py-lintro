@@ -1968,15 +1968,16 @@ developer's login.
   because `--bare` disables OAuth session login (see the `--bare` note above). Set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
   binary's egress and version predictable under an egress allowlist.
-- **Lanes, not variables (ADR-0011).** Where the review goes is a named row in the
-  committed manifest `scripts/ci/ai_review_lanes.json`; its ordered `chain` is the only
-  routing input, and no Actions variable selects a provider, model or endpoint. The
-  declared rows are the Claude subscription (active), the Codex ChatGPT-plan session
-  (decoded from the `CODEX_AUTH_JSON` secret into `~/.codex/auth.json` for the attempt;
-  `CODEX_API_KEY` is metered API billing, not the subscription), Cursor, and a declared
-  z.ai GLM gateway row that is an explicit opt-in. A secret-free job resolves the chain,
-  the review job's egress and credentials follow from it, and the wrapper refuses a
-  competing credential or an override that names another host. See
+- **Lanes, selected by one variable (ADR-0011).** Where the review goes is a named row
+  in the committed manifest `scripts/ci/ai_review_lanes.json`. The repository variable
+  `LINTRO_AI_PROVIDER` picks the row by id and `LINTRO_AI_MODEL` overrides its default
+  model; no variable supplies an endpoint, a credential binding or an egress host. The
+  declared rows are `anthropic` (the Claude subscription, the default), `openai` (the
+  Codex ChatGPT-plan session, decoded from the `CODEX_AUTH_JSON` secret into
+  `~/.codex/auth.json` for the attempt; `CODEX_API_KEY` is metered API billing, not the
+  subscription), `cursor`, `zai` and `kimi` (two declared gateways). A secret-free job
+  resolves the chain, the review job's egress and credentials follow from it, and the
+  wrapper refuses a competing credential or an override that names another host. See
   `docs/ai-review-transports.md` for the binding rules.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the

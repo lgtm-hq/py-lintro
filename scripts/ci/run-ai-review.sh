@@ -58,7 +58,7 @@ set -euo pipefail
 # genuinely missing — a visible failure, not a skip.
 #
 # Usage:
-#   PR_NUMBER=<n> LINTRO_REVIEW_CHAIN='["claude-subscription"]' \
+#   PR_NUMBER=<n> LINTRO_REVIEW_CHAIN='["anthropic"]' \
 #     LINTRO_REVIEW_LANES='{...}' CLAUDE_CODE_OAUTH_TOKEN=<token> GH_TOKEN=<token> \
 #     scripts/ci/run-ai-review.sh
 #   scripts/ci/run-ai-review.sh <pr-number>
@@ -70,7 +70,7 @@ set -euo pipefail
 #   LINTRO_REVIEW_ATTEMPT   Index into the chain for this attempt (default 0).
 #   <credential secrets>    Each chain credential under its SECRET name
 #                           (CLAUDE_CODE_OAUTH_TOKEN, ZAI_AUTH_TOKEN,
-#                           CURSOR_API_KEY, CODEX_AUTH_JSON), gated by the
+#                           KIMI_API_KEY, CURSOR_API_KEY, CODEX_AUTH_JSON), gated by the
 #                           workflow on chain membership. Captured, unset, and
 #                           re-armed for the active lane only. Empty for the
 #                           active lane => visible no-credential failure.
@@ -89,7 +89,11 @@ set -euo pipefail
 #   GITHUB_OUTPUT           When set, --locate-prior-state writes run-id=.
 #   LINTRO_AI_ENABLED       Master switch; the workflow sets this to 1.
 #   LINTRO_AI_PROVIDER      Set from the lane row; a value passed in is replaced.
-#   LINTRO_AI_MODEL         Set from the lane row (empty = the CLI's own default).
+#                           (The repository variable of the same name selects
+#                           the lane, in the lane job, not here.)
+#   LINTRO_AI_MODEL         Set from the lane row: the row's default, or the
+#                           LINTRO_AI_MODEL repository variable the lane job
+#                           resolved into it. Never empty.
 #   LINTRO_AI_MAX_COST_USD  Optional spend ceiling overlay (empty = config default).
 #   LINTRO_AI_REVIEW_PR_BUDGET_USD  Optional per-PR review budget overlay
 #                           (#2796; empty = config default, unset = off).
@@ -187,7 +191,7 @@ fi
 # Capture every credential a lane could bind into non-exported shell state
 # and unset it, so the environment the CLI transport forwards to its
 # subprocess holds one credential: the active lane's, re-armed below.
-_LANE_CREDENTIAL_NAMES="CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN ZAI_AUTH_TOKEN CURSOR_API_KEY CODEX_AUTH_JSON"
+_LANE_CREDENTIAL_NAMES="CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN ZAI_AUTH_TOKEN KIMI_API_KEY CURSOR_API_KEY CODEX_AUTH_JSON"
 for _name in $_LANE_CREDENTIAL_NAMES; do
 	eval "_captured_${_name}=\"\${${_name}:-}\""
 	unset "$_name"

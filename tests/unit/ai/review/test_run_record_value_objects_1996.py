@@ -112,7 +112,7 @@ def _full_record() -> RunRecord:
                     provider="firstParty",
                 ),
             ),
-            lane="claude-subscription",
+            lane="anthropic",
             model_verification="verified",
         ),
         coverage=RunCoverage(

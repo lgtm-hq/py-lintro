@@ -70,7 +70,17 @@ on the same shape. The owner decided the four remaining points the same day:
 2. A repository variable selects a declared lane; it never supplies an endpoint. Revised
    on review of this ADR: the `vars` context cannot prove a variable is
    repository-scoped, so a selector variable would be inheritable in exactly the way
-   `ZAI_BASE_URL` was. The selection therefore lives in the manifest (decision A).
+   `ZAI_BASE_URL` was, and the selection was moved into the manifest. Revised again by
+   the owner on 2026-10-16, during the review of
+   [#2901](https://github.com/lgtm-hq/py-lintro/pull/2901): the two risks are not the
+   same size. `ZAI_BASE_URL` supplied the endpoint, so an inherited value sent the
+   review to an unreviewed host with the Anthropic credential attached. A selector can
+   only name a declared row, so the worst an inherited value can do is pick another
+   declared lane, with that lane's own credential, egress and endpoint, and the sticky
+   prints which. The original decision stands: `LINTRO_AI_PROVIDER` selects the lane and
+   `LINTRO_AI_MODEL` overrides its default model, both read by the secret-free lane job
+   alone; the manifest remains the only place an endpoint, a credential binding, an
+   egress host or a default model is defined (decision A).
 3. Degradation follows a declared, ordered fallback chain.
 4. The Z.ai lane is kept as an explicit opt-in, not removed.
 
@@ -86,34 +96,43 @@ row declares the provider, transport, endpoint, whether the endpoint is first-pa
 that provider, whether the transport reports model usage (`reports_model_usage`), the
 name of the credential it binds and its form (an environment variable, or a file the
 wrapper materialises: the Codex session is `$HOME/.codex/auth.json`, decoded from
-`CODEX_AUTH_JSON`), the exact egress hosts it needs, the default model, the allowed
-models, and the cost basis its figures carry.
+`CODEX_AUTH_JSON`), the exact egress hosts it needs, the default model, and the cost
+basis its figures carry. There is no allowed-model list: the operator chooses the model,
+and the sticky reports what answered.
 
 - The manifest is the **only** place an endpoint, a credential binding or an egress host
   may be defined. No workflow expression derives any of them from the `vars` context.
-- The manifest's ordered `chain` of lane ids is the only routing input: its first entry
-  is the active lane, and the rest are the fallback order of decision D. There is no
-  separate selector field, so the active lane and the chain cannot disagree. No
-  variable, at any scope, selects, enables or shapes a lane. Switching lanes is a
-  reviewed one-line diff to the manifest. It takes effect for every open pull request on
-  the next event that starts the workflow, because the resolver reads the manifest at
-  `github.workflow_sha`, the `main` commit that supplied the workflow definition
-  (`ai-review.yml` runs under `pull_request_target` and `issue_comment`, and every
-  dogfood PR targets `main`), and not at `pull_request.base.sha`, which is the base as
-  of the PR's last sync and can lag `main`. A rerun of an existing run keeps that run's
-  `workflow_sha` and therefore its manifest, so after an emergency switch the recovery
-  step for a red PR is an `@lintro review` comment, which starts a new run, not a rerun.
-  An empty chain, an entry that does not name a declared row, a row that declares a
-  wildcard host, a chain that mixes `first_party` values or has more than one entry
-  behind a non-first-party first entry (decision D), or a row that needs a
-  `shadow_price_model` and declares none (decision B) fails closed in the resolver
-  before a secret is exposed, with the allowed lane list in the error.
-- The existing `vars.LINTRO_AI_PROVIDER`, `vars.LINTRO_AI_TRANSPORT` and
-  `vars.LINTRO_AI_MODEL` reads in the dogfood jobs are removed; provider, transport and
-  model come from the lane row. Budget overlays remain variables because they shape
-  spend, not routing. A structural test asserts that no job in `ai-review.yml` or
-  `ai-contract-tests.yml` reads a routing value from `vars`. The Tier 2 contract-tests
-  job today reads `vars.ZAI_BASE_URL` to route and to pick its credential, and
+- The repository variable `LINTRO_AI_PROVIDER` selects the lane: it must name a declared
+  row (`anthropic`, `openai`, `cursor`, `zai`, `kimi`), unset means the manifest's
+  `chain[0]`, and anything else fails closed in the resolver before a secret is exposed.
+  `LINTRO_AI_MODEL` overrides the selected row's default model; unset means the row's
+  own, so no run ever falls through to a CLI's built-in default. Both are read by the
+  resolver step of the secret-free lane job and by nothing else. The manifest's ordered
+  `chain` is the default lane followed by the fallback order of decision D; a selected
+  lane other than `chain[0]` runs as a single-entry chain, so the operator's choice is
+  exactly what runs. No variable supplies an endpoint, a credential binding, an egress
+  host or a transport. Switching lanes is a change to the variable; it takes effect for
+  every open pull request on the next event that starts the workflow, and the resolver
+  reads the manifest at `github.workflow_sha`, the `main` commit that supplied the
+  workflow definition (`ai-review.yml` runs under `pull_request_target` and
+  `issue_comment`, and every dogfood PR targets `main`), and not at
+  `pull_request.base.sha`, which is the base as of the PR's last sync and can lag
+  `main`. A rerun of an existing run keeps that run's `workflow_sha` and therefore its
+  manifest, so after an emergency switch the recovery step for a red PR is an
+  `@lintro review` comment, which starts a new run, not a rerun. An empty chain, an
+  entry that does not name a declared row, a row that declares a wildcard host, a chain
+  that mixes `first_party` values or has more than one entry behind a non-first-party
+  first entry (decision D), or a row that needs a `shadow_price_model` and declares none
+  (decision B) fails closed in the resolver before a secret is exposed, with the allowed
+  lane list in the error.
+- The review job reads no routing variable: provider, transport and model reach it in
+  the resolved row. `vars.LINTRO_AI_TRANSPORT` is gone (the transport follows the
+  credential form) and `vars.ZAI_BASE_URL` is gone (the endpoint is the row's). Budget
+  overlays remain variables because they shape spend, not routing. A structural test
+  asserts that `vars.LINTRO_AI_PROVIDER` and `vars.LINTRO_AI_MODEL` are read by the lane
+  job's resolver step only, and that no other routing value is read from `vars` in
+  `ai-review.yml` or `ai-contract-tests.yml`. The Tier 2 contract-tests job today reads
+  `vars.ZAI_BASE_URL` to route and to pick its credential, and
   `tests/unit/test_workflow_wiring.py` derives those expressions from `ai-review.yml`,
   so both workflows are rewired together and that test is re-pointed at the manifest.
 - A separate secret-free job checks out `github.workflow_sha`, resolves the chain from
@@ -152,15 +171,17 @@ models, and the cost basis its figures carry.
   `status=no-credential`, never a fallback trigger: the manifest promised a binding the
   secrets do not hold. The committed config and its `LINTRO_AI_*` overlays are not a
   second source either: the wrapper also refuses when the effective `ai.api_base_url` or
-  `ai.api_key_env` is set and differs from the lane row, and when a configured
-  `fallback_models` entry is outside the lane's allowed models. Provider, transport and
-  model are exported from the row as the `LINTRO_AI_*` overlays, and the wrapper refuses
-  when the effective `ai.provider`, `ai.transport` or `ai.model` still differs from the
-  row.
-- The initial manifest declares `claude-subscription` (the sole initial `chain` entry),
-  `codex-subscription`, `cursor` and `zai-glm-gateway`. The last is
-  `first_party: false`, binds `ZAI_AUTH_TOKEN`, egresses only to `api.z.ai:443`, and
-  becomes active only by a merged manifest diff placing it first in `chain`.
+  `ai.api_key_env` is set and differs from the lane row, and when `fallback_models` is
+  configured at all: the review falls back by lane, never by model. Provider, transport
+  and model are exported from the row as the `LINTRO_AI_*` overlays, and the wrapper
+  refuses when the effective `ai.provider`, `ai.transport` or `ai.model` still differs
+  from the row.
+- The initial manifest declares `anthropic` (the sole initial `chain` entry, default
+  model `claude-opus-5-5`), `openai` (the Codex session, `gpt-6.1-sol`), `cursor`
+  (`cursor-grok-4.6-high`), `zai` (`first_party: false`, `ZAI_AUTH_TOKEN`,
+  `api.z.ai:443` only, `glm-5.3-flash`) and `kimi` (`first_party: false`,
+  `KIMI_API_KEY`, `api.moonshot.ai:443` only, `kimi-k3`). A gateway row becomes active
+  by setting `LINTRO_AI_PROVIDER` to its id.
 
 The manifest and the resolver land first and inert, and the workflow rewire follows in a
 second PR. That split is a staged rollout, not a bootstrap requirement: once the review
@@ -183,26 +204,24 @@ A run record reports where its requests went and what answered, not what was con
   `model_verification` with exactly five states:
   - `verified`: on a first-party endpoint, every completed call reported model usage,
     the requested model is among the reported models once aliases are normalised to
-    `canonicalModel`, and every reported model is in the lane's allowed models.
+    `canonicalModel`, and every reported model is the requested model.
   - `mismatch`: on a first-party endpoint, a completed call reported model usage and the
-    requested model is absent from it, or a reported model is outside the lane's allowed
-    models.
+    requested model is absent from it, or a reported model is not the requested model.
   - `unverifiable`: the endpoint is not first-party, so the reported model cannot be
     trusted to describe what answered.
   - `unreported`: some completed call returned no model usage.
   - `legacy`: the round was stored before this ADR and carries none of these fields.
     Only the state reader assigns it; a run in the current workflow never produces it.
 
-  The requested model of a call is the one the run asked for: the lane default, or a
-  declared fallback or custom-agent override, each of which must be in the lane's
-  allowed models. States are assigned in a fixed order so that no round qualifies for
-  two: `legacy` by the state reader; then `unverifiable` whenever the endpoint is not
-  first-party, whatever the envelope carried; then, over every completed call of the
-  round, `mismatch` if any call is a mismatch, else `unreported` if any call carried no
-  model usage, else `verified`. A non-first-party round that reports no model usage is
-  therefore `unverifiable`, never `unreported`. A round that completed no call has no
-  state of its own: the verdict rests on the reused rounds it inherits from, each judged
-  on its stored state.
+  The requested model of a call is the one the run asked for: the row's default, or the
+  `LINTRO_AI_MODEL` override the lane job resolved into the row. States are assigned in
+  a fixed order so that no round qualifies for two: `legacy` by the state reader; then
+  `unverifiable` whenever the endpoint is not first-party, whatever the envelope
+  carried; then, over every completed call of the round, `mismatch` if any call is a
+  mismatch, else `unreported` if any call carried no model usage, else `verified`. A
+  non-first-party round that reports no model usage is therefore `unverifiable`, never
+  `unreported`. A round that completed no call has no state of its own: the verdict
+  rests on the reused rounds it inherits from, each judged on its stored state.
 
 - `auth_mode` is no longer derived from the `--bare` policy; it follows `credential`.
 - No renderer prints a configured model without the endpoint host beside it and the
@@ -237,7 +256,7 @@ A run record reports where its requests went and what answered, not what was con
   `LIST_PRICE_SHADOW`, as it is on `unpriceable` today. A non-first-party row declares
   `shadow_price_model`, the first-party model whose list table prices its shadow figure,
   and the resolver fails closed on a non-first-party row without one, or on any row
-  whose default or allowed model has no list table and no `shadow_price_model`.
+  whose default model has no list table and no `shadow_price_model`.
   `PrBudget.unpriceable` and the runtime-bound note it drives today key on `UNPRICEABLE`
   alone; the two new bases carry the shadow label the same way.
 - Review-reuse validity includes the lane: a stored round from one lane is not reused as
@@ -249,17 +268,16 @@ A run record reports where its requests went and what answered, not what was con
   unchanged round must not inherit it into a green check. The stored state is not taken
   on trust either: before coverage is inherited, every stored round's `lane` and
   `endpoint` are re-checked against the current manifest row, and on a row declared
-  `first_party: true` its `reported_models` are re-checked against the row's allowed
-  models as well, in the same order the states are assigned; a round that no longer
-  passes is excluded as if it were `mismatch`, so tightening a first-party lane's
-  allowed models re-reviews what those models covered. A non-first-party round's
-  reported models are not re-checked, because the live rule does not trust them either.
-  Historical cost figures are kept. A stored round with no lane field predates this ADR
-  and records no endpoint, so nothing can say which lane produced it; from 2026-09-09
-  until the interim measure in Consequences, such rounds were answered by GLM through
-  Z.ai. It is therefore **not** reused for lane validity. It is kept in the cumulative
-  history with `model_verification == legacy` and labelled "predates ADR-0011", and it
-  never contributes to a live verdict. The first run after
+  `first_party: true` its `reported_models` are re-checked against the round's requested
+  model as well, in the same order the states are assigned; a round that no longer
+  passes is excluded as if it were `mismatch`. A non-first-party round's reported models
+  are not re-checked, because the live rule does not trust them either. Historical cost
+  figures are kept. A stored round with no lane field predates this ADR and records no
+  endpoint, so nothing can say which lane produced it; from 2026-09-09 until the interim
+  measure in Consequences, such rounds were answered by GLM through Z.ai. It is
+  therefore **not** reused for lane validity. It is kept in the cumulative history with
+  `model_verification == legacy` and labelled "predates ADR-0011", and it never
+  contributes to a live verdict. The first run after
   [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) therefore re-reviews each
   open PR once on the active lane; that one-time cost is accepted in preference to a
   green check built on rounds of unknown provenance.
@@ -296,7 +314,8 @@ Delivered by: [#2871](https://github.com/lgtm-hq/py-lintro/issues/2871).
 ### D. Degradation
 
 The manifest's `chain` (decision A) is also the fallback order. The initial chain is
-`["claude-subscription"]`; adding a second entry is a reviewed change to the manifest.
+`["anthropic"]`; adding a second entry is a reviewed change to the manifest. A lane
+selected by `LINTRO_AI_PROVIDER` other than `chain[0]` runs as a single-entry chain.
 
 - The wrapper tries lanes in chain order. It advances only on the provider-unavailable
   class, which is exactly `ReviewErrorKind.AUTH_FAILED`, `INSUFFICIENT_CREDITS` and
@@ -391,16 +410,17 @@ Delivered by: [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870).
 
 ## Consequences
 
-The next lane switch is a reviewed diff to a committed JSON file, visible in the
-repository and printed on every sticky. No variable at any scope is read for routing, so
-an inherited organisation variable cannot change where a review goes. The price of that
-guarantee is that an emergency switch is a merged one-line PR rather than a settings
-click, and that it reaches an already-red PR through a new run (an `@lintro review`
-comment), not through a rerun of the failed one. Because reuse validity includes the
-lane, every lane switch, not only the first run after this ADR lands, re-reviews each
-open PR once on the new lane. A reader of a sticky sees the lane, the endpoint host,
-whether the model claim is verified, and what the cost figure is based on; the sticky
-cannot again say Opus while GLM answers.
+The next lane switch is a change to the repository variable `LINTRO_AI_PROVIDER`, and
+the lane it names is a row in a committed JSON file, visible in the repository and
+printed on every sticky. No variable supplies an endpoint, a credential binding or an
+egress host, so an inherited organisation variable can at most select another declared
+lane, never redirect a review to an unreviewed host. Adding or changing a lane is a
+reviewed diff to the manifest. A switch reaches an already-red PR through a new run (an
+`@lintro review` comment), not through a rerun of the failed one. Because reuse validity
+includes the lane, every lane switch, not only the first run after this ADR lands,
+re-reviews each open PR once on the new lane. A reader of a sticky sees the lane, the
+endpoint host, whether the model claim is verified, and what the cost figure is based
+on; the sticky cannot again say Opus while GLM answers.
 
 The cost is one more committed artifact to keep in step with the secrets that exist and
 a resolver job on every review. Adding a lane now requires a manifest row, a smoke row

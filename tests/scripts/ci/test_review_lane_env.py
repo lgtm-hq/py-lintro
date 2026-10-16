@@ -89,18 +89,18 @@ def test_the_env_phase_exports_the_rows_facts_and_overlays(
     tmp_path: Path,
 ) -> None:
     """Provider, transport, model and the run-record facts come from the row."""
-    result = _run("env", _env(lanes, ["claude-subscription"], tmp_path))
+    result = _run("env", _env(lanes, ["anthropic"], tmp_path))
 
     assert_that(result.returncode).is_equal_to(0)
     exports = _exports(result.stdout)
-    assert_that(exports["LINTRO_REVIEW_LANE"]).is_equal_to("claude-subscription")
+    assert_that(exports["LINTRO_REVIEW_LANE"]).is_equal_to("anthropic")
     assert_that(exports["LINTRO_REVIEW_ENDPOINT"]).is_equal_to(
         "https://api.anthropic.com",
     )
     assert_that(exports["LINTRO_REVIEW_FIRST_PARTY"]).is_equal_to("true")
-    assert_that(exports["LINTRO_REVIEW_ALLOWED_MODELS"]).is_equal_to(
-        "claude-opus-5-5,claude-sonnet-5-5",
-    )
+    # No allowed-model list travels: the operator chose the model, and the
+    # sticky reports what answered.
+    assert_that(exports).does_not_contain_key("LINTRO_REVIEW_ALLOWED_MODELS")
     assert_that(exports["LINTRO_REVIEW_REPORTS_MODEL_USAGE"]).is_equal_to("true")
     assert_that(exports["LINTRO_AI_PROVIDER"]).is_equal_to("anthropic")
     assert_that(exports["LINTRO_AI_TRANSPORT"]).is_equal_to("cli")
@@ -121,7 +121,7 @@ def test_a_gateway_lane_exports_its_endpoint_as_the_override(
     tmp_path: Path,
 ) -> None:
     """Off-host the base-URL variable is set to the row's endpoint, by the wrapper."""
-    exports = _exports(_run("env", _env(lanes, ["zai-glm-gateway"], tmp_path)).stdout)
+    exports = _exports(_run("env", _env(lanes, ["zai"], tmp_path)).stdout)
 
     assert_that(exports["LANE_BASE_URL_VALUE"]).is_equal_to(
         "https://api.z.ai/api/anthropic",
@@ -136,10 +136,10 @@ def test_the_attempt_index_selects_the_lane_and_is_bounded(
     tmp_path: Path,
 ) -> None:
     """Attempt 1 of a two-lane chain binds the second lane; past the end refuses."""
-    chain = ["claude-subscription", "codex-subscription"]
+    chain = ["anthropic", "openai"]
     second = _run("env", _env(lanes, chain, tmp_path, LINTRO_REVIEW_ATTEMPT="1"))
     assert_that(_exports(second.stdout)["LINTRO_REVIEW_LANE"]).is_equal_to(
-        "codex-subscription",
+        "openai",
     )
     beyond = _run("env", _env(lanes, chain, tmp_path, LINTRO_REVIEW_ATTEMPT="2"))
     assert_that(beyond.returncode).is_equal_to(3)
@@ -164,11 +164,9 @@ def test_a_row_whose_name_fields_are_not_names_is_refused(
     )
     for field in gate._NAME_VALUED_FIELDS:
         hostile = copy.deepcopy(lanes)
-        hostile["claude-subscription"][
-            field
-        ] = 'CLAUDE_CODE_OAUTH_TOKEN}"; touch /tmp/x; : "${X'
+        hostile["anthropic"][field] = 'CLAUDE_CODE_OAUTH_TOKEN}"; touch /tmp/x; : "${X'
         for phase in ("env", "check"):
-            result = _run(phase, _env(hostile, ["claude-subscription"], tmp_path))
+            result = _run(phase, _env(hostile, ["anthropic"], tmp_path))
             assert_that(result.returncode).described_as(f"{field}/{phase}").is_equal_to(
                 3,
             )
@@ -201,7 +199,7 @@ def test_an_absent_credential_is_a_no_credential_refusal(
     tmp_path: Path,
 ) -> None:
     """Exit 2 is the wrapper's cue for status=no-credential, never a fallback."""
-    result = _run("check", _env(lanes, ["claude-subscription"], tmp_path))
+    result = _run("check", _env(lanes, ["anthropic"], tmp_path))
 
     assert_that(result.returncode).is_equal_to(2)
     assert_that(result.stderr).contains("no provider credential")
@@ -215,7 +213,7 @@ def test_the_bound_credential_passes_and_a_competitor_refuses(
     """Exactly one credential may be in scope: the lane's, under its CLI variable."""
     ok = _run(
         "check",
-        _env(lanes, ["claude-subscription"], tmp_path, CLAUDE_CODE_OAUTH_TOKEN=_TOKEN),
+        _env(lanes, ["anthropic"], tmp_path, CLAUDE_CODE_OAUTH_TOKEN=_TOKEN),
     )
     assert_that(ok.returncode).is_equal_to(0)
     assert_that(ok.stderr).contains("no competitor")
@@ -224,7 +222,7 @@ def test_the_bound_credential_passes_and_a_competitor_refuses(
         "check",
         _env(
             lanes,
-            ["claude-subscription"],
+            ["anthropic"],
             tmp_path,
             CLAUDE_CODE_OAUTH_TOKEN=_TOKEN,
             CURSOR_API_KEY="key",
@@ -244,7 +242,7 @@ def test_a_session_on_disk_competes_with_a_non_codex_lane(
 
     claude = _run(
         "check",
-        _env(lanes, ["claude-subscription"], tmp_path, CLAUDE_CODE_OAUTH_TOKEN=_TOKEN),
+        _env(lanes, ["anthropic"], tmp_path, CLAUDE_CODE_OAUTH_TOKEN=_TOKEN),
     )
     assert_that(claude.returncode).is_equal_to(3)
     assert_that(claude.stderr).contains("codex_oauth session")
@@ -252,7 +250,7 @@ def test_a_session_on_disk_competes_with_a_non_codex_lane(
     # The codex lane itself needs its source variable, and owns the file.
     codex = _run(
         "check",
-        _env(lanes, ["codex-subscription"], tmp_path, CODEX_AUTH_JSON="e30="),
+        _env(lanes, ["openai"], tmp_path, CODEX_AUTH_JSON="e30="),
     )
     assert_that(codex.returncode).is_equal_to(0)
 
@@ -266,7 +264,7 @@ def test_the_base_url_override_must_name_the_lane_endpoint(
         "check",
         _env(
             lanes,
-            ["claude-subscription"],
+            ["anthropic"],
             tmp_path,
             CLAUDE_CODE_OAUTH_TOKEN=_TOKEN,
             ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic",
@@ -279,7 +277,7 @@ def test_the_base_url_override_must_name_the_lane_endpoint(
         "check",
         _env(
             lanes,
-            ["zai-glm-gateway"],
+            ["zai"],
             tmp_path,
             ANTHROPIC_AUTH_TOKEN=_TOKEN,
             ANTHROPIC_BASE_URL="https://proxy.example/anthropic",
@@ -292,7 +290,7 @@ def test_the_base_url_override_must_name_the_lane_endpoint(
         "check",
         _env(
             lanes,
-            ["zai-glm-gateway"],
+            ["zai"],
             tmp_path,
             ANTHROPIC_AUTH_TOKEN=_TOKEN,
             ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic",
@@ -306,7 +304,7 @@ def test_the_base_url_override_must_name_the_lane_endpoint(
         "check",
         _env(
             lanes,
-            ["zai-glm-gateway"],
+            ["zai"],
             tmp_path,
             ANTHROPIC_AUTH_TOKEN=_TOKEN,
             ANTHROPIC_BASE_URL="http://api.z.ai/api/anthropic",
@@ -329,23 +327,23 @@ def test_a_file_backed_override_is_checked_too(
 
     result = _run(
         "check",
-        _env(lanes, ["codex-subscription"], tmp_path, CODEX_AUTH_JSON="e30="),
+        _env(lanes, ["openai"], tmp_path, CODEX_AUTH_JSON="e30="),
     )
 
     assert_that(result.returncode).is_equal_to(3)
     assert_that(result.stderr).contains("chatgpt_base_url")
 
 
-def test_a_row_that_names_no_model_allows_no_override_and_no_fallback(
+def test_the_model_is_the_rows_and_no_model_fallback_is_allowed(
     lanes: dict[str, Any],
     tmp_path: Path,
 ) -> None:
-    """``model: null`` means the CLI's own default; a config may not name one."""
-    base = _env(lanes, ["codex-subscription"], tmp_path, CODEX_AUTH_JSON="e30=")
+    """The row's model (default or variable) is the model; fallback is by lane."""
+    base = _env(lanes, ["openai"], tmp_path, CODEX_AUTH_JSON="e30=")
     agreeing: dict[str, Any] = {
         "provider": "openai",
         "transport": "cli",
-        "model": None,
+        "model": "gpt-6.1-sol",
         "api_base_url": None,
         "api_key_env": None,
         "fallback_models": [],
@@ -356,15 +354,16 @@ def test_a_row_that_names_no_model_allows_no_override_and_no_fallback(
             {**base, "LINTRO_EFFECTIVE_AI_JSON": json.dumps(agreeing)},
         ).returncode,
     ).is_equal_to(0)
-    named = _run(
-        "check",
-        {
-            **base,
-            "LINTRO_EFFECTIVE_AI_JSON": json.dumps({**agreeing, "model": "gpt-5"}),
-        },
-    )
-    assert_that(named.returncode).is_equal_to(3)
-    assert_that(named.stderr).contains("effective ai.model is 'gpt-5'")
+    for model, fragment in (("gpt-5", "is 'gpt-5'"), (None, "is None"), ("", "is ''")):
+        named = _run(
+            "check",
+            {
+                **base,
+                "LINTRO_EFFECTIVE_AI_JSON": json.dumps({**agreeing, "model": model}),
+            },
+        )
+        assert_that(named.returncode).described_as(repr(model)).is_equal_to(3)
+        assert_that(named.stderr).contains("effective ai.model " + fragment)
     fallback = _run(
         "check",
         {
@@ -375,7 +374,7 @@ def test_a_row_that_names_no_model_allows_no_override_and_no_fallback(
         },
     )
     assert_that(fallback.returncode).is_equal_to(3)
-    assert_that(fallback.stderr).contains("fallback_models ['gpt-5']")
+    assert_that(fallback.stderr).contains("fallback_models ['gpt-5'] are set")
 
 
 def test_a_file_backed_override_is_parsed_as_toml_and_fails_closed(
@@ -385,7 +384,7 @@ def test_a_file_backed_override_is_parsed_as_toml_and_fails_closed(
     """Single-quoted TOML is TOML; an unparsable file refuses the attempt."""
     (tmp_path / ".codex").mkdir()
     config = tmp_path / ".codex" / "config.toml"
-    env = _env(lanes, ["codex-subscription"], tmp_path, CODEX_AUTH_JSON="e30=")
+    env = _env(lanes, ["openai"], tmp_path, CODEX_AUTH_JSON="e30=")
 
     config.write_text(
         "chatgpt_base_url = 'https://evil.example/backend'\n",
@@ -409,17 +408,17 @@ def test_the_effective_config_must_agree_with_the_row(
     """The committed config and its overlays are not a second routing source."""
     base = _env(
         lanes,
-        ["claude-subscription"],
+        ["anthropic"],
         tmp_path,
         CLAUDE_CODE_OAUTH_TOKEN=_TOKEN,
     )
-    agreeing = {
+    agreeing: dict[str, Any] = {
         "provider": "anthropic",
         "transport": "cli",
         "model": "claude-opus-5-5",
         "api_base_url": None,
         "api_key_env": None,
-        "fallback_models": ["claude-sonnet-5-5"],
+        "fallback_models": [],
     }
     ok = _run("check", {**base, "LINTRO_EFFECTIVE_AI_JSON": json.dumps(agreeing)})
     assert_that(ok.returncode).is_equal_to(0)

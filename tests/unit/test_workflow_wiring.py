@@ -5688,12 +5688,15 @@ _CHAIN_MEMBERSHIP_RE = re.compile(
     r"contains\(fromJSON\(needs\.lane\.outputs\.chain\), '[a-z0-9-]+'\)",
 )
 
-#: Routing variables no dogfood job may read (ADR-0011 A): a variable at any
-#: scope could otherwise redirect a PR's credentials and diff. Budget overlays
-#: shape spend, not routing, and stay variables.
-_ROUTING_VARS_RE = re.compile(
-    r"vars\.(LINTRO_AI_PROVIDER|LINTRO_AI_TRANSPORT|LINTRO_AI_MODEL|ZAI_BASE_URL)\b",
-)
+#: Variables no dogfood job may read anywhere (ADR-0011 A): one supplied an
+#: endpoint, the other a transport, and neither can be bounded to a declared
+#: row. The lane selector and the model override are read by the lane job's
+#: resolver step alone (asserted below); budget overlays stay variables.
+_ROUTING_VARS_RE = re.compile(r"vars\.(LINTRO_AI_TRANSPORT|ZAI_BASE_URL)\b")
+#: The two routing inputs the resolver accepts, and the only step that may
+#: read them: a selector can only name a declared row, so an inherited value
+#: can at worst pick another declared lane, which the sticky prints.
+_LANE_SELECTOR_VARS = {"vars.LINTRO_AI_PROVIDER", "vars.LINTRO_AI_MODEL"}
 #: Names of the CLI-behaviour flags the review pins for the agent binaries.
 #: Matched by shape rather than listed, so a fourth flag is mirrored without
 #: anyone remembering to extend a tuple.
@@ -5733,10 +5736,12 @@ _DOGFOOD_ONLY_ENV = {
     # The codex session secret: Tier 2 restores it in its own step and the
     # runner mounts the directory; the smoke step never sees the secret.
     "CODEX_AUTH_JSON",
-    # The z.ai token travels under its secret name to the dogfood wrapper,
-    # which binds it to ANTHROPIC_AUTH_TOKEN for the attempt; Tier 2 binds
-    # it to ANTHROPIC_AUTH_TOKEN directly (asserted below).
+    # The gateway tokens travel under their secret names to the dogfood
+    # wrapper, which binds the active lane's to ANTHROPIC_AUTH_TOKEN for the
+    # attempt; Tier 2 binds them to ANTHROPIC_AUTH_TOKEN directly (asserted
+    # below).
     "ZAI_AUTH_TOKEN",
+    "KIMI_API_KEY",
 }
 #: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
 #: the dogfood job's per-provider egress expressions.
@@ -5903,8 +5908,8 @@ def _tier2_expression_from_dogfood(expression: str) -> str:
     # (The gateway token is bound under another name; it is not mirrored
     # here.) Every other lane's credential is forwarded whenever the gate
     # allows, because Tier 2 drives every lane in one job.
-    if "'claude-subscription'" in match.group(0):
-        active = "needs.lane.outputs.lane == 'claude-subscription'"
+    if "'anthropic'" in match.group(0):
+        active = "needs.lane.outputs.lane == 'anthropic'"
         return expression.replace(match.group(0), f"({gate} && {active})", 1)
     return expression.replace(match.group(0), gate, 1)
 
@@ -6020,11 +6025,12 @@ def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() ->
 
 
 def test_tier2_binds_the_gateway_token_from_the_lane_row() -> None:
-    """Tier 2 carries the z.ai token as ANTHROPIC_AUTH_TOKEN, from the lane.
+    """Tier 2 carries the active gateway's token as ANTHROPIC_AUTH_TOKEN.
 
-    The dogfood wrapper binds ``ZAI_AUTH_TOKEN`` to ``ANTHROPIC_AUTH_TOKEN``
-    for the attempt; Tier 2 has no wrapper, so its workflow binds the same
-    secret to the same variable. Both the token and the endpoint key on the
+    The dogfood wrapper binds ``ZAI_AUTH_TOKEN`` or ``KIMI_API_KEY`` to
+    ``ANTHROPIC_AUTH_TOKEN`` for the attempt; Tier 2 has no wrapper, so its
+    workflow binds the same secret to the same variable, one expression
+    selecting by active lane. Both the token and the endpoint key on the
     *active* lane: a chain that lists the gateway as a fallback must not put
     its bearer token in front of the subscription CLI, which would send it
     to api.anthropic.com (ADR-0011 A, #2870).
@@ -6035,10 +6041,12 @@ def test_tier2_binds_the_gateway_token_from_the_lane_row() -> None:
         if "run-ai-contract-tests.sh" in str(step.get("run", ""))
     )
     token = _normalize_github_expr(str(tier2_env["ANTHROPIC_AUTH_TOKEN"]))
+    gate = f"env.{_AI_CONTRACT_GATE_ENV} == 'true'"
     assert_that(token).is_equal_to(
-        f"${{{{ (env.{_AI_CONTRACT_GATE_ENV} == 'true'"
-        " && needs.lane.outputs.lane == 'zai-glm-gateway')"
-        " && secrets.ZAI_AUTH_TOKEN || '' }}",
+        f"${{{{ ({gate} && needs.lane.outputs.lane == 'zai')"
+        " && secrets.ZAI_AUTH_TOKEN"
+        f" || ({gate} && needs.lane.outputs.lane == 'kimi')"
+        " && secrets.KIMI_API_KEY || '' }}",
     )
     base_url = _normalize_github_expr(str(tier2_env["ANTHROPIC_BASE_URL"]))
     assert_that(base_url).is_equal_to(
@@ -6066,7 +6074,12 @@ def test_the_structural_regexes_match_what_they_guard() -> None:
 
 @pytest.mark.parametrize("workflow", [_AI_REVIEW_WORKFLOW, _AI_CONTRACT_WORKFLOW])
 def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
-    """No variable at any scope may select, enable or shape a lane (ADR-0011 A).
+    """No variable may supply an endpoint or a transport (ADR-0011 A).
+
+    The lane selector and the model override are variables, read by the
+    resolver step of the secret-free lane job and nowhere else: the resolver
+    accepts only a declared lane id and a model id, so the worst an inherited
+    value can do is pick another declared row.
 
     Args:
         workflow: The workflow file under test.
@@ -6075,9 +6088,34 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
         encoding="utf-8",
     )
     assert_that(_ROUTING_VARS_RE.findall(text)).described_as(workflow).is_empty()
-    allowed = {"vars.LINTRO_AI_MAX_COST_USD", "vars.LINTRO_AI_REVIEW_PR_BUDGET_USD"}
+    budget = {"vars.LINTRO_AI_MAX_COST_USD", "vars.LINTRO_AI_REVIEW_PR_BUDGET_USD"}
     reads = set(re.findall(r"\bvars\.[A-Za-z_][A-Za-z0-9_]*", text))
-    assert_that(reads - allowed).described_as(f"{workflow} vars reads").is_empty()
+    assert_that(reads - budget - _LANE_SELECTOR_VARS).described_as(
+        f"{workflow} vars reads",
+    ).is_empty()
+    loaded = _load_workflow(name=workflow)
+    seen: set[str] = set()
+    for job_name, job in loaded["jobs"].items():
+        for step in job.get("steps") or []:
+            for name, value in (step.get("env") or {}).items():
+                found = _LANE_SELECTOR_VARS & set(
+                    re.findall(r"\bvars\.[A-Za-z_][A-Za-z0-9_]*", str(value)),
+                )
+                if found:
+                    assert_that((job_name, step.get("id"))).described_as(
+                        f"{workflow}: {name} reads {sorted(found)}",
+                    ).is_equal_to(("lane", "resolve"))
+                    seen |= found
+        job_blob = json.dumps({k: v for k, v in job.items() if k != "steps"})
+        for variable in _LANE_SELECTOR_VARS:
+            assert_that(job_blob).described_as(
+                f"{workflow}: job {job_name}",
+            ).does_not_contain(
+                variable,
+            )
+    assert_that(seen).described_as(f"{workflow} lane job inputs").is_equal_to(
+        _LANE_SELECTOR_VARS,
+    )
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

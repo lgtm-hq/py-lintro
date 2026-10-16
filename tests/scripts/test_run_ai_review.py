@@ -42,14 +42,16 @@ PROVIDER_CREDENTIAL_ENVS = (CREDENTIAL_ENV, CURSOR_CREDENTIAL_ENV)
 #: for the attempt; the z.ai token is bound to ANTHROPIC_AUTH_TOKEN.
 CODEX_SESSION_ENV = "CODEX_AUTH_JSON"
 ZAI_GATEWAY_ENV = "ZAI_AUTH_TOKEN"
+KIMI_GATEWAY_ENV = "KIMI_API_KEY"
 GATEWAY_AUTH_ENV = "ANTHROPIC_AUTH_TOKEN"
 #: Every chain credential the review step may carry, each gated on chain
 #: membership (ADR-0011 A).
 CHAIN_CREDENTIALS = {
-    "claude-subscription": CREDENTIAL_ENV,
-    "codex-subscription": CODEX_SESSION_ENV,
+    "anthropic": CREDENTIAL_ENV,
+    "openai": CODEX_SESSION_ENV,
     "cursor": CURSOR_CREDENTIAL_ENV,
-    "zai-glm-gateway": ZAI_GATEWAY_ENV,
+    "zai": ZAI_GATEWAY_ENV,
+    "kimi": KIMI_GATEWAY_ENV,
 }
 MANIFEST = REPO_ROOT / "scripts" / "ci" / "ai_review_lanes.json"
 #: ``{}`` as base64: a Codex session file with nothing in it, enough for the
@@ -57,7 +59,7 @@ MANIFEST = REPO_ROOT / "scripts" / "ci" / "ai_review_lanes.json"
 EMPTY_CODEX_SESSION = base64.b64encode(b"{}").decode("ascii")
 
 
-def _lane(lane_id: str = "claude-subscription", **row_overrides: Any) -> dict[str, str]:
+def _lane(lane_id: str = "anthropic", **row_overrides: Any) -> dict[str, str]:
     """Return the lane job's outputs for one lane, as the wrapper reads them.
 
     The effective ``ai.*`` config is supplied agreeing with the row, as
@@ -231,6 +233,15 @@ def test_workflow_feeds_only_budget_overlays_from_repo_variables() -> None:
     assert_that(env["LINTRO_AI_ENABLED"]).is_equal_to("1")
     for routing in ("LINTRO_AI_TRANSPORT", "LINTRO_AI_PROVIDER", "LINTRO_AI_MODEL"):
         assert_that(env).does_not_contain_key(routing)
+    # The selector and the model override are the lane job's inputs alone.
+    lane_steps = loaded["jobs"]["lane"]["steps"]
+    resolve = next(step for step in lane_steps if step.get("id") == "resolve")
+    assert_that(resolve["env"]["LINTRO_AI_PROVIDER"]).is_equal_to(
+        "${{ vars.LINTRO_AI_PROVIDER }}",
+    )
+    assert_that(resolve["env"]["LINTRO_AI_MODEL"]).is_equal_to(
+        "${{ vars.LINTRO_AI_MODEL }}",
+    )
     assert_that(env["LINTRO_REVIEW_CHAIN"]).is_equal_to(
         "${{ needs.lane.outputs.chain }}",
     )
@@ -343,7 +354,7 @@ def test_shell_fails_visibly_without_codex_session_when_provider_is_openai(
     result = _run_shell(
         args=[],
         env_overrides={
-            **_lane("codex-subscription"),
+            **_lane("openai"),
             "HOME": str(tmp_path),
             CREDENTIAL_ENV: "dummy-claude-token",
             CODEX_SESSION_ENV: "",
@@ -365,7 +376,7 @@ def test_shell_materialises_the_codex_session_for_the_attempt(tmp_path: Path) ->
     result = _run_shell(
         args=[],
         env_overrides={
-            **_lane("codex-subscription"),
+            **_lane("openai"),
             "HOME": str(tmp_path),
             CREDENTIAL_ENV: "",
             CODEX_SESSION_ENV: EMPTY_CODEX_SESSION,
@@ -398,7 +409,7 @@ def test_shell_never_overwrites_a_session_it_does_not_own(tmp_path: Path) -> Non
     result = _run_shell(
         args=[],
         env_overrides={
-            **_lane("codex-subscription"),
+            **_lane("openai"),
             "HOME": str(tmp_path),
             CREDENTIAL_ENV: "",
             CODEX_SESSION_ENV: EMPTY_CODEX_SESSION,
@@ -421,7 +432,7 @@ def test_shell_binds_the_gateway_token_on_the_zai_lane() -> None:
     result = _run_shell(
         args=[],
         env_overrides={
-            **_lane("zai-glm-gateway"),
+            **_lane("zai"),
             CREDENTIAL_ENV: "",
             ZAI_GATEWAY_ENV: "dummy-gateway-token",
             "PR_NUMBER": "",
@@ -430,6 +441,28 @@ def test_shell_binds_the_gateway_token_on_the_zai_lane() -> None:
     assert_that(result.returncode).is_equal_to(1)
     assert_that(result.stdout).contains("never invoked")
     assert_that(result.stdout).contains("endpoint https://api.z.ai/api/anthropic")
+    assert_that(result.stdout).does_not_contain("no provider credential")
+
+
+def test_shell_binds_the_kimi_key_on_the_kimi_lane() -> None:
+    """On the Kimi lane the KIMI_API_KEY secret satisfies the gate.
+
+    The second gateway row: the wrapper binds the secret to
+    ANTHROPIC_AUTH_TOKEN and exports the Moonshot endpoint itself, exactly as
+    for z.ai, so a lane switch between gateways changes nothing but the row.
+    """
+    result = _run_shell(
+        args=[],
+        env_overrides={
+            **_lane("kimi"),
+            CREDENTIAL_ENV: "",
+            KIMI_GATEWAY_ENV: "dummy-moonshot-key",
+            "PR_NUMBER": "",
+        },
+    )
+    assert_that(result.returncode).is_equal_to(1)
+    assert_that(result.stdout).contains("never invoked")
+    assert_that(result.stdout).contains("endpoint https://api.moonshot.ai/anthropic")
     assert_that(result.stdout).does_not_contain("no provider credential")
 
 
@@ -460,7 +493,7 @@ def test_shell_fails_visibly_without_the_gateway_token_on_the_zai_lane() -> None
     result = _run_shell(
         args=[],
         env_overrides={
-            **_lane("zai-glm-gateway"),
+            **_lane("zai"),
             CREDENTIAL_ENV: "",
             ZAI_GATEWAY_ENV: "",
             "PR_NUMBER": "",
@@ -485,17 +518,15 @@ def test_shell_looks_credentials_up_by_name_never_by_eval(tmp_path: Path) -> Non
     assert_that(evals).is_length(1)
     assert_that(evals[0]).contains("_captured_${_name}")
     marker = tmp_path / "x"
-    hostile = json.loads(MANIFEST.read_text(encoding="utf-8"))["lanes"][
-        "claude-subscription"
-    ]
+    hostile = json.loads(MANIFEST.read_text(encoding="utf-8"))["lanes"]["anthropic"]
     hostile["credential_secret"] = (
         f'CLAUDE_CODE_OAUTH_TOKEN}}"; touch {marker}; : "${{X'
     )
     result = _run_shell(
         args=[],
         env_overrides={
-            "LINTRO_REVIEW_CHAIN": json.dumps(["claude-subscription"]),
-            "LINTRO_REVIEW_LANES": json.dumps({"claude-subscription": hostile}),
+            "LINTRO_REVIEW_CHAIN": json.dumps(["anthropic"]),
+            "LINTRO_REVIEW_LANES": json.dumps({"anthropic": hostile}),
             CREDENTIAL_ENV: "dummy-claude-token",
             "PR_NUMBER": "123",
         },
@@ -573,9 +604,7 @@ def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
     """
     shell_text = SHELL_SCRIPT.read_text(encoding="utf-8")
     assert_that(shell_text).contains("restore-codex-session.sh")
-    codex_row = json.loads(MANIFEST.read_text(encoding="utf-8"))["lanes"][
-        "codex-subscription"
-    ]
+    codex_row = json.loads(MANIFEST.read_text(encoding="utf-8"))["lanes"]["openai"]
     assert_that(codex_row["credential_file"]).is_equal_to("$HOME/.codex/auth.json")
     restore_script = REPO_ROOT / "scripts" / "ci" / "restore-codex-session.sh"
     assert_that(restore_script.read_text(encoding="utf-8")).contains(
@@ -589,7 +618,7 @@ def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
     restored = _run_shell(
         args=[],
         env_overrides={
-            **_lane("codex-subscription"),
+            **_lane("openai"),
             CREDENTIAL_ENV: "",
             CODEX_SESSION_ENV: EMPTY_CODEX_SESSION,
             "PR_NUMBER": "",
@@ -603,7 +632,7 @@ def test_codex_session_path_is_bound_between_scripts(tmp_path: Path) -> None:
     undecodable = _run_shell(
         args=[],
         env_overrides={
-            **_lane("codex-subscription"),
+            **_lane("openai"),
             CREDENTIAL_ENV: "",
             CODEX_SESSION_ENV: "not base64 of a json object",
             "PR_NUMBER": "",
@@ -643,7 +672,7 @@ def test_shell_no_credential_path_respects_transport_overlay() -> None:
     result = _run_shell(
         args=[],
         env_overrides={
-            **_lane("claude-subscription", transport="API"),
+            **_lane("anthropic", transport="API"),
             CREDENTIAL_ENV: "",
             "PR_NUMBER": "123",
         },

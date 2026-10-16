@@ -95,20 +95,21 @@ workflow runs an AI diff review and prints the JSON result to the job log.
   through `gh` (GitHub API), so the PR's changes are reviewed as data and never executed
   with the secret. Trade-off: a PR that breaks the review code itself isn't caught by
   this job — that is covered by the unit tests.
-- 🔑 **A declared lane, not a variable (ADR-0011)** — runs the `cli` transport on the
-  lane the committed manifest `scripts/ci/ai_review_lanes.json` names first in its
-  `chain`. Provider, transport, model, endpoint, egress and the credential binding all
-  come from that row: a secret-free `lane` job resolves it, the review job's allowlist
-  and credentials follow from the outputs, and `run-ai-review.sh` exports the row's
-  values over the committed `.lintro-config.yaml` and refuses when the effective config,
-  a competing credential or a base-URL override disagrees with the row. No Actions
-  variable selects a provider or model; `LINTRO_AI_MAX_COST_USD` and
-  `LINTRO_AI_REVIEW_PR_BUDGET_USD` remain variables because they shape spend, not
-  routing. The active lane is the Claude subscription: the pinned `claude` CLI
-  authenticated by `CLAUDE_CODE_OAUTH_TOKEN`. `ANTHROPIC_API_KEY` is deliberately
-  **not** in scope, and `LINTRO_CLI_BARE: never` keeps `--bare` off the command line so
-  an OAuth session is actually used (#1838). CLI versions are pinned in
-  `docker/ai-tools.Dockerfile` and installed from npm at those exact versions.
+- 🔑 **A declared lane, selected by a variable (ADR-0011)** — runs the `cli` transport
+  on the lane the repository variable `LINTRO_AI_PROVIDER` names in the committed
+  manifest `scripts/ci/ai_review_lanes.json` (`anthropic`, `openai`, `cursor`, `zai` or
+  `kimi`; unset means the manifest's default). `LINTRO_AI_MODEL` overrides that row's
+  default model. Transport, endpoint, egress and the credential binding come from the
+  row: a secret-free `lane` job resolves it, the review job's allowlist and credentials
+  follow from the outputs, and `run-ai-review.sh` exports the row's values over the
+  committed `.lintro-config.yaml` and refuses when the effective config, a competing
+  credential or a base-URL override disagrees with the row. `LINTRO_AI_MAX_COST_USD` and
+  `LINTRO_AI_REVIEW_PR_BUDGET_USD` remain the budget variables. The default lane is the
+  Claude subscription: the pinned `claude` CLI authenticated by
+  `CLAUDE_CODE_OAUTH_TOKEN`. `ANTHROPIC_API_KEY` is deliberately **not** in scope, and
+  `LINTRO_CLI_BARE: never` keeps `--bare` off the command line so an OAuth session is
+  actually used (#1838). CLI versions are pinned in `docker/ai-tools.Dockerfile` and
+  installed from npm at those exact versions.
 - 💸 **Operator-set spend ceiling (advisory under the CLI transport)** — the trusted
   base config ships **no** `ai.max_cost_usd`, so there is no committed default cap. A PR
   still cannot raise spend: the workflow installs lintro from `github.workflow_sha` and
@@ -129,11 +130,12 @@ workflow runs an AI diff review and prints the JSON result to the job log.
 - ⏭️ **Skipped, not failed, where it cannot run** — draft PRs and fork PRs (which cannot
   read secrets) never start the job at all.
 
-To activate it, add the secret the active lane's row binds (**Settings → Secrets and
-variables → Actions**): `CLAUDE_CODE_OAUTH_TOKEN` (mint with `claude setup-token`) for
-the Claude subscription lane, `CURSOR_API_KEY` for the Cursor lane, `CODEX_AUTH_JSON`
-for the Codex lane. To switch lanes, change `chain` in the manifest in a reviewed pull
-request; the switch reaches every open PR on its next run. Optionally set
+To activate it, add the secret the lane's row binds (**Settings → Secrets and variables
+→ Actions**): `CLAUDE_CODE_OAUTH_TOKEN` (mint with `claude setup-token`) for
+`anthropic`, `CODEX_AUTH_JSON` for `openai`, `CURSOR_API_KEY` for `cursor`,
+`ZAI_AUTH_TOKEN` for `zai`, `KIMI_API_KEY` for `kimi`. To switch lanes, set the
+repository variable `LINTRO_AI_PROVIDER` to the lane id, and optionally
+`LINTRO_AI_MODEL`; the switch reaches every open PR on its next run. Optionally set
 `LINTRO_AI_MAX_COST_USD=uncapped`. Because reviews run using lintro from the
 default-branch commit that supplied the workflow, the credential is safe to enable.
 

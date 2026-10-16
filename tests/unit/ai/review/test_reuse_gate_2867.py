@@ -39,7 +39,7 @@ _CURRENT = RunProvenance(
     endpoint="api.anthropic.com",
     first_party=True,
     credential=CredentialKind.CLAUDE_OAUTH,
-    lane="claude-subscription",
+    lane="anthropic",
     reports_model_usage=True,
 )
 
@@ -48,7 +48,7 @@ def _run(
     round_number: int,
     *,
     state: str = "verified",
-    lane: str = "claude-subscription",
+    lane: str = "anthropic",
     endpoint: str = "api.anthropic.com",
     reported: tuple[ReportedModel, ...] = (_OPUS,),
 ) -> RunRecord:
@@ -96,7 +96,7 @@ def test_an_unreported_round_is_reused_only_where_the_lane_cannot_report() -> No
         provenance=RunProvenance(
             endpoint="api.anthropic.com",
             first_party=True,
-            lane="claude-subscription",
+            lane="anthropic",
             reports_model_usage=False,
         ),
         allowed=("claude-opus-5-5",),
@@ -109,7 +109,7 @@ def test_an_unreported_round_is_reused_only_where_the_lane_cannot_report() -> No
 def test_a_round_from_another_lane_or_endpoint_is_not_reused() -> None:
     """Reuse validity includes the lane: a lane switch re-reviews once."""
     rounds = _rounds(
-        _run(1, lane="codex-subscription"),
+        _run(1, lane="openai"),
         _run(2, endpoint="api.z.ai"),
         _run(3),
     )
@@ -133,7 +133,7 @@ def test_a_gateway_lane_does_not_re_check_models_it_never_trusted() -> None:
     gateway = RunProvenance(
         endpoint="api.z.ai",
         first_party=False,
-        lane="zai-glm-gateway",
+        lane="zai",
         reports_model_usage=True,
     )
     rounds = reusable_rounds(
@@ -142,7 +142,7 @@ def test_a_gateway_lane_does_not_re_check_models_it_never_trusted() -> None:
                 _run(
                     1,
                     state="unverifiable",
-                    lane="zai-glm-gateway",
+                    lane="zai",
                     endpoint="api.z.ai",
                 ),
             ),

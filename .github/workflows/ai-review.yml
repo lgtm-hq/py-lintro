@@ -14,10 +14,15 @@ name: AI Review - Dogfood
 #
 # REVIEW LANES (ADR-0011, #2869/#2870): where the review goes is a named row
 # in the committed manifest scripts/ci/ai_review_lanes.json, and nowhere
-# else. The secret-free `lane` job checks out github.workflow_sha, runs
-# scripts/ci/resolve_review_lanes.py, and publishes the manifest's ordered
-# `chain` (chain[0] is the active lane; the rest is the fallback order of
-# ADR-0011 decision D, walked by #2872) and every chain row as job outputs.
+# else. Which row runs is selected by the repository variable
+# LINTRO_AI_PROVIDER (a declared lane id: anthropic, openai, cursor, zai or
+# kimi; unset means the manifest's chain[0]; anything else is red before a
+# secret exists) and LINTRO_AI_MODEL overrides that row's default model.
+# Both are read by the secret-free `lane` job only. It checks out
+# github.workflow_sha, runs scripts/ci/resolve_review_lanes.py, and
+# publishes the resolved `chain` (chain[0] is the active lane; the rest is
+# the fallback order of ADR-0011 decision D, walked by #2872) and every
+# chain row as job outputs.
 # The review job consumes only those outputs: its harden-runner egress is the
 # union of the chain's hosts plus the static GitHub and toolchain hosts; each
 # credential is forwarded by one literal `secrets.<NAME>` expression gated on
@@ -26,19 +31,20 @@ name: AI Review - Dogfood
 # attempt to its row — provider, transport, model and the base-URL override
 # come from the row, exactly one credential is in scope, and a competing
 # credential or a config that disagrees with the row refuses the run.
-# No variable at any scope selects, enables or shapes a lane: `vars.*` reads
-# here are budget overlays only, and a structural test asserts that. The
-# initial chain is `claude-subscription` (the pinned `claude` binary on the
+# No variable supplies an endpoint, a credential binding or an egress host:
+# a selector can only name a declared row, so the worst an inherited value
+# can do is pick another declared lane, and the sticky prints which. The
+# other `vars.*` reads here are budget overlays, and a structural test pins
+# the set. The default lane is `anthropic` (the pinned `claude` binary on the
 # CLAUDE_CODE_OAUTH_TOKEN subscription session, LINTRO_CLI_BARE=never so the
-# OAuth session is used, #1838); `codex-subscription` (the pinned `codex`
-# binary on the CODEX_AUTH_JSON session, materialised by the wrapper for the
-# attempt), `cursor` (CURSOR_API_KEY) and `zai-glm-gateway` (a declared,
-# non-first-party opt-in that becomes active only by a merged manifest diff)
-# are declared rows. Switching lanes is a one-line diff to `chain`; it reaches
-# every open PR on the next run, because the manifest is read at
-# workflow_sha. A rerun keeps its run's workflow_sha and therefore its
-# manifest, so after a switch the recovery step for a red PR is an
-# `@lintro review` comment, which starts a new run.
+# OAuth session is used, #1838); `openai` (the pinned `codex` binary on the
+# CODEX_AUTH_JSON session, materialised by the wrapper for the attempt),
+# `cursor` (CURSOR_API_KEY), `zai` (ZAI_AUTH_TOKEN) and `kimi` (KIMI_API_KEY),
+# the last two non-first-party gateways, are the other declared rows.
+# Switching lanes is a change to the repository variable; it reaches every
+# open PR on the next run. A rerun keeps its run's inputs, so after a switch
+# the recovery step for a red PR is an `@lintro review` comment, which
+# starts a new run.
 #
 # Spend ceiling: committed YAML leaves `ai.max_cost_usd` unset (#2156
 # rollout). The `LINTRO_AI_MAX_COST_USD` Actions variable is the operator
@@ -73,8 +79,9 @@ name: AI Review - Dogfood
 #      default-branch commit that supplied this definition and the manifest,
 #      never the PR head and never older than the manifest it is handed.
 #   3. Secret ordering: provider credentials (CLAUDE_CODE_OAUTH_TOKEN,
-#      CURSOR_API_KEY, ZAI_AUTH_TOKEN, and CODEX_AUTH_JSON) are injected only
-#      into the review step env, after the trusted checkout, the pinned CLI
+#      CURSOR_API_KEY, ZAI_AUTH_TOKEN, KIMI_API_KEY and CODEX_AUTH_JSON) are
+#      injected only into the review step env, after the trusted checkout,
+#      the pinned CLI
 #      installs, and uv sync.
 #   4. Credentials are selected by the resolved lane id, never by a
 #      variable's presence: each is one literal expression gated on
@@ -137,10 +144,12 @@ jobs:
   lane:
     name: Resolve review lane
     # Secret-free. Reads the committed manifest at the default-branch commit
-    # that supplied this workflow (github.workflow_sha) and publishes the
-    # chain and every chain row; the review job consumes only these outputs
-    # (ADR-0011 A). Runs on pull-request events and on comments that could be
-    # a review request (the request job's own prefilter), so a comment that
+    # that supplied this workflow (github.workflow_sha), applies the
+    # LINTRO_AI_PROVIDER lane selector and the LINTRO_AI_MODEL override, and
+    # publishes the chain and every chain row; the review job consumes only
+    # these outputs (ADR-0011 A). Runs on pull-request events and on comments
+    # that could be a review request (the request job's own prefilter), so a
+    # comment that
     # is not one spends no runner; the request job's refusals then leave this
     # job's result unused.
     if: >-
@@ -186,6 +195,11 @@ jobs:
       - name: Resolve the chain from the manifest
         id: resolve
         # Fails closed, naming the declared lanes, before any secret exists.
+        # The two routing variables are read here and nowhere else: the
+        # resolver accepts only a declared lane id and a model id.
+        env:
+          LINTRO_AI_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER }}
+          LINTRO_AI_MODEL: ${{ vars.LINTRO_AI_MODEL }}
         run: python3 -I scripts/ci/resolve_review_lanes.py --format github
 
   request:
@@ -670,13 +684,15 @@ jobs:
           # `cond && '' || secret` can never yield '': GHA's `||` falls
           # through on the falsy ''.
           # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ contains(fromJSON(needs.lane.outputs.chain), 'claude-subscription') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ contains(fromJSON(needs.lane.outputs.chain), 'anthropic') && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # yamllint disable-line rule:line-length
-          CODEX_AUTH_JSON: ${{ contains(fromJSON(needs.lane.outputs.chain), 'codex-subscription') && secrets.CODEX_AUTH_JSON || '' }}
+          CODEX_AUTH_JSON: ${{ contains(fromJSON(needs.lane.outputs.chain), 'openai') && secrets.CODEX_AUTH_JSON || '' }}
           # yamllint disable-line rule:line-length
           CURSOR_API_KEY: ${{ contains(fromJSON(needs.lane.outputs.chain), 'cursor') && secrets.CURSOR_API_KEY || '' }}
           # yamllint disable-line rule:line-length
-          ZAI_AUTH_TOKEN: ${{ contains(fromJSON(needs.lane.outputs.chain), 'zai-glm-gateway') && secrets.ZAI_AUTH_TOKEN || '' }}
+          ZAI_AUTH_TOKEN: ${{ contains(fromJSON(needs.lane.outputs.chain), 'zai') && secrets.ZAI_AUTH_TOKEN || '' }}
+          # yamllint disable-line rule:line-length
+          KIMI_API_KEY: ${{ contains(fromJSON(needs.lane.outputs.chain), 'kimi') && secrets.KIMI_API_KEY || '' }}
           # The resolved chain and its rows. The wrapper binds the attempt:
           # LINTRO_REVIEW_* facts for the run record (#2867), the LINTRO_AI_*
           # overlays from the row, and the base-URL override to the row's
