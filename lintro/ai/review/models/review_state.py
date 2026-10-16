@@ -43,6 +43,9 @@ class ReviewState:
         workflow: Trusted workflow filename (CI only).
         event: Workflow event (CI only).
         run_id: Actions run id that wrote the state.
+        run_attempt: Actions run attempt that wrote the state (#2871): a
+            rerun resumes its own earlier attempt's artifact, so the run id
+            alone cannot say which attempt persisted the last record.
         lintro_version: Lintro version that wrote the state.
         truncated: True when older runs or resolved findings were pruned.
         pr_spend_usd: The PR's cumulative review spend in USD (#2796): every
@@ -69,6 +72,7 @@ class ReviewState:
     workflow: str = ""
     event: str = ""
     run_id: str = ""
+    run_attempt: str = ""
     lintro_version: str = ""
     truncated: bool = False
     pr_spend_usd: float = 0.0
@@ -162,6 +166,7 @@ class ReviewState:
             "workflow": self.workflow,
             "event": self.event,
             "run_id": self.run_id,
+            "run_attempt": self.run_attempt,
             "lintro_version": self.lintro_version,
             "runs": [run.to_dict() for run in self.runs],
             "findings": [record.to_dict() for record in self.findings],
@@ -238,6 +243,7 @@ class ReviewState:
             workflow=str(payload.get("workflow", "")),
             event=str(payload.get("event", "")),
             run_id=str(payload.get("run_id", "")),
+            run_attempt=str(payload.get("run_attempt", "")),
             lintro_version=str(payload.get("lintro_version", "")),
             truncated=bool(payload.get("truncated", False)),
             pr_spend_usd=spend_from_payload(payload),

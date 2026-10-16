@@ -6,16 +6,16 @@ and reported numbers mean different things. Configure them under `ai.transports.
 
 ## Decision table
 
-| Dimension           | `api`                                       | `cli`                                                                                 |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| Credential          | the provider's API-key variable             | the provider's CLI login or CLI key (see the matrix below)                            |
-| Billing             | Metered API spend                           | Subscription / OAuth session                                                          |
-| Default timeout     | 60s (stream-sized per call)                 | 1800s (per CLI chunk)                                                                 |
-| Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                  |
-| Legacy fallback     | `ai.api_timeout`, `ai.max_cost_usd`         | `ai.max_cost_usd` for the advisory only                                               |
-| Auth mode recorded  | `api_key`                                   | `subscription`                                                                        |
-| Cost basis recorded | `billed`                                    | `unpriceable`                                                                         |
-| Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session`, `cli_version_drift`, `turn_timeout`, `killed_externally` |
+| Dimension           | `api`                                       | `cli`                                                                                                                                                  |
+| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Credential          | the provider's API-key variable             | the provider's CLI login or CLI key (see the matrix below)                                                                                             |
+| Billing             | Metered API spend                           | Subscription / OAuth session                                                                                                                           |
+| Default timeout     | 60s (stream-sized per call)                 | 1800s (per CLI chunk)                                                                                                                                  |
+| Cost cap field      | `ai.transports.api.max_cost_usd` (enforced) | `ai.transports.cli.max_cost_usd_advisory` (advisory)                                                                                                   |
+| Legacy fallback     | `ai.api_timeout`, `ai.max_cost_usd`         | `ai.max_cost_usd` for the advisory only                                                                                                                |
+| Auth mode recorded  | `api_key`                                   | `subscription`                                                                                                                                         |
+| Cost basis recorded | `billed`                                    | `unpriceable`                                                                                                                                          |
+| Typical CI failures | `insufficient_credits`, `auth_failed:key`   | `auth_failed:oauth_session` (or `:codex_session` / `:gateway_token` by the bound credential), `cli_version_drift`, `turn_timeout`, `killed_externally` |
 
 The credential row is deliberately generic: each provider declares its own variables,
 and lintro has no default provider. The full `(provider, transport)` matrix is below.

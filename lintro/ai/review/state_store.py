@@ -205,6 +205,7 @@ def union_states(states: Iterable[ReviewState]) -> ReviewState:
         workflow=identity.workflow,
         event=identity.event,
         run_id=identity.run_id,
+        run_attempt=identity.run_attempt,
         lintro_version=identity.lintro_version,
         truncated=truncated,
         pr_spend_usd=pr_spend,

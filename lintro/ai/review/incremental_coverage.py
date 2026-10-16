@@ -217,6 +217,7 @@ def write_incremental_coverage_part(
             workflow="ai-review.yml",
             event=os.environ.get("GITHUB_EVENT_NAME", "") or seed.event,
             run_id=os.environ.get("GITHUB_RUN_ID", "") or seed.run_id,
+            run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", "") or seed.run_attempt,
             # From the prior state, not ``seed``: a ``--full`` seed is empty,
             # and a full round must not reset the PR's spend.
             pr_spend_usd=prior_spend + (0.0 if shadow_basis else round_figure),

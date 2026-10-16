@@ -22,8 +22,9 @@ from assertpy import assert_that
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "classify_review_outcome.py"
 MANIFEST = REPO_ROOT / "scripts" / "ci" / "ai_review_lanes.json"
-#: This workflow run's id, which the state file must name.
+#: This workflow run's id and attempt, which the state file must name.
 RUN_ID = "38900000001"
+RUN_ATTEMPT = "2"
 
 
 def _load() -> ModuleType:
@@ -72,7 +73,14 @@ def _env(
     if record is not None:
         earlier = {"round": 1, "lane": "anthropic", "endpoint": "api.anthropic.com"}
         (state_dir / "state.json").write_text(
-            json.dumps({"version": 1, "run_id": RUN_ID, "runs": [earlier, record]}),
+            json.dumps(
+                {
+                    "version": 1,
+                    "run_id": RUN_ID,
+                    "run_attempt": RUN_ATTEMPT,
+                    "runs": [earlier, record],
+                },
+            ),
             encoding="utf-8",
         )
     return {
@@ -81,6 +89,7 @@ def _env(
         "LANE_CREDENTIAL": credential,
         "LINTRO_REVIEW_STATE_DIR": str(state_dir),
         "GITHUB_RUN_ID": RUN_ID,
+        "GITHUB_RUN_ATTEMPT": RUN_ATTEMPT,
     }
 
 
@@ -325,6 +334,29 @@ def test_a_prior_runs_artifact_is_not_this_runs_provenance(
     assert_that(report.headline).contains("belongs to run 38800000000")
 
 
+def test_an_earlier_attempts_artifact_is_not_this_attempts_provenance(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """A rerun resumes its own cancelled attempt's artifact: same run id.
+
+    If this attempt persisted nothing, that file still names the run but an
+    earlier attempt, and must not vouch for this attempt's review.
+    """
+    env = _env(tmp_path, rows, ["anthropic"], record=_record())
+    state = Path(env["LINTRO_REVIEW_STATE_DIR"]) / "state.json"
+    stale = json.loads(state.read_text(encoding="utf-8"))
+    stale["run_attempt"] = "1"
+    state.write_text(json.dumps(stale), encoding="utf-8")
+
+    report = classifier.classify(status=0, output="{}", env=env)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONTRADICTED)
+    assert_that(report.status).is_equal_to("provenance-unrecorded")
+    assert_that(report.headline).contains("belongs to attempt 1 of this run")
+
+
 @pytest.mark.parametrize(
     ("chain", "record", "fragment"),
     [
@@ -567,22 +599,93 @@ def test_the_reader_matches_the_state_lintro_really_writes(tmp_path: Path) -> No
     )
     state_dir = tmp_path / "ai-review-state"
     write_state_part(
-        state=ReviewState(runs=(earlier, current), run_id=RUN_ID),
+        state=ReviewState(
+            runs=(earlier, current),
+            run_id=RUN_ID,
+            run_attempt=RUN_ATTEMPT,
+        ),
         directory=state_dir,
         sequence=1,
         final=True,
     )
+    state = state_dir / "state.json"
 
-    record, missing = module.latest_run_record(state_dir / "state.json", run_id=RUN_ID)
+    record, missing = module.latest_run_record(
+        state,
+        run_id=RUN_ID,
+        run_attempt=RUN_ATTEMPT,
+    )
 
     assert_that(missing).is_empty()
     assert record is not None
     assert_that(record["round"]).is_equal_to(2)
     assert_that(record["lane"]).is_equal_to("anthropic")
     assert_that(record["model_verification"]).is_equal_to("verified")
-    stale, why = module.latest_run_record(state_dir / "state.json", run_id="other")
+    stale, why = module.latest_run_record(
+        state,
+        run_id="other",
+        run_attempt=RUN_ATTEMPT,
+    )
     assert_that(stale).is_none()
     assert_that(why).contains(f"belongs to run {RUN_ID}")
+    earlier_attempt, why = module.latest_run_record(
+        state,
+        run_id=RUN_ID,
+        run_attempt="3",
+    )
+    assert_that(earlier_attempt).is_none()
+    assert_that(why).contains(f"belongs to attempt {RUN_ATTEMPT} of this run")
+
+
+def test_record_strings_are_clamped_before_they_reach_an_annotation(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """A hostile or corrupt record cannot flood the annotation or summary."""
+    flood = "x" * 200_000
+    env = _env(tmp_path, rows, ["anthropic"], record=_record(lane=flood))
+
+    report = classifier.classify(status=0, output="{}", env=env)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONTRADICTED)
+    assert_that(len(report.headline)).is_less_than(600)
+    assert_that(report.headline).contains("…")
+
+
+def test_a_partial_review_keeps_its_own_reason_when_provenance_is_missing(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """A budget stop before any call is red for the budget, with a warning.
+
+    Such a round has no provider call to record, so its record carries no
+    verification state; the actionable reason (raise the budget) must not
+    be buried under ``provenance-unrecorded``.
+    """
+    env = _env(
+        tmp_path,
+        rows,
+        ["anthropic"],
+        record=_record(model_verification="", reported_models=[]),
+    )
+    envelope = json.dumps(
+        {
+            "readiness_verdict": "incomplete",
+            "coverage": {"complete": False, "covered_at_head": 0, "eligible": 4},
+            "stopped_reason": "PR budget of $1.00 reached",
+            "findings": [],
+        },
+    )
+
+    report = classifier.classify(status=0, output=envelope, env=env)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.PR_BUDGET)
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.status).is_empty()
+    assert_that(report.warnings).is_length(1)
+    assert_that(report.warnings[0]).contains("provenance not verified")
 
 
 def test_the_lane_module_is_stdlib_only() -> None:

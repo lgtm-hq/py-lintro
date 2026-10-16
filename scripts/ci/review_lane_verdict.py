@@ -84,6 +84,10 @@ AUTH_LABELS: Final[dict[str, str]] = {
 #: The file lintro refreshes with this round's run record (state_store).
 STATE_FILENAME: Final[str] = "state.json"
 
+#: Record strings are quoted in annotations and the job summary; a value
+#: longer than this is cut, so a hostile or corrupt record cannot flood them.
+_QUOTE_LIMIT: Final[int] = 120
+
 #: The verification states a row can record, by whether it is first-party
 #: (``lintro.ai.enums.model_verification``; ``legacy`` is history only).
 _FIRST_PARTY_STATES: Final[frozenset[str]] = frozenset(
@@ -107,6 +111,9 @@ class LaneFacts:
         run_id: This workflow run's id (``GITHUB_RUN_ID``); the state file
             must name it, so a prior run's downloaded artifact is never
             read as this run's provenance. Empty outside Actions.
+        run_attempt: This run attempt (``GITHUB_RUN_ATTEMPT``); the state
+            must name it too, because a rerun resumes its own earlier
+            attempt's artifact, which carries the same run id.
     """
 
     chain: tuple[str, ...]
@@ -114,6 +121,7 @@ class LaneFacts:
     credential: str
     state_file: Path | None
     run_id: str = ""
+    run_attempt: str = ""
 
     @property
     def active(self) -> str:
@@ -173,6 +181,7 @@ def lane_facts(env: Mapping[str, str]) -> LaneFacts | None:
         credential=env.get("LANE_CREDENTIAL", "").strip(),
         state_file=Path(state_dir) / STATE_FILENAME if state_dir else None,
         run_id=env.get("GITHUB_RUN_ID", "").strip(),
+        run_attempt=env.get("GITHUB_RUN_ATTEMPT", "").strip(),
     )
 
 
@@ -180,18 +189,22 @@ def latest_run_record(
     state_file: Path | None,
     *,
     run_id: str = "",
+    run_attempt: str = "",
 ) -> tuple[Mapping[str, Any] | None, str]:
-    """Return this run's run record from the persisted state.
+    """Return this attempt's run record from the persisted state.
 
-    lintro writes the state with this run's ``run_id`` and appends the
-    current round's record last (incremental_coverage), so a state file
-    naming this run has this run's record as the last entry of ``runs``. A
-    state file naming another run is a prior round's artifact that this run
-    never refreshed, and is not provenance for this review.
+    lintro writes the state with this run's ``run_id`` and ``run_attempt``
+    and appends the current round's record last (incremental_coverage), so
+    a state file naming this attempt has this round's record as the last
+    entry of ``runs``. A state file naming another run, or an earlier
+    attempt of this run (a rerun resumes its own cancelled attempt's
+    artifact), is one this attempt never refreshed, and is not provenance
+    for this review.
 
     Args:
         state_file: The ``state.json`` path, or ``None``.
         run_id: This run's id; when set, the state must name it.
+        run_attempt: This run attempt; when set, the state must name it.
 
     Returns:
         The record and an empty string, or ``None`` and the reason there is
@@ -210,8 +223,15 @@ def latest_run_record(
     recorded_run = str(payload.get("run_id") or "")
     if run_id and recorded_run != run_id:
         return None, (
-            f"{state_file.name} belongs to run {recorded_run or '(none)'}, "
+            f"{state_file.name} belongs to run {_short(recorded_run) or '(none)'}, "
             f"not this run ({run_id}); this run persisted no record"
+        )
+    recorded_attempt = str(payload.get("run_attempt") or "")
+    if run_attempt and recorded_attempt != run_attempt:
+        return None, (
+            f"{state_file.name} belongs to attempt "
+            f"{_short(recorded_attempt) or '(none)'} of this run, not this "
+            f"attempt ({run_attempt}); this attempt persisted no record"
         )
     runs = payload.get("runs")
     if not isinstance(runs, list) or not runs:
@@ -233,9 +253,17 @@ def _incomplete(record: Mapping[str, Any], row: Mapping[str, Any]) -> str:
         return ""
     kind = "first-party" if first_party else "gateway"
     return (
-        f"the run record's model_verification {verification or '(none)'!r} is "
-        f"not a state a {kind} lane can produce"
+        f"the run record's model_verification {_short(verification) or '(none)'!r} "
+        f"is not a state a {kind} lane can produce"
     )
+
+
+def _short(value: object) -> str:
+    """Return *value* as text fit to quote in one annotation line."""
+    text = str(value if value is not None else "")
+    if len(text) <= _QUOTE_LIMIT:
+        return text
+    return text[: _QUOTE_LIMIT - 1] + "…"
 
 
 def _host(value: str) -> str:
@@ -256,8 +284,8 @@ def _reported(record: Mapping[str, Any]) -> str:
     if not isinstance(raw, list):
         return ""
     names = [
-        str(item.get("canonical") or item.get("model") or "")
-        for item in raw
+        _short(item.get("canonical") or item.get("model") or "")
+        for item in raw[:8]
         if isinstance(item, Mapping)
     ]
     return ", ".join(name for name in names if name)
@@ -293,8 +321,8 @@ def lane_verdict(
         return LaneVerdict(
             status=STATUS_ENDPOINT_MISMATCH,
             reason=(
-                f"recorded lane {lane or '(none)'!r} is not in the resolved chain "
-                f"{list(facts.chain)}"
+                f"recorded lane {_short(lane) or '(none)'!r} is not in the "
+                f"resolved chain {[_short(entry) for entry in facts.chain]}"
             ),
         )
     incomplete = _incomplete(record, row)
@@ -306,8 +334,8 @@ def lane_verdict(
         return LaneVerdict(
             status=STATUS_ENDPOINT_MISMATCH,
             reason=(
-                f"recorded endpoint {endpoint or '(none)'!r} is not the {lane} "
-                f"lane's {expected!r}"
+                f"recorded endpoint {_short(endpoint) or '(none)'!r} is not the "
+                f"{lane} lane's {expected!r}"
             ),
         )
     warnings: list[str] = []

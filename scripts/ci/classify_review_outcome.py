@@ -938,10 +938,26 @@ def _apply_lane_verdict(
     """
     if facts is None or not report.outcome.produced_review:
         return report
-    record, missing = _lanes.latest_run_record(facts.state_file, run_id=facts.run_id)
+    record, missing = _lanes.latest_run_record(
+        facts.state_file,
+        run_id=facts.run_id,
+        run_attempt=facts.run_attempt,
+    )
     verdict = _lanes.lane_verdict(facts, record, missing=missing)
     if not verdict.status:
         return replace(report, warnings=verdict.warnings)
+    if (
+        verdict.status == _lanes.STATUS_PROVENANCE_UNRECORDED
+        and report.outcome.partial_review
+    ):
+        # A partial review is already red with the reason a reader can act
+        # on (resume the files, raise the budget); a round the budget
+        # stopped before any call has no provenance to record, and the
+        # missing record must not bury that reason. It is still said.
+        return replace(
+            report,
+            warnings=(*verdict.warnings, f"provenance not verified: {verdict.reason}"),
+        )
     return OutcomeReport(
         outcome=ReviewOutcome.CONTRADICTED,
         headline=_with_transport(
