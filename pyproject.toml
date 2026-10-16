@@ -413,6 +413,15 @@ exclude = [
 # packages fails the run. The live guard stays `<=` so a pylint/astroid build
 # that reports a phantom finding is the only way this can move, and the fix is
 # to delete the duplication. See lintro/utils/duplicate_code.py.
+[tool.lintro.pip_audit]
+# Advisory ids pip-audit ignores on this repository's own requirements.
+# Every id here must also be a time-boxed [[IgnoredVulns]] entry (by id or
+# alias) in .osv-scanner.toml, which carries the reason and the expiry;
+# tests/unit/test_pip_audit_ignores.py fails when one is missing or expired.
+# GHSA-84m7-p3x7-pcfv / CVE-2026-59951: mcp 1.29.0, pinned exactly by semgrep;
+# see the osv entry. Drop both together once semgrep's pin moves.
+ignore_vulns = ["CVE-2026-59951", "GHSA-84m7-p3x7-pcfv"]
+
 [tool.lintro.pylint]
 include = [
   "lintro/tools/actionlint",

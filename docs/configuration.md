@@ -1721,6 +1721,21 @@ command line by upstream and are not exposed via lintro.
   (`node_modules`, `.venv`, `venv`, `vendor`, `.git`, `__pycache__`) are skipped. To
   audit a file outside this scope, pass it explicitly on the command line.
 
+**Ignoring an advisory:**
+
+```toml
+# pyproject.toml
+[tool.lintro.pip_audit]
+# Each id is passed to pip-audit as --ignore-vuln. Pair every entry with a
+# time-boxed [[IgnoredVulns]] row in .osv-scanner.toml that names the same id
+# (or lists it as an alias in its reason), so both scanners agree and the
+# ignore carries a reason and an expiry.
+ignore_vulns = ["GHSA-xxxx-xxxx-xxxx"]
+```
+
+The same list can be passed once with `--tool-options "pip_audit:ignore_vulns=ID|ID"`
+(pipes separate ids, since commas separate options).
+
 **Usage Examples:**
 
 ```bash
