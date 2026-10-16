@@ -46,7 +46,7 @@ def test_provenance_fields_round_trip_through_the_flat_payload() -> None:
             first_party=False,
             credential="zai_token",
             reported_models=(_GLM,),
-            lane="zai-glm-gateway",
+            lane="zai",
             model_verification="unverifiable",
         ),
         usage=RunUsage(cost=0.0, cost_basis="unknown", cost_shadow=0.42),
@@ -161,7 +161,7 @@ def test_the_factory_copies_provenance_from_the_metadata(
             first_party=True,
             credential="claude_oauth",
             reported_models=(sonnet,),
-            lane="claude-subscription",
+            lane="anthropic",
             model_verification="verified",
         ),
     )
@@ -172,7 +172,7 @@ def test_the_factory_copies_provenance_from_the_metadata(
     assert_that(identity.first_party).is_true()
     assert_that(identity.credential).is_equal_to("claude_oauth")
     assert_that(identity.reported_models).is_equal_to((sonnet,))
-    assert_that(identity.lane).is_equal_to("claude-subscription")
+    assert_that(identity.lane).is_equal_to("anthropic")
     assert_that(identity.model_verification).is_equal_to("verified")
 
 
@@ -464,7 +464,7 @@ def test_an_attempt_on_another_lane_leaves_no_evidence_on_the_record(
             RunRecord(
                 identity=RunIdentity(
                     round=1,
-                    lane="codex-subscription",
+                    lane="openai",
                     endpoint="api.openai.com",
                     reported_models=(other_lane,),
                     model_verification="verified",
@@ -477,7 +477,7 @@ def test_an_attempt_on_another_lane_leaves_no_evidence_on_the_record(
         sample_review_result,
         metadata=replace(
             sample_review_result.metadata,
-            lane="claude-subscription",
+            lane="anthropic",
             endpoint="api.anthropic.com",
             reported_models=(_GLM,),
             model_verification="verified",

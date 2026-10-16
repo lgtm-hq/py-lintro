@@ -147,6 +147,22 @@ def test_a_gateway_override_is_not_first_party(tmp_path: Path) -> None:
     assert_that(provenance.credential).is_equal_to(CredentialKind.ZAI_TOKEN)
 
 
+def test_a_moonshot_override_is_recorded_as_the_kimi_token(tmp_path: Path) -> None:
+    """A bearer is named by the gateway it goes to: Moonshot is the Kimi kind."""
+    provenance = _detect(
+        tmp_path,
+        **{
+            ANTHROPIC_BASE_URL_ENV: "https://api.moonshot.ai/anthropic",
+            ANTHROPIC_AUTH_TOKEN_ENV: "moonshot-key",
+        },
+    )
+
+    assert_that(provenance.endpoint).is_equal_to("api.moonshot.ai")
+    assert_that(provenance.first_party).is_false()
+    assert_that(provenance.credential).is_equal_to(CredentialKind.KIMI_TOKEN)
+    assert_that(auth_mode_for(provenance.credential)).is_equal_to("gateway_token")
+
+
 def test_an_override_naming_the_canonical_host_stays_first_party(
     tmp_path: Path,
 ) -> None:
@@ -164,7 +180,7 @@ def test_the_lane_row_decides_first_party_and_what_is_allowed(tmp_path: Path) ->
     provenance = _detect(
         tmp_path,
         **{
-            REVIEW_LANE_ENV: "zai-glm-gateway",
+            REVIEW_LANE_ENV: "zai",
             REVIEW_ENDPOINT_ENV: "https://api.z.ai/api/anthropic",
             REVIEW_FIRST_PARTY_ENV: "false",
             REVIEW_ALLOWED_MODELS_ENV: "glm-5.3-flash, glm-5",
@@ -173,7 +189,7 @@ def test_the_lane_row_decides_first_party_and_what_is_allowed(tmp_path: Path) ->
         },
     )
 
-    assert_that(provenance.lane).is_equal_to("zai-glm-gateway")
+    assert_that(provenance.lane).is_equal_to("zai")
     assert_that(provenance.endpoint).is_equal_to("api.z.ai")
     assert_that(provenance.first_party).is_false()
     assert_that(provenance.allowed_models).is_equal_to(("glm-5.3-flash", "glm-5"))
@@ -188,7 +204,7 @@ def test_the_actual_override_is_recorded_over_the_declared_endpoint(
     provenance = _detect(
         tmp_path,
         **{
-            REVIEW_LANE_ENV: "claude-subscription",
+            REVIEW_LANE_ENV: "anthropic",
             REVIEW_ENDPOINT_ENV: "https://api.anthropic.com",
             REVIEW_FIRST_PARTY_ENV: "true",
             ANTHROPIC_BASE_URL_ENV: "https://api.z.ai/api/anthropic",
@@ -200,7 +216,7 @@ def test_the_actual_override_is_recorded_over_the_declared_endpoint(
 
 def test_a_lane_row_that_does_not_say_is_not_first_party(tmp_path: Path) -> None:
     """A lane without ``LINTRO_REVIEW_FIRST_PARTY`` fails closed."""
-    provenance = _detect(tmp_path, **{REVIEW_LANE_ENV: "claude-subscription"})
+    provenance = _detect(tmp_path, **{REVIEW_LANE_ENV: "anthropic"})
 
     assert_that(provenance.first_party).is_false()
 
@@ -358,6 +374,7 @@ def test_an_unknown_provider_records_nothing_it_cannot_know(tmp_path: Path) -> N
         (CredentialKind.API_KEY, "api_key"),
         (CredentialKind.CURSOR_API_KEY, "api_key"),
         (CredentialKind.ZAI_TOKEN, "gateway_token"),
+        (CredentialKind.KIMI_TOKEN, "gateway_token"),
         (CredentialKind.UNKNOWN, ""),
         ("not-a-kind", ""),
     ],
@@ -786,7 +803,7 @@ def test_a_first_party_claim_cannot_override_a_contradicting_host(
     provenance = _detect(
         tmp_path,
         **{
-            REVIEW_LANE_ENV: "claude-subscription",
+            REVIEW_LANE_ENV: "anthropic",
             REVIEW_FIRST_PARTY_ENV: "true",
             ANTHROPIC_BASE_URL_ENV: "https://api.z.ai/api/anthropic",
         },

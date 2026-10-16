@@ -5677,11 +5677,44 @@ _AI_CONTRACT_TIER2_JOB = "tier2-invocation-smoke"
 _AI_REVIEW_WORKFLOW = "ai-review.yml"
 _AI_REVIEW_JOB = "ai-review"
 _AI_CONTRACT_GATE_ENV = "AI_CONTRACT_SECRETS_ALLOWED"
-#: The clause the dogfood review uses to select its anthropic lane. Tier 2
-#: has no provider variable, so its expressions carry the gate here instead.
-_DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE = (
-    "(vars.LINTRO_AI_PROVIDER || 'anthropic') == 'anthropic'"
+#: The committed review-lanes manifest (ADR-0011 A, #2869): the only place
+#: a dogfood provider host, credential binding or endpoint is defined.
+_REVIEW_LANES_MANIFEST = _REPO_ROOT / "scripts" / "ci" / "ai_review_lanes.json"
+
+#: The clause the dogfood review gates each credential on: membership of the
+#: chain the secret-free lane job published (#2870). Tier 2 has no provider to
+#: select, so it joins its own trusted-event gate to the same clause.
+_CHAIN_MEMBERSHIP_RE = re.compile(
+    r"contains\(fromJSON\(needs\.lane\.outputs\.chain\), '[a-z0-9-]+'\)",
 )
+
+#: The two routing inputs the resolver accepts, and the only step that may
+#: read them: a selector can only name a declared row, so an inherited value
+#: can at worst pick another declared lane, which the sticky prints.
+_LANE_SELECTOR_VARS = {"vars.LINTRO_AI_PROVIDER", "vars.LINTRO_AI_MODEL"}
+#: Every spelling of a ``vars`` read GitHub accepts: ``vars.NAME``,
+#: ``vars['NAME']`` and ``vars["NAME"]``.
+_VARS_READ_RE = re.compile(
+    r"\bvars(?:\.(?P<dot>[A-Za-z_][A-Za-z0-9_]*)"
+    r"|\[\s*['\"](?P<bracket>[A-Za-z_][A-Za-z0-9_]*)['\"]\s*\])",
+)
+
+
+def _vars_reads(blob: str) -> list[str]:
+    """Return every variable name *blob* reads from ``vars``, in order.
+
+    Args:
+        blob: Workflow text or a joined set of expression values.
+
+    Returns:
+        The names, one per read, in any spelling GitHub accepts.
+    """
+    return [
+        match.group("dot") or match.group("bracket")
+        for match in _VARS_READ_RE.finditer(blob)
+    ]
+
+
 #: Names of the CLI-behaviour flags the review pins for the agent binaries.
 #: Matched by shape rather than listed, so a fourth flag is mirrored without
 #: anyone remembering to extend a tuple.
@@ -5715,6 +5748,18 @@ _DOGFOOD_ONLY_ENV = {
     # Review-state artifact upload (#2173); the smoke persists nothing.
     "ACTIONS_RUNTIME_TOKEN",
     "ACTIONS_RESULTS_URL",
+    # The resolved chain and rows; Tier 2 drives every lane and binds none.
+    "LINTRO_REVIEW_CHAIN",
+    "LINTRO_REVIEW_LANES",
+    # The codex session secret: Tier 2 restores it in its own step and the
+    # runner mounts the directory; the smoke step never sees the secret.
+    "CODEX_AUTH_JSON",
+    # The gateway tokens travel under their secret names to the dogfood
+    # wrapper, which binds the active lane's to ANTHROPIC_AUTH_TOKEN for the
+    # attempt; Tier 2 binds them to ANTHROPIC_AUTH_TOKEN directly (asserted
+    # below).
+    "ZAI_AUTH_TOKEN",
+    "KIMI_API_KEY",
 }
 #: Matches a ``host:port`` endpoint inside a harden-runner allowlist or inside
 #: the dogfood job's per-provider egress expressions.
@@ -5795,22 +5840,19 @@ def _harden_runner_endpoints(*, job: dict[str, Any]) -> set[str]:
 
 
 def _dogfood_provider_egress() -> set[str]:
-    """Return every host the dogfood review's per-provider egress vars carry.
+    """Return every provider host any declared review lane can reach.
 
-    Derived from the ``AI_REVIEW_*_EGRESS`` job-level expressions rather than
-    from a literal list, so a new provider lane cannot be added to the review
-    without the Tier 2 assertion below noticing.
+    Derived from the committed manifest, the only place a lane host is
+    defined (ADR-0011 A), so a new lane cannot be declared without the Tier 2
+    assertion below noticing.
 
     Returns:
-        The union of the per-provider ``host:port`` endpoints.
+        The union of every lane row's ``host:port`` endpoints.
     """
-    review = _load_workflow(name=_AI_REVIEW_WORKFLOW)
-    env = review["jobs"][_AI_REVIEW_JOB]["env"]
+    manifest = json.loads(_REVIEW_LANES_MANIFEST.read_text(encoding="utf-8"))
     endpoints: set[str] = set()
-    for name, value in env.items():
-        if not str(name).endswith("_EGRESS"):
-            continue
-        endpoints.update(_EGRESS_ENDPOINT_RE.findall(str(value)))
+    for row in manifest["lanes"].values():
+        endpoints.update(row["egress"])
     return endpoints
 
 
@@ -5859,14 +5901,14 @@ def _mirrored_dogfood_env(env: dict[str, str]) -> dict[str, str]:
 
 
 def _tier2_expression_from_dogfood(expression: str) -> str:
-    """Rewrite a dogfood anthropic expression into its Tier 2 equivalent.
+    """Rewrite a dogfood chain-gated expression into its Tier 2 equivalent.
 
-    The dogfood review chooses between its anthropic configurations on a
-    provider variable Tier 2 does not have — Tier 2 always drives every lane —
-    so the provider clause is the one and only difference: Tier 2 puts its
-    trusted-event gate there instead. Everything else, in particular the
-    ``ZAI_BASE_URL`` selection between the subscription token and the gateway
-    token, must survive the rewrite untouched.
+    The dogfood review gates each credential on membership of the resolved
+    chain (#2870): its wrapper binds one per attempt. Tier 2 has no wrapper,
+    so the two anthropic credentials, which the claude CLI reads directly,
+    key on the *active* lane instead; every other lane's credential is
+    forwarded whenever its trusted-event gate allows. The secret reference
+    must survive untouched.
 
     Args:
         expression: The normalised dogfood expression.
@@ -5874,10 +5916,20 @@ def _tier2_expression_from_dogfood(expression: str) -> str:
     Returns:
         The normalised expression Tier 2 must carry for the same variable.
     """
-    return expression.replace(
-        _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
-        f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
-    )
+    match = _CHAIN_MEMBERSHIP_RE.search(expression)
+    assert_that(match).described_as(expression).is_not_none()
+    assert match is not None  # narrow for mypy
+    gate = f"env.{_AI_CONTRACT_GATE_ENV} == 'true'"
+    # The subscription token keys on the active lane, like the gateway
+    # token and endpoint: a chain that lists the subscription as a fallback
+    # behind the gateway must not hand the claude CLI both credentials.
+    # (The gateway token is bound under another name; it is not mirrored
+    # here.) Every other lane's credential is forwarded whenever the gate
+    # allows, because Tier 2 drives every lane in one job.
+    if "'anthropic'" in match.group(0):
+        active = "needs.lane.outputs.lane == 'anthropic'"
+        return expression.replace(match.group(0), f"({gate} && {active})", 1)
+    return expression.replace(match.group(0), gate, 1)
 
 
 def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> None:
@@ -5901,9 +5953,19 @@ def test_ai_contract_tier2_mirrors_dogfood_egress_and_gates_its_secrets() -> Non
 
     dogfood = _dogfood_provider_egress()
     assert_that(dogfood).described_as("dogfood per-provider egress").is_not_empty()
-    assert_that(_harden_runner_endpoints(job=job)).described_as(
-        "Tier 2 egress must cover every dogfood provider lane",
-    ).contains(*sorted(dogfood))
+    # Tier 2 takes the union of every declared lane's hosts from the lane
+    # job, which derives it from the manifest with the dogfood resolver; no
+    # provider host is written into this workflow (ADR-0011 A).
+    tier2_endpoints = _harden_runner_endpoints(job=job)
+    assert_that(tier2_endpoints).contains("needs.lane.outputs.egress-all")
+    for endpoint in tier2_endpoints:
+        if _EGRESS_ENDPOINT_RE.fullmatch(endpoint):
+            assert_that(endpoint).described_as(endpoint).is_not_in(*sorted(dogfood))
+    lane_job = _load_workflow(name=_AI_CONTRACT_WORKFLOW)["jobs"]["lane"]
+    assert_that(lane_job["outputs"]["egress-all"]).is_equal_to(
+        "${{ steps.resolve.outputs.egress_all }}",
+    )
+    assert_that(job["needs"]).contains("lane")
 
     # Exact, not substring: an added `|| github.event_name == 'push'` would
     # slip past independent contains() checks while widening what can read a
@@ -5967,13 +6029,8 @@ def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() ->
         tier2_value = _normalize_github_expr(str(tier2_env[name]))
         normalized = _normalize_github_expr(dogfood_value)
 
-        if _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE in normalized:
+        if _CHAIN_MEMBERSHIP_RE.search(normalized):
             expected = _tier2_expression_from_dogfood(normalized)
-            # The rewrite must have found the provider clause; otherwise the
-            # comparison would silently assert dogfood equals itself.
-            assert_that(expected).described_as(name).does_not_contain(
-                _DOGFOOD_ANTHROPIC_PROVIDER_CLAUSE,
-            )
             assert_that(tier2_value).described_as(name).is_equal_to(expected)
         elif "${{" not in normalized:
             assert_that(tier2_value).described_as(name).is_equal_to(normalized)
@@ -5983,6 +6040,116 @@ def test_ai_contract_tier2_mirrors_every_dogfood_credential_and_cli_setting() ->
             assert_that(tier2_value).described_as(name).contains(
                 f"env.{_AI_CONTRACT_GATE_ENV} == 'true'",
             )
+
+
+def test_tier2_binds_the_gateway_token_from_the_lane_row() -> None:
+    """Tier 2 carries the active gateway's token as ANTHROPIC_AUTH_TOKEN.
+
+    The dogfood wrapper binds ``ZAI_AUTH_TOKEN`` or ``KIMI_API_KEY`` to
+    ``ANTHROPIC_AUTH_TOKEN`` for the attempt; Tier 2 has no wrapper, so its
+    workflow binds the same secret to the same variable, one expression
+    selecting by active lane. Both the token and the endpoint key on the
+    *active* lane: a chain that lists the gateway as a fallback must not put
+    its bearer token in front of the subscription CLI, which would send it
+    to api.anthropic.com (ADR-0011 A, #2870).
+    """
+    tier2_env = next(
+        step["env"]
+        for step in _ai_contract_tier2_job()["steps"]
+        if "run-ai-contract-tests.sh" in str(step.get("run", ""))
+    )
+    token = _normalize_github_expr(str(tier2_env["ANTHROPIC_AUTH_TOKEN"]))
+    gate = f"env.{_AI_CONTRACT_GATE_ENV} == 'true'"
+    assert_that(token).is_equal_to(
+        f"${{{{ ({gate} && needs.lane.outputs.lane == 'zai')"
+        " && secrets.ZAI_AUTH_TOKEN"
+        f" || ({gate} && needs.lane.outputs.lane == 'kimi')"
+        " && secrets.KIMI_API_KEY || '' }}",
+    )
+    base_url = _normalize_github_expr(str(tier2_env["ANTHROPIC_BASE_URL"]))
+    assert_that(base_url).is_equal_to(
+        f"${{{{ (env.{_AI_CONTRACT_GATE_ENV} == 'true'"
+        " && needs.lane.outputs.first-party == 'false')"
+        " && needs.lane.outputs.endpoint || '' }}",
+    )
+    assert_that(tier2_env).does_not_contain_key("LINTRO_AI_MODEL")
+
+
+def test_the_structural_regexes_match_what_they_guard() -> None:
+    """A regex that matches nothing guards nothing: pin each on a live sample."""
+    dogfood_env = _dogfood_review_step_env()
+    assert_that(
+        _CHAIN_MEMBERSHIP_RE.search(dogfood_env["CLAUDE_CODE_OAUTH_TOKEN"]),
+    ).is_not_none()
+    assert_that(_vars_reads("x ${{ vars.ZAI_BASE_URL }} y")).is_equal_to(
+        ["ZAI_BASE_URL"],
+    )
+    assert_that(_vars_reads('${{ vars["LINTRO_AI_MODEL"] }}')).is_equal_to(
+        ["LINTRO_AI_MODEL"],
+    )
+    assert_that(_EGRESS_ENDPOINT_RE.fullmatch("api.anthropic.com:443")).is_not_none()
+
+
+@pytest.mark.parametrize("workflow", [_AI_REVIEW_WORKFLOW, _AI_CONTRACT_WORKFLOW])
+def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
+    """No variable may supply an endpoint or a transport (ADR-0011 A).
+
+    The lane selector and the model override are variables, read by the
+    resolver step of the secret-free lane job and nowhere else: the resolver
+    accepts only a declared lane id and a model id, so the worst an inherited
+    value can do is pick another declared row. Every ``vars`` read in the
+    file, in any spelling GitHub accepts, is collected: the budget overlays
+    may appear anywhere, the two selector names only in that step's ``env``,
+    and nothing else at all.
+
+    Args:
+        workflow: The workflow file under test.
+    """
+    text = (_REPO_ROOT / ".github" / "workflows" / workflow).read_text(
+        encoding="utf-8",
+    )
+    budget = {"LINTRO_AI_MAX_COST_USD", "LINTRO_AI_REVIEW_PR_BUDGET_USD"}
+    selectors = {name.removeprefix("vars.") for name in _LANE_SELECTOR_VARS}
+    # Only expressions read the context; prose in comments does not. A job or
+    # step ``if:`` is an expression even without the ``${{ }}`` fence, so
+    # every one of those is scanned as well.
+    loaded = _load_workflow(name=workflow)
+    conditions = [
+        str(item.get("if", ""))
+        for job in loaded["jobs"].values()
+        for item in (job, *(job.get("steps") or []))
+    ]
+    expressions = " ".join(
+        [*re.findall(r"\$\{\{(.*?)\}\}", text, re.S), *conditions],
+    )
+    reads = _vars_reads(expressions)
+    assert_that(set(reads) - budget - selectors).described_as(
+        f"{workflow} vars reads",
+    ).is_empty()
+    resolve = next(
+        step for step in loaded["jobs"]["lane"]["steps"] if step.get("id") == "resolve"
+    )
+    in_place = [
+        name
+        for name in _vars_reads(" ".join(map(str, (resolve.get("env") or {}).values())))
+        if name in selectors
+    ]
+    selector_reads = [name for name in reads if name in selectors]
+    assert_that(set(selector_reads)).described_as(
+        f"{workflow} selector reads",
+    ).is_equal_to(selectors)
+    assert_that(sorted(in_place)).described_as(
+        f"{workflow}: every selector read sits in the lane job's resolve env",
+    ).is_equal_to(sorted(selector_reads))
+    # The collector sees every literal spelling, and any other use of the
+    # context (``toJSON(vars)``, ``vars[expr]``) is refused outright, so a
+    # banned name cannot hide behind a form the collector does not read.
+    assert_that(_vars_reads("${{ vars['ZAI_BASE_URL'] }} ${{ vars.X }}")).is_equal_to(
+        ["ZAI_BASE_URL", "X"],
+    )
+    assert_that(len(re.findall(r"\bvars\b", expressions))).described_as(
+        f"{workflow}: every use of the vars context is a literal read",
+    ).is_equal_to(len(reads))
 
 
 # --- Tool-execution timeout classification wiring (#1653) --------------------

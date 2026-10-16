@@ -1,38 +1,42 @@
 {
   "$comment": [
-    "Review-lanes manifest (ADR-0011 decision A, #2869). A lane is a named row",
+    "Review-lanes manifest (ADR-0011 decision A, #2869/#2870). A lane is a named row",
     "here and nowhere else: this file is the only place an endpoint, a",
-    "credential binding, an egress host, a model policy or a cost basis for the",
+    "credential binding, an egress host, a default model or a cost basis for the",
     "dogfood AI review may be defined. No workflow expression derives any of",
-    "them from the vars context, and no variable at any scope selects a lane.",
-    "chain is the only routing input: chain[0] is the active lane, the rest is",
-    "the fallback order of decision D. Switching lanes is a reviewed one-line",
-    "diff to chain. scripts/ci/resolve_review_lanes.py validates this file and",
-    "fails closed before any secret is exposed.",
+    "them from the vars context. Which row a run uses is selected by the",
+    "repository variable LINTRO_AI_PROVIDER, read only by the secret-free lane",
+    "job: it must name a row here, unset means chain[0], and anything else",
+    "fails closed before a secret is exposed. LINTRO_AI_MODEL, read the same",
+    "way, overrides the selected row's default model; unset means the row's.",
+    "chain is the default lane followed by the fallback order of decision D.",
+    "scripts/ci/resolve_review_lanes.py validates this file and the two",
+    "variables and fails closed, naming the declared lanes.",
     "credential_secret names the organisation or repository secret the workflow forwards by one",
     "literal secrets.<NAME> expression; credential_env names the environment",
-    "VARIABLE the CLI reads it from (for z.ai, ZAI_AUTH_TOKEN fills",
+    "VARIABLE the CLI reads it from (for z.ai and Kimi, the secret fills",
     "ANTHROPIC_AUTH_TOKEN). A file-form credential is materialised by the",
     "wrapper at credential_file from credential_source_env, the variable the",
     "secret is injected into, for the length of one attempt. Nothing in this",
     "file is a secret.",
     "base_url_env is the provider override the CLI reads; null means the CLI",
     "reads none, and the lane endpoint must then be the CLI's built-in one.",
-    "model null with models [] means the CLI's own default, unnamed: the row",
-    "reports no model usage, so there is nothing to verify and no override is",
-    "allowed. A row that reports model usage must name its model.",
+    "model is the row's default, used when LINTRO_AI_MODEL is unset; every row",
+    "names one, so no run falls through to a CLI's own default. There is no",
+    "allowed-model list: the operator chooses the model, the sticky reports",
+    "what answered.",
     "first_party must agree with the endpoint: true only on the provider's own",
     "host (anthropic api.anthropic.com, openai api.openai.com, cursor",
     "api2.cursor.sh); a non-first-party row carries cost_basis unknown.",
     "priced_models lists the models lintro carries a non-zero list-price table",
     "for (tests/scripts/ci/test_resolve_review_lanes.py pins it to the",
-    "registry); a row whose default or allowed model is not in it must declare",
+    "registry); a row whose default model is not in it must declare",
     "shadow_price_model, as must every non-first-party row (decision B).",
-    "Owner decision 2026-10-13: zai-glm-gateway stays declared as an explicit",
-    "opt-in lane; it becomes active only by a merged diff placing it first.",
-    "claude-subscription's shadow_price_model is a stand-in until lintro carries Claude 5.5 list tables; on list_price_shadow the envelope's own figure is used and the stand-in prices nothing."
+    "Owner decision 2026-10-16: zai and kimi are declared gateway rows; either",
+    "becomes active by setting LINTRO_AI_PROVIDER to its id.",
+    "anthropic's shadow_price_model is a stand-in until lintro carries Claude 5.5 list tables; on list_price_shadow the envelope's own figure is used and the stand-in prices nothing."
   ],
-  "chain": ["claude-subscription"],
+  "chain": ["anthropic"],
   "priced_models": [
     "claude-haiku-4-5-20251001",
     "claude-opus-4-20250514",
@@ -45,7 +49,7 @@
     "o1-mini"
   ],
   "lanes": {
-    "claude-subscription": {
+    "anthropic": {
       "provider": "anthropic",
       "transport": "cli",
       "endpoint": "https://api.anthropic.com",
@@ -59,11 +63,10 @@
       "base_url_files": [],
       "egress": ["api.anthropic.com:443"],
       "model": "claude-opus-5-5",
-      "models": ["claude-opus-5-5", "claude-sonnet-5-5"],
       "shadow_price_model": "claude-opus-4-20250514",
       "cost_basis": "list_price_shadow"
     },
-    "codex-subscription": {
+    "openai": {
       "provider": "openai",
       "transport": "cli",
       "endpoint": "https://api.openai.com",
@@ -82,8 +85,7 @@
         }
       ],
       "egress": ["api.openai.com:443", "auth.openai.com:443", "chatgpt.com:443"],
-      "model": null,
-      "models": [],
+      "model": "gpt-6.1-sol",
       "shadow_price_model": "gpt-4o",
       "cost_basis": "unpriceable"
     },
@@ -100,18 +102,18 @@
       "base_url_env": null,
       "base_url_files": [],
       "egress": [
+        "api.cursor.com:443",
         "downloads.cursor.com:443",
         "api2.cursor.sh:443",
         "api3.cursor.sh:443",
         "agentn.global.api5.cursor.sh:443",
         "repo42.cursor.sh:443"
       ],
-      "model": "auto",
-      "models": ["auto", "composer-2.5", "gpt-5.3-codex-fast"],
+      "model": "cursor-grok-4.6-high",
       "shadow_price_model": "claude-sonnet-4-6",
       "cost_basis": "unpriceable"
     },
-    "zai-glm-gateway": {
+    "zai": {
       "provider": "anthropic",
       "transport": "cli",
       "endpoint": "https://api.z.ai/api/anthropic",
@@ -125,7 +127,23 @@
       "base_url_files": [],
       "egress": ["api.z.ai:443"],
       "model": "glm-5.3-flash",
-      "models": ["glm-5.3-flash"],
+      "shadow_price_model": "claude-sonnet-4-6",
+      "cost_basis": "unknown"
+    },
+    "kimi": {
+      "provider": "anthropic",
+      "transport": "cli",
+      "endpoint": "https://api.moonshot.ai/anthropic",
+      "first_party": false,
+      "reports_model_usage": true,
+      "credential": "kimi_token",
+      "credential_secret": "KIMI_API_KEY",
+      "credential_form": "env",
+      "credential_env": "ANTHROPIC_AUTH_TOKEN",
+      "base_url_env": "ANTHROPIC_BASE_URL",
+      "base_url_files": [],
+      "egress": ["api.moonshot.ai:443"],
+      "model": "kimi-k3",
       "shadow_price_model": "claude-sonnet-4-6",
       "cost_basis": "unknown"
     }

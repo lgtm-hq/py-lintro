@@ -8,6 +8,7 @@ one provider's nested block rather than a flat table like every other section.
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit, urlunsplit
 
 from rich.table import Table
 
@@ -124,6 +125,25 @@ def print_ai_config(
             resolved.sources.get("model"),
         ),
     )
+    # The routing state the dogfood lane gate checks (ADR-0011 A): shown
+    # here as ``--json`` reports it, so the two outputs cannot drift.
+    base_url = displayable_base_url(ai_config.api_base_url)
+    table.add_row(
+        "api_base_url",
+        escape(base_url) if base_url else "[dim]unset[/dim]",
+    )
+    table.add_row(
+        "api_key_env",
+        escape(ai_config.api_key_env) if ai_config.api_key_env else "[dim]unset[/dim]",
+    )
+    table.add_row(
+        "fallback_models",
+        (
+            escape(", ".join(ai_config.fallback_models))
+            if ai_config.fallback_models
+            else "[dim]none[/dim]"
+        ),
+    )
 
     if provider is not None:
         settings = ai_config.provider_settings(provider)
@@ -153,6 +173,36 @@ def print_ai_config(
             f"{provider.value if provider is not None else 'none'}[/dim]",
         )
     console.print()
+
+
+def displayable_base_url(url: str | None) -> str | None:
+    """Return a base URL with any credential-bearing parts removed.
+
+    A URL may carry a password in its userinfo or a token in its query; the
+    reports print the scheme, host, port and path only. The lane gate
+    compares host and port, so nothing it checks is lost.
+
+    Args:
+        url: The configured ``ai.api_base_url``.
+
+    Returns:
+        The URL without userinfo, query or fragment, or ``None`` when unset.
+    """
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+        scheme, hostname, port = parts.scheme, parts.hostname, parts.port
+    except ValueError:
+        scheme, hostname, port = "", None, None
+    if not scheme or not hostname:
+        # Unparsable, or missing a scheme or host: no part of the value can
+        # be trusted to be free of a credential, so the raw value is never
+        # echoed; the reports say only that one is set.
+        return "<unparsable url>"
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    netloc = f"{host}:{port}" if port else host
+    return urlunsplit((scheme, netloc, parts.path, "", ""))
 
 
 def ai_config_json(config: LintroConfig) -> dict[str, Any]:
@@ -190,6 +240,10 @@ def ai_config_json(config: LintroConfig) -> dict[str, Any]:
             ai_config.transport.value if ai_config.transport is not None else None
         ),
         "model": ai_config.model,
+        # What the dogfood wrapper checks a lane binding against (ADR-0011 A).
+        "api_base_url": displayable_base_url(ai_config.api_base_url),
+        "api_key_env": ai_config.api_key_env,
+        "fallback_models": list(ai_config.fallback_models),
         "sources": {
             field: str(resolved.sources[field])
             for field in ("provider", "transport", "model")

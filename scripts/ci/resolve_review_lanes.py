@@ -4,12 +4,20 @@
 """Resolve the dogfood review chain from the committed lanes manifest (#2869).
 
 ADR-0011 decision A: a lane is a named row in ``scripts/ci/ai_review_lanes.json``
-and nowhere else, and the manifest's ordered ``chain`` is the only routing
-input. This script runs in a secret-free job, reads the manifest at the commit
-that supplied the workflow (``github.workflow_sha``), validates it, and
-publishes the chain and every lane's fields as step outputs. It fails closed,
-before any secret is exposed, on:
+and nowhere else. Which row a run uses is selected by the repository variable
+``LINTRO_AI_PROVIDER``, which this script reads from its environment: it must
+name a declared row, unset means the manifest's ``chain[0]``, and anything
+else is a refusal. ``LINTRO_AI_MODEL`` overrides the selected row's default
+model; unset means the row's own. The manifest's ordered ``chain`` is the
+default lane followed by the fallback order of decision D; a selected lane
+other than ``chain[0]`` runs as a single-entry chain. This script runs in a
+secret-free job, reads the manifest at the commit that supplied the workflow
+(``github.workflow_sha``), validates it and the two variables, and publishes
+the chain and every lane's fields as step outputs. It fails closed, before
+any secret is exposed, on:
 
+- a selector that names no declared row, or a model override that is not a
+  model id;
 - an empty chain, a duplicate entry, or an entry naming no declared row;
 - a row missing a required field or carrying one of the wrong shape;
 - a lane id or a variable name of the wrong shape (they become step outputs
@@ -17,9 +25,8 @@ before any secret is exposed, on:
   reach the workflow);
 - a non-``https`` endpoint, an endpoint host and port missing from the row's
   own egress list, an egress port out of range, or a wildcard egress host;
-- a model outside the row's allowed list, or a row that reports model usage
-  and names no model (``model: null`` with ``models: []`` means the CLI's
-  own default, unnamed, and is allowed only where nothing reports usage);
+- a row that names no default model: every run asks for a model this
+  repository chose, never a CLI's own default;
 - a ``first_party`` flag that disagrees with the endpoint host (each
   provider is first-party on exactly one host), a non-first-party row whose
   cost basis is not ``unknown``, or a credential bound in the wrong form;
@@ -27,7 +34,7 @@ before any secret is exposed, on:
 - a chain mixing ``first_party`` values, or a chain with more than one entry
   whose first entry is non-first-party (decision D);
 - a non-first-party row without ``shadow_price_model``, or any row whose
-  default or allowed model has no list-price table (``priced_models``) and no
+  default model has no list-price table (``priced_models``) and no
   ``shadow_price_model`` (decision B).
 
 Every error names the lanes the manifest declares. Standard library only: the
@@ -38,12 +45,17 @@ or to stdout when it is unset; ``--format json`` prints one object):
 
     chain                 JSON list of lane ids, active lane first
     lane                  the active lane id (``chain[0]``)
+    model_source          ``variable`` when LINTRO_AI_MODEL set the active
+                          lane's model, ``manifest`` when the row's default
+                          applies
     egress                space-separated union of the chain's egress hosts
+    egress_all            the same union over every declared row, for a job
+                          that drives every lane (the Tier 2 contract smoke)
     lanes                 JSON object: every chain lane's row, keyed by id
     provider, transport, endpoint, first_party, reports_model_usage,
     credential, credential_secret, credential_form, credential_env,
     credential_file,
-    credential_source_env, base_url_env, base_url_files, model, models,
+    credential_source_env, base_url_env, base_url_files, model,
     shadow_price_model, cost_basis
                           the active lane's fields (lists and objects as JSON,
                           booleans as ``true``/``false``, null as ``""``)
@@ -64,6 +76,8 @@ from urllib.parse import urlsplit
 __all__ = [
     "DEFAULT_MANIFEST",
     "LaneError",
+    "MODEL_ENV",
+    "SELECTOR_ENV",
     "ResolvedChain",
     "load_manifest",
     "main",
@@ -73,6 +87,12 @@ __all__ = [
 #: The committed manifest, relative to the repository root.
 DEFAULT_MANIFEST: Final[Path] = Path("scripts/ci/ai_review_lanes.json")
 
+#: The repository variable that selects a declared lane by id (the lane job
+#: forwards ``vars.LINTRO_AI_PROVIDER`` under this name) and the one that
+#: overrides the selected row's default model. Nothing else routes.
+SELECTOR_ENV: Final[str] = "LINTRO_AI_PROVIDER"
+MODEL_ENV: Final[str] = "LINTRO_AI_MODEL"
+
 #: Cost bases a row may declare (``lintro/ai/enums/cost_basis.py``).
 COST_BASES: Final[frozenset[str]] = frozenset(
     {"billed", "estimated", "unpriceable", "list_price_shadow", "unknown"},
@@ -80,7 +100,14 @@ COST_BASES: Final[frozenset[str]] = frozenset(
 
 #: Credential kinds a row may bind (``lintro/ai/enums/credential_kind.py``).
 CREDENTIALS: Final[frozenset[str]] = frozenset(
-    {"claude_oauth", "api_key", "zai_token", "codex_oauth", "cursor_api_key"},
+    {
+        "claude_oauth",
+        "api_key",
+        "zai_token",
+        "kimi_token",
+        "codex_oauth",
+        "cursor_api_key",
+    },
 )
 
 #: Providers and transports lintro runs the dogfood review on.
@@ -95,11 +122,20 @@ FIRST_PARTY_HOSTS: Final[dict[str, str]] = {
     "cursor": "api2.cursor.sh",
 }
 
+#: The gateway host each gateway credential kind is bound to: the run record
+#: names a bearer by the host it goes to (``lintro.ai.provenance``), so a row
+#: may not pair a kind with another gateway's host.
+GATEWAY_HOSTS: Final[dict[str, str]] = {
+    "zai_token": "api.z.ai",  # nosec B105 - a hostname, not a secret
+    "kimi_token": "api.moonshot.ai",  # nosec B105 - a hostname, not a secret
+}
+
 #: The form each credential kind takes.
 BINDING_FORMS: Final[dict[str, str]] = {
     "claude_oauth": "env",
     "api_key": "env",
     "zai_token": "env",  # nosec B105 - a form name, not a secret
+    "kimi_token": "env",  # nosec B105 - a form name, not a secret
     "codex_oauth": "file",
     "cursor_api_key": "env",
 }
@@ -129,6 +165,13 @@ _LABEL_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-
 
 #: An environment-variable or secret name.
 _NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[A-Z][A-Z0-9_]{0,127}$")
+
+#: A model id as the provider CLIs accept one (``gpt-6.1-sol``,
+#: ``cursor-grok-4.6-high``, ``kimi-k3[1m]``): no whitespace, no shell
+#: metacharacter, so it can travel as an output and an export.
+_MODEL_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,127}$",
+)
 
 #: Free-form string fields: published flat and read by a shell, so no
 #: whitespace or control character may appear in them.
@@ -160,8 +203,7 @@ _REQUIRED: Final[dict[str, type | tuple[type, ...]]] = {
     "base_url_env": (str, type(None)),
     "base_url_files": list,
     "egress": list,
-    "model": (str, type(None)),
-    "models": list,
+    "model": str,
     "cost_basis": str,
 }
 
@@ -181,7 +223,6 @@ _LANE_OUTPUTS: Final[tuple[str, ...]] = (
     "base_url_env",
     "base_url_files",
     "model",
-    "models",
     "shadow_price_model",
     "cost_basis",
 )
@@ -199,11 +240,17 @@ class ResolvedChain:
         chain: Lane ids, active lane first.
         lanes: The chain's rows, keyed by id, in chain order.
         egress: The union of the chain's egress hosts, in first-seen order.
+        egress_all: The union of every declared row's egress hosts, for a
+            job that drives every lane at once (the Tier 2 contract smoke).
+        model_source: ``variable`` when ``LINTRO_AI_MODEL`` set the active
+            lane's model, ``manifest`` when the row's default applies.
     """
 
     chain: list[str]
     lanes: dict[str, dict[str, Any]]
     egress: list[str]
+    egress_all: list[str]
+    model_source: str = "manifest"
 
     @property
     def active(self) -> dict[str, Any]:
@@ -306,9 +353,8 @@ def _check_shape(lane_id: str, row: Any, lanes: dict[str, Any]) -> dict[str, Any
             kind is bool and type(row[field]) is not bool
         ):
             _fail(f"lane {lane_id!r} field {field!r} has the wrong type", lanes)
-    for field in ("egress", "models"):
-        if not all(isinstance(item, str) and item for item in row[field]):
-            _fail(f"lane {lane_id!r} field {field!r} must list strings", lanes)
+    if not all(isinstance(item, str) and item for item in row["egress"]):
+        _fail(f"lane {lane_id!r} field 'egress' must list strings", lanes)
     _check_names(lane_id, row, lanes)
     return row
 
@@ -342,7 +388,6 @@ def _check_names(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> No
         ):
             _fail(f"lane {lane_id!r} field {field!r} must be a variable name", lanes)
     tokens = [(field, row.get(field)) for field in _TOKEN_FIELDS]
-    tokens += [("models", m) for m in row["models"]]
     tokens += [
         ("base_url_files", entry.get(key))
         for entry in row["base_url_files"]
@@ -435,6 +480,13 @@ def _check_first_party(
             f"on {own_host!r})",
             lanes,
         )
+    gateway_host = GATEWAY_HOSTS.get(row["credential"])
+    if gateway_host is not None and hostname != gateway_host:
+        _fail(
+            f"lane {lane_id!r} binds {row['credential']!r}, which belongs to "
+            f"{gateway_host!r}, on endpoint host {hostname!r}",
+            lanes,
+        )
     if not row["first_party"] and row["cost_basis"] != "unknown":
         _fail(
             f"lane {lane_id!r} is not first-party, so its cost basis must be "
@@ -500,21 +552,10 @@ def _check_models(
     priced: set[str],
     lanes: dict[str, Any],
 ) -> None:
-    """Check the model policy and the shadow-pricing rule (decision B)."""
+    """Check the default model and the shadow-pricing rule (decision B)."""
     model = row["model"]
-    models = row["models"]
-    if model is not None and model not in models:
-        _fail(
-            f"lane {lane_id!r} default model {model!r} is outside its allowed models",
-            lanes,
-        )
-    if model is None and models:
-        _fail(f"lane {lane_id!r} lists allowed models but no default", lanes)
-    if model is None and row["reports_model_usage"]:
-        _fail(
-            f"lane {lane_id!r} reports model usage but names no model to verify",
-            lanes,
-        )
+    if not _MODEL_RE.fullmatch(model):
+        _fail(f"lane {lane_id!r} default model {model!r} is not a model id", lanes)
     shadow = row.get("shadow_price_model")
     if shadow is not None and (not isinstance(shadow, str) or not shadow):
         _fail(
@@ -526,10 +567,9 @@ def _check_models(
             f"lane {lane_id!r} is not first-party and declares no shadow_price_model",
             lanes,
         )
-    unpriced = [m for m in models if m not in priced]
-    if unpriced and shadow is None:
+    if model not in priced and shadow is None:
         _fail(
-            f"lane {lane_id!r} allows unpriced models {unpriced} and "
+            f"lane {lane_id!r} names unpriced model {model!r} and "
             "declares no shadow_price_model",
             lanes,
         )
@@ -562,11 +602,38 @@ def _check_chain(chain: Any, lanes: dict[str, Any]) -> list[str]:
     return list(chain)
 
 
-def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
+def _select(
+    chain: list[str],
+    rows: dict[str, dict[str, Any]],
+    selector: str | None,
+) -> list[str]:
+    """Apply the lane selector to the manifest's chain.
+
+    Unset keeps the manifest's chain. The default lane keeps its declared
+    fallbacks; any other declared lane runs as a single-entry chain, so the
+    operator's choice is exactly what runs and decision D's shape holds.
+    """
+    if not selector:
+        return chain
+    if not _LANE_ID_RE.fullmatch(selector) or selector not in rows:
+        _fail(f"{SELECTOR_ENV}={selector!r} names no declared lane", rows)
+    return chain if selector == chain[0] else [selector]
+
+
+def resolve_chain(
+    document: dict[str, Any],
+    *,
+    selector: str | None = None,
+    model: str | None = None,
+) -> ResolvedChain:
     """Validate the manifest and return the chain it routes to.
 
     Args:
         document: The parsed manifest.
+        selector: ``LINTRO_AI_PROVIDER``: a declared lane id, or empty for
+            the manifest's default.
+        model: ``LINTRO_AI_MODEL``: a model id that overrides the selected
+            row's default, or empty for the row's own.
 
     Returns:
         The validated chain with every row it names.
@@ -603,9 +670,23 @@ def resolve_chain(document: dict[str, Any]) -> ResolvedChain:
         _check_endpoint(lane_id, checked, lanes_raw)
         _check_models(lane_id, checked, priced, lanes_raw)
         rows[lane_id] = checked
-    chain = _check_chain(document.get("chain"), rows)
+    chain = _select(_check_chain(document.get("chain"), rows), rows, selector)
+    model_source = "manifest"
+    if model:
+        if not _MODEL_RE.fullmatch(model):
+            _fail(f"{MODEL_ENV}={model!r} is not a model id", rows)
+        rows[chain[0]] = {**rows[chain[0]], "model": model}
+        # Decision B's priced-or-shadow rule applies to the model that runs.
+        _check_models(chain[0], rows[chain[0]], priced, rows)
+        model_source = "variable"
     lanes = {entry: rows[entry] for entry in chain}
-    return ResolvedChain(chain=chain, lanes=lanes, egress=_egress_union(chain, lanes))
+    return ResolvedChain(
+        chain=chain,
+        lanes=lanes,
+        egress=_egress_union(chain, lanes),
+        egress_all=_egress_union(list(rows), rows),
+        model_source=model_source,
+    )
 
 
 def _output_value(value: Any) -> str:
@@ -632,7 +713,9 @@ def outputs_for(resolved: ResolvedChain) -> dict[str, str]:
     values: dict[str, str] = {
         "chain": _output_value(resolved.chain),
         "lane": resolved.chain[0],
+        "model_source": resolved.model_source,
         "egress": " ".join(resolved.egress),
+        "egress_all": " ".join(resolved.egress_all),
         "lanes": _output_value(resolved.lanes),
     }
     for field in _LANE_OUTPUTS:
@@ -691,7 +774,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     try:
-        resolved = resolve_chain(load_manifest(args.manifest))
+        resolved = resolve_chain(
+            load_manifest(args.manifest),
+            selector=os.environ.get(SELECTOR_ENV, "").strip(),
+            model=os.environ.get(MODEL_ENV, "").strip(),
+        )
     except LaneError as exc:
         sys.stderr.write(f"::error::review lanes: {exc}\n")
         return 1
@@ -706,6 +793,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     sys.stderr.write(
         f"review lanes: active {resolved.chain[0]!r}, chain {resolved.chain}, "
+        f"model {resolved.active['model']!r} ({resolved.model_source}), "
         f"egress {resolved.egress}\n",
     )
     return 0

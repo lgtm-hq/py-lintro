@@ -329,9 +329,9 @@ def test_the_review_job_runs_on_both_paths_with_validated_inputs() -> None:
     """The shared review job: request outputs only, a review slot, the 53 min cap."""
     job = _job("ai-review")
 
-    assert_that(job["needs"]).is_equal_to(["request"])
+    assert_that(job["needs"]).is_equal_to(["lane", "request"])
     assert_that(_flat(job["if"])).is_equal_to(
-        "!cancelled() && ((github.event_name == 'pull_request_target' "
+        "!cancelled() && needs.lane.result == 'success' && ((github.event_name == 'pull_request_target' "
         "&& github.event.pull_request.draft == false "
         "&& github.event.pull_request.head.repo.full_name == github.repository) "
         "|| (github.event_name == 'issue_comment' "

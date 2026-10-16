@@ -120,6 +120,15 @@ _AUTH_MODES: Mapping[CredentialKind, str] = {
     CredentialKind.API_KEY: "api_key",
     CredentialKind.CURSOR_API_KEY: "api_key",
     CredentialKind.ZAI_TOKEN: "gateway_token",
+    CredentialKind.KIMI_TOKEN: "gateway_token",
+}
+
+#: A bearer on ``ANTHROPIC_AUTH_TOKEN`` is named by the gateway host it goes
+#: to; a host not listed here is recorded as the z.ai kind, the first such
+#: gateway lintro learned (#2867).
+GATEWAY_TOKEN_KINDS: Mapping[str, CredentialKind] = {
+    "api.z.ai": CredentialKind.ZAI_TOKEN,
+    "api.moonshot.ai": CredentialKind.KIMI_TOKEN,
 }
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
@@ -412,18 +421,21 @@ def detect_run_provenance(
         # A row may declare a gateway first-party only by naming a host
         # lintro cannot place; a known provider pointed elsewhere is not.
         first_party = False
+    credential = _credential(
+        provider=member,
+        transport=effective_transport,
+        first_party=first_party,
+        bare=bare,
+        env=environment,
+        home=home if home is not None else Path.home(),
+        cwd=cwd,
+    )
+    if credential is CredentialKind.ZAI_TOKEN:
+        credential = GATEWAY_TOKEN_KINDS.get(endpoint, CredentialKind.ZAI_TOKEN)
     return RunProvenance(
         endpoint=endpoint,
         first_party=first_party,
-        credential=_credential(
-            provider=member,
-            transport=effective_transport,
-            first_party=first_party,
-            bare=bare,
-            env=environment,
-            home=home if home is not None else Path.home(),
-            cwd=cwd,
-        ),
+        credential=credential,
         lane=lane,
         allowed_models=_env_list(environment.get(REVIEW_ALLOWED_MODELS_ENV)),
         reports_model_usage=_reports_model_usage(

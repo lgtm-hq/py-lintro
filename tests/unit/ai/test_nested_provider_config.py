@@ -904,6 +904,144 @@ def test_lintro_config_json_carries_the_same_block(
     assert_that(payload["other_provider_blocks"]).is_equal_to(1)
 
 
+def test_lintro_config_json_reports_the_routing_state_the_lane_gate_checks(
+    isolated_project: Path,
+) -> None:
+    """``--json`` carries ``api_base_url``, ``api_key_env``, ``fallback_models``.
+
+    The dogfood lane gate (``scripts/ci/review_lane_env.py``) compares these
+    against the lane row and refuses when any is missing, so the producer
+    must emit them with the configured values (ADR-0011 A, #2870).
+
+    Args:
+        isolated_project: Empty project directory with the user tier isolated.
+    """
+    (isolated_project / ".lintro-config.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "ai": {
+                    "provider": "anthropic",
+                    "api_base_url": "https://proxy.example/anthropic",
+                    "api_key_env": "MY_ANTHROPIC_KEY",
+                    "fallback_models": ["claude-sonnet-5-5"],
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+
+    result = CliRunner().invoke(cli, ["config", "--json"])
+
+    clear_config_cache()
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)["ai"]
+    assert_that(payload["api_base_url"]).is_equal_to("https://proxy.example/anthropic")
+    assert_that(payload["api_key_env"]).is_equal_to("MY_ANTHROPIC_KEY")
+    assert_that(payload["fallback_models"]).is_equal_to(["claude-sonnet-5-5"])
+
+    # The rich report shows the same three rows, so the two cannot drift.
+    rich = CliRunner().invoke(cli, ["config"])
+    clear_config_cache()
+    assert_that(rich.exit_code).is_equal_to(0)
+    text = " ".join(rich.output.split())
+    assert_that(text).contains("api_base_url https://proxy.example/anthropic")
+    assert_that(text).contains("api_key_env MY_ANTHROPIC_KEY")
+    assert_that(text).contains("fallback_models claude-sonnet-5-5")
+
+
+_NOISY_BASE_URL_TAIL = "proxy.example:8443/v1?token=abc#f"
+
+
+def test_the_config_reports_never_print_a_credential(
+    isolated_project: Path,
+) -> None:
+    """A URL's userinfo and query are dropped; a key in ``api_key_env`` is refused.
+
+    Both reports print routing state in clear. The base URL is reduced to
+    scheme, host, port and path, which is all the lane gate compares, and
+    ``api_key_env`` must be a variable name, so a key pasted there is a
+    configuration error rather than a line in a log.
+
+    Args:
+        isolated_project: Empty project directory with the user tier isolated.
+    """
+    config_path = isolated_project / ".lintro-config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(
+            {
+                "ai": {
+                    "provider": "anthropic",
+                    # Assembled so no credential-bearing URL literal is committed.
+                    "api_base_url": "https://" + "user:hunter2@" + _NOISY_BASE_URL_TAIL,
+                },
+            },
+        ),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+
+    result = CliRunner().invoke(cli, ["config", "--json"])
+    rich = CliRunner().invoke(cli, ["config"])
+
+    clear_config_cache()
+    assert_that(result.exit_code).is_equal_to(0)
+    payload = json.loads(result.output)["ai"]
+    assert_that(payload["api_base_url"]).is_equal_to("https://proxy.example:8443/v1")
+    assert_that(result.output).does_not_contain("hunter2")
+    assert_that(result.output).does_not_contain("token=abc")
+    assert_that(rich.output).does_not_contain("hunter2")
+    assert_that(rich.output).does_not_contain("token=abc")
+
+    # A port that is not a number, or is out of range, must not crash the
+    # report, and must not print the rest of the URL either.
+    # Each value pairs with the fragment of it that must never be printed.
+    for noisy, secret in (
+        ("https://user:pw@proxy.example:abc/v1", "user:pw"),
+        ("https://proxy.example:99999/v1", "99999"),
+        # No scheme: urlsplit reads the whole value as a path, userinfo and all.
+        ("user:pw@proxy.example/v1", "user:pw"),
+        ("proxy.example/v1?token=pw", "token=pw"),
+    ):
+        config_path.write_text(
+            yaml.safe_dump({"ai": {"provider": "anthropic", "api_base_url": noisy}}),
+            encoding="utf-8",
+        )
+        clear_config_cache()
+        malformed = CliRunner().invoke(cli, ["config", "--json"])
+        clear_config_cache()
+        assert_that(malformed.exit_code).described_as(noisy).is_equal_to(0)
+        assert_that(json.loads(malformed.output)["ai"]["api_base_url"]).is_equal_to(
+            "<unparsable url>",
+        )
+        assert_that(malformed.output).described_as(noisy).does_not_contain(secret)
+
+    config_path.write_text(
+        yaml.safe_dump(
+            {"ai": {"provider": "anthropic", "api_key_env": "sk-ant-not-a-name"}},
+        ),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+
+    refused = CliRunner().invoke(cli, ["config", "--json"])
+
+    clear_config_cache()
+    assert_that(refused.output).does_not_contain("sk-ant-not-a-name")
+    assert_that(refused.output).contains("api_key_env")
+
+    # An empty value keeps its old meaning: unset, the provider's default.
+    config_path.write_text(
+        yaml.safe_dump({"ai": {"provider": "anthropic", "api_key_env": ""}}),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+    empty = CliRunner().invoke(cli, ["config", "--json"])
+    clear_config_cache()
+    assert_that(empty.exit_code).is_equal_to(0)
+    assert_that(json.loads(empty.output)["ai"]["api_key_env"]).is_none()
+
+
 def test_lintro_config_nudges_a_legacy_key_once(
     isolated_project: Path,
     caplog: pytest.LogCaptureFixture,

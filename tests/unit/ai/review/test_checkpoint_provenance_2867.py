@@ -44,7 +44,7 @@ _IDENTITY = RunIdentity(
     endpoint="api.anthropic.com",
     first_party=True,
     credential="claude_oauth",
-    lane="claude-subscription",
+    lane="anthropic",
 )
 
 
@@ -114,7 +114,7 @@ def test_a_checkpoint_writes_a_partial_run_with_the_rounds_provenance(
     assert_that(loaded.runs).is_length(1)
     partial = loaded.runs[0]
     assert_that(partial.identity.round).is_equal_to(1)
-    assert_that(partial.identity.lane).is_equal_to("claude-subscription")
+    assert_that(partial.identity.lane).is_equal_to("anthropic")
     assert_that(partial.identity.endpoint).is_equal_to("api.anthropic.com")
     assert_that(partial.identity.model_verification).is_empty()
     assert_that(partial.coverage.partial).is_true()
@@ -159,7 +159,7 @@ def test_a_checkpoint_carries_the_verification_of_the_calls_so_far(
             provenance=RunProvenance(
                 endpoint="api.anthropic.com",
                 first_party=True,
-                lane="claude-subscription",
+                lane="anthropic",
             ),
             allowed=("claude-opus-5-5",),
         ),

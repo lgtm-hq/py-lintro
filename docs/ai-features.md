@@ -1956,10 +1956,11 @@ developer's login.
 - **Never default an unset secret.** Forwarding `${{ secrets.X }}` unset lets the run
   report a visible skip naming the missing credential; substituting a placeholder turns
   it into a false pass.
-- **Trusted install.** Lintro installs itself from the PR's _base_ ref before the step
-  that holds the provider credential, so PR-controlled code never executes with the
-  secret in scope. The PR is reviewed as data (the diff is fetched through the GitHub
-  API).
+- **Trusted install.** Lintro installs itself from the commit that supplied the workflow
+  (`github.workflow_sha`: the tip of the PR's base branch, or the default branch on a
+  comment-triggered run) before the step that holds the provider credential, so
+  PR-controlled code never executes with the secret in scope. The PR is reviewed as data
+  (the diff is fetched through the GitHub API).
 - **A subscription works in CI, on the `cli` transport.** Lintro's own `ai-review.yml`
   runs `ai.transport: cli` against a version-pinned `claude` CLI
   (`npm install -g @anthropic-ai/claude-code@<pin>`) authenticated by a
@@ -1968,16 +1969,17 @@ developer's login.
   because `--bare` disables OAuth session login (see the `--bare` note above). Set
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` and `DISABLE_AUTOUPDATER=1` to keep the
   binary's egress and version predictable under an egress allowlist.
-- **Two more subscription lanes (#2472).** With provider `anthropic` (the default) and
-  the `ZAI_BASE_URL` variable set, the pinned `claude` binary is pointed at a gateway
-  (e.g. z.ai's GLM Coding Plan endpoint) via `ANTHROPIC_BASE_URL` +
-  `ANTHROPIC_AUTH_TOKEN` — the CLI transport forwards `os.environ` to the subprocess, so
-  no product code is involved. `LINTRO_AI_PROVIDER=openai` runs the version-pinned
-  `codex` CLI on a ChatGPT-plan session: the workflow resolves the Renovate-pinned
-  version, installs the CLI and decodes an org secret into `~/.codex/auth.json` (Codex
-  has no OAuth-token env var; `CODEX_API_KEY` is metered API billing, not the
-  subscription) before the review step; with the secret unset the run fails visibly at
-  the credential gate.
+- **Lanes, selected by one variable (ADR-0011).** Where the review goes is a named row
+  in the committed manifest `scripts/ci/ai_review_lanes.json`. The repository variable
+  `LINTRO_AI_PROVIDER` picks the row by id and `LINTRO_AI_MODEL` overrides its default
+  model; no variable supplies an endpoint, a credential binding or an egress host. The
+  declared rows are `anthropic` (the Claude subscription, the default), `openai` (the
+  Codex ChatGPT-plan session, decoded from the `CODEX_AUTH_JSON` secret into
+  `~/.codex/auth.json` for the attempt; `CODEX_API_KEY` is metered API billing, not the
+  subscription), `cursor`, `zai` and `kimi` (two declared gateways). A secret-free job
+  resolves the chain, the review job's egress and credentials follow from it, and the
+  wrapper refuses a competing credential or an override that names another host. See
+  `docs/ai-review-transports.md` for the binding rules.
 - **`ai.max_cost_usd` is API-path accounting.** Lintro prices the tokens it billed
   itself, so under the `cli` transport the cap is advisory — the call bills the
   subscription (or, in bare mode with a reachable API key, that key — see the billing

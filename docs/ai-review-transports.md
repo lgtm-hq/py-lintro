@@ -101,20 +101,38 @@ credential:
 (#1838/#1859). Dogfood CI pins `LINTRO_CLI_BARE=never` and keeps `ANTHROPIC_API_KEY` out
 of scope so the subscription token is actually used.
 
-The dogfood job can also run two further CLI lanes without an API key (#2472): provider
-`anthropic` against a gateway such as z.ai's GLM Coding Plan by forwarding
-`ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` to the pinned `claude` binary, and
-provider `openai` on a restored `~/.codex/auth.json` subscription session (org secret
-`CODEX_AUTH_JSON`; `CODEX_API_KEY` would bill metered API credits, not the plan) — the
-workflow resolves the Renovate-pinned codex version, installs it and decodes the secret
-into the session file before the review step; with the secret unset the run fails
-visibly at the credential gate.
+Where the dogfood review goes is a named **lane**: a row in the committed manifest
+`scripts/ci/ai_review_lanes.json`, and nowhere else (ADR-0011 decision A, #2869/#2870).
+The repository variable `LINTRO_AI_PROVIDER` selects the row (`anthropic`, `openai`,
+`cursor`, `zai` or `kimi`; unset means the manifest's `chain[0]`; anything else is red
+before a secret exists), and `LINTRO_AI_MODEL` overrides the row's default model. A
+secret-free `lane` job in `ai-review.yml` reads those two variables, resolves the chain
+with `scripts/ci/resolve_review_lanes.py` at `github.workflow_sha` and publishes every
+row; the review job's egress is the union of the chain's hosts, each credential is
+forwarded under its secret name by one literal expression gated on chain membership, and
+`scripts/ci/run-ai-review.sh` binds the attempt through `scripts/ci/review_lane_env.py`:
+provider, transport and model are exported from the row, exactly one credential is in
+scope under the variable its CLI reads (the z.ai and Kimi tokens fill
+`ANTHROPIC_AUTH_TOKEN`; the Codex session is decoded from `CODEX_AUTH_JSON` into
+`~/.codex/auth.json` for the attempt and deleted at its end), the provider's base-URL
+override is exported to the row's endpoint off-host and must be unset on-host, and a
+competing credential, an override naming another host, or an effective `ai.*` config
+that disagrees with the row refuses the run before any provider call. An absent
+credential is red with `status=no-credential`, never a fallback. No variable supplies an
+endpoint, a credential binding or an egress host: a selector can only name a declared
+row. The declared rows and their default models are `anthropic` (`claude-opus-5-5`, the
+default lane), `openai` (the Codex session, `gpt-6.1-sol`), `cursor`
+(`cursor-grok-4.6-high`), `zai` (`glm-5.3-flash`) and `kimi` (`kimi-k3`), the last two
+non-first-party gateways. Switching lanes is a change to the variable and reaches every
+open PR on its next run; a rerun keeps its run's inputs, so after a switch the recovery
+step for a red PR is an `@lintro review` comment, which starts a new run.
 
-On that lane lintro sends **no** `--model` unless one is configured (#2537). The two
-codex credentials do not accept the same models: an API key reaches the OpenAI API
-catalogue and still gets the provider default (`gpt-4o`), while a ChatGPT-plan session
-reaches only that plan's models and rejects an API-catalogue name outright — the whole
-call fails with
+The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
+`LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends
+**no** `--model` unless one is configured (#2537). The two codex credentials do not
+accept the same models: an API key reaches the OpenAI API catalogue and still gets the
+provider default (`gpt-4o`), while a ChatGPT-plan session reaches only that plan's
+models and rejects an API-catalogue name outright — the whole call fails with
 `The 'gpt-4o' model is not supported when using Codex with a ChatGPT account`. The plan
 catalogue is per-account and renames often, so lintro defers to codex's own default
 rather than pinning a slug that would break on the next rename. Set `ai.model` (or
@@ -192,21 +210,24 @@ zero; a list-price shadow is labelled a shadow; a round from before ADR-0011 is 
 priced cost.
 
 Each run also records where its requests went (#2867): `endpoint` (host only),
-`first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `codex_oauth`,
-`cursor_api_key`), `reported_models` (the Claude CLI envelope's `modelUsage`), `lane`,
-and `model_verification` (`verified`, `mismatch`, `unverifiable`, `unreported`; a record
-from before these fields reads as `legacy`). `auth_mode` follows `credential`, so a
-gateway token reads `gateway_token`, not `subscription`. In CI the review-lanes wrapper
-exports the resolved lane row as `LINTRO_REVIEW_LANE`, `LINTRO_REVIEW_ENDPOINT`,
-`LINTRO_REVIEW_FIRST_PARTY` and `LINTRO_REVIEW_ALLOWED_MODELS`, and those win; outside
-CI the provider's base-URL override (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the
-Claude settings files' `env` block) and the provider's own host decide. The credential
-kinds add `api_key` (a metered vendor key, or the API transport) and `unknown` to the
-four lane bindings so a local run can be described too. The Claude credential follows
-Claude Code's documented precedence: the bearer token, then the API key or helper, then
-the OAuth token, which bare mode never reads. A run off the provider's host prices its
-shadow figure on `LINTRO_REVIEW_SHADOW_PRICE_MODEL`, or on the requested model's own
-table when no lane row names one.
+`first_party`, `credential` (`claude_oauth`, `api_key`, `zai_token`, `kimi_token`,
+`codex_oauth`, `cursor_api_key`), `reported_models` (the Claude CLI envelope's
+`modelUsage`), `lane`, and `model_verification` (`verified`, `mismatch`, `unverifiable`,
+`unreported`; a record from before these fields reads as `legacy`). `auth_mode` follows
+`credential`, so a gateway token reads `gateway_token`, not `subscription`. In CI the
+review-lanes wrapper exports the resolved lane row as `LINTRO_REVIEW_LANE`,
+`LINTRO_REVIEW_ENDPOINT` and `LINTRO_REVIEW_FIRST_PARTY`, and those win; no
+allowed-model list travels, so on a lane `model_verification` accepts the requested
+model alone (a first-party call that reports another model is `mismatch` and its
+coverage is not reused). Outside CI the provider's base-URL override
+(`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the Claude settings files' `env` block) and
+the provider's own host decide. The credential kinds add `api_key` (a metered vendor
+key, or the API transport) and `unknown` to the five lane bindings so a local run can be
+described too. The Claude credential follows Claude Code's documented precedence: the
+bearer token, then the API key or helper, then the OAuth token, which bare mode never
+reads. A run off the provider's host prices its shadow figure on
+`LINTRO_REVIEW_SHADOW_PRICE_MODEL`, or on the requested model's own table when no lane
+row names one.
 
 Reuse follows provenance (ADR-0011, decision B): a stored round's coverage is inherited
 only when the round is not `legacy` or `mismatch`, is not `unreported` on a lane whose
