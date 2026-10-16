@@ -737,6 +737,44 @@ def _patch_doctor_deps() -> tuple[Any, Any]:
     )
 
 
+def _ok_snapshots() -> dict[str, Any]:
+    """Return a probe_all_tools result for a healthy ruff install."""
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
+
+    return {
+        "ruff": ToolSnapshot(
+            name="ruff",
+            available=True,
+            version="0.14.4",
+            capabilities=ToolCapabilities(can_fix=True),
+            binary_path="/usr/bin/ruff",
+            binary_mtime=1.0,
+            version_check_passed=True,
+            min_version="0.14.0",
+        ),
+    }
+
+
+def _missing_snapshots() -> dict[str, Any]:
+    """Return a probe_all_tools result for a missing ruff binary."""
+    from lintro.tools.core.snapshots import ToolCapabilities, ToolSnapshot
+
+    return {
+        "ruff": ToolSnapshot(
+            name="ruff",
+            available=False,
+            version=None,
+            capabilities=ToolCapabilities(),
+            probe_error="ruff not found in PATH",
+            remediation_hint="Install ruff",
+            binary_path="",
+            binary_mtime=0.0,
+            version_check_passed=False,
+            min_version="0.14.0",
+        ),
+    }
+
+
 def test_doctor_all_ok_exit_0() -> None:
     """Exit code 0 when all tools pass."""
     runner = CliRunner()
@@ -745,10 +783,11 @@ def test_doctor_all_ok_exit_0() -> None:
     with (
         p1,
         p2,
-        patch("subprocess.run") as mock_run,
-        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_ok_snapshots(),
+        ),
     ):
-        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
         result = runner.invoke(doctor_command, [])
 
     assert_that(result.exit_code).is_equal_to(0)
@@ -759,7 +798,14 @@ def test_doctor_missing_tool_exit_1() -> None:
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
 
-    with p1, p2, patch("shutil.which", return_value=None):
+    with (
+        p1,
+        p2,
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+    ):
         result = runner.invoke(doctor_command, [])
 
     assert_that(result.exit_code).is_equal_to(1)
@@ -773,14 +819,15 @@ def test_doctor_json_output_valid() -> None:
     with (
         p1,
         p2,
-        patch("subprocess.run") as mock_run,
-        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_ok_snapshots(),
+        ),
         patch(
             "lintro.cli_utils.commands.doctor.collect_full_environment",
             return_value=None,
         ),
     ):
-        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
         result = runner.invoke(doctor_command, ["--json"])
 
     data = json.loads(result.output)
@@ -795,14 +842,15 @@ def test_doctor_fix_incompatible_with_json() -> None:
     with (
         p1,
         p2,
-        patch("subprocess.run") as mock_run,
-        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_ok_snapshots(),
+        ),
         patch(
             "lintro.cli_utils.commands.doctor.collect_full_environment",
             return_value=MagicMock(),
         ),
     ):
-        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
         result = runner.invoke(doctor_command, ["--fix", "--json"])
 
     assert_that(result.exit_code).is_not_equal_to(0)
@@ -851,6 +899,10 @@ def test_doctor_post_fix_blocks_only_non_retryable_outcomes() -> None:
         p2,
         patch("shutil.which", return_value=None),
         patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+        patch(
             "lintro.tools.core.tool_installer.ToolInstaller.plan",
             return_value=plan,
         ),
@@ -879,6 +931,34 @@ def test_doctor_post_fix_blocks_only_non_retryable_outcomes() -> None:
     )
 
 
+def test_doctor_fix_clears_snapshot_cache_after_install() -> None:
+    """``--fix`` clears the capability cache before re-probing tools."""
+    from lintro.tools.core import snapshots
+
+    runner = CliRunner()
+    p1, p2 = _patch_doctor_deps()
+    cache_file = snapshots._cache_file_path()
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text("{}", encoding="utf-8")
+
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+        patch(
+            "lintro.cli_utils.commands.doctor._run_fix",
+            return_value=[],
+        ),
+    ):
+        runner.invoke(doctor_command, ["--fix"])
+
+    assert_that(cache_file.exists()).is_false()
+
+
 def test_doctor_post_fix_quick_fix_skips_tools_that_did_not_resolve() -> None:
     """After --fix, a tool whose command did not resolve it is not re-suggested."""
     runner = CliRunner()
@@ -888,6 +968,10 @@ def test_doctor_post_fix_quick_fix_skips_tools_that_did_not_resolve() -> None:
         p1,
         p2,
         patch("shutil.which", return_value=None),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
         patch(
             "lintro.cli_utils.commands.doctor._run_fix",
             return_value=["ruff"],
@@ -907,7 +991,15 @@ def test_doctor_quick_fix_lists_missing_tool_before_any_fix() -> None:
     runner = CliRunner()
     p1, p2 = _patch_doctor_deps()
 
-    with p1, p2, patch("shutil.which", return_value=None):
+    with (
+        p1,
+        p2,
+        patch("shutil.which", return_value=None),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_missing_snapshots(),
+        ),
+    ):
         result = runner.invoke(doctor_command, [])
 
     assert_that(result.output).contains("Quick fix: lintro install ruff")
@@ -921,10 +1013,11 @@ def test_doctor_tools_filter_known_tool() -> None:
     with (
         p1,
         p2,
-        patch("subprocess.run") as mock_run,
-        patch("shutil.which", return_value="/usr/bin/ruff"),
+        patch(
+            "lintro.tools.core.snapshots.probe_all_tools",
+            return_value=_ok_snapshots(),
+        ),
     ):
-        mock_run.return_value = MagicMock(returncode=0, stdout="ruff 0.14.4", stderr="")
         result = runner.invoke(doctor_command, ["--tools", "ruff"])
 
     assert_that(result.exit_code).is_equal_to(0)

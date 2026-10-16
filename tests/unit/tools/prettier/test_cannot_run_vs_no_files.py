@@ -3,7 +3,7 @@
 Two outcomes must stay distinguishable:
 
 * **cannot run** — the tool's binary could not be resolved. The result must be
-  a loud skip carrying a reason, never a plain ``PASS``.
+  a loud ``unavailable`` result carrying a reason, never a plain ``PASS``.
 * **nothing to check** — the tool ran its discovery and no file matched its
   patterns. That is a legitimate pass and must not regress into a skip.
 """
@@ -44,11 +44,11 @@ def unresolvable_binary(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_prettier_cannot_run_is_a_loud_skip_not_a_pass(
+def test_prettier_cannot_run_is_loudly_unavailable_not_a_pass(
     tmp_path: Path,
     unresolvable_binary: None,
 ) -> None:
-    """Prettier that cannot resolve its binary reports a skip with a reason.
+    """Prettier that cannot resolve its binary reports unavailable with a reason.
 
     Args:
         tmp_path: Temporary directory fixture.
@@ -61,13 +61,13 @@ def test_prettier_cannot_run_is_a_loud_skip_not_a_pass(
     plugin.exclude_patterns = []
     result = plugin.check([str(target)], {})
 
-    assert_that(result.skipped).is_true()
+    assert_that(result.unavailable).is_true()
     assert_that(result.skip_reason).is_not_none()
     assert_that(result.skip_reason).is_not_equal_to("")
-    assert_that(result.output).contains("Skipping prettier")
+    assert_that(result.output).contains("prettier unavailable")
 
 
-def test_oxlint_cannot_run_is_a_loud_skip_not_a_pass(
+def test_oxlint_cannot_run_is_loudly_unavailable_not_a_pass(
     tmp_path: Path,
     unresolvable_binary: None,
 ) -> None:
@@ -84,7 +84,7 @@ def test_oxlint_cannot_run_is_a_loud_skip_not_a_pass(
     plugin.exclude_patterns = []
     result = plugin.check([str(target)], {})
 
-    assert_that(result.skipped).is_true()
+    assert_that(result.unavailable).is_true()
     assert_that(result.skip_reason).is_not_none()
     assert_that(result.skip_reason).is_not_equal_to("")
 
