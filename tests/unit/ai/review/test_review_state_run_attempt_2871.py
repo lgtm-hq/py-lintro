@@ -11,10 +11,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from assertpy import assert_that
 
+from lintro.ai.review.lifecycle.state import persist_review_state
 from lintro.ai.review.models.review_state import ReviewState
-from lintro.ai.review.state_store import union_states, write_state_part
+from lintro.ai.review.state_store import load_ci_state, union_states, write_state_part
+from tests.unit.ai.review.test_pr_spend_2796 import _context, _result
 
 
 def test_the_run_attempt_round_trips_through_the_artifact_dict() -> None:
@@ -43,11 +46,58 @@ def test_the_union_keeps_the_last_parts_attempt(tmp_path: Path) -> None:
     assert_that(written).contains('"run_attempt": "2"')
 
 
-def test_the_checkpoint_stamps_the_attempt_from_the_environment() -> None:
-    """The writer reads ``GITHUB_RUN_ATTEMPT`` next to ``GITHUB_RUN_ID``."""
+def test_the_checkpoint_writer_stamps_the_attempt_from_the_environment() -> None:
+    """The checkpoint writer reads ``GITHUB_RUN_ATTEMPT`` next to ``GITHUB_RUN_ID``."""
     source = Path("lintro/ai/review/incremental_coverage.py").read_text(
         encoding="utf-8",
     )
     assert_that(source).contains(
         'run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT", "") or seed.run_attempt',
     )
+
+
+def test_the_final_persist_stamps_this_attempt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The round's final write names the run and the attempt that wrote it.
+
+    The CI classifier refuses a state naming another attempt, so a final
+    write that stamped only the run id would redden every completed review
+    on a rerun. Driven through the real persist path in Actions mode.
+
+    Args:
+        tmp_path: Scratch directory holding the state directory.
+        monkeypatch: Pytest monkeypatch fixture.
+    """
+    state_dir = tmp_path / "state"
+    monkeypatch.setenv("LINTRO_REVIEW_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GITHUB_RUN_ID", "38900000001")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    # A prior attempt's artifact is what the workflow downloads here.
+    write_state_part(
+        state=ReviewState(
+            repo="o/r",
+            pr_number=2871,
+            run_id="38900000001",
+            run_attempt="1",
+        ),
+        directory=state_dir,
+        sequence=2,
+        final=True,
+    )
+
+    persist_review_state(
+        result=_result(1.0),
+        context=_context(),
+        prior=None,
+        pr_number=2871,
+        repo="o/r",
+    )
+
+    written = load_ci_state(directory=state_dir, repo="o/r", pr_number=2871)
+    assert_that(written.run_id).is_equal_to("38900000001")
+    assert_that(written.run_attempt).is_equal_to("2")
+    raw = (state_dir / "state.json").read_text(encoding="utf-8")
+    assert_that(raw).contains('"run_attempt": "2"')
