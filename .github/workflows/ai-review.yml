@@ -114,8 +114,8 @@ name: AI Review - Dogfood
 # text only ever reaches the request step through `env:`, never a `run:` line.
 # For issue_comment GitHub takes this file and GITHUB_SHA from the default
 # branch, and there is no pull_request.base.sha: the review job's checkout
-# falls back to github.workflow_sha, the protected base-branch commit that
-# supplied this definition. issue_comment is not affected by the 2026-11-02
+# is github.workflow_sha on every event, which on a comment run is that
+# default-branch commit. issue_comment is not affected by the 2026-11-02
 # pull_request_target restriction (#2793).
 'on':
   pull_request_target:
@@ -505,7 +505,7 @@ jobs:
             ${{ env.AI_REVIEW_LANE_EGRESS }}
 
       - name: Checkout workflow_sha (trusted lintro install)
-        # Install lintro from github.workflow_sha, the protected default-branch
+        # Install lintro from github.workflow_sha, the protected base-branch
         # commit that supplied this workflow definition and the manifest the
         # lane job read, NOT the PR head and NOT pull_request.base.sha, which
         # is the base as of the PR's last sync and can lag main (ADR-0011 A).
@@ -676,8 +676,8 @@ jobs:
           # chain the secret-free lane job published. Never indexed
           # dynamically, never selected by a variable's presence. The
           # wrapper captures them, unsets them, and re-arms only the active
-          # lane's under the variable its CLI reads (the z.ai token fills
-          # ANTHROPIC_AUTH_TOKEN; CODEX_AUTH_JSON is decoded into the codex
+          # lane's under the variable its CLI reads (the z.ai and Kimi tokens
+          # fill ANTHROPIC_AUTH_TOKEN; CODEX_AUTH_JSON is decoded into the codex
           # session for the attempt). ANTHROPIC_API_KEY is deliberately
           # absent: its account has no balance, and its mere presence would
           # make lintro's bare-mode detection think a bare `claude` call could
