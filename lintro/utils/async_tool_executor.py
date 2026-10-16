@@ -125,6 +125,9 @@ class AsyncToolExecutor:
                 paths,
                 opts,
             )
+            from lintro.utils.tool_executor import _finalize_template_aware_result
+
+            result = _finalize_template_aware_result(tool=tool, result=result)
         logger.debug(f"Completed async execution of {tool.definition.name}")
         result.duration_seconds = time.monotonic() - started
 
