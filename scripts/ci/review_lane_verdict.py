@@ -28,9 +28,14 @@ attempt can produce (decision D's chain-walk rows are #2872):
   with ``reports_model_usage: false`` the verdict is unchanged;
 - ``verified``: unchanged, no label.
 
-A produced review with no run record at all is red with
-``status=provenance-unrecorded``: the lane cannot be verified, and a check
-that cannot verify where the review went must not read as a pass.
+A produced review with no run record for *this* run is red with
+``status=provenance-unrecorded``: the state file must carry this run's id
+(a downloaded prior-round artifact does not), and the record must carry a
+lane, an endpoint and a ``model_verification`` state the lane's row can
+produce (a first-party row records ``verified``, ``mismatch`` or
+``unreported``; a gateway row records ``unverifiable``). Anything less
+cannot verify where the review went, and a check that cannot verify that
+must not read as a pass.
 
 An authentication failure is labelled by the credential kind the lane
 bound, never by a fixed label, so a gateway 401 is not blamed on the Claude
@@ -79,6 +84,13 @@ AUTH_LABELS: Final[dict[str, str]] = {
 #: The file lintro refreshes with this round's run record (state_store).
 STATE_FILENAME: Final[str] = "state.json"
 
+#: The verification states a row can record, by whether it is first-party
+#: (``lintro.ai.enums.model_verification``; ``legacy`` is history only).
+_FIRST_PARTY_STATES: Final[frozenset[str]] = frozenset(
+    {"verified", "mismatch", "unreported"},
+)
+_GATEWAY_STATES: Final[frozenset[str]] = frozenset({"unverifiable"})
+
 
 @dataclass(frozen=True)
 class LaneFacts:
@@ -92,12 +104,16 @@ class LaneFacts:
         credential: The credential kind the active lane bound, or empty.
         state_file: The state file holding this round's run record, or
             ``None`` when no state directory was exported.
+        run_id: This workflow run's id (``GITHUB_RUN_ID``); the state file
+            must name it, so a prior run's downloaded artifact is never
+            read as this run's provenance. Empty outside Actions.
     """
 
     chain: tuple[str, ...]
     lanes: Mapping[str, Mapping[str, Any]]
     credential: str
     state_file: Path | None
+    run_id: str = ""
 
     @property
     def active(self) -> str:
@@ -156,35 +172,70 @@ def lane_facts(env: Mapping[str, str]) -> LaneFacts | None:
         lanes=lanes,
         credential=env.get("LANE_CREDENTIAL", "").strip(),
         state_file=Path(state_dir) / STATE_FILENAME if state_dir else None,
+        run_id=env.get("GITHUB_RUN_ID", "").strip(),
     )
 
 
-def latest_run_record(state_file: Path | None) -> Mapping[str, Any] | None:
-    """Return this round's run record from the persisted state.
+def latest_run_record(
+    state_file: Path | None,
+    *,
+    run_id: str = "",
+) -> tuple[Mapping[str, Any] | None, str]:
+    """Return this run's run record from the persisted state.
 
-    lintro appends the current round's record last (incremental_coverage),
-    so the last entry of ``runs`` is this run's.
+    lintro writes the state with this run's ``run_id`` and appends the
+    current round's record last (incremental_coverage), so a state file
+    naming this run has this run's record as the last entry of ``runs``. A
+    state file naming another run is a prior round's artifact that this run
+    never refreshed, and is not provenance for this review.
 
     Args:
         state_file: The ``state.json`` path, or ``None``.
+        run_id: This run's id; when set, the state must name it.
 
     Returns:
-        The record, or ``None`` when the file, the list or the entry is
-        missing or unreadable.
+        The record and an empty string, or ``None`` and the reason there is
+        no usable record.
     """
-    if state_file is None or not state_file.is_file():
-        return None
+    if state_file is None:
+        return None, "no state directory was exported"
+    if not state_file.is_file():
+        return None, f"{state_file.name} was not written"
     try:
         payload = json.loads(state_file.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
+        return None, f"{state_file.name} is unreadable"
     if not isinstance(payload, dict):
-        return None
+        return None, f"{state_file.name} is not a state object"
+    recorded_run = str(payload.get("run_id") or "")
+    if run_id and recorded_run != run_id:
+        return None, (
+            f"{state_file.name} belongs to run {recorded_run or '(none)'}, "
+            f"not this run ({run_id}); this run persisted no record"
+        )
     runs = payload.get("runs")
     if not isinstance(runs, list) or not runs:
-        return None
+        return None, f"{state_file.name} lists no runs"
     last = runs[-1]
-    return last if isinstance(last, dict) else None
+    if not isinstance(last, dict):
+        return None, f"the last run in {state_file.name} is not a record"
+    return last, ""
+
+
+def _incomplete(record: Mapping[str, Any], row: Mapping[str, Any]) -> str:
+    """Return why *record* cannot vouch for its lane, or empty when it can."""
+    if not str(record.get("endpoint") or "").strip():
+        return "the run record names no endpoint"
+    verification = str(record.get("model_verification") or "")
+    first_party = bool(row.get("first_party"))
+    allowed = _FIRST_PARTY_STATES if first_party else _GATEWAY_STATES
+    if verification in allowed:
+        return ""
+    kind = "first-party" if first_party else "gateway"
+    return (
+        f"the run record's model_verification {verification or '(none)'!r} is "
+        f"not a state a {kind} lane can produce"
+    )
 
 
 def _host(value: str) -> str:
@@ -215,12 +266,15 @@ def _reported(record: Mapping[str, Any]) -> str:
 def lane_verdict(
     facts: LaneFacts,
     record: Mapping[str, Any] | None,
+    *,
+    missing: str = "",
 ) -> LaneVerdict:
     """Apply decision C's rows to a produced review's run record.
 
     Args:
         facts: The lane facts the wrapper exported.
-        record: This round's run record, or ``None`` when none was persisted.
+        record: This run's run record, or ``None`` when none was persisted.
+        missing: Why there is no record, from :func:`latest_run_record`.
 
     Returns:
         The verdict: a red status with its reason, or warnings only.
@@ -229,8 +283,8 @@ def lane_verdict(
         return LaneVerdict(
             status=STATUS_PROVENANCE_UNRECORDED,
             reason=(
-                "the review persisted no run record, so where it went cannot be "
-                "verified"
+                f"where the review went cannot be verified: "
+                f"{missing or 'no run record'}"
             ),
         )
     lane = str(record.get("lane") or "")
@@ -243,6 +297,9 @@ def lane_verdict(
                 f"{list(facts.chain)}"
             ),
         )
+    incomplete = _incomplete(record, row)
+    if incomplete:
+        return LaneVerdict(status=STATUS_PROVENANCE_UNRECORDED, reason=incomplete)
     endpoint = _host(str(record.get("endpoint") or ""))
     expected = _host(str(row.get("endpoint") or ""))
     if endpoint != expected:

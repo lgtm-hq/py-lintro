@@ -22,6 +22,8 @@ from assertpy import assert_that
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "ci" / "classify_review_outcome.py"
 MANIFEST = REPO_ROOT / "scripts" / "ci" / "ai_review_lanes.json"
+#: This workflow run's id, which the state file must name.
+RUN_ID = "38900000001"
 
 
 def _load() -> ModuleType:
@@ -70,7 +72,7 @@ def _env(
     if record is not None:
         earlier = {"round": 1, "lane": "anthropic", "endpoint": "api.anthropic.com"}
         (state_dir / "state.json").write_text(
-            json.dumps({"version": 1, "runs": [earlier, record]}),
+            json.dumps({"version": 1, "run_id": RUN_ID, "runs": [earlier, record]}),
             encoding="utf-8",
         )
     return {
@@ -78,6 +80,7 @@ def _env(
         "LINTRO_REVIEW_LANES": json.dumps({lane: rows[lane] for lane in chain}),
         "LANE_CREDENTIAL": credential,
         "LINTRO_REVIEW_STATE_DIR": str(state_dir),
+        "GITHUB_RUN_ID": RUN_ID,
     }
 
 
@@ -298,6 +301,71 @@ def test_a_missing_run_record_is_red_as_unrecorded(
     assert_that(report.status).is_equal_to("provenance-unrecorded")
 
 
+def test_a_prior_runs_artifact_is_not_this_runs_provenance(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """A downloaded state naming another run cannot vouch for this review.
+
+    The workflow downloads the prior round's artifact into the state
+    directory; if this run persisted nothing, that file is still there with
+    the prior run's id, and must not be read as this run's record.
+    """
+    env = _env(tmp_path, rows, ["anthropic"], record=_record())
+    state = Path(env["LINTRO_REVIEW_STATE_DIR"]) / "state.json"
+    stale = json.loads(state.read_text(encoding="utf-8"))
+    stale["run_id"] = "38800000000"
+    state.write_text(json.dumps(stale), encoding="utf-8")
+
+    report = classifier.classify(status=0, output="{}", env=env)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONTRADICTED)
+    assert_that(report.status).is_equal_to("provenance-unrecorded")
+    assert_that(report.headline).contains("belongs to run 38800000000")
+
+
+@pytest.mark.parametrize(
+    ("chain", "record", "fragment"),
+    [
+        # No verification state at all: nothing says what answered.
+        (
+            ["anthropic"],
+            {"lane": "anthropic", "endpoint": "api.anthropic.com"},
+            "'(none)'",
+        ),
+        # History-only state on a live round.
+        (["anthropic"], _record(model_verification="legacy"), "'legacy'"),
+        # A gateway record claiming a verification a gateway cannot give.
+        (
+            ["zai"],
+            _record(lane="zai", endpoint="api.z.ai", model_verification="verified"),
+            "gateway lane",
+        ),
+        # A first-party record in a state only a gateway produces.
+        (["anthropic"], _record(model_verification="unverifiable"), "first-party lane"),
+        # An endpoint-less record.
+        (["anthropic"], _record(endpoint=""), "names no endpoint"),
+    ],
+)
+def test_an_incomplete_or_impossible_record_is_red_as_unrecorded(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+    chain: list[str],
+    record: dict[str, Any],
+    fragment: str,
+) -> None:
+    """A record must carry a state the lane's row can produce; less is refused."""
+    env = _env(tmp_path, rows, chain, record=record)
+
+    report = classifier.classify(status=0, output="{}", env=env)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.CONTRADICTED)
+    assert_that(report.status).is_equal_to("provenance-unrecorded")
+    assert_that(report.headline).contains(fragment)
+
+
 def test_an_unreadable_chain_trusts_no_recorded_lane(
     classifier: ModuleType,
     rows: dict[str, Any],
@@ -394,6 +462,21 @@ def test_an_auth_failure_is_labelled_by_the_bound_credential(
     assert_that(report.headline).contains(f"({label})")
 
 
+def test_thin_auth_prose_is_labelled_by_the_bound_credential_too(
+    classifier: ModuleType,
+) -> None:
+    """A thin envelope whose prose says OAuth still names the bound credential."""
+    label = classifier.refine_failure_kind(
+        transport="cli",
+        kind="",
+        message="not logged in, run /login",
+        output="",
+        credential="codex_oauth",
+    )
+
+    assert_that(label).is_equal_to("auth_failed:codex_session")
+
+
 def test_without_a_bound_credential_the_prose_heuristics_still_apply(
     classifier: ModuleType,
 ) -> None:
@@ -450,6 +533,56 @@ def test_warnings_and_status_reach_the_annotation_and_summary(
     text = summary.read_text(encoding="utf-8")
     assert_that(text).contains("🚫 AI Review (cli)")
     assert_that(text).contains("treat the posted review as unverified")
+
+
+def test_the_reader_matches_the_state_lintro_really_writes(tmp_path: Path) -> None:
+    """The producer's ``state.json`` carries ``run_id`` and the record where read.
+
+    ``write_state_part(final=True)`` is what the review's final persist calls;
+    the verdict module must find this run's id at the top level and this
+    round's record as the last run, or every CI run would read as unrecorded.
+    """
+    from lintro.ai.review.models.review_state import ReviewState
+    from lintro.ai.review.models.run_identity import RunIdentity
+    from lintro.ai.review.models.run_record import RunRecord
+    from lintro.ai.review.state_store import write_state_part
+
+    verdict = importlib.util.spec_from_file_location(
+        "review_lane_verdict",
+        SCRIPT.parent / "review_lane_verdict.py",
+    )
+    assert verdict is not None and verdict.loader is not None
+    module = importlib.util.module_from_spec(verdict)
+    verdict.loader.exec_module(module)
+    earlier = RunRecord(identity=RunIdentity(round=1, lane="anthropic"))
+    current = RunRecord(
+        identity=RunIdentity(
+            round=2,
+            lane="anthropic",
+            endpoint="api.anthropic.com",
+            first_party=True,
+            credential="claude_oauth",
+            model_verification="verified",
+        ),
+    )
+    state_dir = tmp_path / "ai-review-state"
+    write_state_part(
+        state=ReviewState(runs=(earlier, current), run_id=RUN_ID),
+        directory=state_dir,
+        sequence=1,
+        final=True,
+    )
+
+    record, missing = module.latest_run_record(state_dir / "state.json", run_id=RUN_ID)
+
+    assert_that(missing).is_empty()
+    assert record is not None
+    assert_that(record["round"]).is_equal_to(2)
+    assert_that(record["lane"]).is_equal_to("anthropic")
+    assert_that(record["model_verification"]).is_equal_to("verified")
+    stale, why = module.latest_run_record(state_dir / "state.json", run_id="other")
+    assert_that(stale).is_none()
+    assert_that(why).contains(f"belongs to run {RUN_ID}")
 
 
 def test_the_lane_module_is_stdlib_only() -> None:

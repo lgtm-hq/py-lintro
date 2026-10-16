@@ -849,9 +849,17 @@ def refine_failure_kind(
     Returns:
         A transport-aware kind label for CI summaries.
     """
-    if kind == "auth_failed" and credential in _lanes.AUTH_LABELS:
-        return str(_lanes.AUTH_LABELS[credential])
     haystack = f"{message}\n{output}"
+    if credential in _lanes.AUTH_LABELS and (
+        kind == "auth_failed"
+        or (
+            kind in ("", "unknown")
+            and (_OAUTH_AUTH.search(haystack) or _API_KEY_AUTH.search(haystack))
+        )
+    ):
+        # The bound credential names the failure, for a concrete kind and
+        # for a thin envelope whose prose only says "authentication" alike.
+        return str(_lanes.AUTH_LABELS[credential])
     if transport == "cli":
         # Prose patterns may only classify a *thin* envelope (no concrete
         # kind): a real envelope kind (insufficient_credits, timeout, ...)
@@ -930,7 +938,8 @@ def _apply_lane_verdict(
     """
     if facts is None or not report.outcome.produced_review:
         return report
-    verdict = _lanes.lane_verdict(facts, _lanes.latest_run_record(facts.state_file))
+    record, missing = _lanes.latest_run_record(facts.state_file, run_id=facts.run_id)
+    verdict = _lanes.lane_verdict(facts, record, missing=missing)
     if not verdict.status:
         return replace(report, warnings=verdict.warnings)
     return OutcomeReport(
