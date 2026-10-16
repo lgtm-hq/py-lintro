@@ -127,11 +127,12 @@ Switching lanes is a change to the variable and reaches every open PR on its nex
 rerun keeps its run's inputs, so after a switch the recovery step for a red PR is an
 `@lintro review` comment, which starts a new run.
 
-On that lane lintro sends **no** `--model` unless one is configured (#2537). The two
-codex credentials do not accept the same models: an API key reaches the OpenAI API
-catalogue and still gets the provider default (`gpt-4o`), while a ChatGPT-plan session
-reaches only that plan's models and rejects an API-catalogue name outright — the whole
-call fails with
+The dogfood `openai` lane always sends its row's model (`gpt-6.1-sol`, or the
+`LINTRO_AI_MODEL` override). Outside a lane, on the openai `cli` transport lintro sends
+**no** `--model` unless one is configured (#2537). The two codex credentials do not
+accept the same models: an API key reaches the OpenAI API catalogue and still gets the
+provider default (`gpt-4o`), while a ChatGPT-plan session reaches only that plan's
+models and rejects an API-catalogue name outright — the whole call fails with
 `The 'gpt-4o' model is not supported when using Codex with a ChatGPT account`. The plan
 catalogue is per-account and renames often, so lintro defers to codex's own default
 rather than pinning a slug that would break on the next rename. Set `ai.model` (or
@@ -221,7 +222,7 @@ model alone (a first-party call that reports another model is `mismatch` and its
 coverage is not reused). Outside CI the provider's base-URL override
 (`ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, or the Claude settings files' `env` block) and
 the provider's own host decide. The credential kinds add `api_key` (a metered vendor
-key, or the API transport) and `unknown` to the four lane bindings so a local run can be
+key, or the API transport) and `unknown` to the five lane bindings so a local run can be
 described too. The Claude credential follows Claude Code's documented precedence: the
 bearer token, then the API key or helper, then the OAuth token, which bare mode never
 reads. A run off the provider's host prices its shadow figure on

@@ -204,9 +204,10 @@ A run record reports where its requests went and what answered, not what was con
   `model_verification` with exactly five states:
   - `verified`: on a first-party endpoint, every completed call reported model usage,
     the requested model is among the reported models once aliases are normalised to
-    `canonicalModel`, and every reported model is the requested model.
+    `canonicalModel`, and every reported model is one the run accepts.
   - `mismatch`: on a first-party endpoint, a completed call reported model usage and the
-    requested model is absent from it, or a reported model is not the requested model.
+    requested model is absent from it, or a reported model is one the run does not
+    accept.
   - `unverifiable`: the endpoint is not first-party, so the reported model cannot be
     trusted to describe what answered.
   - `unreported`: some completed call returned no model usage.
@@ -214,14 +215,18 @@ A run record reports where its requests went and what answered, not what was con
     Only the state reader assigns it; a run in the current workflow never produces it.
 
   The requested model of a call is the one the run asked for: the row's default, or the
-  `LINTRO_AI_MODEL` override the lane job resolved into the row. States are assigned in
-  a fixed order so that no round qualifies for two: `legacy` by the state reader; then
-  `unverifiable` whenever the endpoint is not first-party, whatever the envelope
-  carried; then, over every completed call of the round, `mismatch` if any call is a
-  mismatch, else `unreported` if any call carried no model usage, else `verified`. A
-  non-first-party round that reports no model usage is therefore `unverifiable`, never
-  `unreported`. A round that completed no call has no state of its own: the verdict
-  rests on the reused rounds it inherits from, each judged on its stored state.
+  `LINTRO_AI_MODEL` override the lane job resolved into the row. The models a run
+  accepts are that requested model plus any configured `fallback_models` and
+  custom-agent `model` overrides; on a lane the wrapper exports no allowed list and the
+  gate refuses configured fallbacks, so the accepted set is the requested model and the
+  agents' overrides. States are assigned in a fixed order so that no round qualifies for
+  two: `legacy` by the state reader; then `unverifiable` whenever the endpoint is not
+  first-party, whatever the envelope carried; then, over every completed call of the
+  round, `mismatch` if any call is a mismatch, else `unreported` if any call carried no
+  model usage, else `verified`. A non-first-party round that reports no model usage is
+  therefore `unverifiable`, never `unreported`. A round that completed no call has no
+  state of its own: the verdict rests on the reused rounds it inherits from, each judged
+  on its stored state.
 
 - `auth_mode` is no longer derived from the `--bare` policy; it follows `credential`.
 - No renderer prints a configured model without the endpoint host beside it and the
@@ -268,16 +273,16 @@ A run record reports where its requests went and what answered, not what was con
   unchanged round must not inherit it into a green check. The stored state is not taken
   on trust either: before coverage is inherited, every stored round's `lane` and
   `endpoint` are re-checked against the current manifest row, and on a row declared
-  `first_party: true` its `reported_models` are re-checked against the round's requested
-  model as well, in the same order the states are assigned; a round that no longer
-  passes is excluded as if it were `mismatch`. A non-first-party round's reported models
-  are not re-checked, because the live rule does not trust them either. Historical cost
-  figures are kept. A stored round with no lane field predates this ADR and records no
-  endpoint, so nothing can say which lane produced it; from 2026-09-09 until the interim
-  measure in Consequences, such rounds were answered by GLM through Z.ai. It is
-  therefore **not** reused for lane validity. It is kept in the cumulative history with
-  `model_verification == legacy` and labelled "predates ADR-0011", and it never
-  contributes to a live verdict. The first run after
+  `first_party: true` its `reported_models` are re-checked against the current run's
+  accepted models as well, in the same order the states are assigned; a round that no
+  longer passes is excluded as if it were `mismatch`. A non-first-party round's reported
+  models are not re-checked, because the live rule does not trust them either.
+  Historical cost figures are kept. A stored round with no lane field predates this ADR
+  and records no endpoint, so nothing can say which lane produced it; from 2026-09-09
+  until the interim measure in Consequences, such rounds were answered by GLM through
+  Z.ai. It is therefore **not** reused for lane validity. It is kept in the cumulative
+  history with `model_verification == legacy` and labelled "predates ADR-0011", and it
+  never contributes to a live verdict. The first run after
   [#2870](https://github.com/lgtm-hq/py-lintro/issues/2870) therefore re-reviews each
   open PR once on the active lane; that one-time cost is accepted in preference to a
   green check built on rounds of unknown provenance.
@@ -418,9 +423,14 @@ lane, never redirect a review to an unreviewed host. Adding or changing a lane i
 reviewed diff to the manifest. A switch reaches an already-red PR through a new run (an
 `@lintro review` comment), not through a rerun of the failed one. Because reuse validity
 includes the lane, every lane switch, not only the first run after this ADR lands,
-re-reviews each open PR once on the new lane. A reader of a sticky sees the lane, the
-endpoint host, whether the model claim is verified, and what the cost figure is based
-on; the sticky cannot again say Opus while GLM answers.
+re-reviews each open PR once on the new lane, and so does a change of `LINTRO_AI_MODEL`
+on the same lane, because a stored round answered by another model is not accepted. The
+rename of the initial rows (`claude-subscription`, `codex-subscription`,
+`zai-glm-gateway` to `anthropic`, `openai`, `zai`, 2026-10-16) has the same one-time
+effect: no alias maps the old ids, so rounds stored under them are re-reviewed rather
+than reused. A reader of a sticky sees the lane, the endpoint host, whether the model
+claim is verified, and what the cost figure is based on; the sticky cannot again say
+Opus while GLM answers.
 
 The cost is one more committed artifact to keep in step with the secrets that exist and
 a resolver job on every review. Adding a lane now requires a manifest row, a smoke row

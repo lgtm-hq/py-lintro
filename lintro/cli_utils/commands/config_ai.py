@@ -190,14 +190,19 @@ def displayable_base_url(url: str | None) -> str | None:
     """
     if not url:
         return None
-    parts = urlsplit(url)
-    if not parts.scheme or not parts.hostname:
+    try:
+        parts = urlsplit(url)
+        scheme, hostname, port = parts.scheme, parts.hostname, parts.port
+    except ValueError:
+        # An unparsable URL, or a port that is not a number or is out of
+        # range: nothing after the scheme can be trusted to be free of a
+        # credential, so report only that a value is set.
+        return "<unparsable url>"
+    if not scheme or not hostname:
         return url
-    host = parts.hostname
-    if ":" in host:
-        host = f"[{host}]"
-    netloc = f"{host}:{parts.port}" if parts.port else host
-    return urlunsplit((parts.scheme, netloc, parts.path, "", ""))
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    netloc = f"{host}:{port}" if port else host
+    return urlunsplit((scheme, netloc, parts.path, "", ""))
 
 
 def ai_config_json(config: LintroConfig) -> dict[str, Any]:

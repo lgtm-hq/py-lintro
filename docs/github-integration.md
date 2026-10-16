@@ -88,13 +88,14 @@ workflow runs an AI diff review and prints the JSON result to the job log.
 **Features:**
 
 - 🤖 **AI diff review** via `lintro review --pr <n> --depth 1 --output json`
-- 🛡️ **Trusted install** — lintro is installed from the **default-branch commit that
-  supplied the workflow** (`github.workflow_sha`), never the PR head. The code that runs
-  with the credential is always trusted, so a PR cannot substitute its own `lintro/**`
-  to exfiltrate it. The PR is still reviewed: `lintro review --pr` fetches the diff
-  through `gh` (GitHub API), so the PR's changes are reviewed as data and never executed
-  with the secret. Trade-off: a PR that breaks the review code itself isn't caught by
-  this job — that is covered by the unit tests.
+- 🛡️ **Trusted install** — lintro is installed from the **commit that supplied the
+  workflow** (`github.workflow_sha`: the tip of the PR's base branch, or the default
+  branch on a comment-triggered run), never the PR head. The code that runs with the
+  credential is always trusted, so a PR cannot substitute its own `lintro/**` to
+  exfiltrate it. The PR is still reviewed: `lintro review --pr` fetches the diff through
+  `gh` (GitHub API), so the PR's changes are reviewed as data and never executed with
+  the secret. Trade-off: a PR that breaks the review code itself isn't caught by this
+  job — that is covered by the unit tests.
 - 🔑 **A declared lane, selected by a variable (ADR-0011)** — runs the `cli` transport
   on the lane the repository variable `LINTRO_AI_PROVIDER` names in the committed
   manifest `scripts/ci/ai_review_lanes.json` (`anthropic`, `openai`, `cursor`, `zai` or
@@ -136,8 +137,8 @@ To activate it, add the secret the lane's row binds (**Settings → Secrets and 
 `ZAI_AUTH_TOKEN` for `zai`, `KIMI_API_KEY` for `kimi`. To switch lanes, set the
 repository variable `LINTRO_AI_PROVIDER` to the lane id, and optionally
 `LINTRO_AI_MODEL`; the switch reaches every open PR on its next run. Optionally set
-`LINTRO_AI_MAX_COST_USD=uncapped`. Because reviews run using lintro from the
-default-branch commit that supplied the workflow, the credential is safe to enable.
+`LINTRO_AI_MAX_COST_USD=uncapped`. Because reviews run using lintro from the commit that
+supplied the workflow, the credential is safe to enable.
 
 #### Activation precondition (security audit #1317)
 
@@ -147,12 +148,12 @@ all four controls (also asserted in `tests/scripts/test_run_ai_review.py`):
 1. **Same-repo only** — the job `if` guard requires
    `pull_request.head.repo.full_name == github.repository` (fork PRs never run).
 2. **Trusted install** — the checkout step uses `github.workflow_sha`, never the PR
-   head, so code that runs with the credential is always the default-branch commit that
-   supplied the workflow. The `claude` CLI is installed at a version pinned in that same
-   trusted checkout.
-3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`
-   and `ZAI_AUTH_TOKEN` are injected only into the final review step's `env`, after
-   checkout, the CLI install, and dependency install.
+   head, so code that runs with the credential is always the commit that supplied the
+   workflow. The `claude` CLI is installed at a version pinned in that same trusted
+   checkout.
+3. **Secret ordering** — `CLAUDE_CODE_OAUTH_TOKEN`, `CURSOR_API_KEY`, `CODEX_AUTH_JSON`,
+   `ZAI_AUTH_TOKEN` and `KIMI_API_KEY` are injected only into the final review step's
+   `env`, after checkout, the CLI install, and dependency install.
 4. **Lane-selected credentials** — each secret is forwarded by one literal expression
    gated on its lane being in the resolved chain, never by a variable's presence.
 
@@ -241,9 +242,9 @@ The request is validated in a separate `request` job that holds no secrets and o
 read-only token (`scripts/ci/resolve_review_request.py`, with the parser in
 `lintro/ai/review/commands.py`). The comment text reaches it only through the
 environment, never a shell line. On `issue_comment` there is no pull-request base
-commit, so the review job installs lintro from the default-branch commit that supplied
-the workflow (`github.workflow_sha`). `issue_comment` is not affected by GitHub's
-2026-11-02 default restriction on `pull_request_target`.
+commit, so the review job installs lintro from the commit that supplied the workflow
+(`github.workflow_sha`). `issue_comment` is not affected by GitHub's 2026-11-02 default
+restriction on `pull_request_target`.
 
 #### Review slots and the per-PR budget
 

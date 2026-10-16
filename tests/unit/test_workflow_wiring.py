@@ -5688,15 +5688,33 @@ _CHAIN_MEMBERSHIP_RE = re.compile(
     r"contains\(fromJSON\(needs\.lane\.outputs\.chain\), '[a-z0-9-]+'\)",
 )
 
-#: Variables no dogfood job may read anywhere (ADR-0011 A): one supplied an
-#: endpoint, the other a transport, and neither can be bounded to a declared
-#: row. The lane selector and the model override are read by the lane job's
-#: resolver step alone (asserted below); budget overlays stay variables.
-_ROUTING_VARS_RE = re.compile(r"vars\.(LINTRO_AI_TRANSPORT|ZAI_BASE_URL)\b")
 #: The two routing inputs the resolver accepts, and the only step that may
 #: read them: a selector can only name a declared row, so an inherited value
 #: can at worst pick another declared lane, which the sticky prints.
 _LANE_SELECTOR_VARS = {"vars.LINTRO_AI_PROVIDER", "vars.LINTRO_AI_MODEL"}
+#: Every spelling of a ``vars`` read GitHub accepts: ``vars.NAME``,
+#: ``vars['NAME']`` and ``vars["NAME"]``.
+_VARS_READ_RE = re.compile(
+    r"\bvars(?:\.(?P<dot>[A-Za-z_][A-Za-z0-9_]*)"
+    r"|\[\s*['\"](?P<bracket>[A-Za-z_][A-Za-z0-9_]*)['\"]\s*\])",
+)
+
+
+def _vars_reads(blob: str) -> list[str]:
+    """Return every variable name *blob* reads from ``vars``, in order.
+
+    Args:
+        blob: Workflow text or a joined set of expression values.
+
+    Returns:
+        The names, one per read, in any spelling GitHub accepts.
+    """
+    return [
+        match.group("dot") or match.group("bracket")
+        for match in _VARS_READ_RE.finditer(blob)
+    ]
+
+
 #: Names of the CLI-behaviour flags the review pins for the agent binaries.
 #: Matched by shape rather than listed, so a fourth flag is mirrored without
 #: anyone remembering to extend a tuple.
@@ -6063,12 +6081,12 @@ def test_the_structural_regexes_match_what_they_guard() -> None:
     assert_that(
         _CHAIN_MEMBERSHIP_RE.search(dogfood_env["CLAUDE_CODE_OAUTH_TOKEN"]),
     ).is_not_none()
-    assert_that(_ROUTING_VARS_RE.findall("x ${{ vars.ZAI_BASE_URL }} y")).is_equal_to(
+    assert_that(_vars_reads("x ${{ vars.ZAI_BASE_URL }} y")).is_equal_to(
         ["ZAI_BASE_URL"],
     )
-    assert_that(
-        _ROUTING_VARS_RE.findall("${{ vars.LINTRO_AI_MAX_COST_USD }}"),
-    ).is_empty()
+    assert_that(_vars_reads('${{ vars["LINTRO_AI_MODEL"] }}')).is_equal_to(
+        ["LINTRO_AI_MODEL"],
+    )
     assert_that(_EGRESS_ENDPOINT_RE.fullmatch("api.anthropic.com:443")).is_not_none()
 
 
@@ -6079,9 +6097,10 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     The lane selector and the model override are variables, read by the
     resolver step of the secret-free lane job and nowhere else: the resolver
     accepts only a declared lane id and a model id, so the worst an inherited
-    value can do is pick another declared row. Every mention of either name
-    in the file, in any ``vars`` spelling, is counted and must sit in that
-    step's ``env``.
+    value can do is pick another declared row. Every ``vars`` read in the
+    file, in any spelling GitHub accepts, is collected: the budget overlays
+    may appear anywhere, the two selector names only in that step's ``env``,
+    and nothing else at all.
 
     Args:
         workflow: The workflow file under test.
@@ -6089,43 +6108,31 @@ def test_no_dogfood_job_reads_a_routing_value_from_vars(workflow: str) -> None:
     text = (_REPO_ROOT / ".github" / "workflows" / workflow).read_text(
         encoding="utf-8",
     )
-    assert_that(_ROUTING_VARS_RE.findall(text)).described_as(workflow).is_empty()
-    budget = {"vars.LINTRO_AI_MAX_COST_USD", "vars.LINTRO_AI_REVIEW_PR_BUDGET_USD"}
-    reads = set(re.findall(r"\bvars\.[A-Za-z_][A-Za-z0-9_]*", text))
-    assert_that(reads - budget - _LANE_SELECTOR_VARS).described_as(
+    budget = {"LINTRO_AI_MAX_COST_USD", "LINTRO_AI_REVIEW_PR_BUDGET_USD"}
+    selectors = {name.removeprefix("vars.") for name in _LANE_SELECTOR_VARS}
+    reads = _vars_reads(text)
+    assert_that(set(reads) - budget - selectors).described_as(
         f"{workflow} vars reads",
     ).is_empty()
-    # Every spelling GitHub accepts: vars.NAME, vars['NAME'], vars["NAME"].
-    selector_names = {name.removeprefix("vars.") for name in _LANE_SELECTOR_VARS}
-    mention_re = re.compile(
-        r"\bvars(?:\.(?P<dot>[A-Za-z_][A-Za-z0-9_]*)"
-        r"|\[\s*['\"](?P<bracket>[A-Za-z_][A-Za-z0-9_]*)['\"]\s*\])",
-    )
-
-    def mentions(blob: str) -> list[str]:
-        return [
-            m.group("dot") or m.group("bracket")
-            for m in mention_re.finditer(blob)
-            if (m.group("dot") or m.group("bracket")) in selector_names
-        ]
-
-    total = mentions(text)
-    assert_that(set(total)).described_as(f"{workflow} selector reads").is_equal_to(
-        selector_names,
-    )
     loaded = _load_workflow(name=workflow)
     resolve = next(
         step for step in loaded["jobs"]["lane"]["steps"] if step.get("id") == "resolve"
     )
-    in_place = mentions(json.dumps(resolve.get("env") or {}))
+    in_place = [
+        name
+        for name in _vars_reads(" ".join(map(str, (resolve.get("env") or {}).values())))
+        if name in selectors
+    ]
+    selector_reads = [name for name in reads if name in selectors]
+    assert_that(set(selector_reads)).described_as(
+        f"{workflow} selector reads",
+    ).is_equal_to(selectors)
     assert_that(sorted(in_place)).described_as(
         f"{workflow}: every selector read sits in the lane job's resolve env",
-    ).is_equal_to(sorted(total))
-    assert_that(
-        _ROUTING_VARS_RE.search("x ${{ vars.LINTRO_AI_TRANSPORT }}"),
-    ).is_not_none()
-    assert_that(mentions("${{ vars['LINTRO_AI_MODEL'] }}")).is_equal_to(
-        ["LINTRO_AI_MODEL"],
+    ).is_equal_to(sorted(selector_reads))
+    # The collector sees every spelling, so a banned name cannot hide.
+    assert_that(_vars_reads("${{ vars['ZAI_BASE_URL'] }} ${{ vars.X }}")).is_equal_to(
+        ["ZAI_BASE_URL", "X"],
     )
 
 

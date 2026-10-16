@@ -275,9 +275,9 @@ jobs:
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1'
           DISABLE_AUTOUPDATER: '1'
           # No model overlay: the dogfood review takes its model from the lane
-          # row, and one value cannot serve the three lanes this job drives in
-          # one container, so each lane resolves its own default (for codex,
-          # the CLI's own under a subscription session, #2537).
+          # row (every row names one), and one value cannot serve the lanes
+          # this job drives in one container, so each smoke row names its own
+          # model in the contract suite.
           # cursor: the same API key the dogfood cursor lane uses.
           # yamllint disable-line rule:line-length
           CURSOR_API_KEY: ${{ env.AI_CONTRACT_SECRETS_ALLOWED == 'true' && secrets.CURSOR_API_KEY || '' }}

@@ -178,12 +178,14 @@ def test_the_lane_job_runs_the_resolver_secret_free(workflow: str) -> None:
     assert_that(checkout["with"]["persist-credentials"]).is_false()
     if workflow == "ai-review.yml":
         assert_that(checkout["with"]["ref"]).is_equal_to("${{ github.workflow_sha }}")
-        # A comment that cannot be a review request spends no runner.
+        # A comment that cannot be a review request spends no runner: the
+        # lane job's comment clause is the request job's prefilter verbatim,
+        # so the two cannot drift apart and leave the review silently unrun.
         condition = " ".join(str(job["if"]).split())
         assert_that(condition).contains("github.event_name == 'pull_request_target'")
-        assert_that(condition).contains(
-            "startsWith(github.event.comment.body, '@lintro review')",
-        )
+        loaded = yaml.safe_load((WORKFLOWS / workflow).read_text(encoding="utf-8"))
+        request_condition = " ".join(str(loaded["jobs"]["request"]["if"]).split())
+        assert_that(condition).contains(f"({request_condition})")
     resolve = next(step for step in job["steps"] if step.get("id") == "resolve")
     assert_that(str(resolve["run"]).strip()).is_equal_to(
         "python3 -I scripts/ci/resolve_review_lanes.py --format github",
@@ -515,6 +517,10 @@ def test_the_model_variable_overrides_the_rows_default(
     kept = resolver.resolve_chain(manifest)
     assert_that(kept.active["model"]).is_equal_to("claude-opus-5-5")
     assert_that(kept.model_source).is_equal_to("manifest")
+    # Empty is what an unset repository variable expands to: the row's own.
+    empty = resolver.resolve_chain(manifest, model="")
+    assert_that(empty.active["model"]).is_equal_to("claude-opus-5-5")
+    assert_that(empty.model_source).is_equal_to("manifest")
 
     overridden = resolver.resolve_chain(manifest, model="claude-sonnet-5-5")
     assert_that(overridden.active["model"]).is_equal_to("claude-sonnet-5-5")
@@ -539,9 +545,7 @@ def test_the_model_variable_overrides_the_rows_default(
         resolver.resolve_chain(manifest, model="claude-opus-5-5")
     assert_that(str(caught.value)).contains("unpriced model")
 
-    for bad in ("x y", "gpt\n", "a;b", "$(id)", ""):
-        if not bad:
-            continue
+    for bad in ("x y", "gpt\n", "a;b", "$(id)", "-x"):
         with pytest.raises(resolver.LaneError) as caught:
             resolver.resolve_chain(manifest, model=bad)
         assert_that(str(caught.value)).contains("is not a model id")

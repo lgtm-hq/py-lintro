@@ -648,7 +648,10 @@ class AIConfig(BaseModel):
         Raises:
             ValueError: When the value is not a variable name.
         """
-        if value is None or _ENV_NAME_RE.fullmatch(value):
+        if value is None or not value.strip():
+            # An empty value has always meant "the provider's default".
+            return None
+        if _ENV_NAME_RE.fullmatch(value):
             return value
         msg = (
             "ai.api_key_env must be the NAME of an environment variable "

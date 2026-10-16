@@ -993,6 +993,25 @@ def test_the_config_reports_never_print_a_credential(
     assert_that(rich.output).does_not_contain("hunter2")
     assert_that(rich.output).does_not_contain("token=abc")
 
+    # A port that is not a number, or is out of range, must not crash the
+    # report, and must not print the rest of the URL either.
+    for noisy in (
+        "https://user:pw@proxy.example:abc/v1",
+        "https://proxy.example:99999/v1",
+    ):
+        config_path.write_text(
+            yaml.safe_dump({"ai": {"provider": "anthropic", "api_base_url": noisy}}),
+            encoding="utf-8",
+        )
+        clear_config_cache()
+        malformed = CliRunner().invoke(cli, ["config", "--json"])
+        clear_config_cache()
+        assert_that(malformed.exit_code).described_as(noisy).is_equal_to(0)
+        assert_that(json.loads(malformed.output)["ai"]["api_base_url"]).is_equal_to(
+            "<unparsable url>",
+        )
+        assert_that(malformed.output).does_not_contain("user:pw")
+
     config_path.write_text(
         yaml.safe_dump(
             {"ai": {"provider": "anthropic", "api_key_env": "sk-ant-not-a-name"}},
@@ -1006,6 +1025,17 @@ def test_the_config_reports_never_print_a_credential(
     clear_config_cache()
     assert_that(refused.output).does_not_contain("sk-ant-not-a-name")
     assert_that(refused.output).contains("api_key_env")
+
+    # An empty value keeps its old meaning: unset, the provider's default.
+    config_path.write_text(
+        yaml.safe_dump({"ai": {"provider": "anthropic", "api_key_env": ""}}),
+        encoding="utf-8",
+    )
+    clear_config_cache()
+    empty = CliRunner().invoke(cli, ["config", "--json"])
+    clear_config_cache()
+    assert_that(empty.exit_code).is_equal_to(0)
+    assert_that(json.loads(empty.output)["ai"]["api_key_env"]).is_none()
 
 
 def test_lintro_config_nudges_a_legacy_key_once(
