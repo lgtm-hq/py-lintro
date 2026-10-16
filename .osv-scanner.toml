@@ -22,3 +22,14 @@ reason = "http-cache-semantics@4.2.0: no patched release (advisory first_patched
 id = "GHSA-vfj7-8cjw-p6xm"
 ignoreUntil = 2026-11-02
 reason = "braces@3.0.3: no patched release (advisory first_patched_version = none; 3.0.3 is latest). Dev/lint tooling only (root package.json devDependencies, also bundled in the lintro tools image): reached via micromatch/fast-glob from markdownlint-cli2, stylelint and spectral-cli, plus vite/rollup at build time. Input is glob patterns from the operator's own CLI args and lint configs, never network or end-user input; worst case is a stack-exhaustion crash of a single local lint/build process (DoS only, no confidentiality or integrity impact). Upstream: https://github.com/micromatch/braces/issues/70"
+
+# --- mcp (PyPI, transitive via semgrep) ---
+# GHSA-84m7-p3x7-pcfv (published 2026-10-15) is fixed in mcp 1.30.0, but every
+# semgrep release, 1.181.0 included, requires mcp==1.29.0 exactly, so the
+# isolated semgrep lock cannot move. Drop this entry once semgrep's pin does.
+# Track: https://github.com/semgrep/semgrep/blob/develop/cli/pyproject.toml
+
+[[IgnoredVulns]]
+id = "GHSA-84m7-p3x7-pcfv"
+ignoreUntil = 2026-11-15
+reason = "mcp@1.29.0 in requirements-semgrep.txt: semgrep (every release through 1.181.0) requires mcp==1.29.0 exactly, so no resolvable upgrade exists. The flaw is unbounded session accumulation in mcp's StreamableHTTP server transport, reached only by a long-running MCP server. semgrep bundles mcp for its own `semgrep mcp` server command; lintro runs semgrep as a one-shot CLI linter on local files and never starts that server, in CI, locally or in the tools image, so the vulnerable transport is never opened. Not reachable. Upstream pin: semgrep cli/pyproject.toml"
