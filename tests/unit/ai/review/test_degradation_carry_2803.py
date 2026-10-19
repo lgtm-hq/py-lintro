@@ -53,6 +53,7 @@ from lintro.ai.review.pass_notes import format_pass_note_lines
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.resume import plan_resume, records_for_reviewed
 from lintro.ai.review.run_record_factory import RoundTotals, run_record_from_result
+from lintro.ai.review.state_store import union_states
 
 _HEAD = "b0153e29169bfcb2b702b97ad92be5e4bf84929b"
 #: The head the v5 fixture records (PR #2826's final run); kept apart from
@@ -997,6 +998,63 @@ def test_a_failed_sweep_checkpointed_at_a_newer_hash_is_still_owed() -> None:
                 reviewed_sha=_HEAD,
             ),
         ),
+    )
+
+    scope = redo_scope(prior=prior, hashes=_HASHES)
+
+    assert_that(scope.paths).is_equal_to(frozenset({"a.py"}))
+    assert_that(scope.redone).is_empty()
+
+
+def test_a_rewritten_coverage_key_keeps_its_place_and_the_redo_stays_owed() -> None:
+    """A state merged through union_states can hold the newer record first."""
+    old_then_new = ReviewState(
+        coverage=(
+            CoverageRecord(
+                path="a.py",
+                patch_hash="ha",
+                round=2,
+                reviewed_sha=_OTHER_HEAD,
+            ),
+            CoverageRecord(path="a.py", patch_hash="old", round=2, reviewed_sha=_HEAD),
+        ),
+    )
+    rewrite = ReviewState(
+        coverage=(
+            CoverageRecord(
+                path="a.py",
+                patch_hash="ha",
+                round=2,
+                reviewed_sha=_OTHER_HEAD,
+            ),
+        ),
+    )
+    merged = union_states([old_then_new, rewrite])
+    # The rewritten key stayed where it first appeared: newer record first.
+    assert_that([record.patch_hash for record in merged.coverage]).is_equal_to(
+        ["ha", "old"],
+    )
+    failed_again = DegradationRecord.from_degradation(
+        degradation=CoverageDegradation(
+            reason=_Reason.ADVERSARIAL_SWEEP_FAILED,
+            chunk_index=0,
+            paths=("a.py",),
+        ),
+        head_sha=_OTHER_HEAD,
+    )
+    prior = ReviewState(
+        runs=(
+            *_state(_record(_Reason.ADVERSARIAL_SWEEP_FAILED, paths=("a.py",))).runs,
+            RunRecord(
+                identity=RunIdentity(round=2, sha=_OTHER_HEAD),
+                coverage=RunCoverage(
+                    partial=True,
+                    checkpoint=True,
+                    degradations=(failed_again,),
+                ),
+            ),
+        ),
+        coverage=merged.coverage,
     )
 
     scope = redo_scope(prior=prior, hashes=_HASHES)
