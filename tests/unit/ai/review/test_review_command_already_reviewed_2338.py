@@ -32,7 +32,7 @@ from lintro.cli_utils.commands import review as review_module
 from lintro.cli_utils.commands.review import review_command
 from lintro.config.review_config import ReviewConvergenceConfig
 
-_HEAD = "sha9"
+_HEAD = "abc1234abc1234abc1234abc1234abc1234abc12"
 _DECISION = AlreadyReviewed(head_sha=_HEAD, round=2, files_covered=3, open_findings=1)
 
 
@@ -225,7 +225,7 @@ def test_a_covered_head_skips_the_round_without_calling_the_provider(
     assert_that(result.exit_code).is_equal_to(0)
     assert_that(review_calls["get_provider"]).is_equal_to(0)
     assert_that(review_calls["run_review"]).is_equal_to(0)
-    assert_that(result.output).contains("already reviewed at sha9 in round 2")
+    assert_that(result.output).contains("already reviewed at abc1234 in round 2")
     assert_that(result.output).contains("3 files covered, 1 open finding carried")
     assert_that(seen["force_full"]).is_false()
 
@@ -252,7 +252,7 @@ def test_json_output_emits_the_already_reviewed_envelope(
             "open_p1": 0,
         },
     )
-    assert_that(payload["detail"]).contains("already reviewed at sha9")
+    assert_that(payload["detail"]).contains("already reviewed at abc1234")
     assert_that(payload).does_not_contain_key("readiness_verdict")
     assert_that(payload).does_not_contain_key("findings")
     assert_that(payload).does_not_contain_key("partial")
@@ -343,7 +343,7 @@ def test_post_with_publication_evidence_skips_and_posts_nothing(
     reporter = MagicMock()
     reporter.find_issue_comment.return_value = (
         1,
-        f"<!-- lintro-ai-review -->\n### Findings · Round 2 · `{_HEAD}` · complete",
+        f"<!-- lintro-ai-review -->\n### Findings · Round 2 · `{_HEAD[:7]}` · complete",
     )
     reporter.fetch_pr_diff_lines.return_value = {"a.py": {1}}
     monkeypatch.setattr(

@@ -33,12 +33,19 @@ from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.flagged_file import FlaggedFile
 from lintro.ai.review.models.review_context import ReviewContext
 from lintro.ai.review.models.review_finding import Severity
+from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.review_state import ReviewState
 from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.models.sticky_request import StickyRequest
 from lintro.ai.review.patch_hash import normalized_patch_hash
 from lintro.ai.review.posting_policy import PostingPolicy
+from lintro.ai.review.sticky import build_sticky_comment
+from lintro.ai.review.sticky.heading import (
+    FINDINGS_HEADING_PREFIX,
+    parse_findings_heading,
+)
 from lintro.enums.confidence_level import ConfidenceLevel
 
 _HEAD = "b0153e29169bfcb2b702b97ad92be5e4bf84929b"
@@ -541,18 +548,45 @@ def test_publication_is_complete_with_the_rounds_sticky_and_threads() -> None:
     ).is_true()
 
 
-def test_the_heading_parser_reads_what_the_renderer_writes() -> None:
-    """The guard's parser and the sticky heading cannot drift apart."""
-    from lintro.ai.review.sticky.heading import (
-        FINDINGS_HEADING_PREFIX,
-        parse_findings_heading,
+def test_the_heading_parser_reads_what_the_renderer_writes(
+    sample_review_result: ReviewResult,
+) -> None:
+    """The guard's parser and the sticky heading cannot drift apart.
+
+    A real board is rendered for round 2 at the head and parsed back, so a
+    change to either side fails here.
+
+    Args:
+        sample_review_result: A complete review result fixture.
+    """
+    body = build_sticky_comment(
+        request=StickyRequest(
+            result=sample_review_result,
+            prior_state=ReviewState(runs=(_run(sha=_OTHER_HEAD),)),
+            head_sha=_HEAD,
+        ),
     )
 
+    assert_that(parse_findings_heading(body=body)).is_equal_to((2, _HEAD[:7]))
+
+
+def test_the_heading_parser_handles_each_shape() -> None:
+    """A sha, no sha, a sha in an unexpected form, and no heading at all."""
     assert_that(parse_findings_heading(body=_STICKY)).is_equal_to((2, _HEAD[:7]))
     assert_that(
         parse_findings_heading(body=f"{FINDINGS_HEADING_PREFIX}3 · complete"),
     ).is_equal_to((3, ""))
+    assert_that(
+        parse_findings_heading(body=f"{FINDINGS_HEADING_PREFIX}3 · `ABCDEF1` · x"),
+    ).is_equal_to((3, "ABCDEF1"))
     assert_that(parse_findings_heading(body="no heading here")).is_none()
+
+
+def test_a_sha_the_renderer_would_not_write_is_still_compared() -> None:
+    """An unexpected sha form is read and rejected, not read as absent."""
+    odd = _STICKY.replace(f"`{_HEAD[:7]}`", "`ZZZ`")
+
+    assert_that(_published(sticky=odd)).is_false()
 
 
 def test_a_missing_sticky_is_not_published() -> None:

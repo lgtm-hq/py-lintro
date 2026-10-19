@@ -17,7 +17,7 @@ __all__ = ["FINDINGS_HEADING_PREFIX", "parse_findings_heading"]
 FINDINGS_HEADING_PREFIX = "### Findings · Round "
 
 _FINDINGS_HEADING_RE = re.compile(
-    r"^" + re.escape(FINDINGS_HEADING_PREFIX) + r"(\d+)(?: · `([0-9a-f]+)`)?",
+    r"^" + re.escape(FINDINGS_HEADING_PREFIX) + r"(\d+)(?: · `([^`]*)`)?",
     re.MULTILINE,
 )
 
@@ -34,7 +34,10 @@ def parse_findings_heading(*, body: str) -> tuple[int, str] | None:
 
     Returns:
         ``(round, short_sha)`` from the heading, with an empty sha when the
-        heading carries none, or ``None`` when the body has no heading.
+        heading carries none, or ``None`` when the body has no heading. Any
+        backticked token after the round is returned as the sha, so a value
+        the writer produced in an unexpected form is compared rather than
+        read as absent.
     """
     match = _FINDINGS_HEADING_RE.search(body)
     if match is None:
