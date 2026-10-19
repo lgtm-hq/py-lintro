@@ -490,6 +490,143 @@ def test_a_failed_review_is_not_second_guessed_by_the_lane(
     assert_that(report.status).is_empty()
 
 
+# --- decision D: the chain walk's verdicts ---------------------------------------
+
+
+def _unavailable_envelope(kind: str) -> str:
+    return json.dumps(
+        {
+            "error": {
+                "kind": kind,
+                "provider": "anthropic",
+                "status": 402,
+                "retryable": False,
+                "provider_unavailable": True,
+                "message": "stub",
+            },
+        },
+    )
+
+
+def test_every_lane_dead_before_any_chunk_is_lanes_exhausted(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """A chain of two with both lanes recorded down: red with its own status."""
+    env = _env(tmp_path, rows, ["anthropic", "openai"], record=None)
+    env["LINTRO_REVIEW_LANES_DOWN"] = json.dumps(
+        [
+            {"lane": "anthropic", "kind": "insufficient_credits"},
+            {"lane": "openai", "kind": "auth_failed"},
+        ],
+    )
+
+    report = classifier.classify(
+        status=2,
+        output=_unavailable_envelope("auth_failed"),
+        env=env,
+    )
+
+    assert_that(report.outcome).is_equal_to(
+        classifier.ReviewOutcome.PROVIDER_UNAVAILABLE,
+    )
+    assert_that(report.exit_code).is_equal_to(1)
+    assert_that(report.status).is_equal_to("lanes-exhausted")
+    assert_that(report.headline).contains("anthropic (insufficient_credits)")
+    assert_that(report.headline).contains("openai (auth_failed)")
+
+
+@pytest.mark.parametrize(
+    ("chain", "down"),
+    [
+        # A single-entry chain has nothing to exhaust.
+        (["anthropic"], [{"lane": "anthropic", "kind": "insufficient_credits"}]),
+        # The last lane failed after a chunk completed: never recorded as down.
+        (
+            ["anthropic", "openai"],
+            [{"lane": "anthropic", "kind": "insufficient_credits"}],
+        ),
+        # Nothing recorded at all.
+        (["anthropic", "openai"], []),
+    ],
+)
+def test_provider_unavailable_stays_when_the_chain_is_not_exhausted(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+    chain: list[str],
+    down: list[dict[str, str]],
+) -> None:
+    """The mid-review case and the single lane keep ``provider-unavailable``."""
+    env = _env(tmp_path, rows, chain, record=None)
+    env["LINTRO_REVIEW_LANES_DOWN"] = json.dumps(down)
+
+    report = classifier.classify(
+        status=2,
+        output=_unavailable_envelope("auth_failed"),
+        env=env,
+    )
+
+    assert_that(report.outcome).is_equal_to(
+        classifier.ReviewOutcome.PROVIDER_UNAVAILABLE,
+    )
+    assert_that(report.status).is_empty()
+    assert_that(report.headline).does_not_contain("lanes-exhausted")
+
+
+def test_a_fallback_round_names_why_the_primary_died(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """With the dead lane recorded, the warning carries its reason."""
+    env = _env(
+        tmp_path,
+        rows,
+        ["anthropic", "openai"],
+        record=_record(
+            lane="openai",
+            endpoint="api.openai.com",
+            model_verification="unreported",
+        ),
+    )
+    env["LINTRO_REVIEW_LANES_DOWN"] = json.dumps(
+        [{"lane": "anthropic", "kind": "quota_exceeded"}],
+    )
+
+    report = classifier.classify(status=0, output="{}", env=env)
+
+    assert_that(report.outcome).is_equal_to(classifier.ReviewOutcome.REVIEWED)
+    assert_that(report.exit_code).is_equal_to(0)
+    assert_that(report.warnings).is_length(1)
+    assert_that(report.warnings[0]).is_equal_to(
+        "primary lane anthropic unavailable (quota_exceeded); reviewed by openai (ADR-0011 D)",
+    )
+
+
+def test_a_malformed_lanes_down_value_is_ignored(
+    classifier: ModuleType,
+    rows: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Junk in the dead-lane list neither exhausts the chain nor crashes."""
+    for raw in ("not json", '{"lane": "anthropic"}', '[1, "x", {"kind": "k"}]'):
+        env = _env(tmp_path, rows, ["anthropic", "openai"], record=None)
+        env["LINTRO_REVIEW_LANES_DOWN"] = raw
+
+        report = classifier.classify(
+            status=2,
+            output=_unavailable_envelope("auth_failed"),
+            env=env,
+        )
+
+        assert_that(report.outcome).described_as(raw).is_equal_to(
+            classifier.ReviewOutcome.PROVIDER_UNAVAILABLE,
+        )
+        assert_that(report.status).described_as(raw).is_empty()
+
+
 # --- the auth-failure label ------------------------------------------------------
 
 
@@ -624,6 +761,10 @@ def test_the_reader_matches_the_state_lintro_really_writes(tmp_path: Path) -> No
     )
     assert verdict is not None and verdict.loader is not None
     module = importlib.util.module_from_spec(verdict)
+    # Registered before execution: a dataclass under ``from __future__ import
+    # annotations`` resolves its module through ``sys.modules`` on 3.14, so
+    # the test must not depend on the classifier fixture having loaded it.
+    sys.modules["review_lane_verdict"] = module
     verdict.loader.exec_module(module)
     earlier = RunRecord(identity=RunIdentity(round=1, lane="anthropic"))
     current = RunRecord(
@@ -743,5 +884,10 @@ def test_the_status_slugs_match_the_adr() -> None:
         / "adr"
         / "0011-dogfood-review-lanes-provenance-and-degradation.md"
     ).read_text(encoding="utf-8")
-    for slug in ("endpoint-mismatch", "model-mismatch", "model-unreported"):
+    for slug in (
+        "endpoint-mismatch",
+        "model-mismatch",
+        "model-unreported",
+        "lanes-exhausted",
+    ):
         assert_that(adr).contains(f"`status={slug}`")

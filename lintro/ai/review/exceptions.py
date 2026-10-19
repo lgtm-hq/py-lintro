@@ -54,7 +54,8 @@ class ReviewExecutionError(AIError):
         chunk_index: Zero-based index of the chunk that failed, if known.
         total_chunks: Total chunks planned for the review.
         step: Sub-step within the chunk (e.g. "reviewing").
-        completed_chunks: Number of chunks successfully reviewed before failure.
+        completed_chunks: Number of chunks successfully reviewed before
+            failure, or ``None`` when the raise site did not count.
         cause_message: Original provider or parser error text.
         error_kind: Canonical classification of the underlying cause, resolved
             provider-aware at the raise site. ``None`` when not yet classified.
@@ -64,7 +65,7 @@ class ReviewExecutionError(AIError):
     chunk_index: int | None = None
     total_chunks: int | None = None
     step: str | None = None
-    completed_chunks: int = 0
+    completed_chunks: int | None = None
     cause_message: str = ""
     error_kind: ReviewErrorKind | None = None
 
@@ -87,3 +88,48 @@ class ReviewPreparationError(AIError):
     usage error for the CLI, a structured envelope for MCP) rather than the
     shared layer owning either policy.
     """
+
+
+#: Where :func:`annotate_completed_chunks` keeps the count on an exception
+#: that has no field of its own.
+COMPLETED_CHUNKS_ATTR = "lintro_completed_chunks"
+
+
+def annotate_completed_chunks(error: BaseException, *, completed: int) -> None:
+    """Record on *error* how many chunks the run had completed when it left.
+
+    A CI wrapper deciding whether to restart the review on another lane
+    (ADR-0011 D) must not infer that from checkpoint files, which are
+    best-effort and may have failed to write. The run boundary stamps the
+    count on the exceptions it catches and re-raises, ``AIError`` and
+    ``ReviewExecutionError``; any other exception leaves the count unknown,
+    which the wrapper reads as "stay on this lane".
+
+    Args:
+        error: The exception leaving the run.
+        completed: Chunks whose partial the run had collected.
+    """
+    setattr(error, COMPLETED_CHUNKS_ATTR, max(int(completed), 0))
+
+
+def completed_chunks_of(error: BaseException) -> int | None:
+    """Return how many chunks had completed when *error* left the run.
+
+    Args:
+        error: The exception the run raised.
+
+    Returns:
+        The run-boundary annotation when present: it counts the partials the
+        run collected, and wins over the execution error's own field, which
+        the chunk pass fills with the failing chunk's position (under
+        concurrency a later chunk can fail first, so that position is not a
+        count). Without an annotation, the execution error's field; ``None``
+        when neither is present, so the count is unknown and a wrapper must
+        not restart the review elsewhere.
+    """
+    annotated = getattr(error, COMPLETED_CHUNKS_ATTR, None)
+    if isinstance(annotated, int) and not isinstance(annotated, bool):
+        return max(annotated, 0)
+    if isinstance(error, ReviewExecutionError) and error.completed_chunks is not None:
+        return max(int(error.completed_chunks), 0)
+    return None

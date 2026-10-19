@@ -125,6 +125,8 @@ def _identity(
         reported_models=tuple(metadata.reported_models),
         lane=metadata.lane,
         model_verification=metadata.model_verification,
+        fallback_from=metadata.fallback_from,
+        fallback_reason=metadata.fallback_reason,
     )
 
 

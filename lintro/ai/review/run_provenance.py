@@ -130,6 +130,8 @@ def checkpoint_stamp(
             first_party=provenance.first_party,
             credential=provenance.credential.value,
             lane=provenance.lane,
+            fallback_from=provenance.fallback_from,
+            fallback_reason=provenance.fallback_reason,
         ),
         cost_basis=cost_basis,
         shadow_price_model=provenance.shadow_price_model or requested,
@@ -196,6 +198,8 @@ def run_provenance_fields(
         "reported_models": ledger.reported_models if ledger is not None else (),
         "model_verification": verification.value if verification is not None else "",
         "lane": provenance.lane,
+        "fallback_from": provenance.fallback_from,
+        "fallback_reason": provenance.fallback_reason,
         "shadow_price_model": provenance.shadow_price_model,
         "cost_reported": ledger.cost_reported if ledger is not None else False,
     }

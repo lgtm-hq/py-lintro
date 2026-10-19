@@ -430,7 +430,16 @@ def main(argv: list[str] | None = None) -> int:
         _check_base_url(lane_id, row, env, home)
         _check_config(lane_id, row, env)
     except LaneRefusalError as exc:
-        sys.stderr.write(f"::error::review lane: {exc}\n")
+        # On attempt 0 the refusal is the run's verdict. A check-phase
+        # refusal on a fallback attempt (ADR-0011 D) is one the wrapper
+        # records as an unbound lane and walks past, so a green run must
+        # not carry a red annotation. A lane that cannot even be resolved
+        # (env phase: a bad index, a missing row) is a configuration error
+        # whatever the attempt.
+        raw_attempt = env.get("LINTRO_REVIEW_ATTEMPT", "0").strip()
+        fallback_attempt = raw_attempt.isdigit() and int(raw_attempt) > 0
+        level = "warning" if args.phase == "check" and fallback_attempt else "error"
+        sys.stderr.write(f"::{level}::review lane: {exc}\n")
         return exc.status
     sys.stderr.write(
         f"review lane: {lane_id!r} bound; credential {row.get('credential')!r} "
