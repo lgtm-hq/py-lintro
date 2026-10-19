@@ -176,18 +176,7 @@ class _CodexCliTransport(CliTransport):
         )
         self._model = model
 
-    def parse_stdout(self, stdout: str) -> AIResponse:
-        """Parse JSONL stdout, attributing the response to the default model.
-
-        Args:
-            stdout: Raw stdout from the CLI.
-
-        Returns:
-            AIResponse: The parsed response.
-        """
-        return self.parse_stdout_as(stdout, model=self._model)
-
-    def parse_stdout_as(self, stdout: str, *, model: str) -> AIResponse:
+    def parse_stdout(self, stdout: str, *, model: str) -> AIResponse:
         """Parse JSONL stdout and extract the final agent message.
 
         The model is passed in rather than read from the transport because it
@@ -553,7 +542,7 @@ class OpenAIProvider(ApiStreamingProvider):
                 auth_patterns=("authentication", "login", "not authenticated"),
                 auth_hint="Run 'codex login' or set CODEX_API_KEY.",
             )
-            return self._cli.parse_stdout_as(
+            return self._cli.parse_stdout(
                 result.stdout,
                 model=effective_model or CODEX_SESSION_DEFAULT_MODEL,
             )

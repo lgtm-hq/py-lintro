@@ -105,13 +105,13 @@ def _parse(*, cli: str, stdout: str, model: str) -> tuple[AIResponse, str | None
     """
     if cli == "claude":
         transport = _AnthropicCliTransport(binary_path=_FAKE_BINARY, model=model)
-        return transport.parse_stdout(stdout)
+        return transport.parse_stdout(stdout, model=model)
     if cli == "cursor":
         cursor = _CursorCliTransport(binary_path=_FAKE_BINARY, model=model)
-        return cursor.parse_stdout(stdout)
+        return cursor.parse_stdout(stdout, model=model)
     if cli == "codex":
         codex = _CodexCliTransport(binary_path=_FAKE_BINARY, model=model)
-        return codex.parse_stdout_as(stdout, model=model), None
+        return codex.parse_stdout(stdout, model=model), None
     msg = f"unsupported CLI {cli!r}; known: {', '.join(supported_clis())}"
     raise ValueError(msg)
 

@@ -15,7 +15,6 @@ import os
 import threading
 from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import contextmanager
-from dataclasses import replace
 from typing import Any
 
 from loguru import logger
@@ -207,12 +206,21 @@ class _AnthropicCliTransport(CliTransport):
         self,
         stdout: str,
         *,
+        model: str,
         max_turns: int | None = None,
     ) -> tuple[AIResponse, str | None]:
         """Parse the JSON envelope from ``claude --output-format json``.
 
+        The model is passed in rather than read from the transport because it
+        is resolved per call: a per-call override or a fallback runs as
+        ``--model <that>``, and the response must name what answered and be
+        priced at its rate (#2532).
+
         Args:
             stdout: Raw CLI stdout.
+            model: The model the call was invoked with; stamped on the
+                response and used to price it when the envelope reports no
+                cost.
             max_turns: The turn limit the executed argv carried, when any.
 
         Returns:
@@ -229,7 +237,7 @@ class _AnthropicCliTransport(CliTransport):
             return (
                 AIResponse(
                     content=decoded,
-                    model=self._model,
+                    model=model,
                     provider=AIProvider.ANTHROPIC,
                 ),
                 None,
@@ -262,7 +270,7 @@ class _AnthropicCliTransport(CliTransport):
             decoded.total_cost_usd
             if decoded.total_cost_usd is not None
             else estimate_cost(
-                self._model,
+                model,
                 decoded.input_tokens,
                 decoded.output_tokens,
             )
@@ -270,7 +278,7 @@ class _AnthropicCliTransport(CliTransport):
         return (
             AIResponse(
                 content=self.substitute_parsed_json(decoded.result),
-                model=self._model,
+                model=model,
                 input_tokens=decoded.input_tokens,
                 output_tokens=decoded.output_tokens,
                 cost_estimate=cost,
@@ -593,14 +601,13 @@ class AnthropicProvider(ApiStreamingProvider):
             auth_hint=_auth_hint(bare=bare),
         )
 
+        # The response names the model the call ran as, so a fallback or a
+        # per-call override is reported and priced as itself (#2867, #2532).
         response, session_id = self._cli.parse_stdout(
             result.stdout,
+            model=effective_model,
             max_turns=sent_limit,
         )
-        # The envelope parser only knows the primary model; a fallback call
-        # ran as ``--model <fallback>`` and must say so, or its provenance
-        # check compares the wrong request (#2867).
-        response = replace(response, model=effective_model)
         if not use_one_shot and session_id is not None:
             with self._session_lock:
                 self._session_id = session_id

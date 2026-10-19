@@ -41,15 +41,17 @@ _FULL_HELP = "Usage: fake [options]\n  --always\n  --print\n  --resume\n"
 class _FakeTransport(CliTransport):
     """Minimal concrete transport for exercising the liveness probe."""
 
-    def parse_stdout(self, stdout: str) -> str:
+    def parse_stdout(self, stdout: str, *, model: str) -> str:
         """Return stdout unchanged.
 
         Args:
             stdout: Raw stdout from the CLI.
+            model: Ignored; the stub attributes nothing.
 
         Returns:
             The unmodified stdout.
         """
+        del model
         return stdout
 
 

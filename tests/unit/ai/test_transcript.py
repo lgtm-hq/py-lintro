@@ -54,7 +54,8 @@ def _make_cli_transport(**kwargs: object) -> CliTransport:
     """Build a concrete CliTransport for hook tests without a test class."""
 
     class _Concrete(CliTransport):
-        def parse_stdout(self, stdout: str) -> str:
+        def parse_stdout(self, stdout: str, *, model: str) -> str:
+            del model
             return stdout
 
     return _Concrete(**kwargs)  # type: ignore[arg-type]

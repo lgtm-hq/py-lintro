@@ -527,11 +527,17 @@ class CliTransport(ABC):
         return content
 
     @abstractmethod
-    def parse_stdout(self, stdout: str) -> Any:
+    def parse_stdout(self, stdout: str, *, model: str) -> Any:
         """Parse provider-specific stdout into a transport payload.
+
+        The model is part of the contract rather than transport state because
+        it is resolved per call: a per-call override or a fallback runs as
+        ``--model <that>``, and the response must name what answered and be
+        priced at its rate (#2532).
 
         Args:
             stdout: Raw stdout from the CLI.
+            model: The model the call was invoked with.
 
         Returns:
             Provider-specific parsed payload.

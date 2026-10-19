@@ -60,11 +60,18 @@ def _find_agent() -> str | None:
 class _CursorCliTransport(CliTransport):
     """Cursor ``agent --print`` subprocess transport."""
 
-    def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
+    def parse_stdout(
+        self,
+        stdout: str,
+        *,
+        model: str,
+    ) -> tuple[AIResponse, str | None]:
         """Parse the JSON envelope from ``agent --output-format json``.
 
         Args:
             stdout: Raw CLI stdout.
+            model: The model the call was invoked with; stamped on the
+                response (#2532).
 
         Returns:
             The response and the session id the envelope reported.
@@ -78,7 +85,7 @@ class _CursorCliTransport(CliTransport):
             return (
                 AIResponse(
                     content=decoded,
-                    model=self._model,
+                    model=model,
                     provider=AIProvider.CURSOR,
                 ),
                 None,
@@ -105,7 +112,7 @@ class _CursorCliTransport(CliTransport):
                 # replaces the content only when it parses, so a plain-text
                 # answer with incidental braces stays intact.
                 content=self.substitute_parsed_json(content),
-                model=self._model,
+                model=model,
                 input_tokens=decoded.input_tokens,
                 output_tokens=decoded.output_tokens,
                 cost_estimate=0.0,
@@ -341,15 +348,15 @@ class CursorProvider(BaseAIProvider):
             auth_patterns=("authentication required", "login"),
             auth_hint="Run 'agent login' or set CURSOR_API_KEY.",
         )
-        response, session_id = self._cli.parse_stdout(result.stdout)
-        response = replace(
-            self._estimate_usage(
-                prompt=combined_prompt,
-                model=effective_model,
-                response=response,
-            ),
-            # The call asked for ``effective_model``; say so (#2867).
+        # The response names the model the call ran as (#2867, #2532).
+        response, session_id = self._cli.parse_stdout(
+            result.stdout,
             model=effective_model,
+        )
+        response = self._estimate_usage(
+            prompt=combined_prompt,
+            model=effective_model,
+            response=response,
         )
 
         if not use_one_shot and self._durable_repo_root is not None and session_id:
