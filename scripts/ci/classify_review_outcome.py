@@ -174,6 +174,13 @@ CONVERGED_ENVELOPE_KEY: Final[str] = "converged"
 # lintro.ai.review.output.CONVERGED_OUTCOME; a contract test pins the pair.
 CONVERGED_OUTCOME: Final[str] = "converged"
 
+# Top-level key and `outcome` discriminator `lintro review` writes when the
+# last finished round already covered this head (#2338). Mirror
+# lintro.ai.review.output.ALREADY_REVIEWED_ENVELOPE_KEY / _OUTCOME; a contract
+# test pins the pairs.
+ALREADY_REVIEWED_ENVELOPE_KEY: Final[str] = "already_reviewed"
+ALREADY_REVIEWED_OUTCOME: Final[str] = "already_reviewed"
+
 # Top-level keys `lintro review` writes for the finding-depth axis (#2003 /
 # #2395). Mirror lintro.ai.review.output.review_result_to_dict; a contract
 # test in tests/scripts/test_classify_review_outcome.py pins the names.
@@ -259,6 +266,9 @@ class ReviewOutcome(StrEnum):
             the envelope's ``findings_coverage_complete`` is false (#2395).
         CONVERGED: The round was deliberately skipped by the convergence stop
             rule before any provider call (#2099).
+        ALREADY_REVIEWED: The round was skipped because the last finished
+            round already covered this head, before any provider call
+            (#2338); that round's review stands as posted.
         NO_CREDENTIAL: No provider credential was available to review with.
         PROVIDER_UNAVAILABLE: The credential, balance, or endpoint failed.
         BROKEN: lintro itself could not complete the review.
@@ -271,6 +281,7 @@ class ReviewOutcome(StrEnum):
     PR_BUDGET = auto()
     DEGRADED = auto()
     CONVERGED = auto()
+    ALREADY_REVIEWED = auto()
     NO_CREDENTIAL = auto()
     PROVIDER_UNAVAILABLE = auto()
     BROKEN = auto()
@@ -316,10 +327,10 @@ class ReviewOutcome(StrEnum):
     def review_unavailable(self) -> bool:
         """Return whether the diff went un-reviewed for a bad reason.
 
-        A skipped-because-converged round produced no review either, but it
-        is a decision rather than a failure: it must not carry the
-        "treat the diff as un-reviewed, fall back to CodeRabbit/Greptile"
-        advice.
+        A skipped-because-converged round, or one skipped because its head
+        was already reviewed, produced no review either, but each is a
+        decision rather than a failure: neither must carry the "treat the
+        diff as un-reviewed, fall back to CodeRabbit/Greptile" advice.
 
         This controls that fallback copy and the ``::error`` annotation only
         — it is not the readiness gate. There is no readiness gate at check
@@ -642,6 +653,107 @@ def _parse_converged_envelope(*, text: str) -> dict[str, Any] | None:
         converged = payload.get(CONVERGED_ENVELOPE_KEY)
         if isinstance(converged, dict):
             return {**converged, "detail": str(payload.get("detail") or "")}
+    return None
+
+
+def _parse_already_reviewed_envelope(*, text: str) -> dict[str, Any] | None:
+    """Extract the already-reviewed object from captured review output.
+
+    Same discipline as :func:`_parse_converged_envelope`: the ``outcome``
+    discriminator is required next to the mapping, so a nested object that
+    happens to carry the key cannot classify a real review as a skip.
+
+    Args:
+        text: Combined stdout/stderr captured from the review run.
+
+    Returns:
+        The ``already_reviewed`` mapping, or ``None`` when the round ran.
+    """
+    for payload in _iter_json_objects(text=text):
+        if payload.get("outcome") != ALREADY_REVIEWED_OUTCOME:
+            continue
+        skipped = payload.get(ALREADY_REVIEWED_ENVELOPE_KEY)
+        if isinstance(skipped, dict):
+            return {**skipped, "detail": str(payload.get("detail") or "")}
+    return None
+
+
+def _already_reviewed_report(
+    *,
+    skipped: dict[str, Any],
+    transport: str,
+) -> OutcomeReport:
+    """Build the ALREADY_REVIEWED outcome from a parsed envelope.
+
+    Args:
+        skipped: The ``already_reviewed`` mapping from the review envelope.
+        transport: Active transport named on the headline.
+
+    Returns:
+        Green report naming the head and round that stand, and how many
+        open P1 findings that round left behind. An unreadable ``open_p1``
+        fails closed, as the converged branch does.
+    """
+    open_p1 = _converged_open_p1(converged=skipped)
+    if open_p1 is None:
+        return OutcomeReport(
+            outcome=ReviewOutcome.BROKEN,
+            headline=_with_transport(
+                transport=transport,
+                headline=(
+                    "already-reviewed envelope is unreadable — open_p1 is "
+                    f"{skipped.get('open_p1')!r}, not a count"
+                ),
+            ),
+            detail=(
+                "lintro wrote an already-reviewed envelope whose open_p1 "
+                "field is missing or not a non-negative integer, so the "
+                "readiness gate for the skipped round cannot be evaluated."
+            ),
+            exit_code=1,
+            transport=transport,
+        )
+    head = str(skipped.get("head_sha") or "")[:7]
+    round_number = skipped.get("round", 0)
+    noun = "finding" if open_p1 == 1 else "findings"
+    remaining = f"; {open_p1} open P1 {noun} remain" if open_p1 > 0 else ""
+    return OutcomeReport(
+        outcome=ReviewOutcome.ALREADY_REVIEWED,
+        headline=_with_transport(
+            transport=transport,
+            headline=(
+                f"already reviewed — head {head} covered by round "
+                f"{round_number}{remaining}"
+            ),
+        ),
+        detail=str(skipped.get("detail") or ""),
+        # Exit 0 even with open P1s, for the reason the converged branch
+        # gives: the skip must not be stricter than the round that found
+        # them; the count is named in the headline.
+        exit_code=0,
+        transport=transport,
+    )
+
+
+def _skipped_round_report(*, output: str, transport: str) -> OutcomeReport | None:
+    """Report a round lintro deliberately skipped before any provider call.
+
+    Two envelopes share the contract: the convergence stop rule (#2099) and
+    an already-reviewed head (#2338). Each is its own green outcome.
+
+    Args:
+        output: Combined stdout/stderr captured from the run.
+        transport: Active transport named on the headline.
+
+    Returns:
+        The skip's report, or ``None`` when the round ran.
+    """
+    converged = _parse_converged_envelope(text=output)
+    if converged is not None:
+        return _converged_report(converged=converged, transport=transport)
+    skipped = _parse_already_reviewed_envelope(text=output)
+    if skipped is not None:
+        return _already_reviewed_report(skipped=skipped, transport=transport)
     return None
 
 
@@ -1175,9 +1287,9 @@ def _classify_run(
     # pass this module exists to prevent. Let the error branches below own
     # that case.
     if status != REVIEW_STATUS_ERROR:
-        converged = _parse_converged_envelope(text=output)
-        if converged is not None:
-            return _converged_report(converged=converged, transport=transport)
+        skipped = _skipped_round_report(output=output, transport=transport)
+        if skipped is not None:
+            return skipped
 
     # A persist envelope wins over the wrapper exit status. ``wait`` reports
     # 143 when the runner SIGTERMs the step after lintro already wrote
@@ -1283,6 +1395,52 @@ def _classify_run(
     )
 
 
+#: The paragraph the job summary adds under the headline for outcomes that
+#: need one; the others are explained by the headline alone.
+_OUTCOME_EXPLANATIONS: Final[dict[ReviewOutcome, str]] = {
+    ReviewOutcome.INCOMPLETE: (
+        "A review was produced, but coverage-at-HEAD is not 100%. "
+        "The next round resumes with unreviewed files first. "
+        "P1 findings still pass this check; an unfinished review "
+        "does not."
+    ),
+    ReviewOutcome.PR_BUDGET: (
+        "A review was produced, but the PR's review budget "
+        "(`ai.review_pr_budget_usd`) ran out before every file was "
+        "covered at HEAD. Findings so far are posted and coverage is "
+        "saved. Later rounds stop at the same budget: raise the "
+        "`LINTRO_AI_REVIEW_PR_BUDGET_USD` Actions variable to review "
+        "the rest, or leave the PR as it is."
+    ),
+    ReviewOutcome.DEGRADED: (
+        "Every eligible file was reviewed, but not at full depth: the "
+        "run recorded a coverage degradation, so findings may have "
+        "gone unreported. The review and its findings are posted as "
+        "usual — this check is red because the finding set is not a "
+        "guaranteed complete one."
+    ),
+    ReviewOutcome.CONVERGED: (
+        "No provider call was made: the convergence stop rule found "
+        "the open findings stable below the configured threshold, so "
+        "another round would have re-reported the same set. Re-run "
+        "the review with `--full` to force one."
+    ),
+    ReviewOutcome.ALREADY_REVIEWED: (
+        "No provider call was made: the last finished round already "
+        "covered this head, so its review, threads and verdict stand "
+        "as posted. Re-run with `--full` or `LINTRO_REVIEW_FORCE=1` "
+        "to force a round."
+    ),
+    ReviewOutcome.CONTRADICTED: (
+        "A review was produced and its findings are posted, but the "
+        "run record says it did not come from the lane this "
+        "repository declared (ADR-0011): treat the posted review as "
+        "unverified. The check is red until a run on the declared "
+        "lane reviews the diff."
+    ),
+}
+
+
 def render_summary(*, report: OutcomeReport) -> str:
     """Render the outcome as a Markdown job-summary block.
 
@@ -1294,7 +1452,7 @@ def render_summary(*, report: OutcomeReport) -> str:
     """
     if report.outcome.partial_review:
         icon = "⚠️"
-    elif report.outcome is ReviewOutcome.CONVERGED:
+    elif report.outcome in {ReviewOutcome.CONVERGED, ReviewOutcome.ALREADY_REVIEWED}:
         icon = "🔁"
     elif report.outcome.produced_review:
         icon = "✅"
@@ -1304,60 +1462,9 @@ def render_summary(*, report: OutcomeReport) -> str:
         f"### {icon} AI Review ({report.transport}) — {report.headline}",
         "",
     ]
-    if report.outcome is ReviewOutcome.INCOMPLETE:
-        lines.extend(
-            [
-                "A review was produced, but coverage-at-HEAD is not 100%. "
-                "The next round resumes with unreviewed files first. "
-                "P1 findings still pass this check; an unfinished review "
-                "does not.",
-                "",
-            ],
-        )
-    if report.outcome is ReviewOutcome.PR_BUDGET:
-        lines.extend(
-            [
-                "A review was produced, but the PR's review budget "
-                "(`ai.review_pr_budget_usd`) ran out before every file was "
-                "covered at HEAD. Findings so far are posted and coverage is "
-                "saved. Later rounds stop at the same budget: raise the "
-                "`LINTRO_AI_REVIEW_PR_BUDGET_USD` Actions variable to review "
-                "the rest, or leave the PR as it is.",
-                "",
-            ],
-        )
-    if report.outcome is ReviewOutcome.DEGRADED:
-        lines.extend(
-            [
-                "Every eligible file was reviewed, but not at full depth: the "
-                "run recorded a coverage degradation, so findings may have "
-                "gone unreported. The review and its findings are posted as "
-                "usual — this check is red because the finding set is not a "
-                "guaranteed complete one.",
-                "",
-            ],
-        )
-    if report.outcome is ReviewOutcome.CONVERGED:
-        lines.extend(
-            [
-                "No provider call was made: the convergence stop rule found "
-                "the open findings stable below the configured threshold, so "
-                "another round would have re-reported the same set. Re-run "
-                "the review with `--full` to force one.",
-                "",
-            ],
-        )
-    if report.outcome is ReviewOutcome.CONTRADICTED:
-        lines.extend(
-            [
-                "A review was produced and its findings are posted, but the "
-                "run record says it did not come from the lane this "
-                "repository declared (ADR-0011): treat the posted review as "
-                "unverified. The check is red until a run on the declared "
-                "lane reviews the diff.",
-                "",
-            ],
-        )
+    explanation = _OUTCOME_EXPLANATIONS.get(report.outcome)
+    if explanation:
+        lines.extend([explanation, ""])
     if report.detail:
         lines.extend(["> " + report.detail, ""])
     for line in (*report.warnings, *report.notes):

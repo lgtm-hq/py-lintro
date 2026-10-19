@@ -36,17 +36,22 @@ state in an editable hidden blob.
 
 ## Consequences
 
-Capped reviews converge across rounds. A quiet re-review makes zero provider calls. A
-partial review cannot render clean or pass the AI Review check. Large capped API-key PRs
-are red on round 1 by design. A mid-round **timeout** is the same class of stop as a
-cost cap: coverage and this-run findings already written are persisted (incremental
-`part-*.json` under `LINTRO_REVIEW_STATE_DIR`) and the next round resumes. A SIGTERM
-after a finished chunk must not lose that chunk's coverage or issues. The wrapper
-uploads those parts from inside the review step: a cancelled Actions job skips later
-`if: always()` uploads. The post-wait inline upload is capped at 2s (Create/PUT/Finalize
-together, plus a `timeout(1)` hard kill) so classify still runs inside GitHub's ~7.5s
-SIGTERM grace. After `wait` reports 143, the persisted envelope decides the outcome:
-incomplete coverage is INCOMPLETE, and complete coverage stays REVIEWED.
+Capped reviews converge across rounds. A quiet re-review makes zero provider calls: a
+head the last finished round covered completely is skipped as `already_reviewed` before
+any provider is constructed, open threads included, since on the same head the code a
+thread points at has not changed (#2338). `--full` and `LINTRO_REVIEW_FORCE` both get
+past this skip and the convergence skip; only `--full` also discards the carried
+coverage. A partial review cannot render clean or pass the AI Review check. Large capped
+API-key PRs are red on round 1 by design. A mid-round **timeout** is the same class of
+stop as a cost cap: coverage and this-run findings already written are persisted
+(incremental `part-*.json` under `LINTRO_REVIEW_STATE_DIR`) and the next round resumes.
+A SIGTERM after a finished chunk must not lose that chunk's coverage or issues. The
+wrapper uploads those parts from inside the review step: a cancelled Actions job skips
+later `if: always()` uploads. The post-wait inline upload is capped at 2s
+(Create/PUT/Finalize together, plus a `timeout(1)` hard kill) so classify still runs
+inside GitHub's ~7.5s SIGTERM grace. After `wait` reports 143, the persisted envelope
+decides the outcome: incomplete coverage is INCOMPLETE, and complete coverage stays
+REVIEWED.
 
 `conftest.py` is a known semantic hole (test-wide fixtures) left on the revisit list.
 

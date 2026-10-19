@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import asdict
 from typing import Any
 
+from lintro.ai.review.already_reviewed import AlreadyReviewed
 from lintro.ai.review.convergence import format_convergence_stamp
 from lintro.ai.review.enums.checklist_display import ChecklistDisplay
 from lintro.ai.review.finding_identity import current_records
@@ -25,11 +26,15 @@ from lintro.ai.review.severity_gate import count_cross_chunk_contradictions
 INLINE_POST_FAILURE_KEY = "inline_post_failure"
 
 __all__ = [
+    "ALREADY_REVIEWED_ENVELOPE_KEY",
+    "ALREADY_REVIEWED_OUTCOME",
     "CONVERGED_ENVELOPE_KEY",
     "CONVERGED_OUTCOME",
     "INLINE_POST_FAILURE_KEY",
+    "already_reviewed_outcome_to_dict",
     "convergence_outcome_to_dict",
     "finding_to_dict",
+    "render_already_reviewed_outcome_json",
     "render_convergence_outcome_json",
     "render_inline_post_failure_json",
     "render_review_json",
@@ -47,6 +52,15 @@ CONVERGED_ENVELOPE_KEY = "converged"
 
 #: Value of the envelope's ``outcome`` field for a short-circuited round.
 CONVERGED_OUTCOME = "converged"
+
+#: Top-level key that marks a review invocation as skipped because the last
+#: finished round already covered this head (#2338). The classifier keys on
+#: it the way it keys on :data:`CONVERGED_ENVELOPE_KEY`; a contract test pins
+#: the two spellings together.
+ALREADY_REVIEWED_ENVELOPE_KEY = "already_reviewed"
+
+#: Value of the envelope's ``outcome`` field for an already-reviewed head.
+ALREADY_REVIEWED_OUTCOME = "already_reviewed"
 
 
 def convergence_outcome_to_dict(
@@ -76,6 +90,52 @@ def convergence_outcome_to_dict(
         CONVERGED_ENVELOPE_KEY: {**decision.to_dict(), "open_p1": open_p1},
         "detail": format_convergence_stamp(decision=decision),
     }
+
+
+def already_reviewed_outcome_to_dict(
+    *,
+    decision: AlreadyReviewed,
+    open_p1: int = 0,
+) -> dict[str, Any]:
+    """Build the machine-readable envelope for an already-reviewed head.
+
+    Like :func:`convergence_outcome_to_dict`, the envelope carries no
+    ``readiness_verdict``, ``coverage`` or ``findings``: no review was
+    produced this round, and the last finished round's findings stand as
+    posted.
+
+    Args:
+        decision: The decision that skipped the round.
+        open_p1: Open P1 records the last finished round left in force.
+
+    Returns:
+        JSON-serializable mapping describing why the round was skipped.
+    """
+    return {
+        "outcome": ALREADY_REVIEWED_OUTCOME,
+        ALREADY_REVIEWED_ENVELOPE_KEY: {**decision.to_dict(), "open_p1": open_p1},
+        "detail": decision.describe(),
+    }
+
+
+def render_already_reviewed_outcome_json(
+    *,
+    decision: AlreadyReviewed,
+    open_p1: int = 0,
+) -> str:
+    """Serialize the already-reviewed envelope to pretty-printed JSON.
+
+    Args:
+        decision: The decision that skipped the round.
+        open_p1: Open P1 records the last finished round left in force.
+
+    Returns:
+        JSON string with two-space indentation.
+    """
+    return json.dumps(
+        already_reviewed_outcome_to_dict(decision=decision, open_p1=open_p1),
+        indent=2,
+    )
 
 
 def render_convergence_outcome_json(

@@ -20,6 +20,9 @@ from lintro.ai.provenance import RunProvenance, detect_run_provenance
 from lintro.ai.transport import cli_bare_billing, cli_runtime_env
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
+    from lintro.ai.config import AIConfig
     from lintro.ai.review.models.review_state import ReviewState
     from lintro.ai.review.models.run_identity import RunIdentity
     from lintro.ai.review.models.run_record import RunRecord
@@ -31,6 +34,7 @@ __all__ = [
     "evidence_carries_over",
     "allowed_models_for",
     "reusable_rounds",
+    "reusable_rounds_before_provider",
     "reusable_rounds_for",
 ]
 
@@ -199,31 +203,69 @@ def reusable_rounds_for(*, options: ReviewSessionOptions) -> frozenset[int] | No
         such a state predates this gate or was hand-built, and missing
         provenance fails toward more review (ADR-0007, ADR-0011 B).
     """
-    prior = options.prior_state
+    return reusable_rounds_before_provider(
+        prior=options.prior_state,
+        ai_config=options.ai_config,
+        provider_name=options.provider.name,
+        model_name=options.provider.model_name,
+        agent_models=agent_model_overrides(options),
+        workspace_root=options.workspace_root,
+    )
+
+
+def reusable_rounds_before_provider(
+    *,
+    prior: ReviewState | None,
+    ai_config: AIConfig,
+    provider_name: str,
+    model_name: str,
+    agent_models: Iterable[str] = (),
+    workspace_root: Path | None = None,
+) -> frozenset[int] | None:
+    """Resolve the reusable rounds from what is known before a provider exists.
+
+    The already-reviewed guard (#2338) runs before the provider is
+    constructed, so it cannot hand over session options; it passes the
+    resolved provider and model names instead. Custom-agent overrides may be
+    omitted there: that only narrows the allowed list and so the inherited
+    coverage, which fails toward review.
+
+    Args:
+        prior: The PR's stored state, or ``None`` on a first round.
+        ai_config: The run's AI configuration.
+        provider_name: The provider the run uses.
+        model_name: The model the run requests.
+        agent_models: Custom-agent ``model`` overrides, when known.
+        workspace_root: Workspace the CLI subprocess runs in, for
+            project-level settings files.
+
+    Returns:
+        The reusable round numbers, or ``None`` when there is no prior state
+        and nothing to gate; an empty set for a prior without run records.
+    """
     if prior is None:
         return None
     if not prior.runs:
         return frozenset()
-    workspace = options.workspace_root
-    cwd = str(workspace) if workspace is not None else None
+    cwd = str(workspace_root) if workspace_root is not None else None
     # The environment the claude subprocess will run under (#2549), so the
     # credential and the bare-billing decision describe the run as made.
-    env = cli_runtime_env(options.ai_config)
+    env = cli_runtime_env(ai_config)
     provenance = detect_run_provenance(
-        provider=options.provider.name,
-        transport=options.ai_config.transport,
-        bare=cli_bare_billing(options.ai_config, cwd=cwd, env=env),
+        provider=provider_name,
+        transport=ai_config.transport,
+        bare=cli_bare_billing(ai_config, cwd=cwd, env=env),
         env=env,
         cwd=cwd,
-        configured_base_url=options.ai_config.api_base_url,
+        configured_base_url=ai_config.api_base_url,
     )
     return reusable_rounds(
-        prior=options.prior_state,
+        prior=prior,
         provenance=provenance,
         allowed=allowed_models_for(
             provenance=provenance,
-            requested=options.provider.model_name,
-            fallback_models=options.ai_config.fallback_models,
-            agent_models=agent_model_overrides(options),
+            requested=model_name,
+            fallback_models=ai_config.fallback_models,
+            agent_models=agent_models,
         ),
     )

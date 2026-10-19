@@ -43,6 +43,7 @@ __all__ = [
     "RedoScope",
     "carried_degradations",
     "latest_degradations",
+    "latest_finished_run",
     "redo_scope",
 ]
 
@@ -111,8 +112,11 @@ class RedoScope:
         )
 
 
-def _degrading_run(*, prior: ReviewState | None) -> RunRecord | None:
-    """Return the latest finished run, whose degradations the next round owes.
+def latest_finished_run(*, prior: ReviewState | None) -> RunRecord | None:
+    """Return the latest finished run: the last record that is not a checkpoint.
+
+    Its degradations are what the next round owes, and its head is what the
+    already-reviewed guard (#2338) compares against.
 
     A mid-run checkpoint (#2867) appends a partial record for the interrupted
     round with no degradations of its own; reading it as the latest run would
@@ -146,7 +150,7 @@ def latest_degradations(*, prior: ReviewState | None) -> tuple[DegradationRecord
         is, so a later head that leaves a degraded file unchanged still owes
         its redo.
     """
-    run = _degrading_run(prior=prior)
+    run = latest_finished_run(prior=prior)
     if run is None:
         return ()
     return (
@@ -192,7 +196,7 @@ def _degraded_hashes(*, prior: ReviewState | None) -> dict[str, str]:
     Returns:
         Path to hash for the coverage records the degrading round wrote.
     """
-    run = _degrading_run(prior=prior)
+    run = latest_finished_run(prior=prior)
     if prior is None or run is None:
         return {}
     # The latest credit per file from the degrading round on, so a
@@ -248,7 +252,7 @@ def _redone_paths(
         The files with a coverage record from a round after the degrading
         run, at the file's current hash.
     """
-    run = _degrading_run(prior=prior)
+    run = latest_finished_run(prior=prior)
     if prior is None or run is None:
         return frozenset()
     # A checkpoint that recorded the redo degrading again earned its
