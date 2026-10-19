@@ -53,8 +53,8 @@ METERED_KEY: dict[str, str] = {
 }
 
 #: What a session lane's row can honestly claim. The claude CLI on a
-#: subscription calls api.anthropic.com/v1/messages, the same host and path
-#: the metered key reaches: ``host``. The Codex CLI on a ChatGPT session
+#: subscription calls api.anthropic.com, the host the metered key reaches
+#: (the check compares hosts): ``host``. The Codex CLI on a ChatGPT session
 #: calls the ChatGPT backend (chatgpt.com, in the lane's egress), which no
 #: API smoke can reach, so openai-api proves only the provider's API answers:
 #: ``provider``. A lane may not claim more than this table allows.

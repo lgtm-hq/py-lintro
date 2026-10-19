@@ -162,8 +162,8 @@ OPTIONAL_ROW_KEYS: Final[frozenset[str]] = frozenset(
 
 #: What a lane's smoke row proves (#2873). ``route``: the lane's own secret
 #: down the lane's own path. ``host``: the provider's metered key to the host
-#: and path the CLI calls, because the lane's credential is a session the raw
-#: API cannot take. ``provider``: the session's own route is unreachable by
+#: the CLI calls, because the lane's credential is a session the raw API
+#: cannot take. ``provider``: the session's own route is unreachable by
 #: an API smoke, so only the provider's API is proved to answer.
 SMOKE_COVERS: Final[frozenset[str]] = frozenset({"route", "host", "provider"})
 TRANSPORTS: Final[frozenset[str]] = frozenset({"cli", "api"})
