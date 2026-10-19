@@ -6,7 +6,7 @@ import asyncio
 import os
 import subprocess  # nosec B404 - only CompletedProcess objects are constructed here
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -248,17 +248,21 @@ def patch_cli_exec(
     Yields:
         MagicMock: The recording mock standing in for each spawn. Its extra
         ``transport_calls`` attribute records the ``CliTransport.run``
-        arguments (``cmd``, ``input_text``, ``timeout``, ``cwd``) that the
-        argv alone cannot show, since stdin and timeouts are applied after
-        the spawn. Its ``processes`` attribute records every spawned
-        :class:`_FakeProcess` so tests can assert on child lifecycle (for
-        example that a cancelled call actually killed the child).
+        arguments (``cmd``, ``input_text``, ``timeout``, ``cwd``,
+        ``extra_env``) that the argv alone cannot show, since stdin and
+        timeouts are applied after the spawn. Its ``processes`` attribute
+        records every spawned :class:`_FakeProcess` so tests can assert on
+        child lifecycle (for example that a cancelled call actually killed
+        the child), and its ``spawn_envs`` attribute the ``env`` mapping each
+        spawn received (#2549).
     """
     recorder = MagicMock(**mock_kwargs)
     transport_calls: list[SimpleNamespace] = []
     recorder.transport_calls = transport_calls
     processes: list[_FakeProcess] = []
     recorder.processes = processes
+    spawn_envs: list[dict[str, str] | None] = []
+    recorder.spawn_envs = spawn_envs
     original_run = CliTransport.run
 
     async def _recording_run(
@@ -268,6 +272,7 @@ def patch_cli_exec(
         input_text: str | None = None,
         timeout: float,
         cwd: str | None = None,
+        extra_env: Mapping[str, str] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Record the transport-level call, then run the real implementation.
 
@@ -277,6 +282,7 @@ def patch_cli_exec(
             input_text: Optional stdin payload.
             timeout: Subprocess timeout in seconds.
             cwd: Optional working directory.
+            extra_env: Variables set on the child's environment only.
 
         Returns:
             Whatever the real ``CliTransport.run`` returns.
@@ -287,6 +293,7 @@ def patch_cli_exec(
                 input_text=input_text,
                 timeout=timeout,
                 cwd=cwd,
+                extra_env=dict(extra_env) if extra_env is not None else None,
             ),
         )
         return await original_run(
@@ -295,6 +302,7 @@ def patch_cli_exec(
             input_text=input_text,
             timeout=timeout,
             cwd=cwd,
+            extra_env=extra_env,
         )
 
     async def _fake_exec(*argv: str, **spawn_kwargs: Any) -> _FakeProcess:
@@ -310,7 +318,8 @@ def patch_cli_exec(
         Raises:
             TypeError: When the configured result is not a CompletedProcess.
         """
-        del spawn_kwargs
+        env = spawn_kwargs.get("env")
+        spawn_envs.append(dict(env) if isinstance(env, dict) else None)
         if help_text is not None and "--help" in argv:
             help_process = _FakeProcess(
                 subprocess.CompletedProcess(

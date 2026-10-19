@@ -45,7 +45,7 @@ from lintro.ai.providers.base import (
     AsyncAIStreamResult,
     ProviderCapabilities,
 )
-from lintro.ai.providers.claude_auth import should_send_bare
+from lintro.ai.providers.claude_auth import claude_cli_env, should_send_bare
 from lintro.ai.providers.cli_contracts import cli_contract_for, flag_named_in
 from lintro.ai.providers.cli_transport import CliTransport, OptionalArg
 from lintro.ai.providers.constants import (
@@ -489,10 +489,19 @@ class AnthropicProvider(ApiStreamingProvider):
 
         effective_model = model or self._model
         working_dir = repo_root or os.getcwd()
+        # A renamed ``ai.api_key_env`` is re-exported as ANTHROPIC_API_KEY for
+        # the child only (#2549); the bare-mode decision reads that same
+        # child environment so the re-exported key counts as one.
+        extra_env = claude_cli_env(api_key_env=self._api_key_env)
+        child_env = {**os.environ, **extra_env}
         # `--bare` disables the CLI's OAuth session login, so it may only be
         # sent when the binary can reach an API key. Forcing it locked every
         # subscription-authenticated user out of this transport (#1838).
-        bare = should_send_bare(configured=self._cli_bare, cwd=working_dir)
+        bare = should_send_bare(
+            configured=self._cli_bare,
+            cwd=working_dir,
+            env=child_env,
+        )
         # Fail closed on the read-only bound (#2685): ``--tools`` is a
         # required contract flag, and a binary that cannot restrict its tool
         # surface is refused before any session starts rather than reviewing
@@ -584,6 +593,7 @@ class AnthropicProvider(ApiStreamingProvider):
             input_text=prompt,
             timeout=timeout,
             cwd=working_dir,
+            extra_env=extra_env,
         )
         # A turn-limited run exits non-zero with a well-formed envelope on
         # stdout. Recognise it before the exit-code mapping, whose auth

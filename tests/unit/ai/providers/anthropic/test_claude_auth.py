@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess  # nosec B404 - only CompletedProcess objects are constructed here
 from collections.abc import Iterator
 from pathlib import Path
@@ -19,6 +20,7 @@ from lintro.ai.providers.claude_auth import (
     BARE_MODE_ENV,
     CLAUDE_API_KEY_ENV,
     claude_api_key_available,
+    claude_cli_env,
     resolve_bare_mode,
     should_send_bare,
 )
@@ -426,3 +428,78 @@ class TestProviderBareFlag:
             cli_bare=CliBareMode.ALWAYS,
         )
         assert_that(argv).does_not_contain("--bare")
+
+
+# --- claude_cli_env: a renamed ai.api_key_env reaches the binary (#2549) -------
+
+
+def test_a_renamed_key_is_exported_under_the_binary_name() -> None:
+    """The renamed variable's value is handed to the child as ANTHROPIC_API_KEY."""
+    exported = claude_cli_env(
+        api_key_env="MY_CLAUDE_KEY",
+        env={"MY_CLAUDE_KEY": "sk-ant-renamed"},
+    )
+
+    assert_that(exported).is_equal_to({CLAUDE_API_KEY_ENV: "sk-ant-renamed"})
+
+
+def test_the_default_name_exports_nothing() -> None:
+    """With the default variable there is nothing to re-export."""
+    exported = claude_cli_env(
+        api_key_env=CLAUDE_API_KEY_ENV,
+        env={CLAUDE_API_KEY_ENV: "sk-ant-literal"},
+    )
+
+    assert_that(exported).is_empty()
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_a_blank_renamed_key_exports_nothing(value: str) -> None:
+    """An unset or blank renamed variable is not a credential."""
+    exported = claude_cli_env(
+        api_key_env="MY_CLAUDE_KEY",
+        env={"MY_CLAUDE_KEY": value},
+    )
+
+    assert_that(exported).is_empty()
+
+
+def test_the_renamed_key_wins_over_a_literal_one() -> None:
+    """When both are set the configured name decides, as on the api transport."""
+    exported = claude_cli_env(
+        api_key_env="MY_CLAUDE_KEY",
+        env={"MY_CLAUDE_KEY": "sk-ant-renamed", CLAUDE_API_KEY_ENV: "sk-ant-literal"},
+    )
+
+    assert_that(exported).is_equal_to({CLAUDE_API_KEY_ENV: "sk-ant-renamed"})
+
+
+def test_claude_cli_env_does_not_write_the_process_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Re-exporting is a child-only mapping; the parent is never written."""
+    monkeypatch.delenv(CLAUDE_API_KEY_ENV, raising=False)
+    monkeypatch.setenv("MY_CLAUDE_KEY", "sk-ant-renamed")
+
+    exported = claude_cli_env(api_key_env="MY_CLAUDE_KEY")
+
+    assert_that(exported).is_equal_to({CLAUDE_API_KEY_ENV: "sk-ant-renamed"})
+    assert_that(os.environ).does_not_contain_key(CLAUDE_API_KEY_ENV)
+
+
+def test_bare_auto_counts_a_key_in_the_child_environment(
+    isolated_auth_env: Path,
+) -> None:
+    """``should_send_bare`` reads the environment it is given, not the parent."""
+    child_env = {CLAUDE_API_KEY_ENV: "sk-ant-renamed"}
+
+    assert_that(
+        should_send_bare(
+            configured=CliBareMode.AUTO,
+            cwd=str(isolated_auth_env),
+            env=child_env,
+        ),
+    ).is_true()
+    assert_that(
+        should_send_bare(configured=CliBareMode.AUTO, cwd=str(isolated_auth_env)),
+    ).is_false()

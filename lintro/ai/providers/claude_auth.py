@@ -39,6 +39,7 @@ __all__ = [
     "BARE_MODE_ENV",
     "CLAUDE_API_KEY_ENV",
     "claude_api_key_available",
+    "claude_cli_env",
     "claude_settings_env_value",
     "resolve_bare_mode",
     "should_send_bare",
@@ -49,10 +50,10 @@ __all__ = [
 BARE_MODE_ENV = "LINTRO_CLI_BARE"
 
 #: The only API-key variable the ``claude`` binary itself reads. A custom
-#: ``ai.api_key_env`` renames the variable lintro's *API* transport reads and is
-#: deliberately not consulted here: the CLI subprocess would never look at it,
-#: so treating it as proof of an API key would send ``--bare`` into a CLI that
-#: cannot authenticate.
+#: ``ai.api_key_env`` renames the variable lintro reads; the CLI transport
+#: re-exports its value under this name into the subprocess environment
+#: (:func:`claude_cli_env`, #2549), so the binary sees it, and the bare-mode
+#: decision is taken against that same child environment.
 CLAUDE_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
 #: Truthy/falsey spellings accepted by ``LINTRO_CLI_BARE`` in addition to the
@@ -272,12 +273,16 @@ def should_send_bare(
     *,
     configured: CliBareMode = CliBareMode.AUTO,
     cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> bool:
     """Decide whether this ``claude`` invocation may carry ``--bare``.
 
     Args:
         configured: The mode set in ``ai.providers.anthropic.cli_bare``.
         cwd: Working directory the CLI subprocess runs in.
+        env: The environment the subprocess will see; the process
+            environment when ``None``. The caller passes the child
+            environment so a re-exported key (#2549) counts.
 
     Returns:
         True when ``--bare`` should be appended to the command line.
@@ -287,4 +292,37 @@ def should_send_bare(
         return True
     if mode is CliBareMode.NEVER:
         return False
-    return claude_api_key_available(cwd=cwd)
+    return claude_api_key_available(cwd=cwd, env=env)
+
+
+def claude_cli_env(
+    *,
+    api_key_env: str,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """Return the variables to add to the ``claude`` subprocess environment.
+
+    ``ai.api_key_env`` renames the variable lintro reads its API key from,
+    and the ``api`` transport honours it. The ``claude`` binary reads only
+    ``ANTHROPIC_API_KEY``, so the renamed variable's value is exported under
+    that name for the child process (#2549). The configured name wins: when
+    both the renamed variable and a literal ``ANTHROPIC_API_KEY`` are set,
+    the child sees the configured one, because a user who renamed the
+    variable asked for that credential and the ``api`` transport would use
+    the same one. The parent environment is never written.
+
+    Args:
+        api_key_env: The resolved ``ai.api_key_env`` for the provider.
+        env: Environment to read; the process environment when ``None``.
+
+    Returns:
+        ``{"ANTHROPIC_API_KEY": value}`` when the variable is renamed and set
+        to a non-blank value, else an empty mapping.
+    """
+    if api_key_env == CLAUDE_API_KEY_ENV:
+        return {}
+    environment: Mapping[str, str] = os.environ if env is None else env
+    value = environment.get(api_key_env, "")
+    if not value.strip():
+        return {}
+    return {CLAUDE_API_KEY_ENV: value}
