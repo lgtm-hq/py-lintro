@@ -968,7 +968,7 @@ def test_sticky_nit_row_carries_description_and_fix(
         findings=(
             ReviewFinding(
                 severity=Severity.P3,
-                category="code-smell",
+                category="logic-bug",
                 file="src/app.py",
                 line=9,
                 title="Nit title",
