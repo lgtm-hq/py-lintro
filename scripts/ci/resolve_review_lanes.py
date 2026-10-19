@@ -35,7 +35,10 @@ any secret is exposed, on:
   whose first entry is non-first-party (decision D);
 - a non-first-party row without ``shadow_price_model``, or any row whose
   default model has no list-price table (``priced_models``) and no
-  ``shadow_price_model`` (decision B).
+  ``shadow_price_model`` (decision B);
+- a row without ``smoke_row``, a ``null`` smoke row without a ``smoke_gap``,
+  a named smoke row without a ``smoke_covers`` level or with a gap as well,
+  or a gap with a coverage level (#2873).
 
 Every error names the lanes the manifest declares. Standard library only: the
 job that runs this installs nothing.
@@ -151,10 +154,18 @@ OPTIONAL_ROW_KEYS: Final[frozenset[str]] = frozenset(
         "credential_file",
         "credential_source_env",
         "shadow_price_model",
-        "smoke_row",
+        # Each exactly as _check_smoke allows for the row's smoke_row value.
         "smoke_gap",
+        "smoke_covers",
     },
 )
+
+#: What a lane's smoke row proves (#2873). ``route``: the lane's own secret
+#: down the lane's own path. ``host``: the provider's metered key to the host
+#: and path the CLI calls, because the lane's credential is a session the raw
+#: API cannot take. ``provider``: the session's own route is unreachable by
+#: an API smoke, so only the provider's API is proved to answer.
+SMOKE_COVERS: Final[frozenset[str]] = frozenset({"route", "host", "provider"})
 TRANSPORTS: Final[frozenset[str]] = frozenset({"cli", "api"})
 
 #: A lane id: lowercase, digits and hyphens, so it can name a job, a
@@ -207,6 +218,8 @@ _REQUIRED: Final[dict[str, type | tuple[type, ...]]] = {
     "egress": list,
     "model": str,
     "cost_basis": str,
+    # The smoke row that stands for the lane, or null with a smoke_gap (#2873).
+    "smoke_row": (str, type(None)),
 }
 
 #: The active-lane fields published flat, in output order.
@@ -365,29 +378,38 @@ def _check_shape(lane_id: str, row: Any, lanes: dict[str, Any]) -> dict[str, Any
 def _check_smoke(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> None:
     """Check the row names its weekly smoke row, or says why none can (#2873).
 
-    ``smoke_row`` is the name of the provider-smoke table row that calls this
-    lane's real endpoint; ``null`` is allowed only with a ``smoke_gap`` that
+    ``smoke_row`` is the name of the provider-smoke table row that stands for
+    this lane, with ``smoke_covers`` saying what that call proves
+    (:data:`SMOKE_COVERS`); ``null`` is allowed only with a ``smoke_gap`` that
     says why no API smoke can reach the lane. The agreement between the row
-    and the lane (host, protocol, credential) is held by
+    and the lane (host, protocol, credential, level) is held by
     ``tests/scripts/ci/test_smoke_rows_match_lanes.py``, which reads both
-    files; this check only keeps the declaration well formed.
+    files; this check only keeps the declaration well formed. Presence and
+    shape of ``smoke_row`` itself are the shape check's (``_REQUIRED``).
     """
-    if "smoke_row" not in row:
-        _fail(f"lane {lane_id!r} is missing 'smoke_row'", lanes)
     smoke_row = row["smoke_row"]
     gap = row.get("smoke_gap")
+    covers = row.get("smoke_covers")
     if smoke_row is None:
         if not isinstance(gap, str) or not gap.strip():
             _fail(
                 f"lane {lane_id!r} has no smoke row and no 'smoke_gap' saying why",
                 lanes,
             )
+        if covers is not None:
+            _fail(f"lane {lane_id!r} has no smoke row but a 'smoke_covers'", lanes)
         return
     if not isinstance(smoke_row, str) or not _LANE_ID_RE.match(smoke_row):
         _fail(f"lane {lane_id!r} field 'smoke_row' is not a smoke row name", lanes)
     if gap is not None:
         _fail(
             f"lane {lane_id!r} names a smoke row and a 'smoke_gap'; it cannot be both",
+            lanes,
+        )
+    if covers not in SMOKE_COVERS:
+        _fail(
+            f"lane {lane_id!r} field 'smoke_covers' must be one of "
+            f"{sorted(SMOKE_COVERS)}",
             lanes,
         )
 

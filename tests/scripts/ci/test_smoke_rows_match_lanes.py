@@ -36,11 +36,29 @@ RESOLVER = ROOT / "scripts" / "ci" / "resolve_review_lanes.py"
 WIRE_PROTOCOL: dict[str, str] = {"anthropic": "anthropic", "openai": "openai"}
 
 #: Credential kinds that are a bearer token the raw API accepts, so the smoke
-#: row must use the lane's own secret. A session kind (the Claude and Codex
-#: subscriptions) cannot drive the API: its row uses the provider's metered
-#: key against the same host, and must not name the session's secret.
+#: row must send the lane's own secret and the lane declares ``smoke_covers:
+#: route``. A session kind (the Claude and Codex subscriptions) cannot drive
+#: the API: its row sends the provider's metered key, and the lane declares
+#: how far that reaches (``SESSION_COVERS``), saying out loud that the
+#: session itself is never probed.
 TOKEN_KINDS: frozenset[str] = frozenset({"api_key", "zai_token", "kimi_token"})
 SESSION_KINDS: frozenset[str] = frozenset({"claude_oauth", "codex_oauth"})
+
+#: The metered key a session lane's smoke row must send: the repository
+#: secret the provider's raw API takes, pinned so that no other secret (a
+#: session, another provider's key) can stand in for it.
+METERED_KEY: dict[str, str] = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+}
+
+#: What a session lane's row can honestly claim. The claude CLI on a
+#: subscription calls api.anthropic.com/v1/messages, the same host and path
+#: the metered key reaches: ``host``. The Codex CLI on a ChatGPT session
+#: calls the ChatGPT backend (chatgpt.com, in the lane's egress), which no
+#: API smoke can reach, so openai-api proves only the provider's API answers:
+#: ``provider``. A lane may not claim more than this table allows.
+SESSION_COVERS: dict[str, str] = {"anthropic": "host", "openai": "provider"}
 
 
 def _load_resolver() -> ModuleType:
@@ -75,47 +93,112 @@ def _host(url: str) -> str:
     return (urlparse(url).hostname or "").lower()
 
 
-def test_every_lane_declares_its_smoke_row_or_a_gap(
-    lanes: dict[str, dict[str, Any]],
+def _check_lane(
+    lane_id: str,
+    lane: dict[str, Any],
+    rows: dict[str, dict[str, Any]],
 ) -> None:
-    """No lane is silent about its weekly smoke."""
-    for lane_id, row in lanes.items():
-        assert_that(row).described_as(lane_id).contains_key("smoke_row")
-        if row["smoke_row"] is None:
-            assert_that(row.get("smoke_gap", "")).described_as(lane_id).is_not_empty()
-        else:
-            assert_that(row).described_as(lane_id).does_not_contain_key("smoke_gap")
+    """Assert one lane's smoke row stands for it with a usable credential.
+
+    Args:
+        lane_id: The lane's id, for the failure message.
+        lane: The manifest row.
+        rows: The smoke table's rows by name.
+    """
+    name = lane["smoke_row"]
+    assert_that(rows).described_as(f"{lane_id} -> {name}").contains_key(name)
+    row = rows[name]
+    assert_that(_host(row["base_url"])).described_as(lane_id).is_equal_to(
+        _host(lane["endpoint"]),
+    )
+    assert_that(WIRE_PROTOCOL).described_as(lane_id).contains_key(lane["provider"])
+    assert_that(row["protocol"]).described_as(lane_id).is_equal_to(
+        WIRE_PROTOCOL[lane["provider"]],
+    )
+    kind = lane["credential"]
+    if kind in TOKEN_KINDS:
+        assert_that(lane["smoke_covers"]).described_as(lane_id).is_equal_to("route")
+        assert_that(row["key_env"]).described_as(lane_id).is_equal_to(
+            lane["credential_secret"],
+        )
+    elif kind in SESSION_KINDS:
+        assert_that(SESSION_COVERS).described_as(lane_id).contains_key(lane["provider"])
+        assert_that(lane["smoke_covers"]).described_as(lane_id).is_equal_to(
+            SESSION_COVERS[lane["provider"]],
+        )
+        assert_that(METERED_KEY).described_as(lane_id).contains_key(lane["provider"])
+        assert_that(row["key_env"]).described_as(lane_id).is_equal_to(
+            METERED_KEY[lane["provider"]],
+        )
+    else:
+        pytest.fail(f"lane {lane_id!r}: credential kind {kind!r} is not classified")
 
 
-def test_a_lane_with_a_smoke_row_is_smoked_on_its_real_route(
+def test_a_lane_with_a_smoke_row_is_smoked_as_far_as_it_claims(
     lanes: dict[str, dict[str, Any]],
     rows: dict[str, dict[str, Any]],
 ) -> None:
-    """Same host, same wire protocol, a credential the API can take."""
+    """Same host, same wire protocol, the credential and level the lane declares."""
     for lane_id, lane in lanes.items():
-        name = lane["smoke_row"]
-        if name is None:
+        if lane["smoke_row"] is None:
             continue
-        assert_that(rows).described_as(f"{lane_id} -> {name}").contains_key(name)
-        row = rows[name]
-        assert_that(_host(row["base_url"])).described_as(lane_id).is_equal_to(
-            _host(lane["endpoint"]),
-        )
-        assert_that(WIRE_PROTOCOL).described_as(lane_id).contains_key(lane["provider"])
-        assert_that(row["protocol"]).described_as(lane_id).is_equal_to(
-            WIRE_PROTOCOL[lane["provider"]],
-        )
-        kind = lane["credential"]
-        if kind in TOKEN_KINDS:
-            assert_that(row["key_env"]).described_as(lane_id).is_equal_to(
-                lane["credential_secret"],
-            )
-        elif kind in SESSION_KINDS:
-            assert_that(row["key_env"]).described_as(lane_id).is_not_equal_to(
-                lane["credential_secret"],
-            )
-        else:
-            pytest.fail(f"lane {lane_id!r}: credential kind {kind!r} is not classified")
+        _check_lane(lane_id, lane, rows)
+
+
+@pytest.mark.parametrize(
+    ("lane_id", "key_env"),
+    [
+        # A session secret cannot drive the raw API: not "any other secret".
+        ("anthropic", "CLAUDE_CODE_OAUTH_TOKEN"),
+        ("openai", "CODEX_AUTH_JSON"),
+        # Another provider's key is not this host's key.
+        ("anthropic", "OPENAI_API_KEY"),
+        ("openai", "ANTHROPIC_API_KEY"),
+        ("anthropic", "ZAI_AUTH_TOKEN"),
+        # A token lane's row must send that lane's own token.
+        ("kimi", "ZAI_AUTH_TOKEN"),
+        ("zai", "ANTHROPIC_API_KEY"),
+    ],
+)
+def test_a_row_sending_the_wrong_secret_is_caught(
+    lanes: dict[str, dict[str, Any]],
+    rows: dict[str, dict[str, Any]],
+    lane_id: str,
+    key_env: str,
+) -> None:
+    """The credential check pins the key, so a usable-looking swap still fails."""
+    lane = lanes[lane_id]
+    swapped = copy.deepcopy(rows)
+    swapped[lane["smoke_row"]]["key_env"] = key_env
+
+    with pytest.raises(AssertionError):
+        _check_lane(lane_id, lane, swapped)
+
+
+@pytest.mark.parametrize(
+    ("lane_id", "covers"),
+    [
+        # A session lane may not claim its session is probed.
+        ("anthropic", "route"),
+        ("openai", "route"),
+        # The Codex session's route is not the API host: not even "host".
+        ("openai", "host"),
+        # A token lane may not hide behind a weaker level.
+        ("kimi", "host"),
+        ("zai", "provider"),
+    ],
+)
+def test_a_lane_cannot_overstate_or_understate_its_coverage(
+    lanes: dict[str, dict[str, Any]],
+    rows: dict[str, dict[str, Any]],
+    lane_id: str,
+    covers: str,
+) -> None:
+    """The declared level is pinned per lane, in both directions."""
+    lane = dict(lanes[lane_id], smoke_covers=covers)
+
+    with pytest.raises(AssertionError):
+        _check_lane(lane_id, lane, rows)
 
 
 def test_a_gateway_lane_is_smoked_on_its_own_path_not_the_hosts_other_route(
@@ -155,14 +238,17 @@ def test_the_committed_tables_agree_today(
 ) -> None:
     """The mapping as merged, so a drift names the lane that moved."""
     assert_that(
-        {lane_id: lane["smoke_row"] for lane_id, lane in lanes.items()},
+        {
+            lane_id: (lane["smoke_row"], lane.get("smoke_covers"))
+            for lane_id, lane in lanes.items()
+        },
     ).is_equal_to(
         {
-            "anthropic": "anthropic-api",
-            "openai": "openai-api",
-            "cursor": None,
-            "zai": "zai-anthropic-api",
-            "kimi": "kimi-api",
+            "anthropic": ("anthropic-api", "host"),
+            "openai": ("openai-api", "provider"),
+            "cursor": (None, None),
+            "zai": ("zai-anthropic-api", "route"),
+            "kimi": ("kimi-api", "route"),
         },
     )
     assert_that(rows["zai-anthropic-api"]["protocol"]).is_equal_to("anthropic")
@@ -181,9 +267,19 @@ def _refuses(resolver: ModuleType, document: dict[str, Any], fragment: str) -> N
         (lambda row: row.pop("smoke_row"), "missing 'smoke_row'"),
         (lambda row: row.update(smoke_row=None), "no 'smoke_gap' saying why"),
         (lambda row: row.update(smoke_row=None, smoke_gap="  "), "no 'smoke_gap'"),
-        (lambda row: row.update(smoke_row=7), "not a smoke row name"),
+        (lambda row: row.update(smoke_row=7), "has the wrong type"),
         (lambda row: row.update(smoke_row="Not A Row"), "not a smoke row name"),
         (lambda row: row.update(smoke_gap="also"), "cannot be both"),
+        (lambda row: row.pop("smoke_covers"), "'smoke_covers' must be one of"),
+        (lambda row: row.update(smoke_covers="all"), "'smoke_covers' must be one of"),
+        (
+            lambda row: row.update(
+                smoke_row=None,
+                smoke_gap="why",
+                smoke_covers="host",
+            ),
+            "no smoke row but a 'smoke_covers'",
+        ),
     ],
 )
 def test_the_resolver_refuses_a_malformed_declaration(
