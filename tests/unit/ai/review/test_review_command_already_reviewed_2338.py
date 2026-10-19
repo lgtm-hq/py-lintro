@@ -54,12 +54,15 @@ def review_calls() -> dict[str, int]:
 def patched_review(
     monkeypatch: pytest.MonkeyPatch,
     review_calls: dict[str, int],
-) -> None:
+) -> MagicMock:
     """Stub the review command up to the provider call.
 
     Args:
         monkeypatch: Pytest monkeypatch fixture.
         review_calls: Counter shared with the tests.
+
+    Returns:
+        The mutable project config the command will read.
     """
     from lintro.ai.config import AIConfig
 
@@ -122,6 +125,7 @@ def patched_review(
         lambda **_: None,
     )
     monkeypatch.delenv(guard_module.FORCE_ENV, raising=False)
+    return config
 
 
 def _with_prior_state(*, monkeypatch: pytest.MonkeyPatch, state: ReviewState) -> None:
@@ -361,3 +365,33 @@ def test_post_with_publication_evidence_skips_and_posts_nothing(
     assert_that(_envelope(output=result.output)["outcome"]).is_equal_to(
         "already_reviewed",
     )
+
+
+def test_the_force_variable_gets_past_both_skips(
+    patched_review: MagicMock,
+    review_calls: dict[str, int],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``LINTRO_REVIEW_FORCE=1`` runs a round past the convergence skip too."""
+    from lintro.ai.review.models.run_outcome import RunOutcome
+
+    config = patched_review
+    config.review.convergence = ReviewConvergenceConfig(threshold=3.0, stable_rounds=2)
+    quiet = ReviewState(
+        runs=tuple(
+            RunRecord(
+                identity=RunIdentity(round=index, sha=_HEAD),
+                outcome=RunOutcome(convergence_score=0.5),
+            )
+            for index in (1, 2)
+        ),
+    )
+    _with_prior_state(monkeypatch=monkeypatch, state=quiet)
+    seen = _decide(monkeypatch=monkeypatch, decision=_DECISION)
+    monkeypatch.setenv(guard_module.FORCE_ENV, "1")
+
+    result = CliRunner().invoke(review_command, [])
+
+    assert_that(seen).is_empty()
+    assert_that(review_calls["run_review"]).is_equal_to(1)
+    assert_that(result.exception).is_instance_of(_RoundRanError)

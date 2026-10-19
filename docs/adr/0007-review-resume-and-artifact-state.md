@@ -39,8 +39,9 @@ state in an editable hidden blob.
 Capped reviews converge across rounds. A quiet re-review makes zero provider calls: a
 head the last finished round covered completely is skipped as `already_reviewed` before
 any provider is constructed, open threads included, since on the same head the code a
-thread points at has not changed (#2338; `--full` or `LINTRO_REVIEW_FORCE` forces a
-round). A partial review cannot render clean or pass the AI Review check. Large capped
+thread points at has not changed (#2338). `--full` and `LINTRO_REVIEW_FORCE` both get
+past this skip and the convergence skip; only `--full` also discards the carried
+coverage. A partial review cannot render clean or pass the AI Review check. Large capped
 API-key PRs are red on round 1 by design. A mid-round **timeout** is the same class of
 stop as a cost cap: coverage and this-run findings already written are persisted
 (incremental `part-*.json` under `LINTRO_REVIEW_STATE_DIR`) and the next round resumes.

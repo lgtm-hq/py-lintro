@@ -38,9 +38,10 @@ when an open P1 record remains, as a converged skip does). The guard needs the l
 finished round to have reviewed this head completely, without a degradation, with every
 eligible file covered or only carrying an open thread, and, under `--post`, the sticky
 present and every inline-tier open finding holding its thread id, since state is written
-before posting and a failed post must post on retry. `--full` or `LINTRO_REVIEW_FORCE=1`
-forces a round. `--max-cost-usd uncapped` lifts a flag/env cap. Overlay `0` is rejected;
-use `uncapped` or a positive value.
+before posting and a failed post must post on retry. `--full` and
+`LINTRO_REVIEW_FORCE=1` both get past this skip and the convergence skip; only `--full`
+also discards the carried coverage. `--max-cost-usd uncapped` lifts a flag/env cap.
+Overlay `0` is rejected; use `uncapped` or a positive value.
 
 When the per-PR question pass fails, every chunk is reviewed with the rubric alone. The
 run log then says why, as one of `empty`, `not_json`, `not_list`, `no_question`,

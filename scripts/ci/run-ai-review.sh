@@ -18,7 +18,8 @@ set -euo pipefail
 #           (#2338) — so exit 0 is "not blocked", not "a review ran"
 #   exit 1  no review was produced — no credential, dead credential, depleted
 #           balance, unreachable provider, or a lintro-side failure — or a
-#           converged skip whose last real round left open P1 findings
+#           converged or already-reviewed skip whose last real round left
+#           open P1 findings
 #
 # The check is deliberately NOT required, so a billing condition is loud without
 # blocking a merge. P1 findings from a completed round still exit 0: the review

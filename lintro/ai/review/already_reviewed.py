@@ -180,8 +180,9 @@ def _expects_inline_thread(*, record: FindingRecord, policy: PostingPolicy) -> b
     """Return whether the posting policy would have opened a thread for *record*.
 
     Mirrors :meth:`PostingPolicy.posts_inline` on the record's fields: a
-    defect claim in the inline severity tier at or above the confidence
-    floor. Category routing (#2909) touches P3 only, so it cannot apply.
+    defect claim, or a question when questions are configured to post
+    inline, in the inline severity tier at or above the confidence floor.
+    Category routing (#2909) touches P3 only, so it cannot apply.
 
     Args:
         record: A tracked finding.
@@ -190,7 +191,7 @@ def _expects_inline_thread(*, record: FindingRecord, policy: PostingPolicy) -> b
     Returns:
         True when an inline thread was expected for the record.
     """
-    if record.kind is not FindingKind.FINDING:
+    if record.kind is FindingKind.QUESTION and not policy.post_questions_inline:
         return False
     if record.severity not in INLINE_SEVERITIES:
         return False

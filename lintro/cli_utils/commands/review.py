@@ -51,6 +51,7 @@ from lintro.ai.providers import get_provider
 from lintro.ai.review.already_reviewed import (
     AlreadyReviewed,
     evaluate_already_reviewed,
+    force_requested,
     publication_complete,
 )
 from lintro.ai.review.checklist_display import (
@@ -1019,7 +1020,10 @@ def _finish_review(
             repo=targets.effective_repo or os.environ.get("GITHUB_REPOSITORY", ""),
             post=options.post,
         )
-        if not options.force_full:
+        # ``--full`` and ``LINTRO_REVIEW_FORCE`` both get past the two
+        # pre-provider skips (#2099, #2338); only ``--full`` also discards
+        # the carried coverage.
+        if not options.force_full and not force_requested():
             _check_convergence(
                 options=options,
                 lintro_config=lintro_config,

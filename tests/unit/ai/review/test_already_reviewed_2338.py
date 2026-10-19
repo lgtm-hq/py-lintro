@@ -558,3 +558,20 @@ def test_records_the_policy_never_posts_inline_need_no_thread(
             find_sticky=lambda *, marker: (1, "body"),
         ),
     ).is_true()
+
+
+def test_a_question_posted_inline_by_configuration_needs_its_thread() -> None:
+    """With questions opted into inline posting, an open question without an id is unpublished."""
+    question = replace(_open("a.py", comment=None), kind=FindingKind.QUESTION)
+    policy = PostingPolicy(
+        inline_min_confidence=ConfidenceLevel.MEDIUM,
+        post_questions_inline=True,
+    )
+
+    assert_that(
+        publication_complete(
+            prior=ReviewState(findings=(question,)),
+            policy=policy,
+            find_sticky=lambda *, marker: (1, "body"),
+        ),
+    ).is_false()
