@@ -28,6 +28,7 @@ from lintro.ai.exceptions import (
 )
 from lintro.ai.json_response import CliSchemaRequest
 from lintro.ai.provider_enum import AIProvider
+from lintro.ai.providers._cli_envelope import decode_envelope_or_prose
 from lintro.ai.providers.base import (
     AIResponse,
     BaseAIProvider,
@@ -41,11 +42,7 @@ from lintro.ai.providers.constants import (
     DEFAULT_TIMEOUT,
 )
 from lintro.ai.providers.cursor.metadata import CURSOR_CLI_BINARY, CURSOR_METADATA
-from lintro.ai.raw_response import (
-    CLI_ENVELOPE_STAGE,
-    describe_raw_response,
-    recover_prose_envelope,
-)
+from lintro.ai.raw_response import CLI_ENVELOPE_STAGE, describe_raw_response
 from lintro.ai.token_budget import estimate_tokens
 
 CURSOR_MIN_TIMEOUT = 600.0
@@ -64,80 +61,57 @@ class _CursorCliTransport(CliTransport):
     """Cursor ``agent --print`` subprocess transport."""
 
     def parse_stdout(self, stdout: str) -> tuple[AIResponse, str | None]:
-        """Parse the JSON envelope from ``agent --output-format json``."""
-        try:
-            data = json.loads(stdout.strip())
-        except json.JSONDecodeError as exc:
-            recovered = recover_prose_envelope(
-                provider="Cursor agent",
-                stdout=stdout,
-                reason=str(exc),
-            )
-            if recovered is None:
-                evidence = describe_raw_response(
-                    provider="Cursor agent",
-                    stage=CLI_ENVELOPE_STAGE,
-                    raw=stdout,
-                )
-                raise AIProviderError(
-                    f"Cursor CLI returned invalid JSON: {exc}\n{evidence}",
-                ) from exc
+        """Parse the JSON envelope from ``agent --output-format json``.
+
+        Args:
+            stdout: Raw CLI stdout.
+
+        Returns:
+            The response and the session id the envelope reported.
+
+        Raises:
+            AIProviderError: When the envelope reports an error, or cannot be
+                decoded (:class:`CliEnvelopeError`, #2513).
+        """
+        decoded = decode_envelope_or_prose(stdout, provider="Cursor agent")
+        if isinstance(decoded, str):
             return (
                 AIResponse(
-                    content=recovered,
+                    content=decoded,
                     model=self._model,
                     provider=AIProvider.CURSOR,
                 ),
                 None,
             )
 
-        if data.get("is_error") or data.get("subtype") == "error":
-            cause = data.get("result") or describe_raw_response(
+        if decoded.is_error:
+            cause = decoded.result or describe_raw_response(
                 provider="Cursor agent",
                 stage=CLI_ENVELOPE_STAGE,
                 raw=stdout,
             )
             raise AIProviderError(f"Cursor CLI reported error: {cause}")
 
-        content = data.get("result", "")
+        content = decoded.result
         if not content:
             logger.warning(
                 f"Cursor CLI returned empty result. "
-                f"Full response: {json.dumps(data)[:1000]}",
+                f"Full response: {json.dumps(decoded.raw)[:1000]}",
             )
-
-        # The agent CLI may prefix JSON with prose. Only substitute extracted
-        # content when it parses as JSON; otherwise keep plain-text answers
-        # with incidental braces intact.
-        try:
-            json.loads(content)
-        except json.JSONDecodeError:
-            extracted = self.extract_json_object(content)
-            if extracted != content:
-                try:
-                    json.loads(extracted)
-                except json.JSONDecodeError:
-                    pass
-                else:
-                    content = extracted
-
-        usage = data.get("usage", {})
-        session_id = data.get("session_id")
-        if isinstance(session_id, str) and session_id.strip():
-            session_id = session_id.strip()
-        else:
-            session_id = None
 
         return (
             AIResponse(
-                content=content,
+                # The agent CLI may prefix JSON with prose; the extracted span
+                # replaces the content only when it parses, so a plain-text
+                # answer with incidental braces stays intact.
+                content=self.substitute_parsed_json(content),
                 model=self._model,
-                input_tokens=usage.get("inputTokens", 0),
-                output_tokens=usage.get("outputTokens", 0),
+                input_tokens=decoded.input_tokens,
+                output_tokens=decoded.output_tokens,
                 cost_estimate=0.0,
                 provider=AIProvider.CURSOR,
             ),
-            session_id,
+            decoded.session_id,
         )
 
     def __init__(

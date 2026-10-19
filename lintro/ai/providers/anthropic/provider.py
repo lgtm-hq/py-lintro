@@ -36,6 +36,7 @@ from lintro.ai.providers._api_common import (
     ApiStreamingProvider,
     finish_api_completion,
 )
+from lintro.ai.providers._cli_envelope import decode_envelope_or_prose
 from lintro.ai.providers.anthropic.metadata import (
     ANTHROPIC_CLI_BINARY,
     ANTHROPIC_METADATA,
@@ -55,11 +56,7 @@ from lintro.ai.providers.constants import (
 )
 from lintro.ai.providers.reported_model import parse_model_usage
 from lintro.ai.rate_limit import retry_after_from_exception
-from lintro.ai.raw_response import (
-    CLI_ENVELOPE_STAGE,
-    describe_raw_response,
-    recover_prose_envelope,
-)
+from lintro.ai.raw_response import CLI_ENVELOPE_STAGE, describe_raw_response
 from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
 _has_anthropic = False
@@ -212,41 +209,40 @@ class _AnthropicCliTransport(CliTransport):
         *,
         max_turns: int | None = None,
     ) -> tuple[AIResponse, str | None]:
-        """Parse JSON envelope from ``claude --output-format json``."""
-        try:
-            data = json.loads(stdout.strip())
-        except json.JSONDecodeError as exc:
-            recovered = recover_prose_envelope(
-                provider="Claude",
-                stdout=stdout,
-                reason=str(exc),
-            )
-            if recovered is None:
-                evidence = describe_raw_response(
-                    provider="Claude",
-                    stage=CLI_ENVELOPE_STAGE,
-                    raw=stdout,
-                )
-                raise AIProviderError(
-                    f"Claude CLI returned invalid JSON: {exc}\n{evidence}",
-                ) from exc
+        """Parse the JSON envelope from ``claude --output-format json``.
+
+        Args:
+            stdout: Raw CLI stdout.
+            max_turns: The turn limit the executed argv carried, when any.
+
+        Returns:
+            The response and the session id the envelope reported.
+
+        Raises:
+            AITurnLimitError: When the envelope says the loop stopped at the
+                turn limit rather than by answering.
+            AIProviderError: When the envelope reports an error, or cannot be
+                decoded (:class:`CliEnvelopeError`, #2513).
+        """
+        decoded = decode_envelope_or_prose(stdout, provider="Claude")
+        if isinstance(decoded, str):
             return (
                 AIResponse(
-                    content=recovered,
+                    content=decoded,
                     model=self._model,
                     provider=AIProvider.ANTHROPIC,
                 ),
                 None,
             )
 
-        if _hit_turn_limit(data=data, max_turns=max_turns):
+        if _hit_turn_limit(data=decoded.raw, max_turns=max_turns):
             raise AITurnLimitError(
                 "Claude CLI stopped at the per-call turn limit"
                 f"{f' ({max_turns} turns)' if max_turns is not None else ''} "
                 "before answering (#2685).",
             )
-        if data.get("is_error") or data.get("subtype") == "error":
-            cause = data.get("result") or describe_raw_response(
+        if decoded.is_error:
+            cause = decoded.result or describe_raw_response(
                 provider="Claude",
                 stage=CLI_ENVELOPE_STAGE,
                 raw=stdout,
@@ -255,72 +251,40 @@ class _AnthropicCliTransport(CliTransport):
             # what tells a rejected request (400, 429) apart from an answer
             # that overran the output ceiling, and the output-exhaustion
             # classifier reads them from the message (#2695).
-            markers = {
-                key: data[key]
-                for key in ("terminal_reason", "api_error_status")
-                if data.get(key) is not None
-            }
+            markers = decoded.error_markers
             suffix = (
                 f" ({json.dumps(markers, separators=(',', ':'))})" if markers else ""
             )
             raise AIProviderError(f"Claude CLI reported error: {cause}{suffix}")
 
-        content = data.get("result", "")
-        structured = data.get("structured_output")
-        if structured is not None:
-            content = json.dumps(structured)
-        elif isinstance(content, dict):
-            content = json.dumps(content)
-        elif not isinstance(content, str):
-            content = str(content)
-
-        usage = data.get("usage", {})
-        input_tokens = int(
-            usage.get("input_tokens", usage.get("inputTokens", 0)),
+        cost_reported = decoded.total_cost_usd is not None
+        cost = (
+            decoded.total_cost_usd
+            if decoded.total_cost_usd is not None
+            else estimate_cost(
+                self._model,
+                decoded.input_tokens,
+                decoded.output_tokens,
+            )
         )
-        output_tokens = int(
-            usage.get("output_tokens", usage.get("outputTokens", 0)),
-        )
-        raw_cost = data.get("total_cost_usd")
-        cost_reported = raw_cost is not None
-        if raw_cost is None:
-            cost = estimate_cost(self._model, input_tokens, output_tokens)
-        else:
-            cost = float(raw_cost)
-
-        session_id = data.get("session_id")
-        if isinstance(session_id, str) and session_id.strip():
-            session_id = session_id.strip()
-        else:
-            session_id = None
-
-        # The CLI envelope reports how many agent turns the call took; it is
-        # carried onto the per-chunk timings (lintro-ops #37). A bool is an
-        # int in Python and never a turn count, so it is rejected explicitly.
-        raw_turns = data.get("num_turns")
-        turns = (
-            raw_turns
-            if isinstance(raw_turns, int)
-            and not isinstance(raw_turns, bool)
-            and raw_turns >= 0
-            else None
-        )
-
         return (
             AIResponse(
-                content=self.substitute_parsed_json(content),
+                content=self.substitute_parsed_json(decoded.result),
                 model=self._model,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
+                input_tokens=decoded.input_tokens,
+                output_tokens=decoded.output_tokens,
                 cost_estimate=cost,
                 provider=AIProvider.ANTHROPIC,
-                turns=turns,
+                # The CLI envelope reports how many agent turns the call
+                # took; it is carried onto the per-chunk timings
+                # (lintro-ops #37).
+                turns=decoded.num_turns,
                 # What answered, as the envelope says, next to what was asked
                 # for (#2867).
-                reported_models=parse_model_usage(data.get("modelUsage")),
+                reported_models=parse_model_usage(decoded.model_usage),
                 cost_reported=cost_reported,
             ),
-            session_id,
+            decoded.session_id,
         )
 
 
