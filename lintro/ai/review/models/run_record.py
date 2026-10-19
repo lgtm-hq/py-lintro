@@ -22,6 +22,7 @@ from lintro.ai.enums.model_verification import ModelVerification
 from lintro.ai.providers.reported_model import ReportedModel
 from lintro.ai.review.enums.review_verdict import ReviewVerdict
 from lintro.ai.review.models._coerce import coerce_float, coerce_int
+from lintro.ai.review.models.degradation_record import DegradationRecord
 from lintro.ai.review.models.run_coverage import RunCoverage
 from lintro.ai.review.models.run_identity import RunIdentity
 from lintro.ai.review.models.run_outcome import (
@@ -156,6 +157,10 @@ class RunRecord:
             payload["open_after"] = outcome.open_after
         if outcome.narrative:
             payload["narrative"] = outcome.narrative
+        if coverage.degradations:
+            payload["degradations"] = [
+                record.to_dict() for record in coverage.degradations
+            ]
         # A non-finite score is dropped rather than written: json.dumps would
         # emit a bare NaN/Infinity token, which is not valid JSON and would
         # make the whole state blob undecodable for every later round. Omitted
@@ -330,7 +335,27 @@ def _coverage_from_payload(*, payload: dict[str, Any]) -> RunCoverage:
         delta_since=str(payload.get("delta_since", "") or ""),
         delta_reason=str(payload.get("delta_reason", "") or ""),
         checkpoint=_strict_bool(payload.get("checkpoint")),
+        degradations=_degradations_from_payload(payload=payload),
     )
+
+
+def _degradations_from_payload(
+    *,
+    payload: dict[str, Any],
+) -> tuple[DegradationRecord, ...]:
+    """Parse the round's degradation records (#2803).
+
+    Args:
+        payload: Decoded JSON mapping for one run.
+
+    Returns:
+        The valid records; empty for a v5 record, which never had the key.
+    """
+    raw = payload.get("degradations")
+    if not isinstance(raw, list):
+        return ()
+    parsed = (DegradationRecord.from_dict(item) for item in raw)
+    return tuple(record for record in parsed if record is not None)
 
 
 def _usage_from_payload(*, payload: dict[str, Any]) -> RunUsage:

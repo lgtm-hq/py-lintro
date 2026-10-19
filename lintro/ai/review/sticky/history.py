@@ -17,15 +17,14 @@ from lintro.ai.review.github_constants import (
     STICKY_FOOTER,
 )
 from lintro.ai.review.github_notes import (
-    format_synthesis_note_line,
     format_timings_note,
-    format_verification_note_line,
 )
 from lintro.ai.review.github_render import Section, assemble
 from lintro.ai.review.models.finding_record import FindingRecord
 from lintro.ai.review.models.review_result import ReviewResult
 from lintro.ai.review.models.run_outcome import NARRATIVE_LIMIT
 from lintro.ai.review.models.run_record import RunRecord
+from lintro.ai.review.pass_notes import format_pass_note_lines
 from lintro.ai.review.pr_budget import RUNTIME_BOUND_BASES, RUNTIME_BOUND_NOTE
 from lintro.ai.review.provenance_display import (
     SHADOW_BASES,
@@ -107,20 +106,7 @@ def _this_run_section(
                 f"| {metadata.checklist_items} "
                 f"| {metadata.duration_seconds:.0f}s |"
             ),
-            *(
-                ["", synthesis_note]
-                if (synthesis_note := format_synthesis_note_line(metadata=metadata))
-                else []
-            ),
-            *(
-                ["", verification_note]
-                if (
-                    verification_note := format_verification_note_line(
-                        metadata=metadata,
-                    )
-                )
-                else []
-            ),
+            *format_pass_note_lines(metadata=metadata),
             *(
                 ["", timings_note]
                 if (timings_note := format_timings_note(metadata=metadata))
