@@ -144,9 +144,11 @@ class JsonlEvents:
 
     Attributes:
         events: Every line that decoded to a JSON object, in order.
-        unparsed_tail: The last line when it did not decode to a JSON
-            object, else ``None``. A tail that looks like JSON is the sign of
-            a stream cut mid-event; a prose tail is the binary's own chatter.
+        unparsed_tail: The last line when it was not valid JSON, else
+            ``None``. A line that decodes to something other than an object
+            is complete and is simply not an event, so it is neither kept
+            nor reported. A tail that looks like JSON is the sign of a
+            stream cut mid-event; a prose tail is the binary's own chatter.
     """
 
     events: tuple[Mapping[str, Any], ...]
@@ -649,9 +651,10 @@ def decode_jsonl_events(raw: str, *, provider: str) -> JsonlEvents:
     Lines that are not JSON objects are skipped: ``codex`` interleaves its
     own human-readable lines with the event stream, and a non-JSON line in
     the middle of a stream is not evidence of anything. The last line is
-    reported separately when it did not decode, so a caller that found no
-    answer can tell a stream cut mid-event from a stream that never carried
-    one.
+    reported separately when it was not valid JSON, so a caller that found
+    no answer can tell a stream cut mid-event from a stream that never
+    carried one. A complete trailing array or scalar is valid JSON and is
+    not reported: it is not an event, but it is not a cut-off one either.
 
     Args:
         raw: The complete CLI stdout.

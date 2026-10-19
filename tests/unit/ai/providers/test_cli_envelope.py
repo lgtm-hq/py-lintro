@@ -399,6 +399,14 @@ def test_jsonl_events_skip_chatter_and_non_objects() -> None:
     assert_that(stream.unparsed_tail).is_none()
 
 
+def test_a_complete_non_object_final_line_is_not_a_tail() -> None:
+    """A trailing array or scalar is valid JSON: not an event, not a cut-off one."""
+    stream = decode_jsonl_events('{"type": "a"}\n[1, 2]\n', provider=_PROVIDER)
+
+    assert_that(len(stream.events)).is_equal_to(1)
+    assert_that(stream.unparsed_tail).is_none()
+
+
 def test_jsonl_events_report_an_undecoded_tail() -> None:
     """The last line is reported when it did not decode."""
     raw = '{"type": "a"}\n{"type": "b", "item": {"te'
