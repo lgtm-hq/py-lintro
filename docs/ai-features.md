@@ -356,10 +356,11 @@ Nothing is dropped. JSON and MCP output keep every finding and add `posted_inlin
 verdict, the JSON `readiness_verdict`, and the exit code are derived from tracked
 records rather than from what posted inline: a P3 opens a record and moves the verdict
 to `nits only` even though it renders in the sticky, while a finding routed to notes
-opens no record and never moves it — so a P1 routed to notes does not fail the process.
-With the default floor that means a `low` confidence P1; with
-`review_inline_min_confidence: low` no confidence is below the floor, so every P1
-finding blocks again.
+opens no record and never moves it — so a P1 routed to notes does not fail the process,
+and a P3 in a routed category (default `code-smell`) does not move the verdict either: a
+PR whose only nits are `code-smell` reads `ready`, not `nits only`. With the default
+floor that means a `low` confidence P1; with `review_inline_min_confidence: low` no
+confidence is below the floor, so every P1 finding blocks again.
 
 ```yaml
 # .lintro-config.yaml
