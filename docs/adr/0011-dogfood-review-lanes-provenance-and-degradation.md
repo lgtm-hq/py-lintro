@@ -483,3 +483,27 @@ and the initial manifest contents are the edits this ADR invites.
   [ADR-0010](0010-review-shape-and-protocol.md)
 - [`docs/ai-review-transports.md`](../ai-review-transports.md),
   [`docs/ai-features.md`](../ai-features.md)
+
+## Amendment 2026-10-19: what a lane's smoke row proves ([#2873](https://github.com/lgtm-hq/py-lintro/issues/2873))
+
+Decision A requires "a weekly smoke row per lane against its real endpoint", and
+[#2873](https://github.com/lgtm-hq/py-lintro/issues/2873) asked that the row's
+credential match the lane's binding. Both hold for a token lane. Neither can hold for a
+session lane: a subscription session (the Claude OAuth token, the Codex `auth.json`)
+drives a CLI, not the raw API the weekly smoke calls, so no smoke row can send it, and
+the Codex session's route is not the provider's API at all. The `host` and `provider`
+levels below therefore relax "real endpoint" (and the credential) for the session lanes,
+and `cursor` has no row at all. Each manifest row declares `smoke_row` and
+`smoke_covers`, the level the row honestly reaches:
+
+- `route`: the lane's own secret down the lane's own path (`zai`, `kimi`);
+- `host`: the provider's metered key to the host the CLI calls (`anthropic`);
+- `provider`: the provider's API only, because the session's route is one no API smoke
+  can reach (`openai`: the Codex session calls the ChatGPT backend);
+- `smoke_row: null` with a `smoke_gap` when no API protocol lintro implements can reach
+  the lane at all (`cursor`).
+
+A session lane's smoke is reachability coverage, not credential coverage: an expired
+session is reported by the dogfood's own `auth_failed` verdict on the next review, never
+by the smoke. `tests/scripts/ci/test_smoke_rows_match_lanes.py` pins the level and the
+metered key each session lane may claim.

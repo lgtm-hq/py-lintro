@@ -34,7 +34,23 @@
     "shadow_price_model, as must every non-first-party row (decision B).",
     "Owner decision 2026-10-16: zai and kimi are declared gateway rows; either",
     "becomes active by setting LINTRO_AI_PROVIDER to its id.",
-    "anthropic's shadow_price_model is a stand-in until lintro carries Claude 5.5 list tables; on list_price_shadow the envelope's own figure is used and the stand-in prices nothing."
+    "anthropic's shadow_price_model is a stand-in until lintro carries Claude 5.5 list tables; on list_price_shadow the envelope's own figure is used and the stand-in prices nothing.",
+    "smoke_row names the row of scripts/ci/ai_provider_smoke/providers.json whose",
+    "weekly call stands for this lane (#2873), and smoke_covers says how much of",
+    "the lane that call proves. 'route': the row sends the lane's own secret down",
+    "the lane's own path, so a dead token and a dead path both go red (zai, kimi).",
+    "'host': the lane's credential is a subscription session the raw API cannot",
+    "take, so the row sends the provider's metered key to the same host",
+    "the CLI calls; it proves the host answers, not that the session is alive",
+    "(anthropic: the claude CLI calls api.anthropic.com/v1/messages). 'provider':",
+    "the session's own route is one no API smoke can reach, so the row proves",
+    "only that the provider's API answers (openai: the Codex session calls the",
+    "ChatGPT backend, chatgpt.com in the lane's egress, while openai-api calls",
+    "api.openai.com). An expired session is reported by the dogfood's own",
+    "auth_failed verdict on the next review, never by the smoke. A lane no smoke",
+    "can reach at all (cursor exposes no API protocol lintro implements) carries",
+    "smoke_row null and smoke_gap saying why.",
+    "tests/scripts/ci/test_smoke_rows_match_lanes.py holds the two files to this."
   ],
   "chain": ["anthropic"],
   "priced_models": [
@@ -64,7 +80,9 @@
       "egress": ["api.anthropic.com:443"],
       "model": "claude-opus-5-5",
       "shadow_price_model": "claude-opus-4-20250514",
-      "cost_basis": "list_price_shadow"
+      "cost_basis": "list_price_shadow",
+      "smoke_row": "anthropic-api",
+      "smoke_covers": "host"
     },
     "openai": {
       "provider": "openai",
@@ -87,7 +105,9 @@
       "egress": ["api.openai.com:443", "auth.openai.com:443", "chatgpt.com:443"],
       "model": "gpt-6.1-sol",
       "shadow_price_model": "gpt-4o",
-      "cost_basis": "unpriceable"
+      "cost_basis": "unpriceable",
+      "smoke_row": "openai-api",
+      "smoke_covers": "provider"
     },
     "cursor": {
       "provider": "cursor",
@@ -111,7 +131,9 @@
       ],
       "model": "cursor-grok-4.6-high",
       "shadow_price_model": "claude-sonnet-4-6",
-      "cost_basis": "unpriceable"
+      "cost_basis": "unpriceable",
+      "smoke_row": null,
+      "smoke_gap": "cursor exposes no API protocol lintro implements; the CLI is the only transport"
     },
     "zai": {
       "provider": "anthropic",
@@ -128,7 +150,9 @@
       "egress": ["api.z.ai:443"],
       "model": "glm-5.3-flash",
       "shadow_price_model": "claude-sonnet-4-6",
-      "cost_basis": "unknown"
+      "cost_basis": "unknown",
+      "smoke_row": "zai-anthropic-api",
+      "smoke_covers": "route"
     },
     "kimi": {
       "provider": "anthropic",
@@ -145,7 +169,9 @@
       "egress": ["api.moonshot.ai:443"],
       "model": "kimi-k3",
       "shadow_price_model": "claude-sonnet-4-6",
-      "cost_basis": "unknown"
+      "cost_basis": "unknown",
+      "smoke_row": "kimi-api",
+      "smoke_covers": "route"
     }
   }
 }

@@ -14,7 +14,12 @@
     "max_tokens is optional (default 16, at most 4096). kimi-k3 and glm-5.3-flash",
     "always reason before answering and spend the cap on that first; at 16",
     "they return a reasoning block and no text, which reads as an empty",
-    "response (#2748)."
+    "response (#2748).",
+    "zai-anthropic-api is the route the dogfood's zai lane takes (the claude CLI",
+    "against Z.ai's Anthropic-protocol endpoint); zai-api is Z.ai's OpenAI-protocol",
+    "route. The two share a token, so a dead token reddens both while a dead route",
+    "reddens only its own row; only the first proves the dogfood route answers (#2873). Every dogfood lane that an API",
+    "smoke can reach names its row in scripts/ci/ai_review_lanes.json (smoke_row)."
   ],
   "providers": [
     {
@@ -43,6 +48,14 @@
       "name": "zai-api",
       "protocol": "openai",
       "base_url": "https://api.z.ai/api/coding/paas/v4",
+      "key_env": "ZAI_AUTH_TOKEN",
+      "model": "glm-5.3-flash",
+      "max_tokens": 1024
+    },
+    {
+      "name": "zai-anthropic-api",
+      "protocol": "anthropic",
+      "base_url": "https://api.z.ai/api/anthropic",
       "key_env": "ZAI_AUTH_TOKEN",
       "model": "glm-5.3-flash",
       "max_tokens": 1024
