@@ -1144,7 +1144,9 @@ def _check_already_reviewed(
         if not publication_complete(
             prior=prior_state,
             policy=PostingPolicy.from_ai_config(ai_config),
+            decision=decision,
             find_sticky=reporter.find_issue_comment,
+            fetch_diff_lines=reporter.fetch_pr_diff_lines,
         ):
             logger.info(
                 "Head {} is covered by round {} but its review is not fully "

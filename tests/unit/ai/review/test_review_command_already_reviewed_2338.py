@@ -341,7 +341,11 @@ def test_post_with_publication_evidence_skips_and_posts_nothing(
     _with_prior_state(monkeypatch=monkeypatch, state=_state(_open_p1()))
     _decide(monkeypatch=monkeypatch, decision=_DECISION)
     reporter = MagicMock()
-    reporter.find_issue_comment.return_value = (1, "<!-- lintro-ai-review -->")
+    reporter.find_issue_comment.return_value = (
+        1,
+        f"<!-- lintro-ai-review -->\n### Findings · Round 2 · `{_HEAD}` · complete",
+    )
+    reporter.fetch_pr_diff_lines.return_value = {"a.py": {1}}
     monkeypatch.setattr(
         "lintro.ai.integrations.github_pr.GitHubPRReporter",
         lambda **_: reporter,
@@ -361,7 +365,9 @@ def test_post_with_publication_evidence_skips_and_posts_nothing(
     assert_that(review_calls["get_provider"]).is_equal_to(0)
     assert_that(review_calls["run_review"]).is_equal_to(0)
     assert_that(posted).is_empty()
-    assert_that(reporter.method_calls).is_length(1)
+    assert_that([call[0] for call in reporter.method_calls]).is_equal_to(
+        ["find_issue_comment", "fetch_pr_diff_lines"],
+    )
     assert_that(_envelope(output=result.output)["outcome"]).is_equal_to(
         "already_reviewed",
     )

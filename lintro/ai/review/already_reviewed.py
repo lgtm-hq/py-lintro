@@ -16,10 +16,12 @@ machine-readable envelope with ``outcome: already_reviewed``. ``--full`` and
 ``LINTRO_REVIEW_FORCE`` force a round, as the on-request review of #2627 will.
 
 State is persisted before the posting step runs, so under ``--post`` the
-decision also needs publication evidence: the sticky exists and every open
-finding the posting policy would have posted inline carries its thread id.
-Without that evidence the round runs, so a run whose posting step failed
-posts on retry.
+decision also needs publication evidence: the sticky's Findings heading
+names the finished round at this head, and every open finding the posting
+policy would have posted inline, and that sits on a line of the PR diff
+(the poster's own mapping rule; anything else is sticky-only by design),
+carries its thread id. Without that evidence the round runs, so a run whose
+posting step failed posts on retry.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ from lintro.ai.review.github_constants import STICKY_MARKER
 from lintro.ai.review.posting_policy import PostingPolicy, coerce_confidence
 from lintro.ai.review.posting_tiers import INLINE_SEVERITIES
 from lintro.ai.review.resume import plan_resume
+from lintro.ai.review.sticky.heading import parse_findings_heading
 
 if TYPE_CHECKING:
     from lintro.ai.review.models.finding_record import FindingRecord
@@ -199,31 +202,76 @@ def _expects_inline_thread(*, record: FindingRecord, policy: PostingPolicy) -> b
     return confidence.numeric_order >= policy.inline_min_confidence.numeric_order
 
 
+def _sticky_names_the_round(*, body: str, decision: AlreadyReviewed) -> bool:
+    """Return whether the sticky was rendered for the finished round at this head.
+
+    A sticky left by an earlier round is not evidence: if the finished round
+    produced sticky-only findings and the sticky update failed, the state
+    already names the new head while the board still shows the old one.
+
+    Args:
+        body: The sticky comment body.
+        decision: The round and head the guard is deciding on.
+
+    Returns:
+        True when the heading names the round and, when it carries a sha,
+        that sha is a prefix of the head.
+    """
+    heading = parse_findings_heading(body=body)
+    if heading is None:
+        return False
+    round_number, short_sha = heading
+    if round_number != decision.round:
+        return False
+    return not short_sha or decision.head_sha.startswith(short_sha)
+
+
 def publication_complete(
     *,
     prior: ReviewState,
     policy: PostingPolicy,
+    decision: AlreadyReviewed,
     find_sticky: Any,
+    fetch_diff_lines: Any,
 ) -> bool:
-    """Return whether the last finished round's review reached the PR.
+    """Return whether the finished round's review reached the PR.
 
     Args:
         prior: State loaded for this invocation.
         policy: Posting policy the round was posted under.
+        decision: The round and head the guard is deciding on.
         find_sticky: Callable taking ``marker=`` and returning the sticky
-            comment, or ``None`` when absent or when the listing failed
+            comment ``(id, body)``, or ``None`` when absent or when the
+            listing failed
             (:meth:`lintro.ai.integrations.github_pr.GitHubPRReporter.find_issue_comment`).
+        fetch_diff_lines: Callable returning the PR's right-side diff lines
+            per file, or ``None`` when they cannot be fetched
+            (:meth:`lintro.ai.integrations.github_pr.GitHubPRReporter.fetch_pr_diff_lines`);
+            the poster anchors an inline comment only on those lines and
+            puts every other finding on the sticky.
 
     Returns:
-        True when the sticky comment exists and every open record the
-        policy would have posted inline carries its thread id. Anything the
-        listing cannot establish reads as not published.
+        True when the sticky's Findings heading names the finished round at
+        this head, and every open record the policy would have posted
+        inline, and that sits on a diff line, carries its thread id.
+        Anything the listing cannot establish reads as not published.
     """
-    if find_sticky(marker=STICKY_MARKER) is None:
+    found = find_sticky(marker=STICKY_MARKER)
+    if found is None or not _sticky_names_the_round(body=found[1], decision=decision):
         return False
-    return all(
-        record.inline_comment_id is not None
+    expecting = [
+        record
         for record in prior.findings
         if record.status is FindingStatus.OPEN
         and _expects_inline_thread(record=record, policy=policy)
+    ]
+    if not expecting:
+        return True
+    diff_lines = fetch_diff_lines()
+    if diff_lines is None:
+        return False
+    return all(
+        record.inline_comment_id is not None
+        for record in expecting
+        if record.line in diff_lines.get(record.file, set())
     )
