@@ -172,6 +172,10 @@ def test_spec_has_server_subpackage_requires_server_and_stdio(
     (package / "server").mkdir(exist_ok=True)
     (package / "server" / "__init__.py").write_text("", encoding="utf-8")
     (package / "server" / "stdio.py").write_text("", encoding="utf-8")
+    # The file finder caches each directory listing keyed on the directory's
+    # mtime; within the filesystem's mtime granularity the second lookup
+    # would answer from the first layout (#2915).
+    importlib.invalidate_caches()
     assert_that(spec_has_server_subpackage(spec)).is_true()
     assert_that(spec_has_server_subpackage(ModuleSpec("mcp", None))).is_false()
 
