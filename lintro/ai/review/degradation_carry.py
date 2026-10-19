@@ -201,7 +201,9 @@ def _degraded_hashes(*, prior: ReviewState | None) -> dict[str, str]:
     for record in prior.coverage:
         if record.round < run.identity.round:
             continue
-        if record.path not in credited or credited[record.path][0] < record.round:
+        # Newest wins on equal rounds too: a resumed round's checkpoints share
+        # its number, and the later record is the one whose hash it saw.
+        if record.path not in credited or credited[record.path][0] <= record.round:
             credited[record.path] = (record.round, record.patch_hash)
     return {path: patch_hash for path, (_, patch_hash) in credited.items()}
 
