@@ -358,9 +358,14 @@ records rather than from what posted inline: a P3 opens a record and moves the v
 to `nits only` even though it renders in the sticky, while a finding routed to notes
 opens no record and never moves it — so a P1 routed to notes does not fail the process,
 and a P3 in a routed category (default `code-smell`) does not move the verdict either: a
-PR whose only nits are `code-smell` reads `ready`, not `nits only`. With the default
-floor that means a `low` confidence P1; with `review_inline_min_confidence: low` no
-confidence is below the floor, so every P1 finding blocks again.
+PR whose only nits are `code-smell` reads `ready`, not `nits only`. That holds for
+findings first seen after the category was routed. A `code-smell` P3 recorded by an
+earlier round, before the upgrade or before the category was added to the list, is an
+existing record: its note re-asserts it, so the record is carried open, keeps its row
+and the `nits only` verdict, and resolves when the smell is fixed or the model stops
+reporting it, exactly as it did before. With the default floor that means a `low`
+confidence P1; with `review_inline_min_confidence: low` no confidence is below the
+floor, so every P1 finding blocks again.
 
 ```yaml
 # .lintro-config.yaml
