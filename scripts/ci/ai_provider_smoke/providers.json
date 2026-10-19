@@ -17,8 +17,8 @@
     "response (#2748).",
     "zai-anthropic-api is the route the dogfood's zai lane takes (the claude CLI",
     "against Z.ai's Anthropic-protocol endpoint); zai-api is Z.ai's OpenAI-protocol",
-    "route. The two share a token, so both go red together, but only the first",
-    "proves the dogfood route answers (#2873). Every dogfood lane that an API",
+    "route. The two share a token, so a dead token reddens both while a dead route",
+    "reddens only its own row; only the first proves the dogfood route answers (#2873). Every dogfood lane that an API",
     "smoke can reach names its row in scripts/ci/ai_review_lanes.json (smoke_row)."
   ],
   "providers": [

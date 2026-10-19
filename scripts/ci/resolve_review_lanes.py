@@ -406,7 +406,7 @@ def _check_smoke(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> No
             f"lane {lane_id!r} names a smoke row and a 'smoke_gap'; it cannot be both",
             lanes,
         )
-    if covers not in SMOKE_COVERS:
+    if not isinstance(covers, str) or covers not in SMOKE_COVERS:
         _fail(
             f"lane {lane_id!r} field 'smoke_covers' must be one of "
             f"{sorted(SMOKE_COVERS)}",

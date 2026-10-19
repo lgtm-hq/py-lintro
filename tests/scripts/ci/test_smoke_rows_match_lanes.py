@@ -208,8 +208,8 @@ def test_a_route_level_row_is_the_lanes_own_path_not_the_hosts_other_route(
     """``route`` means the lane's own path and model, not just its host.
 
     A gateway serves several protocols on one host: Z.ai's OpenAI route and
-    its Anthropic route share a host and a token and go red together, but
-    only the latter is what the claude CLI calls. Keyed on the declared level,
+    its Anthropic route share a host and a token, so a dead token reddens both while a dead route
+    reddens only its own row; only the latter is what the claude CLI calls. Keyed on the declared level,
     so a future first-party token lane claiming ``route`` is held to it too.
     """
     for lane_id, lane in lanes.items():
@@ -276,6 +276,11 @@ def _refuses(resolver: ModuleType, document: dict[str, Any], fragment: str) -> N
         (lambda row: row.update(smoke_gap="also"), "cannot be both"),
         (lambda row: row.pop("smoke_covers"), "'smoke_covers' must be one of"),
         (lambda row: row.update(smoke_covers="all"), "'smoke_covers' must be one of"),
+        # An unhashable value must be a refusal naming the lanes, not a TypeError.
+        (
+            lambda row: row.update(smoke_covers=["route"]),
+            "'smoke_covers' must be one of",
+        ),
         (
             lambda row: row.update(
                 smoke_row=None,
