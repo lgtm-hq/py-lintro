@@ -33,7 +33,7 @@ EMPTY_CODEX_SESSION = base64.b64encode(b"{}").decode("ascii")
 _GH_STUB = f"""
 set -euo pipefail
 log="$CHAIN_STUB_DIR/gh-argv"
-printf '%s\\n' "$*" >>"$log"
+printf '%s token=%s\\n' "$*" "${{GH_TOKEN:-}}" >>"$log"
 if [[ "$1" == "label" ]]; then exit 0; fi
 if [[ "$1" == "issue" && "$2" == "list" ]]; then
     if [[ -f "$CHAIN_STUB_DIR/open-issues" ]]; then cat "$CHAIN_STUB_DIR/open-issues"; else echo "[]"; fi
@@ -280,6 +280,12 @@ def test_a_dead_lane_opens_one_tracker_issue_or_updates_the_open_one(
     creates = [call for call in created["gh"] if call.startswith("issue create ")]
     assert_that(creates).is_length(1)
     assert_that(creates[0]).contains("--label ai-review-lane-down")
+    # The tracker runs under the minted App token, never the read token the
+    # rest of the wrapper uses.
+    for call in [c for c in created["gh"] if c.startswith(("issue ", "label "))]:
+        assert_that(call).described_as(call).ends_with("token=dummy-app-token")
+    for call in [c for c in created["gh"] if c.startswith("api ")]:
+        assert_that(call).described_as(call).ends_with("token=dummy-read-token")
     assert_that(creates[0]).contains("AI review lane down: anthropic")
     assert_that(creates[0]).contains("auth_failed")
     comments = [call for call in updated["gh"] if call.startswith("issue comment ")]

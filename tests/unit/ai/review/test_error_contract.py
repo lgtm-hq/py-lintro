@@ -240,6 +240,9 @@ def test_completed_chunks_comes_from_the_execution_error_or_the_annotation(
         cause_message="401",
     )
     annotate_completed_chunks(positional, completed=0)
+    # Without an annotation the field is all there is. lintro's run boundary
+    # always annotates what it re-raises, so this only describes an error
+    # built outside the run; the wrapper then sees the field as given.
     unannotated = ReviewExecutionError(
         message="aborted",
         chunk_index=2,
