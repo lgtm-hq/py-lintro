@@ -208,6 +208,16 @@ dropped whole if it echoes the credential and otherwise redacted, so a gateway q
 the key back cannot leak it onto an issue. A row whose credential variable is empty
 reports a pending status and a skip notice, never a pass.
 
+**Every dogfood lane names its smoke row** (#2873). A row of the lanes manifest carries
+`smoke_row`, the smoke table row that calls the lane's real endpoint: the same host and
+the same wire protocol the lane's CLI speaks (`zai-anthropic-api` for the `zai` lane,
+not the OpenAI-protocol `zai-api` route that shares its token). A token lane's row uses
+the lane's own secret; a session lane (the Claude and Codex subscriptions) cannot drive
+the raw API, so its row uses the provider's metered key against the same host. A lane no
+smoke can reach (`cursor`, no API protocol lintro implements) carries `smoke_row: null`
+and a `smoke_gap` saying why. `tests/scripts/ci/test_smoke_rows_match_lanes.py` fails
+when the two files drift apart.
+
 **Parser drift is caught for free.**
 `tests/fixtures/ai/cli_replay/<cli>/<version>.jsonl` holds one stdout capture per agent
 CLI at the pinned version, and the Tier 1 replay test parses it with the real transport

@@ -151,6 +151,8 @@ OPTIONAL_ROW_KEYS: Final[frozenset[str]] = frozenset(
         "credential_file",
         "credential_source_env",
         "shadow_price_model",
+        "smoke_row",
+        "smoke_gap",
     },
 )
 TRANSPORTS: Final[frozenset[str]] = frozenset({"cli", "api"})
@@ -355,8 +357,39 @@ def _check_shape(lane_id: str, row: Any, lanes: dict[str, Any]) -> dict[str, Any
             _fail(f"lane {lane_id!r} field {field!r} has the wrong type", lanes)
     if not all(isinstance(item, str) and item for item in row["egress"]):
         _fail(f"lane {lane_id!r} field 'egress' must list strings", lanes)
+    _check_smoke(lane_id, row, lanes)
     _check_names(lane_id, row, lanes)
     return row
+
+
+def _check_smoke(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> None:
+    """Check the row names its weekly smoke row, or says why none can (#2873).
+
+    ``smoke_row`` is the name of the provider-smoke table row that calls this
+    lane's real endpoint; ``null`` is allowed only with a ``smoke_gap`` that
+    says why no API smoke can reach the lane. The agreement between the row
+    and the lane (host, protocol, credential) is held by
+    ``tests/scripts/ci/test_smoke_rows_match_lanes.py``, which reads both
+    files; this check only keeps the declaration well formed.
+    """
+    if "smoke_row" not in row:
+        _fail(f"lane {lane_id!r} is missing 'smoke_row'", lanes)
+    smoke_row = row["smoke_row"]
+    gap = row.get("smoke_gap")
+    if smoke_row is None:
+        if not isinstance(gap, str) or not gap.strip():
+            _fail(
+                f"lane {lane_id!r} has no smoke row and no 'smoke_gap' saying why",
+                lanes,
+            )
+        return
+    if not isinstance(smoke_row, str) or not _LANE_ID_RE.match(smoke_row):
+        _fail(f"lane {lane_id!r} field 'smoke_row' is not a smoke row name", lanes)
+    if gap is not None:
+        _fail(
+            f"lane {lane_id!r} names a smoke row and a 'smoke_gap'; it cannot be both",
+            lanes,
+        )
 
 
 def _check_names(lane_id: str, row: dict[str, Any], lanes: dict[str, Any]) -> None:
