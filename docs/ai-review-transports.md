@@ -87,11 +87,15 @@ credential:
 - `cursor` declares `True` and means it — the `agent` CLI reads `CURSOR_API_KEY` itself.
 - `openai` declares `False`: the `codex` CLI always reads `CODEX_API_KEY`, never
   `OPENAI_API_KEY`, so renaming cannot reach it.
-- `anthropic` declares `True`, but the `claude` binary reads only the literal
-  `ANTHROPIC_API_KEY` (`lintro/ai/providers/claude_auth.py`), and lintro does not
-  re-export a renamed variable into it. Doctor therefore reports OK for a credential the
-  CLI cannot see. That mismatch predates the provider refactor and is tracked by #2449;
-  until it lands, rename `ai.api_key_env` for anthropic's `api` transport only.
+- `anthropic` declares `True` and lintro makes it so: the `claude` binary reads only the
+  literal `ANTHROPIC_API_KEY`, so the transport exports the renamed variable's value
+  under that name into the subprocess environment, for that process only
+  (`lintro/ai/providers/claude_auth.py`). When both are set, the renamed variable wins,
+  as it does on the `api` transport. The bare-mode decision reads the same child
+  environment, so a renamed key still selects `--bare` under `auto`. Before this landed
+  a renamed key never reached the binary, so a subscription user who keeps one exported
+  (say for an `api` profile) and runs the `cli` transport now bills that key under
+  `auto`; set `cli_bare: never` or `LINTRO_CLI_BARE=never` to keep the login session.
 
 | Variable / setting                                    | Transport | Role                                                   |
 | ----------------------------------------------------- | --------- | ------------------------------------------------------ |

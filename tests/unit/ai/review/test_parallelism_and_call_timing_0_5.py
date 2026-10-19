@@ -176,6 +176,9 @@ def test_claude_cli_envelope_turns(raw: object, expected: int | None) -> None:
     if raw is not None:
         envelope["num_turns"] = raw
 
-    response, _session = transport.parse_stdout(json.dumps(envelope))
+    response, _session = transport.parse_stdout(
+        json.dumps(envelope),
+        model="claude-test",
+    )
 
     assert_that(response.turns).is_equal_to(expected)

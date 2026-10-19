@@ -99,13 +99,11 @@ ANTHROPIC_METADATA = ProviderMetadata(
     ),
     cli_install_hint="Install Claude Code: https://code.claude.com/docs/en/setup",
     cli_auth_probe=CliAuthProbe(
-        # Pre-#2308 behaviour, preserved verbatim: doctor accepts whichever
-        # variable `ai.api_key_env` resolves to. The `claude` binary itself
-        # only ever reads ANTHROPIC_API_KEY (see
-        # `claude_auth.CLAUDE_API_KEY_ENV`), so a renamed variable makes this
-        # probe report OK for a credential the CLI cannot see. That mismatch
-        # predates this refactor and is left for #2449 rather than changed
-        # here; the OpenAI probe shows the shape the fix would take.
+        # Doctor accepts whichever variable `ai.api_key_env` resolves to, and
+        # the CLI transport makes that true: the `claude` binary reads only
+        # ANTHROPIC_API_KEY, so a renamed variable's value is re-exported
+        # under that name into the subprocess environment
+        # (`claude_auth.claude_cli_env`, #2549).
         honors_api_key_env=True,
         configured_message="{key_env} set (API billing overrides subscription)",
         unverified_message="Claude CLI auth not verified",

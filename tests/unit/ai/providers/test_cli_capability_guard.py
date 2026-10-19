@@ -43,15 +43,17 @@ _TEST_CONTRACT = CliContract(
 class _FakeTransport(CliTransport):
     """Minimal concrete transport for exercising the guard."""
 
-    def parse_stdout(self, stdout: str) -> str:
+    def parse_stdout(self, stdout: str, *, model: str) -> str:
         """Return stdout unchanged.
 
         Args:
             stdout: Raw stdout from the CLI.
+            model: Ignored; the stub attributes nothing.
 
         Returns:
             The unmodified stdout.
         """
+        del model
         return stdout
 
 

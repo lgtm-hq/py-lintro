@@ -15,7 +15,7 @@ import copy
 import json
 import os
 import tempfile
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any
 
@@ -35,6 +35,13 @@ from lintro.ai.providers._api_common import (
     ApiStreamingProvider,
     finish_api_completion,
 )
+from lintro.ai.providers._cli_envelope import (
+    CliEnvelopeError,
+    decode_envelope_or_prose,
+    decode_jsonl_events,
+    decode_usage,
+    truncated_tail_error,
+)
 from lintro.ai.providers.base import (
     AIResponse,
     AsyncAIStreamResult,
@@ -50,11 +57,7 @@ from lintro.ai.providers.constants import (
 from lintro.ai.providers.openai.codex_auth import uses_subscription_session
 from lintro.ai.providers.openai.metadata import OPENAI_CLI_BINARY, OPENAI_METADATA
 from lintro.ai.rate_limit import retry_after_from_exception
-from lintro.ai.raw_response import (
-    CLI_ENVELOPE_STAGE,
-    describe_raw_response,
-    recover_prose_envelope,
-)
+from lintro.ai.raw_response import CLI_ENVELOPE_STAGE, describe_raw_response
 from lintro.ai.transcript import TranscriptDirection, log_transcript_event
 
 _has_openai = False
@@ -173,18 +176,7 @@ class _CodexCliTransport(CliTransport):
         )
         self._model = model
 
-    def parse_stdout(self, stdout: str) -> AIResponse:
-        """Parse JSONL stdout, attributing the response to the default model.
-
-        Args:
-            stdout: Raw stdout from the CLI.
-
-        Returns:
-            AIResponse: The parsed response.
-        """
-        return self.parse_stdout_as(stdout, model=self._model)
-
-    def parse_stdout_as(self, stdout: str, *, model: str) -> AIResponse:
+    def parse_stdout(self, stdout: str, *, model: str) -> AIResponse:
         """Parse JSONL stdout and extract the final agent message.
 
         The model is passed in rather than read from the transport because it
@@ -200,72 +192,66 @@ class _CodexCliTransport(CliTransport):
             AIResponse: The parsed response.
 
         Raises:
-            AIProviderError: When codex reports an error event, or its output
-                is neither JSONL nor a recoverable prose envelope.
+            AIProviderError: When codex reports an error event.
+            CliEnvelopeError: When the stream is cut mid-event, or the output
+                is neither JSONL nor a recoverable prose envelope (#2513).
         """
         final_text = ""
         input_tokens = 0
         output_tokens = 0
 
-        for line in stdout.splitlines():
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                event = json.loads(stripped)
-            except json.JSONDecodeError:
-                continue
-
+        stream = decode_jsonl_events(stdout, provider="Codex")
+        for event in stream.events:
             event_type = event.get("type", "")
             if event_type == "item.completed":
-                item = event.get("item", {})
-                if item.get("type") == "agent_message":
-                    final_text = item.get("text", final_text)
+                item = event.get("item")
+                if isinstance(item, Mapping) and item.get("type") == "agent_message":
+                    text = item.get("text")
+                    if isinstance(text, str):
+                        final_text = text
             elif event_type == "turn.completed":
-                usage = event.get("usage", {})
-                input_tokens = int(usage.get("input_tokens", input_tokens))
-                output_tokens = int(usage.get("output_tokens", output_tokens))
+                # A later block may carry only one counter; the other keeps
+                # what an earlier block reported.
+                input_tokens, output_tokens = decode_usage(
+                    event.get("usage"),
+                    provider="Codex",
+                    defaults=(input_tokens, output_tokens),
+                )
                 structured = event.get("structured_output")
                 if structured is not None:
                     final_text = json.dumps(structured)
             elif event_type == "error":
                 raise AIProviderError(
-                    f"Codex CLI reported error: {event.get('message', stripped)}",
+                    f"Codex CLI reported error: "
+                    f"{event.get('message', json.dumps(event))}",
                 )
 
         if not final_text:
-            # Fallback: single JSON object envelope
-            try:
-                data = json.loads(stdout.strip())
-                final_text = data.get("result", data.get("output", ""))
-                if isinstance(final_text, dict):
-                    final_text = json.dumps(final_text)
-                elif not isinstance(final_text, str):
-                    final_text = str(final_text)
-                usage = data.get("usage", {})
-                input_tokens = int(usage.get("input_tokens", input_tokens))
-                output_tokens = int(usage.get("output_tokens", output_tokens))
-            except json.JSONDecodeError as exc:
-                recovered = recover_prose_envelope(
-                    provider="Codex",
-                    stdout=stdout,
-                    reason=str(exc),
-                )
-                if recovered is None:
+            # A stream that carried events but no answer, and ends in a
+            # JSON-looking line that did not decode, was cut mid-event.
+            tail = stream.unparsed_tail
+            if stream.events and tail is not None:
+                cut = truncated_tail_error(provider="Codex", tail=tail)
+                if cut is not None:
                     evidence = describe_raw_response(
                         provider="Codex",
                         stage=CLI_ENVELOPE_STAGE,
                         raw=stdout,
                     )
-                    raise AIProviderError(
-                        f"Codex CLI returned unparsable output: {exc}\n{evidence}",
-                    ) from exc
+                    raise CliEnvelopeError(
+                        f"{cut}\n{evidence}",
+                        kind=cut.kind,
+                        fragment=cut.fragment,
+                    ) from cut
+            # Fallback: single JSON object envelope, or a prose answer.
+            decoded = decode_envelope_or_prose(stdout, provider="Codex")
+            if isinstance(decoded, str):
                 # Return the prose untouched: substitute_parsed_json would swap
                 # in any balanced JSON span it finds inside the answer, which
                 # on a prose answer means silently dropping the surrounding
                 # findings. The review layer extracts embedded JSON itself.
                 return AIResponse(
-                    content=recovered,
+                    content=decoded,
                     model=model,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -276,6 +262,16 @@ class _CodexCliTransport(CliTransport):
                     ),
                     provider=AIProvider.OPENAI,
                 )
+            if decoded.is_error:
+                cause = decoded.result or describe_raw_response(
+                    provider="Codex",
+                    stage=CLI_ENVELOPE_STAGE,
+                    raw=stdout,
+                )
+                raise AIProviderError(f"Codex CLI reported error: {cause}")
+            final_text = decoded.result or _output_alias(decoded.raw)
+            input_tokens = decoded.input_tokens
+            output_tokens = decoded.output_tokens
 
         cost = estimate_cost(model, input_tokens, output_tokens)
         return AIResponse(
@@ -286,6 +282,23 @@ class _CodexCliTransport(CliTransport):
             cost_estimate=cost,
             provider=AIProvider.OPENAI,
         )
+
+
+def _output_alias(data: Mapping[str, Any]) -> str:
+    """Return the ``output`` field some codex envelopes carry instead of ``result``.
+
+    Args:
+        data: The decoded single-object envelope.
+
+    Returns:
+        The text, an object or array serialised as JSON, or the empty string.
+    """
+    output = data.get("output")
+    if isinstance(output, str):
+        return output
+    if isinstance(output, (Mapping, list)):
+        return json.dumps(output)
+    return ""
 
 
 class OpenAIProvider(ApiStreamingProvider):
@@ -538,7 +551,7 @@ class OpenAIProvider(ApiStreamingProvider):
                 auth_patterns=("authentication", "login", "not authenticated"),
                 auth_hint="Run 'codex login' or set CODEX_API_KEY.",
             )
-            return self._cli.parse_stdout_as(
+            return self._cli.parse_stdout(
                 result.stdout,
                 model=effective_model or CODEX_SESSION_DEFAULT_MODEL,
             )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -10,7 +12,8 @@ from lintro.ai.enums.cost_basis import CostBasis
 from lintro.ai.enums.credential_kind import CredentialKind
 from lintro.ai.provenance import auth_mode_for, detect_run_provenance
 from lintro.ai.providers.anthropic.config import anthropic_settings
-from lintro.ai.providers.claude_auth import should_send_bare
+from lintro.ai.providers.anthropic.metadata import ANTHROPIC_METADATA
+from lintro.ai.providers.claude_auth import claude_cli_env, should_send_bare
 from lintro.ai.registry import AIProvider
 from lintro.ai.resolved_ai_config import ResolvedAIConfig
 
@@ -97,7 +100,38 @@ def _auth_mode(*, credential: CredentialKind, bare_billing: bool) -> AuthMode:
     return "subscription"
 
 
-def cli_bare_billing(ai_config: AIConfig, *, cwd: str | None = None) -> bool:
+def cli_runtime_env(ai_config: AIConfig) -> dict[str, str]:
+    """Return the environment the CLI subprocess will run under.
+
+    The claude transport re-exports a renamed ``ai.api_key_env`` as
+    ``ANTHROPIC_API_KEY`` for its child (#2549). Billing and provenance
+    must read that same environment, or a run that bills the re-exported
+    key is reported as subscription spend.
+
+    Args:
+        ai_config: AI configuration.
+
+    Returns:
+        A copy of the process environment with the transport's additions.
+    """
+    env = dict(os.environ)
+    if ai_config.provider is AIProvider.ANTHROPIC:
+        env.update(
+            claude_cli_env(
+                api_key_env=ai_config.api_key_env
+                or ANTHROPIC_METADATA.default_api_key_env,
+                env=env,
+            ),
+        )
+    return env
+
+
+def cli_bare_billing(
+    ai_config: AIConfig,
+    *,
+    cwd: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> bool:
     """Return whether the ``claude`` CLI will be sent ``--bare`` for *ai_config*.
 
     Under ``--bare`` the call bills the API key, not the subscription; the
@@ -107,6 +141,8 @@ def cli_bare_billing(ai_config: AIConfig, *, cwd: str | None = None) -> bool:
         ai_config: AI configuration.
         cwd: Working directory the CLI subprocess runs in, so a project-level
             ``apiKeyHelper`` is found where the run finds it.
+        env: The environment the subprocess will see;
+            :func:`cli_runtime_env` when ``None``.
 
     Returns:
         True for the Anthropic provider when its bare-mode policy resolves to
@@ -115,6 +151,7 @@ def cli_bare_billing(ai_config: AIConfig, *, cwd: str | None = None) -> bool:
     return ai_config.provider is AIProvider.ANTHROPIC and should_send_bare(
         configured=anthropic_settings(ai_config).cli_bare,
         cwd=cwd,
+        env=cli_runtime_env(ai_config) if env is None else env,
     )
 
 
@@ -181,7 +218,11 @@ def resolve_transport_settings(
         # (CliBareMode.AUTO, #1859): the call then bills the key, not the
         # subscription, so report api_key/estimated instead of claiming
         # subscription/unpriceable (#1923 cost provenance).
-        bare_billing = cli_bare_billing(ai_config, cwd=cwd)
+        # Billing and the credential read the environment the subprocess
+        # will see, re-exported key included (#2549), so a paid call under
+        # a renamed variable is priced and capped as one.
+        env = cli_runtime_env(ai_config)
+        bare_billing = cli_bare_billing(ai_config, cwd=cwd, env=env)
         # The credential present decides auth_mode, not the --bare policy:
         # a gateway token must not read as a subscription (#2867). A
         # subscription run pointed off the provider's host is priced on the
@@ -190,6 +231,7 @@ def resolve_transport_settings(
             provider=ai_config.provider,
             transport=transport,
             bare=bare_billing,
+            env=env,
             cwd=cwd,
         )
         # A metered key bills the API whichever way it reached the CLI: the
