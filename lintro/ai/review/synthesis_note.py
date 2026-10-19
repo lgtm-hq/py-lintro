@@ -82,9 +82,12 @@ def _what_it_was_given(*, outcome: SynthesisOutcome) -> str:
         the input was cut.
     """
     if outcome.diff_files_included < outcome.diff_files_total:
+        # The count is of files whose diff section reached the prompt whole;
+        # a section the budget cut partway is not counted (#2704).
         return (
-            f"Its prepared input held the hunks of {outcome.diff_files_included} "
-            f"of {outcome.diff_files_total} changed files"
+            "Its prepared input held the complete diff of "
+            f"{outcome.diff_files_included} of {outcome.diff_files_total} "
+            "changed files"
         )
     if outcome.diff_files_total > 0:
         return "Its prepared input had its finding digest trimmed"
@@ -102,8 +105,10 @@ def _what_it_saw(*, outcome: SynthesisOutcome) -> str:
         that predates the file counts, that it saw less than its whole input.
     """
     if outcome.diff_files_included < outcome.diff_files_total:
+        # The count is of files whose diff section reached the prompt whole;
+        # a section the budget cut partway is not counted (#2704).
         return (
-            f"It saw {outcome.diff_files_included} of "
+            f"It saw the complete diff of {outcome.diff_files_included} of "
             f"{outcome.diff_files_total} changed files, less than its whole "
             "input"
         )

@@ -1961,7 +1961,7 @@ def test_a_cut_synthesis_input_records_the_files_it_kept() -> None:
     assert_that(outcome.diff_files_included).is_less_than(2)
     note = format_synthesis_note_line(metadata=result.metadata)
     assert_that(note).contains(
-        f"saw {outcome.diff_files_included} of 2 changed files, less than its whole input",
+        f"saw the complete diff of {outcome.diff_files_included} of 2 changed files, less than its whole input",
     )
 
 

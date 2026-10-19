@@ -194,7 +194,9 @@ def test_the_synthesis_note_names_the_files_seen_and_the_merge_caveat() -> None:
     note = format_synthesis_note_line(
         metadata=_metadata(CoverageDegradationReason.SYNTHESIS_TRUNCATED),
     )
-    assert_that(note).contains("saw 2 of 5 changed files, less than its whole input")
+    assert_that(note).contains(
+        "saw the complete diff of 2 of 5 changed files, less than its whole input",
+    )
     assert_that(note).contains("cross-chunk duplicate merging may be incomplete")
     # Every file kept but the digest trimmed: never claim files were dropped.
     digest_only = ReviewMetadata(
@@ -233,7 +235,9 @@ def test_the_synthesis_note_names_the_files_seen_and_the_merge_caveat() -> None:
     )
     assert_that(cut_and_failed).contains("did not complete")
     # A failed pass produced nothing usable: the note names what it was given.
-    assert_that(cut_and_failed).contains("held the hunks of 2 of 5 changed files")
+    assert_that(cut_and_failed).contains(
+        "held the complete diff of 2 of 5 changed files",
+    )
     assert_that(cut_and_failed).does_not_contain("It saw")
     assert_that(cut_and_failed).does_not_contain("may be incomplete")
 
